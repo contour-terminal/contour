@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <expected>
 #include <filesystem>
@@ -15,15 +16,18 @@
 #include <vector>
 
 #include <vthost/testing/FaultyFileSystem.hpp>
+#include <vthost/testing/RecordingDurableFiles.hpp>
 
 using contour::config::FileGuiConfigStore;
 using contour::config::guiSettingsFile;
+using contour::config::PendingChange;
 using contour::config::profileFile;
 using contour::config::SettingsEditability;
 using contour::config::SettingsEditSession;
 using contour::config::SettingsError;
 using contour::config::SettingsErrorKind;
 using contour::config::SettingsSaveDebounce;
+using contour::config::StagedFile;
 using contour::test::ManualSaveScheduler;
 
 namespace
@@ -96,8 +100,8 @@ TEST_CASE("SettingsEditSession.debounceCoalesces", "[settingssession]")
     CHECK(SettingsSaveDebounce == std::chrono::milliseconds { 300 });
     CHECK(fx.scheduler.scheduleCount() == 3);
     CHECK(fx.session.hasPending());
-    CHECK(fx.session.hasPendingFor(profileFile("main")));
-    CHECK_FALSE(fx.session.hasPendingFor(guiSettingsFile()));
+    CHECK(fx.session.pendingFor(profileFile("main")) == PendingChange::Write);
+    CHECK(fx.session.pendingFor(guiSettingsFile()) == PendingChange::None);
 
     fx.scheduler.fire();
 
@@ -267,4 +271,152 @@ TEST_CASE("SettingsEditSession: a direct flush returns the first error and repor
     REQUIRE(fx.reported.size() == 1);
     CHECK(fx.reported.front().kind == SettingsErrorKind::ChangedOnDisk);
     CHECK(fx.reloads == 1);
+}
+
+TEST_CASE("SettingsEditSession: a file observed when its draft was seeded is not written over",
+          "[settingssession]")
+{
+    // I1: the draft was seeded from p0; an editor wrote "vim" before the first commit staged anything.
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    fx.session.observe(profileFile("main"));
+    CHECK_FALSE(fx.session.hasChanges());
+
+    handEdit(fileSystem, mainProfile(), "vim");
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    auto const flushed = fx.session.flush();
+
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+}
+
+TEST_CASE("SettingsEditSession: observing a file already touched keeps what the session saw",
+          "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    REQUIRE(fx.session.flush().has_value());
+    handEdit(fileSystem, mainProfile(), "vim");
+
+    fx.session.observe(profileFile("main")); // a re-seed after a reload must not launder the hand edit
+    REQUIRE(fx.session.stage(profileFile("main"), "p2").has_value());
+
+    auto const flushed = fx.session.flush();
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+}
+
+TEST_CASE("SettingsEditSession: Revert adopts a file changed on disk", "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    REQUIRE(fx.session.flush().has_value());
+    handEdit(fileSystem, mainProfile(), "vim");
+
+    auto const reverted = fx.session.revert();
+
+    REQUIRE_FALSE(reverted.has_value());
+    CHECK(reverted.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+    CHECK_FALSE(fx.session.hasChanges());
+}
+
+TEST_CASE(
+    "SettingsEditSession: bytes that reached the disk are what the session last saw, even when the sync "
+    "failed",
+    "[settingssession]")
+{
+    // m2: the replace took, the directory sync did not. The write is reported, and the next flush does not
+    // take Settings' own bytes for a change made outside it.
+    auto fileSystem = vthost::testing::RecordingDurableFiles {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    fileSystem.failing = vthost::testing::DurableOp::SyncDirectory;
+    auto fx = SessionFixture { fileSystem };
+
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    auto const first = fx.session.flush();
+    REQUIRE_FALSE(first.has_value());
+    CHECK(first.error().kind == SettingsErrorKind::WriteFailed);
+    REQUIRE(contentOf(fileSystem, mainProfile()) == "p1");
+
+    fileSystem.failing.reset();
+    REQUIRE(fx.session.stage(profileFile("main"), "p2").has_value());
+    CHECK(fx.session.flush().has_value());
+    CHECK(contentOf(fileSystem, mainProfile()) == "p2");
+}
+
+TEST_CASE("SettingsEditSession: files staged together are written together or not at all",
+          "[settingssession]")
+{
+    // m7: a rename writes the new file and removes the old one, as one change.
+    auto const newProfile = std::filesystem::path { "profiles" } / "office.yml";
+    auto const rename = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p0" } },
+        StagedFile { .file = profileFile("main"), .bytes = std::nullopt },
+    };
+
+    SECTION("both land")
+    {
+        auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+        handEdit(fileSystem, mainProfile(), "p0");
+        auto fx = SessionFixture { fileSystem };
+        REQUIRE(fx.session.stageTogether(rename).has_value());
+        REQUIRE(fx.session.flush().has_value());
+        CHECK(contentOf(fileSystem, newProfile) == "p0");
+        CHECK(contentOf(fileSystem, mainProfile()) == std::nullopt);
+        CHECK(fx.reloads == 1);
+    }
+
+    SECTION("one changed on disk: none is written")
+    {
+        auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+        handEdit(fileSystem, mainProfile(), "p0");
+        auto fx = SessionFixture { fileSystem };
+        REQUIRE(fx.session.stageTogether(rename).has_value());
+        handEdit(fileSystem, mainProfile(), "vim");
+
+        auto const flushed = fx.session.flush();
+        REQUIRE_FALSE(flushed.has_value());
+        CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+        CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+        CHECK(contentOf(fileSystem, newProfile) == std::nullopt); // no duplicate beside the hand edit
+    }
+
+    SECTION("the first write fails: the rest is not done")
+    {
+        auto const target = configDir() / newProfile;
+        auto const fileSystem = vthost::testing::FaultyFileSystem {
+            [&](auto op, std::filesystem::path const& path) {
+                return op == vthost::testing::FaultOp::Rename && path == target;
+            },
+        };
+        handEdit(fileSystem, mainProfile(), "p0");
+        auto fx = SessionFixture { fileSystem };
+        REQUIRE(fx.session.stageTogether(rename).has_value());
+
+        auto const flushed = fx.session.flush();
+        REQUIRE_FALSE(flushed.has_value());
+        CHECK(flushed.error().kind == SettingsErrorKind::WriteFailed);
+        CHECK(contentOf(fileSystem, mainProfile()) == "p0"); // the profile is not lost
+        CHECK(contentOf(fileSystem, newProfile) == std::nullopt);
+        CHECK_FALSE(fx.session.hasChanges());
+    }
+}
+
+TEST_CASE("SettingsEditSession: what is pending for a file", "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto fx = SessionFixture { fileSystem };
+    CHECK(fx.session.pendingFor(profileFile("main")) == PendingChange::None);
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    CHECK(fx.session.pendingFor(profileFile("main")) == PendingChange::Write);
+    REQUIRE(fx.session.stage(profileFile("main"), std::nullopt).has_value());
+    CHECK(fx.session.pendingFor(profileFile("main")) == PendingChange::Removal);
 }

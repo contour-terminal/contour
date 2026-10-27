@@ -30,6 +30,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 
@@ -400,6 +401,172 @@ TEST_CASE("SettingsController: the app's own override goes through the one save 
     }
 }
 
+TEST_CASE("SettingsController: a hand edit made after the draft was opened is not written over", "[settings]")
+{
+    // I1: the draft was seeded before an editor saved the file; the first commit must not overwrite it.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    auto const path = fx.configDir() / config::relativePathOf(config::profileFile("work"));
+    auto handEdited = *fx.cfg.findProfile("work");
+    handEdited.fonts.value().size.pt = 20.0;
+    auto const handBytes = config::emitProfileYaml(handEdited);
+    {
+        auto out = std::ofstream(path);
+        out << handBytes;
+    }
+
+    REQUIRE(fx.controller->setProfileField("font_size", 15.0).has_value());
+    fx.fire();
+
+    CHECK(fx.fileContent(config::relativePathOf(config::profileFile("work"))) == handBytes);
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("changed outside Settings"));
+    CHECK(rowWithKey(fx.controller->profileFields(), "font_size").value("value").toDouble()
+          == Catch::Approx(20.0));
+}
+
+TEST_CASE("SettingsController: a hand edit of settings.yml after it was read is not written over",
+          "[settings]")
+{
+    auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
+    {
+        auto out = std::ofstream(fx.configDir() / "settings.yml");
+        out << "snap_to_rows: true\n";
+    }
+    // No reload: the page's settings.yml draft is from before the edit.
+    REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false).has_value());
+    fx.fire();
+    CHECK(fx.fileContent("settings.yml") == "snap_to_rows: true\n");
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("settings.yml changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: a reset applies at once and shows the value in effect", "[settings]")
+{
+    // m6: a Reset is a click, not a drag; written at once, its row never shows the override it removed.
+    auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
+    fx.commitGlobal("reflow_on_resize", false);
+    REQUIRE(fx.cfg.reflowOnResize.value() == false);
+
+    REQUIRE(fx.controller->resetGlobalField("reflow_on_resize").has_value());
+
+    CHECK(fx.scheduler->pendingDelay() == std::nullopt);
+    CHECK(fx.cfg.reflowOnResize.value() == true);
+    auto const row = rowWithKey(fx.controller->globalFields(), "reflow_on_resize");
+    CHECK(row.value("value").toBool() == true);
+    CHECK_FALSE(row.value("overridden").toBool());
+}
+
+TEST_CASE(
+    "SettingsController: a profile or scheme added this session can be renamed and deleted before it is "
+    "written",
+    "[settings]")
+{
+    // m3: a staged side file is a side file.
+    auto fx = Fixture(BasicConfig);
+    auto const copy = fx.controller->duplicateProfile("main");
+    REQUIRE(copy.has_value());
+    REQUIRE(fx.controller->renameProfile(*copy, "work").has_value());
+    fx.fire();
+    CHECK(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile(copy->toStdString()) == nullptr);
+
+    auto const added = fx.controller->createProfile();
+    REQUIRE(added.has_value());
+    REQUIRE(fx.controller->deleteProfile(*added).has_value());
+    fx.fire();
+    CHECK(fx.cfg.findProfile(added->toStdString()) == nullptr);
+    CHECK_FALSE(
+        fx.fileContent(config::relativePathOf(config::profileFile(added->toStdString()))).has_value());
+
+    auto const scheme = fx.controller->duplicateColorScheme("default");
+    REQUIRE(scheme.has_value());
+    REQUIRE(fx.controller->renameColorScheme(*scheme, "midnight").has_value());
+    fx.fire();
+    CHECK(fx.schemeFile("midnight").has_value());
+    CHECK_FALSE(fx.schemeFile(scheme->toStdString()).has_value());
+}
+
+TEST_CASE("SettingsController: a rename whose source changed on disk writes no copy", "[settings]")
+{
+    // m7: the new file and the old one's removal are one change.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    REQUIRE(fx.controller->renameProfile("work", "office").has_value());
+    {
+        auto out = std::ofstream(fx.configDir() / "profiles" / "work.yml", std::ios::app);
+        out << "show_title_bar: false\n";
+    }
+    fx.fire();
+    CHECK(fx.fileContent(std::filesystem::path { "profiles" } / "work.yml").has_value());
+    CHECK_FALSE(fx.fileContent(std::filesystem::path { "profiles" } / "office.yml").has_value());
+}
+
+TEST_CASE("SettingsController: a name that would leave its directory is refused", "[settings]")
+{
+    // m8: a profile or scheme name is a file name inside profiles/ or colorschemes/, never a path.
+    auto fx = Fixture("default_profile: main\n"
+                      "profiles:\n"
+                      "    main:\n"
+                      "        show_title_bar: true\n"
+                      "    \"../../x\":\n"
+                      "        show_title_bar: true\n");
+    fx.openSideProfile("work");
+    fx.openSideScheme("midnight");
+    auto const outside = [&fx] {
+        auto const parent = fx.configDir().parent_path();
+        return std::filesystem::exists(parent / "x.yml") || std::filesystem::exists(parent / "x copy.yml")
+               || std::filesystem::exists(fx.configDir() / "x.yml")
+               || std::filesystem::exists(fx.configDir() / "profiles" / "a")
+               || std::filesystem::exists(fx.configDir() / "colorschemes" / "a")
+               || std::filesystem::exists(fx.configDir() / "profiles" / ".hidden.yml")
+               || std::filesystem::exists(fx.configDir() / "colorschemes" / ".hidden.yml");
+    };
+
+    for (auto const* name: { "../../x", "a/b", "a\\b", ".hidden", "a..b" })
+    {
+        INFO(name);
+        auto const profile = fx.controller->renameProfile("work", QString::fromUtf8(name));
+        REQUIRE_FALSE(profile.has_value());
+        CHECK(profile.error().kind == config::SettingsErrorKind::InvalidValue);
+        CHECK_FALSE(profile.error().message.empty());
+        auto const scheme = fx.controller->renameColorScheme("midnight", QString::fromUtf8(name));
+        REQUIRE_FALSE(scheme.has_value());
+        CHECK(scheme.error().kind == config::SettingsErrorKind::InvalidValue);
+    }
+    auto const duplicated = fx.controller->duplicateProfile("../../x");
+    REQUIRE_FALSE(duplicated.has_value());
+    CHECK(duplicated.error().kind == config::SettingsErrorKind::InvalidValue);
+
+    fx.fire();
+    CHECK_FALSE(outside());
+    CHECK(fx.cfg.findProfile("work") != nullptr);
+}
+
+TEST_CASE(
+    "SettingsController: gui_config_locked set by a reload starts a locked session and re-seeds the drafts",
+    "[settings]")
+{
+    // m4, m11: the session is rebuilt after the reload that runs inside it; the open draft turns read-only.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    REQUIRE(fx.controller->setProfileField("font_size", 15.0).has_value());
+    {
+        auto out = std::ofstream(fx.configPath, std::ios::app);
+        out << "gui_config_locked: true\n";
+    }
+    fx.reload();
+    QCoreApplication::processEvents();
+
+    CHECK(fx.controller->locked());
+    CHECK(fx.controller->editingReadOnly());
+    CHECK_FALSE(fx.controller->hasChanges());
+    CHECK(fx.scheduler->pendingDelay() == std::nullopt); // the staged change is dropped, not written
+    auto const refused = fx.controller->setProfileField("font_size", 16.0);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().kind == config::SettingsErrorKind::Locked);
+}
+
 TEST_CASE("SettingsController: a global row shows the committed value before the flush", "[settings]")
 {
     auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
@@ -407,7 +574,7 @@ TEST_CASE("SettingsController: a global row shows the committed value before the
 
     REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false).has_value());
 
-    CHECK(spy.count() >= 1);
+    CHECK(spy.count() == 1);
     auto const row = rowWithKey(fx.controller->globalFields(), "reflow_on_resize");
     CHECK(row.value("value").toBool() == false);
     CHECK(row.value("overridden").toBool());
@@ -2611,10 +2778,12 @@ TEST_CASE("SettingsController: a user link pattern cannot take another pattern's
     CHECK(fx.controller->linkPatterns().size() == index + 2);
 }
 
-TEST_CASE("SettingsController: a profile with a link pattern in error is not written, and says which",
-          "[settings][links]")
+TEST_CASE(
+    "SettingsController: a link pattern in error is held back, and the profile's other edits are written",
+    "[settings][links]")
 {
-    // The reader would skip a pattern without a regex: refused, as a field in error is.
+    // m5: the reader would skip a pattern without a regex, so it is not written until it has one; its row
+    // says why. Every other edit of the profile is written meanwhile.
     auto fx = Fixture(BasicConfig);
     fx.openSideProfile("work");
     auto const index = builtinRowCount();
@@ -2623,12 +2792,13 @@ TEST_CASE("SettingsController: a profile with a link pattern in error is not wri
     edited["name"] = "jira";
     fx.controller->setLinkPattern(index, edited);
     CHECK(fx.errors.isEmpty()); // its row says what is wrong while the regex is still to be typed
-    auto const refused = fx.controller->setProfileField("show_title_bar", false);
-    REQUIRE_FALSE(refused.has_value());
-    CHECK(refused.error().kind == config::SettingsErrorKind::InvalidValue);
-    CHECK(refused.error().message.contains("jira"));
+    CHECK_FALSE(linkRow(*fx.controller, index).value("problem").toString().isEmpty());
+    REQUIRE(fx.controller->setProfileField("show_title_bar", false).has_value());
+    CHECK(fx.controller->hasChanges());
     fx.fire();
-    CHECK(fx.cfg.findProfile("work")->hintPatterns.value().empty()); // nothing was written
+    CHECK(fx.cfg.findProfile("work")->showTitleBar.value() == false);
+    CHECK(fx.cfg.findProfile("work")->hintPatterns.value().empty()); // the pattern in error was not written
+    CHECK(linkRow(*fx.controller, index).value("name").toString() == "jira"); // and is still being edited
 
     edited["regex"] = QString::fromUtf8(JiraRegex.data(), static_cast<qsizetype>(JiraRegex.size()));
     edited["url"] = "https://j/{0}";

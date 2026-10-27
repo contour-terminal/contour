@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,14 +69,33 @@ enum class SettingsEditability : uint8_t
     Locked,       ///< `gui_config_locked` is set in contour.yml: nothing is staged.
 };
 
+/// What a session has staged for one file and not yet written.
+enum class PendingChange : uint8_t
+{
+    None = 0, ///< Nothing.
+    Write,    ///< New bytes.
+    Removal,  ///< Its removal.
+};
+
+/// One file of a change staged with stageTogether().
+struct StagedFile
+{
+    SideFile file {};                    ///< The side file.
+    std::optional<std::string> bytes {}; ///< Its new content; nullopt removes it.
+};
+
 /// One Settings save model over the GUI side files: every change is staged and written after
-/// SettingsSaveDebounce, each file is snapshotted when the session first touches it, Revert puts the
+/// SettingsSaveDebounce, each file is snapshotted when the session first sees it, Revert puts the
 /// snapshots back, and a file changed on disk since the session last saw it is never written over.
 ///
-/// The session never writes over bytes it has not seen. Before writing a file it reads it; when its bytes
-/// differ from what the session last read or wrote, it writes nothing, adopts the disk's bytes as both what
-/// it last saw and its snapshot, and reports SettingsErrorKind::ChangedOnDisk. A failed write drops what was
-/// pending for that file, so the next reload shows what is on disk.
+/// The session never writes over bytes it has not seen. A draft seeded from a file says so with observe(),
+/// so that what the session last saw is what the draft was seeded from, not what the file holds when the
+/// first change is staged. Before writing a file the session reads it; when its bytes differ from what the
+/// session last read or wrote, it writes nothing, adopts the disk's bytes as both what it last saw and its
+/// snapshot, and reports SettingsErrorKind::ChangedOnDisk. A failed write drops what was pending for that
+/// file, so the next reload shows what is on disk; bytes that reached the disk all the same (the replace
+/// took, a sync did not) are what the session last saw. Files staged together -- a rename's new file and the
+/// old one's removal -- are written together or not at all.
 ///
 /// Configured at construction: the store, the scheduler and the editability are fixed for its lifetime.
 /// GUI thread only, as the scheduler fires there.
@@ -108,6 +128,11 @@ class SettingsEditSession
     /// Cancels a pending flush: the scheduler must not call into a destroyed session.
     ~SettingsEditSession();
 
+    /// Records @p file as it is now as what the session saw, unless it has seen it already: a draft was
+    /// seeded from it. A file that cannot be read is left to the first stage() to read.
+    /// @param file The side file.
+    void observe(SideFile const& file);
+
     /// Stages @p bytes as @p file's next content, and (re)starts the debounce.
     /// The first time the session touches @p file it reads and snapshots it.
     /// @param file  The side file.
@@ -116,12 +141,18 @@ class SettingsEditSession
     [[nodiscard]] std::expected<void, SettingsError> stage(SideFile const& file,
                                                            std::optional<std::string> bytes);
 
+    /// Stages @p files as one change, written in their order, together or not at all, and (re)starts the
+    /// debounce. A later stage() of one of them takes it out of the change.
+    /// @param files The files and their new contents.
+    /// @return Nothing, or why nothing was staged.
+    [[nodiscard]] std::expected<void, SettingsError> stageTogether(std::span<StagedFile const> files);
+
     /// Writes every staged file now, then reloads once if anything was written or adopted.
     /// A flush with nothing staged does nothing and does not reload.
     /// @return Nothing, or the first error; the rest go to the error sink.
     [[nodiscard]] std::expected<void, SettingsError> flush();
 
-    /// Drops what is staged and puts every touched file back as it was when the session first touched it
+    /// Drops what is staged and puts every touched file back as it was when the session first saw it
     /// (removing one that was absent), then reloads once. A file changed on disk since the session last saw
     /// it is adopted instead, as a flush adopts it.
     /// @return Nothing, or the first error; the rest go to the error sink.
@@ -134,43 +165,61 @@ class SettingsEditSession
     [[nodiscard]] bool hasPending() const noexcept;
 
     /// @param file The side file.
-    /// @return Whether something is staged for @p file and not yet written.
-    [[nodiscard]] bool hasPendingFor(SideFile const& file) const;
+    /// @return What is staged for @p file and not yet written.
+    [[nodiscard]] PendingChange pendingFor(SideFile const& file) const;
 
   private:
-    /// What the session knows of one file it touched.
+    /// What the session knows of one file it saw.
     struct TouchedFile
     {
-        std::optional<std::string> snapshot; ///< Its bytes when first touched; nullopt: it was absent.
+        std::optional<std::string> snapshot; ///< Its bytes when first seen; nullopt: it was absent.
         std::optional<std::string> lastSeen; ///< Its bytes when last read or written by the session.
     };
 
-    /// Whether settling a file changed what the configuration reads from disk.
-    enum class DiskChange : uint8_t
+    /// One staged file.
+    struct Pending
     {
-        None = 0, ///< The file is as it was: nothing written, nothing adopted.
-        Changed,  ///< The session wrote the file, or adopted a version written outside it.
+        std::optional<std::string> bytes; ///< Its new content; nullopt removes it.
+        uint64_t change = 0;              ///< The change it belongs to; files of one change share it.
+        uint64_t order = 0;               ///< Its place in the order it was staged in.
     };
 
-    /// What settling one file did.
+    /// Whether settling a change altered what the configuration reads from disk.
+    enum class DiskChange : uint8_t
+    {
+        None = 0, ///< As it was: nothing written, nothing adopted.
+        Changed,  ///< The session wrote a file, or adopted a version written outside it.
+    };
+
+    /// What settling one change did.
     struct Settled
     {
-        DiskChange change = DiskChange::None;  ///< Whether the configuration must reload.
-        std::optional<SettingsError> error {}; ///< Why it did not take as asked, if it did not.
+        DiskChange change = DiskChange::None; ///< Whether the configuration must reload.
+        std::vector<SettingsError> errors {}; ///< Why it did not take as asked, if it did not.
     };
 
     /// Reads @p file as it is on disk now.
     [[nodiscard]] std::expected<std::optional<std::string>, SettingsError> readNow(
         SideFile const& file) const;
 
-    /// Makes @p file hold @p bytes (absent for nullopt), unless it changed on disk since the session last
-    /// saw it: then the disk's version is adopted and nothing is written.
-    [[nodiscard]] Settled settle(SideFile const& file, std::optional<std::string> const& bytes);
+    /// Reads and snapshots @p file unless the session saw it already.
+    [[nodiscard]] std::expected<void, SettingsError> touch(SideFile const& file);
 
-    /// Settles each of @p targets, reloads once if any of them changed on disk, and returns the first
+    /// Makes @p file hold @p bytes (absent for nullopt).
+    [[nodiscard]] std::expected<void, std::string> writeNow(SideFile const& file,
+                                                            std::optional<std::string> const& bytes);
+
+    /// Makes each file of one change hold its bytes, in order, unless one of them changed on disk since the
+    /// session last saw it: then those are adopted and nothing is written. A write that fails puts back
+    /// what this change wrote before it.
+    [[nodiscard]] Settled settleChange(std::vector<StagedFile> const& files);
+
+    /// Settles every change of @p targets, reloads once if any of them changed on disk, and returns the first
     /// error, sending the rest to the sink.
-    [[nodiscard]] std::expected<void, SettingsError> settleAll(
-        std::map<SideFile, std::optional<std::string>> const& targets);
+    [[nodiscard]] std::expected<void, SettingsError> settleAll(std::map<SideFile, Pending> const& targets);
+
+    /// (Re)starts the debounce.
+    void scheduleFlush();
 
     GuiConfigStore& _store;
     SaveScheduler& _scheduler;
@@ -178,8 +227,10 @@ class SettingsEditSession
     ReloadCallback _reload;
     ErrorSink _reportError;
 
-    std::map<SideFile, TouchedFile> _touched;                ///< Every file staged since the session began.
-    std::map<SideFile, std::optional<std::string>> _pending; ///< Staged, not yet written.
+    std::map<SideFile, TouchedFile> _touched; ///< Every file seen since the session began.
+    std::map<SideFile, Pending> _pending;     ///< Staged, not yet written.
+    uint64_t _nextChange = 1;                 ///< The id of the next change staged.
+    uint64_t _nextOrder = 0;                  ///< The place of the next file staged.
 };
 
 } // namespace contour::config

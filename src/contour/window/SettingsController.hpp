@@ -57,8 +57,8 @@ class SettingsController: public QObject
     QML_ELEMENT
     QML_UNCREATABLE("Created by the WindowController")
 
-    /// True when `gui_config_locked` is set in contour.yml: the page opens read-only and no Save,
-    /// Save-As or Delete is offered.
+    /// True when `gui_config_locked` is set in contour.yml: the page opens read-only and Settings stages
+    /// nothing.
     Q_PROPERTY(bool locked READ locked NOTIFY changed)
 
     /// How links are opened, spelled for the page: "Ctrl+Click (Shift+Ctrl+Click inside applications that use
@@ -155,7 +155,7 @@ class SettingsController: public QObject
     /// @param appearance The appearance the terminals are drawn in from now on.
     void setColorPreference(vtbackend::ColorPreference appearance);
 
-    [[nodiscard]] bool locked() const noexcept { return _locked; }
+    [[nodiscard]] bool locked() const noexcept { return _editability == config::SettingsEditability::Locked; }
     [[nodiscard]] QString linkGesture() const { return _linkGesture; }
     [[nodiscard]] QVariantList profiles() const { return _profiles; }
     [[nodiscard]] QVariantList colorSchemes() const { return _colorSchemes; }
@@ -441,6 +441,10 @@ class SettingsController: public QObject
     [[nodiscard]] std::expected<void, config::SettingsError> stageSchemeDraft();
     /// Stages the settings.yml draft; on failure it is re-seeded, so no row shows a value not staged.
     [[nodiscard]] std::expected<void, config::SettingsError> stageGlobalDraft();
+    /// Rebuilds the profile rows and the default profile from the configuration and the settings.yml draft.
+    void rebuildProfileRows();
+    /// Whether profile @p name is a GUI side file, written or staged in this session.
+    [[nodiscard]] bool isSideFileProfile(std::string const& name) const;
     /// Whether profile @p name exists, as a side file, or is staged.
     [[nodiscard]] bool profileNameTaken(std::string const& name) const;
     /// Whether color scheme @p name exists, as a side file, inline, or is staged.
@@ -466,7 +470,8 @@ class SettingsController: public QObject
     std::unique_ptr<config::SaveScheduler> _scheduler;
     std::unique_ptr<config::SettingsEditSession> _session;
 
-    bool _locked = false; ///< `gui_config_locked`, as refresh() last read it; the session follows it.
+    /// Whether `gui_config_locked`, as refresh() last read it, lets Settings write; the session follows it.
+    config::SettingsEditability _editability = config::SettingsEditability::Editable;
     QString _linkGesture; ///< Listed by refresh(): how links are opened.
     QVariantList _profiles;
     QVariantList _colorSchemes;

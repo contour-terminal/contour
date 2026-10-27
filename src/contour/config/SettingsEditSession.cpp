@@ -2,7 +2,9 @@
 #include <contour/config/SettingsEditSession.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
+#include <iterator>
 #include <ranges>
 #include <utility>
 
@@ -45,26 +47,55 @@ SettingsEditSession::~SettingsEditSession()
     _scheduler.cancel();
 }
 
+void SettingsEditSession::observe(SideFile const& file)
+{
+    // A file it cannot read now is read by the first stage(), which reports why.
+    if (!_touched.contains(file))
+        if (auto const disk = readNow(file))
+            _touched.emplace(file, TouchedFile { .snapshot = *disk, .lastSeen = *disk });
+}
+
+std::expected<void, SettingsError> SettingsEditSession::touch(SideFile const& file)
+{
+    if (_touched.contains(file))
+        return {};
+    auto const disk = readNow(file);
+    if (!disk)
+        return std::unexpected(disk.error());
+    _touched.emplace(file, TouchedFile { .snapshot = *disk, .lastSeen = *disk });
+    return {};
+}
+
 std::expected<void, SettingsError> SettingsEditSession::stage(SideFile const& file,
                                                               std::optional<std::string> bytes)
+{
+    auto const one = std::array { StagedFile { .file = file, .bytes = std::move(bytes) } };
+    return stageTogether(one);
+}
+
+std::expected<void, SettingsError> SettingsEditSession::stageTogether(std::span<StagedFile const> files)
 {
     if (_editability == SettingsEditability::Locked)
         return std::unexpected(SettingsError { .kind = SettingsErrorKind::Locked,
                                                .message = std::string { SettingsLockedMessage } });
 
-    if (!_touched.contains(file))
-    {
-        auto const disk = readNow(file);
-        if (!disk)
-            return std::unexpected(disk.error());
-        _touched.emplace(file, TouchedFile { .snapshot = *disk, .lastSeen = *disk });
-    }
-    _pending.insert_or_assign(file, std::move(bytes));
+    for (auto const& staged: files)
+        if (auto const touched = touch(staged.file); !touched)
+            return touched;
+    auto const change = _nextChange++;
+    for (auto const& staged: files)
+        _pending.insert_or_assign(staged.file,
+                                  Pending { .bytes = staged.bytes, .change = change, .order = _nextOrder++ });
+    scheduleFlush();
+    return {};
+}
+
+void SettingsEditSession::scheduleFlush()
+{
     _scheduler.schedule(SettingsSaveDebounce, [this] {
         if (auto const flushed = flush(); !flushed)
             _reportError(flushed.error());
     });
-    return {};
 }
 
 std::expected<void, SettingsError> SettingsEditSession::flush()
@@ -79,9 +110,10 @@ std::expected<void, SettingsError> SettingsEditSession::revert()
 {
     _scheduler.cancel();
     _pending.clear();
-    auto snapshots = std::map<SideFile, std::optional<std::string>> {};
+    // Each file on its own: a file changed on disk keeps its version, and the others still go back.
+    auto snapshots = std::map<SideFile, Pending> {};
     for (auto const& [file, touched]: _touched)
-        snapshots.emplace(file, touched.snapshot);
+        snapshots.emplace(file, Pending { .bytes = touched.snapshot, .change = _nextChange++, .order = 0 });
     return settleAll(snapshots);
 }
 
@@ -97,9 +129,12 @@ bool SettingsEditSession::hasPending() const noexcept
     return !_pending.empty();
 }
 
-bool SettingsEditSession::hasPendingFor(SideFile const& file) const
+PendingChange SettingsEditSession::pendingFor(SideFile const& file) const
 {
-    return _pending.contains(file);
+    auto const found = _pending.find(file);
+    if (found == _pending.end())
+        return PendingChange::None;
+    return found->second.bytes ? PendingChange::Write : PendingChange::Removal;
 }
 
 std::expected<std::optional<std::string>, SettingsError> SettingsEditSession::readNow(
@@ -109,44 +144,98 @@ std::expected<std::optional<std::string>, SettingsError> SettingsEditSession::re
         [&](std::string const& reason) { return writeFailed(file, reason); });
 }
 
-SettingsEditSession::Settled SettingsEditSession::settle(SideFile const& file,
-                                                         std::optional<std::string> const& bytes)
+std::expected<void, std::string> SettingsEditSession::writeNow(SideFile const& file,
+                                                               std::optional<std::string> const& bytes)
 {
-    auto& touched = _touched.at(file);
-    auto const disk = readNow(file);
-    if (!disk)
-        return Settled { .change = DiskChange::None, .error = disk.error() };
-
-    // Disk wins: bytes the session has not seen are never written over, and become the new base, so that
-    // a later Revert does not write over them either.
-    if (*disk != touched.lastSeen)
-    {
-        touched.snapshot = *disk;
-        touched.lastSeen = *disk;
-        return Settled { .change = DiskChange::Changed, .error = changedOnDisk(file) };
-    }
-    if (*disk == bytes)
-        return Settled {};
-
-    auto const written = bytes ? _store.write(file, *bytes) : _store.remove(file);
-    if (!written)
-        return Settled { .change = DiskChange::None, .error = writeFailed(file, written.error()) };
-    touched.lastSeen = bytes;
-    return Settled { .change = DiskChange::Changed, .error = std::nullopt };
+    return bytes ? _store.write(file, *bytes) : _store.remove(file);
 }
 
-std::expected<void, SettingsError> SettingsEditSession::settleAll(
-    std::map<SideFile, std::optional<std::string>> const& targets)
+SettingsEditSession::Settled SettingsEditSession::settleChange(std::vector<StagedFile> const& files)
 {
+    auto settled = Settled {};
+
+    // Disk wins: bytes the session has not seen are never written over, and become the new base, so that a
+    // later Revert does not write over them either. One such file holds back the whole change, or a rename
+    // would leave a copy beside the version written outside Settings.
+    auto before = std::vector<std::optional<std::string>> {};
+    for (auto const& staged: files)
+    {
+        auto const disk = readNow(staged.file);
+        if (!disk)
+        {
+            settled.errors.push_back(disk.error());
+            return settled;
+        }
+        auto& touched = _touched.at(staged.file);
+        if (*disk != touched.lastSeen)
+        {
+            touched.snapshot = *disk;
+            touched.lastSeen = *disk;
+            settled.change = DiskChange::Changed;
+            settled.errors.push_back(changedOnDisk(staged.file));
+        }
+        before.push_back(*disk);
+    }
+    if (!settled.errors.empty())
+        return settled;
+
+    for (auto const index: std::views::iota(size_t { 0 }, files.size()))
+    {
+        auto const& staged = files[index];
+        if (before[index] == staged.bytes)
+            continue;
+        auto const written = writeNow(staged.file, staged.bytes);
+        if (written)
+        {
+            _touched.at(staged.file).lastSeen = staged.bytes;
+            settled.change = DiskChange::Changed;
+            continue;
+        }
+        settled.errors.push_back(writeFailed(staged.file, written.error()));
+        // Bytes that reached the disk all the same -- the replace took, a sync did not -- are what the
+        // session last saw, or the next flush would take Settings' own bytes for a change made outside it.
+        if (auto const after = readNow(staged.file); after && *after == staged.bytes)
+        {
+            _touched.at(staged.file).lastSeen = staged.bytes;
+            settled.change = DiskChange::Changed;
+            continue;
+        }
+        // The change is not done: what it wrote before this file goes back.
+        for (auto const undo: std::views::iota(size_t { 0 }, index) | std::views::reverse)
+        {
+            auto const& done = files[undo];
+            if (before[undo] == done.bytes)
+                continue;
+            if (auto const restored = writeNow(done.file, before[undo]); restored)
+                _touched.at(done.file).lastSeen = before[undo];
+            else
+                settled.errors.push_back(writeFailed(done.file, restored.error()));
+        }
+        return settled;
+    }
+    return settled;
+}
+
+std::expected<void, SettingsError> SettingsEditSession::settleAll(std::map<SideFile, Pending> const& targets)
+{
+    // The files of each change, in the order they were staged.
+    auto changes = std::map<uint64_t, std::vector<std::pair<uint64_t, StagedFile>>> {};
+    for (auto const& [file, pending]: targets)
+        changes[pending.change].emplace_back(pending.order,
+                                             StagedFile { .file = file, .bytes = pending.bytes });
+
     auto change = DiskChange::None;
     auto errors = std::vector<SettingsError> {};
-    for (auto const& [file, bytes]: targets)
+    for (auto& [id, members]: changes)
     {
-        auto settled = settle(file, bytes);
+        std::ranges::sort(members, {}, &std::pair<uint64_t, StagedFile>::first);
+        auto files = std::vector<StagedFile> {};
+        for (auto& member: members)
+            files.push_back(std::move(member.second));
+        auto settled = settleChange(files);
         if (settled.change == DiskChange::Changed)
             change = DiskChange::Changed;
-        if (settled.error)
-            errors.push_back(std::move(*settled.error));
+        std::ranges::move(settled.errors, std::back_inserter(errors));
     }
 
     if (change == DiskChange::Changed)

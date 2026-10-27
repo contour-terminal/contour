@@ -1962,6 +1962,21 @@ namespace
         return std::unexpected(SettingsError { .kind = kind, .message = std::move(message) });
     }
 
+    /// Whether @p config lets Settings write: not under `gui_config_locked`.
+    [[nodiscard]] config::SettingsEditability editabilityOf(config::Config const& config)
+    {
+        return config.guiConfigLocked.value() ? config::SettingsEditability::Locked
+                                              : config::SettingsEditability::Editable;
+    }
+
+    /// A name the user typed for a profile or a colour scheme, checked as a side file's name: never a path.
+    [[nodiscard]] std::expected<void, SettingsError> checkNewName(std::string const& name)
+    {
+        return config::checkSideFileName(name).transform_error([](std::string reason) {
+            return SettingsError { .kind = SettingsErrorKind::InvalidValue, .message = std::move(reason) };
+        });
+    }
+
     /// What every change says while `gui_config_locked` is set.
     [[nodiscard]] std::unexpected<SettingsError> lockedRefusal()
     {
@@ -2025,10 +2040,11 @@ SettingsController::SettingsController(ConfigAccessor config,
     _appearance { appearance },
     _scheduler { std::make_unique<NotifyingScheduler>(_services.scheduler,
                                                       [this] { emit changesChanged(); }) },
-    _locked { _config().guiConfigLocked.value() },
+    _editability { editabilityOf(_config()) },
     _globalDraft { _config().guiManagedSettings }
 {
     _session = makeSession();
+    _session->observe(config::guiSettingsFile());
     refresh();
 }
 
@@ -2037,11 +2053,9 @@ SettingsController::~SettingsController() = default;
 std::unique_ptr<config::SettingsEditSession> SettingsController::makeSession()
 {
     return std::make_unique<config::SettingsEditSession>(
-        *_services.store,
-        *_scheduler,
-        _locked ? config::SettingsEditability::Locked : config::SettingsEditability::Editable,
-        _services.reload,
-        [this](SettingsError const& error) { onSessionError(error); });
+        *_services.store, *_scheduler, _editability, _services.reload, [this](SettingsError const& error) {
+            onSessionError(error);
+        });
 }
 
 void SettingsController::setColorPreference(vtbackend::ColorPreference appearance)
@@ -2094,7 +2108,14 @@ SettingsOrigin SettingsController::profileOrigin(std::string const& name) const
 
 bool SettingsController::colorSchemeSideFileExists(std::string const& name) const
 {
-    auto const read = _services.store->read(config::colorSchemeFile(name));
+    auto const file = config::colorSchemeFile(name);
+    switch (_session->pendingFor(file))
+    {
+        case config::PendingChange::Write: return true;
+        case config::PendingChange::Removal: return false;
+        case config::PendingChange::None: break;
+    }
+    auto const read = _services.store->read(file);
     return read && read->has_value();
 }
 
@@ -2178,6 +2199,7 @@ void SettingsController::onSessionError(SettingsError const& error)
 void SettingsController::reseedGlobalDraft()
 {
     _globalDraft = _config().guiManagedSettings;
+    _session->observe(config::guiSettingsFile());
     emit globalFieldsChanged();
 }
 
@@ -2238,34 +2260,12 @@ std::expected<void, SettingsError> SettingsController::stage(config::SideFile co
 
 // }}}
 
-void SettingsController::refresh()
+void SettingsController::rebuildProfileRows()
 {
-    _previewPaletteCache.reset(); // a scheme written, renamed or deleted, or the configuration reloaded
     auto const& cfg = _config();
-    _gpus = _services.gpuInventory ? _services.gpuInventory->list() : std::vector<display::GpuCandidate> {};
-    _linkGesture =
-        QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
-
-    // gui_config_locked configures the session rather than changing its state, so a change of it starts a
-    // new one. Not here and now: refresh() runs inside the session's own reload.
-    if (cfg.guiConfigLocked.value() != _locked)
-    {
-        _locked = cfg.guiConfigLocked.value();
-        QMetaObject::invokeMethod(
-            this,
-            [this] {
-                _session = makeSession();
-                emit changesChanged();
-            },
-            Qt::QueuedConnection);
-    }
-
-    if (!_session->hasPendingFor(config::guiSettingsFile()))
-        _globalDraft = cfg.guiManagedSettings;
     _defaultProfile =
         QString::fromStdString(_globalDraft.defaultProfile.value_or(cfg.defaultProfileName.value()));
-
-    // Profiles, name-sorted for a stable list.
+    // Name-sorted for a stable list.
     auto profileNames = std::vector<std::string> {};
     for (auto const& [name, _]: cfg.profiles.value())
         profileNames.push_back(name);
@@ -2278,10 +2278,44 @@ void SettingsController::refresh()
         auto row = QVariantMap {};
         row[QStringLiteral("name")] = QString::fromStdString(name);
         row[QStringLiteral("origin")] = originString(origin);
-        row[QStringLiteral("editable")] = (!_locked && origin == SettingsOrigin::SideFile);
+        row[QStringLiteral("editable")] = (!locked() && origin == SettingsOrigin::SideFile);
         row[QStringLiteral("isDefault")] = (QString::fromStdString(name) == _defaultProfile);
         _profiles.push_back(row);
     }
+}
+
+void SettingsController::refresh()
+{
+    _previewPaletteCache.reset(); // a scheme written, renamed or deleted, or the configuration reloaded
+    auto const& cfg = _config();
+    _gpus = _services.gpuInventory ? _services.gpuInventory->list() : std::vector<display::GpuCandidate> {};
+    _linkGesture =
+        QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
+
+    // gui_config_locked configures the session rather than changing its state, so a change of it starts a
+    // new one. Not here and now: refresh() runs inside the session's own reload. What the old session had
+    // staged is dropped, not written -- once locked nothing may be, and a session that was locked staged
+    // nothing -- and with it the snapshots Revert would have restored. The drafts are re-seeded, so that
+    // none shows a value that is not on disk, and their editability follows the lock.
+    if (editabilityOf(cfg) != _editability)
+    {
+        _editability = editabilityOf(cfg);
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                _session = makeSession();
+                reseedDrafts();
+                emit changesChanged();
+            },
+            Qt::QueuedConnection);
+    }
+
+    if (_session->pendingFor(config::guiSettingsFile()) == config::PendingChange::None)
+    {
+        _globalDraft = cfg.guiManagedSettings;
+        _session->observe(config::guiSettingsFile());
+    }
+    rebuildProfileRows();
 
     // Color schemes: those the config knows about, unioned with any colorschemes/*.yml there is.
     auto schemeNames = std::set<std::string> {};
@@ -2302,7 +2336,7 @@ void SettingsController::refresh()
     {
         auto row = QVariantMap {};
         row[QStringLiteral("name")] = QString::fromStdString(name);
-        row[QStringLiteral("editable")] = (!_locked && onDisk.contains(name));
+        row[QStringLiteral("editable")] = (!locked() && onDisk.contains(name));
         _colorSchemes.push_back(row);
     }
 
@@ -2356,15 +2390,19 @@ void SettingsController::editProfile(QString const& name)
         return;
     _draft = *profile;
     _editingProfile = name;
-    _profileAccess = _locked || profileOrigin(name.toStdString()) != SettingsOrigin::SideFile
+    _profileAccess = locked() || profileOrigin(name.toStdString()) != SettingsOrigin::SideFile
                          ? DraftAccess::ReadOnly
                          : DraftAccess::Editable;
+    // What the draft was seeded from is what Settings last saw of the file: an edit made outside it from
+    // now on is one it must not write over.
+    if (_profileAccess == DraftAccess::Editable)
+        _session->observe(config::profileFile(name.toStdString()));
     emit draftChanged();
 }
 
 std::expected<void, SettingsError> SettingsController::profileDraftWritable() const
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     switch (_profileAccess)
     {
@@ -2384,18 +2422,31 @@ std::expected<void, SettingsError> SettingsController::profileDraftWritable() co
 
 std::expected<void, SettingsError> SettingsController::stageProfileDraft()
 {
-    if (auto const problem = draftProblem())
-        return refuse(SettingsErrorKind::InvalidValue, *problem);
-    return stage(config::profileFile(_editingProfile.toStdString()), config::emitProfileYaml(_draft));
+    // A link pattern still in error is held back -- the reader would skip it, or the terminal disable it --
+    // and its row says why; everything else in the draft is written meanwhile.
+    auto writable = _draft;
+    if (draftProblem())
+    {
+        auto const table = config::linkPatternsFor(_draft);
+        auto const inError = [&table](config::HintPatternConfig const& pattern) {
+            if (config::skippedHintPatternReason(pattern))
+                return true;
+            return !vtbackend::isBuiltinLinkPatternName(pattern.name)
+                   && std::ranges::any_of(table->diagnostics(), [&pattern](auto const& diagnostic) {
+                          return diagnostic.pattern == pattern.name
+                                 && diagnostic.severity() == vtbackend::LinkPatternSeverity::Error;
+                      });
+        };
+        auto patterns = _draft.hintPatterns.value();
+        std::erase_if(patterns, inError);
+        writable.hintPatterns = std::move(patterns);
+    }
+    return stage(config::profileFile(_editingProfile.toStdString()), config::emitProfileYaml(writable));
 }
 
 void SettingsController::stageProfileDraftReporting()
 {
-    // A link pattern still in error is not staged, and its row says why: reporting it too would interrupt
-    // the user who is still typing its regex.
-    if (auto const staged = stageProfileDraft();
-        !staged && staged.error().kind != SettingsErrorKind::InvalidValue)
-        fail(staged.error().message);
+    report(stageProfileDraft());
 }
 
 std::expected<void, SettingsError> SettingsController::setProfileField(QString const& key,
@@ -2424,7 +2475,18 @@ bool SettingsController::profileNameTaken(std::string const& name) const
     auto const file = config::profileFile(name);
     auto const read = _services.store->read(file);
     return _config().findProfile(name) != nullptr || (read && read->has_value())
-           || _session->hasPendingFor(file);
+           || _session->pendingFor(file) == config::PendingChange::Write;
+}
+
+bool SettingsController::isSideFileProfile(std::string const& name) const
+{
+    switch (_session->pendingFor(config::profileFile(name)))
+    {
+        case config::PendingChange::Write: return true;
+        case config::PendingChange::Removal: return false;
+        case config::PendingChange::None: break;
+    }
+    return profileOrigin(name) == SettingsOrigin::SideFile;
 }
 
 std::expected<QString, SettingsError> SettingsController::openNewProfile(std::string const& name,
@@ -2441,7 +2503,7 @@ std::expected<QString, SettingsError> SettingsController::openNewProfile(std::st
 
 std::expected<QString, SettingsError> SettingsController::duplicateProfile(QString const& name)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     // The open draft is what the page shows: a read-only one is the configuration's profile anyway.
     auto const* source = _profileAccess != DraftAccess::Closed && _editingProfile == name
@@ -2453,12 +2515,14 @@ std::expected<QString, SettingsError> SettingsController::duplicateProfile(QStri
     auto const copyName = firstFreeName(copyNameOf(name.toStdString()), [this](std::string const& candidate) {
         return profileNameTaken(candidate);
     });
+    if (auto const valid = checkNewName(copyName); !valid)
+        return std::unexpected(valid.error());
     return openNewProfile(copyName, *source);
 }
 
 std::expected<QString, SettingsError> SettingsController::createProfile()
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     auto const& cfg = _config();
     auto const* base = cfg.findProfile(cfg.defaultProfileName.value());
@@ -2583,10 +2647,10 @@ void SettingsController::setColorSchemeDark(QString const& name)
 
 std::expected<void, SettingsError> SettingsController::deleteProfile(QString const& name)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
-    if (profileOrigin(name.toStdString()) != SettingsOrigin::SideFile)
-        return refuse(SettingsErrorKind::ReadOnly, "Only GUI-created profiles can be deleted here.");
+    if (!isSideFileProfile(name.toStdString()))
+        return refuse(SettingsErrorKind::ReadOnly, "Only profiles made in Settings can be deleted here.");
 
     if (auto const staged = stage(config::profileFile(name.toStdString()), std::nullopt); !staged)
         return staged;
@@ -2610,35 +2674,51 @@ void SettingsController::requestDeleteProfile(QString const& name)
 std::expected<void, SettingsError> SettingsController::renameProfile(QString const& oldName,
                                                                      QString const& newName)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
-    if (profileOrigin(oldName.toStdString()) != SettingsOrigin::SideFile)
-        return refuse(SettingsErrorKind::ReadOnly, "Only GUI-created profiles can be renamed here.");
+    if (!isSideFileProfile(oldName.toStdString()))
+        return refuse(SettingsErrorKind::ReadOnly, "Only profiles made in Settings can be renamed here.");
     auto const trimmed = newName.trimmed();
-    if (trimmed.isEmpty())
-        return refuse(SettingsErrorKind::InvalidValue, "Enter a name for the profile.");
     if (trimmed == oldName)
         return {}; // nothing to do
+    if (auto const valid = checkNewName(trimmed.toStdString()); !valid)
+        return valid;
     if (profileNameTaken(trimmed.toStdString()))
         return refuse(SettingsErrorKind::NameTaken, "A profile with that name already exists.");
 
     // The open draft carries what is staged for the profile; another profile is as the configuration has it.
     auto const* profile = _editingProfile == oldName ? &_draft : _config().findProfile(oldName.toStdString());
     if (profile == nullptr)
-        return refuse(SettingsErrorKind::UnknownSetting, "Profile not found.");
-    auto const bytes = config::emitProfileYaml(*profile);
+        return refuse(SettingsErrorKind::UnknownSetting, "Open the profile to rename it.");
 
-    if (auto const staged = stage(config::profileFile(trimmed.toStdString()), bytes); !staged)
-        return staged;
-    if (auto const staged = stage(config::profileFile(oldName.toStdString()), std::nullopt); !staged)
-        return staged;
-    if (_defaultProfile == oldName)
+    // One change: the new file, the old one's removal, and the default that follows it are written together
+    // or not at all.
+    auto files = std::vector<config::StagedFile> {
+        { .file = config::profileFile(trimmed.toStdString()), .bytes = config::emitProfileYaml(*profile) },
+        { .file = config::profileFile(oldName.toStdString()), .bytes = std::nullopt },
+    };
+    auto defaultDraft = _globalDraft;
+    auto const followsDefault = _defaultProfile == oldName;
+    if (followsDefault)
     {
-        _globalDraft.defaultProfile = trimmed.toStdString();
-        if (auto const staged = stageGlobalDraft(); !staged)
-            return staged;
+        if (auto const writable = globalDraftWritable(); !writable)
+            return writable;
+        defaultDraft.defaultProfile = trimmed.toStdString();
+        files.push_back(
+            { .file = config::guiSettingsFile(), .bytes = config::emitGuiSettingsYaml(defaultDraft) });
     }
+    auto staged = _session->stageTogether(files);
+    emit changesChanged();
+    if (!staged)
+        return staged;
 
+    if (followsDefault)
+    {
+        _globalDraft = std::move(defaultDraft);
+        rebuildProfileRows();
+        emit changed();
+        emit globalFieldsChanged();
+    }
     if (_editingProfile == oldName)
     {
         _editingProfile = trimmed;
@@ -2654,7 +2734,7 @@ void SettingsController::requestRenameProfile(QString const& oldName, QString co
 
 std::expected<void, SettingsError> SettingsController::globalDraftWritable() const
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     // Rewriting a settings.yml the loader could not read would replace everything in it with the few keys
     // the page knows.
@@ -2679,7 +2759,9 @@ std::expected<void, SettingsError> SettingsController::setDefaultProfile(QString
         return writable;
     _globalDraft.defaultProfile = name.toStdString();
     auto staged = stageGlobalDraft();
-    refresh(); // the list's default mark follows the draft
+    // The list's default mark follows the draft; nothing else in the lists changed.
+    rebuildProfileRows();
+    emit changed();
     return staged;
 }
 
@@ -2745,7 +2827,7 @@ QVariantList SettingsController::globalFields() const
 std::expected<void, SettingsError> SettingsController::setGlobalField(QString const& key,
                                                                       QVariant const& value)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     auto const descriptor = std::ranges::find(globalFieldDescriptors(), key, &GlobalFieldDescriptor::key);
     if (descriptor == globalFieldDescriptors().end())
@@ -2771,7 +2853,13 @@ std::expected<void, SettingsError> SettingsController::resetGlobalField(QString 
     if (auto const writable = globalDraftWritable(); !writable)
         return writable;
     _globalDraft.globalOverrides.erase(key.toStdString());
-    return stageGlobalDraft();
+    // A Reset is a click, not a drag: written at once, its row never shows the value it removed while the
+    // value contour.yml gives is not known until the reload.
+    return stageGlobalDraft().and_then([this] {
+        auto flushed = _session->flush();
+        emit changesChanged();
+        return flushed;
+    });
 }
 
 std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::string_view key,
@@ -2830,10 +2918,12 @@ void SettingsController::editColorScheme(QString const& name)
 
     _schemeDraft = palette;
     _editingScheme = name;
-    _schemeAccess =
-        !_locked && (sideFile || _session->hasPendingFor(config::colorSchemeFile(name.toStdString())))
-            ? DraftAccess::Editable
-            : DraftAccess::ReadOnly;
+    _schemeAccess = !locked() && (sideFile || colorSchemeSideFileExists(name.toStdString()))
+                        ? DraftAccess::Editable
+                        : DraftAccess::ReadOnly;
+    // As editProfile(): what the draft was seeded from is what Settings last saw of the file.
+    if (_schemeAccess == DraftAccess::Editable)
+        _session->observe(config::colorSchemeFile(name.toStdString()));
     emit schemeDraftChanged();
     emit editingSchemeChanged();
 }
@@ -2847,7 +2937,7 @@ std::expected<void, SettingsError> SettingsController::stageSchemeDraft()
 std::expected<void, SettingsError> SettingsController::setSchemeColor(QString const& key,
                                                                       QString const& color)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     switch (_schemeAccess)
     {
@@ -2891,12 +2981,12 @@ bool SettingsController::schemeNameTaken(std::string const& name) const
 {
     return colorSchemeSideFileExists(name) || isInlineColorScheme(name)
            || _config().colorschemes.value().contains(name)
-           || _session->hasPendingFor(config::colorSchemeFile(name));
+           || _session->pendingFor(config::colorSchemeFile(name)) == config::PendingChange::Write;
 }
 
 std::expected<QString, SettingsError> SettingsController::duplicateColorScheme(QString const& name)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     auto palette = _schemeAccess != DraftAccess::Closed && _editingScheme == name
                        ? _schemeDraft
@@ -2904,6 +2994,8 @@ std::expected<QString, SettingsError> SettingsController::duplicateColorScheme(Q
     auto const copyName = firstFreeName(copyNameOf(name.toStdString()), [this](std::string const& candidate) {
         return schemeNameTaken(candidate);
     });
+    if (auto const valid = checkNewName(copyName); !valid)
+        return std::unexpected(valid.error());
     if (auto const staged = stage(config::colorSchemeFile(copyName), config::emitColorSchemeYaml(palette));
         !staged)
         return std::unexpected(staged.error());
@@ -2923,15 +3015,16 @@ void SettingsController::duplicateScheme(QString const& name)
 std::expected<void, SettingsError> SettingsController::renameColorScheme(QString const& oldName,
                                                                          QString const& newName)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     if (!colorSchemeSideFileExists(oldName.toStdString()))
-        return refuse(SettingsErrorKind::ReadOnly, "Only GUI-created color schemes can be renamed here.");
+        return refuse(SettingsErrorKind::ReadOnly,
+                      "Only color schemes made in Settings can be renamed here.");
     auto const trimmed = newName.trimmed();
-    if (trimmed.isEmpty())
-        return refuse(SettingsErrorKind::InvalidValue, "Enter a name for the color scheme.");
     if (trimmed == oldName)
         return {}; // nothing to do
+    if (auto const valid = checkNewName(trimmed.toStdString()); !valid)
+        return valid;
     // Reject a destination naming ANY existing scheme: a side file, a contour.yml inline scheme (which
     // would shadow the written side file at load, leaving a dead file), or a config-known scheme such as
     // the builtin "default".
@@ -2939,20 +3032,26 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
         return refuse(SettingsErrorKind::NameTaken, "A color scheme with that name already exists.");
 
     // The open draft carries what is staged for the scheme; another one is as its side file has it.
-    auto palette = vtbackend::ColorPalette {};
-    if (_editingScheme == oldName)
+    auto palette = std::optional<vtbackend::ColorPalette> {};
+    if (_schemeAccess != DraftAccess::Closed && _editingScheme == oldName)
         palette = _schemeDraft;
     else if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
              it != _config().colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded = sideFileScheme(oldName.toStdString()))
-        palette = *loaded;
+    else
+        palette = sideFileScheme(oldName.toStdString());
+    if (!palette)
+        return refuse(SettingsErrorKind::UnknownSetting, "Open the color scheme to rename it.");
 
-    if (auto const staged =
-            stage(config::colorSchemeFile(trimmed.toStdString()), config::emitColorSchemeYaml(palette));
-        !staged)
-        return staged;
-    if (auto const staged = stage(config::colorSchemeFile(oldName.toStdString()), std::nullopt); !staged)
+    // One change: the new file and the old one's removal are written together or not at all.
+    auto const files = std::array {
+        config::StagedFile { .file = config::colorSchemeFile(trimmed.toStdString()),
+                             .bytes = config::emitColorSchemeYaml(*palette) },
+        config::StagedFile { .file = config::colorSchemeFile(oldName.toStdString()), .bytes = std::nullopt },
+    };
+    auto staged = _session->stageTogether(files);
+    emit changesChanged();
+    if (!staged)
         return staged;
 
     if (_editingScheme == oldName)
@@ -2970,13 +3069,14 @@ void SettingsController::requestRenameScheme(QString const& oldName, QString con
 
 std::expected<void, SettingsError> SettingsController::deleteColorScheme(QString const& name)
 {
-    if (_locked)
+    if (locked())
         return lockedRefusal();
     // Only GUI-created (side-file) schemes can be deleted; a builtin/inline scheme has no side file, and a
     // removal treats an absent file as success, so without this guard a delete of a scheme that is still
     // there would look done. Mirrors deleteProfile's origin guard.
     if (!colorSchemeSideFileExists(name.toStdString()))
-        return refuse(SettingsErrorKind::ReadOnly, "Only GUI-created color schemes can be deleted here.");
+        return refuse(SettingsErrorKind::ReadOnly,
+                      "Only color schemes made in Settings can be deleted here.");
 
     if (auto const staged = stage(config::colorSchemeFile(name.toStdString()), std::nullopt); !staged)
         return staged;
