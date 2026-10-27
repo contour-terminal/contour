@@ -174,25 +174,12 @@ Item {
         onSizeChanged: chrome.updateScrollBarPosition()
         onAvailableHeightChanged: chrome.publishMarkTrack()
 
-        // Comfortable hit target that floats just off the terminal edge. Overlay only — no gutter is
-        // reserved, so the grid/window geometry is untouched.
-        implicitWidth: 12
-        padding: 2
-
-        // A stock ScrollBar inherits the app-pinned Fusion style's thin, low-contrast, hover-only handle
-        // (see ContourGuiApp's QQuickStyle::setStyle("Fusion")), nearly invisible over a terminal's
-        // per-profile background. An explicit contentItem/background — the same remedy WindowControls.qml
-        // uses for Fusion's illegible defaults — makes the handle style-independent: clearly visible at
-        // rest, emphasized on hover/drag.
-
-        // Auto-contrast handle color derived from the profile background (QColor r/g/b are 0..1), so it
-        // reads on any theme without plumbing a foreground color to QML: light handle over dark
-        // backgrounds, dark handle over light ones. Null-guarded during split-teardown rebinds.
-        readonly property color handleColor: {
-            let bg = chrome.session ? chrome.session.backgroundColor : Qt.color("black");
-            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
-            return luminance < 0.5 ? Qt.color("white") : Qt.color("black");
-        }
+        // The track and, toward the pane's edge, the inset beside it: inside the hit area, so a press at the
+        // very edge still takes the bar. Overlay only: no gutter is reserved, so the grid is untouched.
+        implicitWidth: chromeStyle.size.scrollbar + chromeStyle.space.scrollbarInset
+        padding: 0
+        leftPadding: vbar.atRightEdge ? 0 : chromeStyle.space.scrollbarInset
+        rightPadding: vbar.atRightEdge ? chromeStyle.space.scrollbarInset : 0
 
         // True only while there is scrollback to move through. Because we supply our own contentItem, the
         // style's "hide when content fits" no longer applies, so we gate the whole bar's visibility on
@@ -201,23 +188,56 @@ Item {
         // capture mouse events in its strip).
         readonly property bool hasScrollback: vbar.size < 1.0
 
+        // The Terminal row draws the thumb as a column of a glyph (one per cell row); the native rows as a
+        // rounded shape. Hovered or dragged, the thumb takes its active colour and the track shows.
+        readonly property bool glyphThumb: chromeStyle.scrollThumbGlyph !== ""
+        readonly property bool engaged: vbar.hovered || vbar.pressed
+        // The native thumb resolves on the pane's own background (colorOn), so a light profile under a dark
+        // chrome keeps a legible one; the Terminal row's is the scheme's, chrome-wide.
+        readonly property color paneBackground: chrome.session ? chrome.session.backgroundColor : "transparent"
+        readonly property color thumbColor: {
+            if (chromeStyle.paletteRevision < 0)
+                return "transparent"
+            if (vbar.glyphThumb)
+                return vbar.pressed ? chromeStyle.colors.scrollbarThumbActive : chromeStyle.colors.scrollbarThumb
+            return chromeStyle.colorOn(vbar.engaged ? chromeStyle.roles.scrollbarThumbActive
+                                                    : chromeStyle.roles.scrollbarThumb,
+                                       vbar.paneBackground)
+        }
+
         contentItem: Rectangle {
+            id: thumb
+            objectName: "scrollbarThumb"
             // Above the tick layer below, so the handle is drawn over the ticks it passes.
             z: 1
-            implicitWidth: 8
-            radius: width / 2
-            color: vbar.handleColor
-            // Visible at rest, brighter on hover, brightest while dragging. Opacity is ours (not the
-            // style's active-driven fade), so the handle never vanishes when merely idle.
-            opacity: vbar.pressed ? 0.55 : vbar.hovered ? 0.45 : 0.28
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            implicitWidth: chromeStyle.size.scrollbar
+            radius: chromeStyle.radii.scrollbar
+            color: vbar.glyphThumb ? "transparent" : vbar.thumbColor
+
+            Column {
+                visible: vbar.glyphThumb
+                Repeater {
+                    model: vbar.glyphThumb ? Math.max(1, Math.floor(thumb.height / chromeStyle.cellHeight)) : 0
+                    Text {
+                        objectName: "scrollbarThumbGlyph"
+                        width: thumb.width
+                        height: chromeStyle.cellHeight
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        text: chromeStyle.scrollThumbGlyph
+                        font: chromeStyle.type.body
+                        color: vbar.thumbColor
+                    }
+                }
+            }
         }
 
         background: Rectangle {
-            color: vbar.handleColor
-            // A faint track that only surfaces while the user interacts, keeping the resting look clean.
-            opacity: (vbar.hovered || vbar.pressed) ? 0.10 : 0.0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            objectName: "scrollbarTrack"
+            radius: chromeStyle.radii.scrollbar
+            color: vbar.engaged && !vbar.glyphThumb && chromeStyle.paletteRevision >= 0
+                ? chromeStyle.colorOn(chromeStyle.roles.scrollbarTrack, vbar.paneBackground)
+                : "transparent"
         }
 
         // Tick marks over the track (`scrollbar.marks`): where commands ran, failed or are still running, and
@@ -404,11 +424,11 @@ Item {
             vt.scrollOffset = Math.round(vt.historyLineCount - vbar.position * totalLineCount);
     }
 
-    // The colour of a tick of @p kind, from the session's colour scheme; the handle's own colour while the
+    // The colour of a tick of @p kind, from the session's colour scheme; the thumb's own colour while the
     // session has published none (a mock, or the instant before its first refresh).
     function markColor(kind) {
         return kind >= 0 && kind < chrome.scrollbarMarkColors.length ? chrome.scrollbarMarkColors[kind]
-                                                                       : vbar.handleColor;
+                                                                       : vbar.thumbColor;
     }
 
     // Whether @p y, in the mark layer's coordinates, lies under the scrollbar's handle as it is drawn.

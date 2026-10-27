@@ -2339,6 +2339,152 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
 
 namespace
 {
+[[nodiscard]] QPoint centreOf(QQuickItem const& item);
+[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
+
+/// The colour @p role resolves to on a pane of @p background, as the chrome's colorOn() answers it.
+[[nodiscard]] QColor colorOnPane(QQmlEngine& engine,
+                                 contour::config::ChromeColorRole role,
+                                 QColor const& background)
+{
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto color = QColor {};
+    REQUIRE(QMetaObject::invokeMethod(style,
+                                      "colorOn",
+                                      Q_RETURN_ARG(QColor, color),
+                                      Q_ARG(int, static_cast<int>(role)),
+                                      Q_ARG(QColor, background)));
+    return color;
+}
+} // namespace
+
+TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens (offscreen)",
+          "[contour][gui][qml][scrollbar]")
+{
+    using contour::config::ChromeColorRole;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto const dark = QColor(0x1C, 0x1E, 0x24);
+    auto session = std::make_unique<MockSession>(dark);
+    session->setScrollbarVisible(true);
+    session->setHistoryLineCount(1000);
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    // The track and the inset beside it, toward the pane's edge, so the hit area reaches the edge.
+    CHECK(host.bar->width()
+          == chromeToken(engine, "size", "scrollbar") + chromeToken(engine, "space", "scrollbarInset"));
+    CHECK(host.bar->property("rightPadding").toReal() == chromeToken(engine, "space", "scrollbarInset"));
+    CHECK(host.bar->property("leftPadding").toReal() == 0.0);
+    auto* handle = host.bar->property("contentItem").value<QQuickItem*>();
+    REQUIRE(handle != nullptr);
+    CHECK(handle->width() == chromeToken(engine, "size", "scrollbar"));
+    CHECK(handle->property("radius").toReal() == chromeToken(engine, "radii", "scrollbar"));
+    CHECK(handle->property("color").value<QColor>()
+          == colorOnPane(engine, ChromeColorRole::ScrollbarThumb, dark));
+
+    // Engaged (pressed, as hovered), the thumb takes the active colour and the track shows.
+    auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+    REQUIRE(window != nullptr);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->property("pressed").toBool(); }));
+    CHECK(handle->property("color").value<QColor>()
+          == colorOnPane(engine, ChromeColorRole::ScrollbarThumbActive, dark));
+    auto* track = host.bar->property("background").value<QQuickItem*>();
+    REQUIRE(track != nullptr);
+    CHECK(track->property("color").value<QColor>()
+          == colorOnPane(engine, ChromeColorRole::ScrollbarTrack, dark));
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
+    REQUIRE(QTest::qWaitFor([&] { return !host.bar->property("pressed").toBool(); }));
+
+    // Over a light pane the thumb is dark.
+    auto light = std::make_unique<MockSession>(QColor(0xFA, 0xFA, 0xF8));
+    light->setScrollbarVisible(true);
+    light->setHistoryLineCount(1000);
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(light.get())));
+    QCoreApplication::processEvents();
+    auto const lightThumb = colorOnPane(engine, ChromeColorRole::ScrollbarThumb, QColor(0xFA, 0xFA, 0xF8));
+    CHECK(lightThumb.lightnessF() < 0.5);
+    if (!host.bar->property("engaged").toBool())
+        CHECK(handle->property("color").value<QColor>() == lightThumb);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome: an overlay bar hidden at the bottom takes no presses (offscreen)",
+          "[contour][gui][qml][scrollbar]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    session->setScrollbarVisible(false); // an overlay bar at the bottom of the scrollback
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    CHECK_FALSE(host.bar->isVisible());
+    // What a press at the pane's right edge lands on is not the bar.
+    auto const edge = QPointF(host.paneWidth - 1, host.chrome->height() / 2);
+    CHECK(host.chrome->childAt(edge.x(), edge.y()) != host.bar);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome: the Terminal row draws the bar as a column of its thumb glyph (offscreen)",
+          "[contour][gui][qml][scrollbar]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    session->setHistoryLineCount(30); // a tall handle: several cell rows
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const cellHeight = style->property("cellHeight").toReal();
+    CHECK(host.bar->width() == Catch::Approx(style->property("cellWidth").toReal()));
+
+    auto* handle = host.bar->property("contentItem").value<QQuickItem*>();
+    REQUIRE(handle != nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return handle->height() > cellHeight; }));
+    auto glyphs = std::vector<QQuickItem*> {};
+    auto const collect = [&](this auto const& self, QQuickItem const& item) -> void {
+        for (auto* child: item.childItems())
+        {
+            if (child->objectName() == QStringLiteral("scrollbarThumbGlyph"))
+                glyphs.push_back(child);
+            self(*child);
+        }
+    };
+    collect(*handle);
+    auto const rows = static_cast<qsizetype>(std::floor(handle->height() / cellHeight));
+    CHECK(std::cmp_equal(glyphs.size(), rows));
+    for (auto const* glyph: glyphs)
+        CHECK(glyph->property("text").toString() == QStringLiteral("┃"));
+    CHECK(handle->property("color").value<QColor>().alpha() == 0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
 /// The tick items a SessionChrome's mark layer currently shows, top first.
 [[nodiscard]] std::vector<QQuickItem*> markTicksOf(QQuickItem const& layer)
 {
