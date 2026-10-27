@@ -5,12 +5,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 using contour::config::ChromeFontSource;
 using contour::config::ChromeStyle;
 using contour::config::configEnumValues;
+using contour::config::firstAvailableFamily;
+using contour::config::FluentFontFamilies;
 using contour::config::HostPlatform;
 using contour::config::LengthUnit;
 using contour::config::resolveChromeStyle;
@@ -206,8 +213,9 @@ TEST_CASE("UiStyle.resolveChromeStyle", "[config]")
 
 TEST_CASE("UiStyle.nativeRowsKeepTodaysGeometry", "[config]")
 {
-    // Phase 0 must not move a pixel: every native row starts as a copy of the old Native row.
-    for (auto row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    // Phase 0 must not move a pixel: every native row starts as a copy of the old Native row. Fluent has
+    // left the copy for the Windows 11 board (UiStyle.fluentRowMatchesTheWinBoard).
+    for (auto row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux })
     {
         auto const& t = uiStyleTokens(row);
         CHECK(t.chromeHeightUnits == 34);
@@ -216,6 +224,34 @@ TEST_CASE("UiStyle.nativeRowsKeepTodaysGeometry", "[config]")
         CHECK(t.quickControlsStyle == "Fusion");
     }
     CHECK(uiStyleTokens(ChromeStyle::Terminal).quickControlsStyle == "ContourTui");
+}
+
+TEST_CASE("UiStyle.fluentRowMatchesTheWinBoard", "[uistyle]")
+{
+    auto const& fluent = uiStyleTokens(ChromeStyle::Fluent);
+    CHECK(fluent.chromeHeightUnits == 40);
+    CHECK(fluent.tabHeightUnits == 34);
+    CHECK(fluent.windowControlUnits == 46);
+    CHECK(fluent.stripButtonUnits == 36);
+    CHECK(std::ranges::equal(fluent.fontFamilies, FluentFontFamilies));
+    // The other rows ask for the platform UI font as they always did.
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+        CHECK(uiStyleTokens(row).fontFamilies.empty());
+}
+
+TEST_CASE("UiStyle.firstAvailableFamily", "[uistyle]")
+{
+    using namespace std::string_view_literals;
+    auto constexpr Families = std::array { "A"sv, "B"sv };
+    auto const installed = [](std::vector<std::string_view> names) {
+        return [names = std::move(names)](std::string_view family) {
+            return std::ranges::find(names, family) != names.end();
+        };
+    };
+    CHECK(firstAvailableFamily(Families, installed({ "B" })) == std::optional { "B"sv });
+    CHECK(firstAvailableFamily(Families, installed({ "A", "B" })) == std::optional { "A"sv });
+    CHECK(firstAvailableFamily(Families, installed({})) == std::nullopt);
+    CHECK(firstAvailableFamily({}, installed({ "A" })) == std::nullopt);
 }
 
 TEST_CASE("UiStyle.chromeStyleName", "[config]")

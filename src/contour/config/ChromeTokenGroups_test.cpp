@@ -183,6 +183,8 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(radii.rail),
              double(radii.blockActions),
              double(radii.chip) });
+    // The joined strip's buttons and leading inset, 0 on the rows that do not join.
+    append({ double(size.stripButton), double(size.profileButton), double(row.space.tabStripLeading) });
     return out;
 }
 
@@ -255,7 +257,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeFind,
                    nativeOverlay,
                    { 11 },
-                   nativeBlocks }),
+                   nativeBlocks,
+                   { 0, 0, 0 } }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -267,7 +270,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           ActiveTabWeight::Regular },
         { ChromeStyle::Fluent,
           joined({ { 40, 0, 34, 32, 28, 36, 280, 16, 16, 1110, 920, 720, 480 },
-                   { 14, 16, 14, 6, 2, 24, 7, 32, 22, 30 },
+                   { 16, 24, 14, 6, 2, 24, 7, 32, 22, 30 },
                    { 28 },
                    nativePaneSizes,
                    { 4, 10, 4 },
@@ -275,7 +278,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeBand,
                    { 4, 8, 14 },
                    { 4, 8, 8, 4, 18, 6, 0 },
-                   nativeRadii,
+                   // tabIcon tabClose badge hostChip toolbarChip grabber (win: the close button's 4)
+                   { 3, 4, 7, 12, 11, 1 },
                    { 12, 12, 14, 12, 20, 12, 600, 15 },
                    nativeMotion,
                    nativeTail,
@@ -283,13 +287,15 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeFind,
                    nativeOverlay,
                    { 11 },
-                   nativeBlocks }),
+                   nativeBlocks,
+                   // win: the + and the profile caret 30 tall, the caret 28 wide, the strip led by 8
+                   { 30, 28, 8 } }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
           DialogPlacement::Centered,
           MenuPresentation::InScene,
-          TabShape::Flat,
+          TabShape::Joined,
           ProfileMenuAffordance::Caret,
           TabColorSource::Palette,
           ActiveTabWeight::Regular },
@@ -311,7 +317,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeFind,
                    nativeOverlay,
                    { 11 },
-                   nativeBlocks }),
+                   nativeBlocks,
+                   { 0, 0, 0 } }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -343,7 +350,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    // No icon: the lock is `[secure]` in cells.
                    { 0 },
                    // The block column is today's glyph cells: one-cell marks, chips and ticks, no strip.
-                   { 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 } }),
+                   { 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 },
+                   { 0, 0, 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
@@ -696,6 +704,39 @@ TEST_CASE("chromeTokens.onlyTheMacRowIsAPill", "[chrometokens]")
     }
 }
 
+TEST_CASE("chromeTokens.onlyTheFluentRowJoins", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const index: allStyles())
+    {
+        CAPTURE(index);
+        auto const isFluent = static_cast<ChromeStyle>(index) == ChromeStyle::Fluent;
+        CHECK((ChromeTokenRows[index].layout.tabShape == TabShape::Joined) == isFluent);
+    }
+}
+
+TEST_CASE("chromeTokens.fluentRowMatchesTheWinBoard", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const fluent = resolveChromeTokens(ChromeStyle::Fluent, {});
+    CHECK(fluent.size.titleBar == 40);
+    CHECK(fluent.size.tab == 34);
+    CHECK(fluent.size.tabIcon == 16);
+    CHECK(fluent.size.tabClose == 24);
+    CHECK(fluent.size.stripButton == 30);
+    CHECK(fluent.size.profileButton == 28);
+    CHECK(fluent.space.tabStripLeading == 8);
+    CHECK(fluent.radii.tab == 6);
+    CHECK(fluent.radii.tabClose == 4);
+    CHECK(fluent.radii.paneCard == 4);
+    CHECK(fluent.radii.control == 4);
+    CHECK(fluent.space.paneGap == 4);
+    CHECK(fluent.type.body == 14);
+    CHECK(fluent.type.caption == 12);
+    CHECK(fluent.layout.tabShape == TabShape::Joined);
+    CHECK(fluent.layout.profileMenu == ProfileMenuAffordance::Caret);
+}
+
 TEST_CASE("chromeTokens.tabColoursFollowTheRolesWhereTheChromeDrawsItsOwn", "[chrometokens]")
 {
     using namespace contour::config;
@@ -704,8 +745,9 @@ TEST_CASE("chromeTokens.tabColoursFollowTheRolesWhereTheChromeDrawsItsOwn", "[ch
         CAPTURE(index);
         auto const& layout = ChromeTokenRows[index].layout;
         auto const style = static_cast<ChromeStyle>(index);
-        // The native Flat rows keep today's palette look; the pills and the Terminal row draw the roles.
-        auto const native = layout.tabShape == TabShape::Flat && style != ChromeStyle::Terminal;
+        // The native Flat and Joined rows keep today's palette look; the pills and the Terminal row draw the
+        // roles.
+        auto const native = layout.tabShape != TabShape::Pill && style != ChromeStyle::Terminal;
         CHECK((layout.tabColors == TabColorSource::Palette) == native);
         // Only the Terminal row's active fill can be the bar's own colour, so only it needs the bold.
         CHECK((layout.activeTabWeight == ActiveTabWeight::Bold) == (style == ChromeStyle::Terminal));

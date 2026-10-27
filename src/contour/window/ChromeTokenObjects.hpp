@@ -911,6 +911,7 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int tabShape READ tabShape CONSTANT)
     Q_PROPERTY(int flat READ flat CONSTANT)
     Q_PROPERTY(int pill READ pill CONSTANT)
+    Q_PROPERTY(int joined READ joined CONSTANT)
     // A bool for QML (the QML-facing carve-out): a read-only predicate over `tabShape`, which stays the
     // source of truth as a config::TabShape; the one place the shape is compared, so the tab, the strip and
     // the badge slot cannot disagree on it.
@@ -957,6 +958,10 @@ class ChromeLayoutTokens: public QObject
     /// @return The QML names of config::TabShape's enumerators.
     [[nodiscard]] static constexpr int flat() noexcept { return static_cast<int>(config::TabShape::Flat); }
     [[nodiscard]] static constexpr int pill() noexcept { return static_cast<int>(config::TabShape::Pill); }
+    [[nodiscard]] static constexpr int joined() noexcept
+    {
+        return static_cast<int>(config::TabShape::Joined);
+    }
     /// @return Whether the tabs are pills in a well (config::TabShape::Pill).
     [[nodiscard]] bool isPill() const noexcept { return _tokens.tabShape == config::TabShape::Pill; }
     /// @return Whether the block column is a pixel strip holding the rail (vtbackend::BlockColumnForm::Rail).

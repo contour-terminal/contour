@@ -25,6 +25,7 @@ struct BandCase
 
 constexpr auto Pill = TabShape::Pill;
 constexpr auto Flat = TabShape::Flat;
+constexpr auto Joined = TabShape::Joined;
 constexpr auto ClientBand = WindowFrame::ClientBand;
 constexpr auto NativeFrame = WindowFrame::NativeFrame;
 constexpr auto Windowed = WindowMode::Windowed;
@@ -54,6 +55,15 @@ constexpr auto BandCases = std::array {
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom },
                { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    // Joined has no band rules of its own yet: on a client band it is the strip, as Flat is.
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     // A native frame: no band of ours, the strip per the gate at its edge, whatever the shape.
     BandCase { { Pill, NativeFrame, Windowed, GateShown, Top },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
@@ -70,6 +80,14 @@ constexpr auto BandCases = std::array {
     BandCase { { Flat, NativeFrame, Windowed, GateShown, Top },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Bottom },
                { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
 
@@ -144,6 +162,22 @@ constexpr auto InterruptedCases = std::array {
     BandCase { { Flat, NativeFrame, Windowed, GateShown, Top, Interrupted },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
                { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
 

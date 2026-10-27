@@ -853,10 +853,37 @@ TEST_CASE("the macOS row draws the well and pills at the canvas tokens (offscree
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("the Fluent and ContourLinux rows keep today's geometry (offscreen)",
+TEST_CASE("the Fluent row takes the win board's geometry (offscreen)",
           "[contour][gui][qml][mainwindow][tabwell]")
 {
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3, .decor = TabDecor::EveryBadge } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(titleBar != nullptr);
+    CHECK(titleBar->height() == 40);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    CHECK(tabs[0]->implicitHeight() == 34);
+
+    // The mock window asks for no client-frame affordances, so Main.qml loads no window controls here; the
+    // width every WindowControls button binds to is the chrome style's.
+    CHECK(chromeStyleOf(engine).property("windowControlWidth").toReal() == 46);
+    auto const* newTab = root->findChild<QQuickItem*>(QStringLiteral("newTabButton"));
+    REQUIRE(newTab != nullptr);
+    CHECK(newTab->width() == 36);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the ContourLinux row keeps today's geometry (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    for (auto const row: { ChromeStyle::ContourLinux })
     {
         INFO("row: " << contour::config::chromeStyleName(row));
         QQmlEngine engine;

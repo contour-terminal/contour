@@ -8,8 +8,10 @@
 #include <vtbackend/vt/ProgressState.hpp>
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -86,6 +88,10 @@ struct UiStyleTokens
 
     /// Where the chrome font comes from. @see resolveChromeFont.
     ChromeFontSource fontSource;
+
+    /// The chrome font families to try in order, the first installed one winning (@see firstAvailableFamily);
+    /// empty for the platform UI font itself. Read only under @c ChromeFontSource::PlatformUi.
+    std::span<std::string_view const> fontFamilies {};
 
     int cornerRadiusPixels; ///< Corner radius of chrome rectangles. 0 squares them off.
     int borderWidthPixels;  ///< Border and outline thickness.
@@ -338,6 +344,24 @@ inline constexpr std::array<StatusColorRole, 5> ProgressStatusRoles {
 static_assert(ProgressStatusRoles.size() == static_cast<size_t>(vtbackend::ProgressState::Paused) + 1,
               "ProgressStatusRoles needs one row per vtbackend::ProgressState");
 
+/// The Fluent row's chrome font families (win board): Windows 11's variable Segoe UI, then Windows 10's.
+inline constexpr auto FluentFontFamilies =
+    std::array { std::string_view { "Segoe UI Variable Text" }, std::string_view { "Segoe UI" } };
+
+/// The first of @p families that is installed.
+/// @param families    The families to try, in order.
+/// @param isInstalled Whether a family is installed; the font database in production, a fake in tests.
+/// @return The first installed family, or @c std::nullopt when none is (or @p families is empty).
+template <std::predicate<std::string_view> IsInstalled>
+[[nodiscard]] constexpr std::optional<std::string_view> firstAvailableFamily(
+    std::span<std::string_view const> families, IsInstalled const& isInstalled)
+{
+    for (auto const family: families)
+        if (isInstalled(family))
+            return family;
+    return std::nullopt;
+}
+
 /// Chrome tokens no style row varies, kept together so a restyle changes a number here and not a
 /// literal in a QML file.
 namespace ChromeTokens
@@ -370,6 +394,7 @@ namespace detail
         .unit = LengthUnit::Pixel,
         .quickControlsStyle = "Fusion",
         .fontSource = ChromeFontSource::PlatformUi,
+        .fontFamilies = {},
         .cornerRadiusPixels = 3,
         .borderWidthPixels = 1,
         .dropCaretPixels = 4,
@@ -460,6 +485,7 @@ namespace detail
         .unit = LengthUnit::Cell,
         .quickControlsStyle = "ContourTui",
         .fontSource = ChromeFontSource::TerminalProfile,
+        .fontFamilies = {},
         .cornerRadiusPixels = 0,
         .borderWidthPixels = 1,
         .dropCaretPixels = 1,
@@ -549,11 +575,24 @@ namespace detail
         .palettePromptGlyph = "❯",
     };
 
-    // The three native rows start as copies of one another (Phase 0 moves no pixel); a platform's
-    // look diverges by changing its own row, never by branching in code.
+    // The Windows 11 board's (win) extents and font, over the native row it otherwise agrees with: a
+    // 40-pixel bar holding 34-pixel tabs, 46-pixel caption buttons and a 36-pixel "+". It says only what
+    // differs, as PlasmaTokens does, so a value the two rows share cannot drift between two literal blocks.
+    inline constexpr auto FluentTokens = [] {
+        auto tokens = NativeTokens;
+        tokens.chromeHeightUnits = 40;
+        tokens.tabHeightUnits = 34;
+        tokens.windowControlUnits = 46;
+        tokens.stripButtonUnits = 36;
+        tokens.fontFamilies = FluentFontFamilies;
+        return tokens;
+    }();
+
+    // The native rows started as copies of one another (Phase 0 moved no pixel); a platform's look
+    // diverges by changing its own row, never by branching in code.
     inline constexpr auto UiStyleTokenTable = std::array {
         NativeTokens,   // ChromeStyle::MacOS
-        NativeTokens,   // ChromeStyle::Fluent
+        FluentTokens,   // ChromeStyle::Fluent
         NativeTokens,   // ChromeStyle::ContourLinux
         TerminalTokens, // ChromeStyle::Terminal
     };

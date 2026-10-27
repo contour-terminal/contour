@@ -58,6 +58,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -122,6 +123,50 @@ TEST_CASE("resolveChromeFont: the native chrome keeps the platform UI font", "[c
     config.uiFontFamily = "JetBrains Mono";
     config.uiFontSize = 18.0;
     CHECK(resolveChromeFont(config, chromeRowOf(config), "main") == QGuiApplication::font());
+}
+
+TEST_CASE("resolveChromeFont: the Fluent chrome font is the first installed Fluent family",
+          "[contour][uistyle]")
+{
+    // The installed families are a fake, so the outcome does not depend on the fonts of the machine
+    // running the test: Windows CI's offscreen run does have Segoe UI.
+    auto config = twoProfileConfig();
+    config.uiStyle = UiStyle::Native;
+    auto const fluent = contour::config::ChromeStyle::Fluent;
+    auto const installed = [](std::vector<std::string_view> names) {
+        return [names = std::move(names)](std::string_view family) {
+            return std::ranges::contains(names, family);
+        };
+    };
+
+    SECTION("neither installed: the platform UI font, unchanged")
+    {
+        CHECK(resolveChromeFont(config, fluent, "main", installed({})) == QGuiApplication::font());
+    }
+
+    SECTION("only the Windows 10 family: Segoe UI")
+    {
+        auto const font = resolveChromeFont(config, fluent, "main", installed({ "Segoe UI" }));
+        CHECK(font.family() == QStringLiteral("Segoe UI"));
+        CHECK(font.pointSizeF() == QGuiApplication::font().pointSizeF());
+    }
+
+    SECTION("both: the Windows 11 variable family first")
+    {
+        auto const font =
+            resolveChromeFont(config, fluent, "main", installed({ "Segoe UI", "Segoe UI Variable Text" }));
+        CHECK(font.family() == QStringLiteral("Segoe UI Variable Text"));
+    }
+
+    SECTION("a row without families never asks")
+    {
+        auto const never = [](std::string_view) {
+            FAIL("a row without font families asked for one");
+            return true;
+        };
+        CHECK(resolveChromeFont(config, contour::config::ChromeStyle::ContourLinux, "main", never)
+              == QGuiApplication::font());
+    }
 }
 
 TEST_CASE("resolveChromeFont: the terminal chrome inherits the running profile's font", "[contour][uistyle]")
@@ -1112,12 +1157,13 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(tokenOf(mac, "layout", "flat").toInt() != tokenOf(mac, "layout", "pill").toInt());
     CHECK(tokenOf(mac, "layout", "profileMenu").toInt() == tokenOf(mac, "layout", "secondaryClick").toInt());
     CHECK(tokenOf(mac, "layout", "caret").toInt() != tokenOf(mac, "layout", "secondaryClick").toInt());
-    // The Pill band is the title bar's own height; a Flat bar keeps today's strip height.
-    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    // The Pill band is the title bar's own height; a Flat or Joined bar is its strip, 40 on the win board.
+    for (auto const [row, expected]: { std::pair { ChromeStyle::MacOS, 38.0 },
+                                       std::pair { ChromeStyle::Fluent, 40.0 },
+                                       std::pair { ChromeStyle::ContourLinux, 34.0 } })
     {
         CAPTURE(static_cast<int>(row));
         auto const provider = UiStyleProvider(chromeInputsFor(row, font));
-        auto const expected = row == ChromeStyle::MacOS ? 38.0 : 34.0;
         CHECK(provider.property("bandHeight").toReal() == expected);
         // A Flat tab's corners are the 1a corner radius (3), not radii.tab (the pill's, 6 or 8 on
         // Fluent and Linux): binding the Flat strip to the pill's radius would move today's geometry.
@@ -1131,8 +1177,9 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
 
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
     CHECK(fluent.property("bandHeight").toReal() == fluent.chromeHeight());
-    CHECK(fluent.chromeHeight() == 34.0);
-    CHECK(tokenOf(fluent, "layout", "tabShape").toInt() == tokenOf(fluent, "layout", "flat").toInt());
+    CHECK(fluent.chromeHeight() == 40.0);
+    CHECK(tokenOf(fluent, "layout", "tabShape").toInt() == tokenOf(fluent, "layout", "joined").toInt());
+    CHECK(tokenOf(fluent, "layout", "joined").toInt() != tokenOf(fluent, "layout", "flat").toInt());
     CHECK(tokenOf(fluent, "layout", "profileMenu").toInt() == tokenOf(fluent, "layout", "caret").toInt());
 
     auto inputs = chromeInputsFor(ChromeStyle::MacOS, font);

@@ -26,6 +26,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtCore/QStringList>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
@@ -457,7 +458,8 @@ qreal UiStyleProvider::bandHeight() const noexcept
     switch (_groups.layout.tabShape)
     {
         case config::TabShape::Pill: return _size.titleBar();
-        case config::TabShape::Flat: break;
+        case config::TabShape::Flat:
+        case config::TabShape::Joined: break;
     }
     return _metrics.chromeHeight;
 }
@@ -854,14 +856,30 @@ QColor UiStyleProvider::errorColor() const
 
 QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)
 {
+    return resolveChromeFont(config, row, profileName, [](std::string_view family) {
+        return QFontDatabase::hasFamily(
+            QString::fromUtf8(family.data(), static_cast<qsizetype>(family.size())));
+    });
+}
+
+QFont resolveChromeFont(config::Config const& config,
+                        config::ChromeStyle row,
+                        std::string const& profileName,
+                        FontFamilyAvailability const& isInstalled)
+{
     auto const& tokens = config::uiStyleTokens(row);
     auto font = QGuiApplication::font();
 
     // A style that wants the platform's own font is done here -- and the ui_font_* keys, which exist
     // to make a cell-counting chrome match the grid, are deliberately not applied to it rather than
-    // quietly restyling a chrome nobody asked to restyle.
+    // quietly restyling a chrome nobody asked to restyle. A row naming its own families (Fluent's
+    // Segoe UI Variable) takes the first one installed, and the platform font where none is.
     if (tokens.fontSource == config::ChromeFontSource::PlatformUi)
+    {
+        if (auto const family = config::firstAvailableFamily(tokens.fontFamilies, isInstalled))
+            font.setFamily(QString::fromUtf8(family->data(), static_cast<qsizetype>(family->size())));
         return font;
+    }
 
     // Fall back to the RUNNING profile's regular font, so `ui_style: terminal` alone already matches
     // the terminal grid. The running one rather than `default_profile`: `contour profile=big` puts a

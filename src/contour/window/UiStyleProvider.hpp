@@ -19,7 +19,9 @@
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 
+#include <functional>
 #include <string>
+#include <string_view>
 
 namespace contour::config
 {
@@ -960,5 +962,21 @@ class UiStyleProvider: public QObject
 [[nodiscard]] QFont resolveChromeFont(config::Config const& config,
                                       config::ChromeStyle row,
                                       std::string const& profileName);
+
+/// Whether a font family is installed. A @c bool by the @c std::predicate shape firstAvailableFamily takes.
+using FontFamilyAvailability = std::function<bool(std::string_view family)>;
+
+/// resolveChromeFont() with the installed font families injected: the overload above asks the font
+/// database, a test passes a fake so its outcome does not depend on the fonts of the machine it runs on.
+///
+/// @param config      The loaded configuration.
+/// @param row         The resolved chrome row, see config::resolveChromeStyle.
+/// @param profileName The profile this window is opening with (see the overload above).
+/// @param isInstalled Whether a family is installed; asked for the row's @c fontFamilies only.
+/// @return A font ready to hand to UiStyleProvider.
+[[nodiscard]] QFont resolveChromeFont(config::Config const& config,
+                                      config::ChromeStyle row,
+                                      std::string const& profileName,
+                                      FontFamilyAvailability const& isInstalled);
 
 } // namespace contour::window

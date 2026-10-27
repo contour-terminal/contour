@@ -82,10 +82,13 @@ enum class TabShape : uint8_t
 {
     Flat = 0, //!< Today's strip: the bar is the tab strip, edge to edge.
     Pill,     //!< A well of pills inside the window's title band.
+    /// Tabs with rounded top corners, bottom-aligned in the bar, the active one filled with the content's
+    /// colour so that it joins the content area (Windows 11).
+    Joined,
 };
 
 /// Number of @c TabShape enumerators, derived from the last one.
-inline constexpr size_t TabShapeCount = static_cast<size_t>(TabShape::Pill) + 1;
+inline constexpr size_t TabShapeCount = static_cast<size_t>(TabShape::Joined) + 1;
 
 /// Where a tab's fill and label colours come from.
 enum class TabColorSource : uint8_t
@@ -438,6 +441,10 @@ struct SizeTokens
     int hostDot = 0;       ///< Diameter of the host chip's state dot.
     int toolbarButton = 0; ///< Width of a band toolbar button.
     int toolbarChip = 0;   ///< Height of a band toolbar chip.
+    /// Height of the "+" and profile buttons in a @c TabShape::Joined strip; 0 on the rows that do not join.
+    int stripButton = 0;
+    /// Width of the profile button in a @c TabShape::Joined strip; 0 on the rows that do not join.
+    int profileButton = 0;
 
     // The tab colour flyout.
     int flyoutSwatch = 0; ///< Edge of a swatch in the tab colour flyout (bigger than a menu's).
@@ -503,6 +510,9 @@ struct SpaceTokens
     int dragReserve = 0;        ///< Empty band that always stays draggable.
     int revealEdge = 0;         ///< Height of the full-screen edge that reveals the band.
     int toolbarChipPadding = 0; ///< Horizontal padding inside a toolbar chip.
+    /// Inset from the band's leading edge to a @c TabShape::Joined strip's first tab; 0 on the rows that do
+    /// not join.
+    int tabStripLeading = 0;
 
     // The panes.
     int paneGapRows =
@@ -924,7 +934,7 @@ namespace detail
     /// @param paneGap       The gap between split panes, and their inset from the content edge.
     /// @param paneHeaderGap The gap between a pane header's items.
     /// @return A native row's spacing.
-    constexpr SpaceTokens nativeSpace(int paneGap, int paneHeaderGap) noexcept
+    constexpr SpaceTokens nativeSpace(int paneGap, int paneHeaderGap, int tabStripLeading) noexcept
     {
         return SpaceTokens { .paneGap = paneGap,
                              .splitHit = 10,
@@ -933,6 +943,7 @@ namespace detail
                              .dragReserve = 40,
                              .revealEdge = 2,
                              .toolbarChipPadding = 9,
+                             .tabStripLeading = tabStripLeading,
                              .paneGapRows = paneGap,
                              .paneHeaderGap = paneHeaderGap,
                              .footerLeading = 14,
@@ -1437,6 +1448,8 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 28,
                   .toolbarChip = 22,
+                  .stripButton = 0,
+                  .profileButton = 0,
                   .flyoutSwatch = 30,
                   .bareBand = 32,
                   .grabber = 2,
@@ -1469,7 +1482,7 @@ namespace detail
                   .foldChipHit = 24,
                   .scrollTick = 3,
                   .scrollTickOutline = 1 },
-        .space = nativeSpace(6, 6),
+        .space = nativeSpace(6, 6, 0),
         .radii = { .control = 6,
                    .popover = 14,
                    .menu = 10,
@@ -1542,8 +1555,8 @@ namespace detail
                   .settingsHeight = 920,
                   .settingsMinWidth = 720,
                   .settingsMinHeight = 480,
-                  .tabIcon = 14,
-                  .tabClose = 16,
+                  .tabIcon = 16,
+                  .tabClose = 24,
                   .badge = 14,
                   .badgeDot = 6,
                   .progressBar = 2,
@@ -1551,6 +1564,8 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 32,
                   .toolbarChip = 22,
+                  .stripButton = 30,
+                  .profileButton = 28,
                   .flyoutSwatch = 30,
                   .bareBand = 28,
                   .grabber = 2,
@@ -1583,7 +1598,7 @@ namespace detail
                   .foldChipHit = 24,
                   .scrollTick = 3,
                   .scrollTickOutline = 1 },
-        .space = nativeSpace(4, 8),
+        .space = nativeSpace(4, 8, 8),
         .radii = { .control = 4,
                    .popover = 8,
                    .menu = 8,
@@ -1593,7 +1608,7 @@ namespace detail
                    .tab = 6,
                    .tabWell = 0,
                    .tabIcon = 3,
-                   .tabClose = 8,
+                   .tabClose = 4,
                    .badge = 7,
                    .hostChip = 12,
                    .toolbarChip = 11,
@@ -1621,7 +1636,7 @@ namespace detail
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
         .layout = { .dialog = DialogPlacement::Centered,
                     .menu = MenuPresentation::InScene,
-                    .tabShape = TabShape::Flat,
+                    .tabShape = TabShape::Joined,
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Palette,
                     .activeTabWeight = ActiveTabWeight::Regular,
@@ -1662,6 +1677,8 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 34,
                   .toolbarChip = 22,
+                  .stripButton = 0,
+                  .profileButton = 0,
                   .flyoutSwatch = 30,
                   .bareBand = 28,
                   .grabber = 2,
@@ -1694,7 +1711,7 @@ namespace detail
                   .foldChipHit = 24,
                   .scrollTick = 3,
                   .scrollTickOutline = 1 },
-        .space = nativeSpace(6, 8),
+        .space = nativeSpace(6, 8, 0),
         .radii = { .control = 8,
                    .popover = 12,
                    .menu = 10,
@@ -1777,6 +1794,8 @@ namespace detail
                   .hostDot = 1,
                   .toolbarButton = 2,
                   .toolbarChip = 1,
+                  .stripButton = 0,
+                  .profileButton = 0,
                   .flyoutSwatch = 2,
                   .bareBand = 1,
                   .grabber = 0,
@@ -1816,6 +1835,7 @@ namespace detail
                    .dragReserve = 4,
                    .revealEdge = 1,
                    .toolbarChipPadding = 1,
+                   .tabStripLeading = 0,
                    .paneGapRows = 1,
                    .paneHeaderGap = 1,
                    .footerLeading = 1,
