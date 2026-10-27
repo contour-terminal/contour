@@ -902,6 +902,7 @@ if(CONTOUR_FRONTEND_GUI)
             config/Config_test.cpp
             display/DisplayRendering_test.cpp
             display/TerminalAccessible_test.cpp
+            display/TerminalDisplayIme_test.cpp
             remote/NativeController_test.cpp
             remote/TmuxController_test.cpp
             session/FocusRouting_test.cpp

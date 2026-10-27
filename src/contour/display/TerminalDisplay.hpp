@@ -557,6 +557,10 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// changed, so it refreshes the WM size hints. No-op without a controller.
     void notifyCellGeometryChanged();
 
+    /// Tells the platform input method that the cursor's rectangle may have moved, so an open candidate
+    /// window follows its cell. GUI thread only, for the reason @ref reportCursorMoved gives.
+    void reannounceInputMethodRectangle();
+
     void statsSummary();
 
   public:
@@ -634,6 +638,14 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     bool _locationReportPending = false;
     /// @see cellGeometryRevision
     int _cellGeometryRevision = 0;
+    /// The rectangle inputMethodQuery(Qt::ImCursorRectangle) last answered from a cell, in item-local
+    /// logical coordinates; nothing until the first such answer.
+    ///
+    /// Answered again whenever the cursor names no cell -- scrolled out of the viewport, or outside a page
+    /// that a resize has just shrunk -- so the candidate window stays where it was instead of jumping to the
+    /// pane's origin. GUI thread only: the query refuses grid-backed questions on any other thread before
+    /// it gets here. Mutable because Qt's query is const, and this is a cache of its answer, not state.
+    mutable std::optional<QRectF> _lastImeRectangle;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
     /// The cursor column of the frame prepareFrameRhi() drew last.

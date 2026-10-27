@@ -8,6 +8,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
+
+using contour::display::imeAnchorCell;
 using contour::display::imeCursorAddressable;
 using contour::display::imeCursorRectangle;
 using vtbackend::CellLocation;
@@ -103,4 +106,31 @@ TEST_CASE("imeCursorAddressable.negative coordinates are refused", "[contour][im
     // The lexicographic CellLocation ordering alone would admit {0, -1} — the guard must not.
     CHECK_FALSE(imeCursorAddressable(cursorAt(-1, 0), page(24, 80)));
     CHECK_FALSE(imeCursorAddressable(cursorAt(0, -1), page(24, 80)));
+}
+
+TEST_CASE("imeAnchorCell.interiorCellsAnchorAtThemselves", "[contour][ime]")
+{
+    auto const pageSize = page(3, 4);
+    for (auto const line: std::views::iota(0, 3))
+        for (auto const column: std::views::iota(0, 4))
+            CHECK(imeAnchorCell(cursorAt(line, column), pageSize) == cursorAt(line, column));
+}
+
+TEST_CASE("imeAnchorCell.clampsTheWrapPendingColumn", "[contour][ime]")
+{
+    // Typing to the last column leaves the cursor wrap-pending, one past the last cell. The candidate
+    // window belongs at the last cell of that line, not at the pane's origin.
+    CHECK(imeAnchorCell(cursorAt(2, 4), page(3, 4)) == cursorAt(2, 3));
+    CHECK(imeAnchorCell(cursorAt(0, 4), page(3, 4)) == cursorAt(0, 3));
+}
+
+TEST_CASE("imeAnchorCell.outsideThePageHasNoAnchor", "[contour][ime]")
+{
+    auto const pageSize = page(3, 4);
+    CHECK_FALSE(imeAnchorCell(cursorAt(3, 0), pageSize).has_value()); // the line below the page
+    CHECK_FALSE(imeAnchorCell(cursorAt(3, 4), pageSize).has_value()); // wrap-pending, but below the page
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, 5), pageSize).has_value()); // past the wrap-pending column
+    CHECK_FALSE(imeAnchorCell(cursorAt(-1, 0), pageSize).has_value());
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, -1), pageSize).has_value());
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, 0), page(3, 0)).has_value()); // a page without columns
 }

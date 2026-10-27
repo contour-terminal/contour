@@ -483,9 +483,14 @@ void TerminalDisplay::geometryChange(QRectF const& newGeometry, QRectF const& ol
         applyDisplaySizeToGrid();
 
     // A position-only move DOES matter here, though: a magnifier tracks the caret by screen rectangle,
-    // and every rectangle we hand out is mapped through this item's origin.
+    // and every rectangle we hand out is mapped through this item's origin. So does an open candidate
+    // window, which the platform places from the rectangle it last asked for: a split dragged or a sibling
+    // closed while composing must move it with the cell.
     if (newGeometry != oldGeometry)
+    {
         reportAccessibleLocation();
+        reannounceInputMethodRectangle();
+    }
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -1450,6 +1455,8 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
     if (!_session)
         return;
     terminal().updateInputMethodPreeditString(event->preeditString().toStdString());
+    // Composing scrolls the viewport to the cursor first, which may move the cell the platform has.
+    reannounceInputMethodRectangle();
 
     if (!event->commitString().isEmpty())
     {
@@ -1494,17 +1501,25 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             //
             // One locked GridMetrics copy, for this case only: it yields the cell size AND the page
             // margin tear-free, where two separate reads could straddle a concurrent font apply.
+            //
+            // Never an empty rectangle: that sends the candidate window to the pane's origin. A cursor that
+            // names no cell (scrolled out of the viewport, or outside a page a resize just shrank) answers
+            // the rectangle answered last, and before any answer the first cell's.
             auto const metrics = _renderer->gridMetrics();
             auto const lock = std::lock_guard { term };
             auto const& screen = term.currentScreen();
-            auto const cursor = screen.cursor().position;
-            if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
-                return imeCursorRectangle(metrics.pageMargin,
-                                          metrics.cellSize,
-                                          cursor,
-                                          screen.cellWidthAt(cursor),
-                                          devicePixelRatio());
-            return QRectF();
+            auto const anchor = term.isCursorInViewport()
+                                    ? imeAnchorCell(screen.cursor().position, term.pageSize())
+                                    : std::nullopt;
+            if (!anchor)
+                return _lastImeRectangle.value_or(imeCursorRectangle(
+                    metrics.pageMargin, metrics.cellSize, vtbackend::CellLocation {}, 1, devicePixelRatio()));
+            _lastImeRectangle = imeCursorRectangle(metrics.pageMargin,
+                                                   metrics.cellSize,
+                                                   *anchor,
+                                                   screen.cellWidthAt(*anchor),
+                                                   devicePixelRatio());
+            return *_lastImeRectangle;
         }
         case Qt::ImCursorPosition: {
             // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
@@ -1614,6 +1629,7 @@ void TerminalDisplay::notifyCellGeometryChanged()
     // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
     // on screen without moving this item -- geometryChange() stays silent for them.
     reportAccessibleLocation();
+    reannounceInputMethodRectangle();
 
     // And every row band: the find bar re-reads where the current match lies (SearchBar's _band).
     ++_cellGeometryRevision;
@@ -1735,13 +1751,18 @@ namespace
     }
 } // namespace
 
-void TerminalDisplay::reportCursorMoved()
+void TerminalDisplay::reannounceInputMethodRectangle()
 {
 #if QT_CONFIG(im)
     // No-op unless this item has active focus; the platform re-queries inputMethodQuery()
     // synchronously, which is why this must only ever run on the GUI thread.
     updateInputMethod(Qt::ImCursorRectangle);
 #endif
+}
+
+void TerminalDisplay::reportCursorMoved()
+{
+    reannounceInputMethodRectangle();
     if (TerminalAccessible::isActive())
         reportAccessibleCaret();
 }

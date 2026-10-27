@@ -9,6 +9,8 @@
 
 #include <QtCore/QRectF>
 
+#include <optional>
+
 namespace contour::display
 {
 
@@ -30,6 +32,30 @@ namespace contour::display
                                                   vtbackend::PageSize pageSize) noexcept
 {
     return vtbackend::strictlyContains(cursor, pageSize);
+}
+
+/// The cell an input method's candidate window anchors at, for a cursor at @p cursor.
+///
+/// The cursor's own cell when it names one. After text runs to the last column the cursor is
+/// wrap-pending, one past the last cell (column == page width): that names no cell, but the user is
+/// still composing on that line, so the line's last cell stands in. Anywhere else outside the page
+/// there is no cell to anchor at, and the caller keeps the rectangle it last answered.
+///
+/// @param cursor   Cursor position in grid coordinates (viewport-relative line/column).
+/// @param pageSize The page the grid currently holds.
+/// @return The anchor cell, or nothing when @p cursor lies outside the page.
+[[nodiscard]] constexpr std::optional<vtbackend::CellLocation> imeAnchorCell(
+    vtbackend::CellLocation cursor, vtbackend::PageSize pageSize) noexcept
+{
+    if (imeCursorAddressable(cursor, pageSize))
+        return cursor;
+
+    auto const lastCell = vtbackend::CellLocation { .line = cursor.line, .column = cursor.column - 1 };
+    if (cursor.column == pageSize.columns.as<vtbackend::ColumnOffset>()
+        && imeCursorAddressable(lastCell, pageSize))
+        return lastCell;
+
+    return std::nullopt;
 }
 
 /// Computes the IME cursor rectangle (Qt::ImCursorRectangle) in ITEM-LOCAL LOGICAL coordinates.
