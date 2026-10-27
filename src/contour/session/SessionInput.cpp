@@ -553,7 +553,9 @@ bool sendKeyEvent(QKeyEvent* event,
 #ifdef __APPLE__
     if (0x20 <= key && key < 0x80
         && (modifiers.chord.test(Modifier::Alt)
-            && session.profile().optionAsAlt.value() != config::OptionAsAlt::Off))
+            && config::optionKeyRole(session.profile().optionAsAlt.value(),
+                                     input::optionKeySideOf(event->nativeModifiers()))
+                   == config::OptionKeyRole::Alt))
     {
         // CapsLock inverts the effect of Shift on letter case, which is the one thing a lock key
         // legitimately decides here.

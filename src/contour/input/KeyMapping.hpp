@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/OptionAsAlt.hpp>
+
 #include <vtbackend/input/InputGenerator.hpp>
 
 #include <QtCore/QString>
@@ -175,6 +177,30 @@ enum class CtrlAltRole : uint8_t
 /// @return AltGr when Ctrl and Alt are both held and @p text is non-empty and wholly graphical,
 ///         else Chord.
 [[nodiscard]] CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text) noexcept;
+
+/// The bit of macOS's device-dependent modifier flags (`NX_DEVICELALTKEYMASK`) set while the left Option key
+/// is down. Qt hands the flags over as QKeyEvent::nativeModifiers().
+inline constexpr quint32 MacLeftOptionBit = 0x00000020;
+
+/// The bit of macOS's device-dependent modifier flags (`NX_DEVICERALTKEYMASK`) set while the right Option key
+/// is down.
+inline constexpr quint32 MacRightOptionBit = 0x00000040;
+
+/// Which Option keys are down, as macOS's device-dependent modifier flags report them.
+/// A pure function of the bits on every host, so that it is tested everywhere; only the macOS key path
+/// consults it. The device-independent Option flag (`0x80000`) says Option is held but not which one, and
+/// is ignored here.
+/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
+/// @return The keys whose bit is set; None when neither is.
+[[nodiscard]] constexpr config::OptionKeySide optionKeySideOf(quint32 nativeModifiers) noexcept
+{
+    auto bits = uint8_t { 0 };
+    if ((nativeModifiers & MacLeftOptionBit) != 0)
+        bits |= static_cast<uint8_t>(config::OptionKeySide::Left);
+    if ((nativeModifiers & MacRightOptionBit) != 0)
+        bits |= static_cast<uint8_t>(config::OptionKeySide::Right);
+    return static_cast<config::OptionKeySide>(bits);
+}
 
 /// Creates the VT keyboard modifier state from Qt modifiers and native platform modifiers.
 /// The chord is taken from the Qt modifiers, the CapsLock and NumLock state from the

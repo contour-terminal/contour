@@ -216,6 +216,59 @@ using contour::test::mockPtyOf;
 #endif
 } // namespace
 
+TEST_CASE("optionKeySideOf reads macOS's device-dependent Option bits", "[session][input]")
+{
+    using contour::config::OptionKeySide;
+    using contour::input::optionKeySideOf;
+
+    STATIC_CHECK(optionKeySideOf(0x20) == OptionKeySide::Left);
+    STATIC_CHECK(optionKeySideOf(0x40) == OptionKeySide::Right);
+    STATIC_CHECK(optionKeySideOf(0x60) == OptionKeySide::Both);
+    // The device-independent Option flag says Option is held, not which one.
+    STATIC_CHECK(optionKeySideOf(0x80000) == OptionKeySide::None);
+    STATIC_CHECK(optionKeySideOf(0) == OptionKeySide::None);
+    // The other device bits around them are not Option keys.
+    STATIC_CHECK(optionKeySideOf(0x80000 | 0x20 | 0x01 | 0x08) == OptionKeySide::Left);
+    STATIC_CHECK(optionKeySideOf(0x80000 | 0x40 | 0x02 | 0x10) == OptionKeySide::Right);
+}
+
+TEST_CASE("Option as Alt applies to the configured side only", "[session][input]")
+{
+#ifndef __APPLE__
+    SKIP("Qt delivers macOS's device-dependent Option bits on macOS only");
+#else
+    using contour::config::OptionAsAlt;
+    constexpr auto OptionLeft = quint32 { 0x80000 | contour::input::MacLeftOptionBit };
+    constexpr auto OptionRight = quint32 { 0x80000 | contour::input::MacRightOptionBit };
+
+    // What reaches the PTY for Option+E with @p option held, under @p setting.
+    auto const typed = [](OptionAsAlt setting, quint32 option) {
+        contour::test::TestApp app;
+        app.app().config().profile().optionAsAlt.value() = setting;
+        auto session = makeSession(app.app());
+        auto& pty = mockPtyOf(*session);
+        auto ev =
+            QKeyEvent(QEvent::KeyPress, Qt::Key_E, Qt::AltModifier, 0, 0, option, QStringLiteral("\u00e9"));
+        pty.stdinBuffer().clear();
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        return pty.stdinBuffer();
+    };
+    auto const alt = std::string { "\x1b"
+                                   "e" };
+    auto const composed = std::string { "\xc3\xa9" };
+
+    CHECK(typed(OptionAsAlt::Left, OptionLeft) == alt);
+    CHECK(typed(OptionAsAlt::Left, OptionRight) == composed);
+    CHECK(typed(OptionAsAlt::Right, OptionRight) == alt);
+    CHECK(typed(OptionAsAlt::Right, OptionLeft) == composed);
+    CHECK(typed(OptionAsAlt::Both, OptionLeft) == alt);
+    CHECK(typed(OptionAsAlt::Both, OptionRight) == alt);
+    CHECK(typed(OptionAsAlt::Off, OptionLeft) == composed);
+    CHECK(typed(OptionAsAlt::Off, OptionRight) == composed);
+#endif
+}
+
 TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[session][input]")
 {
     contour::test::TestApp app;
