@@ -66,6 +66,8 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal hostDot READ hostDot CONSTANT)
     Q_PROPERTY(qreal toolbarButton READ toolbarButton CONSTANT)
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
+    Q_PROPERTY(qreal stripButton READ stripButton CONSTANT)
+    Q_PROPERTY(qreal profileButton READ profileButton CONSTANT)
     Q_PROPERTY(qreal flyoutSwatch READ flyoutSwatch CONSTANT)
     Q_PROPERTY(qreal bareBand READ bareBand CONSTANT)
     Q_PROPERTY(qreal grabber READ grabber CONSTANT)
@@ -154,6 +156,10 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal toolbarButton() const noexcept { return _tokens.toolbarButton * _units.horizontal; }
     /// @return The height of a band toolbar chip in logical pixels.
     [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.vertical; }
+    /// @return The height of a joined strip's "+" and profile buttons in logical pixels.
+    [[nodiscard]] qreal stripButton() const noexcept { return _tokens.stripButton * _units.vertical; }
+    /// @return The width of a joined strip's profile button in logical pixels.
+    [[nodiscard]] qreal profileButton() const noexcept { return _tokens.profileButton * _units.horizontal; }
     /// @return The edge of a tab colour flyout swatch in logical pixels; a width, so the swatch stays square.
     [[nodiscard]] qreal flyoutSwatch() const noexcept { return _tokens.flyoutSwatch * _units.horizontal; }
 
@@ -268,6 +274,7 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal dragReserve READ dragReserve CONSTANT)
     Q_PROPERTY(qreal revealEdge READ revealEdge CONSTANT)
     Q_PROPERTY(qreal toolbarChipPadding READ toolbarChipPadding CONSTANT)
+    Q_PROPERTY(qreal tabStripLeading READ tabStripLeading CONSTANT)
     Q_PROPERTY(qreal paneGapRows READ paneGapRows CONSTANT)
     Q_PROPERTY(qreal paneHeaderGap READ paneHeaderGap CONSTANT)
     Q_PROPERTY(qreal footerLeading READ footerLeading CONSTANT)
@@ -321,6 +328,12 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal toolbarChipPadding() const noexcept
     {
         return _tokens.toolbarChipPadding * _units.horizontal;
+    }
+
+    /// @return The inset from the band's leading edge to a joined strip's first tab, in logical pixels.
+    [[nodiscard]] qreal tabStripLeading() const noexcept
+    {
+        return _tokens.tabStripLeading * _units.horizontal;
     }
 
     /// @return The gap between stacked panes in logical pixels (vertical: one cell's height on Terminal).
@@ -912,13 +925,14 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int flat READ flat CONSTANT)
     Q_PROPERTY(int pill READ pill CONSTANT)
     Q_PROPERTY(int joined READ joined CONSTANT)
-    // A bool for QML (the QML-facing carve-out): a read-only predicate over `tabShape`, which stays the
+    // Bools for QML (the QML-facing carve-out): read-only predicates over `tabShape`, which stays the
     // source of truth as a config::TabShape; the one place the shape is compared, so the tab, the strip and
     // the badge slot cannot disagree on it.
     Q_PROPERTY(bool isPill READ isPill CONSTANT)
     // A bool for QML (the same carve-out): a read-only predicate over `blockColumn`, which stays the source
     // of truth as a vtbackend::BlockColumnForm.
     Q_PROPERTY(bool isBlockRail READ isBlockRail CONSTANT)
+    Q_PROPERTY(bool isJoined READ isJoined CONSTANT)
     Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
     Q_PROPERTY(int caret READ caret CONSTANT)
     Q_PROPERTY(int secondaryClick READ secondaryClick CONSTANT)
@@ -969,6 +983,8 @@ class ChromeLayoutTokens: public QObject
     {
         return _tokens.blockColumn == vtbackend::BlockColumnForm::Rail;
     }
+    /// @return Whether the tabs join the content as the title bar (config::TabShape::Joined).
+    [[nodiscard]] bool isJoined() const noexcept { return _tokens.tabShape == config::TabShape::Joined; }
 
     /// @return How the profile menu is reached, a config::ProfileMenuAffordance as its underlying value.
     [[nodiscard]] int profileMenu() const noexcept { return static_cast<int>(_tokens.profileMenu); }
@@ -1272,15 +1288,27 @@ class ChromeColorTokens: public QObject
     UiStyleProvider const& _provider;
 };
 
+/// The tab roles a joined active tab resolves on the content's colour (UiStyleProvider::colorOn): it fills
+/// with @c PaneGapFill (R-k), whose tone is the terminal scheme's, not the chrome's.
+inline constexpr auto JoinedTabColorRoles = std::array {
+    config::ChromeColorRole::TabTextActive,
+    config::ChromeColorRole::TabTextDimmed,
+    config::ChromeColorRole::TabCloseFill,
+};
+
 /// The QML names of the pane colour roles, `chromeStyle.roles`, for UiStyleProvider::colorOn().
 ///
 /// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
 /// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneColorRoleBegin up to @c
 /// PaneColorRoleEnd, and per find bar role, @c FindColorRoleBegin up to @c FindColorRoleEnd: the find bar
-/// sits on the pane, and per overlay scrollbar role, which a pane resolves on its own background too.
+/// sits on the pane, and per overlay scrollbar role, which a pane resolves on its own background too; and
+/// one per @c JoinedTabColorRoles entry, which sit on the content's colour.
 class ChromePaneRoleNames: public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(int tabTextActive READ tabTextActive CONSTANT)
+    Q_PROPERTY(int tabTextDimmed READ tabTextDimmed CONSTANT)
+    Q_PROPERTY(int tabCloseFill READ tabCloseFill CONSTANT)
     Q_PROPERTY(int paneGapFill READ paneGapFill CONSTANT)
     Q_PROPERTY(int paneCardBorder READ paneCardBorder CONSTANT)
     Q_PROPERTY(int paneHeaderFill READ paneHeaderFill CONSTANT)
@@ -1306,6 +1334,18 @@ class ChromePaneRoleNames: public QObject
     explicit ChromePaneRoleNames(QObject* parent);
 
     /// @return Each role's config::ChromeColorRole as its underlying value.
+    [[nodiscard]] static constexpr int tabTextActive() noexcept
+    {
+        return of(config::ChromeColorRole::TabTextActive);
+    }
+    [[nodiscard]] static constexpr int tabTextDimmed() noexcept
+    {
+        return of(config::ChromeColorRole::TabTextDimmed);
+    }
+    [[nodiscard]] static constexpr int tabCloseFill() noexcept
+    {
+        return of(config::ChromeColorRole::TabCloseFill);
+    }
     [[nodiscard]] static constexpr int paneGapFill() noexcept
     {
         return of(config::ChromeColorRole::PaneGapFill);

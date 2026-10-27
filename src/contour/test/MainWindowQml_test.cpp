@@ -1472,10 +1472,10 @@ TEST_CASE("with one tab under Multiple, the macOS band shows the centred title (
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("with one tab under Multiple, Fluent and Linux show no bar, as today (offscreen)",
+TEST_CASE("with one tab under Multiple, Linux shows no bar, as today (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    for (auto const row: { ChromeStyle::ContourLinux })
     {
         INFO("row: " << contour::config::chromeStyleName(row));
         QQmlEngine engine;
@@ -1949,12 +1949,13 @@ TEST_CASE("Minimal keeps a user's always-shown tab bar (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Minimal leaves Fluent, Linux and the Terminal row as Comfortable has them (offscreen)",
+TEST_CASE("Minimal leaves Linux and the Terminal row as Comfortable has them (offscreen)",
           "[contour][gui][qml][mainwindow][band][density]")
 {
-    // Under Always too: Minimal never overrides a user's always-shown tab bar.
+    // Under Always too: Minimal never overrides a user's always-shown tab bar. Fluent's joined band is
+    // Pill's under Minimal: see "one tab still shows the joined bar".
     for (auto const visibility: { TabBarVisibility::Multiple, TabBarVisibility::Always })
-        for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+        for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
             for (auto const tabCount: { 1, 3 })
             {
                 INFO("row: " << contour::config::chromeStyleName(row) << ", tabs: " << tabCount
@@ -1963,6 +1964,192 @@ TEST_CASE("Minimal leaves Fluent, Linux and the Terminal row as Comfortable has 
                     barGeometryOf(row, contour::config::ChromeDensity::Minimal, tabCount, visibility)
                     == barGeometryOf(row, contour::config::ChromeDensity::Comfortable, tabCount, visibility));
             }
+}
+
+namespace
+{
+/// The item named @p name in @p root's visual tree, which reaches a Repeater's delegates, as the QObject
+/// tree does not; null when there is none.
+[[nodiscard]] QQuickItem const* visualChild(QQuickItem const& root, QString const& name)
+{
+    for (auto const* child: root.childItems())
+    {
+        if (child->objectName() == name)
+            return child;
+        if (auto const* found = visualChild(*child, name); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
+/// @return Whether @p root's window draws its own close button.
+[[nodiscard]] bool showsCloseButton(QObject& root)
+{
+    auto const* window = qobject_cast<QQuickWindow*>(&root);
+    REQUIRE(window != nullptr);
+    auto const* close = visualChild(*window->contentItem(), QStringLiteral("windowControl_close"));
+    return close != nullptr && close->isVisible();
+}
+} // namespace
+
+TEST_CASE("joined tabs sit on the band's floor (offscreen)", "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    auto const& size = styleGroup(engine, "size");
+    auto const& radii = styleGroup(engine, "radii");
+    auto const& space = styleGroup(engine, "space");
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(named(*root, QStringLiteral("tabShapeJoined")).isVisible());
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    for (auto* tab: tabs)
+    {
+        REQUIRE(tab != nullptr);
+        CHECK(tab->height() == size.property("tab").toReal());
+        CHECK(tab->mapToItem(&titleBar, QPointF(0, tab->height())).y() == titleBar.height());
+    }
+    CHECK(tabs[0]->mapToItem(&titleBar, QPointF(0, 0)).x() == space.property("tabStripLeading").toReal());
+
+    // Top corners rounded, the bottom meeting the content.
+    auto const& background = part(*tabs[0], QStringLiteral("tabBackground"));
+    CHECK(background.property("topLeftRadius").toReal() == radii.property("tab").toReal());
+    CHECK(background.property("topRightRadius").toReal() == radii.property("tab").toReal());
+    CHECK(background.property("bottomLeftRadius").toReal() == 0);
+    CHECK(background.property("bottomRightRadius").toReal() == 0);
+
+    // The kit's insets: s6, the icon, s4, the title.
+    auto const& icon = part(*tabs[0], QStringLiteral("tabIcon"));
+    CHECK(icon.isVisible());
+    CHECK(icon.x() == space.property("s6").toReal());
+    CHECK(icon.width() == size.property("tabIcon").toReal());
+    CHECK(part(*tabs[0], QStringLiteral("tabLabel")).x()
+          == icon.x() + icon.width() + space.property("s4").toReal());
+
+    // The close button: on the active tab, and on an inactive one only while it is hovered.
+    auto const& activeClose = part(*tabs[0], QStringLiteral("tabCloseButton"));
+    CHECK(activeClose.isVisible());
+    CHECK(activeClose.width() == size.property("tabClose").toReal());
+    CHECK(activeClose.height() == size.property("tabClose").toReal());
+    auto& inactiveClose = part(*tabs[1], QStringLiteral("tabCloseButton"));
+    CHECK_FALSE(inactiveClose.isVisible());
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    auto const centre = tabs[1]->mapToScene(QPointF(tabs[1]->width() / 2, tabs[1]->height() / 2));
+    QTest::mouseMove(window, centre.toPoint());
+    REQUIRE(QTest::qWaitFor([&] { return inactiveClose.isVisible(); }, 1000));
+
+    // A rule ends each inactive tab but the strip's last; the active tab has none.
+    CHECK_FALSE(part(*tabs[0], QStringLiteral("tabJoinedRule")).isVisible());
+    CHECK(part(*tabs[1], QStringLiteral("tabJoinedRule")).isVisible());
+    CHECK_FALSE(part(*tabs[2], QStringLiteral("tabJoinedRule")).isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the active joined tab is the content's colour (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    auto const content = styleGroup(engine, "colors").property("paneGapFill").value<QColor>();
+    auto const fillOf = [&](QQuickItem const& tab) {
+        return part(tab, QStringLiteral("tabBackground")).property("color").value<QColor>();
+    };
+    CHECK(fillOf(*tabs[0]) == content);
+    CHECK(fillOf(*tabs[1]).alpha() == 0);
+
+    // The active label is resolved on the content's colour, not on the band's: a level dimmer while the
+    // window is in the background.
+    auto const* window = qobject_cast<QQuickWindow*>(root.get());
+    auto const role = window->isActive() ? contour::config::ChromeColorRole::TabTextActive
+                                         : contour::config::ChromeColorRole::TabTextDimmed;
+    auto label = QColor {};
+    REQUIRE(QMetaObject::invokeMethod(&chromeStyleOf(engine),
+                                      "colorOn",
+                                      Q_RETURN_ARG(QColor, label),
+                                      Q_ARG(int, static_cast<int>(role)),
+                                      Q_ARG(QColor, content)));
+    // By value: QML hands the colour back in another spec.
+    CHECK(part(*tabs[0], QStringLiteral("tabLabel")).property("color").value<QColor>().rgba()
+          == label.rgba());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the joined strip keeps its profile dropdown (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    auto const& size = styleGroup(engine, "size");
+    auto const stripButton = size.property("stripButton").toReal();
+    auto const floor = named(*root, QStringLiteral("titleBar")).height()
+                       - styleGroup(engine, "space").property("s1").toReal();
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+
+    auto& menu = named(*root, QStringLiteral("newTabMenuButton"));
+    CHECK(menu.isVisible());
+    CHECK(menu.width() == size.property("profileButton").toReal());
+    CHECK(menu.height() == stripButton);
+    CHECK(menu.mapToItem(&titleBar, QPointF(0, menu.height())).y() == floor);
+
+    auto& newTab = named(*root, QStringLiteral("newTabButton"));
+    CHECK(newTab.width() == chromeStyleOf(engine).property("stripButtonWidth").toReal());
+    CHECK(newTab.height() == stripButton);
+    CHECK(newTab.mapToItem(&titleBar, QPointF(0, newTab.height())).y() == floor);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("one tab still shows the joined bar and its caption buttons (offscreen)",
+          "[contour][gui][qml][mainwindow][joinedtabs]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple,
+                                                      .affordances =
+                                                          contour::test::ClientFrameAffordances::Drawn } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    CHECK(named(*root, QStringLiteral("titleBar")).isVisible());
+    CHECK(tabDelegates(*root).size() == 1);
+    CHECK(showsCloseButton(*root));
+
+    // Under Minimal it is Pill's bare band: no tabs, but still the caption buttons.
+    QQmlEngine minimalEngine;
+    MockMainController minimal { MainWindowScene { .tabCount = 1,
+                                                   .tabBarVisibility = TabBarVisibility::Multiple,
+                                                   .affordances =
+                                                       contour::test::ClientFrameAffordances::Drawn } };
+    auto minimalRoot =
+        loadMainWindow(minimalEngine,
+                       minimal,
+                       warnings,
+                       densitySetup(ChromeStyle::Fluent, contour::config::ChromeDensity::Minimal));
+    showWindow(*minimalRoot);
+    auto& bare = named(*minimalRoot, QStringLiteral("titleBar"));
+    CHECK(bare.isVisible());
+    CHECK(bare.height() == styleGroup(minimalEngine, "size").property("bareBand").toReal());
+    CHECK(showsCloseButton(*minimalRoot));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 namespace
@@ -2399,9 +2586,10 @@ TEST_CASE("a one-tab remote window shows its band while its connection is interr
           "[contour][gui][qml][mainwindow][band][hosts]")
 {
     // tab_bar_visibility Multiple hides a one-tab strip on the Flat rows, and the strip is the host chip's
-    // home: a remote window whose connection is not up shows it anyway (R-d), chip and all.
+    // home: a remote window whose connection is not up shows it anyway (R-d), chip and all. (Fluent's joined
+    // band always shows: see "one tab still shows the joined bar".)
     using contour::window::HostChipState;
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
     {
         for (auto const state:
              { HostChipState::Connected, HostChipState::Reconnecting, HostChipState::Disconnected })
@@ -2439,7 +2627,7 @@ TEST_CASE("a one-tab remote window shows its band while its connection is interr
                                                           .hostLabel = QStringLiteral("home"),
                                                           .tabBarVisibility = TabBarVisibility::Multiple } };
         contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
         auto& titleBar = named(*root, QStringLiteral("titleBar"));
         CHECK_FALSE(titleBar.isVisible());
         controller.setHostChipState(static_cast<int>(HostChipState::Disconnected));
@@ -3070,12 +3258,12 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 
-    SECTION("the Fluent row with the strip hidden: no band, so in the content")
+    SECTION("the ContourLinux row with the strip hidden: no band, so in the content")
     {
         QQmlEngine engine;
         MockMainController controller;
         contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
         showWindow(*root);
         controller.setTabBarShouldShow(false);
         QCoreApplication::processEvents();
@@ -3088,6 +3276,28 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         REQUIRE(toast != nullptr);
         REQUIRE(content != nullptr);
         CHECK(sceneRectOf(*content).contains(sceneRectOf(*toast)));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("the Fluent row with the strip hidden: the joined band stays, so in the band")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
+        controller.setTabBarShouldShow(false);
+        QCoreApplication::processEvents();
+        REQUIRE(root->property("band").toMap().value("band").toString() == "shown");
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(titleBar != nullptr);
+        CHECK(toast->property("shown").toBool());
+        CHECK(sceneRectOf(*titleBar).contains(sceneRectOf(*toast).center()));
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 
@@ -3117,7 +3327,7 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         MockMainController controller;
         controller.cursorRow = 0;
         contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
         showWindow(*root);
         controller.setTabBarShouldShow(false);
         QCoreApplication::processEvents();
@@ -3291,11 +3501,33 @@ TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chi
 }
 
 TEST_CASE(
+    "one tab of one pane at a password prompt on the joined Fluent row shows the lock on its tab (offscreen)",
+    "[contour][gui][qml][mainwindow][secureinput]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple,
+                                                      .secure =
+                                                          contour::test::snapshot::SecureDecor::Locked } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+
+    // The band always holds the tabs on a joined row, one tab being still a tab.
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 1);
+    CHECK(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
+    CHECK_FALSE(root->property("secureLockInPane").toBool());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE(
     "one tab of one pane at a password prompt, with no band either, shows the lock in the pane (offscreen)",
     "[contour][gui][qml][mainwindow][secureinput][securelock]")
 {
-    // Fluent, ContourLinux and Terminal hide the band with the strip: no header, well or band holds the lock.
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    // ContourLinux and Terminal hide the band with the strip: no header, well or band holds the lock. (Fluent
+    // is not here: its joined tabs are the title bar, so its band holds the tab, and the tab the lock.)
+    for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
     {
         INFO("row: " << contour::config::chromeStyleName(row));
         QQmlEngine engine;

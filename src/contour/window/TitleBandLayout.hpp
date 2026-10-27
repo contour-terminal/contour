@@ -132,8 +132,8 @@ struct TitleBandRule
     TitleBand answer; ///< The answer, before the full-screen step (resolveTitleBand).
 };
 
-/// The band rules (R-e), first match wins. The Pill rows on a client band come first; the rest is the
-/// strip, shown per the gate at its edge, as today.
+/// The band rules (R-e), first match wins. The Pill and Joined rows on a client band come first; the rest
+/// is the strip, shown per the gate at its edge, as today.
 inline constexpr auto TitleBandRules = std::array {
     // Minimal's bare band in full screen: there are no traffic lights to carry, so an empty band would only
     // slide a strip of nothing over the top rows -- it stays hidden. A remote window whose connection is
@@ -190,6 +190,51 @@ inline constexpr auto TitleBandRules = std::array {
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     TitleBandRule { .shape = config::TabShape::Pill,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = std::nullopt,
+                    .strip = TabStripGate::Hidden,
+                    .notice = std::nullopt,
+                    .density = std::nullopt,
+                    .position = config::TabBarPosition::Bottom,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    // Joined on a client band (Windows): the tabs are the title bar, so the band always shows -- it carries
+    // the caption buttons -- and holds the tabs whatever the gate says, one tab being still a tab, as in
+    // Windows Terminal (R-j). Otherwise it is Pill's band (Q3): Minimal's bare band for one tab, and the
+    // title
+    // on top with a bar of the tabs' own at the bottom.
+    TitleBandRule { .shape = config::TabShape::Joined,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = WindowMode::FullScreen,
+                    .strip = TabStripGate::Hidden,
+                    .notice = HostNotice::None,
+                    .density = config::ChromeDensity::Minimal,
+                    .position = config::TabBarPosition::Top,
+                    .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden } },
+    TitleBandRule { .shape = config::TabShape::Joined,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = std::nullopt,
+                    .strip = TabStripGate::Hidden,
+                    .notice = std::nullopt,
+                    .density = config::ChromeDensity::Minimal,
+                    .position = config::TabBarPosition::Top,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden } },
+    TitleBandRule { .shape = config::TabShape::Joined,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = std::nullopt,
+                    .strip = std::nullopt,
+                    .notice = std::nullopt,
+                    .density = std::nullopt,
+                    .position = config::TabBarPosition::Top,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    TitleBandRule { .shape = config::TabShape::Joined,
+                    .frame = WindowFrame::ClientBand,
+                    .mode = std::nullopt,
+                    .strip = TabStripGate::Shown,
+                    .notice = std::nullopt,
+                    .density = std::nullopt,
+                    .position = config::TabBarPosition::Bottom,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    TitleBandRule { .shape = config::TabShape::Joined,
                     .frame = WindowFrame::ClientBand,
                     .mode = std::nullopt,
                     .strip = TabStripGate::Hidden,

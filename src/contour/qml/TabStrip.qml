@@ -6,7 +6,9 @@
 // maximum, icon-only pills below the minimum, and a well that scrolls, keeping the active tab in view,
 // once even those do not fit. The Flat shape is today's strip, each tab as wide as its title, which scrolls
 // the same way once its tabs outgrow the width it is left. Under Pill the new-tab button is the title
-// band's (TitleBar's ToolbarButton), so the strip draws neither "+" nor "▾" there.
+// band's (TitleBar's ToolbarButton), so the strip draws neither "+" nor "▾" there. The Joined shape is the
+// Flat strip as the title bar: its tabs stand on the band's floor, and its "+" and "▾" are rounded buttons
+// just above it.
 //
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
@@ -40,8 +42,11 @@ Row {
     /// Whether the strip has a popup or an editor of its own open: the tab menu, or a tab's.
     readonly property bool engaged: tabContextMenu.visible || root.engagedTabs > 0
 
-    // The QML-facing carve-out of the shape token: whether the tabs are pills in a well.
+    // The QML-facing carve-out of the shape token: whether the tabs are pills in a well, or join the content.
     readonly property bool pill: chromeStyle.layout.isPill
+    readonly property bool joined: chromeStyle.layout.isJoined
+    // Where a joined strip's "+" and "▾" stand: the kit's s1 above the band's floor.
+    readonly property real joinedButtonY: root.height - chromeStyle.size.stripButton - chromeStyle.space.s1
     // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
     readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
 
@@ -133,6 +138,7 @@ Row {
 
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
     Item {
+        objectName: root.joined ? "tabShapeJoined" : ""
         // A Flat strip is as wide as its tabs until they outgrow what the bar leaves them; then it clips
         // and scrolls, so the active tab and the "+" beside it stay in view.
         // A strip on its own, whose width no bar assigns, is as wide as its tabs.
@@ -159,8 +165,11 @@ Row {
             anchors.fill: root.pill ? well : parent
             // A pill's focus ring reaches past the pill, into the well's own margin and a little beyond it:
             // the list overhangs the well by the ring, or its clip would cut the ring's top and bottom.
-            // The pills stay centred, so nothing moves.
-            anchors.topMargin: root.pill ? -chromeStyle.size.focusRing : 0
+            // The pills stay centred, so nothing moves. Joined tabs stand on the band's floor: the list is one
+            // tab high, at the strip's bottom. (The list, not the delegate: a horizontal ListView resets its
+            // delegates' y.)
+            anchors.topMargin: root.joined ? parent.height - chromeStyle.size.tab
+                                           : root.pill ? -chromeStyle.size.focusRing : 0
             anchors.bottomMargin: root.pill ? -chromeStyle.size.focusRing : 0
             // The well's padding at either end and between the pills; the Flat strip sets tabs flush.
             leftMargin: root.pill ? chromeStyle.space.s1 : 0
@@ -199,8 +208,8 @@ Row {
                 // (WindowController's SecureRole) shows no lock rather than failing the delegate.
                 required property var model
 
-                // A pill is the well's width and its own height, centred in the well; a Flat tab is as
-                // wide as its title and as tall as the strip.
+                // A pill is the well's width and its own height, centred in the well; a Flat or joined tab
+                // is as wide as its title and as tall as the list.
                 height: root.pill ? chromeStyle.size.tab : list.height
                 width: root.pill ? root.wellLayout.tabWidth : implicitWidth
                 y: root.pill ? (list.height - height) / 2 : 0
@@ -306,11 +315,12 @@ Row {
     Loader {
         id: newTabLoader
         active: !root.pill
-        height: root.height
+        y: root.joined ? root.joinedButtonY : 0
+        height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabButton
             objectName: "newTabButton"
-            height: root.height
+            height: newTabLoader.height
             text: chromeStyle.newTabGlyph
             Accessible.name: qsTr("New tab")
             // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
@@ -322,6 +332,7 @@ Row {
             // Flat, transparent chrome so the button blends into the strip background instead of showing
             // an opaque style button panel; a subtle highlight wash gives hover feedback.
             background: Rectangle {
+                radius: root.joined ? chromeStyle.radii.control : 0
                 color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
                                             : "transparent"
             }
@@ -335,14 +346,16 @@ Row {
     Loader {
         id: newTabMenuLoader
         active: !root.pill && chromeStyle.layout.profileMenu === chromeStyle.layout.caret
-        height: root.height
+        y: root.joined ? root.joinedButtonY : 0
+        height: root.joined ? chromeStyle.size.stripButton : root.height
         sourceComponent: ToolButton {
             id: newTabMenuButton
             objectName: "newTabMenuButton"
-            height: root.height
+            height: newTabMenuLoader.height
             text: chromeStyle.menuGlyph
             Accessible.name: qsTr("New tab with profile")
-            width: chromeStyle.stripButtonWidth
+            // The joined strip's profile button is narrower than its "+" (the win board's 28 beside 36).
+            width: root.joined ? chromeStyle.size.profileButton : chromeStyle.stripButtonWidth
             font: chromeStyle.menuFont
             focusPolicy: Qt.NoFocus
             ToolTip.visible: hovered
@@ -352,6 +365,7 @@ Row {
                     root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))
             }
             background: Rectangle {
+                radius: root.joined ? chromeStyle.radii.control : 0
                 color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
                                                 : "transparent"
             }

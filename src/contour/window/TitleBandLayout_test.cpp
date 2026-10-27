@@ -55,15 +55,17 @@ constexpr auto BandCases = std::array {
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom },
                { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
-    // Joined has no band rules of its own yet: on a client band it is the strip, as Flat is.
+    // Joined on a client band: the tabs are the title bar, so the band always shows, holding the caption
+    // buttons -- and its tabs, one tab being still a tab (R-j). With the tabs at the bottom it is Pill's
+    // band: the title on top, the tabs in a bar of their own (Q3).
     BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom },
-               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Top },
-               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateShown, Top },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom },
-               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // A native frame: no band of ours, the strip per the gate at its edge, whatever the shape.
     BandCase { { Pill, NativeFrame, Windowed, GateShown, Top },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
@@ -164,13 +166,13 @@ constexpr auto InterruptedCases = std::array {
     BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
                { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom, Interrupted },
-               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Top, Interrupted },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateShown, Top, Interrupted },
                { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
-               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     BandCase { { Joined, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
                { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Joined, NativeFrame, Windowed, GateHidden, Top, Interrupted },
@@ -288,6 +290,40 @@ TEST_CASE("titleBand.minimalBareBand", "[titleband]")
             CHECK(resolveTitleBand(withDensity(inputs, static_cast<ChromeDensity>(density)))
                   == resolveTitleBand(withDensity(inputs, ChromeDensity::Comfortable)));
     });
+}
+
+TEST_CASE("titleBand.joinedKeepsItsBar", "[titleband]")
+{
+    // One tab under Multiple: the joined band still shows, its one tab with it (R-j).
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateHidden, Top })
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden });
+    // The tabs at the bottom: Pill's answer, whose centre is the title, since the tabs have a bar of their
+    // own there (Q3).
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateShown, Bottom })
+          == resolveTitleBand({ Pill, ClientBand, Windowed, GateShown, Bottom }));
+    // Under a native frame the band is the strip, as on Flat.
+    CHECK(resolveTitleBand({ Joined, NativeFrame, Windowed, GateShown, Top })
+          == resolveTitleBand({ Flat, NativeFrame, Windowed, GateShown, Top }));
+    // Full screen turns a top band into one revealed on the edge, as for every shape.
+    CHECK(resolveTitleBand({ Joined, ClientBand, FullScreen, GateHidden, Top }).band
+          == BarPresence::RevealOnEdge);
+
+    // Minimal with one tab: Pill's bare band, which still carries the caption buttons (Q3), and Pill's
+    // answer in full screen.
+    for (auto const mode: { Windowed, FullScreen })
+        for (auto const notice: { HostNotice::None, Interrupted })
+        {
+            auto const joined = TitleBandInputs { .shape = Joined,
+                                                  .frame = ClientBand,
+                                                  .mode = mode,
+                                                  .strip = GateHidden,
+                                                  .position = Top,
+                                                  .notice = notice,
+                                                  .density = ChromeDensity::Minimal };
+            auto pill = joined;
+            pill.shape = Pill;
+            CHECK(resolveTitleBand(joined) == resolveTitleBand(pill));
+        }
 }
 
 TEST_CASE("titleBand.rowOverload", "[titleband]")

@@ -83,6 +83,7 @@ Item {
 
     readonly property bool isBand: root.role === "band"
     readonly property bool isPill: chromeStyle.layout.isPill
+    readonly property bool isJoined: chromeStyle.layout.isJoined
     // A "reveal" bar that is not revealed: slid away, or faded out.
     readonly property bool isConcealed: root.presence === "reveal" && !root.revealed
     // The room between the band's chips and the parts beside them.
@@ -250,12 +251,14 @@ Item {
             // As wide as the tabs need: the strip caps itself at availableWidth, so the drag region below
             // keeps at least its reserve.
             Layout.preferredWidth: active ? implicitWidth : 0
+            // Joined tabs are the title bar: they start the kit's inset in from the band's leading edge.
+            Layout.leftMargin: active && root.isJoined ? chromeStyle.space.tabStripLeading : 0
             sourceComponent: TabStrip {
                 id: tabStrip
                 objectName: "tabStrip"
                 // What the tabs may take: the bar less its other parts, the drag reserve and the strip's
                 // own buttons. Read from preferred widths, which do not depend on the strip.
-                availableWidth: Math.max(0, root.width - root.fixedPartsWidth
+                availableWidth: Math.max(0, root.width - root.fixedPartsWidth - tabStripLoader.Layout.leftMargin
                                             - chromeStyle.space.dragReserve - tabStrip.fixedWidth)
                 controller: root.controller
                 // Threaded down so a closed inline rename can hand keyboard focus back to the terminal.

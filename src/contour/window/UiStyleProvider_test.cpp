@@ -1033,9 +1033,9 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
     CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
     CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
-    auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    auto const contourLinux = UiStyleProvider(chromeInputsFor(ChromeStyle::ContourLinux, font));
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
+    CHECK(contourLinux.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
     CHECK(mac.titleBand(0, 1, 1, 0, {}, 0).value("band").toString() == QStringLiteral("reveal"));
     CHECK(mac.titleBand(2, 0, 0, 0, {}, 0).isEmpty());
     CHECK(mac.titleBand(0, 0, 0, -1, {}, 0).isEmpty());
@@ -1043,15 +1043,20 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
     // connected one, does not.
     constexpr auto Reconnecting = static_cast<int>(contour::window::HostChipState::Reconnecting);
     constexpr auto Disconnected = static_cast<int>(contour::window::HostChipState::Disconnected);
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
           == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
-          == QStringLiteral("bottom"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
+    CHECK(
+        contourLinux.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
+        == QStringLiteral("bottom"));
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
+    CHECK(contourLinux.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
+    // Fluent's joined band always shows, holding its one tab (R-j).
+    auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("shown"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());
@@ -1122,6 +1127,9 @@ TEST_CASE("UiStyleProvider: the shape and motion flags QML reads follow the toke
         CHECK(
             layout->property("isPill").toBool()
             == (contour::config::ChromeTokenRows[index].layout.tabShape == contour::config::TabShape::Pill));
+        CHECK(layout->property("isJoined").toBool()
+              == (contour::config::ChromeTokenRows[index].layout.tabShape
+                  == contour::config::TabShape::Joined));
         CHECK(motion->property("animates").toBool()); // no row reduces motion of its own accord
     }
 
@@ -1181,6 +1189,10 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(tokenOf(fluent, "layout", "tabShape").toInt() == tokenOf(fluent, "layout", "joined").toInt());
     CHECK(tokenOf(fluent, "layout", "joined").toInt() != tokenOf(fluent, "layout", "flat").toInt());
     CHECK(tokenOf(fluent, "layout", "profileMenu").toInt() == tokenOf(fluent, "layout", "caret").toInt());
+    // The joined strip's buttons and inset, as QML reads them.
+    CHECK(tokenOf(fluent, "size", "stripButton").toReal() == 30.0);
+    CHECK(tokenOf(fluent, "size", "profileButton").toReal() == 28.0);
+    CHECK(tokenOf(fluent, "space", "tabStripLeading").toReal() == 8.0);
 
     auto inputs = chromeInputsFor(ChromeStyle::MacOS, font);
     inputs.accessibility.motion = MotionPreference::Reduced;
@@ -1330,11 +1342,15 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
     auto const propertiesOf = [](QMetaObject const& meta) {
         return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
     };
-    // The pane roles, and the overlay scrollbar's, which colorOn() resolves on the pane's own background.
+    // The pane roles, and the overlay scrollbar's, which colorOn() resolves on the pane's own background,
+    // and the joined tab's, which it resolves on the content's colour.
     CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
           == (contour::config::PaneColorRoleEnd - contour::config::PaneColorRoleBegin)
                  + (contour::config::FindColorRoleEnd - contour::config::FindColorRoleBegin)
-                 + (contour::config::OverlayColorRoleEnd - contour::config::ScrollbarColorRoleBegin));
+                 + (contour::config::OverlayColorRoleEnd - contour::config::ScrollbarColorRoleBegin)
+                 + contour::window::JoinedTabColorRoles.size());
+    CHECK(evaluate("chromeStyle.roles.tabTextActive").toInt()
+          == static_cast<int>(ChromeColorRole::TabTextActive));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
 }
@@ -1743,6 +1759,62 @@ TEST_CASE("UiStyleProvider: the caption glyphs read on every row, appearance and
                     CHECK(contrastOf(over(role("captionGlyphPressed"), pressed), pressed) >= 4.5);
                     // An inactive window's glyphs: an inactive component's, held to a mark's 3:1.
                     CHECK(contrastOf(over(role("captionGlyphInactive"), bar), bar) >= 3.0);
+                });
+        }
+    }
+}
+
+TEST_CASE("UiStyleProvider: a joined tab's label reads on every joined row, appearance and bundled scheme",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+
+    auto const joinedRows = [] {
+        auto rows = std::vector<size_t> {};
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+            if (contour::config::ChromeTokenRows[index].layout.tabShape == contour::config::TabShape::Joined)
+                rows.push_back(index);
+        return rows;
+    }();
+    REQUIRE(!joinedRows.empty());
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        for (auto const index: joinedRows)
+        {
+            CAPTURE(index);
+            auto inputs =
+                contour::window::chromeInputsFor(static_cast<ChromeStyle>(index), QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    // The active tab is the content's colour (R-k), opaque over the band.
+                    auto const tab = over(tokenOf(provider, "colors", "paneGapFill").value<QColor>(), window);
+                    auto const on = [&](ChromeColorRole role, QColor const& ground) {
+                        return over(paneColorOn(provider, role, tab), ground);
+                    };
+                    CHECK(contrastOf(on(ChromeColorRole::TabTextActive, tab), tab) >= 4.5);
+                    // Its close button's hover fill, under the same label.
+                    auto const closeHover = on(ChromeColorRole::TabCloseFill, tab);
+                    CHECK(contrastOf(on(ChromeColorRole::TabTextActive, closeHover), closeHover) >= 4.5);
+                    // An inactive window's label: an inactive component's, held to a mark's 3:1.
+                    CHECK(contrastOf(on(ChromeColorRole::TabTextDimmed, tab), tab) >= 3.0);
+
+                    // An inactive joined tab is transparent over the band, and takes the hover fill.
+                    auto const role = [&provider](char const* roleName) {
+                        return tokenOf(provider, "colors", roleName).value<QColor>();
+                    };
+                    auto const hovered = over(role("tabHoverFill"), window);
+                    CHECK(contrastOf(over(role("tabText"), window), window) >= 4.5);
+                    CHECK(contrastOf(over(role("tabText"), hovered), hovered) >= 4.5);
+                    CHECK(contrastOf(over(role("tabTextDimmed"), window), window) >= 3.0);
                 });
         }
     }

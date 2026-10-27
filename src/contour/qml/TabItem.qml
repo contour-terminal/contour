@@ -1,8 +1,11 @@
 // vim:syntax=qml
-// One tab in the title-bar tab strip, in one of two shapes (chromeStyle.layout.tabShape):
+// One tab in the title-bar tab strip, in one of three shapes (chromeStyle.layout.tabShape):
 //
 //   - Pill (macOS): a rounded pill in the strip's well -- an icon square, the title, the badge slot and a
 //     close button shown on hover and on the active tab. A coloured tab tints the pill and fills the icon.
+//   - Joined (Windows): the same parts on a tab whose top corners are rounded and whose bottom meets the
+//     content -- the active tab is the content's colour (R-k), the rest transparent over the band, each
+//     ended by a rule. A coloured tab is filled as on the Flat strip.
 //   - Flat (today's strip): the label, the badge slot and the close button on a fill. On the native rows
 //     a coloured tab is filled with its colour (WT-style, faded when inactive/unfocused) and an uncoloured
 //     one uses the OS highlight; on the Terminal row the fill is the colour roles' and the colour is a
@@ -72,22 +75,29 @@ Item {
     readonly property bool keyboardFocused: root.activeFocus && !!root.controller
                                             && (root.controller.focusedTabIndex ?? -1) === root.tabIndex
 
-    // Which of the two drawings this tab is (the style's one QML-facing shape flag).
+    // Which of the drawings this tab is (the style's QML-facing shape flags).
     readonly property bool pill: chromeStyle.layout.isPill
+    readonly property bool joined: chromeStyle.layout.isJoined
+    // Whether the tab is laid out as the kit draws it -- the icon square, the title, the badge, the close
+    // button -- which the pill and the joined tab share, at their own insets.
+    readonly property bool kitTab: root.pill || root.joined
     readonly property bool iconOnly: root.pill && root.labelMode === "iconOnly"
+    // The kit tab's insets: before the icon, and between its parts (the kit's 6 on a pill, 8 joined).
+    readonly property real leadingInset: root.joined ? chromeStyle.space.s6 : chromeStyle.space.s5
+    readonly property real kitGap: root.joined ? chromeStyle.space.s4 : chromeStyle.space.s3
     // Whether the fill and the label come from the chrome colour roles rather than the OS palette: the
     // pills and the Terminal row do, so a scheme's legible selection pair is what the active tab wears.
     readonly property bool roleColors: chromeStyle.layout.tabColors === chromeStyle.layout.roles
     readonly property var colors: chromeStyle.colors
 
     readonly property bool hasBadge: badgeSlot.known
-    // The close button shows on every Flat tab, and on a pill only while it is active or hovered and has
-    // the room for one. A hidden button is hidden from assistive technology too, so an inactive or an
-    // icon-only pill offers no "Close tab" there; closing it stays reachable through its context menu and
-    // the keyboard (the CloseTab action on the tab once activated).
-    readonly property bool closeShown: !root.pill || (!root.iconOnly && (root.tabActive || hover.hovered))
-    // The gap between the parts of a tab: the kit's 6 between a pill's icon, title, badge and close.
-    readonly property real partGap: root.pill ? chromeStyle.space.s3 : chromeStyle.labelGap
+    // The close button shows on every Flat tab, and on a pill or a joined tab only while it is active or
+    // hovered and has the room for one. A hidden button is hidden from assistive technology too, so an
+    // inactive or an icon-only pill offers no "Close tab" there; closing it stays reachable through its
+    // context menu and the keyboard (the CloseTab action on the tab once activated).
+    readonly property bool closeShown: !root.kitTab || (!root.iconOnly && (root.tabActive || hover.hovered))
+    // The gap between the parts of a tab: the kit's between a kit tab's icon, title, badge and close.
+    readonly property real partGap: root.kitTab ? root.kitGap : chromeStyle.labelGap
 
     // The tab's natural size, in whatever unit the chrome style counts in: logical pixels natively,
     // whole character cells in the terminal style. `widthQuantum` is what expresses that difference
@@ -102,9 +112,9 @@ Item {
     //
     // A pill is laid out as the kit draws it: s5, the icon, s3, the title, the badge and the close button
     // each after an s3, then s4. Its width is the well's (TabStrip assigns it); this is only what it would
-    // like.
-    readonly property real naturalWidth: root.pill
-        ? chromeStyle.space.s5 + icon.width + chromeStyle.space.s3 + lock.room + label.implicitWidth
+    // like. A joined tab is the same at s6 and s4.
+    readonly property real naturalWidth: root.kitTab
+        ? root.leadingInset + icon.width + root.kitGap + lock.room + label.implicitWidth
           + root.partGap + badgeSlot.width + badgeSlot.gapAfter
           + zoomBadge.width + zoomBadge.anchors.rightMargin
           + chromeStyle.size.tabClose + chromeStyle.space.s4
@@ -119,7 +129,7 @@ Item {
     // cell the label needs, and elide a title that fits.
     implicitWidth: chromeStyle.snapToCells(Math.min(chromeStyle.maxTabWidth,
                                                     Math.max(chromeStyle.minTabWidth, root.naturalWidth)))
-    implicitHeight: root.pill ? chromeStyle.size.tab : chromeStyle.tabHeight
+    implicitHeight: root.kitTab ? chromeStyle.size.tab : chromeStyle.tabHeight
 
     // Live OS palette handle so the tab adapts to dark/light in realtime.
     SystemPalette {
@@ -151,8 +161,13 @@ Item {
     // contrast is the one measured against it.
     readonly property color wellGround: Qt.tint(systemPalette.window, root.colors.tabWellFill)
 
+    // The content's colour (R-k), which a joined active tab fills with and its label is resolved on.
+    readonly property color contentColor: root.colors.paneGapFill
+
     // The fill behind the label; also drives text contrast.
     //   - Pill: the state's fill, and a coloured tab's colour over it at chromeStyle.tint.tab.
+    //   - Joined: the content's colour while active, the hover fill while hovered, else the band shows
+    //     through; a coloured tab is filled as on the Flat strip below.
     //   - Flat with the colour roles (Terminal): the role fills; the colour is the leading cell instead.
     //   - Flat with the OS palette (today's native strip): a coloured tab's WT-style fade from
     //     TabColorScheme.hpp (via the controller), else OS highlight / hover wash / transparent.
@@ -164,6 +179,8 @@ Item {
             return Qt.tint(Qt.tint(root.wellGround, root.pillStateFill),
                            Qt.rgba(root.tabColor.r, root.tabColor.g, root.tabColor.b, chromeStyle.tint.tab))
         }
+        if (root.joined && !root.colored)
+            return root.tabActive ? root.contentColor : hover.hovered ? root.colors.tabHoverFill : "transparent"
         if (root.roleColors) {
             if (root.tabActive)
                 return root.colors.tabActiveFill
@@ -183,11 +200,19 @@ Item {
     // up so it keeps 4.5:1 on the tint, else the inactive label -- each one level dimmer on a pill while
     // its window is in the background. With the OS palette: contrast against a coloured fill, else the
     // matching palette role.
+    // A joined tab's labels are the kit's, the active one resolved on the content's colour it sits on, each
+    // a level dimmer while the window is in the background (R-o).
     readonly property color foreground: {
         // A row that fills the focused item instead of ringing it (size.focusRing 0: the Terminal row)
         // inks the label for that fill, the selection's own text.
         if (root.keyboardFocused && chromeStyle.size.focusRing === 0)
             return root.colors.paletteSelectionText
+        if (root.joined && !root.colored) {
+            if (root.tabActive)
+                return chromeStyle.colorOn(Window.active ? chromeStyle.roles.tabTextActive
+                                                         : chromeStyle.roles.tabTextDimmed, root.contentColor)
+            return Window.active ? root.colors.tabText : root.colors.tabTextDimmed
+        }
         if (root.roleColors) {
             const background = root.pill && !Window.active
             if (root.tabActive)
@@ -203,7 +228,7 @@ Item {
 
     // The label's font: the kit's tab type on a pill, the chrome font on the Flat strip; for the active
     // tab, whatever the row sets it apart with (bold on the Terminal row, see activeTabFont).
-    readonly property font baseLabelFont: root.pill ? chromeStyle.type.tab : chromeStyle.font
+    readonly property font baseLabelFont: root.kitTab ? chromeStyle.type.tab : chromeStyle.font
     readonly property font labelFont: root.tabActive ? chromeStyle.activeTabFont(root.baseLabelFont)
                                                      : root.baseLabelFont
 
@@ -252,8 +277,11 @@ Item {
         id: background
         objectName: "tabBackground"   // findChild() handle for the GUI test
         anchors.fill: parent
-        // A pill is rounded; the Flat strip's tabs are square, as they always were.
-        radius: root.pill ? chromeStyle.radii.tab : 0
+        // A pill is rounded; a joined tab's top corners are, its bottom meeting the content; the Flat strip's
+        // tabs are square, as they always were.
+        radius: root.kitTab ? chromeStyle.radii.tab : 0
+        bottomLeftRadius: root.joined ? 0 : background.radius
+        bottomRightRadius: root.joined ? 0 : background.radius
         color: root.effectiveBackground
     }
 
@@ -267,6 +295,18 @@ Item {
         ground: root.pill ? "transparent" : Qt.tint(systemPalette.window, root.effectiveBackground)
     }
 
+    // A joined tab at rest ends in a rule, which sets it off the next one over the band; the active tab and
+    // the strip's last need none.
+    Rectangle {
+        objectName: "tabJoinedRule"   // findChild() handle for the GUI test
+        visible: root.joined && !root.tabActive && !root.lastInStrip
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: chromeStyle.borderWidth
+        color: Qt.alpha(root.colors.tabText, chromeStyle.contrast.separatorAlpha)
+    }
+
     // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's
     // "▌"): the colour roles keep the fill, so the colour needs a place of its own. Empty, and so zero
     // wide, for an uncoloured tab and on every row whose glyph is empty.
@@ -275,7 +315,7 @@ Item {
         objectName: "tabColorCell"   // findChild() handle for the GUI test
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        visible: !root.pill && text !== ""
+        visible: !root.kitTab && text !== ""
         width: visible ? implicitWidth : 0
         text: root.colored ? chromeStyle.tabColorGlyph : ""
         font: chromeStyle.font
@@ -289,10 +329,10 @@ Item {
         id: icon
         objectName: "tabIcon"   // findChild() handle for the GUI test
         anchors.left: parent.left
-        anchors.leftMargin: chromeStyle.space.s5
+        anchors.leftMargin: root.leadingInset
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.pill && !(root.iconOnly && (root.hasBadge || renameLoader.active))
-        width: root.pill ? chromeStyle.size.tabIcon : 0
+        visible: root.kitTab && !(root.iconOnly && (root.hasBadge || renameLoader.active))
+        width: root.kitTab ? chromeStyle.size.tabIcon : 0
         height: width
         radius: chromeStyle.radii.tabIcon
         color: root.colored ? root.tabColor
@@ -493,8 +533,8 @@ Item {
     Text {
         id: label
         objectName: "tabLabel"   // findChild() handle for the GUI test
-        anchors.left: lock.visible ? lock.right : root.pill ? icon.right : colorCell.right
-        anchors.leftMargin: lock.visible ? root.partGap : root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
+        anchors.left: lock.visible ? lock.right : root.kitTab ? icon.right : colorCell.right
+        anchors.leftMargin: lock.visible ? root.partGap : root.kitTab ? root.kitGap : chromeStyle.labelPadding
         anchors.right: badgeSlot.left
         anchors.rightMargin: root.partGap
         anchors.verticalCenter: parent.verticalCenter
@@ -565,7 +605,7 @@ Item {
         // Where the label is; an icon-only pill has no label to stand in for, so the field takes the
         // whole pill but its well padding (and the icon makes way, see there) rather than the negative
         // width between the icon and the badge.
-        anchors.left: root.iconOnly ? parent.left : root.pill ? icon.right : colorCell.right
+        anchors.left: root.iconOnly ? parent.left : root.kitTab ? icon.right : colorCell.right
         anchors.leftMargin: root.iconOnly ? chromeStyle.space.s1 : label.anchors.leftMargin
         anchors.right: root.iconOnly ? parent.right : badgeSlot.left
         anchors.rightMargin: root.iconOnly ? chromeStyle.space.s1 : root.partGap
@@ -647,11 +687,11 @@ Item {
         // border. Zero natively, where tabs have no drawn edge. @see naturalWidth, which sums it.
         // A pill ends in the kit's s4 instead, and collapses the button while it is hidden, so a pill
         // at rest gives its title the room.
-        anchors.rightMargin: root.pill ? chromeStyle.space.s4 : chromeStyle.trailingPadding
+        anchors.rightMargin: root.kitTab ? chromeStyle.space.s4 : chromeStyle.trailingPadding
         anchors.verticalCenter: parent.verticalCenter
         visible: root.closeShown
-        width: !root.pill ? chromeStyle.controlWidth : root.closeShown ? chromeStyle.size.tabClose : 0
-        height: root.pill ? chromeStyle.size.tabClose : chromeStyle.controlHeight
+        width: !root.kitTab ? chromeStyle.controlWidth : root.closeShown ? chromeStyle.size.tabClose : 0
+        height: root.kitTab ? chromeStyle.size.tabClose : chromeStyle.controlHeight
         text: chromeStyle.closeGlyph
         Accessible.name: qsTr("Close tab %1").arg(root.tabTitle)
         // Don't take keyboard focus away from the terminal when clicked.
@@ -660,9 +700,11 @@ Item {
         // Flat, transparent chrome so the button blends into the tab fill instead of showing an opaque
         // style button panel; a subtle highlight wash gives hover feedback.
         background: Rectangle {
-            radius: root.pill ? chromeStyle.radii.tabClose : 0
+            radius: root.kitTab ? chromeStyle.radii.tabClose : 0
             color: !closeButton.hovered ? "transparent"
-                 : root.pill ? root.colors.tabCloseFill
+                 : root.joined && root.tabActive && !root.colored
+                   ? chromeStyle.colorOn(chromeStyle.roles.tabCloseFill, root.contentColor)
+                 : root.kitTab ? root.colors.tabCloseFill
                  : root.hoverWash
         }
         // Share the label's foreground so the glyph stays legible on colored fills and in light mode.

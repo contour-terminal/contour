@@ -67,6 +67,14 @@ static_assert(DecorBadges.size() + 1 == window::TabBadgeKindCount, "one decor ro
 /// How long row 0's title is under snapshot::TabDecor::LongTitle: longer than any tab is wide.
 inline constexpr auto DecorLongTitleLength = 200;
 
+/// Whether a mock window asks for the chrome's own window controls (WindowController's
+/// needsClientFrameAffordances): a frameless window off macOS does.
+enum class ClientFrameAffordances : uint8_t
+{
+    None = 0, ///< No window controls of ours: every Main.qml load case before the joined tabs.
+    Drawn,    ///< The band draws its own window controls.
+};
+
 /// The shape a MockMainController is built in: what its window holds, fixed for its lifetime.
 ///
 /// The defaults are the mock every Main.qml load case has always seen: two local tabs, a strip that is
@@ -91,6 +99,8 @@ struct MainWindowScene
     /// the band (macOS's traffic lights); 0 under the native frame, which draws them in a bar of its own.
     qreal nativeControlsInset = 0;
     snapshot::SecureDecor secure = snapshot::SecureDecor::None; ///< Which tabs wait for a password.
+    /// Whether the band draws its own window controls.
+    ClientFrameAffordances affordances = ClientFrameAffordances::None;
 };
 
 /// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
@@ -112,6 +122,9 @@ class MockMainController: public MainWindowControllerMock
     // Mirrors WindowController's frame adapter: what the OS reserves for its own window controls, which
     // follows the frame (zero once show_title_bar hands the title area to the system).
     Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY nativeControlsInsetChanged)
+    // Mirrors WindowController's: whether the band draws the window's controls (the scene's affordances).
+    // A bool for QML, the QML-facing carve-out.
+    Q_PROPERTY(bool needsClientFrameAffordances READ needsClientFrameAffordances CONSTANT)
     // Mirrors WindowController's macOS frame hints, which Main.qml's `flags` read; false (no hint) unless a
     // test sets them, as it does to load the real Main.qml under Qt::ExpandedClientAreaHint.
     Q_PROPERTY(bool needsExpandedClientArea READ needsExpandedClientArea WRITE setNeedsExpandedClientArea
@@ -346,6 +359,11 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] qreal nativeControlsInset() const noexcept
     {
         return _titleBarVisible ? 0 : _scene.nativeControlsInset;
+    }
+    /// @return Whether the band draws the window's controls.
+    [[nodiscard]] bool needsClientFrameAffordances() const noexcept
+    {
+        return _scene.affordances == ClientFrameAffordances::Drawn;
     }
     /// Moves the OS's window controls, as WindowController's frame adapter reports once the band's
     /// title-bar growth changed (Minimal's bare band detaches the compact toolbar: 84 -> 78 pt).
