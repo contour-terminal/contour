@@ -8,6 +8,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsSections.hpp>
 
 #include <QtCore/QString>
@@ -16,6 +17,7 @@
 
 #include <expected>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -27,16 +29,19 @@ namespace contour::window::fields
 /// page is adding a row here, not editing logic in three places.
 struct ProfileFieldDescriptor
 {
-    QString key;   //!< Stable identifier / QML key.
-    QString label; //!< Human-readable label.
-    QString help;  //!< One-line help text.
-    QString type;  //!< "bool" | "int" | "double" | "string" | "enum".
+    QString key;                                        //!< Stable identifier / QML key.
+    QString label;                                      //!< Human-readable label.
+    QString help;                                       //!< One-line help text.
+    SettingsValueType type = SettingsValueType::String; //!< What the value is; the row's `type` token.
     std::function<QVariant(config::TerminalProfile const&)> get;        //!< Reads the field as a QVariant.
     std::function<void(config::TerminalProfile&, QVariant const&)> set; //!< Writes the field from QVariant.
     QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
     /// What is wrong with a value, shown under the editor; empty when nothing is. Absent for a field
     /// whose every value is usable.
     std::function<QString(QVariant const&)> validate {};
+    QStringList optionLabels {}; //!< For "enum": what each of @ref options reads as; empty: the tokens.
+    std::optional<NumberRange> range {};       //!< For a number: its bounds, step and unit; absent: none.
+    std::optional<SettingsControl> control {}; //!< The control, where it is not the type's default (R-i).
 };
 
 /// One titled group of related profile fields, as the settings page shows them.
@@ -79,7 +84,7 @@ struct GlobalFieldDescriptor
     QString key; //!< contour.yml key path: "reflow_on_resize", or "gutter.line_numbers" for a leaf.
     QString label;
     QString help;
-    QString type;
+    SettingsValueType type = SettingsValueType::String; //!< What the value is; the row's `type` token.
     std::function<QVariant(config::Config const&)> get;
     std::function<std::string(QVariant const&)> toYaml;
     /// Reads an override back from settings.yml as the loader reads it, as the row's value: an invalid
@@ -92,7 +97,26 @@ struct GlobalFieldDescriptor
     GlobalFieldValidator validate {}; //!< Refuses a value the loader would reject; empty accepts all.
     /// The group the row is shown in; set from GlobalFieldGroups by globalFieldDescriptors().
     SettingsGroup group = SettingsGroup::GeneralWindows;
+    QStringList optionLabels {};               //!< For "enum": what each of @ref options reads as.
+    std::optional<NumberRange> range {};       //!< For a number: its bounds, step and unit; absent: none.
+    std::optional<SettingsControl> control {}; //!< The control, where it is not the type's default (R-i).
 };
+
+/// The control a row of @p type is edited with: @p control where the descriptor names one, else R-i's.
+/// @param type The row's value type.
+/// @param optionLabels An enum's option labels as shown.
+/// @param range A number's range.
+/// @param control The descriptor's own choice, if any.
+/// @return The control.
+[[nodiscard]] SettingsControl controlOf(SettingsValueType type,
+                                        QStringList const& optionLabels,
+                                        std::optional<NumberRange> range,
+                                        std::optional<SettingsControl> control);
+
+/// The range every number row without bounds publishes: unbounded, in steps of one.
+/// @param type Int or Double; a Double without bounds steps by a tenth and shows one decimal (R-i).
+/// @return The range.
+[[nodiscard]] NumberRange unboundedRange(SettingsValueType type);
 
 /// The editable scalar profile fields, in the groups the settings page shows them under.
 /// @return The groups, in page order; built once.

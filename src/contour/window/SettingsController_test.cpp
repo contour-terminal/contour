@@ -12,7 +12,9 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/ManualSaveScheduler.hpp>
+#include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsSections.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -2490,10 +2492,11 @@ profiles:
     CHECK(row.value("optionLabels").toStringList().last() == "Unavailable GPU (1002:7340)");
 }
 
-TEST_CASE("SettingsController: plain enum rows label each option with its value", "[settings]")
+TEST_CASE("SettingsController: a hand-listed enum row labels each option with its value", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
-    auto const row = rowWithKey(fx.controller->globalFields(), "theme");
+    fx.controller->editProfile("main");
+    auto const row = rowWithKey(fx.controller->profileFields(), "pixel_reporting");
     CHECK(row.value("optionLabels").toStringList() == row.value("options").toStringList());
 }
 
@@ -3070,6 +3073,197 @@ TEST_CASE("SettingsController: search finds a profile field and a global one", "
         CHECK(raw.toMap().value("section").toString() == "shell-integration");
     }
     CHECK(fx.controller->searchSettings("  ").isEmpty());
+}
+
+// }}}
+
+// {{{ Controls
+
+namespace
+{
+/// The value type a row's "type" token names.
+[[nodiscard]] std::optional<SettingsValueType> valueTypeOf(QVariantMap const& row)
+{
+    return settingsValueTypeFromToken(row.value("type").toString().toStdString());
+}
+} // namespace
+
+TEST_CASE("SettingsController: every row names a control its type accepts", "[settings][controls]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->editProfile("main");
+    auto rows = fx.controller->globalFields();
+    rows.append(fx.controller->profileFields());
+    REQUIRE_FALSE(rows.isEmpty());
+    for (auto const& raw: rows)
+    {
+        auto const row = raw.toMap();
+        INFO(row.value("key").toString().toStdString());
+        auto const type = valueTypeOf(row);
+        REQUIRE(type.has_value());
+        REQUIRE(row.contains("control"));
+        auto const control = static_cast<SettingsControl>(row.value("control").toInt());
+        CHECK(controlAccepts(control, *type));
+        if (*type == SettingsValueType::Enum)
+            CHECK(row.value("optionLabels").toStringList().size()
+                  == row.value("options").toStringList().size());
+        if (*type == SettingsValueType::Int || *type == SettingsValueType::Double)
+        {
+            CHECK(row.contains("min"));
+            CHECK(row.contains("max"));
+            CHECK(row.value("min").toDouble() <= row.value("max").toDouble());
+            CHECK(row.value("step").toDouble() > 0.0);
+        }
+    }
+}
+
+TEST_CASE("SettingsController: the rows the canvas shows take its controls", "[settings][controls]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->editProfile("main");
+    auto const globals = fx.controller->globalFields();
+    auto const fields = fx.controller->profileFields();
+
+    SECTION("the theme offers the Phase 0 labels")
+    {
+        auto const theme = rowWithKey(globals, "theme");
+        CHECK(theme.value("options").toStringList() == QStringList { "terminal", "system", "dark", "light" });
+        CHECK(theme.value("optionLabels").toStringList()
+              == QStringList { "Match terminal", "Match system", "Dark", "Light" });
+        // "Match terminal" is fourteen characters: too long for a segment.
+        CHECK(theme.value("control").toInt() == static_cast<int>(SettingsControl::PopUp));
+    }
+
+    SECTION("dimming is a slider in percent")
+    {
+        auto const dim = rowWithKey(fields, "dim_unfocused");
+        CHECK(dim.value("label").toString() == "Dim inactive panes");
+        CHECK(dim.value("help").toString() == "How far a pane without focus steps back.");
+        CHECK(dim.value("control").toInt() == static_cast<int>(SettingsControl::Slider));
+        CHECK(dim.value("unit").toInt() == static_cast<int>(NumberUnit::Percent));
+        CHECK(dim.value("min").toDouble() == 0.0);
+        CHECK(dim.value("max").toDouble() == 1.0);
+    }
+
+    SECTION("the scrollback is a stepper in lines that goes down to unlimited")
+    {
+        auto const scrollback = rowWithKey(fields, "history_max_lines");
+        CHECK(scrollback.value("label").toString() == "Scrollback lines");
+        CHECK(scrollback.value("control").toInt() == static_cast<int>(SettingsControl::Stepper));
+        CHECK(scrollback.value("unit").toInt() == static_cast<int>(NumberUnit::Lines));
+        CHECK(scrollback.value("min").toDouble() == -1.0);
+    }
+
+    SECTION("the font family is a font picker")
+    {
+        auto const font = rowWithKey(fields, "font_family");
+        CHECK(font.value("label").toString() == "Font");
+        CHECK(font.value("control").toInt() == static_cast<int>(SettingsControl::FontPicker));
+    }
+
+    SECTION("the tab colour is a colour well, empty for none")
+    {
+        auto const tabColor = rowWithKey(fields, "tab_color");
+        CHECK(tabColor.value("control").toInt() == static_cast<int>(SettingsControl::ColorWell));
+        CHECK(tabColor.value("value").toString().isEmpty());
+        CHECK(tabColor.value("group").toInt() == static_cast<int>(SettingsGroup::ProfileWindow));
+    }
+
+    SECTION("a global with bounds publishes them")
+    {
+        auto const width = rowWithKey(globals, "gutter.block_column_width");
+        CHECK(width.value("min").toDouble() == static_cast<double>(vtbackend::MinBlockColumnWidth));
+        CHECK(width.value("max").toDouble() == static_cast<double>(vtbackend::MaxBlockColumnWidth));
+        auto const uiFontSize = rowWithKey(globals, "ui_font_size");
+        CHECK(uiFontSize.value("unit").toInt() == static_cast<int>(NumberUnit::Points));
+        CHECK(uiFontSize.value("control").toInt() == static_cast<int>(SettingsControl::Stepper));
+    }
+
+    SECTION("a profile enum takes the labels of its table")
+    {
+        auto const sticky = rowWithKey(fields, "sticky_header_mode");
+        CHECK(sticky.value("optionLabels").toStringList().size()
+              == sticky.value("options").toStringList().size());
+        CHECK(sticky.value("optionLabels").toStringList() != sticky.value("options").toStringList());
+    }
+}
+
+TEST_CASE("SettingsController: a tab colour round-trips through the side file", "[settings][controls]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+
+    REQUIRE(fx.controller->setProfileField("tab_color", QStringLiteral("#2e3440")).has_value());
+    fx.fire();
+    auto const* work = fx.cfg.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(work->tabColor.value() == vtbackend::RGBColor { 0x2e, 0x34, 0x40 });
+
+    CHECK(rowWithKey(fx.controller->profileFields(), "tab_color").value("value").toString() == "#2e3440");
+    REQUIRE(fx.controller->setProfileField("tab_color", QString {}).has_value());
+    fx.fire();
+    CHECK_FALSE(fx.cfg.findProfile("work")->tabColor.value().has_value());
+
+    // A value that is no colour changes nothing.
+    auto const ignored = fx.controller->setProfileField("tab_color", QStringLiteral("#12345"));
+    CHECK(ignored.has_value());
+    fx.fire();
+    CHECK_FALSE(fx.cfg.findProfile("work")->tabColor.value().has_value());
+}
+
+TEST_CASE("SettingsController: a profile row carries what its rule offers", "[settings][controls]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+
+    auto const main = rowNamed(fx.controller->profiles(), "main");
+    CHECK_FALSE(main.value("editable").toBool());
+    CHECK(main.value("banner").toString() == "Defined in contour.yml");
+    auto const mainActions = main.value("actions").toMap();
+    CHECK(mainActions.value("duplicate").toBool());
+    CHECK(mainActions.value("setDefault").toBool());
+    CHECK_FALSE(mainActions.value("delete").toBool());
+    CHECK_FALSE(mainActions.value("rename").toBool());
+    CHECK_FALSE(mainActions.value("edit").toBool());
+
+    auto const work = rowNamed(fx.controller->profiles(), "work");
+    CHECK(work.value("editable").toBool());
+    CHECK(work.value("banner").toString().isEmpty());
+    auto const workActions = work.value("actions").toMap();
+    CHECK(workActions.size() == static_cast<qsizetype>(ProfileActionCount));
+    for (auto const& offered: workActions)
+        CHECK(offered.toBool());
+}
+
+TEST_CASE("SettingsController: Use New brings a side file's spelled old status line along",
+          "[settings][controls]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    REQUIRE(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
+    auto const classic = config::editionDefaults(config::DefaultsEdition::Classic).statusLine;
+    auto const native = config::editionDefaults(config::DefaultsEdition::Native2026).statusLine;
+    REQUIRE(fx.cfg.findProfile("work")->statusLine.value().indicator.left == classic.left);
+
+    // The left segment is the user's own: it stays.
+    fx.controller->setIndicatorSegment(0, QStringLiteral("{Clock}"));
+    fx.fire();
+
+    REQUIRE(fx.controller
+                ->writeGlobalOverride(config::DefaultsEditionKey,
+                                      config::configEnumToken(config::DefaultsEdition::Native2026))
+                .has_value());
+    REQUIRE(fx.cfg.defaultsEdition == config::DefaultsEdition::Native2026);
+    auto const& indicator = fx.cfg.findProfile("work")->statusLine.value().indicator;
+    CHECK(indicator.left == "{Clock}");
+    CHECK(indicator.middle == native.middle);
+    CHECK(indicator.right == native.right);
+
+    // One session change: Revert puts the side file and settings.yml back together.
+    fx.controller->revertChanges();
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
+    CHECK(fx.cfg.findProfile("work")->statusLine.value().indicator.middle == classic.middle);
 }
 
 // }}}

@@ -87,6 +87,7 @@
 #include <ranges>
 #include <regex>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -126,8 +127,8 @@ enum class PixelReporting : uint8_t
 /// preference through its per-profile color scheme. @c System defers to the operating
 /// system's color scheme (the historical behavior); @c Terminal follows the terminal's own
 /// background (the default).
-/// @note Exposed to QML/Settings as the lower-case strings produced by
-///       @c std::formatter<GuiTheme>; the reader parses them case-insensitively.
+/// @note Spelled in the configuration and in Settings by its ConfigEnum table, which the reader parses
+///       case-insensitively.
 enum class GuiTheme : uint8_t
 {
     System,   //!< Follow the operating system's light/dark color scheme.
@@ -135,6 +136,24 @@ enum class GuiTheme : uint8_t
     Light,    //!< Force a light GUI appearance regardless of the OS.
     Terminal, //!< Follow the luminance of the terminal's background (default).
 };
+
+namespace detail
+{
+    /// GuiTheme's rows, in the order Settings offers them: the terminal first (Phase 0 R7). The order is
+    /// the table's own; the enumerator values are not.
+    inline constexpr auto GuiThemeTable = std::array {
+        ConfigEnumInfo<GuiTheme> { GuiTheme::Terminal, "terminal", "Match terminal" },
+        ConfigEnumInfo<GuiTheme> { GuiTheme::System, "system", "Match system" },
+        ConfigEnumInfo<GuiTheme> { GuiTheme::Dark, "dark", "Dark" },
+        ConfigEnumInfo<GuiTheme> { GuiTheme::Light, "light", "Light" },
+    };
+} // namespace detail
+
+template <>
+constexpr std::span<ConfigEnumInfo<GuiTheme> const> configEnumValues() noexcept
+{
+    return detail::GuiThemeTable;
+}
 
 enum class Permission : uint8_t
 {
@@ -718,6 +737,20 @@ struct IndicatorConfig
     }
 };
 
+/// One segment of the indicator template, in the configuration and in an edition's defaults.
+struct IndicatorSegment
+{
+    std::string IndicatorConfig::* spelled;        ///< The segment as a configuration holds it.
+    std::string_view IndicatorTemplate::* shipped; ///< The segment as an edition ships it.
+};
+
+/// The indicator template's segments, so that a rule over them is one loop.
+inline constexpr auto IndicatorSegments = std::array {
+    IndicatorSegment { .spelled = &IndicatorConfig::left, .shipped = &IndicatorTemplate::left },
+    IndicatorSegment { .spelled = &IndicatorConfig::middle, .shipped = &IndicatorTemplate::middle },
+    IndicatorSegment { .spelled = &IndicatorConfig::right, .shipped = &IndicatorTemplate::right },
+};
+
 struct StatusLineConfig
 {
     vtbackend::StatusDisplayType initialType { vtbackend::StatusDisplayType::Indicator };
@@ -1199,6 +1232,20 @@ namespace detail
 {
     return detail::EditionDefaultsTable[static_cast<size_t>(edition)];
 }
+
+/// The indicator status line @p spelled means once the defaults switch from @p writtenFor to @p now.
+///
+/// A generated contour.yml, and every profile Settings writes, spells the template out, so a file written
+/// under one edition holds that edition's default as if the user had chosen it, and "Use New" would not
+/// reach the most visible default it promises. A segment equal to @p writtenFor's default is therefore
+/// read as that default and becomes @p now's; any other segment is the user's own and stays.
+/// @param spelled The template as written.
+/// @param writtenFor The edition it was written under.
+/// @param now The edition in effect.
+/// @return The template in effect.
+[[nodiscard]] IndicatorConfig indicatorForEdition(IndicatorConfig spelled,
+                                                  DefaultsEdition writtenFor,
+                                                  DefaultsEdition now);
 
 /// The built-in font configuration of @p edition, used when the config file does not override it.
 ///
@@ -2334,7 +2381,6 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::StatusDisplayPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, SecureInputMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
@@ -3740,23 +3786,6 @@ struct std::formatter<vtrasterizer::GlyphScalingMethod>: formatter<std::string_v
         // nameOf() is the single source of truth for these names -- the config reader parses the
         // same strings, so a new method cannot be formatted one way and parsed another.
         return formatter<std::string_view>::format(vtrasterizer::nameOf(value), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::config::GuiTheme>: formatter<std::string_view>
-{
-    auto format(contour::config::GuiTheme value, auto& ctx) const
-    {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::GuiTheme::System: name = "system"; break;
-            case contour::config::GuiTheme::Dark: name = "dark"; break;
-            case contour::config::GuiTheme::Light: name = "light"; break;
-            case contour::config::GuiTheme::Terminal: name = "terminal"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
     }
 };
 

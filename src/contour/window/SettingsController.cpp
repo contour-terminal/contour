@@ -3,7 +3,9 @@
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsFields.hpp>
 #include <contour/window/SettingsSearch.hpp>
 #include <contour/window/SettingsSections.hpp>
@@ -55,11 +57,13 @@ namespace contour::window
 using config::SettingsOrigin;
 using config::TerminalProfile;
 using namespace std::string_view_literals;
+using fields::controlOf;
 using fields::GlobalFieldDescriptor;
 using fields::globalFieldDescriptors;
 using fields::OptionContext;
 using fields::profileFieldGroups;
 using fields::toQString;
+using fields::unboundedRange;
 
 namespace
 {
@@ -451,26 +455,29 @@ namespace
         return refuse(SettingsErrorKind::Locked, std::string { config::SettingsLockedMessage });
     }
 
-    /// The first of @p base, "@p base 2", "@p base 3", … that @p taken does not hold.
-    [[nodiscard]] std::string firstFreeName(std::string const& base, auto const& taken)
+    /// Puts on field row @p row what the page needs to edit it: its `type` token, its `control`, an enum's
+    /// `optionLabels`, and a number's `min`, `max`, `step`, `decimals` and `unit` (unbounded where the
+    /// descriptor names no range).
+    void describeControl(QVariantMap& row,
+                         SettingsValueType type,
+                         QStringList const& optionLabels,
+                         std::optional<NumberRange> range,
+                         std::optional<SettingsControl> control)
     {
-        if (!taken(base))
-            return base;
-        auto candidates =
-            std::views::iota(2)
-            | std::views::transform([&base](int number) { return std::format("{} {}", base, number); })
-            | std::views::filter([&taken](std::string const& name) { return !taken(name); });
-        return *candidates.begin();
+        row[QStringLiteral("type")] = toQString(settingsValueTypeToken(type));
+        row[QStringLiteral("control")] = static_cast<int>(controlOf(type, optionLabels, range, control));
+        if (type == SettingsValueType::Enum)
+            row[QStringLiteral("optionLabels")] = optionLabels;
+        if (type == SettingsValueType::Int || type == SettingsValueType::Double)
+        {
+            auto const shown = range.value_or(unboundedRange(type));
+            row[QStringLiteral("min")] = shown.min;
+            row[QStringLiteral("max")] = shown.max;
+            row[QStringLiteral("step")] = shown.step;
+            row[QStringLiteral("decimals")] = shown.decimals;
+            row[QStringLiteral("unit")] = static_cast<int>(shown.unit);
+        }
     }
-
-    /// The name "Duplicate to Edit" starts from: "<name> copy".
-    [[nodiscard]] std::string copyNameOf(std::string_view name)
-    {
-        return std::format("{} copy", name);
-    }
-
-    /// The name "+" starts from.
-    constexpr auto NewProfileName = std::string_view { "New Profile" };
 
     /// Forwards to the scheduler the host injected, and calls @p settled after each fire it runs: a
     /// debounced flush changes what "Revert Changes" can do, and nothing else tells the page.
@@ -746,7 +753,14 @@ void SettingsController::rebuildProfileRows()
         auto row = QVariantMap {};
         row[QStringLiteral("name")] = QString::fromStdString(name);
         row[QStringLiteral("origin")] = originString(origin);
-        row[QStringLiteral("editable")] = (!locked() && origin == SettingsOrigin::SideFile);
+        auto const& rule = profileActionRule(profileEditability(origin, _editability));
+        row[QStringLiteral("editable")] = offers(rule, ProfileAction::Edit);
+        row[QStringLiteral("banner")] = toQString(rule.banner);
+        auto actions = QVariantMap {};
+        for (auto const index: std::views::iota(std::size_t { 0 }, ProfileActionCount))
+            actions[toQString(ProfileActionTokens.at(index))] =
+                offers(rule, static_cast<ProfileAction>(index));
+        row[QStringLiteral("actions")] = actions;
         row[QStringLiteral("isDefault")] = (QString::fromStdString(name) == _defaultProfile);
         _profiles.push_back(row);
     }
@@ -839,11 +853,15 @@ QVariantList SettingsController::profileFields() const
             row[QStringLiteral("key")] = descriptor.key;
             row[QStringLiteral("label")] = descriptor.label;
             row[QStringLiteral("help")] = descriptor.help;
-            row[QStringLiteral("type")] = descriptor.type;
             row[QStringLiteral("value")] = descriptor.get(_draft);
             row[QStringLiteral("problem")] =
                 descriptor.validate ? descriptor.validate(row[QStringLiteral("value")]) : QString {};
             row[QStringLiteral("options")] = descriptor.options;
+            describeControl(row,
+                            descriptor.type,
+                            descriptor.optionLabels.isEmpty() ? descriptor.options : descriptor.optionLabels,
+                            descriptor.range,
+                            descriptor.control);
             row[QStringLiteral("group")] = static_cast<int>(group.group);
             row[QStringLiteral("groupTitle")] = toQString(settingsGroupRow(group.group).title);
             row[QStringLiteral("groupGlyph")] = group.glyph;
@@ -859,9 +877,11 @@ void SettingsController::editProfile(QString const& name)
         return;
     _draft = *profile;
     _editingProfile = name;
-    _profileAccess = locked() || profileOrigin(name.toStdString()) != SettingsOrigin::SideFile
-                         ? DraftAccess::ReadOnly
-                         : DraftAccess::Editable;
+    _profileAccess =
+        offers(profileActionRule(profileEditability(profileOrigin(name.toStdString()), _editability)),
+               ProfileAction::Edit)
+            ? DraftAccess::Editable
+            : DraftAccess::ReadOnly;
     // What the draft was seeded from is what Settings last saw of the file: an edit made outside it from
     // now on is one it must not write over.
     if (_profileAccess == DraftAccess::Editable)
@@ -981,8 +1001,8 @@ std::expected<QString, SettingsError> SettingsController::duplicateProfile(QStri
     if (source == nullptr)
         return refuse(SettingsErrorKind::UnknownSetting,
                       std::format("There is no profile '{}'.", name.toStdString()));
-    auto const copyName = firstFreeName(copyNameOf(name.toStdString()), [this](std::string const& candidate) {
-        return profileNameTaken(candidate);
+    auto const copyName = uniqueCopyName(name.toStdString(), [this](std::string_view candidate) {
+        return profileNameTaken(std::string { candidate });
     });
     if (auto const valid = checkNewName(copyName); !valid)
         return std::unexpected(valid.error());
@@ -997,9 +1017,8 @@ std::expected<QString, SettingsError> SettingsController::createProfile()
     auto const* base = cfg.findProfile(cfg.defaultProfileName.value());
     // With no default profile to copy, the built-in defaults of the configuration's own edition.
     auto profile = base != nullptr ? *base : TerminalProfile { .defaultsEdition = cfg.defaultsEdition };
-    auto const name = firstFreeName(std::string { NewProfileName }, [this](std::string const& candidate) {
-        return profileNameTaken(candidate);
-    });
+    auto const name = uniqueNewName(
+        [this](std::string_view candidate) { return profileNameTaken(std::string { candidate }); });
     return openNewProfile(name, std::move(profile));
 }
 
@@ -1252,7 +1271,6 @@ QVariantList SettingsController::globalFields() const
         row[QStringLiteral("key")] = descriptor.key;
         row[QStringLiteral("label")] = descriptor.label;
         row[QStringLiteral("help")] = descriptor.help;
-        row[QStringLiteral("type")] = descriptor.type;
         row[QStringLiteral("group")] = static_cast<int>(descriptor.group);
         row[QStringLiteral("groupTitle")] = toQString(settingsGroupRow(descriptor.group).title);
         row[QStringLiteral("value")] = descriptor.get(cfg);
@@ -1267,12 +1285,16 @@ QVariantList SettingsController::globalFields() const
                 labels.push_back(option.label);
             }
             row[QStringLiteral("options")] = values;
-            row[QStringLiteral("optionLabels")] = labels;
+            describeControl(row, descriptor.type, labels, descriptor.range, descriptor.control);
         }
         else
         {
             row[QStringLiteral("options")] = descriptor.options;
-            row[QStringLiteral("optionLabels")] = descriptor.options;
+            describeControl(row,
+                            descriptor.type,
+                            descriptor.optionLabels.isEmpty() ? descriptor.options : descriptor.optionLabels,
+                            descriptor.range,
+                            descriptor.control);
         }
         auto const stored = committed.find(key);
         auto const effective = inEffect.find(key);
@@ -1434,12 +1456,53 @@ std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::
 {
     if (auto const writable = globalDraftWritable(); !writable)
         return writable;
+    // "Use New": a side-file profile spells its status line out, so the switch rewrites those that spell the
+    // old edition's default, in the same change as settings.yml.
+    auto files = std::vector<config::StagedFile> {};
+    if (key == config::DefaultsEditionKey)
+        if (auto const now = config::configEnumFromToken<config::DefaultsEdition>(value))
+            files = profilesAdoptingEdition(*now);
     _globalDraft.globalOverrides[std::string { key }] = std::string { value };
-    if (auto const staged = stageGlobalDraft(); !staged)
+    files.push_back(
+        { .file = config::guiSettingsFile(), .bytes = config::emitGuiSettingsYaml(_globalDraft) });
+    if (auto const staged = _session->stageTogether(files); !staged)
+    {
+        reseedDrafts();
+        emit changesChanged();
         return staged;
+    }
+    emit globalFieldsChanged();
     auto flushed = _session->flush();
     emit changesChanged();
     return flushed;
+}
+
+std::vector<config::StagedFile> SettingsController::profilesAdoptingEdition(config::DefaultsEdition now)
+{
+    auto const before = _config().defaultsEdition;
+    auto files = std::vector<config::StagedFile> {};
+    for (auto const& [name, profile]: _config().profiles.value())
+    {
+        if (!isSideFileProfile(name))
+            continue;
+        auto const isOpen = _profileAccess == DraftAccess::Editable && _editingProfile.toStdString() == name;
+        auto adopted = isOpen ? _draft : profile;
+        auto statusLine = adopted.statusLine.value();
+        auto const indicator = config::indicatorForEdition(statusLine.indicator, before, now);
+        if (std::ranges::all_of(config::IndicatorSegments, [&](config::IndicatorSegment const& segment) {
+                return indicator.*segment.spelled == statusLine.indicator.*segment.spelled;
+            }))
+            continue;
+        statusLine.indicator = indicator;
+        adopted.statusLine = statusLine;
+        files.push_back({ .file = config::profileFile(name), .bytes = config::emitProfileYaml(adopted) });
+        if (isOpen)
+        {
+            _draft = std::move(adopted);
+            emit draftChanged();
+        }
+    }
+    return files;
 }
 
 void SettingsController::commitGlobalField(QString const& key, QVariant const& value)
@@ -1558,8 +1621,8 @@ std::expected<QString, SettingsError> SettingsController::duplicateColorScheme(Q
     auto palette = _schemeAccess != DraftAccess::Closed && _editingScheme == name
                        ? _schemeDraft
                        : schemePalette(name.toStdString());
-    auto const copyName = firstFreeName(copyNameOf(name.toStdString()), [this](std::string const& candidate) {
-        return schemeNameTaken(candidate);
+    auto const copyName = uniqueCopyName(name.toStdString(), [this](std::string_view candidate) {
+        return schemeNameTaken(std::string { candidate });
     });
     if (auto const valid = checkNewName(copyName); !valid)
         return std::unexpected(valid.error());

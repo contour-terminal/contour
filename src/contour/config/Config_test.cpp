@@ -4558,6 +4558,71 @@ TEST_CASE("Config.firstLaunchDefaults", "[config]")
     }
 }
 
+TEST_CASE("Config: a switch of edition replaces a status line spelled as the old edition's default",
+          "[config]")
+{
+    using contour::config::DefaultsEdition;
+    using contour::config::editionDefaults;
+    auto const classic = editionDefaults(DefaultsEdition::Classic).statusLine;
+    auto const native = editionDefaults(DefaultsEdition::Native2026).statusLine;
+    // What `contour generate config` of an earlier release wrote: the Classic template, spelled out, and
+    // a right segment of the user's own.
+    auto const yaml = std::format("profiles:\n"
+                                  "    main:\n"
+                                  "        status_line:\n"
+                                  "            indicator:\n"
+                                  "                left: \"{}\"\n"
+                                  "                middle: \"{}\"\n"
+                                  "                right: \"{{Clock}}\"\n",
+                                  classic.left,
+                                  classic.middle);
+
+    SECTION("Use New: the spelled defaults become the new ones, the user's own segment stays")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, yaml);
+        writeSideFile(dir, "settings.yml", "defaults_edition: native2026\n");
+        auto const config = contour::config::loadConfigFromFile(path);
+        auto const& indicator = config.profile().statusLine.value().indicator;
+        CHECK(indicator.left == native.left);
+        CHECK(indicator.middle == native.middle);
+        CHECK(indicator.right == "{Clock}");
+    }
+
+    SECTION("no switch: the file's edition keeps what it spells")
+    {
+        QTemporaryDir dir;
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir, yaml));
+        auto const& indicator = config.profile().statusLine.value().indicator;
+        CHECK(indicator.left == classic.left);
+        CHECK(indicator.middle == classic.middle);
+    }
+
+    SECTION("the same edition stated twice is no switch")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, yaml);
+        writeSideFile(dir, "settings.yml", "defaults_edition: classic\n");
+        auto const config = contour::config::loadConfigFromFile(path);
+        CHECK(config.profile().statusLine.value().indicator.left == classic.left);
+    }
+
+    SECTION("the pure rule: only a segment equal to the old edition's default is replaced")
+    {
+        auto const spelled = contour::config::IndicatorConfig { .left = std::string { classic.left },
+                                                                .middle = "mine",
+                                                                .right = std::string { classic.right } };
+        auto const adopted = contour::config::indicatorForEdition(
+            spelled, DefaultsEdition::Classic, DefaultsEdition::Native2026);
+        CHECK(adopted.left == native.left);
+        CHECK(adopted.middle == "mine");
+        CHECK(adopted.right == native.right);
+        auto const same =
+            contour::config::indicatorForEdition(spelled, DefaultsEdition::Classic, DefaultsEdition::Classic);
+        CHECK(same.left == classic.left);
+    }
+}
+
 TEST_CASE("Config: the path overload records what each document states as its edition",
           "[config][newdefaults]")
 {

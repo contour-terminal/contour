@@ -1428,6 +1428,38 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
     }
 }
 
+IndicatorConfig indicatorForEdition(IndicatorConfig spelled, DefaultsEdition writtenFor, DefaultsEdition now)
+{
+    if (writtenFor == now)
+        return spelled;
+    auto const& before = editionDefaults(writtenFor).statusLine;
+    auto const& after = editionDefaults(now).statusLine;
+    for (auto const& segment: IndicatorSegments)
+        if (spelled.*segment.spelled == before.*segment.shipped)
+            spelled.*segment.spelled = std::string { after.*segment.shipped };
+    return spelled;
+}
+
+/// Reads contour.yml's profiles as the edition in effect rather than the one the file was written under,
+/// once settings.yml switches it ("Use New"): contour.yml is never rewritten, so what it spells as its own
+/// edition's default would otherwise keep that default (@see indicatorForEdition). Runs before the side
+/// files merge, so a side-file profile inherits the default profile's template as adopted.
+/// @param config The configuration just read from contour.yml, its origins recorded.
+static void adoptSwitchedEdition(Config& config)
+{
+    auto const writtenFor = config.defaultsEditionSources.mainFile.value_or(DefaultsEdition::Classic);
+    if (!config.defaultsEditionSources.settingsFile || writtenFor == config.defaultsEdition)
+        return;
+    for (auto& [name, profile]: config.profiles.value())
+        if (config.profileOrigins[name] == SettingsOrigin::MainConfig)
+        {
+            auto statusLine = profile.statusLine.value();
+            statusLine.indicator =
+                indicatorForEdition(statusLine.indicator, writtenFor, config.defaultsEdition);
+            profile.statusLine = statusLine;
+        }
+}
+
 /**
  * @return success or failure of loading the config file.
  */
@@ -1468,6 +1500,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     // Provenance first, then the GUI side files (profiles/*.yml, settings.yml) on top — the same
     // freshest-wins, broken-file-tolerant merge philosophy the layouts.yml merge above uses.
     recordMainConfigOrigins(config, yamlVisitor);
+    adoptSwitchedEdition(config);
     mergeGuiManagedSideFiles(config, yamlVisitor);
 
     compareEntries(config, logger);
@@ -3719,7 +3752,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtrasterizer::GlyphScalingMethod& where)
 {
     // Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
-    // in a visible rendering setting should not pass unnoticed. Mirrors the GuiTheme reader.
+    // in a visible rendering setting should not pass unnoticed.
     if (auto const child = node[entry])
     {
         auto const rawValue = child.as<std::string>();
@@ -3727,34 +3760,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             where = *method;
         else
             errorLog()("Invalid value for {}: '{}'. Expected 'stretch' or 'rerasterize'.", entry, rawValue);
-    }
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where)
-{
-    // Case-insensitive. An unrecognized value is reported and leaves @p where at its (default)
-    // value: a typo in a visible appearance setting should not silently pass unnoticed.
-    auto parseTheme = [&](std::string const& key) -> std::optional<GuiTheme> {
-        auto const literal = core::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "system")
-            return GuiTheme::System;
-        if (literal == "dark")
-            return GuiTheme::Dark;
-        if (literal == "light")
-            return GuiTheme::Light;
-        if (literal == "terminal")
-            return GuiTheme::Terminal;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto const rawValue = child.as<std::string>();
-        if (auto const opt = parseTheme(rawValue))
-            where = opt.value();
-        else
-            errorLog()("Unknown theme value '{}'; keeping {}.", rawValue, where);
     }
 }
 

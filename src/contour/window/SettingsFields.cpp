@@ -69,7 +69,7 @@ namespace
         return { std::move(key),
                  std::move(label),
                  std::move(help),
-                 "bool",
+                 SettingsValueType::Bool,
                  [accessor](TerminalProfile const& p) { return QVariant(accessor(p)); },
                  [accessor](TerminalProfile& p, QVariant const& v) { accessor(p) = v.toBool(); } };
     }
@@ -87,7 +87,7 @@ namespace
         return { std::move(key),
                  std::move(label),
                  std::move(help),
-                 "bool",
+                 SettingsValueType::Bool,
                  [source](TerminalProfile const& p) {
                      return QVariant(p.scrollbar.value().marks.test(source));
                  },
@@ -108,6 +108,47 @@ namespace
         for (auto const& info: config::configEnumValues<Enum>())
             tokens.push_back(toQString(info.token));
         return tokens;
+    }
+
+    /// The labels of every value of configuration enum @p Enum, in table order.
+    template <typename Enum>
+    [[nodiscard]] QStringList configEnumLabels()
+    {
+        auto labels = QStringList {};
+        for (auto const& info: config::configEnumValues<Enum>())
+            labels.push_back(toQString(info.label));
+        return labels;
+    }
+
+    /// A fraction of one shown as a whole percentage, on a slider.
+    constexpr auto PercentRange =
+        NumberRange { .min = 0.0, .max = 1.0, .step = 0.01, .decimals = 0, .unit = NumberUnit::Percent };
+
+    /// No bound below or above.
+    constexpr auto Unbounded = std::numeric_limits<double>::infinity();
+
+    /// A whole number in @p unit from @p lowest up, without a bound above.
+    [[nodiscard]] constexpr NumberRange countFrom(double lowest, NumberUnit unit) noexcept
+    {
+        return NumberRange { .min = lowest, .max = Unbounded, .step = 1.0, .decimals = 0, .unit = unit };
+    }
+
+    /// A colour spelled "#rgb" or "#rrggbb", as the colour well's hex field takes it.
+    /// @return The colour, or nullopt for anything else.
+    [[nodiscard]] std::optional<vtbackend::RGBColor> parseHexColor(QString const& text)
+    {
+        constexpr auto ShortLength = 4; // "#rgb"
+        constexpr auto LongLength = 7;  // "#rrggbb"
+        auto const isHexDigit = [](QChar ch) {
+            return ch.isDigit() || QStringLiteral("abcdefABCDEF").contains(ch);
+        };
+        if (!text.startsWith(u'#') || (text.size() != ShortLength && text.size() != LongLength)
+            || !std::ranges::all_of(text.sliced(1), isHexDigit))
+            return std::nullopt;
+        auto const color = QColor::fromString(text);
+        return vtbackend::RGBColor { static_cast<uint8_t>(color.red()),
+                                     static_cast<uint8_t>(color.green()),
+                                     static_cast<uint8_t>(color.blue()) };
     }
 
     /// Every cursor shape paired with the token a configuration file names it by.
@@ -140,7 +181,7 @@ namespace
         return { std::move(key),
                  std::move(label),
                  std::move(help),
-                 "int",
+                 SettingsValueType::Int,
                  [field](TerminalProfile const& p) {
                      auto const& limit = p.history.value().*field;
                      if (auto const* lineCount = std::get_if<vtbackend::LineCount>(&limit))
@@ -155,7 +196,12 @@ namespace
                      else
                          history.*field = vtbackend::LineCount(lines);
                      p.history = history;
-                 } };
+                 },
+                 {},
+                 {},
+                 {},
+                 // -1 is unlimited, the floor.
+                 countFrom(-1.0, NumberUnit::Lines) };
     }
 
     /// enumField() for an enum that already has a ConfigEnum table.
@@ -170,7 +216,7 @@ namespace
         return { std::move(key),
                  std::move(label),
                  std::move(help),
-                 "enum",
+                 SettingsValueType::Enum,
                  [getter](TerminalProfile const& p) -> QVariant {
                      return QVariant(toQString(config::configEnumToken(getter(p))));
                  },
@@ -178,7 +224,9 @@ namespace
                      if (auto const value = config::configEnumFromToken<Enum>(v.toString().toStdString()))
                          setter(p, *value);
                  },
-                 configEnumTokens<Enum>() };
+                 configEnumTokens<Enum>(),
+                 {},
+                 configEnumLabels<Enum>() };
     }
 
     /// Builds an enum profile-field descriptor from a token-to-value table.
@@ -205,7 +253,7 @@ namespace
         return { std::move(key),
                  std::move(label),
                  std::move(help),
-                 "enum",
+                 SettingsValueType::Enum,
                  [mappings, getter](TerminalProfile const& p) -> QVariant {
                      auto const current = getter(p);
                      for (auto const& [token, value]: mappings)
@@ -261,34 +309,70 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                         "Show size on resize",
                         "Briefly show the terminal dimensions when the window is resized.",
                         [](auto& p) -> auto& { return p.sizeIndicatorOnResize.value(); }),
+              // Canvas copy (F8).
               { "dim_unfocused",
-                "Dim when unfocused",
-                "How much to dim a pane while it is not focused (0.0 = off, 1.0 = fully dimmed).",
-                "double",
+                "Dim inactive panes",
+                "How far a pane without focus steps back.",
+                SettingsValueType::Double,
                 [](TerminalProfile const& p) { return QVariant(p.dimUnfocused.value()); },
-                [](TerminalProfile& p, QVariant const& v) { p.dimUnfocused = v.toDouble(); } },
+                [](TerminalProfile& p, QVariant const& v) { p.dimUnfocused = v.toDouble(); },
+                {},
+                {},
+                {},
+                PercentRange },
+              // R-i's colour well; empty is no colour of its own (Q1).
+              { "tab_color",
+                "Tab color",
+                "The color of this profile's tabs and of its tile in the sidebar. Empty for none.",
+                SettingsValueType::Color,
+                [](TerminalProfile const& p) {
+                    auto const color = p.tabColor.value();
+                    return QVariant(color ? toQString(std::format(
+                                                "#{:02x}{:02x}{:02x}", color->red, color->green, color->blue))
+                                          : QString {});
+                },
+                [](TerminalProfile& p, QVariant const& v) {
+                    auto const text = v.toString().trimmed();
+                    if (text.isEmpty())
+                        p.tabColor = std::nullopt;
+                    else if (auto color = parseHexColor(text))
+                        p.tabColor = color;
+                },
+                {},
+                [](QVariant const& v) -> QString {
+                    auto const text = v.toString().trimmed();
+                    if (text.isEmpty() || parseHexColor(text))
+                        return {};
+                    return QStringLiteral("Enter a color as #rgb or #rrggbb, or leave it empty for none.");
+                } },
           } },
         { SettingsGroup::ProfileFont,
           "A",
           {
               { "font_family",
-                "Font family",
-                "The regular font family name.",
-                "string",
+                "Font",
+                "The family the terminal's text is drawn in.",
+                SettingsValueType::FontFamily,
                 [](TerminalProfile const& p) {
                     return QVariant(QString::fromStdString(p.fonts.value().regular.familyName));
                 },
                 [](TerminalProfile& p, QVariant const& v) {
                     p.fonts.value().regular.familyName = v.toString().toStdString();
                 } },
+              // The help as the Fluent board draws it (§4 gaps).
               { "font_size",
-                "Font size (pt)",
-                "The font size in points.",
-                "double",
+                "Font size",
+                "Ctrl + wheel changes it for the session only.",
+                SettingsValueType::Double,
                 [](TerminalProfile const& p) { return QVariant(p.fonts.value().size.pt); },
                 [](TerminalProfile& p, QVariant const& v) {
                     p.fonts.value().size = text::FontSize { v.toDouble() };
-                } },
+                },
+                {},
+                {},
+                {},
+                NumberRange {
+                    .min = 0.0, .max = Unbounded, .step = 0.5, .decimals = 1, .unit = NumberUnit::Points } },
               boolField("draw_bold_text_with_bright_colors",
                         "Bold text uses bright colors",
                         "Render bold text using the bright ANSI colors.",
@@ -308,15 +392,19 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "slow_scrolling_time",
                 "Slow scrolling time (ms)",
                 "Duration of one smooth line-scroll step, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(p.smoothLineScrolling.value().count()));
                 },
-                [](TerminalProfile& p, QVariant const& v) { p.smoothLineScrolling = Ms { v.toInt() }; } },
+                [](TerminalProfile& p, QVariant const& v) { p.smoothLineScrolling = Ms { v.toInt() }; },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
               { "vi_mode_scrolloff",
                 "Vi mode scroll-off",
                 "Minimum lines kept above/below the cursor while scrolling in Vi mode.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(unbox(p.modalCursorScrollOff.value())));
                 },
@@ -326,7 +414,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "copy_last_mark_range_offset",
                 "Copy last-mark range offset",
                 "Line offset applied to the CopyPreviousMarkRange action.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(unbox(p.copyLastMarkRangeOffset.value())));
                 },
@@ -356,21 +444,27 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "vi_mode_highlight_timeout",
                 "Vi highlight timeout (ms)",
                 "How long a Vi-mode yank highlight stays visible, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(p.highlightTimeout.value().count()));
                 },
-                [](TerminalProfile& p, QVariant const& v) { p.highlightTimeout = Ms { v.toInt() }; } },
+                [](TerminalProfile& p, QVariant const& v) { p.highlightTimeout = Ms { v.toInt() }; },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
               { "screen_transition_duration",
                 "Screen transition (ms)",
                 "Duration of the alt-screen transition animation, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(p.screenTransitionDuration.value().count()));
                 },
-                [](TerminalProfile& p, QVariant const& v) {
-                    p.screenTransitionDuration = Ms { v.toInt() };
-                } },
+                [](TerminalProfile& p, QVariant const& v) { p.screenTransitionDuration = Ms { v.toInt() }; },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
           } },
         { SettingsGroup::ProfileTerminal,
           "▣",
@@ -378,7 +472,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "terminal_size_lines",
                 "Terminal rows",
                 "Default number of rows in the terminal grid.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(unbox(p.terminalSize.value().lines)));
                 },
@@ -390,7 +484,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "terminal_size_columns",
                 "Terminal columns",
                 "Default number of columns in the terminal grid.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(unbox(p.terminalSize.value().columns)));
                 },
@@ -402,7 +496,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "margins_horizontal",
                 "Horizontal margin (px)",
                 "Horizontal window margin in pixels.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(*p.margins.value().horizontal));
                 },
@@ -414,7 +508,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "margins_vertical",
                 "Vertical margin (px)",
                 "Vertical window margin in pixels.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(*p.margins.value().vertical));
                 },
@@ -461,13 +555,13 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "wm_class",
                 "WM class",
                 "The X11 WM_CLASS property string.",
-                "string",
+                SettingsValueType::String,
                 [](TerminalProfile const& p) { return QVariant(QString::fromStdString(p.wmClass.value())); },
                 [](TerminalProfile& p, QVariant const& v) { p.wmClass = v.toString().toStdString(); } },
               { "tab_label",
                 "Tab label",
                 "Template for the tab title (e.g. {WindowTitle}).",
-                "string",
+                SettingsValueType::String,
                 [](TerminalProfile const& p) { return QVariant(QString::fromStdString(p.tabLabel.value())); },
                 [](TerminalProfile& p, QVariant const& v) { p.tabLabel = v.toString().toStdString(); } },
           } },
@@ -483,7 +577,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
           "≡",
           {
               historyLimitField("history_max_lines",
-                                "History max lines",
+                                "Scrollback lines",
                                 "Maximum number of scrollback lines to keep (-1 = unlimited).",
                                 &config::HistoryConfig::maxHistoryLineCount),
               historyLimitField(
@@ -496,7 +590,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "history_scroll_multiplier",
                 "History scroll multiplier",
                 "Number of lines scrolled per scroll wheel step.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(unbox(p.history.value().historyScrollMultiplier)));
                 },
@@ -582,14 +676,18 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "notify_on_command_finish_min_duration",
                 "Notify: minimum duration (s)",
                 "Commands that finish faster than this never notify.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(p.notifyOnCommandFinish.value().minDuration.count()));
                 },
                 [](TerminalProfile& p, QVariant const& v) {
                     p.notifyOnCommandFinish.value().minDuration =
                         std::chrono::seconds { std::max(0, v.toInt()) };
-                } },
+                },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::None) },
               enumFieldFromTable<config::NotifyOutcome>(
                   "notify_on_command_finish_outcome",
                   "Notify: outcome",
@@ -693,13 +791,17 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "cursor_motion_animation_duration",
                 "Cursor motion animation (ms)",
                 "Duration of the cursor motion animation, in milliseconds (0 = instant).",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<int>(p.cursorMotionAnimationDuration.value().count()));
                 },
                 [](TerminalProfile& p, QVariant const& v) {
                     p.cursorMotionAnimationDuration = Ms { v.toInt() };
-                } },
+                },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
           } },
         { SettingsGroup::ProfileCursor,
           "▮",
@@ -707,7 +809,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "insert_mode_cursor_blinking",
                 "Insert mode: blinking",
                 "Whether the cursor blinks in Insert mode.",
-                "bool",
+                SettingsValueType::Bool,
                 [](TerminalProfile const& p) {
                     return QVariant(p.modeInsert.value().cursor.cursorDisplay
                                     == vtbackend::CursorDisplay::Blink);
@@ -732,7 +834,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "insert_mode_cursor_blink_interval",
                 "Insert mode: blink interval (ms)",
                 "Cursor blink interval in Insert mode, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(
                         static_cast<int>(p.modeInsert.value().cursor.cursorBlinkInterval.count()));
@@ -741,11 +843,15 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                     auto mode = p.modeInsert.value();
                     mode.cursor.cursorBlinkInterval = Ms { v.toInt() };
                     p.modeInsert = mode;
-                } },
+                },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
               { "normal_mode_cursor_blinking",
                 "Normal mode: blinking",
                 "Whether the cursor blinks in Normal (Vi) mode.",
-                "bool",
+                SettingsValueType::Bool,
                 [](TerminalProfile const& p) {
                     return QVariant(p.modeNormal.value().cursor.cursorDisplay
                                     == vtbackend::CursorDisplay::Blink);
@@ -770,7 +876,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "normal_mode_cursor_blink_interval",
                 "Normal mode: blink interval (ms)",
                 "Cursor blink interval in Normal (Vi) mode, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(
                         static_cast<int>(p.modeNormal.value().cursor.cursorBlinkInterval.count()));
@@ -779,11 +885,15 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                     auto mode = p.modeNormal.value();
                     mode.cursor.cursorBlinkInterval = Ms { v.toInt() };
                     p.modeNormal = mode;
-                } },
+                },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
               { "visual_mode_cursor_blinking",
                 "Visual mode: blinking",
                 "Whether the cursor blinks in Visual (Vi) mode.",
-                "bool",
+                SettingsValueType::Bool,
                 [](TerminalProfile const& p) {
                     return QVariant(p.modeVisual.value().cursor.cursorDisplay
                                     == vtbackend::CursorDisplay::Blink);
@@ -808,7 +918,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "visual_mode_cursor_blink_interval",
                 "Visual mode: blink interval (ms)",
                 "Cursor blink interval in Visual (Vi) mode, in milliseconds.",
-                "int",
+                SettingsValueType::Int,
                 [](TerminalProfile const& p) {
                     return QVariant(
                         static_cast<int>(p.modeVisual.value().cursor.cursorBlinkInterval.count()));
@@ -817,7 +927,11 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                     auto mode = p.modeVisual.value();
                     mode.cursor.cursorBlinkInterval = Ms { v.toInt() };
                     p.modeVisual = mode;
-                } },
+                },
+                {},
+                {},
+                {},
+                countFrom(0.0, NumberUnit::Milliseconds) },
           } },
         { SettingsGroup::ProfileBell,
           "♪",
@@ -825,7 +939,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "bell_sound",
                 "Bell sound",
                 "Path to a sound file for the terminal bell, or 'default', or 'off'.",
-                "string",
+                SettingsValueType::String,
                 [](TerminalProfile const& p) {
                     return QVariant(QString::fromStdString(p.bell.value().sound));
                 },
@@ -841,13 +955,17 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "bell_volume",
                 "Bell volume",
                 "Volume of the bell sound (0.0 = silent, 1.0 = full).",
-                "double",
+                SettingsValueType::Double,
                 [](TerminalProfile const& p) { return QVariant(static_cast<double>(p.bell.value().volume)); },
                 [](TerminalProfile& p, QVariant const& v) {
                     auto b = p.bell.value();
                     b.volume = static_cast<float>(v.toDouble());
                     p.bell = b;
-                } },
+                },
+                {},
+                {},
+                {},
+                PercentRange },
           } },
         { SettingsGroup::ProfileBackground,
           "▨",
@@ -855,7 +973,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
               { "background_opacity",
                 "Background opacity",
                 "Terminal background opacity (0.0 = fully transparent, 1.0 = fully opaque).",
-                "double",
+                SettingsValueType::Double,
                 [](TerminalProfile const& p) {
                     return QVariant(static_cast<double>(static_cast<uint8_t>(p.background.value().opacity))
                                     / 255.0);
@@ -865,7 +983,11 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                     bg.opacity =
                         vtbackend::Opacity(static_cast<unsigned>(255 * std::clamp(v.toDouble(), 0.0, 1.0)));
                     p.background = bg;
-                } },
+                },
+                {},
+                {},
+                {},
+                PercentRange },
               boolField(
                   "background_blur",
                   "Background blur",
@@ -937,7 +1059,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                   .label = "Open files with",
                   .help = "A command line for detected file paths, with {path}, {line} and {column}; empty "
                           "opens them with the system's default application. No shell is involved.",
-                  .type = "string",
+                  .type = SettingsValueType::String,
                   .get =
                       [](TerminalProfile const& p) {
                           return QVariant(toQString(p.fileOpener.value().command));
@@ -1079,7 +1201,7 @@ namespace
         return { .key = std::move(key),
                  .label = std::move(label),
                  .help = std::move(help),
-                 .type = "bool",
+                 .type = SettingsValueType::Bool,
                  .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
                  .toYaml = [](QVariant const& v) { return std::string { v.toBool() ? "true" : "false" }; },
                  .fromYaml = scalarFromYaml<bool> };
@@ -1092,8 +1214,8 @@ namespace
     /// @param help    One-line help text.
     /// @param get     Reads the effective value from the configuration.
     /// @param lowest  The smallest accepted value.
-    /// @param highest The largest accepted value.
-    /// @return The descriptor.
+    /// @param highest The largest accepted value; std::numeric_limits<int>::max() for no bound.
+    /// @return The descriptor, whose range is [@p lowest, @p highest].
     GlobalFieldDescriptor globalIntField(QString key,
                                          QString label,
                                          QString help,
@@ -1101,10 +1223,11 @@ namespace
                                          int lowest,
                                          int highest)
     {
+        auto const unbounded = highest == std::numeric_limits<int>::max();
         return { .key = std::move(key),
                  .label = std::move(label),
                  .help = std::move(help),
-                 .type = "int",
+                 .type = SettingsValueType::Int,
                  .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
                  .toYaml = [](QVariant const& v) { return std::to_string(v.toInt()); },
                  .fromYaml = scalarFromYaml<int>,
@@ -1117,26 +1240,34 @@ namespace
                          return std::unexpected(std::format("Enter a whole number of at least {}.", lowest));
                      return std::unexpected(
                          std::format("Enter a whole number from {} to {}.", lowest, highest));
-                 } };
+                 },
+                 .optionLabels = {},
+                 .range = NumberRange { .min = static_cast<double>(lowest),
+                                        .max = unbounded ? Unbounded : static_cast<double>(highest),
+                                        .step = 1.0,
+                                        .decimals = 0,
+                                        .unit = NumberUnit::None },
+                 .control = {} };
     }
 
-    /// Builds a decimal global-field descriptor that refuses values below @p lowest.
-    /// @param key    The contour.yml key path (see GlobalFieldDescriptor::key).
-    /// @param label  Human-readable label.
-    /// @param help   One-line help text.
-    /// @param get    Reads the effective value from the configuration.
-    /// @param lowest The smallest accepted value.
+    /// Builds a decimal global-field descriptor that refuses values below @p range's minimum.
+    /// @param key   The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label Human-readable label.
+    /// @param help  One-line help text.
+    /// @param get   Reads the effective value from the configuration.
+    /// @param range Its bounds, step and unit; the minimum is what the validator refuses below.
     /// @return The descriptor.
     GlobalFieldDescriptor globalDoubleField(QString key,
                                             QString label,
                                             QString help,
                                             std::function<double(config::Config const&)> get,
-                                            double lowest)
+                                            NumberRange range)
     {
+        auto const lowest = range.min;
         return { .key = std::move(key),
                  .label = std::move(label),
                  .help = std::move(help),
-                 .type = "double",
+                 .type = SettingsValueType::Double,
                  .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
                  .toYaml = [](QVariant const& v) { return std::format("{}", v.toDouble()); },
                  .fromYaml = scalarFromYaml<double>,
@@ -1145,7 +1276,10 @@ namespace
                      if (auto const number = v.toDouble(&isNumber); isNumber && number >= lowest)
                          return {};
                      return std::unexpected(std::format("Enter a number of at least {}.", lowest));
-                 } };
+                 },
+                 .optionLabels = {},
+                 .range = range,
+                 .control = {} };
     }
 
     /// Builds a string global-field descriptor, optionally checked by @p validate before it is written.
@@ -1164,7 +1298,7 @@ namespace
         return { .key = std::move(key),
                  .label = std::move(label),
                  .help = std::move(help),
-                 .type = "string",
+                 .type = SettingsValueType::String,
                  .get = [get = std::move(get)](
                             config::Config const& c) { return QVariant(QString::fromStdString(get(c))); },
                  .toYaml = [](QVariant const& v) { return v.toString().toStdString(); },
@@ -1172,21 +1306,31 @@ namespace
                  .validate = std::move(validate) };
     }
 
-    /// Builds an enum global-field descriptor offering @p options.
+    /// An enum option: the token the loader reads, and the label a person reads.
+    using TokenLabel = std::pair<std::string_view, std::string_view>;
+
+    /// Builds an enum global-field descriptor offering @p choices.
     /// @param key      The contour.yml key path (see GlobalFieldDescriptor::key).
     /// @param label    Human-readable label.
     /// @param help     One-line help text.
-    /// @param get      Reads the effective value from the configuration, spelled as one of @p options.
-    /// @param options  The values offered, spelled as the loader reads them.
-    /// @param validate Refuses a value the loader would reject; empty accepts @p options alone.
+    /// @param get      Reads the effective value from the configuration, spelled as one of the tokens.
+    /// @param choices  The values offered: each token, spelled as the loader reads it, with its label.
+    /// @param validate Refuses a value the loader would reject; empty accepts the tokens alone.
     /// @return The descriptor.
     GlobalFieldDescriptor globalEnumField(QString key,
                                           QString label,
                                           QString help,
                                           std::function<std::string(config::Config const&)> get,
-                                          QStringList const& options,
+                                          std::span<TokenLabel const> choices,
                                           GlobalFieldValidator validate = {})
     {
+        auto options = QStringList {};
+        auto labels = QStringList {};
+        for (auto const& [token, shown]: choices)
+        {
+            options.push_back(toQString(token));
+            labels.push_back(toQString(shown));
+        }
         if (!validate)
             validate = [options](QVariant const& v) -> std::expected<void, std::string> {
                 if (options.contains(v.toString()))
@@ -1196,13 +1340,18 @@ namespace
         return { .key = std::move(key),
                  .label = std::move(label),
                  .help = std::move(help),
-                 .type = "enum",
+                 .type = SettingsValueType::Enum,
                  .get = [get = std::move(get)](
                             config::Config const& c) { return QVariant(QString::fromStdString(get(c))); },
                  .toYaml = [](QVariant const& v) { return v.toString().toStdString(); },
                  .fromYaml = [options](std::string const& text) { return optionFromYaml(options, text); },
                  .options = options,
-                 .validate = std::move(validate) };
+                 .optionsProvider = {},
+                 .validate = std::move(validate),
+                 .group = SettingsGroup::GeneralWindows,
+                 .optionLabels = labels,
+                 .range = {},
+                 .control = {} };
     }
 
     /// Builds an enum global-field descriptor whose options, displayed value and accepted set all come
@@ -1219,6 +1368,9 @@ namespace
                                                    QString help,
                                                    std::function<Enum(config::Config const&)> get)
     {
+        auto choices = std::vector<TokenLabel> {};
+        for (auto const& info: config::configEnumValues<Enum>())
+            choices.emplace_back(info.token, info.label);
         return globalEnumField(
             std::move(key),
             std::move(label),
@@ -1226,7 +1378,7 @@ namespace
             [get = std::move(get)](config::Config const& c) {
                 return std::string { config::configEnumToken(get(c)) };
             },
-            configEnumTokens<Enum>(),
+            choices,
             [](QVariant const& v) -> std::expected<void, std::string> {
                 auto const token = v.toString().toStdString();
                 if (config::configEnumFromToken<Enum>(token))
@@ -1234,6 +1386,12 @@ namespace
                 return notOffered(token);
             });
     }
+
+    /// The text scaling methods, as vtrasterizer::methodFromName() reads them.
+    constexpr auto TextScalingChoices = std::array {
+        TokenLabel { "stretch", "Stretch" },
+        TokenLabel { "rerasterize", "Rerasterize" },
+    };
 
     /// The gutter's own timestamp-format check, vtbackend::measureTimestampFormat() -- the one the
     /// GutterConfig loader uses -- phrased for the page with vtbackend::timestampFormatErrorText()'s reason.
@@ -1374,14 +1532,13 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                               "Word delimiters",
                               "Characters that separate words when selecting by double-click.",
                               [](config::Config const& c) { return c.wordDelimiters.value(); }),
-            // Reuse the std::formatter<GuiTheme> (the "terminal"/"system"/"dark"/"light" source of truth)
-            // rather than re-switching the enum here, matching the std::format idiom used for modifiers/keys.
-            globalEnumField("theme",
-                            "GUI theme",
-                            "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). 'terminal' "
-                            "matches the terminal's background; 'system' follows the OS.",
-                            [](config::Config const& c) { return std::format("{}", c.theme.value()); },
-                            { "terminal", "system", "dark", "light" }),
+            // The options and their labels are GuiTheme's table, "Match terminal" first (Phase 0 R7).
+            globalEnumFieldFromTable<config::GuiTheme>(
+                "theme",
+                "GUI theme",
+                "Light/dark appearance of the GUI chrome (menus, tabs, dialogs): match the terminal's "
+                "background, follow the system, or always dark or light.",
+                [](config::Config const& c) { return c.theme.value(); }),
             // Both tab bar rows read their options, their rendered value and their accepted set from
             // contour/TabBarMode.h, so the page cannot offer a token the configuration reader would
             // then reject -- and a new mode shows up here with this file untouched.
@@ -1414,7 +1571,7 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
               .help =
                   "Which GPU draws the terminal. Takes effect after restart. OpenGL honours this on Linux "
                   "only. Has no effect on macOS.",
-              .type = "enum",
+              .type = SettingsValueType::Enum,
               .get =
                   [](config::Config const& c) {
                       return QVariant(QString::fromStdString(std::format("{}", c.renderer.value().gpu)));
@@ -1459,7 +1616,8 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 "Size, in points, the terminal-style chrome is drawn with. 0 inherits the "
                 "running profile's font size. Takes effect after restart.",
                 [](config::Config const& c) { return c.uiFontSize.value(); },
-                0.0),
+                NumberRange {
+                    .min = 0.0, .max = Unbounded, .step = 0.5, .decimals = 1, .unit = NumberUnit::Points }),
             globalBoolField("grapheme_clustering",
                             "Grapheme clustering",
                             "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the "
@@ -1475,7 +1633,7 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 "free but softens at large sizes; rerasterize stays crisp at the cost of memory "
                 "and rasterization.",
                 [](config::Config const& c) { return std::format("{}", c.textScalingMethod.value()); },
-                { "stretch", "rerasterize" }),
+                TextScalingChoices),
             // {{{ Command blocks. A dotted key is a path to one leaf of a contour.yml section; settings.yml
             // stores it nested and the merge applies that leaf alone (see mergeGuiManagedSideFiles), so a
             // row here never resets its section's other keys.
@@ -1580,6 +1738,32 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
         return list;
     }();
     return descriptors;
+}
+
+SettingsControl controlOf(SettingsValueType type,
+                          QStringList const& optionLabels,
+                          std::optional<NumberRange> range,
+                          std::optional<SettingsControl> control)
+{
+    if (control)
+        return *control;
+    auto utf8 = std::vector<std::string> {};
+    for (auto const& label: optionLabels)
+        utf8.push_back(label.toStdString());
+    auto labels = std::vector<std::string_view> {};
+    for (auto const& label: utf8)
+        labels.emplace_back(label);
+    return defaultControlFor(type, labels, range);
+}
+
+NumberRange unboundedRange(SettingsValueType type)
+{
+    auto const isDouble = type == SettingsValueType::Double;
+    return NumberRange { .min = -Unbounded,
+                         .max = Unbounded,
+                         .step = isDouble ? 0.1 : 1.0,
+                         .decimals = isDouble ? 1 : 0,
+                         .unit = NumberUnit::None };
 }
 
 } // namespace contour::window::fields

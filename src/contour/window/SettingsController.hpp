@@ -463,6 +463,11 @@ class SettingsController: public QObject
     void rebuildProfileRows();
     /// Whether profile @p name is a GUI side file, written or staged in this session.
     [[nodiscard]] bool isSideFileProfile(std::string const& name) const;
+    /// The side-file profiles whose spelled status line follows a switch of the defaults to @p now
+    /// (config::indicatorForEdition), as the files to stage with the switch; the open draft follows too.
+    /// @param now The edition switched to.
+    /// @return One file per profile that changes.
+    [[nodiscard]] std::vector<config::StagedFile> profilesAdoptingEdition(config::DefaultsEdition now);
     /// Whether profile @p name exists, as a side file, or is staged.
     [[nodiscard]] bool profileNameTaken(std::string const& name) const;
     /// Whether color scheme @p name exists, as a side file, inline, or is staged.

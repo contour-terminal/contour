@@ -7,6 +7,7 @@
 // controller's own logic is unit-tested separately in SettingsController_test.cpp.
 
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigEnum.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -1084,17 +1085,22 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
     SECTION("a combo box")
     {
         auto const key = QStringLiteral("gutter.line_numbers");
-        REQUIRE(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
+        // The combo shows the table's labels: "None" is off, the relative mode its own words.
+        auto const off = QStringLiteral("None");
+        auto const relativeLabel = config::configEnumLabel(vtbackend::LineNumberMode::Relative);
+        auto const relative =
+            QString::fromUtf8(relativeLabel.data(), static_cast<qsizetype>(relativeLabel.size()));
+        REQUIRE(editor(key, "QQuickComboBox").property("currentText").toString() == off);
 
         press(editor(key, "QQuickComboBox"), Qt::Key_Down);
         fx.scheduler->fire();
         fx.settle();
         REQUIRE(fx.errors.size() == qsizetype { 1 });
         CHECK(fx.errors.front().contains(QString::fromUtf8(UnwritableStore::Reason)));
-        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
+        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == off);
 
         required(rowOf(*page, key)).setProperty("value", "relative");
-        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "relative");
+        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == relative);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

@@ -291,6 +291,8 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionFactory.hpp
         window/SettingsController.hpp
         window/SettingsFields.hpp
+        window/ProfileRules.hpp
+        window/SettingsControls.hpp
         window/SettingsSearch.hpp
         window/SettingsSections.hpp
         window/QtSaveScheduler.hpp
@@ -1290,6 +1292,8 @@ if(CONTOUR_TESTING)
         window/NoticeQueue_test.cpp
         window/ToastPlacement_test.cpp
         window/SaveLayoutCheck_test.cpp
+        window/ProfileRules_test.cpp
+        window/SettingsControls_test.cpp
         window/SettingsSearch_test.cpp
         window/SettingsSections_test.cpp
         window/TabWellLayout_test.cpp
