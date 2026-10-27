@@ -115,6 +115,21 @@ TEST_CASE("the seeded divider is one dim row that a resize cuts instead of wrapp
     }
 }
 
+TEST_CASE("the divider's dim rendition does not reach what is written after the seed",
+          "[vthost][snapshot][seed]")
+{
+    auto fresh = freshTerminal(40);
+    seedRestoredHistory(fresh.terminal, capturedRows(3, 40), DividerOn);
+    fresh.terminal.writeToScreen("$ ");
+
+    auto const& screen = fresh.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineText(LineOffset(1)).starts_with("$ "));
+    CHECK_FALSE(
+        screen.at(LineOffset(1), vtbackend::ColumnOffset(0)).isFlagEnabled(vtbackend::CellFlag::Faint));
+    CHECK_FALSE(
+        screen.at(LineOffset(1), vtbackend::ColumnOffset(1)).isFlagEnabled(vtbackend::CellFlag::Faint));
+}
+
 TEST_CASE("on a one-line page the divider that scrolls into the history is the row left unwrappable",
           "[vthost][snapshot][seed]")
 {
