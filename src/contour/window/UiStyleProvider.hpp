@@ -414,12 +414,34 @@ class UiStyleProvider: public QObject
 
     /// Where a locked pane's lock is drawn (window::secureIndicatorSpots).
     ///
-    /// Ints rather than enums or two adjacent bools: the QML-facing carve-out, as paneHeader() takes it.
+    /// Ints rather than enums or adjacent bools: the QML-facing carve-out, as paneHeader() takes it.
     /// A value out of range answers an empty map.
     /// @param header  Whether the pane's header is shown (a window::SpotShown's value).
     /// @param tabWell Whether the tab well is shown (a window::SpotShown's value).
-    /// @return `{ header, tab, band }`, each whether the lock goes there.
-    [[nodiscard]] Q_INVOKABLE QVariantMap secureIndicatorSpots(int header, int tabWell) const;
+    /// @param band    Whether a title band is always on screen (a window::SpotShown's value).
+    /// @return `{ header, tab, band, pane }`, each whether the lock goes there.
+    [[nodiscard]] Q_INVOKABLE QVariantMap secureIndicatorSpots(int header, int tabWell, int band) const;
+
+    /// Where the in-pane lock pill goes (window::placeSecureLock), with this row's insets.
+    /// @param findBar        A window::FindBarPresence (findBarPresence()).
+    /// @param linkPillAnchor Where the link pill is now, as window::linkPillAnchorName names it; `hidden`
+    /// while
+    ///                       it is not shown.
+    /// @param paneWidth      The pane's width in logical pixels.
+    /// @param paneHeight     The pane's height in logical pixels.
+    /// @param lockWidth      The pill's width.
+    /// @param lockHeight     The pill's height.
+    /// @param clearance      The session's overlay clearance, as linkPillPlacement() takes it.
+    /// @return `{ anchor, x, y }`, the anchor as window::secureLockAnchorName names it; empty for an input
+    /// out
+    ///         of range.
+    [[nodiscard]] Q_INVOKABLE QVariantMap secureLockPlacement(int findBar,
+                                                              QString const& linkPillAnchor,
+                                                              qreal paneWidth,
+                                                              qreal paneHeight,
+                                                              qreal lockWidth,
+                                                              qreal lockHeight,
+                                                              QVariantMap const& clearance) const;
 
     /// Where the find bar goes in a pane (window::placeFindBar), with this row's tokens.
     /// @param header      Whether the pane shows an inline header (a window::PaneHeaderPresence's value).

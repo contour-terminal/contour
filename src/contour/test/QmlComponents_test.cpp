@@ -11909,6 +11909,183 @@ TEST_CASE("SecureInputLock: \"Input hidden\" where the OS has no secure keyboard
     CHECK(accessibleNameOf(*lock) == QStringLiteral("Input hidden"));
 }
 
+namespace
+{
+/// The rows on which one tab of one pane under `tab_bar: multiple` has no header, tab well or band: the lock
+/// goes in the pane (window::SecureIndicatorRules).
+constexpr auto InPaneLockRows = std::array { contour::config::ChromeStyle::Fluent,
+                                             contour::config::ChromeStyle::ContourLinux,
+                                             contour::config::ChromeStyle::Terminal };
+
+/// An 800 × 400 SessionChrome on @p row whose pane is locked and whose rule puts the lock in the pane.
+struct SecureLockScene
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    std::unique_ptr<MockSession> session = std::make_unique<MockSession>();
+    ChromeHost host;
+    QQuickItem* lock {};
+
+    explicit SecureLockScene(contour::config::ChromeStyle row)
+    {
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        setup.secureInput = contour::platform::SecureInputSupport::None;
+        contour::test::installChromeStyle(engine, setup);
+        host = createChromeInWindow(engine, QSize { 800, 400 });
+        session->setOverlayClearance(linkClearance(100, 20, 100));
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        host.chrome->setProperty("lockInPane", true);
+        QCoreApplication::processEvents();
+        lock = host.chrome->findChild<QQuickItem*>(QStringLiteral("secureInputPill"));
+        REQUIRE(lock != nullptr);
+    }
+
+    void setLocked(
+        contour::window::SecureIndicator indicator = contour::window::SecureIndicator::Locked) const
+    {
+        session->setSecureIndicator(static_cast<int>(indicator));
+        QCoreApplication::processEvents();
+    }
+
+    [[nodiscard]] QString anchor() const
+    {
+        return lock->property("placement").toMap().value(QStringLiteral("anchor")).toString();
+    }
+};
+} // namespace
+
+TEST_CASE(
+    "secure lock pill: with no header, well or band a locked pane's pill sits top right over blank cells "
+    "(offscreen)",
+    "[contour][gui][qml][secureinput][securelock]")
+{
+    for (auto const row: InPaneLockRows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        contour::test::QmlMessageCapture const warnings;
+        auto scene = SecureLockScene { row };
+        CHECK_FALSE(scene.lock->isVisible());
+
+        scene.setLocked();
+        REQUIRE(scene.lock->isVisible());
+        CHECK(scene.anchor() == QStringLiteral("topRight"));
+        // Placed like the link pill: its insets, its height.
+        CHECK(scene.lock->y() == chromeToken(scene.engine, "space", "s4"));
+        CHECK(scene.lock->x() + scene.lock->width()
+              == Catch::Approx(scene.host.chrome->width() - chromeToken(scene.engine, "space", "s5")));
+        CHECK(scene.lock->height() == chromeToken(scene.engine, "size", "linkPill"));
+        CHECK(accessibleNameOf(*scene.lock) == QStringLiteral("Input hidden"));
+
+        auto* icon = scene.lock->findChild<QQuickItem*>(QStringLiteral("secureInputIcon"));
+        auto* cells = scene.lock->findChild<QQuickItem*>(QStringLiteral("secureInputText"));
+        auto* words = scene.lock->findChild<QQuickItem*>(QStringLiteral("secureInputPillText"));
+        REQUIRE(icon != nullptr);
+        REQUIRE(cells != nullptr);
+        REQUIRE(words != nullptr);
+        if (row == contour::config::ChromeStyle::Terminal)
+        {
+            // An inverse cell run: `[secure]`, no icon and no words beside it.
+            CHECK(cells->isVisible());
+            CHECK(cells->property("text").toString() == QStringLiteral("[secure]"));
+            CHECK_FALSE(icon->isVisible());
+            CHECK_FALSE(words->isVisible());
+        }
+        else
+        {
+            CHECK(icon->isVisible());
+            CHECK(words->isVisible());
+            CHECK(words->property("text").toString() == QStringLiteral("Input hidden"));
+            CHECK_FALSE(cells->isVisible());
+        }
+
+        scene.setLocked(contour::window::SecureIndicator::None);
+        CHECK_FALSE(scene.lock->isVisible());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("secure lock pill: shown only where the rule puts the lock in the pane (offscreen)",
+          "[contour][gui][qml][secureinput][securelock]")
+{
+    for (auto const row: InPaneLockRows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        auto scene = SecureLockScene { row };
+        scene.setLocked();
+        REQUIRE(scene.lock->isVisible());
+        // A header, a tab or a band holds the lock instead.
+        scene.host.chrome->setProperty("lockInPane", false);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(scene.lock->isVisible());
+    }
+}
+
+TEST_CASE("secure lock pill: it yields the top to the link pill and goes to the bottom (offscreen)",
+          "[contour][gui][qml][secureinput][securelock]")
+{
+    for (auto const row: InPaneLockRows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        auto scene = SecureLockScene { row };
+        scene.setLocked();
+        REQUIRE(scene.anchor() == QStringLiteral("topRight"));
+
+        auto* link = scene.host.chrome->findChild<QQuickItem*>(QStringLiteral("linkPill"));
+        REQUIRE(link != nullptr);
+        scene.session->setLinkTarget(
+            QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), true);
+        REQUIRE(QTest::qWaitFor([&] { return link->property("shown").toBool() && link->isVisible(); }));
+        CHECK(scene.anchor() == QStringLiteral("bottomRight"));
+        CHECK(scene.lock->y() > scene.host.chrome->height() / 2);
+        CHECK_FALSE(sceneRectOf(*scene.lock).intersects(sceneRectOf(*link)));
+
+        // The link pill gone (faded out), the lock returns to the top.
+        scene.session->setLinkTarget({}, {}, false);
+        REQUIRE(QTest::qWaitFor([&] { return !link->isVisible(); }));
+        CHECK(scene.anchor() == QStringLiteral("topRight"));
+    }
+}
+
+TEST_CASE("secure lock pill: it yields to the find bar (offscreen)",
+          "[contour][gui][qml][secureinput][securelock]")
+{
+    for (auto const row: InPaneLockRows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        auto scene = SecureLockScene { row };
+        scene.setLocked();
+        REQUIRE(scene.anchor() == QStringLiteral("topRight"));
+
+        auto* bar = scene.host.chrome->findChild<QObject*>(QStringLiteral("searchBar"));
+        REQUIRE(bar != nullptr);
+        QMetaObject::invokeMethod(bar, "open");
+        QCoreApplication::processEvents();
+        REQUIRE(bar->property("visible").toBool());
+        // The bar holds the top right: the lock goes below it, whatever the bar's own anchor name.
+        CHECK(scene.anchor() == QStringLiteral("bottomRight"));
+        CHECK(scene.lock->y() > scene.host.chrome->height() / 2);
+    }
+}
+
+TEST_CASE("secure lock pill: over a full-screen program it shows nowhere (offscreen)",
+          "[contour][gui][qml][secureinput][securelock]")
+{
+    for (auto const row: InPaneLockRows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        auto scene = SecureLockScene { row };
+        scene.setLocked();
+        REQUIRE(scene.lock->isVisible());
+        // Every cell painted: no blank place. Secure Keyboard Entry is still on; only the pill is missing.
+        scene.session->setOverlayClearance(linkClearance(100, 20, 0));
+        QCoreApplication::processEvents();
+        CHECK(scene.anchor() == QStringLiteral("hidden"));
+        CHECK_FALSE(scene.lock->isVisible());
+    }
+}
+
 TEST_CASE("pane card: a pane at a password prompt shows the lock and says so in its header (offscreen)",
           "[contour][gui][qml][secureinput][panecard]")
 {

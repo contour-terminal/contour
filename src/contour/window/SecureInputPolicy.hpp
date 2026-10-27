@@ -73,46 +73,66 @@ struct SecureIndicatorRule
 {
     SpotShown header = SpotShown::No;       ///< Whether the pane's header is shown.
     SpotShown tabWell = SpotShown::No;      ///< Whether the tab well is shown.
+    SpotShown band = SpotShown::No;         ///< Whether a title band is always on screen.
     SpotShown lockInHeader = SpotShown::No; ///< The lock goes in the pane header.
     SpotShown lockOnTab = SpotShown::No;    ///< The lock goes on the tab.
     SpotShown bandChip = SpotShown::No;     ///< The lock goes in a title-band chip.
+    SpotShown lockInPane = SpotShown::No;   ///< The lock goes in an in-pane pill over the grid.
 };
 
-/// Every place the lock is drawn, one row per (header, tab well) pair: wherever the pane or its tab is shown,
-/// and in the band when neither is (one tab, one pane, no header).
+/// Every place the lock is drawn, one row per (header, tab well, band) combination: wherever the pane or its
+/// tab is shown; else in the band's chip where a band is; else (one tab, one pane, no header, well or band --
+/// the Flat rows under `tab_bar: multiple`) in a pill over the pane's blank cells. The band decides only the
+/// last case, so the rows with a header or a well answer alike for either band.
 inline constexpr auto SecureIndicatorRules = std::array {
     SecureIndicatorRule { .header = SpotShown::Yes,
                           .tabWell = SpotShown::Yes,
+                          .band = SpotShown::Yes,
                           .lockInHeader = SpotShown::Yes,
-                          .lockOnTab = SpotShown::Yes,
-                          .bandChip = SpotShown::No },
+                          .lockOnTab = SpotShown::Yes },
+    SecureIndicatorRule { .header = SpotShown::Yes,
+                          .tabWell = SpotShown::Yes,
+                          .band = SpotShown::No,
+                          .lockInHeader = SpotShown::Yes,
+                          .lockOnTab = SpotShown::Yes },
     SecureIndicatorRule { .header = SpotShown::Yes,
                           .tabWell = SpotShown::No,
-                          .lockInHeader = SpotShown::Yes,
-                          .lockOnTab = SpotShown::No,
-                          .bandChip = SpotShown::No },
+                          .band = SpotShown::Yes,
+                          .lockInHeader = SpotShown::Yes },
+    SecureIndicatorRule { .header = SpotShown::Yes,
+                          .tabWell = SpotShown::No,
+                          .band = SpotShown::No,
+                          .lockInHeader = SpotShown::Yes },
     SecureIndicatorRule { .header = SpotShown::No,
                           .tabWell = SpotShown::Yes,
-                          .lockInHeader = SpotShown::No,
-                          .lockOnTab = SpotShown::Yes,
-                          .bandChip = SpotShown::No },
+                          .band = SpotShown::Yes,
+                          .lockOnTab = SpotShown::Yes },
+    SecureIndicatorRule { .header = SpotShown::No,
+                          .tabWell = SpotShown::Yes,
+                          .band = SpotShown::No,
+                          .lockOnTab = SpotShown::Yes },
     SecureIndicatorRule { .header = SpotShown::No,
                           .tabWell = SpotShown::No,
-                          .lockInHeader = SpotShown::No,
-                          .lockOnTab = SpotShown::No,
+                          .band = SpotShown::Yes,
                           .bandChip = SpotShown::Yes },
+    SecureIndicatorRule { .header = SpotShown::No,
+                          .tabWell = SpotShown::No,
+                          .band = SpotShown::No,
+                          .lockInPane = SpotShown::Yes },
 };
 
 /// @param header  Whether the pane's header is shown.
 /// @param tabWell Whether the tab well is shown.
-/// @return The rule of SecureIndicatorRules for that pair.
+/// @param band    Whether a title band is always on screen (not one revealed on demand).
+/// @return The rule of SecureIndicatorRules for that combination.
 [[nodiscard]] constexpr SecureIndicatorRule const& secureIndicatorSpots(SpotShown header,
-                                                                        SpotShown tabWell) noexcept
+                                                                        SpotShown tabWell,
+                                                                        SpotShown band) noexcept
 {
     for (auto const& rule: SecureIndicatorRules)
-        if (rule.header == header && rule.tabWell == tabWell)
+        if (rule.header == header && rule.tabWell == tabWell && rule.band == band)
             return rule;
-    return SecureIndicatorRules.back(); // unreachable: the table holds every pair
+    return SecureIndicatorRules.back(); // unreachable: the table holds every combination
 }
 
 /// The words beside the lock and its accessible name.

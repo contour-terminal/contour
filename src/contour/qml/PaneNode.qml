@@ -46,6 +46,10 @@ FocusScope {
     // A window::HeaderReveal's value (WindowController.headerReveal), handed down as visiblePanes is.
     property int headerReveal: 0
 
+    // Whether a locked pane draws its lock in a pill over its own grid (Main.qml's secureLockInPane), handed
+    // down as visiblePanes is. A bool by the QML-facing carve-out.
+    property bool lockInPane: false
+
     // How deep in the tree this node sits: 0 for the tab's root, one more for each split above it.
     property int depth: 0
 
@@ -58,6 +62,7 @@ FocusScope {
         child.depth = root.depth + 1
         child.visiblePanes = Qt.binding(function() { return root.visiblePanes })
         child.headerReveal = Qt.binding(function() { return root.headerReveal })
+        child.lockInPane = Qt.binding(function() { return root.lockInPane })
     }
 
     // Clamp a raw drag ratio into [minPaneRatio, 1 - minPaneRatio]. Hoisted to the top-level item (and
@@ -130,6 +135,7 @@ FocusScope {
             node: root.node
             visiblePanes: root.visiblePanes
             headerReveal: root.headerReveal
+            lockInPane: root.lockInPane
         }
     }
 

@@ -246,6 +246,7 @@ set(_header_files
     session/SizeIndicator.hpp
     window/ProgramStatusBadge.hpp
     window/SecureInputPolicy.hpp
+    window/SecureLockPlacement.hpp
     window/TabLabel.hpp
 )
 
@@ -450,6 +451,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Toast.qml
         qml/LinkPill.qml
         qml/SecureInputLock.qml
+        qml/SecureInputPill.qml
         qml/ElevationShadow.qml
         qml/KitDialog.qml
         qml/PermissionDialog.qml
@@ -1256,6 +1258,7 @@ if(CONTOUR_TESTING)
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
         window/SecureInputPolicy_test.cpp
+        window/SecureLockPlacement_test.cpp
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
         window/TabBadge_test.cpp

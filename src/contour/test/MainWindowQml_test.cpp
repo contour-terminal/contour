@@ -3114,8 +3114,7 @@ TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chi
           "[contour][gui][qml][mainwindow][secureinput]")
 {
     // The Pill rows only: they keep the band for its traffic lights when the strip hides. The Flat rows hide
-    // the band with the strip (TitleBandRules), which leaves this case no place for the lock -- an open
-    // question of Step 6.6, not a chip this test could find.
+    // the band with the strip (TitleBandRules); the next case gives them their lock.
     for (auto const row: { ChromeStyle::MacOS })
     {
         INFO("row: " << contour::config::chromeStyleName(row));
@@ -3138,6 +3137,63 @@ TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chi
         CHECK(std::ranges::none_of(root->findChildren<QQuickItem*>(QStringLiteral("tabLock")),
                                    [](QQuickItem const* lock) { return lock->isVisible(); }));
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE(
+    "one tab of one pane at a password prompt, with no band either, shows the lock in the pane (offscreen)",
+    "[contour][gui][qml][mainwindow][secureinput][securelock]")
+{
+    // Fluent, ContourLinux and Terminal hide the band with the strip: no header, well or band holds the lock.
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+
+        CHECK(root->property("secureLockInPane").toBool());
+        CHECK_FALSE(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the in-pane lock is the last resort: a band, a tab well or a header holds it first (offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput][securelock]")
+{
+    SECTION("the Pill row keeps its band chip")
+    {
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        CHECK_FALSE(root->property("secureLockInPane").toBool());
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+    }
+
+    SECTION("a shown tab well holds it on every row")
+    {
+        for (auto const row:
+             { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+        {
+            INFO("row: " << contour::config::chromeStyleName(row));
+            QQmlEngine engine;
+            MockMainController controller { MainWindowScene {
+                .tabCount = 2, .activeTab = 1, .secure = contour::test::snapshot::SecureDecor::Locked } };
+            contour::test::QmlMessageCapture warnings;
+            auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+            showWindow(*root);
+            CHECK_FALSE(root->property("secureLockInPane").toBool());
+        }
     }
 }
 

@@ -68,6 +68,9 @@ Item {
     property Item overlayHost: null
     /// The pane header's link pill slot, where the pane shows an inline header; null where it shows none.
     property Item headerLinkSlot: null
+    /// Whether a locked pane draws its lock in a pill over its grid (window::SecureIndicatorRules: no header,
+    /// tab well or band holds it); a bool by the QML-facing carve-out.
+    property bool lockInPane: false
     /// Whether the link pill sits in the pane header (QML-facing): the header hides what it would cover --
     /// until the pill has faded out, not from when it starts to, so nothing comes back under it.
     readonly property bool linkPillInHeader: linkPill.inHeader && linkPill.visible
@@ -83,6 +86,18 @@ Item {
         headerPresent: chrome.headerPresent
         // Where the find bar is while it is open: the pill keeps out of the places it holds.
         findBar: chromeStyle.findBarPresence(searchBar.visible ? searchBar.placement.anchor : "")
+    }
+
+    // The lock, where no header, tab well or band holds it: over blank cells at the top right, yielding to the
+    // link pill and the find bar.
+    SecureInputPill {
+        id: secureLockPill
+        session: chrome.session
+        gridItem: chrome
+        gridHost: chrome.overlayHost ? chrome.overlayHost : chrome
+        enabledByRule: chrome.lockInPane
+        findBar: linkPill.findBar
+        linkPillAnchor: linkPill.visible ? linkPill.placement.anchor : "hidden"
     }
 
     // The gutter's block-column tooltip: how the hovered command ended, how long it took, when and where it

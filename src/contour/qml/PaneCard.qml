@@ -31,6 +31,8 @@ Item {
     property var node: null
     /// The panes the tab shows (WindowController.visiblePaneCount).
     property int visiblePanes: 1
+    /// Whether a locked pane draws its lock in a pill over its grid (PaneNode.lockInPane).
+    property bool lockInPane: false
     /// A window::HeaderReveal's value (WindowController.headerReveal).
     property int headerReveal: 0
 
@@ -85,6 +87,7 @@ Item {
             session: card.session
             paneActive: card.isActive
             visiblePanes: card.visiblePanes
+            lockInPane: card.lockInPane
             cornerRadius: card.cornerRadius
             squareTop: card.headerInline ? card.cornerRadius : 0
             squareBottom: footer.visible ? card.cornerRadius : 0

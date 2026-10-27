@@ -9,6 +9,7 @@
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SecureLockPlacement.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
@@ -599,6 +600,23 @@ namespace
             ints.push_back(value.toInt());
         return ints;
     }
+
+    /// The grid a pill may cover, from the session's overlay clearance map. The map's lists are copied into
+    /// @p trailingBlank and @p avoidRows, which the returned grid views, so they must outlive it.
+    [[nodiscard]] window::LinkPillGrid pillGridOf(QVariantMap const& clearance,
+                                                  std::vector<int>& trailingBlank,
+                                                  std::vector<int>& avoidRows)
+    {
+        trailingBlank = intsOf(clearance.value(QStringLiteral("trailingBlank")));
+        avoidRows = intsOf(clearance.value(QStringLiteral("avoidRows")));
+        return window::LinkPillGrid { .marginLeft = clearance.value(QStringLiteral("marginLeft")).toReal(),
+                                      .marginTop = clearance.value(QStringLiteral("marginTop")).toReal(),
+                                      .cellWidth = clearance.value(QStringLiteral("cellWidth")).toReal(),
+                                      .cellHeight = clearance.value(QStringLiteral("cellHeight")).toReal(),
+                                      .columns = clearance.value(QStringLiteral("columns")).toInt(),
+                                      .trailingBlankColumns = trailingBlank,
+                                      .avoidRows = avoidRows };
+    }
 } // namespace
 
 QVariantMap UiStyleProvider::linkPillPlacement(int host,
@@ -613,30 +631,57 @@ QVariantMap UiStyleProvider::linkPillPlacement(int host,
 {
     if (!inRange(host, LinkPillHostCount) || !inRange(findBar, FindBarPresenceCount))
         return {};
-    auto const trailingBlank = intsOf(clearance.value(QStringLiteral("trailingBlank")));
-    auto const avoidRows = intsOf(clearance.value(QStringLiteral("avoidRows")));
-    auto const placement = placeLinkPill(LinkPillInputs {
-        .host = static_cast<LinkPillHost>(host),
-        .findBar = static_cast<FindBarPresence>(findBar),
-        .paneWidth = paneWidth,
-        .paneHeight = paneHeight,
-        .pillWidth = pillWidth,
-        .pillMinimumWidth = pillMinimumWidth,
-        .pillHeight = pillHeight,
-        .headerSlotWidth = headerWidth,
-        .insetTop = _space.s4(),
-        .insetRight = _space.s5(),
-        .grid = LinkPillGrid { .marginLeft = clearance.value(QStringLiteral("marginLeft")).toReal(),
-                               .marginTop = clearance.value(QStringLiteral("marginTop")).toReal(),
-                               .cellWidth = clearance.value(QStringLiteral("cellWidth")).toReal(),
-                               .cellHeight = clearance.value(QStringLiteral("cellHeight")).toReal(),
-                               .columns = clearance.value(QStringLiteral("columns")).toInt(),
-                               .trailingBlankColumns = trailingBlank,
-                               .avoidRows = avoidRows } });
+    auto trailingBlank = std::vector<int> {};
+    auto avoidRows = std::vector<int> {};
+    auto const placement =
+        placeLinkPill(LinkPillInputs { .host = static_cast<LinkPillHost>(host),
+                                       .findBar = static_cast<FindBarPresence>(findBar),
+                                       .paneWidth = paneWidth,
+                                       .paneHeight = paneHeight,
+                                       .pillWidth = pillWidth,
+                                       .pillMinimumWidth = pillMinimumWidth,
+                                       .pillHeight = pillHeight,
+                                       .headerSlotWidth = headerWidth,
+                                       .insetTop = _space.s4(),
+                                       .insetRight = _space.s5(),
+                                       .grid = pillGridOf(clearance, trailingBlank, avoidRows) });
     return { { QStringLiteral("anchor"), nameOf(linkPillAnchorName(placement.anchor)) },
              { QStringLiteral("x"), placement.x },
              { QStringLiteral("y"), placement.y },
              { QStringLiteral("width"), placement.width } };
+}
+
+QVariantMap UiStyleProvider::secureLockPlacement(int findBar,
+                                                 QString const& linkPillAnchor,
+                                                 qreal paneWidth,
+                                                 qreal paneHeight,
+                                                 qreal lockWidth,
+                                                 qreal lockHeight,
+                                                 QVariantMap const& clearance) const
+{
+    auto const anchors =
+        std::views::iota(size_t { 0 }, LinkPillAnchorCount)
+        | std::views::transform([](size_t index) { return static_cast<LinkPillAnchor>(index); });
+    auto const linkPill = std::ranges::find_if(anchors, [&](LinkPillAnchor candidate) {
+        return linkPillAnchor == nameOf(linkPillAnchorName(candidate));
+    });
+    if (!inRange(findBar, FindBarPresenceCount) || linkPill == anchors.end())
+        return {};
+    auto trailingBlank = std::vector<int> {};
+    auto avoidRows = std::vector<int> {};
+    auto const placement =
+        placeSecureLock(SecureLockInputs { .findBar = static_cast<FindBarPresence>(findBar),
+                                           .linkPill = *linkPill,
+                                           .paneWidth = paneWidth,
+                                           .paneHeight = paneHeight,
+                                           .lockWidth = lockWidth,
+                                           .lockHeight = lockHeight,
+                                           .insetTop = _space.s4(),
+                                           .insetRight = _space.s5(),
+                                           .grid = pillGridOf(clearance, trailingBlank, avoidRows) });
+    return { { QStringLiteral("anchor"), nameOf(secureLockAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y } };
 }
 
 int UiStyleProvider::findBarPresence(QString const& anchor) const
@@ -656,15 +701,17 @@ QString UiStyleProvider::secureInputText() const
     return nameOf(secureInputStateText(_inputs.secureInput));
 }
 
-QVariantMap UiStyleProvider::secureIndicatorSpots(int header, int tabWell) const
+QVariantMap UiStyleProvider::secureIndicatorSpots(int header, int tabWell, int band) const
 {
-    if (!inRange(header, SpotShownCount) || !inRange(tabWell, SpotShownCount))
+    if (!inRange(header, SpotShownCount) || !inRange(tabWell, SpotShownCount)
+        || !inRange(band, SpotShownCount))
         return {};
-    auto const& rule =
-        window::secureIndicatorSpots(static_cast<SpotShown>(header), static_cast<SpotShown>(tabWell));
+    auto const& rule = window::secureIndicatorSpots(
+        static_cast<SpotShown>(header), static_cast<SpotShown>(tabWell), static_cast<SpotShown>(band));
     return { { QStringLiteral("header"), rule.lockInHeader == SpotShown::Yes },
              { QStringLiteral("tab"), rule.lockOnTab == SpotShown::Yes },
-             { QStringLiteral("band"), rule.bandChip == SpotShown::Yes } };
+             { QStringLiteral("band"), rule.bandChip == SpotShown::Yes },
+             { QStringLiteral("pane"), rule.lockInPane == SpotShown::Yes } };
 }
 
 QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const

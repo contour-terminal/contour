@@ -55,6 +55,7 @@ Item {
     /// Whether the pane is at a password prompt, and the rule puts the lock in a shown header.
     readonly property bool locked: !!session && session.secureIndicator === chromeStyle.secureInputs.locked
         && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotShown,
+                                            chromeStyle.secureInputs.spotHidden,
                                             chromeStyle.secureInputs.spotHidden).header === true
     /// What the name slot reads: the name, or while locked the name and the lock's state.
     // Concatenated, not formatted: a title the application set may itself contain "%2".

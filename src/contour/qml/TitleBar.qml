@@ -284,8 +284,11 @@ Item {
                                               ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
             readonly property int wellSpot: root.controller && (root.controller.tabBarShouldShow ?? false)
                                             ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
+            // A band that only appears on demand (full screen) is not one the lock can rely on.
+            readonly property int bandSpot: root.presence === "shown" || root.presence === "pinned"
+                                            ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
             readonly property bool shown: root.isBand && titleRows.activeLocked
-                && chromeStyle.secureIndicatorSpots(headerSpot, wellSpot).band === true
+                && chromeStyle.secureIndicatorSpots(headerSpot, wellSpot, bandSpot).band === true
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: shown ? secureChip.implicitWidth : 0
             Layout.preferredHeight: secureChip.implicitHeight

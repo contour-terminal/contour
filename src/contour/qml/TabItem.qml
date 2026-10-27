@@ -53,7 +53,8 @@ Item {
     // header shows (window::SecureIndicatorRules).
     readonly property bool lockShown: root.locked && !root.iconOnly
         && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotHidden,
-                                            chromeStyle.secureInputs.spotShown).tab === true
+                                            chromeStyle.secureInputs.spotShown,
+                                            chromeStyle.secureInputs.spotHidden).tab === true
 
     // What the pill shows, as TabStrip reads it from chromeStyle.tabWellLayout(): "full", or "iconOnly"
     // once the well is too narrow for labels. The Flat shape always shows its label.

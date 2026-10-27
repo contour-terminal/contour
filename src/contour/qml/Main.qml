@@ -76,6 +76,16 @@ ThemedWindow
     // Where a sheet hangs from (KitDialog): the top of the content, below the band and the banners.
     readonly property real sheetTop: content.y
 
+    // Whether the lock is drawn in the pane itself (window::SecureIndicatorRules): one tab of one pane, with
+    // no pane header, tab well or always-shown band to hold it. Each pane draws its own, handed down by
+    // PaneNode like visiblePanes; a bool by the QML-facing carve-out, the rule's answer.
+    readonly property bool secureLockInPane: chromeStyle.secureIndicatorSpots(
+        (appWindow.win ? appWindow.win.visiblePaneCount : 1) > 1 ? chromeStyle.secureInputs.spotShown
+                                                                  : chromeStyle.secureInputs.spotHidden,
+        appWindow.tabBarShouldShow ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden,
+        appWindow.band.band === "shown" || appWindow.band.band === "pinned" ? chromeStyle.secureInputs.spotShown
+                                                                             : chromeStyle.secureInputs.spotHidden).pane === true
+
     // Whether a full-screen band rests below the menu bar AppKit reveals over the window's top, as a native
     // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar
     // too), a pinned one (an interrupted remote connection) only while the pointer rests on the edge --
@@ -396,6 +406,7 @@ ThemedWindow
                 node: appWindow.win ? appWindow.win.activeTabRootPane : null
                 visiblePanes: appWindow.win ? appWindow.win.visiblePaneCount : 1
                 headerReveal: appWindow.win ? appWindow.win.headerReveal : 0
+                lockInPane: appWindow.secureLockInPane
             }
         }
 

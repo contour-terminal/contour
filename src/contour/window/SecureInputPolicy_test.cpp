@@ -68,47 +68,84 @@ TEST_CASE("SecureIndicatorRules places the lock as R-f says", "[secureinputpolic
     using contour::window::SecureIndicatorRules;
     using contour::window::secureIndicatorSpots;
 
-    SECTION("one row per header and tab well pair")
+    SECTION("one row per header, tab well and band combination")
     {
-        CHECK(SecureIndicatorRules.size() == Spots.size() * Spots.size());
+        CHECK(SecureIndicatorRules.size() == Spots.size() * Spots.size() * Spots.size());
         for (auto const header: Spots)
             for (auto const well: Spots)
-                CHECK(std::ranges::count_if(
-                          SecureIndicatorRules,
-                          [&](auto const& rule) { return rule.header == header && rule.tabWell == well; })
-                      == 1);
+                for (auto const band: Spots)
+                    CHECK(std::ranges::count_if(SecureIndicatorRules,
+                                                [&](auto const& rule) {
+                                                    return rule.header == header && rule.tabWell == well
+                                                           && rule.band == band;
+                                                })
+                          == 1);
     }
 
-    SECTION("header and tab well: both draw it")
+    SECTION("the lock is drawn on one surface, whatever is on screen")
     {
-        auto const& rule = secureIndicatorSpots(SpotShown::Yes, SpotShown::Yes);
-        CHECK(rule.lockInHeader == SpotShown::Yes);
-        CHECK(rule.lockOnTab == SpotShown::Yes);
-        CHECK(rule.bandChip == SpotShown::No);
+        // The header and the tab are one surface (the pane's own chrome); the chip and the pill are others.
+        for (auto const& rule: SecureIndicatorRules)
+        {
+            auto const chrome = rule.lockInHeader == SpotShown::Yes || rule.lockOnTab == SpotShown::Yes;
+            auto const surfaces =
+                std::array { chrome, rule.bandChip == SpotShown::Yes, rule.lockInPane == SpotShown::Yes };
+            CHECK(std::ranges::count(surfaces, true) == 1);
+        }
+    }
+
+    SECTION("header and tab well: both draw it, band or not")
+    {
+        for (auto const band: Spots)
+        {
+            auto const& rule = secureIndicatorSpots(SpotShown::Yes, SpotShown::Yes, band);
+            CHECK(rule.lockInHeader == SpotShown::Yes);
+            CHECK(rule.lockOnTab == SpotShown::Yes);
+            CHECK(rule.bandChip == SpotShown::No);
+            CHECK(rule.lockInPane == SpotShown::No);
+        }
     }
 
     SECTION("header only: the header")
     {
-        auto const& rule = secureIndicatorSpots(SpotShown::Yes, SpotShown::No);
-        CHECK(rule.lockInHeader == SpotShown::Yes);
-        CHECK(rule.lockOnTab == SpotShown::No);
-        CHECK(rule.bandChip == SpotShown::No);
+        for (auto const band: Spots)
+        {
+            auto const& rule = secureIndicatorSpots(SpotShown::Yes, SpotShown::No, band);
+            CHECK(rule.lockInHeader == SpotShown::Yes);
+            CHECK(rule.lockOnTab == SpotShown::No);
+            CHECK(rule.bandChip == SpotShown::No);
+            CHECK(rule.lockInPane == SpotShown::No);
+        }
     }
 
     SECTION("tab well only: the tab")
     {
-        auto const& rule = secureIndicatorSpots(SpotShown::No, SpotShown::Yes);
-        CHECK(rule.lockInHeader == SpotShown::No);
-        CHECK(rule.lockOnTab == SpotShown::Yes);
-        CHECK(rule.bandChip == SpotShown::No);
+        for (auto const band: Spots)
+        {
+            auto const& rule = secureIndicatorSpots(SpotShown::No, SpotShown::Yes, band);
+            CHECK(rule.lockInHeader == SpotShown::No);
+            CHECK(rule.lockOnTab == SpotShown::Yes);
+            CHECK(rule.bandChip == SpotShown::No);
+            CHECK(rule.lockInPane == SpotShown::No);
+        }
     }
 
-    SECTION("neither: the band chip")
+    SECTION("neither, with a band: the band chip")
     {
-        auto const& rule = secureIndicatorSpots(SpotShown::No, SpotShown::No);
+        auto const& rule = secureIndicatorSpots(SpotShown::No, SpotShown::No, SpotShown::Yes);
         CHECK(rule.lockInHeader == SpotShown::No);
         CHECK(rule.lockOnTab == SpotShown::No);
         CHECK(rule.bandChip == SpotShown::Yes);
+        CHECK(rule.lockInPane == SpotShown::No);
+    }
+
+    SECTION("neither, and no band either: a pill in the pane")
+    {
+        auto const& rule = secureIndicatorSpots(SpotShown::No, SpotShown::No, SpotShown::No);
+        CHECK(rule.lockInHeader == SpotShown::No);
+        CHECK(rule.lockOnTab == SpotShown::No);
+        CHECK(rule.bandChip == SpotShown::No);
+        CHECK(rule.lockInPane == SpotShown::Yes);
     }
 }
 
