@@ -1505,7 +1505,9 @@ jobs:
         # app runs and contour_gui_test dominate it (~20-30s each); the unit suites are all under
         # 3s. The two vtconformance gates would add ~3 minutes, but they self-skip on a runner
         # that has not fetched vttest/esctest. Keep an eye on this ceiling when adding an e2e run.
-        timeout-minutes: 5
+        # Raised to 10 on 2026-10-27: the native redesign's suites brought the run to 309 s, so 5 minutes
+        # cut off a fully passing suite.
+        timeout-minutes: 10
         run: cmake --build --preset gcc-debug --target test
       - name: "verify the tmux oracles actually ran"
         # ctest prints nothing for a passing test, and a Catch2 SKIP exits 0 — so "the suite is
