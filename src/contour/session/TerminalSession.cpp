@@ -1159,9 +1159,11 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
 
 void TerminalSession::publishPendingPermission()
 {
-    // An extension's question answered meanwhile through another session's prompt, or gone with a reload of
-    // the extensions, leaves its place in line: it has nothing left to ask. (One at most: the queue holds no
-    // question twice.)
+    // An extension's consent with no question left behind it has nothing to show, and leaves its place in
+    // line. A guard, not a path taken today: the consent queue empties only through answer(), which
+    // answerExtensionConsent() follows by withdrawing the ask itself, and the queue is never replaced. (A
+    // question answered meanwhile through another session's prompt stays at the front until this session's
+    // own answer moves past it.)
     if (_permissionQueue.current() == PermissionAsk { ExtensionConsentAsk {} } && !consentPermissionPrompt())
         if (_permissionQueue.withdraw(ExtensionConsentAsk {}) == PromptChange::Due)
             ++_shownQuestionId;
