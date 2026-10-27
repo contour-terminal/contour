@@ -386,11 +386,13 @@ class MockMainController: public MainWindowControllerMock
                                     replace ? window::LayoutReplace::Replace : window::LayoutReplace::Keep),
             trimmed);
     }
-    /// Mirrors WindowController::layoutSummary() for one tab of one pane.
+    /// Mirrors WindowController::layoutSummary() over @c layoutTabs and @c layoutPanes.
     [[nodiscard]] Q_INVOKABLE QString layoutSummary() const
     {
-        return QString::fromStdString(window::layoutSummaryText(1, 1));
+        return QString::fromStdString(window::layoutSummaryText(layoutTabs, layoutPanes));
     }
+    int layoutTabs = 1;                       ///< The tabs layoutSummary() counts.
+    int layoutPanes = 1;                      ///< Their panes.
     std::vector<std::string> existingLayouts; ///< The layouts checkLayoutName() reads as taken.
     QStringList savedLayouts;                 ///< Every saveLayoutAs(), in order.
     QStringList replacedLayouts;              ///< Every replaceLayout(), in order.

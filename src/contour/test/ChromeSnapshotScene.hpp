@@ -12,6 +12,7 @@
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/PermissionPrompt.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/PopupWaits.hpp>
@@ -21,6 +22,7 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
@@ -298,7 +300,14 @@ class ChromeSnapshotScene
                 _controller.setHeaderReveal(static_cast<int>(window::HeaderReveal::HeldModifier));
                 break;
             case ScriptAction::OpenFindBar: openFindBar(); break;
+            case ScriptAction::OpenPermission: openPermission(scriptRow(_variant.script).permission); break;
+            case ScriptAction::OpenSaveLayout: openSaveLayout(scriptRow(_variant.script).layoutName); break;
         }
+        // The window's notices post their banner as the reload that failed would.
+        if (scriptRow(_variant.script).banner == SnapshotBanner::ConfigReload)
+            _controller.notices().post(
+                window::Notice { .kind = window::NoticeKind::ConfigReloadFailed,
+                                 .text = window::configReloadFailedNoticeText(SnapshotConfigReloadError) });
         _incubation.settle();
         QCoreApplication::processEvents();
         QCoreApplication::processEvents();
@@ -351,6 +360,9 @@ class ChromeSnapshotScene
 
     /// The toast's message.
     static inline auto const ToastText = QStringLiteral("Copied 3 lines");
+    /// The size of the paste the permission-paste script asks about, and the lines its preview leaves out.
+    static constexpr std::size_t SnapshotPasteBytes = 2'400'000;
+    static constexpr std::size_t SnapshotPasteMoreLines = 48'211;
 
     /// The dialog's texts.
     static inline auto const DialogHeading = QStringLiteral("Close this tab?");
@@ -652,7 +664,8 @@ class ChromeSnapshotScene
         {
             case SnapshotBanner::None: break;
             case SnapshotBanner::Hosting: return QString::fromUtf8(SnapshotHostingNotice);
-            case SnapshotBanner::NewDefaults: break;
+            case SnapshotBanner::NewDefaults:
+            case SnapshotBanner::ConfigReload: break;
         }
         return {};
     }
@@ -665,7 +678,8 @@ class ChromeSnapshotScene
         switch (banner)
         {
             case SnapshotBanner::None:
-            case SnapshotBanner::Hosting: break;
+            case SnapshotBanner::Hosting:
+            case SnapshotBanner::ConfigReload: break;
             case SnapshotBanner::NewDefaults: return config::NewDefaultsOffer::ExistingConfig;
         }
         return config::NewDefaultsOffer::None;
@@ -703,21 +717,83 @@ class ChromeSnapshotScene
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); });
     }
 
-    /// Creates the toast over the content, centred horizontally at its top, and shows it.
+    /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it.
     void showToast()
     {
-        auto component = QQmlComponent(&_engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml")));
-        INFO("Toast.qml errors: " << component.errorString().toStdString());
-        REQUIRE(component.isReady());
-        auto overlay = std::unique_ptr<QObject>(component.createWithInitialProperties(
-            QVariantMap { { QStringLiteral("text"), ToastText }, { QStringLiteral("shown"), true } }));
-        auto* item = qobject_cast<QQuickItem*>(overlay.get());
-        REQUIRE(item != nullptr);
-        auto* content = window().contentItem();
-        item->setParentItem(content);
-        item->setX((content->width() - item->implicitWidth()) / HalfDivisor);
-        item->setWidth(item->implicitWidth());
-        _overlay = std::move(overlay);
+        _controller.notices().post(
+            window::Notice { .kind = window::NoticeKind::Copied, .text = ToastText.toStdString() });
+    }
+
+    /// The question a script's session asks: what the session publishes for it (permissionPromptMap()).
+    [[nodiscard]] static QVariantMap permissionQuestion(SnapshotPermission permission)
+    {
+        switch (permission)
+        {
+            case SnapshotPermission::None: break;
+            case SnapshotPermission::Paste:
+                return session::permissionPromptMap(
+                    session::bigPastePrompt(
+                        "zsh",
+                        SnapshotPasteBytes,
+                        session::PastePreview { .lines = { "git log --oneline --graph --decorate --all",
+                                                           "cmake --build out/release -j 8" },
+                                                .moreLines = SnapshotPasteMoreLines }),
+                    1);
+            case SnapshotPermission::Consent: {
+                auto lines = std::vector<session::PromptLine> {
+                    session::consentLine("Module: git-stats@/usr/share/contour/extensions/git-stats.wasm",
+                                         vtcontrol::ConsentWeight::Observes),
+                };
+                for (auto const control: { vtcontrol::Permission::Read,
+                                           vtcontrol::Permission::Screen,
+                                           vtcontrol::Permission::Input })
+                {
+                    auto const weight = vtcontrol::consentWeightOf(control);
+                    lines.push_back(session::consentLine(
+                        std::format("May {}{}.",
+                                    vtcontrol::consentPhraseOf(control),
+                                    weight == vtcontrol::ConsentWeight::CanRunCommands ? " (can run commands)"
+                                                                                       : ""),
+                        weight));
+                }
+                return session::permissionPromptMap(
+                    session::consentPrompt("“git-stats” wants to control Contour", std::move(lines)), 1);
+            }
+        }
+        return {};
+    }
+
+    /// Has the active pane's session ask @p permission, and waits for its dialog to open.
+    void openPermission(SnapshotPermission permission)
+    {
+        REQUIRE_FALSE(_sessions.empty());
+        _sessions.front()->setPendingPermission(permissionQuestion(permission));
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* dialog = _root->findChild<QObject*>(QStringLiteral("permissionDialog"));
+                return dialog != nullptr && dialog->property("opened").toBool();
+            },
+            PopupSettleMs));
+    }
+
+    /// Opens Save Layout as a nameless SaveLayout action does, over this script's tabs, and types the name
+    /// into it -- one a layout already has, for SnapshotLayoutName::Taken.
+    void openSaveLayout(SnapshotLayoutName name)
+    {
+        _controller.layoutTabs = scriptRow(_variant.script).tabCount;
+        _controller.layoutPanes = scriptRow(_variant.script).tabCount;
+        _controller.existingLayouts.clear();
+        if (name == SnapshotLayoutName::Taken)
+            _controller.existingLayouts.emplace_back(SnapshotLayoutTyped);
+        _controller.beginSaveLayoutPrompt();
+        auto* dialog = _root->findChild<QObject*>(QStringLiteral("saveLayoutDialog"));
+        REQUIRE(dialog != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, PopupSettleMs));
+        auto const* content = dialog->property("contentItem").value<QQuickItem*>();
+        REQUIRE(content != nullptr);
+        auto const fields = itemsNamed(*content, QStringLiteral("saveLayoutNameField"));
+        REQUIRE(fields.size() == 1);
+        fields.front()->setProperty("text", QString::fromUtf8(SnapshotLayoutTyped));
     }
 
     /// Creates the dialog over the window's overlay, with a destructive accept, and waits for it to open.

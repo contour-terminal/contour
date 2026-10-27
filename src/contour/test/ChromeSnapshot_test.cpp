@@ -29,7 +29,10 @@
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <QtCore/QPointF>
+#include <QtCore/QRectF>
+#include <QtCore/QSizeF>
 #include <QtGui/QColor>
+#include <QtGui/QFont>
 #include <QtGui/QFontInfo>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
@@ -209,15 +212,19 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
             case SnapshotScript::Toast: {
-                // The toast is a visual child of the content item, not a QObject child of the root.
-                auto const items = scene.window().contentItem()->childItems();
-                auto const toast = std::ranges::find_if(items, [](QQuickItem const* item) {
-                    return item->objectName() == QStringLiteral("toast");
-                });
-                REQUIRE(toast != items.end());
-                auto const* text = (*toast)->findChild<QObject*>(QStringLiteral("toastText"));
-                REQUIRE(text != nullptr);
-                CHECK(text->property("text").toString() == QStringLiteral("Copied 3 lines"));
+                // Posted through the window's notices: Main.qml's toast shows it, in the band where the band
+                // holds it (the macOS row's always does).
+                auto const* toast = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+                REQUIRE(toast != nullptr);
+                CHECK(toast->property("shown").toBool());
+                CHECK(toast->property("text").toString() == QStringLiteral("Copied 3 lines"));
+                if (variant.row == contour::config::ChromeStyle::MacOS)
+                {
+                    auto const laidOut = toast->parentItem()->mapRectToScene(
+                        QRectF { toast->position(), QSizeF { toast->width(), toast->height() } });
+                    CHECK(titleBar->mapRectToScene(QRectF { 0, 0, titleBar->width(), titleBar->height() })
+                              .contains(laidOut.center()));
+                }
                 break;
             }
             case SnapshotScript::KitDialog: {
@@ -455,6 +462,46 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
             case SnapshotScript::SingleTab: break;
+            case SnapshotScript::PermissionPaste: {
+                auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                CHECK(dialog->property("acceptText").toString() == QStringLiteral("Paste"));
+                break;
+            }
+            case SnapshotScript::PermissionConsent: {
+                auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                auto const* dialogContent = dialog->property("contentItem").value<QQuickItem*>();
+                REQUIRE(dialogContent != nullptr);
+                auto const lines =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("permissionLine"));
+                CHECK(std::ranges::count_if(
+                          lines,
+                          [](QQuickItem const* line) { return line->property("font").value<QFont>().bold(); })
+                      == 1);
+                break;
+            }
+            case SnapshotScript::SaveLayout:
+            case SnapshotScript::SaveLayoutTaken: {
+                auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("saveLayoutDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                auto const* dialogContent = dialog->property("contentItem").value<QQuickItem*>();
+                REQUIRE(dialogContent != nullptr);
+                auto const taken =
+                    contour::test::itemsNamed(*dialogContent, QStringLiteral("saveLayoutTaken"));
+                REQUIRE(taken.size() == 1);
+                CHECK(taken.front()->isVisible() == (variant.script == SnapshotScript::SaveLayoutTaken));
+                break;
+            }
+            case SnapshotScript::ConfigReloadBanner: {
+                auto const* banner = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeBanner"));
+                REQUIRE(banner != nullptr);
+                CHECK(banner->isVisible());
+                break;
+            }
         }
     }
 }

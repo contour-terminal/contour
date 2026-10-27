@@ -131,6 +131,9 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::PaletteDrilledIn).action == ScriptAction::DrillInPalette);
     CHECK(static_cast<int>(SnapshotScript::FindBar)
           == static_cast<int>(SnapshotScript::PaletteDrilledIn) + 1);
+    // Step 3c's rows come after 3b's find rows, appended.
+    CHECK(static_cast<int>(SnapshotScript::PermissionPaste)
+          == static_cast<int>(SnapshotScript::FindBarInvalid) + 1);
     // Each pane of a split is named, as the canvas's split names them.
     CHECK(paneCount(PaneShape::SingleLeaf) == 1);
     CHECK(paneCount(PaneShape::SplitThree) == 3);
@@ -282,8 +285,7 @@ TEST_CASE("snapshot.manifestLine", "[snapshot]")
 TEST_CASE("snapshot.scriptTable.findBar", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    // The find bar's three rows, appended last: on a pane, under a split's header, and on a refused pattern.
-    CHECK(SnapshotScripts.back().script == SnapshotScript::FindBarInvalid);
+    // The find bar's three rows: on a pane, under a split's header, and on a refused pattern.
     CHECK(scriptRow(SnapshotScript::FindBar).name == "find-bar");
     CHECK(scriptRow(SnapshotScript::FindBar).panes == PaneShape::SingleLeaf);
     CHECK(scriptRow(SnapshotScript::FindBar).find == SnapshotFind::Matches);
@@ -310,4 +312,25 @@ TEST_CASE("snapshot.scriptTable.findBar", "[snapshot]")
     // Each search the scene can give is pictured: matched on a pane and under a split's header, and refused.
     CHECK(matches == 2);
     CHECK(invalid == 1);
+}
+
+TEST_CASE("snapshot.scriptTable.permissionAndSaveLayout", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    CHECK(scriptRow(SnapshotScript::PermissionPaste).permission == SnapshotPermission::Paste);
+    CHECK(scriptRow(SnapshotScript::PermissionPaste).action == ScriptAction::OpenPermission);
+    CHECK(scriptRow(SnapshotScript::PermissionConsent).permission == SnapshotPermission::Consent);
+    CHECK(scriptRow(SnapshotScript::SaveLayout).layoutName == SnapshotLayoutName::Available);
+    CHECK(scriptRow(SnapshotScript::SaveLayout).action == ScriptAction::OpenSaveLayout);
+    CHECK(scriptRow(SnapshotScript::SaveLayout).tabCount == 3);
+    CHECK(scriptRow(SnapshotScript::SaveLayoutTaken).layoutName == SnapshotLayoutName::Taken);
+    CHECK(scriptRow(SnapshotScript::ConfigReloadBanner).banner == SnapshotBanner::ConfigReload);
+    CHECK(scriptRow(SnapshotScript::ConfigReloadBanner).name == "config-reload-banner");
+    // The new last script closes the table: one row per script, in order (the static_asserts beside it).
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ConfigReloadBanner);
+    // Every other row asks for neither.
+    auto const asking = std::ranges::count_if(SnapshotScripts, [](SnapshotScriptRow const& row) {
+        return row.permission != SnapshotPermission::None || row.layoutName != SnapshotLayoutName::None;
+    });
+    CHECK(asking == 4);
 }
