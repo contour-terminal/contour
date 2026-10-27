@@ -89,6 +89,31 @@ TEST_CASE("blockRail.segments", "[blockrail]")
     }
 }
 
+TEST_CASE("blockRail.aRunningBlockHasNoEnd", "[blockrail]")
+{
+    // Whatever follows its last row so far, a running block is open: a Head and then Body, never a Tail or a
+    // Single -- a nested shell without shell integration keeps printing into it.
+    struct Case
+    {
+        std::optional<uint32_t> above;
+        std::optional<uint32_t> below;
+        RailSegment expected = RailSegment::None;
+    };
+    for (auto const& [above, below, expected]: {
+             Case { .above = std::nullopt, .below = 7, .expected = RailSegment::Head },
+             Case { .above = std::nullopt, .below = std::nullopt, .expected = RailSegment::Head },
+             Case { .above = 7, .below = 7, .expected = RailSegment::Body },
+             Case { .above = 7, .below = std::nullopt, .expected = RailSegment::Body },
+             Case { .above = 7, .below = 8, .expected = RailSegment::Body },
+         })
+    {
+        CAPTURE(above.value_or(0), below.value_or(0));
+        auto running = finishedRow(7, above, below);
+        running.state = CommandBlockState::Running;
+        CHECK(railSegmentOf(running) == expected);
+    }
+}
+
 TEST_CASE("blockRail.marksFollowTheTable", "[blockrail]")
 {
     for (auto const i: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))

@@ -55,6 +55,8 @@ struct RailRowFacts
 ///
 /// A block's first row in the projection is its Head, its last its Tail, those between Body, and a block with
 /// a single row Single -- on screen or not, so a block continuing above the page draws Body on the top row.
+/// A block that is still Running has no end yet -- a nested shell that marks nothing prints into it for as
+/// long as it lives -- so it is never a Tail or a Single: its first row is the Head and every other one Body.
 /// The live prompt (a Prompting block) and rows of no block draw none.
 /// @param facts What is true of the row.
 /// @return Its segment.
@@ -63,7 +65,7 @@ struct RailRowFacts
     if (!facts.block || facts.state == CommandBlockState::Prompting)
         return RailSegment::None;
     auto const startsHere = facts.above != facts.block;
-    auto const endsHere = facts.below != facts.block;
+    auto const endsHere = facts.below != facts.block && facts.state != CommandBlockState::Running;
     if (startsHere && endsHere)
         return RailSegment::Single;
     if (startsHere)

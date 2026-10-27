@@ -11,8 +11,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <format>
+#include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <vector>
 
 using namespace vtbackend;
@@ -194,4 +197,58 @@ TEST_CASE("Terminal.blockfocus.aBlockAtItsPromptIsNeverFocused", "[blockfocus]")
     CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Previous).has_value());
     CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Next).has_value());
     CHECK_FALSE(hasBlockFocusMode(mc.terminal));
+}
+
+TEST_CASE("Terminal.blockfocus.aNestedShellWithoutIntegrationStaysOneRunningBlock", "[blockfocus][gutter]")
+{
+    // `ssh` starts (;C) and the remote shell, which marks nothing, prints prompts and output for 50 rows.
+    auto mc = MockTerm { PageSize { LineCount(60), ColumnCount(40) } };
+    mc.terminal.settings().gutter = RailGutter;
+    startCommand(mc, "ssh host");
+    for (auto const row: std::views::iota(0, 25))
+        mc.writeToScreen(std::format("remote$ ls {}\r\nfile {}\r\n", row, row));
+
+    auto const ids = blockIds(mc.terminal);
+    REQUIRE(ids.size() == 1);
+    auto const* const record = mc.terminal.commandBlocks().find(ids.front());
+    REQUIRE(record != nullptr);
+    CHECK(record->state == CommandBlockState::Running);
+
+    auto const buffer = renderOf(mc.terminal);
+    auto rails = std::map<int, RenderGutterCell> {};
+    auto marks = std::vector<RailMark> {};
+    for (auto const& cell: buffer.gutter)
+    {
+        if (cell.rail != RailSegment::None)
+            rails.emplace(unbox<int>(cell.lineOffset), cell);
+        if (cell.mark != RailMark::None)
+            marks.push_back(cell.mark);
+    }
+
+    // Every row from the `ssh` line down to the cursor belongs to the one block: Head on the first, Body
+    // after it, in the running colour; no segment or mark for the nested shell's own prompt rows.
+    REQUIRE(rails.size() >= 50);
+    CHECK(rails.at(0).rail == RailSegment::Head);
+    for (auto const& [row, cell]: rails)
+    {
+        INFO("row " << row);
+        CHECK((cell.rail == RailSegment::Head || cell.rail == RailSegment::Body));
+        CHECK(cell.outcome == CommandBlockOutcome::Running);
+    }
+    CHECK(marks == std::vector { RailMark::Running });
+
+    // One chip, on the `ssh` row: on the Terminal row's annotations, on a native one's pills.
+    auto chipRows = std::set<int> {};
+    for (auto const& cell: buffer.annotations)
+        chipRows.insert(unbox<int>(cell.position.line));
+    for (auto const& chip: buffer.chips)
+        chipRows.insert(unbox<int>(chip.lineOffset));
+    CHECK(chipRows.size() <= 1);
+    if (!chipRows.empty())
+        CHECK(*chipRows.begin() == 0);
+
+    // Nothing after it to focus, so the step finds none, and the focus stays where it was.
+    CHECK(mc.terminal.focusCommandBlock(BlockStep::Previous) == ids.front());
+    CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Next).has_value());
+    CHECK(mc.terminal.focusedCommandBlock() == ids.front());
 }

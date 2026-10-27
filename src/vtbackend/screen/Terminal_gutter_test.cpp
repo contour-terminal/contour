@@ -885,6 +885,7 @@ TEST_CASE("Gutter.terminal.aBlockEndingOnThePagesLastRowEndsThere", "[gutter]")
     REQUIRE(mc.terminal.collapseLastFold());
     startCommand(mc, "make"); // its head on row 4, its output on rows 5-8, the cursor on row 9
     printLines(mc, "x", 4);
+    mc.writeToScreen(commandEnd(0)); // a running block has no end to draw: this one ends on the last row
     REQUIRE(mc.terminal.primaryScreen().cursor().position.line == LineOffset(9));
 
     auto const cells = railCellsOf(renderOf(mc.terminal));
