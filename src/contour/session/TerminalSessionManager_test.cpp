@@ -2858,9 +2858,15 @@ TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every windo
     REQUIRE(newOther != nullptr);
     CHECK(newOther->endReason() == EndReason::None);
 
-    // Nothing is left to take back, so the run is over: a late failure is nobody's to report.
+    // Nothing is left to take back, so the run is over: a later, unrelated loss makes this pane Disconnected
+    // and a failure then is nobody's to report on it.
+    newOther->noteTransportLost();
+    newOther->terminal().device().close();
+    newOther->onClosed();
+    REQUIRE(newOther->endReason() == EndReason::Disconnected);
     manager.reconnectFailed("the connection closed");
-    CHECK(newOther->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+    CHECK(newOther->getFooterMessage()
+          == "Disconnected from the Contour daemon. Its sessions are still running.");
 
     contour::test::closeAllTabs(*second);
 }
