@@ -9520,7 +9520,8 @@ TEST_CASE("TerminalSession: OpenCommandOutput shows a command's output in a page
         REQUIRE((*acting)(
             contour::actions::OpenCommandOutput { .placement = contour::actions::OutputPlacement::Tab }));
         REQUIRE(win->count() == 2);
-        REQUIRE(app.manager().saveWindowLayout(win.id, "with-pager"));
+        REQUIRE(
+            app.manager().saveWindowLayout(win.id, "with-pager", contour::window::LayoutReplace::Replace));
 
         auto const in = std::ifstream(configDirectory / "layouts.yml", std::ios::binary);
         auto contents = std::ostringstream {};

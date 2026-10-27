@@ -460,9 +460,9 @@ ThemedWindow
         window: appWindow
     }
 
-    // The "save layout as" name prompt. Opened by a nameless SaveLayout action (the command-palette row
-    // or a key bound to bare SaveLayout), routed per-window exactly like the command palette above, so
-    // the prompt appears over the window the action fired in.
+    // Save Layout. Opened by a nameless SaveLayout action (the command-palette row or a key bound to bare
+    // SaveLayout), routed per-window exactly like the command palette above, so the dialog appears over the
+    // window the action fired in.
     SaveLayoutDialog {
         id: saveLayoutDialog
         controller: appWindow.win

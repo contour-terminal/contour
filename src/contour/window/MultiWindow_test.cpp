@@ -28,6 +28,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -983,6 +984,65 @@ TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the
 
         window->saveLayoutAs(QStringLiteral("   ")); // a blank field must never write a nameless layout
         CHECK(store->savedPaths.size() == 1);        // still just the one save
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("Save Layout checks the name, refuses a taken one, and replaces only when asked",
+          "[contour][multiwindow][layout]")
+{
+    auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
+    auto* store = storeOwned.get();
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>(),
+                                 std::move(storeOwned) };
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    CHECK(window->layoutSummary() == "1 tab · 1 pane · working directories and commands");
+
+    SECTION("a name the configuration holds is taken, as typed and trimmed")
+    {
+        app.app().config().layouts.value()["dev"] = contour::config::Layout {};
+        auto const check = window->checkLayoutName(QStringLiteral("  dev "), false);
+        CHECK(check.value("nameState").toString() == "taken");
+        CHECK(check.value("button").toString() == "disabled");
+        CHECK(check.value("trimmed").toString() == "dev");
+        CHECK(window->checkLayoutName(QStringLiteral("dev"), true).value("button").toString() == "replace");
+        CHECK(window->checkLayoutName(QStringLiteral("web"), false).value("button").toString() == "save");
+    }
+
+    SECTION("a name taken in the store since the check is not overwritten")
+    {
+        store->layouts["dev"] = contour::config::Layout {};
+        auto const before = store->layouts;
+        window->saveLayoutAs(QStringLiteral("dev"));
+        CHECK(store->savedPaths.empty());
+        CHECK(store->layouts.size() == before.size());
+        CHECK(window->notices().toastText().toStdString()
+              == contour::window::layoutSaveFailedNoticeText("dev",
+                                                             contour::config::LayoutSaveError::NameTaken));
+    }
+
+    SECTION("Replace rewrites it, and says so")
+    {
+        store->layouts["dev"] = contour::config::Layout {};
+        window->replaceLayout(QStringLiteral("dev"));
+        REQUIRE(store->savedPaths.size() == 1);
+        REQUIRE(store->layouts.contains("dev"));
+        CHECK(store->layouts.at("dev").tabs.size() == 1);
+        CHECK(window->notices().toastText() == QStringLiteral("Saved layout “dev”"));
+    }
+
+    SECTION("an unreadable store says why in a toast")
+    {
+        store->loadError = "bad yaml";
+        window->saveLayoutAs(QStringLiteral("web"));
+        CHECK(store->savedPaths.empty());
+        auto const expected =
+            std::format("{}.", contour::config::describe(contour::config::LayoutSaveError::StoreUnreadable));
+        CHECK(window->notices().toastText().toStdString().ends_with(expected));
     }
 
     contour::test::closeAllTabs(*window);

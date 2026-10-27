@@ -37,10 +37,12 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/UiStyleProvider.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
@@ -5483,6 +5485,29 @@ class MockSaveLayoutController: public QObject
     Q_INVOKABLE void saveLayoutAs(QString const& name) { saved << name; }
     QStringList saved;
 
+    /// Records the name the dialog replaced.
+    Q_INVOKABLE void replaceLayout(QString const& name) { replaced << name; }
+    QStringList replaced;
+
+    /// Mirrors WindowController::checkLayoutName() against @c existing.
+    [[nodiscard]] Q_INVOKABLE QVariantMap checkLayoutName(QString const& name, bool replace) const
+    {
+        auto const trimmed = name.trimmed();
+        return contour::window::WindowController::layoutCheckMap(
+            contour::window::checkLayoutName(trimmed.toStdString(),
+                                             existing,
+                                             replace ? contour::window::LayoutReplace::Replace
+                                                     : contour::window::LayoutReplace::Keep),
+            trimmed);
+    }
+    std::vector<std::string> existing; ///< The layouts already saved.
+
+    /// Mirrors WindowController::layoutSummary().
+    [[nodiscard]] Q_INVOKABLE QString layoutSummary() const
+    {
+        return QString::fromStdString(contour::window::layoutSummaryText(3, 5));
+    }
+
   signals:
     /// What WindowController raises to ask its window to open the prompt; Main.qml answers with open().
     void saveLayoutRequested();
@@ -5498,20 +5523,42 @@ struct SaveLayoutHost
 
     [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
     [[nodiscard]] bool opened() const { return dialog != nullptr && dialog->property("opened").toBool(); }
-    [[nodiscard]] QQuickItem* nameField() const
+    [[nodiscard]] QQuickItem* nameField() const { return part(QStringLiteral("saveLayoutNameField")); }
+
+    /// The dialog's part named @p name, found through the visual tree (what a body slot holds may have no
+    /// QObject parent); null for none.
+    [[nodiscard]] QQuickItem* part(QString const& name) const
     {
-        return dialog != nullptr ? dialog->findChild<QQuickItem*>(QStringLiteral("saveLayoutNameField"))
-                                 : nullptr;
+        if (dialog == nullptr)
+            return nullptr;
+        if (auto* direct = dialog->findChild<QQuickItem*>(name))
+            return direct;
+        auto pending = std::vector<QQuickItem*> {};
+        if (auto* content = dialog->property("contentItem").value<QQuickItem*>())
+            pending.push_back(content);
+        while (!pending.empty())
+        {
+            auto* item = pending.back();
+            pending.pop_back();
+            if (item->objectName() == name)
+                return item;
+            for (auto* child: item->childItems())
+                pending.push_back(child);
+        }
+        return nullptr;
     }
 };
 
 /// Builds the host and locates the dialog (not yet opened — the tests open it via the controller's
 /// request, which is the path Main.qml takes).
-[[nodiscard]] SaveLayoutHost makeSaveLayoutHost(QQmlEngine& engine, MockSaveLayoutController& controller)
+[[nodiscard]] SaveLayoutHost makeSaveLayoutHost(
+    QQmlEngine& engine,
+    MockSaveLayoutController& controller,
+    contour::test::ChromeSetup const& setup = contour::test::defaultChromeSetup())
 {
     // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
     // the design tokens -- so the engine needs them, as every other chrome component's does.
-    contour::test::installChromeStyle(engine);
+    contour::test::installChromeStyle(engine, setup);
     engine.rootContext()->setContextProperty("saveLayoutController", &controller);
 
     QQmlComponent component(&engine);
@@ -5599,7 +5646,7 @@ TEST_CASE("Accepting the save-layout prompt saves the typed name and gives the k
     REQUIRE(host.nameField() != nullptr);
 
     host.nameField()->setProperty("text", QStringLiteral("dev"));
-    QMetaObject::invokeMethod(host.dialog, "accept");
+    QMetaObject::invokeMethod(host.dialog, "pressDefault");
     QCoreApplication::processEvents();
 
     REQUIRE(controller.saved.size() == 1);
@@ -5626,11 +5673,12 @@ TEST_CASE("A blank save-layout name is a no-op that keeps the prompt open (offsc
     REQUIRE(host.nameField() != nullptr);
 
     host.nameField()->setProperty("text", QStringLiteral("   "));
-    QMetaObject::invokeMethod(host.dialog, "accept");
+    QMetaObject::invokeMethod(host.dialog, "pressDefault");
     QCoreApplication::processEvents();
 
     CHECK(controller.saved.isEmpty());
     CHECK(host.opened()); // still up, nothing saved
+    CHECK_FALSE(host.part(QStringLiteral("kitDialogAccept"))->property("enabled").toBool());
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
@@ -10303,6 +10351,127 @@ TEST_CASE("notices: toast and banner text read on every scheme, row and appearan
                 CHECK(contrastOn(bannerGlyph, fillOf(bannerFill)) >= 3.0);
             }
     }
+}
+// }}}
+
+// {{{ Save Layout as a kit dialog
+TEST_CASE("Save Layout: Save is offered for a new name, and Replace only once confirmed (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    controller.existing = { "dev", "ops" };
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(host.opened());
+    auto* const field = host.nameField();
+    auto* const accept = host.part(QStringLiteral("kitDialogAccept"));
+    auto* const taken = host.part(QStringLiteral("saveLayoutTaken"));
+    auto* const replace = host.part(QStringLiteral("saveLayoutReplace"));
+    REQUIRE(field != nullptr);
+    REQUIRE(accept != nullptr);
+    REQUIRE(taken != nullptr);
+    REQUIRE(replace != nullptr);
+    auto const typed = [&](QString const& text) {
+        field->setProperty("text", text);
+        QCoreApplication::processEvents();
+    };
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    CHECK(host.part(QStringLiteral("saveLayoutSummary"))->property("text").toString()
+          == "3 tabs · 5 panes · working directories and commands");
+    CHECK_FALSE(accept->property("enabled").toBool()); // empty
+    typed(QStringLiteral("   "));
+    CHECK_FALSE(accept->property("enabled").toBool()); // white space only
+    typed(QStringLiteral("web"));
+    CHECK(accept->property("enabled").toBool());
+    CHECK(accept->property("text").toString() == "Save");
+    CHECK_FALSE(taken->isVisible());
+
+    typed(QStringLiteral("dev"));
+    CHECK(taken->isVisible());
+    CHECK_FALSE(accept->property("enabled").toBool());
+
+    // Return on a disabled Save leaves the dialog open, saving nothing.
+    field->forceActiveFocus();
+    QTest::keyClick(qobject_cast<QWindow*>(host.window.get()), Qt::Key_Return);
+    QCoreApplication::processEvents();
+    CHECK(host.opened());
+    CHECK(controller.saved.isEmpty());
+
+    REQUIRE(QMetaObject::invokeMethod(replace, "clicked"));
+    QCoreApplication::processEvents();
+    CHECK(accept->property("enabled").toBool());
+    CHECK(accept->property("text").toString() == "Replace");
+    CHECK(host.dialog->property("acceptRole").toInt() == contour::window::UiStyleProvider::statusDanger());
+    CHECK_FALSE(taken->isVisible());
+
+    // Typing withdraws the confirmation.
+    typed(QStringLiteral("devx"));
+    typed(QStringLiteral("dev"));
+    CHECK(accept->property("text").toString() == "Save");
+    CHECK_FALSE(accept->property("enabled").toBool());
+
+    REQUIRE(QMetaObject::invokeMethod(replace, "clicked"));
+    QCoreApplication::processEvents();
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "pressDefault"));
+    QCoreApplication::processEvents();
+    CHECK(controller.replaced == QStringList { QStringLiteral("dev") });
+    CHECK(controller.saved.isEmpty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Save Layout: a sheet on the macOS row (offscreen)", "[contour][gui][qml][layout]")
+{
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    auto host = makeSaveLayoutHost(engine, controller, setup);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+    CHECK(host.dialog->property("y").toReal() == 0);
+}
+
+TEST_CASE("Save Layout: the Terminal row's Replace reads on its fill (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-dark", "contour-light");
+    INFO("scheme: " << schemeName);
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    controller.existing = { "dev" };
+    auto host = makeSaveLayoutHost(engine, controller, terminalRowSetup(schemeName));
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+    host.nameField()->setProperty("text", QStringLiteral("dev"));
+    QCoreApplication::processEvents();
+    REQUIRE(QMetaObject::invokeMethod(host.part(QStringLiteral("saveLayoutReplace")), "clicked"));
+    QCoreApplication::processEvents();
+
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    auto const danger = contour::window::UiStyleProvider::statusDanger();
+    CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(provider->onStatusColor(danger)),
+                                   contour::platform::toRGBColor(provider->statusColor(danger)))
+          >= 4.5);
+    // And the button paints exactly that pair.
+    auto* const accept = host.part(QStringLiteral("kitDialogAccept"));
+    REQUIRE(accept != nullptr);
+    auto const* label = accept->property("contentItem").value<QQuickItem*>();
+    auto const* fill = accept->property("background").value<QQuickItem*>();
+    REQUIRE(label != nullptr);
+    REQUIRE(fill != nullptr);
+    CHECK(contrastOn(label, fillOf(fill)) >= 4.5);
 }
 // }}}
 

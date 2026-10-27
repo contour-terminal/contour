@@ -159,13 +159,15 @@ Dialog {
                 // Reads paletteRevision so the bindings re-evaluate on a light/dark flip (see UiStyleProvider).
                 readonly property color fill: chromeStyle.paletteRevision < 0
                                               ? "transparent" : chromeStyle.statusColor(root.acceptRole)
-                readonly property color onFill: chromeStyle.paletteRevision < 0
+                // Not "onFill": QML reads a name of "on" and a capital as a signal handler, and the property
+                // never held a colour -- the label fell back to black, under 4.5:1 on the danger fill.
+                readonly property color inkOnFill: chromeStyle.paletteRevision < 0
                                                 ? "transparent" : chromeStyle.onStatusColor(root.acceptRole)
 
                 contentItem: Label {
                     text: acceptButton.text
                     font: acceptButton.font
-                    color: acceptButton.onFill
+                    color: acceptButton.inkOnFill
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }

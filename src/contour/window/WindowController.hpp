@@ -19,6 +19,7 @@
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -289,11 +290,26 @@ class WindowController:
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
     /// back with the name the user types.
     Q_INVOKABLE void beginSaveLayoutPrompt();
-    /// Saves this window's tabs as the layout named @p name (the "save layout as" prompt's accept), via
-    /// the manager's saveLayout(). A blank name or a window with no active session is a no-op, so an
-    /// empty prompt never writes a nameless layout.
+    /// Saves this window's tabs as a new layout named @p name (Save Layout's Save). A blank name is a no-op,
+    /// so an empty prompt never writes a nameless layout; a name a layout already has is refused, however
+    /// recently it was taken. Either way the window says how it went.
     /// @param name The layout name the user typed.
     Q_INVOKABLE void saveLayoutAs(QString const& name);
+    /// Saves this window's tabs as the layout named @p name, replacing the one that has it (Save Layout's
+    /// Replace, once the user confirmed it). The window says how it went.
+    /// @param name The layout name the user typed.
+    Q_INVOKABLE void replaceLayout(QString const& name);
+    /// What Save Layout makes of @p name against the layouts the configuration holds (checkLayoutName()).
+    /// @param name The typed name, untrimmed.
+    /// @param replace Whether the user confirmed replacing a taken name -- a bool for QML, the documented
+    ///        carve-out (a LayoutReplace inside).
+    /// @return `nameState` ("empty", "available" or "taken"), `button` ("disabled", "save" or "replace")
+    ///         and `trimmed`, the name as it would be saved.
+    [[nodiscard]] Q_INVOKABLE QVariantMap checkLayoutName(QString const& name, bool replace) const;
+    /// @return What Save Layout says it saves: this window's tabs and panes (layoutSummaryText()).
+    [[nodiscard]] Q_INVOKABLE QString layoutSummary() const;
+    /// @p check as QML reads it, with the name it was made of: what checkLayoutName() returns.
+    [[nodiscard]] static QVariantMap layoutCheckMap(SaveLayoutCheck const& check, QString const& trimmed);
     /// Colors the ACTIVE tab (the keyboard entry point for `SetTabColor` carrying a color). Recorded
     /// as the user's own choice, so it outranks any color the application assigned via DECAC.
     /// @param color The color to apply.

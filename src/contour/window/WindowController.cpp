@@ -808,17 +808,71 @@ void WindowController::beginSaveLayoutPrompt()
     emit saveLayoutRequested();
 }
 
+namespace
+{
+    /// Saves @p window under @p name through @p manager, and has @p notices say how it went.
+    void saveWindowLayoutAndTell(session::TerminalSessionManager& manager,
+                                 vtworkspace::WindowId window,
+                                 QString const& name,
+                                 LayoutReplace replace,
+                                 NoticeModel& notices)
+    {
+        // A blank prompt must never write a nameless layout (see the header). Trim first, so trailing
+        // whitespace neither passes the guard nor lands in the saved key.
+        auto const trimmed = name.trimmed().toStdString();
+        if (trimmed.empty())
+            return;
+        if (auto const saved = manager.saveWindowLayout(window, trimmed, replace); saved)
+            notices.post(Notice { .kind = NoticeKind::LayoutSaved, .text = layoutSavedNoticeText(trimmed) });
+        else
+            notices.post(Notice { .kind = NoticeKind::LayoutSaveFailed,
+                                  .text = layoutSaveFailedNoticeText(trimmed, saved.error()) });
+    }
+} // namespace
+
 void WindowController::saveLayoutAs(QString const& name)
 {
-    // A blank prompt must never write a nameless layout (see the header). Trim first, so trailing
-    // whitespace neither passes the guard nor lands in the saved key.
+    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Keep, _notices);
+}
+
+void WindowController::replaceLayout(QString const& name)
+{
+    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Replace, _notices);
+}
+
+QVariantMap WindowController::layoutCheckMap(SaveLayoutCheck const& check, QString const& trimmed)
+{
+    return QVariantMap {
+        { QStringLiteral("nameState"), QString::fromUtf8(layoutNameStateName(check.name)) },
+        { QStringLiteral("button"), QString::fromUtf8(saveLayoutButtonName(check.button)) },
+        { QStringLiteral("trimmed"), trimmed },
+    };
+}
+
+QVariantMap WindowController::checkLayoutName(QString const& name, bool replace) const
+{
     auto const trimmed = name.trimmed();
-    if (trimmed.isEmpty())
-        return;
-    // Route through the same manager entry point the SaveLayout keybinding uses, targeting THIS window's
-    // active session — saveLayout() resolves the hosting window from it and serializes that window.
-    if (auto* session = activeSession(); session != nullptr)
-        _manager.saveLayout(trimmed.toStdString(), session);
+    auto existing = std::vector<std::string> {};
+    for (auto const& [layoutName, layout]: _manager.app().config().layouts.value())
+        existing.push_back(layoutName);
+    auto const check = window::checkLayoutName(
+        trimmed.toStdString(), existing, replace ? LayoutReplace::Replace : LayoutReplace::Keep);
+    return layoutCheckMap(check, trimmed);
+}
+
+QString WindowController::layoutSummary() const
+{
+    auto const* const window = _manager.model().window(_windowId);
+    auto tabs = 0;
+    auto panes = 0;
+    if (window != nullptr)
+        for (auto const index: std::views::iota(0, window->tabCount()))
+            if (auto const* const tab = window->tabAt(index))
+            {
+                ++tabs;
+                panes += tab->paneCount();
+            }
+    return QString::fromStdString(layoutSummaryText(tabs, panes));
 }
 
 // Both of these route through the row-based setters the color flyout already uses, so the keyboard and

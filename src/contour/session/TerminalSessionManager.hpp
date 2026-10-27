@@ -251,9 +251,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// claim more than what is actually saved — stores it under @p name in the app's in-memory config.
     /// @param window The window whose tabs/panes to serialize.
     /// @param name   The key to save the layout under.
+    /// @param replace Whether a layout already saved under @p name -- in the layouts file as it is read now,
+    ///                or in the configuration -- may be replaced; Keep refuses it with NameTaken, checked
+    ///                where the store is read, so a name taken since the dialog checked it is not
+    ///                overwritten.
     /// @return Nothing on success, or the reason the layout could not be saved.
-    [[nodiscard]] std::expected<void, config::LayoutSaveError> saveWindowLayout(vtworkspace::WindowId window,
-                                                                                std::string const& name);
+    [[nodiscard]] std::expected<void, config::LayoutSaveError> saveWindowLayout(
+        vtworkspace::WindowId window, std::string const& name, window::LayoutReplace replace);
 
     /// Where layouts are persisted: the `layouts.yml` sibling of the loaded config file — which is
     /// exactly where loadConfigFromFile() merges it back from, so saving and loading can never

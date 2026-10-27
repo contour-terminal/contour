@@ -308,7 +308,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
     layout.tabs = { t0, t1 };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 
-    REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
+    REQUIRE(app.manager().saveWindowLayout(win.id, "saved", contour::window::LayoutReplace::Replace));
 
     auto const path = std::filesystem::path(configDir.path().toStdU16String()) / "layouts.yml";
     REQUIRE(std::filesystem::exists(path));
@@ -372,7 +372,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unre
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 
-    CHECK_FALSE(app.manager().saveWindowLayout(win.id, "saved"));
+    CHECK_FALSE(app.manager().saveWindowLayout(win.id, "saved", contour::window::LayoutReplace::Replace));
 
     // The unreadable file is left byte-for-byte untouched for the user to fix or remove.
     std::ifstream const in(layoutsPath, std::ios::binary);
@@ -411,7 +411,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected Layo
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
 
-    REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
+    REQUIRE(app.manager().saveWindowLayout(win.id, "saved", contour::window::LayoutReplace::Replace));
 
     // Persisted next to the LOADED CONFIG FILE — the very path loadConfigFromFile merges back from,
     // so a custom `--config` can never strand saves somewhere the loader will not look.
@@ -437,18 +437,21 @@ TEST_CASE("TerminalSessionManager: SaveLayout reports why a save failed", "[mana
     contour::test::ScopedController const win { app.manager() };
 
     // Each failure is a distinct, reportable cause — not a bare "false".
-    CHECK(app.manager().saveWindowLayout(win.id, "").error() == contour::config::LayoutSaveError::EmptyName);
-    CHECK(app.manager().saveWindowLayout(vtworkspace::WindowId { 4711 }, "x").error()
+    CHECK(app.manager().saveWindowLayout(win.id, "", contour::window::LayoutReplace::Replace).error()
+          == contour::config::LayoutSaveError::EmptyName);
+    CHECK(app.manager()
+              .saveWindowLayout(vtworkspace::WindowId { 4711 }, "x", contour::window::LayoutReplace::Replace)
+              .error()
           == contour::config::LayoutSaveError::UnknownWindow);
 
     store->loadError = "corrupt";
-    CHECK(app.manager().saveWindowLayout(win.id, "x").error()
+    CHECK(app.manager().saveWindowLayout(win.id, "x", contour::window::LayoutReplace::Replace).error()
           == contour::config::LayoutSaveError::StoreUnreadable);
     CHECK(store->savedPaths.empty()); // an unreadable store is never written over
 
     store->loadError.reset();
     store->saveError = "disk full";
-    CHECK(app.manager().saveWindowLayout(win.id, "x").error()
+    CHECK(app.manager().saveWindowLayout(win.id, "x", contour::window::LayoutReplace::Replace).error()
           == contour::config::LayoutSaveError::WriteFailed);
     // A failed write must NOT leave the in-memory config claiming a layout that was never saved.
     CHECK_FALSE(app.app().config().layouts.value().contains("x"));

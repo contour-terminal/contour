@@ -688,7 +688,8 @@ void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession
     auto* win = windowHostingSession(acting);
     if (win == nullptr)
         return;
-    if (auto const saved = saveWindowLayout(win->id(), name); !saved)
+    // A name configured into a SaveLayout binding is the intent: it replaces the layout that has it.
+    if (auto const saved = saveWindowLayout(win->id(), name, window::LayoutReplace::Replace); !saved)
         managerLog()("SaveLayout '{}' failed ({}).", name, describe(saved.error()));
 }
 
@@ -898,7 +899,7 @@ void TerminalSessionManager::recordCommand(std::string const& id)
 }
 
 std::expected<void, config::LayoutSaveError> TerminalSessionManager::saveWindowLayout(
-    vtworkspace::WindowId windowId, std::string const& name)
+    vtworkspace::WindowId windowId, std::string const& name, window::LayoutReplace replace)
 {
     if (name.empty())
         return std::unexpected(config::LayoutSaveError::EmptyName);
@@ -950,6 +951,9 @@ std::expected<void, config::LayoutSaveError> TerminalSessionManager::saveWindowL
                      storedLayouts.error());
         return std::unexpected(config::LayoutSaveError::StoreUnreadable);
     }
+    if (replace == window::LayoutReplace::Keep
+        && (storedLayouts->contains(name) || _app.config().layouts.value().contains(name)))
+        return std::unexpected(config::LayoutSaveError::NameTaken);
     (*storedLayouts)[name] = layout;
 
     if (auto const written = _layoutStore.save(path, *storedLayouts); !written)

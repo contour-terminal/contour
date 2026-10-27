@@ -10,7 +10,9 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -28,8 +30,10 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <vthost/client/ReleaseDrift.hpp>
 
@@ -369,7 +373,27 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }
     Q_INVOKABLE void beginActiveTabColorPick() { emit tabColorPickRequested(0); }
     Q_INVOKABLE void beginSaveLayoutPrompt() { emit saveLayoutRequested(); }
-    Q_INVOKABLE void saveLayoutAs(QString const&) {}
+    Q_INVOKABLE void saveLayoutAs(QString const& name) { savedLayouts << name; }
+    /// Mirrors WindowController::replaceLayout(), recording the name.
+    Q_INVOKABLE void replaceLayout(QString const& name) { replacedLayouts << name; }
+    /// Mirrors WindowController::checkLayoutName() against @c existingLayouts.
+    [[nodiscard]] Q_INVOKABLE QVariantMap checkLayoutName(QString const& name, bool replace) const
+    {
+        auto const trimmed = name.trimmed();
+        return window::WindowController::layoutCheckMap(
+            window::checkLayoutName(trimmed.toStdString(),
+                                    existingLayouts,
+                                    replace ? window::LayoutReplace::Replace : window::LayoutReplace::Keep),
+            trimmed);
+    }
+    /// Mirrors WindowController::layoutSummary() for one tab of one pane.
+    [[nodiscard]] Q_INVOKABLE QString layoutSummary() const
+    {
+        return QString::fromStdString(window::layoutSummaryText(1, 1));
+    }
+    std::vector<std::string> existingLayouts; ///< The layouts checkLayoutName() reads as taken.
+    QStringList savedLayouts;                 ///< Every saveLayoutAs(), in order.
+    QStringList replacedLayouts;              ///< Every replaceLayout(), in order.
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
     /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
