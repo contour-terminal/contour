@@ -56,6 +56,18 @@ TEST_CASE("findBar.movesBelowWhenTheCurrentMatchIsUnderIt", "[findbar]")
     CHECK(placeFindBar(inputs).anchor == FindBarAnchor::TopRight);
 }
 
+TEST_CASE("findBar.aMatchUnderBothPlacesKeepsTheBarOnTop", "[findbar]")
+{
+    // M2: a match tall enough to lie under the top place and the bottom one (360-392) as well -- a long
+    // wrapped line -- gains nothing from the move, so the bar stays where it was.
+    auto inputs = Base;
+    inputs.currentMatch = RowBand { .top = 20, .bottom = 380 };
+    CHECK(placeFindBar(inputs).anchor == FindBarAnchor::TopRight);
+    // Ending just above the bottom place, it is moved there.
+    inputs.currentMatch = RowBand { .top = 20, .bottom = 360 };
+    CHECK(placeFindBar(inputs).anchor == FindBarAnchor::BottomRight);
+}
+
 TEST_CASE("findBar.aNarrowPaneShrinksTheBar", "[findbar]")
 {
     auto inputs = Base;

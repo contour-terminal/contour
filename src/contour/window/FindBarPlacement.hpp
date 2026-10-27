@@ -86,10 +86,11 @@ struct FindBarPlacement
     auto const top = in.insetY;
     auto const bottom = in.paneHeight - in.insetY - in.barHeight;
 
-    auto const overlapsTop = [&](RowBand band) {
-        return band.top < top + in.barHeight && band.bottom > top;
+    auto const covers = [&](RowBand band, double y) {
+        return band.top < y + in.barHeight && band.bottom > y;
     };
-    if (in.currentMatch && overlapsTop(*in.currentMatch) && bottom >= top + in.barHeight)
+    if (in.currentMatch && covers(*in.currentMatch, top) && !covers(*in.currentMatch, bottom)
+        && bottom >= top + in.barHeight)
         return { .anchor = FindBarAnchor::BottomRight, .x = x, .y = bottom, .width = width };
     return { .anchor = FindBarAnchor::TopRight, .x = x, .y = top, .width = width };
 }
