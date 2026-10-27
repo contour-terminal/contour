@@ -240,6 +240,20 @@ using FallbackCharMapping = FallbackMapping<char32_t>;
 /// @return The four rows.
 [[nodiscard]] std::array<FallbackCharMapping, 4> const& macFindChords();
 
+/// The chords that act on the focused command block (R-j): Ctrl+Enter and Shift+F10 open its menu, Enter
+/// folds it, Escape lets go of it. Every one requires MatchModes::BlockFocus, so without a focused block the
+/// key reaches the application as it always did. In makeDefaultInputMappings() for a freshly written
+/// configuration, and in builtinFallbackKeyMappings() for one that predates them.
+/// @return The four rows.
+[[nodiscard]] std::array<KeyInputMapping, 4> const& blockFocusChords();
+
+/// The macOS chords that move the block focus (R-j): Super+Up and Super+Down step to the previous and next
+/// command, Shift+Super+Up and Shift+Super+Down do so and select its output. In every mode but the
+/// alternate screen, where an application keeps the chord. Fallbacks; builtinFallbackKeyMappings() holds
+/// them on macOS only, declared everywhere so the table can be tested everywhere.
+/// @return The four rows.
+[[nodiscard]] std::array<FallbackKeyMapping, 4> const& macBlockChords();
+
 namespace helper
 {
     inline bool testMatchMode(uint8_t actualModeFlags,
@@ -1772,6 +1786,7 @@ struct ChromeFocusChord
         for (auto const& row: native2026ChromeFocusChords())
             mappings.keyMappings.push_back(KeyInputMapping {
                 .modes {}, .modifiers = row.modifiers, .input = row.key, .binding = { row.action } });
+    std::ranges::copy(blockFocusChords(), std::back_inserter(mappings.keyMappings));
     return mappings;
 }
 

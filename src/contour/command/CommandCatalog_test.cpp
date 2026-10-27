@@ -452,6 +452,18 @@ TEST_CASE("commandCategory.everyCatalogueActionHasExactlyOneRow", "[contour][pal
     }
 }
 
+TEST_CASE("commandCategory.theBlockFocusActionsAreBlocks", "[contour][palette][commandcategory]")
+{
+    using namespace actions;
+    for (auto const& action: { Action { FocusPreviousCommand {} },
+                               Action { FocusNextCommand {} },
+                               Action { SelectPreviousCommandOutput {} },
+                               Action { SelectNextCommandOutput {} },
+                               Action { OpenBlockMenu {} },
+                               Action { ClearCommandBlockFocus {} } })
+        CHECK(commandCategory(action) == CommandCategory::Blocks);
+}
+
 TEST_CASE("commandCategory.theSpecsSevenGroups", "[contour][palette][commandcategory]")
 {
     CHECK(commandCategory(actions::SplitVertical {}) == CommandCategory::Pane);

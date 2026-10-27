@@ -93,6 +93,12 @@ struct ScrollToTop{};
 struct ToggleFold{};       // OSC 133: toggle the fold at the cursor's block
 struct ToggleFoldAt{ int line {}; }; // OSC 133: toggle the fold covering a given grid line
 struct ToggleLastFold{};   // OSC 133: toggle the most recent finished command's fold
+struct FocusPreviousCommand{};        // OSC 133: focus the previous command block
+struct FocusNextCommand{};            // OSC 133: focus the next command block
+struct SelectPreviousCommandOutput{}; // OSC 133: focus the previous command block and select its output
+struct SelectNextCommandOutput{};     // OSC 133: focus the next command block and select its output
+struct OpenBlockMenu{};               // OSC 133: open the focused command block's menu
+struct ClearCommandBlockFocus{};      // OSC 133: take the keyboard focus off the command block
 struct ScrollUp{};
 struct SearchReverse{};
 struct SearchSelection{};
@@ -224,6 +230,12 @@ using Action = std::variant<CancelSelection,
                             ToggleFold,
                             ToggleFoldAt,
                             ToggleLastFold,
+                            FocusPreviousCommand,
+                            FocusNextCommand,
+                            SelectPreviousCommandOutput,
+                            SelectNextCommandOutput,
+                            OpenBlockMenu,
+                            ClearCommandBlockFocus,
                             ScrollUp,
                             SearchReverse,
                             SearchSelection,
@@ -350,6 +362,8 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     ClosePane,
                                                     OpenCommandPalette,
                                                     OpenContextMenu,
+                                                    OpenBlockMenu,
+                                                    ClearCommandBlockFocus,
                                                     SetTabColor,
                                                     SplitVertical,
                                                     SplitHorizontal,
@@ -557,6 +571,28 @@ namespace documentation
     };
     constexpr inline std::string_view ToggleLastFold {
         "Collapses or expands the most recently finished command"
+    };
+    constexpr inline std::string_view FocusPreviousCommand {
+        "Focuses the command block before the focused one (else the last one in view), scrolls it into view "
+        "and announces how it went."
+    };
+    constexpr inline std::string_view FocusNextCommand {
+        "Focuses the command block after the focused one (else the first one in view), scrolls it into view "
+        "and announces how it went."
+    };
+    constexpr inline std::string_view SelectPreviousCommandOutput {
+        "Focuses the previous command block, as FocusPreviousCommand does, and selects its output."
+    };
+    constexpr inline std::string_view SelectNextCommandOutput {
+        "Focuses the next command block, as FocusNextCommand does, and selects its output."
+    };
+    constexpr inline std::string_view OpenBlockMenu {
+        "Opens the menu of the focused command block. Bind it with the BlockFocus mode, so the key keeps "
+        "reaching the application otherwise."
+    };
+    constexpr inline std::string_view ClearCommandBlockFocus {
+        "Takes the keyboard focus off the command block. Bind it with the BlockFocus mode, so the key keeps "
+        "reaching the application otherwise."
     };
     constexpr inline std::string_view ScrollUp { "Scrolls up by the multiplier factor." };
     constexpr inline std::string_view SearchReverse {
@@ -858,6 +894,20 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ToggleFold", Action { ToggleFold {} }, documentation::ToggleFold },
         ActionCatalogEntry { "ToggleFoldAt", Action { ToggleFoldAt {} }, documentation::ToggleFoldAt },
         ActionCatalogEntry { "ToggleLastFold", Action { ToggleLastFold {} }, documentation::ToggleLastFold },
+        ActionCatalogEntry {
+            "FocusPreviousCommand", Action { FocusPreviousCommand {} }, documentation::FocusPreviousCommand },
+        ActionCatalogEntry {
+            "FocusNextCommand", Action { FocusNextCommand {} }, documentation::FocusNextCommand },
+        ActionCatalogEntry { "SelectPreviousCommandOutput",
+                             Action { SelectPreviousCommandOutput {} },
+                             documentation::SelectPreviousCommandOutput },
+        ActionCatalogEntry { "SelectNextCommandOutput",
+                             Action { SelectNextCommandOutput {} },
+                             documentation::SelectNextCommandOutput },
+        ActionCatalogEntry { "OpenBlockMenu", Action { OpenBlockMenu {} }, documentation::OpenBlockMenu },
+        ActionCatalogEntry { "ClearCommandBlockFocus",
+                             Action { ClearCommandBlockFocus {} },
+                             documentation::ClearCommandBlockFocus },
         ActionCatalogEntry { "ScrollUp", Action { ScrollUp {} }, documentation::ScrollUp },
         ActionCatalogEntry { "SearchReverse", Action { SearchReverse {} }, documentation::SearchReverse },
         ActionCatalogEntry {

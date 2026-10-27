@@ -47,6 +47,7 @@
 #include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/SearchQuery.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
 
@@ -3923,6 +3924,10 @@ void TerminalSession::sendKeyEvent(Key key,
     // input protects the keys after it, not this one; it also releases a stale lock before the key goes in.
     refreshInputEcho();
     noteInputActivity();
+    // Typing is the keyboard acting on the shell, not on a block. A bare modifier is no typing: Ctrl goes
+    // down before the Ctrl+Enter that needs the focus, and a release ends nothing.
+    if (eventType != KeyboardEventType::Release && !modifierOnly)
+        dropBlockFocusOnInput();
     terminal().sendKeyEvent(key, modifiers, eventType, now);
     // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
     // noticed at the next key, once the key's bytes have reached the PTY.
@@ -3993,6 +3998,8 @@ void TerminalSession::sendCharEvent(char32_t value,
         return;
     refreshInputEcho(); // before the key leaves, as in sendKeyEvent
     noteInputActivity();
+    if (eventType != KeyboardEventType::Release)
+        dropBlockFocusOnInput();
     terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
     refreshInputEcho(); // as in sendKeyEvent
 }
@@ -4044,6 +4051,9 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     // Through runUnderStateLock(): a press the application tracks is reported, and with SRM reset the report
     // is echoed, which parses. See ViNormalMode.
     auto const handledByApp = _terminal.runUnderStateLock([&]() {
+        // A click in the grid is the pointer taking over from the keyboard's block.
+        if (vtbackend::ClickCounter::countsClicks(button))
+            _terminal.clearCommandBlockFocus();
         return _terminal.sendMousePressEvent(
             modifiers, button, pos, pixelPosition, uiHandledHint, [&claim](uint8_t clickCount) {
                 claim.claimed = claim.session.clickCountBinding(claim.button, claim.modifiers, clickCount);
@@ -6379,8 +6389,86 @@ bool TerminalSession::operator()(actions::ExpandAllFolds)
 
 bool TerminalSession::operator()(actions::ToggleFold)
 {
-    return withScrollableChange(
-        [](auto& terminal) { return terminal.toggleFoldContaining(foldAnchorLine(terminal)); });
+    return withScrollableChange([](vtbackend::Terminal& terminal) {
+        // The block the keyboard focused first, wherever the viewport's top is; else the viewport's own.
+        if (auto const focused = terminal.focusedCommandBlock())
+            if (auto const* const record = terminal.commandBlocks().find(*focused))
+                if (auto const head = vtbackend::headOffsetOf(terminal.primaryScreen().grid(), *record))
+                    return terminal.toggleFoldContaining(*head);
+        return terminal.toggleFoldContaining(foldAnchorLine(terminal));
+    });
+}
+
+bool TerminalSession::operator()(actions::FocusPreviousCommand)
+{
+    return stepBlockFocus(vtbackend::BlockStep::Previous, BlockOutputSelection::Leave);
+}
+
+bool TerminalSession::operator()(actions::FocusNextCommand)
+{
+    return stepBlockFocus(vtbackend::BlockStep::Next, BlockOutputSelection::Leave);
+}
+
+bool TerminalSession::operator()(actions::SelectPreviousCommandOutput)
+{
+    return stepBlockFocus(vtbackend::BlockStep::Previous, BlockOutputSelection::Select);
+}
+
+bool TerminalSession::operator()(actions::SelectNextCommandOutput)
+{
+    return stepBlockFocus(vtbackend::BlockStep::Next, BlockOutputSelection::Select);
+}
+
+bool TerminalSession::operator()(actions::OpenBlockMenu)
+{
+    // Not openBlockActions(): that one is the pointer's (the hovered block's button), and a focus left
+    // behind must not take over a click on another block's button.
+    auto const focused = core::locked(_terminal, [&] { return terminal().focusedCommandBlock(); });
+    if (!focused)
+        return false;
+    auto const anchor = core::locked(_terminal, [&] { return blockActionsAnchorLocked(*focused); });
+    openBlockMenuAt(*focused, anchor.isEmpty() ? std::nullopt : std::optional { anchor.bottomLeft() });
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ClearCommandBlockFocus)
+{
+    return _terminal.runUnderStateLock([&]() {
+        auto const focused = terminal().focusedCommandBlock().has_value();
+        terminal().clearCommandBlockFocus();
+        return focused;
+    });
+}
+
+bool TerminalSession::stepBlockFocus(vtbackend::BlockStep step, BlockOutputSelection output)
+{
+    // What is said, built under the lock from the record and spoken outside it.
+    auto announcement = QString {};
+    auto const moved = withScrollableChange([&](vtbackend::Terminal& terminal) {
+        auto const block = terminal.focusCommandBlock(step);
+        if (!block)
+            return false;
+        if (auto const* const record = terminal.commandBlocks().find(*block))
+            announcement = QString::fromStdString(
+                std::format("{}, {}",
+                            platform::commandShortName(record->commandLine),
+                            vtbackend::spokenBlockStatus(*record, terminal.wallTimeNow())));
+        if (output == BlockOutputSelection::Select)
+            std::ignore = terminal.selectCommandBlock(
+                vtbackend::CommandBlockTarget::Last, vtbackend::CommandBlockPart::Output, *block);
+        return true;
+    });
+    if (moved)
+        announce(announcement);
+    return moved;
+}
+
+void TerminalSession::dropBlockFocusOnInput()
+{
+    // Read without the lock first: nearly every keystroke arrives with no block focused.
+    if ((_terminal.bindingModes() & static_cast<uint8_t>(vtbackend::MatchModes::BlockFocus)) == 0)
+        return;
+    _terminal.runUnderStateLock([&]() { terminal().clearCommandBlockFocus(); });
 }
 
 bool TerminalSession::operator()(actions::ToggleCommandFold const& action)

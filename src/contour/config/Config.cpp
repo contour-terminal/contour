@@ -82,6 +82,10 @@ namespace
 {
     /// The modes of a built-in row that acts on command blocks, which exist on the primary screen only.
     constexpr auto PrimaryScreenOnly = vtbackend::MatchModes { 0, vtbackend::MatchModes::AlternateScreen };
+
+    /// The modes of a built-in row that acts on the focused command block, so that without one the key
+    /// reaches the application.
+    constexpr auto RequiresBlockFocus = vtbackend::MatchModes { vtbackend::MatchModes::BlockFocus, 0 };
 } // namespace
 
 std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
@@ -153,45 +157,97 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
     // first and therefore wins. Should that trade ever need softening, the cheap retreat is a `.modes`
     // with AlternateScreen DISABLED on the two Tab rows: full-screen applications would keep Ctrl+Tab
     // while the shell still switched tabs, using only data that already exists.
-    static auto const mappings = std::vector<FallbackKeyMapping> {
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::PageUp,
-                         .binding = { { actions::SwitchToTabLeft {} } } } },
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::PageDown,
-                         .binding = { { actions::SwitchToTabRight {} } } } },
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::Tab,
-                         .binding = { { actions::SwitchToTabRight {} } } } },
-        // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
-        // Key_Backtab, which helper.cpp rewrites (see makeKey).
-        FallbackKeyMapping { .mapping = { .modes { vtbackend::MatchModes {} },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::Tab,
-                                          .binding = { { actions::SwitchToTabLeft {} } } } },
-        // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in the
-        // defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane, Ctrl+Alt swaps
-        // one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts are; an
-        // alternate-screen application keeps the chord.
-        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::UpArrow,
-                                          .binding = { { actions::ScrollMarkUp {} } } } },
-        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::DownArrow,
-                                          .binding = { { actions::ScrollMarkDown {} } } } },
-    };
+    static auto const mappings = [] {
+        auto rows = std::vector<FallbackKeyMapping> {
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::PageUp,
+                             .binding = { { actions::SwitchToTabLeft {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::PageDown,
+                             .binding = { { actions::SwitchToTabRight {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::Tab,
+                             .binding = { { actions::SwitchToTabRight {} } } } },
+            // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
+            // Key_Backtab, which helper.cpp rewrites (see makeKey).
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::Tab,
+                             .binding = { { actions::SwitchToTabLeft {} } } } },
+            // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in
+            // the defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane,
+            // Ctrl+Alt swaps one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts
+            // are; an alternate-screen application keeps the chord.
+            FallbackKeyMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::UpArrow,
+                             .binding = { { actions::ScrollMarkUp {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::DownArrow,
+                             .binding = { { actions::ScrollMarkDown {} } } } },
+        };
+        // The block chords, for a contour.yml that predates them; one of its own claiming a chord wins.
+        for (auto const& chord: blockFocusChords())
+            rows.push_back(FallbackKeyMapping { .mapping = chord });
+#ifdef __APPLE__
+        std::ranges::copy(macBlockChords(), std::back_inserter(rows));
+#endif
+        return rows;
+    }();
     return mappings;
+}
+
+std::array<KeyInputMapping, 4> const& blockFocusChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, vtbackend::Key key, actions::Action action) {
+        return KeyInputMapping { .modes { RequiresBlockFocus },
+                                 .modifiers { modifiers },
+                                 .input = key,
+                                 .binding = { { std::move(action) } } };
+    };
+    static auto const rows = std::array {
+        chord(vtbackend::Modifiers { vtbackend::Modifier::Control },
+              vtbackend::Key::Enter,
+              actions::OpenBlockMenu {}),
+        chord(vtbackend::Modifiers { vtbackend::Modifier::Shift },
+              vtbackend::Key::F10,
+              actions::OpenBlockMenu {}),
+        chord(vtbackend::Modifiers {}, vtbackend::Key::Enter, actions::ToggleFold {}),
+        chord(vtbackend::Modifiers {}, vtbackend::Key::Escape, actions::ClearCommandBlockFocus {}),
+    };
+    return rows;
+}
+
+std::array<FallbackKeyMapping, 4> const& macBlockChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, vtbackend::Key key, actions::Action action) {
+        return FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                                 .modifiers { modifiers },
+                                                 .input = key,
+                                                 .binding = { { std::move(action) } } } };
+    };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const shiftSuper = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const rows = std::array {
+        chord(super, vtbackend::Key::UpArrow, actions::FocusPreviousCommand {}),
+        chord(super, vtbackend::Key::DownArrow, actions::FocusNextCommand {}),
+        chord(shiftSuper, vtbackend::Key::UpArrow, actions::SelectPreviousCommandOutput {}),
+        chord(shiftSuper, vtbackend::Key::DownArrow, actions::SelectNextCommandOutput {}),
+    };
+    return rows;
 }
 
 std::vector<FallbackCharMapping> const& builtinFallbackCharMappings()

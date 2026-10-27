@@ -12,13 +12,17 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
 using namespace contour;
+using namespace std::string_view_literals;
 
 TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][repeat]")
 {
@@ -427,4 +431,33 @@ TEST_CASE("actions::fromString names ToggleCommandFold, a non-repeatable block a
         catalog, std::string_view { "ToggleCommandFold" }, &contour::actions::ActionCatalogEntry::name);
     REQUIRE(entry != catalog.end());
     CHECK_FALSE(entry->documentation.empty());
+}
+
+TEST_CASE("actions: the block focus actions round-trip and are Blocks", "[actions][catalog][blockfocus]")
+{
+    using actions::Action;
+    auto const rows = std::array {
+        std::pair { "FocusPreviousCommand"sv, Action { actions::FocusPreviousCommand {} } },
+        std::pair { "FocusNextCommand"sv, Action { actions::FocusNextCommand {} } },
+        std::pair { "SelectPreviousCommandOutput"sv, Action { actions::SelectPreviousCommandOutput {} } },
+        std::pair { "SelectNextCommandOutput"sv, Action { actions::SelectNextCommandOutput {} } },
+        std::pair { "OpenBlockMenu"sv, Action { actions::OpenBlockMenu {} } },
+        std::pair { "ClearCommandBlockFocus"sv, Action { actions::ClearCommandBlockFocus {} } },
+    };
+    for (auto const& [name, action]: rows)
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(std::string { name });
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->index() == action.index());
+        CHECK(actions::actionCatalog()[action.index()].name == name);
+    }
+
+    // The four steps repeat when the key is held; the menu and the release of the focus do not.
+    for (auto const& [name, action]: rows)
+    {
+        INFO(name);
+        auto const steps = name.starts_with("Focus") || name.starts_with("Select");
+        CHECK(actions::isNonRepeatable(action) == !steps);
+    }
 }

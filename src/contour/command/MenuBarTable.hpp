@@ -132,6 +132,9 @@ inline constexpr std::array MenuReachabilityExemptions {
                                 .reason = "moves keyboard focus into the window's chrome" },
     MenuReachabilityExemption { .action = "FocusToolbar",
                                 .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption { .action = "ClearCommandBlockFocus",
+                                .reason = "it is the Escape of a focused block, which a row would need the "
+                                          "focus to run" },
 };
 
 } // namespace contour::command

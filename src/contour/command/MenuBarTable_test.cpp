@@ -481,6 +481,31 @@ TEST_CASE("menuBar.aMacMenuShowsTheCommandKeyChord", "[menubar]")
     CHECK(chordPreferenceFor(config::HostPlatform::Other) == ChordPreference::FirstBound);
 }
 
+TEST_CASE("menuBar.theCommandsSubmenuNavigatesBlocks", "[menubar]")
+{
+    auto const bar = buildMenuBar(fullState());
+    auto const& shell = bar[static_cast<std::size_t>(MenuBarMenu::Shell)].children;
+    auto const commands = std::ranges::find(shell, std::string_view { "Commands" }, &ContextMenuEntry::title);
+    REQUIRE(commands != shell.end());
+    REQUIRE(commands->children.size() >= 5);
+
+    auto const first = std::span(commands->children).first(5);
+    auto const titles = std::array<std::string_view, 5> {
+        "Previous Command", "Next Command", "Select Previous Output", "Select Next Output", "Block Actions…"
+    };
+    for (auto const index: std::views::iota(std::size_t { 0 }, titles.size()))
+    {
+        INFO(titles[index]);
+        CHECK(first[index].title == titles[index]);
+        CHECK(first[index].kind == ContextMenuEntryKind::Command);
+    }
+    CHECK(std::holds_alternative<actions::FocusPreviousCommand>(first[0].action));
+    CHECK(std::holds_alternative<actions::FocusNextCommand>(first[1].action));
+    CHECK(std::holds_alternative<actions::SelectPreviousCommandOutput>(first[2].action));
+    CHECK(std::holds_alternative<actions::SelectNextCommandOutput>(first[3].action));
+    CHECK(std::holds_alternative<actions::OpenBlockMenu>(first[4].action));
+}
+
 #ifdef __APPLE__
 TEST_CASE("menuBar.theFindRowsShowTheMacFindChords", "[menubar]")
 {

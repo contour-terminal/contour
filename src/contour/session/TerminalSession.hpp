@@ -148,6 +148,13 @@ enum class RerunAsk : uint8_t
     Asked,       ///< The dialog is up.
 };
 
+/// Whether stepping the block focus also selects the block's output.
+enum class BlockOutputSelection : uint8_t
+{
+    Leave = 0, ///< The selection stays as it was.
+    Select,    ///< The focused block's output becomes the selection.
+};
+
 /// What a session's program is to the user. Fixed at construction: it decides how the session's end is
 /// reported and whether a saved layout keeps the session's command.
 enum class SessionRole : uint8_t
@@ -1602,6 +1609,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleFold);
     bool operator()(actions::ToggleFoldAt);
     bool operator()(actions::ToggleLastFold);
+    bool operator()(actions::FocusPreviousCommand);
+    bool operator()(actions::FocusNextCommand);
+    bool operator()(actions::SelectPreviousCommandOutput);
+    bool operator()(actions::SelectNextCommandOutput);
+    bool operator()(actions::OpenBlockMenu);
+    bool operator()(actions::ClearCommandBlockFocus);
     bool operator()(actions::ScrollUp);
     bool operator()(actions::SearchReverse);
     bool operator()(actions::SearchSelection);
@@ -1996,6 +2009,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// pointer, and points the anchor at it.
     /// @param screenRow The screen row the pointer stands at.
     void refreshBlockHoverAt(vtbackend::LineOffset screenRow);
+
+    /// Moves the keyboard's block focus one block in @p step's direction, scrolls the block into view and
+    /// announces how it went: the command's short name, then its status as VoiceOver says it, Polite.
+    /// @param step Which way to move.
+    /// @param output Whether to select the block's output as well.
+    /// @return Whether a block is focused now; false where there is none that way (the focus stays).
+    bool stepBlockFocus(vtbackend::BlockStep step, BlockOutputSelection output);
+
+    /// Takes the keyboard's block focus away when typing, with the terminal locked only if there is one.
+    ///
+    /// Called by every key that is about to reach the PTY: the focus describes what the keyboard acts on, and
+    /// typing is the keyboard acting on the shell.
+    void dropBlockFocusOnInput();
 
     /// The anchor of @p block's button, with the terminal locked: the rail's strip beside its first visible
     /// row.

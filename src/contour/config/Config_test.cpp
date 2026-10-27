@@ -9453,3 +9453,94 @@ TEST_CASE("Config: the find chords follow the platform", "[config][input-mapping
               == 2);
     }
 }
+
+TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][blockfocus]")
+{
+    using vtbackend::Key;
+    using vtbackend::MatchModes;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    namespace actions = contour::actions;
+
+    auto const focused = static_cast<uint8_t>(MatchModes::BlockFocus);
+    auto const unfocused = uint8_t { 0 };
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const shift = Modifiers { Modifier::Shift };
+    auto const none = Modifiers {};
+
+    struct Chord
+    {
+        Modifiers modifiers;
+        Key key;
+        actions::Action action;
+    };
+    auto const chords = std::array {
+        Chord { ctrl, Key::Enter, actions::Action { actions::OpenBlockMenu {} } },
+        Chord { shift, Key::F10, actions::Action { actions::OpenBlockMenu {} } },
+        Chord { none, Key::Enter, actions::Action { actions::ToggleFold {} } },
+        Chord { none, Key::Escape, actions::Action { actions::ClearCommandBlockFocus {} } },
+    };
+
+    // The same four rows serve a freshly written configuration (the defaults) and one that predates them
+    // (the fallbacks), in both editions.
+    auto const config = contour::config::Config {};
+    for (auto const& chord: chords)
+    {
+        INFO(std::format("key {}", static_cast<int>(chord.key)));
+        auto const* const bound =
+            contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, focused);
+        REQUIRE(bound != nullptr);
+        REQUIRE(bound->size() == 1);
+        CHECK(bound->front().index() == chord.action.index());
+
+        // Without a focused block the key is the application's: nothing here claims it.
+        auto const* const unclaimed =
+            contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, unfocused);
+        CHECK(unclaimed == nullptr);
+    }
+
+    for (auto const edition:
+         { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
+    {
+        auto const mappings = contour::config::defaultInputMappings(edition);
+        for (auto const& chord: chords)
+        {
+            auto const row = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
+                return m.input == chord.key && m.modifiers == chord.modifiers
+                       && m.binding.front().index() == chord.action.index();
+            });
+            REQUIRE(row != mappings.keyMappings.end());
+            CHECK(row->modes.status(MatchModes::BlockFocus) == MatchModes::Status::Enabled);
+        }
+    }
+
+    SECTION("the macOS chords step the focus, outside the alternate screen")
+    {
+        auto const super = Modifiers { Modifier::Super };
+        auto const shiftSuper = Modifiers { Modifier::Super, Modifier::Shift };
+        auto const rows = std::array {
+            Chord { super, Key::UpArrow, actions::Action { actions::FocusPreviousCommand {} } },
+            Chord { super, Key::DownArrow, actions::Action { actions::FocusNextCommand {} } },
+            Chord { shiftSuper, Key::UpArrow, actions::Action { actions::SelectPreviousCommandOutput {} } },
+            Chord { shiftSuper, Key::DownArrow, actions::Action { actions::SelectNextCommandOutput {} } },
+        };
+        REQUIRE(contour::config::macBlockChords().size() == rows.size());
+        for (auto const& chord: rows)
+        {
+            INFO(std::format("key {}", static_cast<int>(chord.key)));
+            auto const alternate = static_cast<uint8_t>(MatchModes::AlternateScreen);
+            auto const* const primary =
+                contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, unfocused);
+            auto const* const onAlternate =
+                contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, alternate);
+            CHECK(onAlternate == nullptr); // vim keeps it
+#ifdef __APPLE__
+            REQUIRE(primary != nullptr);
+            REQUIRE(primary->size() == 1);
+            CHECK(primary->front().index() == chord.action.index());
+#else
+            CHECK(primary == nullptr); // no default mapping carries Super with Up or Down elsewhere
+#endif
+        }
+    }
+}

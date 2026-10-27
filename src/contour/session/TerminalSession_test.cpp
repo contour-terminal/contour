@@ -13682,3 +13682,198 @@ TEST_CASE("TerminalSession: a size indicator held when the display goes is no bu
     pane->requestSizeIndicator(SizeIndicatorKind::PageSize);
     CHECK(pane->sizeIndicatorText() == pageTextOf(*pane));
 }
+
+namespace
+{
+/// A failed `make` and then a succeeded `ls`, with a live prompt after them, in a displayless session whose
+/// announcements @p recorder takes.
+struct BlockFocusSession
+{
+    explicit BlockFocusSession(contour::ContourGuiApp& app): session { makeDisplaylessSession(app) }
+    {
+        auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+        recorder = announcer.get();
+        session->setAnnouncer(std::move(announcer));
+        auto& terminal = session->terminal();
+        terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(2), 2));
+        terminal.writeToScreen(vtbackend::test::commandRun("ls", numberedOutput(2), 0));
+        terminal.writeToScreen(std::string { vtbackend::test::PromptStart });
+    }
+
+    /// Presses @p key with @p modifiers.
+    void press(vtbackend::Key key, vtbackend::KeyboardModifiers modifiers = {}) const
+    {
+        session->sendKeyEvent(key, modifiers, KeyboardEventType::Press, std::chrono::steady_clock::now());
+    }
+
+    /// The block now focused.
+    [[nodiscard]] std::optional<vtbackend::CommandBlockId> focused() const
+    {
+        return core::locked(session->terminal(), [&] { return session->terminal().focusedCommandBlock(); });
+    }
+
+    std::unique_ptr<contour::session::TerminalSession> session;
+    contour::test::RecordingAnnouncer* recorder = nullptr;
+};
+} // namespace
+
+TEST_CASE("TerminalSession: focusing the last block says how it went", "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto& terminal = test.session->terminal();
+
+    // The newest command is `ls`, a success; one step further back is the failed `make`.
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {}));
+    REQUIRE(test.recorder->said.size() == 1);
+    CHECK(test.recorder->said.back().message.startsWith(QStringLiteral("ls, Succeeded")));
+    CHECK(test.recorder->said.back().politeness == QAccessible::AnnouncementPoliteness::Polite);
+
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {}));
+    REQUIRE(test.recorder->said.size() == 2);
+    CHECK(test.recorder->said.back().message.startsWith(QStringLiteral("make, Failed, exit 2")));
+    CHECK(test.recorder->said.back().politeness == QAccessible::AnnouncementPoliteness::Polite);
+
+    // Its head is in view, and nothing older is left to step to: silence, and the focus stays.
+    auto const* const record = terminal.commandBlocks().find(*test.focused());
+    REQUIRE(record != nullptr);
+    CHECK(terminal.viewport().isLineVisible(
+        *vtbackend::headOffsetOf(terminal.primaryScreen().grid(), *record)));
+    CHECK_FALSE((*test.session)(contour::actions::FocusPreviousCommand {}));
+    CHECK(test.recorder->said.size() == 2);
+
+    // Forward again, to `ls`.
+    REQUIRE((*test.session)(contour::actions::FocusNextCommand {}));
+    CHECK(test.recorder->said.back().message.startsWith(QStringLiteral("ls, Succeeded")));
+}
+
+TEST_CASE("TerminalSession: stepping with Select takes the output along", "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto& terminal = test.session->terminal();
+
+    REQUIRE((*test.session)(contour::actions::SelectPreviousCommandOutput {}));
+    CHECK(test.focused().has_value());
+    CHECK(core::locked(terminal, [&] { return terminal.selectionAvailable(); }));
+    CHECK(core::locked(terminal, [&] { return terminal.extractSelectionText(); }).contains("out 0"));
+}
+
+TEST_CASE("TerminalSession: Ctrl+Enter opens the focused block's menu, and reaches the shell without focus",
+          "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto menuBlocks = std::vector<vtbackend::CommandBlockId> {};
+    QObject::connect(&testApp.app().sessionsManager(),
+                     &contour::session::TerminalSessionManager::blockMenuRequested,
+                     [&](contour::session::TerminalSession*, vtbackend::CommandBlockId block) {
+                         menuBlocks.push_back(block);
+                     });
+    auto const ctrl = vtbackend::KeyboardModifiers { vtbackend::Modifier::Control };
+
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {}));
+    auto const block = test.focused();
+    REQUIRE(block.has_value());
+    mockPtyOf(*test.session).stdinBuffer().clear();
+
+    test.press(vtbackend::Key::Enter, ctrl);
+    REQUIRE(menuBlocks.size() == 1);
+    CHECK(menuBlocks.front() == *block);
+    CHECK(mockPtyOf(*test.session).stdinBuffer().empty());
+
+    // Shift+F10 is the same menu.
+    test.press(vtbackend::Key::F10, vtbackend::KeyboardModifiers { vtbackend::Modifier::Shift });
+    CHECK(menuBlocks.size() == 2);
+
+    // Escape lets go of the block; the same chord then belongs to the shell again.
+    test.press(vtbackend::Key::Escape);
+    CHECK_FALSE(test.focused().has_value());
+    mockPtyOf(*test.session).stdinBuffer().clear();
+    test.press(vtbackend::Key::Enter, ctrl);
+    CHECK(menuBlocks.size() == 2);
+    CHECK_FALSE(mockPtyOf(*test.session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: Enter folds the focused block instead of reaching the shell",
+          "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto& terminal = test.session->terminal();
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {})); // `ls`
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {})); // `make`, the older one
+    auto const block = test.focused();
+    REQUIRE(block.has_value());
+    auto const head = core::locked(terminal, [&] {
+        return *vtbackend::headOffsetOf(terminal.primaryScreen().grid(),
+                                        *terminal.commandBlocks().find(*block));
+    });
+    mockPtyOf(*test.session).stdinBuffer().clear();
+
+    test.press(vtbackend::Key::Enter);
+    CHECK(core::locked(terminal, [&] { return terminal.foldContaining(head).has_value(); }));
+    CHECK(core::locked(terminal, [&] {
+        return terminal.foldState().isCollapsed(terminal.foldContaining(head)->headStableId);
+    }));
+    CHECK(mockPtyOf(*test.session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: typing clears the block focus", "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto const now = std::chrono::steady_clock::now();
+    REQUIRE((*test.session)(contour::actions::FocusPreviousCommand {}));
+    REQUIRE(test.focused().has_value());
+
+    SECTION("a bare modifier is no typing: Ctrl goes down before the Ctrl+Enter that needs the focus")
+    {
+        test.press(vtbackend::Key::LeftControl,
+                   vtbackend::KeyboardModifiers { vtbackend::Modifier::Control });
+        CHECK(test.focused().has_value());
+    }
+
+    SECTION("a character that reaches the PTY")
+    {
+        test.session->sendCharEvent(U'x',
+                                    vtbackend::KeyIdentity { .unshiftedKey = U'x' },
+                                    Modifiers {},
+                                    KeyboardEventType::Press,
+                                    now);
+        CHECK_FALSE(test.focused().has_value());
+        CHECK(mockPtyOf(*test.session).stdinBuffer().ends_with("x"));
+    }
+
+    SECTION("a key that reaches the PTY")
+    {
+        test.press(vtbackend::Key::UpArrow);
+        CHECK_FALSE(test.focused().has_value());
+    }
+}
+
+TEST_CASE("TerminalSession: a nested shell without integration is focused as one running block",
+          "[contour][session][blockfocus]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandStarted("ssh host"));
+    for (auto const row: std::views::iota(0, 25))
+        terminal.writeToScreen(std::format("remote$ ls {}\r\nfile {}\r\n", row, row));
+
+    REQUIRE((*session)(contour::actions::FocusPreviousCommand {}));
+    auto const running = core::locked(terminal, [&] { return terminal.focusedCommandBlock(); });
+    REQUIRE(running.has_value());
+
+    // Nothing after it: the step finds no block, and the focus stays on the running one.
+    CHECK_FALSE((*session)(contour::actions::FocusNextCommand {}));
+    CHECK(core::locked(terminal, [&] { return terminal.focusedCommandBlock(); }) == running);
+
+    // A typed key clears it.
+    session->sendKeyEvent(vtbackend::Key::UpArrow,
+                          vtbackend::KeyboardModifiers {},
+                          KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    CHECK_FALSE(core::locked(terminal, [&] { return terminal.focusedCommandBlock(); }).has_value());
+}

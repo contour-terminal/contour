@@ -135,6 +135,12 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
+            Table::command(FocusPreviousCommand {}, "Previous Command"),
+            Table::command(FocusNextCommand {}, "Next Command"),
+            Table::command(SelectPreviousCommandOutput {}, "Select Previous Output"),
+            Table::command(SelectNextCommandOutput {}, "Select Next Output"),
+            Table::command(OpenBlockMenu {}, "Block Actions…"),
+            Table::separator(),
             Table::command(CopyCommandLine {}, "Copy Last Command"),
             Table::command(CopyLastCommandPrompt {}, "Copy Last Prompt"),
             Table::command(CopyLastCommandOutput {}, "Copy Last Output"),
