@@ -297,6 +297,7 @@ class ChromeSnapshotScene
             case ScriptAction::RevealHeaders:
                 _controller.setHeaderReveal(static_cast<int>(window::HeaderReveal::HeldModifier));
                 break;
+            case ScriptAction::OpenFindBar: openFindBar(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -383,6 +384,42 @@ class ChromeSnapshotScene
         return paneCount(shape) - 1;
     }
 
+    /// Gives @p session the search @p find names, as the find bar would find it.
+    static void searchIn(MockSession& session, SnapshotFind find)
+    {
+        switch (find)
+        {
+            case SnapshotFind::None: break;
+            case SnapshotFind::Matches:
+                session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
+                session.setSearchPattern(QStringLiteral("config"));
+                session.setSearchSummary(QStringLiteral("2 of 5"),
+                                         MockSession::SearchMatchPresence::Some,
+                                         MockSession::SearchNavigation::Some);
+                break;
+            case SnapshotFind::Invalid:
+                session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
+                session.setSearchPattern(QStringLiteral("a("));
+                session.setSearchSummary(QStringLiteral("Invalid pattern"),
+                                         MockSession::SearchMatchPresence::None,
+                                         MockSession::SearchNavigation::None);
+                break;
+        }
+    }
+
+    /// Opens the active pane's find bar, as the SearchReverse action does, and waits for it to stand open.
+    void openFindBar()
+    {
+        auto* active = _sessions[ActiveLeaf].get();
+        auto* bar = static_cast<QObject*>(nullptr);
+        for (auto* candidate: root().findChildren<QObject*>(QStringLiteral("searchBar")))
+            if (candidate->property("session").value<QObject*>() == active)
+                bar = candidate;
+        REQUIRE(bar != nullptr);
+        QMetaObject::invokeMethod(bar, "open");
+        REQUIRE(QTest::qWaitFor([&] { return bar->property("opened").toBool(); }, 2000));
+    }
+
     /// One session per leaf of @p script's pane shape, in the look's background; every one but the
     /// active leaf's dimmed as unfocused, each running what SnapshotPaneLabels names, all of them
     /// reconnecting when the host connection is, and the last one ended -- its program exited, Restart
@@ -401,6 +438,8 @@ class ChromeSnapshotScene
             session->setDisplayWorkingDirectory(QString::fromUtf8(label.workingDirectory));
             if (script.connection == HostConnection::Reconnecting)
                 session->setReconnecting(true);
+            if (leaf == ActiveLeaf)
+                searchIn(*session, script.find);
             switch (script.paneEnd)
             {
                 case SnapshotPaneEnd::None: break;

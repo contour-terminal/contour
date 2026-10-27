@@ -419,6 +419,30 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                     CHECK(titleBar->height() == ChromeSnapshotScene::SnapshotBareTitleBarHeight);
                 }
                 break;
+            case SnapshotScript::FindBar:
+            case SnapshotScript::FindBarSplit:
+            case SnapshotScript::FindBarInvalid: {
+                // The active pane's bar stands open, its count saying what the search found; on the
+                // Terminal row a split's bar sits in its pane header's row.
+                auto* bar = static_cast<QObject*>(nullptr);
+                for (auto* candidate: scene.root().findChildren<QObject*>(QStringLiteral("searchBar")))
+                    if (candidate->property("opened").toBool())
+                        bar = candidate;
+                REQUIRE(bar != nullptr);
+                auto* content = bar->property("contentItem").value<QQuickItem*>();
+                REQUIRE(content != nullptr);
+                auto const counts = contour::test::itemsNamed(*content, QStringLiteral("searchBarCount"));
+                REQUIRE(counts.size() == 1);
+                CHECK(counts.front()->property("text").toString()
+                      == (row.find == SnapshotFind::Invalid ? QStringLiteral("Invalid pattern")
+                                                            : QStringLiteral("2 of 5")));
+                auto const* parent = bar->property("parent").value<QQuickItem*>();
+                REQUIRE(parent != nullptr);
+                auto const inHeaderRow = variant.row == contour::config::ChromeStyle::Terminal
+                                         && row.panes == PaneShape::SplitThree;
+                CHECK((parent->objectName() == QStringLiteral("paneHeaderFindSlot")) == inHeaderRow);
+                break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }

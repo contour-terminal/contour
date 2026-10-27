@@ -129,7 +129,8 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::PaletteFiltered).action == ScriptAction::FilterPalette);
     CHECK(scriptRow(SnapshotScript::PaletteDrilledIn).name == "palette-drill-in");
     CHECK(scriptRow(SnapshotScript::PaletteDrilledIn).action == ScriptAction::DrillInPalette);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::PaletteDrilledIn);
+    CHECK(static_cast<int>(SnapshotScript::FindBar)
+          == static_cast<int>(SnapshotScript::PaletteDrilledIn) + 1);
     // Each pane of a split is named, as the canvas's split names them.
     CHECK(paneCount(PaneShape::SingleLeaf) == 1);
     CHECK(paneCount(PaneShape::SplitThree) == 3);
@@ -276,4 +277,31 @@ TEST_CASE("snapshot.manifestLine", "[snapshot]")
                                      .qtVersion = "6.11.1" })
         == "palette.terminal.native2026.dark.png\tpalette\tterminal\tnative2026\tdark\twayland\t1\tJetBrains "
            "Mono\tContourTui\t6.11.1\n");
+}
+
+TEST_CASE("snapshot.scriptTable.findBar", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    // The find bar's three rows, appended last: on a pane, under a split's header, and on a refused pattern.
+    CHECK(SnapshotScripts.back().script == SnapshotScript::FindBarInvalid);
+    CHECK(scriptRow(SnapshotScript::FindBar).name == "find-bar");
+    CHECK(scriptRow(SnapshotScript::FindBar).panes == PaneShape::SingleLeaf);
+    CHECK(scriptRow(SnapshotScript::FindBar).find == SnapshotFind::Matches);
+    CHECK(scriptRow(SnapshotScript::FindBarSplit).name == "find-bar-split");
+    CHECK(scriptRow(SnapshotScript::FindBarSplit).panes == PaneShape::SplitThree);
+    CHECK(scriptRow(SnapshotScript::FindBarSplit).find == SnapshotFind::Matches);
+    CHECK(scriptRow(SnapshotScript::FindBarInvalid).name == "find-bar-invalid");
+    CHECK(scriptRow(SnapshotScript::FindBarInvalid).panes == PaneShape::SingleLeaf);
+    CHECK(scriptRow(SnapshotScript::FindBarInvalid).find == SnapshotFind::Invalid);
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        auto const isFindRow = row.script == SnapshotScript::FindBar
+                               || row.script == SnapshotScript::FindBarSplit
+                               || row.script == SnapshotScript::FindBarInvalid;
+        // Every row names a find, and only the find rows search and open the bar.
+        CHECK(static_cast<std::size_t>(row.find) <= static_cast<std::size_t>(SnapshotFind::Invalid));
+        CHECK((row.find != SnapshotFind::None) == isFindRow);
+        CHECK((row.action == ScriptAction::OpenFindBar) == isFindRow);
+    }
 }
