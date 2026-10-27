@@ -242,6 +242,7 @@ endif()
 
 set(_header_files
     session/HyperlinkTooltip.hpp
+    session/RestoreSummaryPolicy.hpp
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
     window/ChromeFocus.hpp
@@ -1250,6 +1251,7 @@ if(CONTOUR_TESTING)
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
         session/PastePreview_test.cpp
+        session/RestoreSummaryPolicy_test.cpp
         session/ScrollbarVisibility_test.cpp
         session/SizeIndicator_test.cpp
         session/ScreenshotFile_test.cpp

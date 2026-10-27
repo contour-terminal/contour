@@ -21,6 +21,7 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
+#include <contour/session/RestoreSummaryPolicy.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/AppMenuBar.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
@@ -867,14 +868,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::optional<uint64_t> _pendingAttachWindow;
 
     /// Whether the boot window has adopted the daemon's primary window yet.
-    enum class AttachBoot : uint8_t
-    {
-        Pending = 0, ///< Not yet: the next daemon window shown goes into the boot window.
-        Adopted = 1, ///< It has: every later daemon window gets an OS window of its own.
-    };
     /// Not "the map is empty": after a reconnect lost every window, the windows that came instead are new
     /// OS windows, never the stale one about to be closed.
-    AttachBoot _attachBoot = AttachBoot::Pending;
+    session::AttachBoot _attachBoot = session::AttachBoot::Pending;
 
     /// What `contour client` asked for; empty for a plain launch. @see establishHosting
     std::optional<ClientRequest> _clientRequest;

@@ -2793,7 +2793,7 @@ void ContourGuiApp::reconcileAttachWindows()
         if (_pendingAttachWindow == daemonWindow)
             continue; // an OS window is already spawning for this daemon window
 
-        if (_attachBoot == AttachBoot::Pending)
+        if (_attachBoot == session::AttachBoot::Pending)
         {
             // The primary daemon window adopts the boot window (already created before
             // the first layout arrived). A missing focused window (mid-boot) stages
@@ -2847,7 +2847,7 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
     // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
-    if (_attachBoot == AttachBoot::Pending)
+    if (_attachBoot == session::AttachBoot::Pending)
     {
         if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
             bindDaemonWindow(*adopt, controller->windowId());
@@ -2906,7 +2906,7 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
 
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
-    _attachBoot = AttachBoot::Adopted;
+    _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
     _sessionManager.deliverRestoreSummaryTo(osWindow);
@@ -2914,10 +2914,13 @@ void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::Wi
 
 void ContourGuiApp::expireRestoreSummaryAfterLayout()
 {
-    // A window still to be bound -- the boot window is not up yet, or one is being spawned -- is where the
-    // summary goes; and without a layout nothing has been realized, so nothing is yet missed.
-    if (!_nativeController || _nativeController->windowIds().empty() || _pendingAttachWindow
-        || _attachBoot == AttachBoot::Pending)
+    if (!_nativeController)
+        return;
+    auto const layout =
+        _nativeController->windowIds().empty() ? session::LayoutWindows::None : session::LayoutWindows::Some;
+    auto const spawn = _pendingAttachWindow ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
+    if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
+        == session::RestoreSummaryFate::Keep)
         return;
     _sessionManager.expireRestoreSummary();
 }
