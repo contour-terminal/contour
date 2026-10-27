@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// AppKit's Secure Keyboard Entry, driven through the gate as the app drives it. Needs no window: the call is
-// process-wide. Outside a login session (a CI runner without a console user) the OS may not report the
-// state, so the OS's answer is checked only where it flipped; the balanced round trip is checked always.
+// AppKit's Secure Keyboard Entry, driven through the gate as the app drives it. Needs no window, but the call
+// changes machine-wide state, so the round trip runs only in a display run (CONTOUR_TEST_DISPLAY=1); the
+// default suite drives the gate over the fake (SecureInputGate_test.cpp). Outside a login session (a CI
+// runner without a console user) the OS may not report the state, so the OS's answer is checked only where
+// it flipped; the balanced round trip is checked always.
 
 #include <contour/platform/SecureInput.hpp>
 #include <contour/platform/SecureInputGate.hpp>
+#include <contour/test/TestEnvironment.hpp>
+
+#include <core/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,11 +24,14 @@ using contour::platform::SecureInputSupport;
 
 TEST_CASE("CocoaSecureInput.isNative", "[secureinput][cocoa]")
 {
+    // Builds the backend and asks it nothing that reaches the OS.
     CHECK(contour::platform::makeSecureInput()->support() == SecureInputSupport::Native);
 }
 
-TEST_CASE("CocoaSecureInput.gateRestoresTheSystemState", "[secureinput][cocoa]")
+TEST_CASE("CocoaSecureInput.gateRestoresTheSystemState", "[display][secureinput][cocoa]")
 {
+    if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))
+        SKIP("Needs CONTOUR_TEST_DISPLAY=1: turns on the machine-wide Secure Keyboard Entry");
     auto const before = IsSecureEventInputEnabled() != 0;
     auto os = contour::platform::makeSecureInput();
     auto reportedOn = false;
