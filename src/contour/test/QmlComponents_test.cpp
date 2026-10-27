@@ -4505,9 +4505,14 @@ TEST_CASE("pane card: the native find bar sits under the header (offscreen)", "[
     auto const& terminal = PaneTreeHost::terminalOf(card);
     auto& bar = openFindBarOf(card);
     CHECK(parentOf(bar) == &terminal);
-    // In the card's coordinates: the header, the card's content inset (F5), and the bar's own inset.
+    // In the card's coordinates: the header, the card's content inset (F5), and the bar's own vertical inset
+    // (space.findBarInsetRows, which placeFindBar takes as insetY).
     auto const header = host.style().property("size").value<QObject*>()->property("paneHeader").toReal();
-    CHECK(terminal.y() + bar.property("y").toReal() == header + host.style().paneCardContentInset(1.0) + 8.0);
+    auto const inset =
+        host.style().property("space").value<QObject*>()->property("findBarInsetRows").toReal();
+    REQUIRE(inset > 0.0);
+    CHECK(terminal.y() + bar.property("y").toReal()
+          == Catch::Approx(header + host.style().paneCardContentInset(1.0) + inset));
 }
 
 TEST_CASE("pane card: a Minimal header revealed over the grid leaves the find bar where it was (offscreen)",
