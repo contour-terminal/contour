@@ -227,6 +227,8 @@ struct UiStyleTokens
     std::string_view restartGlyph {};      ///< Marks the exited footer's Restart button.
     std::string_view findPreviousGlyph {}; ///< The find bar's previous-match button.
     std::string_view findNextGlyph {};     ///< The find bar's next-match button.
+    /// The overlay scrollbar's thumb, repeated down its column; empty where the thumb is a rounded shape.
+    std::string_view scrollThumbGlyph {};
 
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
@@ -416,6 +418,7 @@ namespace detail
         .restartGlyph = "↩",
         .findPreviousGlyph = "▴",
         .findNextGlyph = "▾",
+        .scrollThumbGlyph = "",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",
@@ -499,6 +502,7 @@ namespace detail
         .restartGlyph = "↩",
         .findPreviousGlyph = "↑",
         .findNextGlyph = "↓",
+        .scrollThumbGlyph = "┃",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",

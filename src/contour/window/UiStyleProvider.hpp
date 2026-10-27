@@ -93,6 +93,7 @@ struct ChromeGlyphs
     QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
     QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
     QString restart;         ///< Marks the exited footer's Restart button.
+    QString scrollThumb;     ///< The overlay scrollbar's thumb glyph; empty where it is a shape.
     QString drillIn;         ///< Marks a command palette row that opens a list.
     QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
     QString findPrevious;    ///< The find bar's previous-match button.
@@ -249,6 +250,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString restartGlyph READ restartGlyph CONSTANT)
     Q_PROPERTY(QString findPreviousGlyph READ findPreviousGlyph CONSTANT)
     Q_PROPERTY(QString findNextGlyph READ findNextGlyph CONSTANT)
+    Q_PROPERTY(QString scrollThumbGlyph READ scrollThumbGlyph CONSTANT)
     /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
     Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
     /// The QML names of the pane colour roles, for colorOn().
@@ -315,6 +317,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& restartGlyph() const noexcept { return _glyphs.restart; }
     [[nodiscard]] QString const& findPreviousGlyph() const noexcept { return _glyphs.findPrevious; }
     [[nodiscard]] QString const& findNextGlyph() const noexcept { return _glyphs.findNext; }
+    /// @return The overlay scrollbar's thumb glyph: "┃" on the Terminal row, empty on the native ones.
+    [[nodiscard]] QString const& scrollThumbGlyph() const noexcept { return _glyphs.scrollThumb; }
     /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionNames() const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
@@ -339,6 +343,28 @@ class UiStyleProvider: public QObject
     /// @return `{ content, actions, placement, emphasis }` as their names.
     [[nodiscard]] Q_INVOKABLE QVariantMap
     paneHeader(int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const;
+
+    /// Where the link pill goes (window::placeLinkPill), inset by this row's @c s4 from the top and @c s5
+    /// from the right.
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
+    /// @param host       A window::LinkPillHost.
+    /// @param findBar    A window::FindBarPresence.
+    /// @param paneWidth  The pane's width in logical pixels.
+    /// @param paneHeight The pane's height in logical pixels.
+    /// @param pillWidth  The pill's natural width.
+    /// @param pillHeight The pill's height.
+    /// @param clearance  The session's overlay clearance: `marginLeft`, `marginTop`, `cellWidth`,
+    /// `cellHeight`,
+    ///                   `columns`, `trailingBlank` (a list per drawn row) and `avoidRows`.
+    /// @return `{ anchor, x, y, width }`, the anchor as its name (window::linkPillAnchorName).
+    [[nodiscard]] Q_INVOKABLE QVariantMap linkPillPlacement(int host,
+                                                            int findBar,
+                                                            qreal paneWidth,
+                                                            qreal paneHeight,
+                                                            qreal pillWidth,
+                                                            qreal pillHeight,
+                                                            QVariantMap const& clearance) const;
 
     /// The name a pane header shows (window::paneHeaderName).
     /// @param processName The foreground process name.

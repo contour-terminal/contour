@@ -168,6 +168,12 @@ enum class ChromeColorRole : uint8_t
     FindCountText,    //!< The match count beside the field.
     FindToggleOnRing, //!< The ring that sets a lit option toggle off an unlit one; none where its fill does.
     FindErrorText,    //!< The count, and the field's edge, on a miss or a refused pattern.
+
+    // The overlays drawn over a pane's grid.
+    ToastTextSecondary,   //!< A toast's second text: the link pill's hint.
+    ScrollbarThumb,       //!< The overlay scrollbar's thumb at rest (resolved against the pane, see colorOn).
+    ScrollbarThumbActive, //!< The thumb while hovered or dragged.
+    ScrollbarTrack,       //!< The overlay scrollbar's track.
 };
 
 /// Where a chrome colour comes from.
@@ -227,7 +233,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::ToastInk) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
 
 /// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
@@ -238,6 +244,10 @@ inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRol
 
 /// One past the last find bar colour role: the find bar's roles run from @c PaletteColorRoleEnd to here.
 inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
+
+/// One past the last overlay colour role: the overlay roles (the link pill's hint, the overlay scrollbar) run
+/// from @c FindColorRoleEnd to here, so a family appended after them does not shift their count.
+inline constexpr size_t OverlayColorRoleEnd = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -366,6 +376,10 @@ struct SizeTokens
     int findButtonHeight = 0; ///< Height of the previous, next and close buttons.
     int findIcon = 0;         ///< Edge of the magnifier; 0 draws none.
 
+    // The overlays.
+    int linkPill = 0;  ///< Height of the link pill (vertical units).
+    int scrollbar = 0; ///< Width of the overlay scrollbar's track (horizontal units).
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -397,6 +411,8 @@ struct SpaceTokens
     /// spacing is none, so "2 of 5" does not run into "[Aa]"; none where the spacing already parts them.
     int findBarCountGap = 0;
 
+    int scrollbarInset = 0; ///< The overlay scrollbar's gap to the pane's edge, inside its hit area.
+
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
 
@@ -420,6 +436,9 @@ struct RadiusTokens
 
     int grabber = 0; ///< The split handle's grabber.
     int findBar = 0; ///< The find bar.
+
+    int linkPill = 0;  ///< The link pill.
+    int scrollbar = 0; ///< The overlay scrollbar's thumb.
 
     [[nodiscard]] bool operator==(RadiusTokens const&) const = default;
 };
@@ -461,6 +480,10 @@ struct MotionTokens
 
     /// The scale a popover opens from, in percent; 100 opens at full size (a fade only).
     int popoverScalePercent = 0;
+
+    /// How long the size indicator stays after the last change, in milliseconds. A hold rather than an
+    /// animation, so Reduce Motion leaves it be.
+    int lingerMs = 0;
 
     [[nodiscard]] bool operator==(MotionTokens const&) const = default;
 };
@@ -657,7 +680,8 @@ namespace detail
                              .paletteInset = 8,
                              .findBarInset = 8,
                              .findBarInsetRows = 8,
-                             .findBarCountGap = 0 };
+                             .findBarCountGap = 0,
+                             .scrollbarInset = 4 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -668,7 +692,8 @@ namespace detail
                                                  .pulseMs = 700,
                                                  .style = MotionStyle::Full,
                                                  .headerRevealMs = 500,
-                                                 .popoverScalePercent = 97 };
+                                                 .popoverScalePercent = 97,
+                                                 .lingerMs = 600 };
 
     inline constexpr ElevationTokens NativeElevation {
         .levels = { ElevationLevel { .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
@@ -714,6 +739,19 @@ namespace detail
                                    .status = StatusColorRole::Danger,
                                    .slot = SchemeSlot::Background,
                                    .alphaPercent = 100,
+                                   .level = level };
+    }
+
+    /// @param level        The kit's @c label step, 1 (primary) to 3 (tertiary).
+    /// @param alphaPercent The share of that step's own alpha (LabelAlphas) to draw it at.
+    /// @return A @c Label source at a fraction of the step.
+    constexpr ChromeColorSource label(int level, int alphaPercent) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Label,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = alphaPercent,
                                    .level = level };
     }
 
@@ -900,6 +938,18 @@ namespace detail
                             .slot = SchemeSlot::Background,
                             .alphaPercent = 100,
                             .level = 0 }, // FindErrorText
+        // The link pill's hint: white at 60 % on the Toast's fill. The board's 50 % reads 4.3:1 over a light
+        // pane, 60 % reads 5.3:1 (R-h).
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 60,
+                            .level = 0 }, // ToastTextSecondary
+        // label.1 at about 30, 50 and 10 % on either chrome: a share of the kit's own alpha (88 / 92).
+        label(1, 33), // ScrollbarThumb
+        label(1, 55), // ScrollbarThumbActive
+        label(1, 11), // ScrollbarTrack
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -961,7 +1011,9 @@ namespace detail
                   .findToggleHeight = 22,
                   .findButtonWidth = 22,
                   .findButtonHeight = 22,
-                  .findIcon = 14 },
+                  .findIcon = 14,
+                  .linkPill = 22,
+                  .scrollbar = 8 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -976,7 +1028,9 @@ namespace detail
                    .hostChip = 12,
                    .toolbarChip = 11,
                    .grabber = 1,
-                   .findBar = 8 },
+                   .findBar = 8,
+                   .linkPill = 11,
+                   .scrollbar = 4 },
         .type = { .caption = 10,
                   .footnote = 11,
                   .body = 13,
@@ -1053,7 +1107,9 @@ namespace detail
                   .findToggleHeight = 22,
                   .findButtonWidth = 22,
                   .findButtonHeight = 22,
-                  .findIcon = 14 },
+                  .findIcon = 14,
+                  .linkPill = 22,
+                  .scrollbar = 8 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -1068,7 +1124,9 @@ namespace detail
                    .hostChip = 12,
                    .toolbarChip = 11,
                    .grabber = 1,
-                   .findBar = 8 },
+                   .findBar = 8,
+                   .linkPill = 11,
+                   .scrollbar = 4 },
         .type = { .caption = 12,
                   .footnote = 12,
                   .body = 14,
@@ -1142,7 +1200,9 @@ namespace detail
                   .findToggleHeight = 22,
                   .findButtonWidth = 22,
                   .findButtonHeight = 22,
-                  .findIcon = 14 },
+                  .findIcon = 14,
+                  .linkPill = 22,
+                  .scrollbar = 8 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -1157,7 +1217,9 @@ namespace detail
                    .hostChip = 12,
                    .toolbarChip = 11,
                    .grabber = 1,
-                   .findBar = 8 },
+                   .findBar = 8,
+                   .linkPill = 11,
+                   .scrollbar = 4 },
         .type = { .caption = 12,
                   .footnote = 12.5,
                   .body = 14,
@@ -1235,7 +1297,9 @@ namespace detail
                   .findToggleHeight = 1,
                   .findButtonWidth = 2,
                   .findButtonHeight = 1,
-                  .findIcon = 0 },
+                  .findIcon = 0,
+                  .linkPill = 1,
+                  .scrollbar = 1 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -1249,7 +1313,8 @@ namespace detail
                    .paletteInset = 1,
                    .findBarInset = 1,
                    .findBarInsetRows = 1,
-                   .findBarCountGap = 1 },
+                   .findBarCountGap = 1,
+                   .scrollbarInset = 0 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
@@ -1263,7 +1328,9 @@ namespace detail
                    .hostChip = 0,
                    .toolbarChip = 0,
                    .grabber = 0,
-                   .findBar = 0 },
+                   .findBar = 0,
+                   .linkPill = 0,
+                   .scrollbar = 0 },
         .type = { .caption = 0,
                   .footnote = 0,
                   .body = 0,
@@ -1282,7 +1349,8 @@ namespace detail
                     .pulseMs = 700,
                     .style = MotionStyle::Full,
                     .headerRevealMs = 500,
-                    .popoverScalePercent = 100 },
+                    .popoverScalePercent = 100,
+                    .lingerMs = 600 },
         .elevation = { .levels = { ElevationLevel {
                                        .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
                                    TerminalShadow,
@@ -1356,7 +1424,14 @@ namespace detail
                     detail::noColor(), // FindToggleOnRing
                     // The scheme's red where it reads on the bar at 4.5:1, else the bar's ink: the status
                     // hues follow the OS palette's tone, not the bar's.
-                    schemeOnBar(SchemeSlot::Danger) }, // FindErrorText
+                    schemeOnBar(SchemeSlot::Danger), // FindErrorText
+                    // Inverse video, as the toast: the hint is the scheme's background on its foreground.
+                    schemeColor(SchemeSlot::Background), // ToastTextSecondary
+                    // The bar's thumb is a column of "┃" (UiStyleTokens::scrollThumbGlyph): ANSI 8, the
+                    // accent while engaged, and no track.
+                    schemeColor(SchemeSlot::Secondary), // ScrollbarThumb
+                    schemeColor(SchemeSlot::Accent),    // ScrollbarThumbActive
+                    detail::noColor() },                // ScrollbarTrack
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

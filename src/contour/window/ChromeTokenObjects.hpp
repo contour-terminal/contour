@@ -80,6 +80,8 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal findButtonWidth READ findButtonWidth CONSTANT)
     Q_PROPERTY(qreal findButtonHeight READ findButtonHeight CONSTANT)
     Q_PROPERTY(qreal findIcon READ findIcon CONSTANT)
+    Q_PROPERTY(qreal linkPill READ linkPill CONSTANT)
+    Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -205,6 +207,11 @@ class ChromeSizeTokens: public QObject
     /// @return The magnifier's edge in logical pixels; 0 draws none.
     [[nodiscard]] qreal findIcon() const noexcept { return _tokens.findIcon * _units.horizontal; }
 
+    /// @return The link pill's height in logical pixels.
+    [[nodiscard]] qreal linkPill() const noexcept { return _tokens.linkPill * _units.vertical; }
+    /// @return The overlay scrollbar's track width in logical pixels.
+    [[nodiscard]] qreal scrollbar() const noexcept { return _tokens.scrollbar * _units.horizontal; }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
@@ -238,6 +245,7 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal findBarInset READ findBarInset CONSTANT)
     Q_PROPERTY(qreal findBarInsetRows READ findBarInsetRows CONSTANT)
     Q_PROPERTY(qreal findBarCountGap READ findBarCountGap CONSTANT)
+    Q_PROPERTY(qreal scrollbarInset READ scrollbarInset CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -302,6 +310,8 @@ class ChromeSpaceTokens: public QObject
     {
         return _tokens.findBarCountGap * _units.horizontal;
     }
+    /// @return The overlay scrollbar's gap to the pane's edge, in logical pixels.
+    [[nodiscard]] qreal scrollbarInset() const noexcept { return _tokens.scrollbarInset * _units.horizontal; }
 
   private:
     config::SpaceTokens _tokens {};
@@ -326,6 +336,8 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
     Q_PROPERTY(qreal grabber READ grabber CONSTANT)
     Q_PROPERTY(qreal findBar READ findBar CONSTANT)
+    Q_PROPERTY(qreal linkPill READ linkPill CONSTANT)
+    Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
 
   public:
     /// @param tokens The resolved radius group.
@@ -361,6 +373,10 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal grabber() const noexcept { return _tokens.grabber * _units.horizontal; }
     /// @return The radius of the find bar.
     [[nodiscard]] qreal findBar() const noexcept { return _tokens.findBar * _units.horizontal; }
+    /// @return The radius of the link pill.
+    [[nodiscard]] qreal linkPill() const noexcept { return _tokens.linkPill * _units.horizontal; }
+    /// @return The radius of the overlay scrollbar's thumb.
+    [[nodiscard]] qreal scrollbar() const noexcept { return _tokens.scrollbar * _units.horizontal; }
 
   private:
     config::RadiusTokens _tokens {};
@@ -458,6 +474,7 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(int crossFade READ crossFade CONSTANT)
     Q_PROPERTY(int headerReveal READ headerReveal CONSTANT)
     Q_PROPERTY(qreal popoverScale READ popoverScale CONSTANT)
+    Q_PROPERTY(int linger READ linger CONSTANT)
 
   public:
     /// @param tokens The resolved motion group.
@@ -483,6 +500,8 @@ class ChromeMotionTokens: public QObject
     [[nodiscard]] int headerReveal() const noexcept { return _tokens.headerRevealMs; }
     /// @return The scale a popover opens from: 1 opens at full size (a fade only).
     [[nodiscard]] qreal popoverScale() const noexcept { return _tokens.popoverScalePercent / 100.0; }
+    /// @return How long the size indicator stays after the last change, in milliseconds.
+    [[nodiscard]] int linger() const noexcept { return _tokens.lingerMs; }
 
     /// @return The QML names of config::MotionStyle's enumerators.
     [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
@@ -803,6 +822,10 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor findCountText READ findCountText NOTIFY changed)
     Q_PROPERTY(QColor findToggleOnRing READ findToggleOnRing NOTIFY changed)
     Q_PROPERTY(QColor findErrorText READ findErrorText NOTIFY changed)
+    Q_PROPERTY(QColor toastTextSecondary READ toastTextSecondary NOTIFY changed)
+    Q_PROPERTY(QColor scrollbarThumb READ scrollbarThumb NOTIFY changed)
+    Q_PROPERTY(QColor scrollbarThumbActive READ scrollbarThumbActive NOTIFY changed)
+    Q_PROPERTY(QColor scrollbarTrack READ scrollbarTrack NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -895,6 +918,18 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor findCountText() const { return color(config::ChromeColorRole::FindCountText); }
     [[nodiscard]] QColor findToggleOnRing() const { return color(config::ChromeColorRole::FindToggleOnRing); }
     [[nodiscard]] QColor findErrorText() const { return color(config::ChromeColorRole::FindErrorText); }
+    [[nodiscard]] QColor toastTextSecondary() const
+    {
+        return color(config::ChromeColorRole::ToastTextSecondary);
+    }
+    /// The overlay scrollbar's roles by the palette's tone; a pane resolves them on its own background
+    /// (UiStyleProvider::colorOn, with the @c roles names).
+    [[nodiscard]] QColor scrollbarThumb() const { return color(config::ChromeColorRole::ScrollbarThumb); }
+    [[nodiscard]] QColor scrollbarThumbActive() const
+    {
+        return color(config::ChromeColorRole::ScrollbarThumbActive);
+    }
+    [[nodiscard]] QColor scrollbarTrack() const { return color(config::ChromeColorRole::ScrollbarTrack); }
 
   signals:
     /// Every role may have changed colour.
@@ -911,7 +946,8 @@ class ChromeColorTokens: public QObject
 ///
 /// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
 /// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneGapFill up to @c PaneColorRoleEnd,
-/// and per find bar role, @c PaletteColorRoleEnd up to @c FindColorRoleEnd: the find bar sits on the pane.
+/// and per find bar role, @c PaletteColorRoleEnd up to @c FindColorRoleEnd: the find bar sits on the pane,
+/// and per overlay scrollbar role, which a pane resolves on its own background too.
 class ChromePaneRoleNames: public QObject
 {
     Q_OBJECT
@@ -931,6 +967,9 @@ class ChromePaneRoleNames: public QObject
     Q_PROPERTY(int findCountText READ findCountText CONSTANT)
     Q_PROPERTY(int findToggleOnRing READ findToggleOnRing CONSTANT)
     Q_PROPERTY(int findErrorText READ findErrorText CONSTANT)
+    Q_PROPERTY(int scrollbarThumb READ scrollbarThumb CONSTANT)
+    Q_PROPERTY(int scrollbarThumbActive READ scrollbarThumbActive CONSTANT)
+    Q_PROPERTY(int scrollbarTrack READ scrollbarTrack CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -1000,6 +1039,18 @@ class ChromePaneRoleNames: public QObject
     [[nodiscard]] static constexpr int findErrorText() noexcept
     {
         return of(config::ChromeColorRole::FindErrorText);
+    }
+    [[nodiscard]] static constexpr int scrollbarThumb() noexcept
+    {
+        return of(config::ChromeColorRole::ScrollbarThumb);
+    }
+    [[nodiscard]] static constexpr int scrollbarThumbActive() noexcept
+    {
+        return of(config::ChromeColorRole::ScrollbarThumbActive);
+    }
+    [[nodiscard]] static constexpr int scrollbarTrack() noexcept
+    {
+        return of(config::ChromeColorRole::ScrollbarTrack);
     }
 
   private:

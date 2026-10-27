@@ -5,6 +5,7 @@
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SplitChrome.hpp>
@@ -35,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace contour::window
 {
@@ -198,6 +200,7 @@ namespace
             .paneActions = stringsOf(tokens.paneActionGlyphs),
             .splitLines = stringsOf(tokens.splitLineGlyphs),
             .restart = QString::fromUtf8(tokens.restartGlyph),
+            .scrollThumb = QString::fromUtf8(tokens.scrollThumbGlyph),
             .drillIn = QString::fromUtf8(tokens.drillInGlyph),
             .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
             .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
@@ -571,6 +574,54 @@ QVariantMap UiStyleProvider::paneHeader(
              { QStringLiteral("actions"), nameOf(headerActionsName(header.actions)) },
              { QStringLiteral("placement"), nameOf(headerPlacementName(header.placement)) },
              { QStringLiteral("emphasis"), nameOf(headerEmphasisName(header.emphasis)) } };
+}
+
+namespace
+{
+    /// The ints of @p list, as QML hands a JavaScript array over.
+    [[nodiscard]] std::vector<int> intsOf(QVariant const& list)
+    {
+        auto const values = list.toList();
+        auto ints = std::vector<int> {};
+        ints.reserve(static_cast<size_t>(values.size()));
+        for (auto const& value: values)
+            ints.push_back(value.toInt());
+        return ints;
+    }
+} // namespace
+
+QVariantMap UiStyleProvider::linkPillPlacement(int host,
+                                               int findBar,
+                                               qreal paneWidth,
+                                               qreal paneHeight,
+                                               qreal pillWidth,
+                                               qreal pillHeight,
+                                               QVariantMap const& clearance) const
+{
+    if (!inRange(host, LinkPillHostCount) || !inRange(findBar, FindBarPresenceCount))
+        return {};
+    auto const trailingBlank = intsOf(clearance.value(QStringLiteral("trailingBlank")));
+    auto const avoidRows = intsOf(clearance.value(QStringLiteral("avoidRows")));
+    auto const placement = placeLinkPill(LinkPillInputs {
+        .host = static_cast<LinkPillHost>(host),
+        .findBar = static_cast<FindBarPresence>(findBar),
+        .paneWidth = paneWidth,
+        .paneHeight = paneHeight,
+        .pillWidth = pillWidth,
+        .pillHeight = pillHeight,
+        .insetTop = _space.s4(),
+        .insetRight = _space.s5(),
+        .grid = LinkPillGrid { .marginLeft = clearance.value(QStringLiteral("marginLeft")).toReal(),
+                               .marginTop = clearance.value(QStringLiteral("marginTop")).toReal(),
+                               .cellWidth = clearance.value(QStringLiteral("cellWidth")).toReal(),
+                               .cellHeight = clearance.value(QStringLiteral("cellHeight")).toReal(),
+                               .columns = clearance.value(QStringLiteral("columns")).toInt(),
+                               .trailingBlankColumns = trailingBlank,
+                               .avoidRows = avoidRows } });
+    return { { QStringLiteral("anchor"), nameOf(linkPillAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width } };
 }
 
 QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const

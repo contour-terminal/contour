@@ -299,3 +299,10 @@ TEST_CASE("UiStyle: the command palette's glyphs per row", "[uistyle]")
     CHECK(terminal.drillInGlyph == "▸");
     CHECK(terminal.palettePromptGlyph == "❯");
 }
+
+TEST_CASE("UiStyle: the scrollbar's thumb is a glyph on the Terminal row alone", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+        CHECK(uiStyleTokens(row).scrollThumbGlyph.empty());
+    CHECK(uiStyleTokens(ChromeStyle::Terminal).scrollThumbGlyph == "┃");
+}

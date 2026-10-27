@@ -17,6 +17,7 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -1223,9 +1224,12 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
     auto const propertiesOf = [](QMetaObject const& meta) {
         return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
     };
+    // The pane roles, and the overlay scrollbar's, which colorOn() resolves on the pane's own background.
     CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
           == (contour::config::PaneColorRoleEnd - static_cast<size_t>(ChromeColorRole::PaneGapFill))
-                 + (contour::config::FindColorRoleEnd - contour::config::PaletteColorRoleEnd));
+                 + (contour::config::FindColorRoleEnd - contour::config::PaletteColorRoleEnd)
+                 + (contour::config::OverlayColorRoleEnd
+                    - static_cast<size_t>(ChromeColorRole::ScrollbarThumb)));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
 }
@@ -1946,4 +1950,56 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
         CHECK(contrastOf(role("findErrorText"), bar) >= MinimumTextContrast);
         CHECK(role("findToggleOnRing").alpha() == 0);
     }
+}
+
+TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "linkPill").toReal() == 22.0);
+    CHECK(tokenOf(mac, "size", "scrollbar").toReal() == 8.0);
+    CHECK(tokenOf(mac, "space", "scrollbarInset").toReal() == 4.0);
+    CHECK(tokenOf(mac, "radii", "linkPill").toReal() == 11.0);
+    CHECK(tokenOf(mac, "radii", "scrollbar").toReal() == 4.0);
+    CHECK(tokenOf(mac, "motion", "linger").toInt() == 600);
+    CHECK(mac.property("scrollThumbGlyph").toString().isEmpty());
+    CHECK(tokenOf(mac, "roles", "scrollbarThumb").toInt()
+          == static_cast<int>(contour::config::ChromeColorRole::ScrollbarThumb));
+
+    // The base case of LinkPillPlacement_test, through the map QML hands over (Task 10's clearance).
+    auto clearance = QVariantMap {
+        { QStringLiteral("marginLeft"), 0.0 },
+        { QStringLiteral("marginTop"), 0.0 },
+        { QStringLiteral("cellWidth"), 8.0 },
+        { QStringLiteral("cellHeight"), 20.0 },
+        { QStringLiteral("columns"), 100 },
+        { QStringLiteral("trailingBlank"), QVariantList(20, QVariant(100)) },
+        { QStringLiteral("avoidRows"), QVariantList {} },
+    };
+    auto const grid = static_cast<int>(contour::window::LinkPillHost::Grid);
+    auto const closed = static_cast<int>(contour::window::FindBarPresence::Closed);
+    auto const placed = mac.linkPillPlacement(grid, closed, 800, 400, 300, 22, clearance);
+    CHECK(placed.value(QStringLiteral("anchor")).toString() == QStringLiteral("topRight"));
+    CHECK(placed.value(QStringLiteral("x")).toReal() == 490.0);
+    CHECK(placed.value(QStringLiteral("y")).toReal() == 8.0);
+    CHECK(placed.value(QStringLiteral("width")).toReal() == 300.0);
+
+    // The insets are the row's s4 and s5, and a host or find bar out of range answers nothing.
+    CHECK(mac.linkPillPlacement(-1, closed, 800, 400, 300, 22, clearance).isEmpty());
+    CHECK(mac.linkPillPlacement(grid, 99, 800, 400, 300, 22, clearance).isEmpty());
+
+    // The prompt on the top row sends it to the bottom right.
+    clearance.insert(QStringLiteral("avoidRows"), QVariantList { 0 });
+    CHECK(mac.linkPillPlacement(grid, closed, 800, 400, 300, 22, clearance).value(QStringLiteral("anchor"))
+          == QStringLiteral("bottomRight"));
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "size", "linkPill").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "size", "scrollbar").toReal() == Catch::Approx(terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "motion", "linger").toInt() == 600);
+    CHECK(terminal.property("scrollThumbGlyph").toString() == QStringLiteral("┃"));
 }

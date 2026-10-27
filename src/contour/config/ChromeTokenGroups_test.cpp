@@ -157,6 +157,13 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(row.space.findBarInsetRows),
              double(row.space.findBarCountGap),
              double(radii.findBar) });
+    // The overlays' tokens: the link pill, the overlay scrollbar, and the size indicator's hold.
+    append({ double(size.linkPill),
+             double(size.scrollbar),
+             double(row.space.scrollbarInset),
+             double(radii.linkPill),
+             double(radii.scrollbar),
+             double(row.motion.lingerMs) });
     return out;
 }
 
@@ -200,6 +207,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     // bareBand grabber grabberLength paneHeaderAction paneFooter footerButton, after the band's sizes
     auto const nativePaneSizes = std::vector<double> { 2, 32, 22, 34, 24 };
     // ... e3, separator ring dim opacity tint, pane.dim 15/10, Minimal { 0, 1, 1, 8, 0, 0 }
+    // linkPill scrollbar scrollbarInset, radii linkPill scrollbar, motion lingerMs (Fluent and ContourLinux
+    // take the macOS extents: they have no board of their own).
+    auto const nativeOverlay = std::vector<double> { 22, 8, 4, 11, 4, 600 };
     auto const nativeTail = std::vector<double> { 0,  0,  0, 0,  0,   1,  2,  12, 0, 4, 16, 25, 0, 12, 40,
                                                   35, 10, 0, -1, 1.0, 20, 15, 10, 0, 1, 1,  8,  0, 0 };
     // the find bar: size(7) inset(2) count gap(1) radius(1), mac-find-menu
@@ -220,7 +230,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeMotion,
                    nativeTail,
                    { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 },
-                   nativeFind }),
+                   nativeFind,
+                   nativeOverlay }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -245,7 +256,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeMotion,
                    nativeTail,
                    { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 },
-                   nativeFind }),
+                   nativeFind,
+                   nativeOverlay }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
@@ -270,7 +282,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeMotion,
                    nativeTail,
                    { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 },
-                   nativeFind }),
+                   nativeFind,
+                   nativeOverlay }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -296,7 +309,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 15, 10, 0, 1, 1, 1, 0, 0 },
                    { 48, 20, 1, 1, 1, 1, 1, 0, 0, 100, 18 },
                    // the find bar, in cells and rows (tui)
-                   { 1, 48, 4, 1, 2, 1, 0, 1, 1, 1, 0 } }),
+                   { 1, 48, 4, 1, 2, 1, 0, 1, 1, 1, 0 },
+                   // A one-cell pill and track, set flush, square, and the hold every row shares.
+                   { 1, 1, 0, 0, 0, 600 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
@@ -414,6 +429,9 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
         CHECK(reduced.motion.travel == 0);
         // A popover opens at full size: the open is a fade only.
         CHECK(reduced.motion.popoverScalePercent == 100);
+        // A hold is no animation: the size indicator stays as long as without Reduce Motion.
+        CHECK(reduced.motion.lingerMs == base.motion.lingerMs);
+        CHECK(reduced.motion.lingerMs == 600);
         CHECK(base.motion.popoverScalePercent == (style == ChromeStyle::Terminal ? 100 : 97));
         CHECK(reduced.size == base.size);
         CHECK(reduced.space == base.space);
@@ -1386,6 +1404,117 @@ TEST_CASE("chromeTokens.barSelectionStandsOffTheBar", "[chrometokens]")
         {
             CHECK(fill == selection);
             CHECK(text == slotIn(colors, SchemeSlot::SelectionText));
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.overlayColourRoles", "[chrometokens]")
+{
+    using namespace contour::config;
+    using contour::config::detail::noColor;
+    using contour::config::detail::schemeColor;
+    using enum ChromeColorRole;
+
+    struct OverlayColorRow
+    {
+        ChromeColorRole role = ToastTextSecondary;
+        ChromeColorSource native {};
+        ChromeColorSource terminal {};
+    };
+    // The kit's label.1 at a fraction of its own alpha (LabelAlphas): 33 % of 88 / 92 is about 30 %.
+    auto const labelAt = [](int alphaPercent) {
+        return ChromeColorSource { .kind = ColorSourceKind::Label,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = alphaPercent,
+                                   .level = 1 };
+    };
+    auto const rows = std::array {
+        OverlayColorRow { .role = ToastTextSecondary,
+                          .native = ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                                                        .rgb = 0xFFFFFF,
+                                                        .status = StatusColorRole::Danger,
+                                                        .slot = SchemeSlot::Background,
+                                                        .alphaPercent = 60,
+                                                        .level = 0 },
+                          .terminal = schemeColor(SchemeSlot::Background) },
+        OverlayColorRow {
+            .role = ScrollbarThumb, .native = labelAt(33), .terminal = schemeColor(SchemeSlot::Secondary) },
+        OverlayColorRow { .role = ScrollbarThumbActive,
+                          .native = labelAt(55),
+                          .terminal = schemeColor(SchemeSlot::Accent) },
+        OverlayColorRow { .role = ScrollbarTrack, .native = labelAt(11), .terminal = noColor() },
+    };
+    // Every overlay role, FindColorRoleEnd up to OverlayColorRoleEnd, has a row here.
+    CHECK(rows.size() == OverlayColorRoleEnd - FindColorRoleEnd);
+
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const& row: rows)
+        {
+            CAPTURE(static_cast<int>(row.role));
+            auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
+            CHECK(resolveChromeTokens(style, {}).colors[static_cast<size_t>(row.role)] == expected);
+        }
+    }
+
+    // What the label sources resolve to: their percentage of label.1's light and dark alpha, about 30, 50 and
+    // 10 % on either chrome (the board's values).
+    struct ResolvedAlpha
+    {
+        ChromeColorRole role;
+        int light;
+        int dark;
+    };
+    auto const native = resolveChromeTokens(ChromeStyle::MacOS, {});
+    for (auto const& [role, light, dark]: std::array { ResolvedAlpha { ScrollbarThumb, 29, 30 },
+                                                       ResolvedAlpha { ScrollbarThumbActive, 48, 50 },
+                                                       ResolvedAlpha { ScrollbarTrack, 9, 10 } })
+    {
+        CAPTURE(static_cast<int>(role));
+        auto const& source = native.colors[static_cast<size_t>(role)];
+        auto const& pair = LabelAlphas[static_cast<size_t>(source.level - 1)];
+        CHECK(pair.light * source.alphaPercent / 100 == light);
+        CHECK(pair.dark * source.alphaPercent / 100 == dark);
+    }
+}
+
+TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
+{
+    // The hint sits on the Toast's fill, which sits on the pane: on the native rows, over every bundled
+    // scheme's background, it reads at 4.5:1 -- the reason it is 60 % rather than the board's 50 % (R-h).
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    auto const over = [](ChromeColorSource const& source, RGBColor ground) {
+        return mixColor(ground, RGBColor(source.rgb), static_cast<float>(source.alphaPercent) / 100.0f);
+    };
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        for (auto const index: AllStyles())
+        {
+            auto const style = static_cast<ChromeStyle>(index);
+            CAPTURE(index);
+            auto const row = resolveChromeTokens(style, {});
+            auto const& fill = row.colors[static_cast<size_t>(ToastFill)];
+            auto const& hint = row.colors[static_cast<size_t>(ToastTextSecondary)];
+            if (style == ChromeStyle::Terminal)
+            {
+                // Inverse video: the hint is the toast's own text, the scheme's background on its foreground,
+                // so it reads exactly as the toast does. (That pair falls short of 4.5:1 on one-dark and
+                // solarized-light: the Toast's, not the hint's.)
+                CHECK(hint == row.colors[static_cast<size_t>(ToastText)]);
+                continue;
+            }
+            REQUIRE(fill.kind == ColorSourceKind::Fixed);
+            REQUIRE(hint.kind == ColorSourceKind::Fixed);
+            auto const toast = over(fill, palette.defaultBackground);
+            CHECK(contrastRatio(over(hint, toast), toast) >= MinimumTextContrast);
         }
     }
 }
