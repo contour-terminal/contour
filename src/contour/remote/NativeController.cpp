@@ -220,6 +220,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Reconnecting:
                 _client = nullptr;
                 _inputConnection = 0;
+                forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
                     _state = State::Reconnecting;
@@ -230,6 +231,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Stopped:
                 _client = nullptr;
                 _inputConnection = 0;
+                forgetInputEchoes();
                 if (state == ConnectionState::Stopped)
                 {
                     if (_state == State::Connecting || _state == State::Ready
@@ -255,6 +257,17 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         emit connectionClosed();
 }
 
+void NativeController::forgetInputEchoes()
+{
+    // With the connection down, typed input is dropped and nothing reads the program's reply: a stale Hidden
+    // would keep the lock, and the OS's secure input, on for a prompt nobody is answering. The reconnect's
+    // snapshot states each pane's echo again.
+    _inputEchoes.clear();
+    for (auto const& binding: _bindings | std::views::values)
+        if (binding.pty != nullptr)
+            binding.pty->setInputEcho(vtpty::InputEcho::Unknown);
+}
+
 void NativeController::adoptReconnect()
 {
     auto* client = _client;
@@ -273,6 +286,8 @@ void NativeController::adoptReconnect()
         // Every binding is detached, its pty left to the window closing it: a new session with the same id
         // must not reach the old pane, nor the old pane's input the new session.
         _bindings.clear();
+        // The new run's sessions count from 1 again: an old Hidden is no pane's of this run.
+        _inputEchoes.clear();
         _closedSessions.clear();
         _pending.clear();
         // Closes of the old run's sessions: the ids name the new run's, if anything.
@@ -922,6 +937,7 @@ void NativeController::unbind(uint64_t session, uint64_t serial)
     if (binding == _bindings.end() || binding->second.serial != serial)
         return;
     _bindings.erase(binding);
+    _inputEchoes.erase(session); // a session id is never reused within a run
     // The pane is gone: its grid must not keep contributing to a composed client area, and the
     // sent-size bookkeeping for it is meaningless (a session id is never reused).
     {

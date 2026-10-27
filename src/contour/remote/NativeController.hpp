@@ -542,6 +542,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::string _daemonRelease; ///< @see daemonRelease(). Guarded by _mutex.
     /// Takes the handshake's outcome from the client once it has one. Call under _mutex.
     void captureHandshake();
+    /// Forgets what the daemon said of each session's echo, and tells every bound pane it is Unknown. Call
+    /// under _mutex, on the reactor thread, while the connection is down.
+    void forgetInputEchoes();
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     /// What the daemon last said each session's terminal does with typed text (SessionInputEcho), kept so a

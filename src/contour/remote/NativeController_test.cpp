@@ -2115,6 +2115,74 @@ TEST_CASE("the daemon's echo report reaches the pane's device and its observer, 
     pane.terminal.reset();
 }
 
+TEST_CASE("a pane's echo state is not trusted while the connection is down",
+          "[attach][controller][inputecho][reconnect]")
+{
+    // Review M1: with typed input dropped and nothing reading, a stale Hidden would keep the lock and secure
+    // input on. The pane reads Unknown while reconnecting; the reconnect's snapshot states the real one.
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("prompt");
+    daemon.onDaemon([&] {
+        auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+        dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(vtpty::InputEcho::Hidden);
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("prompt"));
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+
+    daemon.refuseConnections();
+    CHECK(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Unknown; }));
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }, 3000));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a restarted daemon's new pane does not inherit the old run's echo state",
+          "[attach][controller][inputecho][reconnect]")
+{
+    // Review M1: session ids count from 1 in every run of a daemon, so a new pane with the old id must not
+    // be handed the old pane's Hidden -- the daemon says nothing of a PTY that reads Unknown.
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("old run");
+    daemon.onDaemon([&] {
+        auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+        dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(vtpty::InputEcho::Hidden);
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto old = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(old.shows("old run"));
+    REQUIRE(waitUntil([&] { return old.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+
+    daemon.restartHost();
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 1; }, 3000));
+    auto fresh = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    CHECK(fresh.pty().inputEcho() == vtpty::InputEcho::Unknown);
+
+    controller.stop();
+    fresh.terminal.reset();
+    old.terminal.reset();
+}
+
 TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attach][controller][reconnect]")
 {
     // The daemon may have been upgraded or downgraded meanwhile: what was agreed is the new connection's.
