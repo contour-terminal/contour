@@ -59,8 +59,9 @@ bool hoverTintKeepsContrast(ColorPalette const& palette, int percent) noexcept
     auto const keeps = [&](RGBColor text) {
         auto const before = contrastRatio(text, page);
         auto const after = contrastRatio(text, tinted);
-        return std::abs(after - before) <= BlockHoverContrastSlack
-               && (before < MinimumTextContrast || after >= MinimumTextContrast);
+        if (before >= MinimumTextContrast)
+            return after >= MinimumTextContrast;
+        return before < MinimumMarkContrast || after >= MinimumMarkContrast;
     };
     return keeps(palette.defaultForeground)
            && std::ranges::all_of(std::views::iota(std::size_t { 0 }, std::size_t { 16 }),

@@ -44,26 +44,32 @@ namespace
     return "?";
 }
 
-/// The schemes whose hovered block takes a lighter tint than the canvas's 5 %, so their text reads as before.
-///
-/// The 0.25 bound is absolute, and a dark scheme's light foreground near 15:1 loses more than that to any
-/// visible tint: on most schemes the tint is clamped to nothing, and the ring alone marks the hover.
-std::set<std::string> const lighterHoverTints {
-    "contour",          "contour-classic", "contour-dark",    "contour-light", "gruvbox-dark",
-    "gruvbox-light",    "monokai",         "one-dark",        "one-light",     "papercolor-dark",
-    "papercolor-light", "solarized-dark",  "solarized-light",
-};
+/// The schemes whose hovered block takes a lighter tint than the canvas's 5 %, because 5 % would push a text
+/// pair that reads at 4.5:1 (or a mark that reads at 3:1) below it. Every other scheme keeps the canvas's
+/// tint.
+[[nodiscard]] std::set<std::string> lighterHoverTints()
+{
+    return {
+        "contour",       "contour-classic", "contour-dark", "contour-light",    "gruvbox-dark",
+        "gruvbox-light", "monokai",         "one-light",    "papercolor-light", "solarized-dark",
+    };
+}
 
 /// The scheme and style of every pill whose canvas ink is too faint for the scheme, and is lifted.
-std::set<std::string> const liftedPills {
-    "contour Failed",        "contour-classic Failed",   "contour-light Success",    "gruvbox-dark Failed",
-    "gruvbox-dark Running",  "gruvbox-light Failed",     "gruvbox-light Fold",       "gruvbox-light Running",
-    "gruvbox-light Success", "monokai Failed",           "one-dark Failed",          "one-dark Fold",
-    "one-dark Success",      "one-light Failed",         "one-light Success",        "papercolor-dark Failed",
-    "papercolor-light Fold", "papercolor-light Running", "papercolor-light Success", "solarized-dark Failed",
-    "solarized-dark Fold",   "solarized-dark Running",   "solarized-dark Success",   "solarized-light Failed",
-    "solarized-light Fold",  "solarized-light Running",  "solarized-light Success",
-};
+[[nodiscard]] std::set<std::string> liftedPills()
+{
+    return {
+        "contour Failed",           "contour-classic Failed",  "contour-light Success",
+        "gruvbox-dark Failed",      "gruvbox-dark Running",    "gruvbox-light Failed",
+        "gruvbox-light Fold",       "gruvbox-light Running",   "gruvbox-light Success",
+        "monokai Failed",           "one-dark Failed",         "one-dark Fold",
+        "one-dark Success",         "one-light Failed",        "one-light Success",
+        "papercolor-dark Failed",   "papercolor-light Fold",   "papercolor-light Running",
+        "papercolor-light Success", "solarized-dark Failed",   "solarized-dark Fold",
+        "solarized-dark Running",   "solarized-dark Success",  "solarized-light Failed",
+        "solarized-light Fold",     "solarized-light Running", "solarized-light Success",
+    };
+}
 } // namespace
 
 TEST_CASE("blockPill.theRowsAreTheCanvas", "[blockpill]")
@@ -155,15 +161,14 @@ TEST_CASE("blockPill.everyInkReadsAtFourAndAHalf", "[blockpill]")
             CHECK(contrastRatio(tinted.ink, tinted.ground) >= MinimumTextContrast);
         }
     }
-    CHECK(lifted == liftedPills);
+    CHECK(lifted == liftedPills());
 }
 
 TEST_CASE("blockPill.aHoveredBlocksTintKeepsTheText", "[blockpill][blockhover]")
 {
-    // The canvas's tint (the label at 5 %) and ring (6 %) of a hovered block: every scheme's foreground and
-    // 16 ANSI colours over the tinted page stay within 0.25 of their contrast against the page, and any that
-    // read at 4.5:1 still do. Where 5 % would cost a scheme that, the tint is lighter, and the schemes that
-    // needed it are named here.
+    // The canvas's tint (the label at 5 %) and ring (6 %) of a hovered block. A scheme keeps the 5 % unless
+    // it would push a text pair that read at 4.5:1 below it, or a mark that read at 3:1 below that; only
+    // those schemes get a lighter tint, and they are named here.
     auto lighter = std::set<std::string> {};
     for (auto const name: defaultColorPaletteNames())
     {
@@ -181,9 +186,10 @@ TEST_CASE("blockPill.aHoveredBlocksTintKeepsTheText", "[blockpill][blockhover]")
         auto const check = [&](RGBColor text) {
             auto const before = contrastRatio(text, page);
             auto const after = contrastRatio(text, tinted);
-            CHECK(std::abs(after - before) <= BlockHoverContrastSlack);
             if (before >= MinimumTextContrast)
                 CHECK(after >= MinimumTextContrast);
+            else if (before >= MinimumMarkContrast)
+                CHECK(after >= MinimumMarkContrast);
         };
         check(palette.defaultForeground);
         for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 16 }))
@@ -192,5 +198,5 @@ TEST_CASE("blockPill.aHoveredBlocksTintKeepsTheText", "[blockpill][blockhover]")
             check(palette.palette.at(index));
         }
     }
-    CHECK(lighter == lighterHoverTints);
+    CHECK(lighter == lighterHoverTints());
 }
