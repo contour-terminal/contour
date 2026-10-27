@@ -1895,10 +1895,14 @@ TEST_CASE("UiStyleProvider publishes the find bar's tokens and placement", "[con
 TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;
+    using contour::config::MinimumMarkContrast;
+    using contour::config::MinimumTextContrast;
     using contour::config::SchemeSlot;
+    using contour::config::StatusColorRole;
 
-    // Native rows: a lit toggle's accent glyph on its 22 % wash, and the unlit glyphs and the count on the
-    // bar, on a light and a dark chrome.
+    // Native rows: a lit toggle's glyph on its 22 % accent wash, and the unlit glyphs and the count on the
+    // bar, on a light and a dark chrome. A lit toggle is told from an unlit one by its ring: the accent, or
+    // the chrome's ink where the accent would not reach 3:1 there (B-I4).
     for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
     {
         CAPTURE(static_cast<int>(row));
@@ -1911,13 +1915,16 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
             withWindowColor(window, [&] {
                 INFO("chrome: " << window.name().toStdString());
                 auto const lit = over(role("findToggleOnFill"), window);
-                CHECK(contrastOf(over(role("findToggleOnText"), lit), lit) >= 4.5);
-                CHECK(contrastOf(over(role("findToggleText"), window), window) >= 4.5);
-                CHECK(contrastOf(over(role("findCountText"), window), window) >= 4.5);
+                CHECK(contrastOf(over(role("findToggleOnText"), lit), lit) >= MinimumTextContrast);
+                CHECK(contrastOf(over(role("findToggleText"), window), window) >= MinimumTextContrast);
+                CHECK(contrastOf(over(role("findCountText"), window), window) >= MinimumTextContrast);
+                auto const ring = provider.statusMarkOn(static_cast<int>(StatusColorRole::Running), window);
+                CHECK(contrastOf(ring, window) >= MinimumMarkContrast);
             });
     }
 
-    // The Terminal row: on the bar, over every bundled scheme.
+    // The Terminal row: on the bar, over every bundled scheme. A lit toggle is its cells in inverse video,
+    // which stands off an unlit one on the bar.
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
         INFO("scheme: " << name);
@@ -1931,8 +1938,9 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
         };
         auto const bar =
             contour::platform::toQColor(inputs.scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)]);
-        CHECK(contrastOf(role("findToggleOnText"), role("findToggleOnFill")) >= 4.5);
-        CHECK(contrastOf(role("findToggleText"), bar) >= 4.5);
-        CHECK(contrastOf(role("findCountText"), bar) >= 4.5);
+        CHECK(contrastOf(role("findToggleOnText"), role("findToggleOnFill")) >= MinimumTextContrast);
+        CHECK(contrastOf(role("findToggleOnFill"), bar) >= MinimumMarkContrast);
+        CHECK(contrastOf(role("findToggleText"), bar) >= MinimumTextContrast);
+        CHECK(contrastOf(role("findCountText"), bar) >= MinimumTextContrast);
     }
 }

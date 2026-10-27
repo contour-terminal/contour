@@ -426,8 +426,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Re-derives _searchToggles and the case affordance from @p options.
     void publishSearchToggles(vtbackend::SearchOptions options);
 
-    /// Re-derives _searchFocusedRows under the lock; marks it to be notified when it changed.
+    /// Re-derives _searchFocusedRows under the lock.
     void refreshSearchFocusedRowsLocked();
+
+    /// Emits searchFocusedRowsChanged where the rows differ from the ones last announced. Outside the lock.
+    void announceSearchFocusedRows();
 
     /// Emits searchStateChanged, and searchFocusedRowsChanged where the rows changed. Outside the lock.
     void publishSearchState();
@@ -2058,8 +2061,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QVariantList _searchToggles;
     /// @see searchFocusedRows. GUI thread only.
     QVariantMap _searchFocusedRows;
-    /// Whether _searchFocusedRows changed since searchFocusedRowsChanged was last emitted. GUI thread only.
-    bool _isSearchFocusedRowsDirty = false;
+    /// The rows searchFocusedRowsChanged last announced: a change is told by comparing. GUI thread only.
+    QVariantMap _announcedSearchFocusedRows;
     /// Collapses the scroll callback's refresh posts to at most one in flight.
     std::atomic_flag _searchFocusedRowsPostPending = ATOMIC_FLAG_INIT;
     /// The count being walked, between its steps; nothing while none is. GUI thread only.

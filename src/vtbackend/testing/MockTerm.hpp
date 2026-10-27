@@ -266,6 +266,11 @@ class MockTerm: public Terminal::NullEvents
     /// How often the terminal reported a selection completed: what a frontend copies to PRIMARY on.
     int selectionCompletions = 0;
 
+    void searchQueryEnded() override { ++searchQueriesEnded; }
+
+    /// How often the terminal reported ending the search's query as too complex to match.
+    int searchQueriesEnded = 0;
+
     /// When set, the request is recorded but NOT applied — modelling a frontend that cannot honour it
     /// (window maximized/fullscreen, a tiling WM, or the resize still in-flight on the GUI thread). Lets
     /// a test prove a sequence resizes the grid on its own authority rather than via the frontend.

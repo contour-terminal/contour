@@ -658,15 +658,19 @@ TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][se
     {
         CHECK(direct->empty());
         CHECK(mock.terminal.search().query == query);
+        CHECK(mock.searchQueriesEnded == 0);
         return;
     }
     CHECK(direct.error() == SearchPatternError::TooComplex);
     CHECK(mock.terminal.search().problem == SearchPatternError::TooComplex);
+    // And the frontend is told, from the render pass, so the find bar can say why.
+    CHECK(mock.searchQueriesEnded == 1);
     CHECK(mock.terminal.search().query == nullptr);
     CHECK(mock.terminal.search().pattern == U"(a+)+$");
-    // The next frame finds no query to run.
+    // The next frame finds no query to run, and tells nobody again.
     mock.terminal.refreshRenderBuffer(true);
     CHECK(mock.terminal.search().query == nullptr);
+    CHECK(mock.searchQueriesEnded == 1);
 }
 
 TEST_CASE("search.aMatchReadsOnEveryCellItPaints", "[renderbuffer][search]")

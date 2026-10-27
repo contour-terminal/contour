@@ -2763,9 +2763,11 @@ void TerminalSession::searchBarClosed()
     // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
     _isSearchBarOpen.store(false, std::memory_order_relaxed);
     _searchTallyTimer.stop();
-    // And the count being walked: its posted steps find the ticket moved on.
+    // And the count being walked: its posted steps find the ticket moved on. A jump it was to make goes
+    // with it, or reopening the bar would move the cursor nobody asked to move.
     _searchWalk.reset();
     ++_searchWalkTicket;
+    _pendingSearchJump = PendingSearchJump::None;
 
     // Cleared BECAUSE the timer was just stopped: the flag is otherwise only cleared where the timer
     // fires, so stopping it mid-window would strand the flag set for the rest of the session -- and a
@@ -2979,8 +2981,15 @@ void TerminalSession::refreshSearchStatus()
 void TerminalSession::publishSearchState()
 {
     emit searchStateChanged();
-    if (std::exchange(_isSearchFocusedRowsDirty, false))
-        emit searchFocusedRowsChanged();
+    announceSearchFocusedRows();
+}
+
+void TerminalSession::announceSearchFocusedRows()
+{
+    if (_searchFocusedRows == _announcedSearchFocusedRows)
+        return;
+    _announcedSearchFocusedRows = _searchFocusedRows;
+    emit searchFocusedRowsChanged();
 }
 
 void TerminalSession::runSearchTallyStep()
@@ -3209,11 +3218,7 @@ void TerminalSession::refreshSearchFocusedRowsLocked()
             rows.insert(QStringLiteral("last"), std::min(last, lastRow));
         }
     }
-    if (rows != _searchFocusedRows)
-    {
-        _searchFocusedRows = std::move(rows);
-        _isSearchFocusedRowsDirty = true;
-    }
+    _searchFocusedRows = std::move(rows);
 }
 
 void TerminalSession::refreshSearchFocusedRows()
@@ -3223,8 +3228,7 @@ void TerminalSession::refreshSearchFocusedRows()
         auto const l = scoped_lock { _terminal };
         refreshSearchFocusedRowsLocked();
     }
-    if (std::exchange(_isSearchFocusedRowsDirty, false))
-        emit searchFocusedRowsChanged();
+    announceSearchFocusedRows();
 }
 // }}}
 

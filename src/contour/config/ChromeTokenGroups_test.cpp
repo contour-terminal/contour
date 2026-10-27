@@ -1186,8 +1186,9 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
     using contour::config::detail::schemeOnBar;
     using enum ChromeColorRole;
     auto const rows = std::array {
-        // The find bar (F13): a lit toggle is an accent wash under the primary label, or a selected run of
-        // cells; an unlit one and the count, the secondary label or the bar's inks.
+        // The find bar (F13): a lit toggle is an accent wash under the primary label, ringed in the accent
+        // (UiStyleProvider::statusMarkOn), or its cells in inverse video; an unlit one and the count, the
+        // secondary label or the bar's inks.
         PaneColorRow { .role = FindToggleOnFill,
                        .native = ChromeColorSource { .kind = ColorSourceKind::StatusMark,
                                                      .rgb = 0,
@@ -1195,10 +1196,9 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
                                                      .slot = SchemeSlot::Background,
                                                      .alphaPercent = 22,
                                                      .level = 0 },
-                       .terminal = schemeColor(SchemeSlot::Selection) },
-        PaneColorRow { .role = FindToggleOnText,
-                       .native = label(1),
-                       .terminal = schemeColor(SchemeSlot::SelectionText) },
+                       .terminal = schemeColor(SchemeSlot::BarInk) },
+        PaneColorRow {
+            .role = FindToggleOnText, .native = label(1), .terminal = schemeColor(SchemeSlot::Bar) },
         PaneColorRow {
             .role = FindToggleText, .native = label(2), .terminal = schemeOnBar(SchemeSlot::Secondary) },
         PaneColorRow {

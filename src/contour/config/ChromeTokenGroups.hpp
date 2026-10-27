@@ -1314,11 +1314,13 @@ namespace detail
                     schemeColor(SchemeSlot::BarSelection),     // PaletteSelectionFill
                     schemeColor(SchemeSlot::BarSelectionText), // PaletteSelectionText
                     schemeColor(SchemeSlot::Secondary),        // PaletteSeparator
-                    // A lit toggle is a selected run of cells; an unlit one and the count, the bar's inks.
-                    schemeColor(SchemeSlot::Selection),     // FindToggleOnFill
-                    schemeColor(SchemeSlot::SelectionText), // FindToggleOnText
-                    schemeOnBar(SchemeSlot::Secondary),     // FindToggleText
-                    schemeColor(SchemeSlot::BarInk) },      // FindCountText
+                    // A lit toggle is its cells in inverse video -- the bar's ink as the fill, the bar as the
+                    // glyph -- which stands off an unlit one on the bar at the ink's own 4.5:1; the scheme's
+                    // selection on the bar can fall to 1.9:1. An unlit one and the count, the bar's inks.
+                    schemeColor(SchemeSlot::BarInk),    // FindToggleOnFill
+                    schemeColor(SchemeSlot::Bar),       // FindToggleOnText
+                    schemeOnBar(SchemeSlot::Secondary), // FindToggleText
+                    schemeColor(SchemeSlot::BarInk) },  // FindCountText
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

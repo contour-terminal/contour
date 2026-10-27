@@ -4521,33 +4521,101 @@ TEST_CASE("TerminalSession: searchFocusedRows names the current match's rows", "
 TEST_CASE("TerminalSession: output scrolling a match from another thread refreshes its rows",
           "[contour][session][search][threading]")
 {
-    // The scroll callback runs on the parser thread with the state mutex held; the rows are re-read on the
-    // GUI thread, from a posted call, never under that callback.
+    // The scroll callback runs on the scrolling thread with the state mutex held; the rows are re-read on
+    // the GUI thread, from a posted call, never under that callback.
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto& terminal = session->terminal();
     allowHistory(*session, 1000);
     writeSearchRows(
-        terminal, 50, [](int row) { return row == 10 ? std::string("needle") : std::string("hay"); });
+        terminal, 50, [](int row) { return row == 45 ? std::string("needle") : std::string("hay"); });
     session->searchBarOpened();
     session->setSearchPattern(QStringLiteral("needle"));
-    {
-        auto const _ = std::scoped_lock { terminal };
-        terminal.viewport().scrollUp(vtbackend::LineCount(5));
-    }
+    auto const before = session->searchFocusedRows();
+    REQUIRE_FALSE(before.isEmpty());
+    auto rowsChanged =
+        QSignalSpy { session.get(), &contour::session::TerminalSession::searchFocusedRowsChanged };
 
-    auto writer = std::thread { [&terminal] {
-        for ([[maybe_unused]] auto const i: std::views::iota(0, 200))
-            terminal.writeToScreen("hay\r\n");
+    auto scroller = std::thread { [&terminal] {
+        auto const _ = std::scoped_lock { terminal };
+        std::ignore = terminal.viewport().scrollUp(vtbackend::LineCount(3));
     } };
-    writer.join();
+    scroller.join();
     QCoreApplication::processEvents();
 
+    CHECK(rowsChanged.count() == 1);
+    auto const rows = session->searchFocusedRows();
+    CHECK(rows[QStringLiteral("first")].toInt() == before[QStringLiteral("first")].toInt() + 3);
     auto const expected = [&] {
         auto const _ = std::scoped_lock { terminal };
-        return terminal.focusedSearchMatch().has_value();
+        return unbox<int>(terminal.focusedSearchMatch()->first.line)
+               + unbox<int>(terminal.viewport().scrollOffset());
     }();
-    CHECK(expected);
+    CHECK(rows[QStringLiteral("first")].toInt() == expected);
+}
+
+TEST_CASE("TerminalSession: closing the find bar drops the jump its walk was to make",
+          "[contour][session][search]")
+{
+    // B-M7: the probe found nothing in its reach, so the walk was to move the cursor once it ended. Closing
+    // the bar ends the walk, and the jump with it: reopening must not move a cursor nobody asked to move.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    allowHistory(*session, 3000);
+    terminal.writeToScreen("needle\r\n");
+    writeSearchRows(terminal, 2000, [](int) { return std::string("hay"); });
+    auto const cursor = [&] {
+        auto const _ = std::scoped_lock { terminal };
+        return terminal.normalModeCursorPosition();
+    };
+
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    auto const before = cursor();
+    session->searchBarClosed();
+
+    session->searchBarOpened();
+    drainSearchTally(*session);
+    CHECK(cursor() == before);
+    CHECK_FALSE(session->searchSummary().contains(QStringLiteral(" of ")));
+}
+
+TEST_CASE("TerminalSession: a pattern too complex to draw says so in the count slot",
+          "[contour][session][search]")
+{
+    // B-I3: the query ends where a frame meets it, not in the probe or the walk -- the page on display
+    // holds the catastrophic rows below the cursor, the probe reads only up from it, and no count runs. The
+    // terminal's searchQueryEnded event is what tells the bar.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    allowHistory(*session, 3000);
+    writeSearchRows(terminal, 2000, [](int) { return std::string("hay"); });
+    writeSearchRows(terminal, 10, [](int) { return std::string(60, 'a') + "b"; });
+    // Opening the bar from Insert mode puts the vi cursor on the terminal's; it is moved after.
+    session->searchBarOpened();
+    session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
+    {
+        // The page's top row is hay; the probe reads up from it, the frame reads the rows below it too.
+        auto const _ = std::scoped_lock { terminal };
+        REQUIRE(terminal.primaryScreen().grid().lineText(vtbackend::LineOffset(0)).starts_with("hay"));
+        terminal.moveNormalModeCursorTo(vtbackend::CellLocation {});
+    }
+    session->setSearchPattern(QStringLiteral("(a+)+$"));
+    REQUIRE(session->searchSummary() != QStringLiteral("Pattern too complex"));
+    REQUIRE_FALSE(session->searchTallyRunning());
+
+    terminal.refreshRenderBuffer(false);
+#ifdef __GLIBCXX__
+    // libstdc++'s breadth-first executor matches it, if slowly: nothing ends.
+    CHECK_FALSE(terminal.search().problem.has_value());
+#else
+    REQUIRE(terminal.search().problem == vtbackend::SearchPatternError::TooComplex);
+    QCoreApplication::processEvents();
+    CHECK(session->searchSummary() == QStringLiteral("Pattern too complex"));
+    CHECK_FALSE(session->searchHasMatches());
+#endif
 }
 
 TEST_CASE("TerminalSession: the find bar wraps to the top of the page on display",
