@@ -101,6 +101,7 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         std::optional<std::string> profileName = std::nullopt) override
     {
         requestedCwds.push_back(std::move(cwd));
+        boundForReconnect = false;
         // Record the size the manager asked for (nullopt == "use the profile default"), so a test can
         // assert that a new tab/split inherited the running window size instead of the default.
         requestedPageSizes.push_back(pageSize);
@@ -144,9 +145,28 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
 
     [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
     {
-        return std::ranges::contains(namedForReconnect, endedPty) ? contour::session::ReconnectBinding::Bound
-                                                                  : contour::session::ReconnectBinding::Gone;
+        if (!std::ranges::contains(namedForReconnect, endedPty))
+            return contour::session::ReconnectBinding::Gone;
+        boundForReconnect = true;
+        return contour::session::ReconnectBinding::Bound;
     }
+
+    void cancelReconnectBinding() override { boundForReconnect = false; }
+
+    [[nodiscard]] bool canCreateSession() const noexcept override
+    {
+        return creation == SessionCreation::Allowed;
+    }
+
+    /// Whether canCreateSession() answers yes.
+    enum class SessionCreation : uint8_t
+    {
+        Refused = 0,
+        Allowed,
+    };
+    SessionCreation creation = SessionCreation::Allowed;
+    /// Whether a bindForReconnect() is pending: createPty() consumes it, cancelReconnectBinding() drops it.
+    bool boundForReconnect = false;
 
     /// What reconnectSupport() reports: Supported stands in for an app attached to a daemon.
     contour::session::ReconnectSupport reportedReconnectSupport =
@@ -303,6 +323,8 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
     {
         return _factory->bindForReconnect(endedPty);
     }
+
+    void cancelReconnectBinding() override { _factory->cancelReconnectBinding(); }
 
   private:
     std::unique_ptr<contour::session::SessionFactory> _factory;

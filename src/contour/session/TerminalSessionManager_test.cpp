@@ -2892,6 +2892,22 @@ TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
     CHECK(lost.right->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Ended));
 }
 
+TEST_CASE("TerminalSessionManager: a failed take-back leaves no binding for the next session",
+          "[manager][paneend][reconnect]")
+{
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    lost.factory->namedForReconnect = { &lost.left->terminal().device() };
+    // The factory binds the pane, then cannot back the session that would mirror it.
+    lost.factory->creation = contour::test::MockPtySessionFactory::SessionCreation::Refused;
+    lost.left->runFooterAction();
+
+    manager.rebindDisconnected();
+
+    CHECK_FALSE(lost.factory->boundForReconnect);
+    CHECK(lost.left->endReason() == contour::session::EndReason::Disconnected);
+}
+
 TEST_CASE("TerminalSessionManager: a restarted pane starts at the size it has once the footer hides",
           "[manager][paneend]")
 {

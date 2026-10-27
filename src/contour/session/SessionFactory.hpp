@@ -315,6 +315,10 @@ class SessionFactory
     {
         return ReconnectBinding::Gone;
     }
+
+    /// Takes back a bindForReconnect() that came to nothing: the pane it was for could not be made, so the
+    /// next createPty() must not mirror its session. A no-op where nothing is bound.
+    virtual void cancelReconnectBinding() {}
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

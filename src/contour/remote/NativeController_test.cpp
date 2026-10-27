@@ -2594,6 +2594,29 @@ TEST_CASE("NativeController.reconnect.takesAPaneBackByItsRemoteSession",
     pane.terminal.reset();
 }
 
+TEST_CASE("NativeController.reconnect.cancelledBindingLeavesNothingForTheNextPty",
+          "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectBinding;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+
+    REQUIRE(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
+    REQUIRE(controller.canCreateSession());
+    controller.cancelReconnectBinding();
+    CHECK_FALSE(controller.canCreateSession());
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.

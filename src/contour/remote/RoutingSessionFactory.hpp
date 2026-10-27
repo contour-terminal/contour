@@ -107,6 +107,8 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().bindForReconnect(endedPty);
     }
 
+    void cancelReconnectBinding() override { active().cancelReconnectBinding(); }
+
     void bindTerminal(vtpty::Pty const* pty,
                       vtbackend::Terminal& terminal,
                       contour::session::InterruptionSink const& interruptions) override

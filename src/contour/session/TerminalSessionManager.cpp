@@ -2160,7 +2160,11 @@ void TerminalSessionManager::rebindDisconnected()
     for (auto* session: lost)
         if (_sessionFactory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
             if (auto const rebound = replaceEndedSession(*session); !rebound)
+            {
                 managerLog()("Not taking a pane back: {}.", describe(rebound.error()));
+                // Left set, the binding would hand the ended pane's remote session to the next one made.
+                _sessionFactory.cancelReconnectBinding();
+            }
     _reconnectRun = ReconnectRun::Idle;
 }
 

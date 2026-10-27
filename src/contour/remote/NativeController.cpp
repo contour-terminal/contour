@@ -532,6 +532,12 @@ contour::session::ReconnectBinding NativeController::bindForReconnect(vtpty::Pty
     return ReconnectBinding::Bound;
 }
 
+void NativeController::cancelReconnectBinding()
+{
+    auto const lock = std::lock_guard { _mutex };
+    _nextBindSession.reset();
+}
+
 void NativeController::setNextBindSession(uint64_t session)
 {
     auto const lock = std::lock_guard { _mutex };

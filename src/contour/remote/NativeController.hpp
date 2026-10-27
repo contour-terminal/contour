@@ -372,6 +372,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// the next createPty() bind to it again. GUI thread.
     [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override;
 
+    /// SessionFactory: forgets the session bindForReconnect() named, when no pty was made for it. GUI thread.
+    void cancelReconnectBinding() override;
+
   signals:
     /// A remote session appeared that has no local tab yet (fires on the
     /// reactor thread; connect queued).
