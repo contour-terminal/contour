@@ -68,6 +68,31 @@ std::filesystem::path relativePathOf(SideFile const& file)
     return std::filesystem::path { location.directory } / sideFileName(file.name);
 }
 
+std::expected<void, std::string> checkSideFileName(std::string_view name)
+{
+    if (name.empty())
+        return std::unexpected(std::string { "Enter a name." });
+    if (name.find_first_of(std::string_view { "/\\\0", 3 }) != std::string_view::npos)
+        return std::unexpected(std::string { "A name cannot contain / or \\." });
+    if (name.contains(".."))
+        return std::unexpected(std::string { "A name cannot contain \"..\"." });
+    if (name.starts_with('.'))
+        return std::unexpected(std::string { "A name cannot start with a dot." });
+    return {};
+}
+
+namespace
+{
+    /// Whether @p file's path stays inside the configuration directory: the store's own guard, beside the
+    /// page's, so that no caller can reach outside it.
+    [[nodiscard]] std::expected<void, std::string> checkSideFile(SideFile const& file)
+    {
+        if (file.kind == SideFileKind::GuiSettings)
+            return {};
+        return checkSideFileName(file.name);
+    }
+} // namespace
+
 std::string displayPathOf(SideFile const& file)
 {
     auto const spelled = relativePathOf(file).generic_u8string();
@@ -82,6 +107,8 @@ FileGuiConfigStore::FileGuiConfigStore(core::platform::FileSystem const& fileSys
 
 std::expected<std::optional<std::string>, std::string> FileGuiConfigStore::read(SideFile const& file) const
 {
+    if (auto const valid = checkSideFile(file); !valid)
+        return std::unexpected(valid.error());
     auto const path = _configDir / relativePathOf(file);
     if (!_fileSystem.exists(path))
         return std::optional<std::string> {};
@@ -91,13 +118,23 @@ std::expected<std::optional<std::string>, std::string> FileGuiConfigStore::read(
 
 std::expected<void, std::string> FileGuiConfigStore::write(SideFile const& file, std::string_view bytes)
 {
+    if (auto const valid = checkSideFile(file); !valid)
+        return valid;
     return writeFileDurably(_fileSystem, _configDir / relativePathOf(file), bytes);
 }
 
 std::expected<void, std::string> FileGuiConfigStore::remove(SideFile const& file)
 {
-    // An already-absent file answers false: the post-state wanted either way.
-    return _fileSystem.remove(_configDir / relativePathOf(file)).transform([](bool) {});
+    if (auto const valid = checkSideFile(file); !valid)
+        return valid;
+    // An already-absent file answers false: the post-state wanted either way, and nothing to sync. A removal
+    // reaches the disk, as a replace does, with its directory synced.
+    auto const path = _configDir / relativePathOf(file);
+    return _fileSystem.remove(path).and_then([&](bool removed) -> std::expected<void, std::string> {
+        if (!removed)
+            return {};
+        return _fileSystem.syncDirectory(path.parent_path());
+    });
 }
 
 std::expected<std::vector<SideFile>, std::string> FileGuiConfigStore::list(SideFileKind kind) const

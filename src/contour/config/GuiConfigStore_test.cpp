@@ -5,11 +5,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
 
 #include <vthost/testing/FaultyFileSystem.hpp>
+#include <vthost/testing/RecordingDurableFiles.hpp>
 
 using contour::config::colorSchemeFile;
 using contour::config::FileGuiConfigStore;
@@ -158,4 +160,44 @@ TEST_CASE("FileGuiConfigStore: list names the side files of one kind", "[guiconf
     CHECK(store.list(SideFileKind::GuiSettings)
           == std::expected<std::vector<contour::config::SideFile>, std::string> {
               std::vector { guiSettingsFile() } });
+}
+
+TEST_CASE("FileGuiConfigStore: a removal reaches the disk with its directory synced", "[guiconfigstore]")
+{
+    auto fileSystem = vthost::testing::RecordingDurableFiles {};
+    auto store = FileGuiConfigStore { fileSystem, configDir() };
+    REQUIRE(store.write(profileFile("main"), "a").has_value());
+    fileSystem.calls.clear();
+
+    REQUIRE(store.remove(profileFile("main")).has_value());
+
+    using vthost::testing::DurableOp;
+    CHECK(std::ranges::count(
+              fileSystem.calls, DurableOp::SyncDirectory, &vthost::testing::RecordedDurableCall::op)
+          == 1);
+    CHECK(fileSystem.calls.back().path == configDir() / "profiles");
+
+    // Nothing removed, nothing to sync: an absent file's directory may not even exist.
+    fileSystem.calls.clear();
+    REQUIRE(store.remove(colorSchemeFile("absent")).has_value());
+    CHECK(fileSystem.calls.empty());
+}
+
+TEST_CASE("FileGuiConfigStore: a name that would leave its directory is refused", "[guiconfigstore]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiConfigStore { fileSystem, configDir() };
+    for (auto const* name: { "../x", "a/b", "a\\b", ".hidden", "..", "" })
+    {
+        INFO(name);
+        CHECK_FALSE(contour::config::checkSideFileName(name).has_value());
+        CHECK_FALSE(store.write(profileFile(name), "x").has_value());
+        CHECK_FALSE(store.write(colorSchemeFile(name), "x").has_value());
+        CHECK_FALSE(store.remove(profileFile(name)).has_value());
+        CHECK_FALSE(store.read(profileFile(name)).has_value());
+    }
+    CHECK_FALSE(fileSystem.exists(configDir() / "x.yml"));
+    CHECK_FALSE(fileSystem.exists(std::filesystem::path { "/x.yml" }));
+    CHECK(contour::config::checkSideFileName("Contour Dark").has_value());
+    CHECK(contour::config::checkSideFileName("main copy 2").has_value());
 }

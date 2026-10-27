@@ -49,6 +49,13 @@ struct SideFile
 /// @return Its path relative to the configuration directory.
 [[nodiscard]] std::filesystem::path relativePathOf(SideFile const& file);
 
+/// Whether @p name may name a profile's or a colour scheme's side file: a file name inside `profiles/` or
+/// `colorschemes/`, never a path. Refused: an empty name, a `/` or `\\`, a `..`, a leading `.` (a hidden
+/// file, and the durable write's temporaries), and a NUL.
+/// @param name The name, as the user typed it.
+/// @return Nothing, or the reason a page shows.
+[[nodiscard]] std::expected<void, std::string> checkSideFileName(std::string_view name);
+
 /// @p file's relative path as a message spells it, in UTF-8 with forward slashes on every platform:
 /// `profiles/main.yml`.
 /// @param file The side file.
