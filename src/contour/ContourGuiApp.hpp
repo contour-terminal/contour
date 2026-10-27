@@ -1095,11 +1095,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// reverse declaration order.
     std::unique_ptr<window::ChromeStyleHost> _chromeStyleHost;
 
-    /// Whether to offer the newest defaults, handed to QML as the `newDefaults` context property. Built
-    /// with the engine, and declared before it for the same borrowed-pointer reason as above.
     /// What the GUI remembers beside contour.yml (gui-state.yml), shared by the new-defaults banner and the
     /// Settings window; created on first use by guiState(). Declared before both, which borrow it.
     std::shared_ptr<config::GuiStateStore> _guiState;
+
+    /// Whether to offer the newest defaults, handed to QML as the `newDefaults` context property. Built
+    /// with the engine, and declared before it for the same borrowed-pointer reason as above.
     std::unique_ptr<window::NewDefaultsNotice> _newDefaultsNotice;
 
     /// What the window controls are and where they go, handed to QML as the `windowControls` context
