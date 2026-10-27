@@ -388,6 +388,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
 
+    /// Whether a walk is under way and the vi cursor is still on the cell it began at, however output has
+    /// scrolled that cell since: a pending jump applies, and a status refresh continues the walk, only then.
+    /// Under the lock.
+    [[nodiscard]] bool searchWalkBegunAtCursorLocked() const;
+
     /// Drops the count being walked: its posted steps find the ticket moved on, and the jump it was to make
     /// goes with it.
     void abandonSearchWalk();
@@ -2051,8 +2056,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<vtbackend::TerminalSearchTally> _searchWalk;
     /// Bumped by every walk begun, so a posted step of an older walk does nothing.
     uint64_t _searchWalkTicket = 0;
-    /// Where the vi cursor was when the walk began: a pending jump applies only if it is still there.
-    vtbackend::CellLocation _searchWalkOrigin {};
     /// @see PendingSearchJump
     PendingSearchJump _pendingSearchJump = PendingSearchJump::None;
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it

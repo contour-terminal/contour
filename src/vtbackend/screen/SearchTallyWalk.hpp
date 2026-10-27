@@ -68,6 +68,10 @@ class SearchTallyWalk
     /// @return The last match the walk found, where it still is in @p grid.
     [[nodiscard]] std::optional<CellLocation> lastMatch(Grid const& grid) const;
 
+    /// @return The position it was begun at, where that cell is in @p grid now: output that scrolls the grid
+    ///         moves it with its row; nothing once its row is evicted or row identity is lost.
+    [[nodiscard]] std::optional<CellLocation> positionIn(Grid const& grid) const;
+
     /// @return How many segments the walk has found by walking back to their line's head: at most one per
     ///         step, the rest found from the segment before them. A cost, read by the tests.
     [[nodiscard]] size_t headLookups() const noexcept { return _headLookups; }

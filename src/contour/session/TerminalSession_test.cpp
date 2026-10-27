@@ -4376,6 +4376,38 @@ TEST_CASE("TerminalSession: the count is walked in steps and the lock is free be
                                     : QStringLiteral("%1 matches").arg(expected.total)));
 }
 
+TEST_CASE("TerminalSession: a status refresh mid-walk after output continues the walk",
+          "[contour][session][search]")
+{
+    // M3 (Q4): output arriving while a count is walked re-runs the debounce, which refreshes the status; that
+    // refresh must leave the walk of the same query from the same place going, or a count longer than the
+    // debounce would never finish while output streams. Run twice, with and without the refresh: a walk that
+    // continued needs the same steps to finish, a restarted one more.
+    auto const remainingSteps = [](bool refreshAfterOutput) {
+        contour::test::TestApp testApp;
+        auto session = makeDisplaylessSession(testApp.app());
+        auto& terminal = session->terminal();
+        allowHistory(*session, 3000);
+        writeSearchRows(terminal, 2000, [](int row) {
+            return row % 5 == 0 ? std::string("needle") : std::string("hay");
+        });
+        session->searchBarOpened();
+        session->setSearchPattern(QStringLiteral("needle"));
+        session->refreshSearchStatus();
+        session->runSearchTallyStep();
+        terminal.writeToScreen("hay\r\n");
+        if (refreshAfterOutput)
+            session->refreshSearchStatus();
+        REQUIRE(session->searchTallyRunning());
+        auto const steps = drainSearchTally(*session);
+        CHECK(session->searchSummary().contains(QStringLiteral("400")));
+        return steps;
+    };
+    auto const undisturbed = remainingSteps(false);
+    REQUIRE(undisturbed > 0);
+    CHECK(remainingSteps(true) == undisturbed);
+}
+
 TEST_CASE("TerminalSession: an invalid regex says so in the count slot", "[contour][session][search]")
 {
     contour::test::TestApp testApp;

@@ -3015,10 +3015,18 @@ void TerminalSession::postSearchTallyStep()
     });
 }
 
+bool TerminalSession::searchWalkBegunAtCursorLocked() const
+{
+    // By the walk's own stable position, not the offset it began at: output that scrolls the page moves the
+    // vi cursor along with its row, and that is no move of the user's.
+    return _searchWalk
+           && _searchWalk->walk.positionIn(_terminal.displayedPage().grid())
+                  == _terminal.normalModeCursorPosition();
+}
+
 void TerminalSession::startSearchTallyLocked()
 {
-    _searchWalkOrigin = _terminal.normalModeCursorPosition();
-    _searchWalk = _terminal.beginSearchTally(_searchWalkOrigin);
+    _searchWalk = _terminal.beginSearchTally(_terminal.normalModeCursorPosition());
     ++_searchWalkTicket;
     // The first step inline, under the lock already held: a scrollback within one step settles at once, so
     // stepping through a short one never flashes "…" between two counts.
@@ -3051,7 +3059,7 @@ TerminalSession::WalkStepOutcome TerminalSession::stepSearchTallyLocked()
     // landed: the nearest match at or before the cursor, else the last one -- if the cursor is still where
     // the walk began, so a jump never undoes a move the user made meanwhile.
     if (std::exchange(_pendingSearchJump, PendingSearchJump::None) == PendingSearchJump::ToNearest
-        && _terminal.normalModeCursorPosition() == _searchWalkOrigin)
+        && searchWalkBegunAtCursorLocked())
     {
         auto const& grid = _terminal.displayedPage().grid();
         auto const nearest = walk.nearestAtOrBefore(grid);
@@ -3186,8 +3194,7 @@ void TerminalSession::refreshSearchStatusLocked()
         _searchWalk.reset();
         _searchStatus = describeSearchError(*search.problem);
     }
-    else if (_searchWalk && _searchWalk->walk.query() == search.query
-             && _searchWalkOrigin == _terminal.normalModeCursorPosition())
+    else if (_searchWalk && _searchWalk->walk.query() == search.query && searchWalkBegunAtCursorLocked())
     {
         // A walk of this very query from this very place is under way: output arriving meanwhile does not
         // restart it, or a count longer than the debounce would never finish while output streams (Q4).

@@ -125,6 +125,13 @@ std::optional<CellLocation> SearchTallyWalk::nearestAtOrBefore(Grid const& grid)
     return locate(grid, _nearest);
 }
 
+std::optional<CellLocation> SearchTallyWalk::positionIn(Grid const& grid) const
+{
+    if (grid.stableIdGeneration() != _idGeneration)
+        return std::nullopt;
+    return locate(grid, _stablePosition);
+}
+
 std::optional<CellLocation> SearchTallyWalk::lastMatch(Grid const& grid) const
 {
     if (grid.stableIdGeneration() != _idGeneration)
