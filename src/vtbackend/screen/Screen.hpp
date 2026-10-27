@@ -1300,6 +1300,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept { return _grid.lineAt(line).empty(); }
 
+    /// Whether the cell at @p position is the right half of a wide glyph. @see Line::continuesAWideGlyphAt
+    [[nodiscard]] bool continuesAWideGlyphAt(CellLocation position) const noexcept
+    {
+        return _grid.lineAt(position.line).continuesAWideGlyphAt(position.column);
+    }
+
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
     {
         return _grid.lineAt(position.line).cellWidthAt(position.column);

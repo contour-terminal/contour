@@ -474,11 +474,22 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
                                                     Color foregroundColor,
                                                     Color backgroundColor) const noexcept
 {
+    return makeColorsForCell(
+        gridPosition, cellFlags, foregroundColor, backgroundColor, CursorColours::AtTheCursor);
+}
+
+RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
+                                                    CellFlags cellFlags,
+                                                    Color foregroundColor,
+                                                    Color backgroundColor,
+                                                    CursorColours cursorColours) const noexcept
+{
     auto const hasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     // clang-format off
     bool const paintCursor =
-        (hasCursor || (_prevHasCursor && _prevWidth == 2))
+        cursorColours == CursorColours::AtTheCursor
+            && (hasCursor || (_prevHasCursor && _prevWidth == 2))
             && _output->cursor.has_value()
             && _output->cursor->shape == CursorShape::Block
             && _output->cursor->animationProgress >= 1.0f;  // Don't invert cell during animation
@@ -921,7 +932,8 @@ ColumnCount RenderBufferBuilder::renderPreedit(CellLocation screenPosition,
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
-                                                textAttributes.backgroundColor);
+                                                textAttributes.backgroundColor,
+                                                CursorColours::Never);
 
         _output->cells.emplace_back(makeRenderCellExplicit(
             _terminal->colorPalette(),
@@ -961,17 +973,20 @@ ColumnCount RenderBufferBuilder::renderPreedit(CellLocation screenPosition,
 
 ColumnCount RenderBufferBuilder::currentLineColumns() const noexcept
 {
-    // DECDWL halves them, as it doubles every cell's width.
-    return _currentLineFlags.test(LineFlag::DoubleWidth) ? _screen->pageSize().columns / 2
-                                                         : _screen->pageSize().columns;
+    return preeditLineColumns(_screen->pageSize().columns, _currentLineFlags);
 }
 
 PreeditPlacement const& RenderBufferBuilder::preeditPlacement()
 {
     // Placed once a frame, on the cursor's own line, whose flags are the current ones whenever this is asked.
     if (!_preeditPlacement)
-        _preeditPlacement =
-            placePreedit(_inputMethodData.preeditString, _cursorPosition->column, currentLineColumns());
+        _preeditPlacement = placePreedit(_inputMethodData.preeditString,
+                                         _cursorPosition->column,
+                                         currentLineColumns(),
+                                         [this, line = _cursorPosition->line](ColumnOffset column) {
+                                             return _screen->continuesAWideGlyphAt(
+                                                 CellLocation { .line = line, .column = column });
+                                         });
     return *_preeditPlacement;
 }
 

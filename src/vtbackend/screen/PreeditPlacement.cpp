@@ -12,6 +12,14 @@ namespace vtbackend
 
 PreeditPlacement placePreedit(std::string_view preedit, ColumnOffset cursorColumn, ColumnCount lineColumns)
 {
+    return placePreedit(preedit, cursorColumn, lineColumns, [](ColumnOffset) { return false; });
+}
+
+PreeditPlacement placePreedit(std::string_view preedit,
+                              ColumnOffset cursorColumn,
+                              ColumnCount lineColumns,
+                              std::function<bool(ColumnOffset)> const& continuesAWideGlyph)
+{
     auto clusters = std::vector<PreeditCluster> {};
     auto total = ColumnCount(0);
     for (std::u32string const& cluster: unicode::utf8_grapheme_segmenter(preedit))
@@ -24,9 +32,11 @@ PreeditPlacement placePreedit(std::string_view preedit, ColumnOffset cursorColum
     }
 
     auto const lineEnd = boxed_cast<ColumnOffset>(lineColumns);
-    auto const start = cursorColumn + boxed_cast<ColumnOffset>(total) <= lineEnd
-                           ? cursorColumn
-                           : std::max(ColumnOffset(0), lineEnd - boxed_cast<ColumnOffset>(total));
+    auto start = cursorColumn + boxed_cast<ColumnOffset>(total) <= lineEnd
+                     ? cursorColumn
+                     : std::max(ColumnOffset(0), lineEnd - boxed_cast<ColumnOffset>(total));
+    if (start != cursorColumn && start > ColumnOffset(0) && continuesAWideGlyph(start))
+        --start;
 
     auto placement = PreeditPlacement { .start = start, .clusters = {}, .columns = ColumnCount(0) };
     auto const room = lineColumns - boxed_cast<ColumnCount>(start);

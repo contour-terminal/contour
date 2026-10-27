@@ -161,3 +161,30 @@ TEST_CASE("imeAnchorCell.outsideThePageHasNoAnchor", "[contour][ime]")
     CHECK_FALSE(imeAnchorCell(cursorAt(0, -1), pageSize).has_value());
     CHECK_FALSE(imeAnchorCell(cursorAt(0, 0), page(3, 0)).has_value()); // a page without columns
 }
+
+TEST_CASE("imePreeditAnchor.agreesWithTheRenderBufferOnAWideGlyph", "[contour][ime]")
+{
+    // The render buffer starts a preedit moved onto a wide glyph's right half one column further left; the
+    // candidate window anchors there too, from the same test of the line.
+    auto const continuesAWideGlyph = [](ColumnOffset column) {
+        return column == ColumnOffset(4);
+    };
+    auto const anchor =
+        contour::display::imePreeditAnchor(cursorAt(0, 9), "にほん", ColumnCount(10), 1, continuesAWideGlyph);
+    CHECK(anchor.cell == cursorAt(0, 3));
+}
+
+TEST_CASE("imeDrawnAnchor.aDoubleWidthLineDrawsTheAnchorTwiceAsFarAndAsWide", "[contour][ime]")
+{
+    using contour::display::ImeAnchor;
+    using contour::display::imeDrawnAnchor;
+    auto const anchor = ImeAnchor { .cell = cursorAt(2, 5), .width = 2 };
+
+    auto const single = imeDrawnAnchor(anchor, vtbackend::LineFlags {});
+    CHECK(single.cell == cursorAt(2, 5));
+    CHECK(single.width == 2);
+
+    auto const doubled = imeDrawnAnchor(anchor, vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth });
+    CHECK(doubled.cell == cursorAt(2, 10));
+    CHECK(doubled.width == 4);
+}

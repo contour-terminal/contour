@@ -91,3 +91,20 @@ TEST_CASE("placePreedit.anEmptyPreeditIsDrawnNowhere", "[renderbuffer][ime]")
     CHECK(placement.start == ColumnOffset(9));
     CHECK(placement.clusters.empty());
 }
+
+TEST_CASE("placePreedit.aMovedPreeditDoesNotStartOnAWideGlyphsRightHalf", "[renderbuffer][ime]")
+{
+    // A wide glyph covers columns 3 and 4. Moved left to column 4, the preedit would begin on its right half,
+    // and the glyph would draw over the preedit's first column; it starts one further left instead.
+    auto const continuesAWideGlyph = [](ColumnOffset column) {
+        return column == ColumnOffset(4);
+    };
+    auto const placement = placePreedit("にほん", ColumnOffset(9), Line, continuesAWideGlyph);
+    CHECK(placement.start == ColumnOffset(3));
+    CHECK(placement.columns == ColumnCount(6));
+
+    SECTION("at the cursor it never steps, as the cursor never stands on a continuation")
+    {
+        CHECK(placePreedit("に", ColumnOffset(4), Line, continuesAWideGlyph).start == ColumnOffset(4));
+    }
+}

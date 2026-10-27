@@ -217,6 +217,21 @@ class RenderBufferBuilder
                                                  Color foregroundColor,
                                                  Color backgroundColor) const noexcept;
 
+    /// Whether a cell may be drawn in a block cursor's colours.
+    enum class CursorColours : uint8_t
+    {
+        Never = 0,   ///< A preedit cell: the cursor drawn after the preedit already marks the caret.
+        AtTheCursor, ///< Any grid cell: in them when the block cursor is on it.
+    };
+
+    /// The colours of a cell, as @ref makeColorsForCell gives them, but in a cursor's colours only as
+    /// @p cursorColours allows.
+    [[nodiscard]] RGBColorPair makeColorsForCell(CellLocation gridPosition,
+                                                 CellFlags cellFlags,
+                                                 Color foregroundColor,
+                                                 Color backgroundColor,
+                                                 CursorColours cursorColours) const noexcept;
+
     [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
                                               LineOffset lineOffset,
                                               std::u32string_view textOverride = {}) const;

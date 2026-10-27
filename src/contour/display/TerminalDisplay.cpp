@@ -1517,8 +1517,20 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             if (auto const cell = term.isCursorInViewport()
                                       ? imeAnchorCell(screen.cursor().position, pageSize)
                                       : std::nullopt)
-                _lastImeAnchor = imePreeditAnchor(
-                    *cell, term.inputMethodPreeditString(), pageSize.columns, screen.cellWidthAt(*cell));
+            {
+                // The preedit is placed in the line's own cells -- half the page's on a DECDWL line -- and
+                // the anchor then drawn where those cells are, as the render buffer draws them.
+                auto const lineFlags = screen.lineFlags(cell->line);
+                auto const anchorInLine = imePreeditAnchor(
+                    *cell,
+                    term.inputMethodPreeditString(),
+                    vtbackend::preeditLineColumns(pageSize.columns, lineFlags),
+                    screen.cellWidthAt(*cell),
+                    [&screen, line = cell->line](vtbackend::ColumnOffset column) {
+                        return screen.continuesAWideGlyphAt({ .line = line, .column = column });
+                    });
+                _lastImeAnchor = imeDrawnAnchor(anchorInLine, lineFlags);
+            }
             auto const anchor = _lastImeAnchor && imeCursorAddressable(_lastImeAnchor->cell, pageSize)
                                     ? *_lastImeAnchor
                                     : ImeAnchor {};

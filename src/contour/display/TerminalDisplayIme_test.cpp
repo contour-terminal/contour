@@ -185,6 +185,29 @@ TEST_CASE("TerminalDisplay.ime.theCandidateWindowFollowsAPreeditMovedLeft", "[co
           == rectangleOf(h, { .line = LineOffset(0), .column = ColumnOffset(columns - 4) }, 2));
 }
 
+TEST_CASE("TerminalDisplay.ime.aDoubleWidthLineAnchorsWhereItsCellIsDrawn", "[contour][ime]")
+{
+    // DECDWL draws cell N at columns 2N and 2N + 1, and its line holds half the page's cells.
+    DisplayHarness const h { HarnessWindow::Unrendered };
+    auto const columns = unbox<int>(h.session->terminal().pageSize().columns);
+
+    SECTION("the cursor's cell")
+    {
+        h.feedAndSettle("\033#6abc");
+        CHECK(cursorRectangle(h) == rectangleOf(h, { .line = LineOffset(0), .column = ColumnOffset(6) }, 2));
+    }
+
+    SECTION("a preedit moved left on the half-width line")
+    {
+        // The line's last cell is cell columns / 2 - 1; にほ takes four of its cells.
+        h.feedAndSettle("\033#6" + std::string(static_cast<size_t>(columns / 2), 'x'));
+        compose(h, QStringLiteral("にほ"));
+        CHECK(
+            cursorRectangle(h)
+            == rectangleOf(h, { .line = LineOffset(0), .column = ColumnOffset(2 * ((columns / 2) - 4)) }, 4));
+    }
+}
+
 TEST_CASE("TerminalDisplay.ime.aReboundDisplayForgetsTheLastSessionsCell", "[contour][ime]")
 {
     // The cell answered last belongs to the session it was answered for. A display rebound to another

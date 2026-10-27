@@ -11,6 +11,7 @@
 #include <QtCore/QRectF>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string_view>
 
@@ -72,25 +73,50 @@ struct ImeAnchor
 /// Where the candidate window anchors while @p preedit is composed at @p anchor: the preedit's first cell.
 ///
 /// That is @p anchor itself, unless the preedit does not fit from there and is drawn further left (@see
-/// vtbackend::placePreedit, which the render buffer places it by too), and as wide as the preedit's first
-/// cluster rather than the grid's glyph beneath it.
+/// vtbackend::placePreedit, which the render buffer places it by too, from the same test of the line), and as
+/// wide as the preedit's first cluster rather than the grid's glyph beneath it.
 ///
-/// @param anchor      The cursor's anchor cell (@see imeAnchorCell).
-/// @param preedit     What the input method is composing; empty when it is composing nothing.
-/// @param lineColumns How many columns the cursor's line has.
-/// @param cellWidth   The width of the grid's cell at @p anchor, for when nothing is composed.
-/// @return The anchor.
+/// @param anchor              The cursor's anchor cell (@see imeAnchorCell).
+/// @param preedit             What the input method is composing; empty when it is composing nothing.
+/// @param lineColumns         How many cells the cursor's line has (@see vtbackend::preeditLineColumns).
+/// @param cellWidth           The width of the grid's cell at @p anchor, for when nothing is composed.
+/// @param continuesAWideGlyph Whether a column of the line is the right half of a wide glyph.
+/// @return The anchor, in the line's own cells.
+[[nodiscard]] inline ImeAnchor imePreeditAnchor(
+    vtbackend::CellLocation anchor,
+    std::string_view preedit,
+    vtbackend::ColumnCount lineColumns,
+    uint8_t cellWidth,
+    std::function<bool(vtbackend::ColumnOffset)> const& continuesAWideGlyph)
+{
+    if (preedit.empty())
+        return { .cell = anchor, .width = cellWidth };
+    auto const placement = vtbackend::placePreedit(preedit, anchor.column, lineColumns, continuesAWideGlyph);
+    auto const width =
+        placement.clusters.empty() ? uint8_t { 1 } : unbox<uint8_t>(placement.clusters.front().width);
+    return { .cell = { .line = anchor.line, .column = placement.start }, .width = width };
+}
+
+/// The anchor on a line that holds no wide glyph. @see the overload taking a wide-glyph test.
 [[nodiscard]] inline ImeAnchor imePreeditAnchor(vtbackend::CellLocation anchor,
                                                 std::string_view preedit,
                                                 vtbackend::ColumnCount lineColumns,
                                                 uint8_t cellWidth)
 {
-    if (preedit.empty())
-        return { .cell = anchor, .width = cellWidth };
-    auto const placement = vtbackend::placePreedit(preedit, anchor.column, lineColumns);
-    auto const width =
-        placement.clusters.empty() ? uint8_t { 1 } : unbox<uint8_t>(placement.clusters.front().width);
-    return { .cell = { .line = anchor.line, .column = placement.start }, .width = width };
+    return imePreeditAnchor(
+        anchor, preedit, lineColumns, cellWidth, [](vtbackend::ColumnOffset) { return false; });
+}
+
+/// The anchor where it is drawn: a DECDWL line draws its cell N at columns 2N and 2N + 1.
+/// @param anchor    The anchor, in the line's own cells.
+/// @param lineFlags The flags of the anchor's line.
+/// @return The anchor in the page's columns.
+[[nodiscard]] constexpr ImeAnchor imeDrawnAnchor(ImeAnchor anchor, vtbackend::LineFlags lineFlags) noexcept
+{
+    if (!lineFlags.test(vtbackend::LineFlag::DoubleWidth))
+        return anchor;
+    return { .cell = { .line = anchor.cell.line, .column = anchor.cell.column * 2 },
+             .width = static_cast<uint8_t>(anchor.width * 2) };
 }
 
 /// Computes the IME cursor rectangle (Qt::ImCursorRectangle) in ITEM-LOCAL LOGICAL coordinates.

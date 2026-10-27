@@ -768,6 +768,8 @@ struct DrawnFrame
     auto settings = MockTerm<>::createSettings(
         PageSize { .lines = LineCount(3), .columns = ColumnCount(10) }, HistoryLimits {}, 1024);
     settings.preeditStyle = style;
+    // A cursor that has arrived: a block cursor colours its cell only once its glide has ended.
+    settings.cursorMotionAnimationDuration = std::chrono::milliseconds(0);
     auto mc = std::make_unique<MockTerm<>>(std::move(settings));
     mc->writeToScreen(std::format("\033[{};{}H", cursor.line.value + 1, cursor.column.value + 1));
     mc->terminal.updateInputMethodPreeditString(std::string { preedit });
@@ -906,7 +908,8 @@ TEST_CASE("RenderBufferBuilder.aPreeditIsPlacedOnTheLine", "[renderbuffer][ime]"
 
     SECTION("a wide first cluster in the last column moves left to meet the edge")
     {
-        // After a full line the cursor is wrap-pending on the last cell, where に does not fit.
+        // The cursor on the last cell, as after a full line (where the grid keeps a wrap-pending cursor): に
+        // does not fit there.
         auto const frame = drawnFrame(
             *composingTermOn(kind, style, { .line = LineOffset(0), .column = LastColumn }, "にほ"));
         CHECK(columnOf(frame, U"に") == ColumnOffset(6));
@@ -949,5 +952,61 @@ TEST_CASE("RenderBufferBuilder.aPreeditIsPlacedOnTheLine", "[renderbuffer][ime]"
             | std::views::transform([](RenderCell const& cell) { return cell.position.column; })
             | std::ranges::to<std::vector>();
         CHECK(std::ranges::adjacent_find(columns) == columns.end());
+    }
+}
+
+TEST_CASE("RenderBufferBuilder.aPreeditMovedLeftIsNotDrawnOverByAWideGlyph", "[renderbuffer][ime]")
+{
+    // あ covers columns 3 and 4. Moved left to meet the edge, the preedit would begin at column 4, the
+    // glyph's right half, and the glyph drawn at column 3 would cover its first column. It begins at
+    // column 3.
+    auto const kind = GENERATE(RowKind::Uniform, RowKind::MixedRenditions);
+    INFO("row kind " << static_cast<int>(kind));
+    auto const cursor = CellLocation { .line = LineOffset(0), .column = ColumnOffset(9) };
+    auto mc = composingTermOn(kind, PreeditStyle::Inline, cursor, "");
+    mc->writeToScreen(std::format("\033[1;4Hあ\033[1;{}H", cursor.column.value + 1));
+    mc->terminal.updateInputMethodPreeditString("にほん");
+
+    auto const frame = drawnFrame(*mc);
+    CHECK_FALSE(columnOf(frame, U"あ").has_value());
+    CHECK(columnOf(frame, U"に") == ColumnOffset(3));
+    CHECK(columnOf(frame, U"ん") == ColumnOffset(7));
+}
+
+TEST_CASE("RenderBufferBuilder.aPreeditCellNeverTakesTheCursorsColours", "[renderbuffer][ime]")
+{
+    // The cursor drawn after the preedit marks the caret. A block cursor's colours on the preedit cell at the
+    // grid cursor's column -- its first, or one in its middle once moved left -- would draw a second one.
+    struct Composition
+    {
+        int cursorColumn;
+        std::string_view preedit;
+        int start;
+        int columns;
+    };
+    auto const [cursorColumn, preedit, start, columns] =
+        GENERATE(Composition { 2, "ab", 2, 2 },   // at the cursor
+                 Composition { 9, "にa", 7, 3 }); // moved left: a at 9
+    INFO("preedit at " << cursorColumn);
+    auto const cursor = CellLocation { .line = LineOffset(0), .column = ColumnOffset(cursorColumn) };
+    auto mc = composingTerm(PreeditStyle::Inline, cursor, "");
+    auto const& palette = mc->terminal.colorPalette();
+
+    // The fixture's cursor is a block, and it does colour the cell it is on.
+    {
+        auto const plain = drawnFrame(*mc).topRowFrom(cursor.column);
+        REQUIRE_FALSE(plain.empty());
+        REQUIRE(plain.front().attributes.backgroundColor != palette.defaultBackground);
+    }
+
+    mc->terminal.updateInputMethodPreeditString(std::string { preedit });
+    auto const cells = drawnFrame(*mc).topRowFrom(ColumnOffset(start));
+    REQUIRE(std::cmp_greater_equal(cells.size(), columns));
+    for (auto const& cell: cells | std::views::take(columns))
+    {
+        INFO("column " << cell.position.column.value);
+        CHECK(cell.attributes.flags.contains(CellFlag::InputMethodPreedit));
+        CHECK(cell.attributes.foregroundColor == palette.defaultForeground);
+        CHECK(cell.attributes.backgroundColor == palette.defaultBackground);
     }
 }
