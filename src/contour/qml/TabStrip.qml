@@ -45,6 +45,12 @@ Row {
     // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
     readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
 
+    /// Whether the tabs would have room for the lock: not while the well shows icons alone (TabItem.lockShown).
+    /// @param available What the tabs may take, as availableWidth.
+    function hostsLockWithin(available) {
+        return !root.pill || chromeStyle.tabWellLayout(available, list.count).label !== "iconOnly";
+    }
+
     spacing: 0
 
     // Brings the active tab into view, should the tabs have scrolled it out: the well's, or a Flat strip

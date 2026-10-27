@@ -3219,6 +3219,34 @@ TEST_CASE("tabs in a full-screen band that is not on screen do not hold the lock
     CHECK_FALSE(band.root->property("secureLockInPane").toBool());
 }
 
+TEST_CASE("icon-only tabs cannot hold the lock, so it falls to the next host: the band's chip, else the pane "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput][securelock]")
+{
+    // A narrow well with many tabs shows icons alone, and an icon-only tab has no room for the lock.
+    constexpr auto TabCount = 20;
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = TabCount,
+            .activeTab = TabCount - 1,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root, 900);
+        if (!tabDelegates(*root).back()->property("iconOnly").toBool())
+            continue; // a Flat strip has no icon-only form: its tabs hold the lock
+
+        CHECK_FALSE(root->property("tabsOnScreen").toBool());
+        // The Pill row's band is on screen and holds the lock as its chip; with no band, the pane does.
+        CHECK(root->property("secureLockInPane").toBool() == !root->property("bandOnScreen").toBool());
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible()
+              == root->property("bandOnScreen").toBool());
+    }
+}
+
 TEST_CASE("no pane waiting for a password shows no lock anywhere (offscreen)",
           "[contour][gui][qml][mainwindow][secureinput]")
 {

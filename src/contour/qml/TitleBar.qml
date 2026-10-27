@@ -53,6 +53,8 @@ Item {
     /// tab's colour flyout or rename -- which a HoverHandler cannot see, since popups live in the overlay.
     readonly property bool engaged: (newTabMenuLoader.item !== null && newTabMenuLoader.item.visible)
                                     || (tabStripLoader.item !== null && tabStripLoader.item.engaged)
+    /// Whether the bar's tab strip can show a tab's lock: false without a strip, or while it shows icons alone.
+    readonly property bool tabsHostLock: tabStripLoader.hostsLock
     /// Whether keyboard focus is on one of the bar's own controls, such as the "+" or the host chip, so a
     /// full-screen band a keyboard user is on does not hide under them (see Main.qml). Popups are not
     /// beneath the bar (they live in the overlay); `engaged` covers those.
@@ -164,6 +166,12 @@ Item {
                                                + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
                                                + trailingSlot.Layout.preferredWidth
     readonly property real fixedPartsWidth: root.leadingPartsWidth + root.trailingPartsWidth
+    // What the tabs may take with the secure-input chip's slot left out of the other parts.
+    readonly property real tabRoomWithoutChip: Math.max(0, root.width - root.leadingPartsWidth
+                                                        - driftSlotItem.Layout.preferredWidth - driftSlotItem.Layout.rightMargin
+                                                        - newTabSlot.Layout.preferredWidth - newTabSlot.Layout.rightMargin
+                                                        - trailingSlot.Layout.preferredWidth
+                                                        - chromeStyle.space.dragReserve)
 
     // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
     // on the bar without running under either end.
@@ -213,6 +221,11 @@ Item {
         // strip (with its own tab menu) beside the tabs bar's.
         Loader {
             id: tabStripLoader
+            // Whether the strip in it can show a tab's lock; false without a strip (Main.qml.tabsOnScreen).
+            // Asked of the room the tabs have without the lock's own chip: the chip shows only where the tabs
+            // cannot hold the lock, so counting its width here would make the answer depend on itself.
+            readonly property bool hostsLock: item !== null
+                && item.hostsLockWithin(root.tabRoomWithoutChip - item.fixedWidth)
             active: root.centre === "tabs"
             Layout.fillHeight: true
             // As wide as the tabs need: the strip caps itself at availableWidth, so the drag region below

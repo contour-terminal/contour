@@ -80,9 +80,11 @@ ThemedWindow
     // allow: a band that only appears while the pointer is on its edge (full screen) holds nothing.
     // Whether a title band rests on screen:
     readonly property bool bandOnScreen: appWindow.band.band === "shown" || appWindow.band.band === "pinned"
-    // Whether the tabs are on screen: in their own strip, or in the centre of a band that is.
-    readonly property bool tabsOnScreen: appWindow.band.tabBar === "shown"
-                                         || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen)
+    // Whether tabs that can show the lock are on screen: in their own strip, or in the centre of a band that
+    // is. Icon-only tabs (a narrow well) have no room for it, so they hold nothing.
+    readonly property bool tabsOnScreen: (appWindow.band.tabBar === "shown" && tabsBar.tabsHostLock)
+                                         || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen
+                                             && titleBar.tabsHostLock)
 
     // Whether a pane without a header draws the lock in itself (window::SecureIndicatorRules): neither the
     // tabs nor a band are on screen to hold it. Each pane adds its own header's presence (PaneCard); handed
