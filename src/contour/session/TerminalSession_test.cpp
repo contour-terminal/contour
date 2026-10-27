@@ -8578,6 +8578,79 @@ TEST_CASE("TerminalSession: a scroll names the block that slid under the pointer
     CHECK(session->blockActionsAnchor().isEmpty() == (under == nullptr));
 }
 
+namespace
+{
+/// The ids of the three finished commands of runTwoBlocksAndHoverTheFirst().
+struct TwoBlocksHovered
+{
+    vtbackend::CommandBlockId first {};
+    vtbackend::CommandBlockId second {};
+    vtbackend::CommandBlockId third {};
+};
+
+/// Runs three finished commands, each over two rows, then moves the grid's pointer onto row 0, which hovers
+/// the first.
+/// @param session The session to drive.
+/// @return The two blocks' ids, in the order they ran.
+[[nodiscard]] TwoBlocksHovered runTwoBlocksAndHoverTheFirst(contour::session::TerminalSession& session)
+{
+    runFailingCommand(session);
+    runFailingCommand(session);
+    runFailingCommand(session);
+    auto& terminal = session.terminal();
+    auto const ids = core::locked(terminal, [&] {
+        return TwoBlocksHovered { .first = terminal.commandBlockAt(vtbackend::LineOffset(0))->id,
+                                  .second = terminal.commandBlockAt(vtbackend::LineOffset(2))->id,
+                                  .third = terminal.commandBlockAt(vtbackend::LineOffset(4))->id };
+    });
+    session.sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) },
+        vtbackend::PixelCoordinate {});
+    return ids;
+}
+} // namespace
+
+TEST_CASE("TerminalSession: a scroll re-decides the terminal's hovered block from the grid",
+          "[contour][session][gutter]")
+{
+    // Deleting the re-decision leaves the hover cleared, which the anchor alone cannot tell from "no block
+    // here": the terminal's own hovered block is what the lit rail and the ring read.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto const blocks = runTwoBlocksAndHoverTheFirst(*session);
+    REQUIRE(session->terminal().hoveredBlock() == blocks.first);
+
+    // The page moves two rows up under the stationary pointer: the second block is at row 0 now.
+    session->terminal().writeToScreen("\033[999;1H\n\n");
+    session->onScrollOffsetChanged(vtbackend::ScrollOffset(0));
+    QCoreApplication::processEvents();
+
+    CHECK(session->terminal().hoveredBlock() == blocks.second);
+    CHECK_FALSE(session->blockActionsAnchor().isEmpty());
+}
+
+TEST_CASE("TerminalSession: after a scroll with the pointer on the rail only one block is hovered",
+          "[contour][session][gutter]")
+{
+    // The scroll re-decides from the grid; a pointer that then moves along the rail names the block beside
+    // it, and the one the grid had named must not stay lit beside it.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto const blocks = runTwoBlocksAndHoverTheFirst(*session);
+    session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
+    REQUIRE(session->terminal().hoveredBlock() == blocks.first);
+
+    session->terminal().writeToScreen("\033[999;1H\n\n");
+    session->onScrollOffsetChanged(vtbackend::ScrollOffset(0));
+    QCoreApplication::processEvents();
+    REQUIRE(session->terminal().hoveredBlock() == blocks.second);
+
+    // Down the rail to the third block, now at row 2: the rail names it, and the second does not stay lit.
+    session->sendGutterHoverEvent(gutterHit(2, vtbackend::GutterSegmentKind::BlockColumn));
+    CHECK(session->terminal().hoveredBlock() == blocks.third);
+}
+
 TEST_CASE("TerminalSession: without shell integration there is no block to anchor actions to",
           "[contour][session][gutter]")
 {

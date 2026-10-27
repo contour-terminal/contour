@@ -2103,6 +2103,11 @@ class Terminal: public IStatusLinePublishTarget
     /// @param block The hovered block, or nullopt when the pointer left every block.
     void setHoveredCommandBlock(std::optional<CommandBlockId> block);
 
+    /// The block the pointer hovers: over its rows (setHoveredCommandBlock()), else over the rail's strip
+    /// beside them (setGutterHoverLine()).
+    /// @return Its id, or nullopt while no block is hovered.
+    [[nodiscard]] std::optional<CommandBlockId> hoveredBlock() const;
+
     /// Moves the keyboard's block focus one block in @p step's direction and scrolls the block's head into
     /// view.
     ///
@@ -5814,11 +5819,6 @@ class Terminal: public IStatusLinePublishTarget
     /// @param text Its label.
     /// @return The columns.
     [[nodiscard]] ColumnCount chipColumns(PillStyle style, std::u32string_view text) const noexcept;
-
-    /// The block the pointer hovers: over its rows (setHoveredCommandBlock()), else over the rail's strip
-    /// beside them (setGutterHoverLine()).
-    /// @return Its id, or nullopt while no block is hovered.
-    [[nodiscard]] std::optional<CommandBlockId> hoveredBlock() const;
 
     /// What a native row's hovered block lays between the page and a pill on its rows: its tint.
     /// @param block The pill's block.

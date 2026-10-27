@@ -4368,10 +4368,17 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> 
     auto const [clickable, block] = core::locked(_terminal, [&] {
         _terminal.setGutterHoverLine(onBlockColumn ? std::optional { hit->gridLine } : std::nullopt);
         if (!onBlockColumn)
+        {
+            _terminal.setHoveredCommandBlock(std::nullopt);
             return std::pair { false, std::optional<vtbackend::CommandBlockId> {} };
-        return std::pair { _terminal.blockColumnPressAt(hit->gridLine)
-                               != vtbackend::BlockColumnPress::Swallow,
-                           blockBeside(_terminal, hit->gridLine) };
+        }
+        // The grid's hover is replaced, not left beside the rail's: a scroll re-decides it from the grid,
+        // and two hovered blocks would light both.
+        auto const beside = blockBeside(_terminal, hit->gridLine);
+        _terminal.setHoveredCommandBlock(beside);
+        return std::pair {
+            _terminal.blockColumnPressAt(hit->gridLine) != vtbackend::BlockColumnPress::Swallow, beside
+        };
     });
 
     // The tooltip describes a BLOCK, so it follows the block column only, and moves on only when the
