@@ -3791,10 +3791,14 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
     // The block is the exception: it is found from the screen row the pointer stands at, which stays, so it
     // is decided again for what slid under it.
     platform::postToObject(this, [this]() {
-        auto const row = _blockHoverRow;
-        clearHovers();
-        if (row)
+        if (auto const row = _blockHoverRow)
+        {
+            // Set in one locked step, not cleared and then set: a frame built in between would show no hover.
+            clearHyperlinkHover();
             refreshBlockHoverAt(*row);
+        }
+        else
+            clearHovers();
         refreshScrollbarVisibility();
     });
     // The current match's viewport rows move with the scroll. Posted for the same reason, and because this
@@ -4799,7 +4803,13 @@ void TerminalSession::clearBlockHover()
 
 void TerminalSession::refreshBlockHoverAt(vtbackend::LineOffset screenRow)
 {
+    // The rail's own hover goes with the move to the grid's, in the same locked step as the new block.
+    auto const wasGutterHovered = std::exchange(_gutterHovered, false);
+    if (wasGutterHovered)
+        _isPointerShapeStale = true; // as clearGutterHover(): only the grid can decide the shape
     auto const block = core::locked(_terminal, [&] {
+        if (wasGutterHovered)
+            _terminal.setGutterHoverLine(std::nullopt);
         auto const found = blockBeside(_terminal, _terminal.viewport().translateScreenToGridLine(screenRow));
         _terminal.setHoveredCommandBlock(found);
         return found;

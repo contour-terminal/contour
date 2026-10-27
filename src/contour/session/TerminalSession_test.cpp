@@ -8563,19 +8563,21 @@ TEST_CASE("TerminalSession: a scroll names the block that slid under the pointer
     runFailingCommand(*session);
     session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
     REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
-    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
     // Nothing is scrollable here, so the page moves under the pointer by output: a command's block is pushed
     // up and the row at the pointer now belongs to no block.
     session->terminal().writeToScreen(std::string(40, '\n'));
     session->onScrollOffsetChanged(vtbackend::ScrollOffset(0));
     QCoreApplication::processEvents();
-    CHECK(spy.count() >= 1);
-    auto const* const under = core::locked(session->terminal(), [&] {
-        return session->terminal().commandBlockAt(
+    // Whatever the page now has at row 0 -- the block's trailing rows, or none -- is what the terminal
+    // hovers.
+    auto const under = core::locked(session->terminal(), [&] {
+        auto const* const block = session->terminal().commandBlockAt(
             session->terminal().viewport().translateScreenToGridLine(vtbackend::LineOffset(0)));
+        return block != nullptr ? std::optional { block->id } : std::nullopt;
     });
-    CHECK(session->blockActionsAnchor().isEmpty() == (under == nullptr));
+    CHECK(session->terminal().hoveredBlock() == under);
+    CHECK(session->blockActionsAnchor().isEmpty() == !under.has_value());
 }
 
 namespace
@@ -8649,6 +8651,27 @@ TEST_CASE("TerminalSession: after a scroll with the pointer on the rail only one
     // Down the rail to the third block, now at row 2: the rail names it, and the second does not stay lit.
     session->sendGutterHoverEvent(gutterHit(2, vtbackend::GutterSegmentKind::BlockColumn));
     CHECK(session->terminal().hoveredBlock() == blocks.third);
+}
+
+TEST_CASE("TerminalSession: a scroll that moves no block under the pointer withdraws nothing",
+          "[contour][session][gutter]")
+{
+    // The hover is set again in one locked step, not cleared and then set: a frame built between the two
+    // would show no hover, and the anchor would be announced gone and back at every step of a wheel scroll.
+    using contour::session::TerminalSession;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto const blocks = runTwoBlocksAndHoverTheFirst(*session);
+    session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
+    REQUIRE(session->terminal().hoveredBlock() == blocks.first);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
+
+    session->onScrollOffsetChanged(vtbackend::ScrollOffset(0)); // the same block stays at row 0
+    QCoreApplication::processEvents();
+
+    CHECK(session->terminal().hoveredBlock() == blocks.first);
+    CHECK(spy.count() == 0);
 }
 
 TEST_CASE("TerminalSession: without shell integration there is no block to anchor actions to",
