@@ -179,12 +179,19 @@ namespace
         return std::clamp(inputs.settings.lineNumberWidth, MinLineNumberWidth, MaxLineNumberWidth);
     }
 
+    /// @return Whether any of the block column's three jobs is on.
+    [[nodiscard]] bool blockColumnWanted(GutterSettings const& settings) noexcept
+    {
+        return settings.foldMarkers || settings.exitStatus || settings.userMarks;
+    }
+
     [[nodiscard]] int blockColumnColumns(SegmentInputs const& inputs)
     {
         // Its configured width whenever any of its three jobs is on. Fold markers alone already reserved
-        // it, so turning exit status or user marks on beside them costs no width.
+        // it, so turning exit status or user marks on beside them costs no width. Under the rail it takes no
+        // cells: it is the strip after them.
         auto const& settings = inputs.settings;
-        if (!settings.foldMarkers && !settings.exitStatus && !settings.userMarks)
+        if (!blockColumnWanted(settings) || settings.blockColumnForm == BlockColumnForm::Rail)
             return 0;
         return std::clamp(settings.blockColumnWidth, MinBlockColumnWidth, MaxBlockColumnWidth);
     }
@@ -274,6 +281,8 @@ GutterLayout gutterLayoutFor(GutterSettings const& settings)
             layout.append(rule.kind, columns);
     if (inputs.timestamp)
         layout.timestampFormat = std::string { inputs.timestamp->format };
+    if (settings.blockColumnForm == BlockColumnForm::Rail && blockColumnWanted(settings))
+        layout.rail = BlockRailPresence::Present;
     return layout;
 }
 

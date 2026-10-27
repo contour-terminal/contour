@@ -284,6 +284,34 @@ TEST_CASE("Gutter.layout.anyOfTheBlockColumnsJobsReservesIt", "[gutter]")
         CHECK(gutterLayoutFor(settings).totalColumns == 1);
 }
 
+TEST_CASE("Gutter.layout.railTakesNoCells", "[gutter]")
+{
+    // Under the Rail form the block column is a pixel strip beside the cells, not a cell segment: the cells
+    // are the line numbers alone, and the layout says the strip is there.
+    auto const rail = GutterSettings { .exitStatus = true,
+                                       .lineNumbers = LineNumberMode::Absolute,
+                                       .blockColumnForm = BlockColumnForm::Rail };
+    auto const railLayout = gutterLayoutFor(rail);
+    REQUIRE(railLayout.segments().size() == 1);
+    CHECK(railLayout.segments()[0].kind == GutterSegmentKind::LineNumber);
+    CHECK(railLayout.totalColumns == 6);
+    CHECK(railLayout.rail == BlockRailPresence::Present);
+
+    // The same settings under the Glyphs form are today's two segments, and no strip.
+    auto glyphs = rail;
+    glyphs.blockColumnForm = BlockColumnForm::Glyphs;
+    auto const glyphLayout = gutterLayoutFor(glyphs);
+    REQUIRE(glyphLayout.segments().size() == 2);
+    CHECK(glyphLayout.segments()[1].kind == GutterSegmentKind::BlockColumn);
+    CHECK(glyphLayout.totalColumns == 7);
+    CHECK(glyphLayout.rail == BlockRailPresence::Absent);
+
+    // With none of the block column's three jobs on, there is no strip either.
+    auto const nothing = gutterLayoutFor(GutterSettings { .blockColumnForm = BlockColumnForm::Rail });
+    CHECK(nothing.rail == BlockRailPresence::Absent);
+    CHECK(nothing.totalColumns == 0);
+}
+
 TEST_CASE("Gutter.layout.theBlockColumnTakesItsConfiguredWidth", "[gutter]")
 {
     // gutter.block_column_width: two cells, the configuration's default, and held to 1..2 like the line
