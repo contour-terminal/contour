@@ -5,8 +5,9 @@
 # The images are review artefacts, never acceptance: a reviewer looks at them, and no test compares
 # them against a baseline.
 #
-# Two passes, because Qt Quick Controls picks its style once per process: the plain pass renders the
-# rows drawn under Fusion, the second (CONTOUR_TEST_CONTROLS_STYLE=ContourTui) the Terminal row.
+# Three passes, because Qt Quick Controls picks its style once per process: the plain pass renders the
+# rows drawn under Fusion, the second (CONTOUR_TEST_CONTROLS_STYLE=ContourTui) the Terminal row, and the
+# third (CONTOUR_TEST_CONTROLS_STYLE=FluentWinUI3) the Fluent row.
 # The script fails unless the PNG count is non-zero and equals the manifest's line count; the count is
 # never written here, because the table owns it.
 #
@@ -31,14 +32,16 @@ export CONTOUR_SNAPSHOT_DIR
 
 # --run keeps run-display-tests.sh from appending its own "[display]" argument, which Catch2 would OR
 # with this selection and so run every display case under ContourTui.
-# A failing pass does not stop the other, so the reviewer still gets every image that rendered; the
+# A failing pass does not stop the others, so the reviewer still gets every image that rendered; the
 # script exits with the first failure's status after the count check.
 status=0
 "$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]" || status=$?
-tui_status=0
-CONTOUR_TEST_CONTROLS_STYLE=ContourTui "$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]" \
-    || tui_status=$?
-[ "$status" -ne 0 ] || status=$tui_status
+for style in ContourTui FluentWinUI3; do
+    style_status=0
+    CONTOUR_TEST_CONTROLS_STYLE=$style "$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]" \
+        || style_status=$?
+    [ "$status" -ne 0 ] || status=$style_status
+done
 
 PNG_COUNT=$(find "$CONTOUR_SNAPSHOT_DIR" -maxdepth 1 -name '*.png' | wc -l)
 MANIFEST="$CONTOUR_SNAPSHOT_DIR/manifest.tsv"

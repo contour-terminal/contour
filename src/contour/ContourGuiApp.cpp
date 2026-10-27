@@ -2460,13 +2460,16 @@ int ContourGuiApp::terminalGuiAction()
     // been captured above and before the first QQuickWindow is created, so the chrome opens themed.
     applyGuiTheme(_config.theme.value(), defaultProfileColors());
 
-    // Pin the Fusion Qt Quick Controls style app-wide so the hand-drawn tab strip, its controls, and the
-    // tab context menu render, blend, and stay readable on every OS. Qt otherwise picks the native style
-    // per platform (e.g. Windows/FluentWinUI3 on Qt 6.7+, whose opaque button chrome and dark-only menu
-    // text clash with our custom palette-driven title bar) or the flat Basic style, neither of which
-    // gives the menu an opaque, themed, readable surface on our transparent window. NB: set
-    // unconditionally — QQuickStyle::name() already resolves to the (non-empty) native default here, so
-    // guarding on it silently skips Fusion.
+    // Pin the chrome row's Qt Quick Controls style app-wide, so the hand-drawn tab strip, its controls and
+    // the tab context menu render, blend and stay readable on every OS. Qt otherwise picks the native style
+    // per platform, or the flat Basic style, which gives the menu no opaque, themed, readable surface on our
+    // transparent window. NB: set unconditionally — QQuickStyle::name() already resolves to the (non-empty)
+    // native default here, so guarding on it silently skips the row's style.
+    //
+    // The macOS and ContourLinux rows take Fusion. The Fluent row takes FluentWinUI3, Windows 11's own:
+    // its opaque button chrome and dark-only menu text no longer clash with the palette-driven title bar,
+    // because every chrome control sets its own `background` and `contentItem`, and ContourMenu.qml sets its
+    // palette per colour group, so the style paints only what the chrome leaves to it.
     //
     // `ui_style: terminal` swaps that for ContourTui, our own style (src/contour/styles/ContourTui),
     // which paints a control as terminal chrome: cell-quantized, square-cornered, in the terminal

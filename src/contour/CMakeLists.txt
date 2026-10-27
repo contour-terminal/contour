@@ -1055,6 +1055,15 @@ if(CONTOUR_FRONTEND_GUI)
                 ENVIRONMENT
                     "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
 
+        # The chrome's QML once more under FluentWinUI3, the Fluent row's controls style. Qt resolves a style
+        # once per process, so only a run of its own exercises it; test_main.cpp's run-wide gate then fails it
+        # on any QML diagnostic the style raises against the hand-drawn chrome.
+        add_test(NAME contour_gui_test_fluent COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml]")
+        set_tests_properties(contour_gui_test_fluent
+            PROPERTIES
+                ENVIRONMENT
+                    "CONTOUR_TEST_CONTROLS_STYLE=FluentWinUI3;QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
         if(WIN32)
             # Native HWND geometry cannot be exercised through the offscreen platform. Keep the
             # regular suite headless, and run the native cases separately on the Windows desktop.

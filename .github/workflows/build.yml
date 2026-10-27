@@ -1281,6 +1281,28 @@ jobs:
               exit 1
             }
           }
+      - name: "Check that the package ships the FluentWinUI3 style"
+        # The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
+        # quickControlsStyle token), which windeployqt's --qmldir scan cannot see. Assert the style module
+        # is in the zip: without it Qt falls back silently and the Fluent row's controls lose their look.
+        # contour.exe must be found too, or the check would pass on a zip it cannot read.
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
+          try {
+            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
+          } finally {
+            $zip.Dispose()
+          }
+          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
+            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
+            exit 1
+          }
+          if (-not ($entries | Where-Object { $_ -like '*qml/QtQuick/Controls/FluentWinUI3/qmldir' })) {
+            Write-Host "::error::the zip holds no qml/QtQuick/Controls/FluentWinUI3/qmldir"
+            exit 1
+          }
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
         with:

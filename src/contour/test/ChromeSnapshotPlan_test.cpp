@@ -198,10 +198,11 @@ TEST_CASE("snapshot.variantHost", "[snapshot]")
 
 TEST_CASE("snapshot.rowsRenderableUnder", "[snapshot]")
 {
+    // Each controls style renders its own rows.
     using contour::config::ChromeStyle;
     using namespace contour::test::snapshot;
-    CHECK(rowsRenderableUnder("Fusion")
-          == std::vector { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux });
+    CHECK(rowsRenderableUnder("Fusion") == std::vector { ChromeStyle::MacOS, ChromeStyle::ContourLinux });
+    CHECK(rowsRenderableUnder("FluentWinUI3") == std::vector { ChromeStyle::Fluent });
     CHECK(rowsRenderableUnder("ContourTui") == std::vector { ChromeStyle::Terminal });
     CHECK(rowsRenderableUnder("ContourTUI").empty()); // a typo renders nothing
 }

@@ -234,6 +234,7 @@ TEST_CASE("UiStyle.fluentRowMatchesTheWinBoard", "[uistyle]")
     CHECK(fluent.windowControlUnits == 46);
     CHECK(fluent.stripButtonUnits == 36);
     CHECK(std::ranges::equal(fluent.fontFamilies, FluentFontFamilies));
+    CHECK(fluent.quickControlsStyle == "FluentWinUI3");
     // The other rows ask for the platform UI font as they always did.
     for (auto const row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
         CHECK(uiStyleTokens(row).fontFamilies.empty());

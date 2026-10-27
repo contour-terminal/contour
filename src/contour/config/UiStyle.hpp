@@ -575,11 +575,13 @@ namespace detail
         .palettePromptGlyph = "❯",
     };
 
-    // The Windows 11 board's (win) extents and font, over the native row it otherwise agrees with: a
-    // 40-pixel bar holding 34-pixel tabs, 46-pixel caption buttons and a 36-pixel "+". It says only what
+    // The Windows 11 board's (win) controls style, extents and font, over the native row it otherwise agrees
+    // with: FluentWinUI3, a 40-pixel bar holding 34-pixel tabs, 46-pixel caption buttons and a 36-pixel "+".
+    // It says only what
     // differs, as PlasmaTokens does, so a value the two rows share cannot drift between two literal blocks.
     inline constexpr auto FluentTokens = [] {
         auto tokens = NativeTokens;
+        tokens.quickControlsStyle = "FluentWinUI3";
         tokens.chromeHeightUnits = 40;
         tokens.tabHeightUnits = 34;
         tokens.windowControlUnits = 46;
