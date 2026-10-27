@@ -396,7 +396,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// The daemon says it restored its saved workspace before this client attached, and how much came back
     /// (fires on the reactor thread, once per connection whose hello carries it; connect queued). Only the
-    /// first Attach connection after a restore is told, so a reconnect or a second client never raises it.
+    /// first Attach connection after a restore is told, so a second client never raises it, nor does a
+    /// reconnect to the same daemon run; a reconnect to a restarted daemon that itself restored does.
     /// @param windows How many windows came back.
     /// @param tabs How many tabs.
     void workspaceRestored(quint32 windows, quint32 tabs);
