@@ -167,6 +167,17 @@ ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
                               CellLocation origin,
                               ColumnOffset end);
 
+/// A chip's band: a translucent fill behind an annotation's cells -- a status chip's, a fold chip's -- whose
+/// ends the renderer rounds as it rounds the rail's.
+struct RenderChipBand
+{
+    LineOffset lineOffset {}; ///< The screen row.
+    ColumnRange columns {};   ///< Its columns, both ends included.
+    RGBAColor fill {};        ///< The fill, its alpha the band's opacity.
+
+    bool operator==(RenderChipBand const&) const = default;
+};
+
 /// Marks @p cells as one shaping group: the text shaper takes them as a single run, first to last.
 /// @param cells The cells, left to right; none is marked when it is empty.
 void markShapingGroup(std::span<RenderCell> cells) noexcept;
@@ -238,6 +249,9 @@ struct RenderBuffer
     /// those, and an annotation is something to read, never something to select.
     std::vector<RenderCell> annotations {};
 
+    /// The bands under the chips among @ref annotations, drawn before them.
+    std::vector<RenderChipBand> chipBands {};
+
     std::optional<RenderCursor> cursor {};
 
     /// The sticky command header covering the main page's first row on this frame, if any.
@@ -266,6 +280,7 @@ struct RenderBuffer
         gutter.clear();
         statusBar.reset();
         annotations.clear();
+        chipBands.clear();
         cursor.reset();
         lineFlash.reset();
         if (stickyHeader)

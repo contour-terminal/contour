@@ -367,6 +367,8 @@ struct ColumnRange
     {
         return line == location.line && fromColumn <= location.column && location.column <= toColumn;
     }
+
+    [[nodiscard]] constexpr bool operator==(ColumnRange const&) const noexcept = default;
 };
 // }}}
 // {{{ Range

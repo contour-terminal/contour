@@ -71,6 +71,30 @@ inline constexpr auto MarkCells = 2;
     return rects;
 }
 
+/// The rectangles a chip's band is drawn as: its columns across its row, its corners cut by a pixel -- as
+/// much of @c radius.chip as rectangles can draw, as the rail's caps are.
+/// @param band The band.
+/// @param metrics The grid's metrics.
+/// @param smoothScrollOffset The rows' sub-cell scroll offset, in device pixels.
+/// @return The middle, then the left and the right end column.
+[[nodiscard]] inline std::vector<RailRect> chipBandRects(vtbackend::RenderChipBand const& band,
+                                                         GridMetrics const& metrics,
+                                                         int smoothScrollOffset)
+{
+    auto const left = metrics.mapTopLeft(band.lineOffset, band.columns.fromColumn, smoothScrollOffset);
+    auto const right = metrics
+                           .mapTopLeft(band.lineOffset,
+                                       band.columns.toColumn + vtbackend::ColumnOffset(1),
+                                       smoothScrollOffset)
+                           .x;
+    auto const height = metrics.cellSize.height.as<int>();
+    return std::vector {
+        RailRect { .x = left.x + 1, .y = left.y, .width = right - left.x - 2, .height = height },
+        RailRect { .x = left.x, .y = left.y + 1, .width = 1, .height = height - 2 },
+        RailRect { .x = right - 1, .y = left.y + 1, .width = 1, .height = height - 2 },
+    };
+}
+
 /// The box @p cell's mark is drawn in: two cells wide -- the mark is flagged LineFlag::DoubleWidth, so it
 /// sizes itself to the row rather than to one cell's width -- centred on the bar, top-aligned with its row.
 /// @param cell The rail cell.

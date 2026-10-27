@@ -265,6 +265,9 @@ namespace
     /// scrollback, so recomputing them faster than a display can show them buys nothing.
     constexpr auto ScrollbarMarksFrameInterval = std::chrono::milliseconds { 16 };
 
+    /// How often a running block's time on display is redrawn: the step it is shown in, a whole second.
+    constexpr auto RunningStatusRefreshInterval = std::chrono::seconds { 1 };
+
     /// How often the program in front of a followed session's shell is asked for: each ask is one query of
     /// the process table, and a header or extension a second behind a program change is in time.
     constexpr auto ForegroundProcessPollInterval = std::chrono::seconds { 1 };
@@ -465,6 +468,14 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _scrollbarMarksTimer.setSingleShot(true);
     _scrollbarMarksTimer.setInterval(ScrollbarMarksFrameInterval);
     connect(&_scrollbarMarksTimer, &QTimer::timeout, this, &TerminalSession::refreshScrollbarMarks);
+    // Once a second, the coarsest step a running time is shown in ("Running · 8s").
+    _runningStatusTimer.setInterval(RunningStatusRefreshInterval);
+    connect(&_runningStatusTimer, &QTimer::timeout, this, [this]() {
+        if (_terminal.hasVisibleRunningStatus())
+            scheduleRedraw();
+        else
+            _runningStatusTimer.stop();
+    });
     _overlayClearanceTimer.setSingleShot(true);
     _overlayClearanceTimer.setInterval(ScrollbarMarksFrameInterval);
     connect(&_overlayClearanceTimer, &QTimer::timeout, this, &TerminalSession::publishOverlayClearance);
@@ -4536,6 +4547,22 @@ void TerminalSession::refreshLinkTarget(QString text)
     _linkTarget = std::move(next);
     _linkTargetVisibility.store(_linkTarget.visibility, std::memory_order_relaxed);
     emit linkTargetChanged();
+}
+
+void TerminalSession::runningStatusChanged()
+{
+    // Raised by the frame build, with the terminal's lock held: only posts. postToObject drops it if the
+    // session dies first; the timer belongs to the session's thread, so it is started there.
+    platform::postToObject(this, [this]() { updateRunningStatusRefresh(); });
+}
+
+void TerminalSession::updateRunningStatusRefresh()
+{
+    // Read when it runs rather than carried in the post: a later frame may already have taken it back.
+    if (!_terminal.hasVisibleRunningStatus())
+        _runningStatusTimer.stop();
+    else if (!_runningStatusTimer.isActive())
+        _runningStatusTimer.start();
 }
 
 void TerminalSession::requestOverlayClearanceRefresh()

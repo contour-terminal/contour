@@ -17,7 +17,9 @@
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
+#include <vtbackend/shell/BlockChipPlacement.hpp>
 #include <vtbackend/shell/BlockRail.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
@@ -1321,10 +1323,21 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // showing, and each is a no-op on a page folding does not apply to.
     fillGutter(output, baseLine);
     fillFoldLabels(output, baseLine);
+    auto const chipStatus = fillBlockChips(output, baseLine);
 
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
     // status line put it.
     fillStickyHeader(output, baseLine);
+
+    // A running block's time on display -- a chip's, or the header's -- goes stale unless a frame is drawn
+    // again: what a frontend's once-a-second redraw asks before it draws one.
+    auto const* const headerBlock =
+        output.stickyHeader ? commandBlocks().find(output.stickyHeader->block) : nullptr;
+    auto const headerRunning = headerBlock != nullptr && headerBlock->state == CommandBlockState::Running;
+    auto const status =
+        chipStatus == RunningStatus::Shown || headerRunning ? RunningStatus::Shown : RunningStatus::Hidden;
+    if (_runningStatus.exchange(status, std::memory_order_relaxed) != status)
+        _eventListener.runningStatusChanged();
     fillLineFlash(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
@@ -4300,6 +4313,69 @@ namespace
         core::unreachable();
     }
 } // namespace
+
+RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine) const
+{
+    // The chip tells how a block ended, a job of exit status's; and only the primary page has blocks.
+    if (!_settings.gutter.exitStatus || !foldingAppliesToDisplayedPage())
+        return RunningStatus::Hidden;
+
+    auto const& grid = primaryScreen().grid();
+    auto const now = _clocks.wall.now();
+    auto const pageColumns = pageSize().columns;
+    auto status = RunningStatus::Hidden;
+    auto lastBlock = std::optional<CommandBlockId> {};
+
+    // Each block once, at its first drawn row: the chip goes on its command row, wherever that is drawn.
+    for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
+    {
+        auto const* const record = commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y)));
+        if (record == nullptr || record->id == lastBlock)
+            continue;
+        lastBlock = record->id;
+        if (record->state == CommandBlockState::Prompting)
+            continue;
+
+        auto const head = headOffsetOf(grid, *record);
+        auto const input = head ? inputRowOf(StampedBlockRows { grid }, *head, record->id) : std::nullopt;
+        if (!input || !_viewport.isLineVisible(*input))
+            continue;
+        auto const text = unicode::convert_to<char32_t>(std::string_view { blockStatusText(*record, now) });
+        if (text.empty())
+            continue;
+
+        auto const screenRow = _viewport.translateGridToScreenCoordinate(*input);
+        auto const& line = grid.lineAt(*input);
+        auto const runs = blankRunsOf(line, baseLine + screenRow, pageColumns);
+        auto const placement =
+            placeBlockChip(BlockChipRowFacts { .pageColumns = pageColumns,
+                                               .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
+                                                                   ? line.promptEndOffset()
+                                                                   : ColumnOffset(0),
+                                               .blankRuns = runs },
+                           ColumnCount::cast_from(text.size()));
+        if (placement.kind == BlockChipPlacementKind::CollapsedToRail)
+            continue;
+
+        auto const colors = blockChipColors(_colorPalette, outcomeOf(*record));
+        layoutRenderText(
+            output.annotations,
+            text,
+            gutterCellAttributes(
+                RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground }),
+            CellLocation { .line = placement.columns.line, .column = placement.columns.fromColumn },
+            placement.columns.toColumn + ColumnOffset(1));
+        if (colors.band)
+            output.chipBands.push_back(RenderChipBand {
+                .lineOffset = placement.columns.line,
+                .columns = placement.columns,
+                .fill = RGBAColor(*colors.band,
+                                  static_cast<uint8_t>(std::lround(BlockChipBandAlpha * 255.0F))) });
+        if (record->state == CommandBlockState::Running)
+            status = RunningStatus::Shown;
+    }
+    return status;
+}
 
 Terminal::GatheredStickyHeader Terminal::stickyHeaderInput() const
 {

@@ -626,6 +626,33 @@ RenderAttributes blockColumnCellAttributes(GutterSegment const& block, RGBColorP
     return attributes;
 }
 
+std::vector<ColumnRange> blankRunsOf(Line const& line, LineOffset screenLine, ColumnCount pageColumns)
+{
+    auto const defaultBackground = GraphicsAttributes {}.backgroundColor;
+    auto const& storage = line.storage();
+    auto const isBlank = [&](ColumnOffset column) {
+        if (column >= boxed_cast<ColumnOffset>(line.size()))
+            return true;
+        if (!line.cellEmptyAt(column))
+            return false;
+        auto const& attributes = line.isBlank() ? storage.fillAttrs : storage.sgr[unbox<std::size_t>(column)];
+        return attributes.backgroundColor == defaultBackground;
+    };
+
+    auto runs = std::vector<ColumnRange> {};
+    for (auto const column: std::views::iota(0, unbox<int>(pageColumns))
+                                | std::views::transform([](int c) { return ColumnOffset(c); }))
+    {
+        if (!isBlank(column))
+            continue;
+        if (!runs.empty() && runs.back().toColumn + ColumnOffset(1) == column)
+            runs.back().toColumn = column;
+        else
+            runs.push_back(ColumnRange { .line = screenLine, .fromColumn = column, .toColumn = column });
+    }
+    return runs;
+}
+
 std::u32string collapsedFoldLabel(uint64_t hiddenLines)
 {
     constexpr auto Lead = std::u32string_view { U"⋯ " };

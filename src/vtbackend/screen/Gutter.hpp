@@ -327,6 +327,20 @@ void appendGutterCells(GutterLayout const& layout,
 
 // }}}
 
+// {{{ status chip
+
+/// The maximal runs of blank cells on @p line, ascending, both ends included: a blank cell is an empty or
+/// space cell on the default background -- what a chip may be drawn over (principle 5).
+/// @param line The row.
+/// @param screenLine The screen row the runs are reported on (ColumnRange::line).
+/// @param pageColumns The page's width; columns past the line's own are blank.
+/// @return The runs.
+[[nodiscard]] std::vector<ColumnRange> blankRunsOf(Line const& line,
+                                                   LineOffset screenLine,
+                                                   ColumnCount pageColumns);
+
+// }}}
+
 // {{{ collapsed-fold label
 
 /// The label a collapsed fold's head row carries: `⋯ 1,234 lines`.

@@ -424,6 +424,11 @@ class Renderer
     template <typename Content>
     void renderShiftedLeft(int shift, Content&& content);
 
+    /// Draws the chips' bands -- translucent, their corners cut -- under the annotations that are their text.
+    /// @param bands  The frame's chip bands (RenderBuffer::chipBands).
+    /// @param smoothScrollOffset  The rows' sub-cell scroll offset, in device pixels.
+    void renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset);
+
     /// Draws the annotations -- render-only text such as a collapsed fold's `⋯ N lines` -- over the cells
     /// already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which selection,
     /// copying and the accessibility bridge walk.

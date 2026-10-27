@@ -848,6 +848,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             renderCells(split.mainCells);
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
             renderLines(split.mainLines);
+            renderChipBands(std::span(buffer.chipBands), 0);
             renderAnnotations(std::span(buffer.annotations));
         });
         renderGutter(std::span(buffer.gutter), 0);
@@ -874,6 +875,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
+            renderChipBands(std::span(renderBuffer.get().chipBands), smoothPixelOffset);
             renderAnnotations(std::span(renderBuffer.get().annotations));
         });
         renderGutter(std::span(renderBuffer.get().gutter), smoothPixelOffset);
@@ -1058,6 +1060,18 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter,
             if (cell.mark != vtbackend::RailMark::None)
                 _textRenderer.renderCell(railMarkCell(cell));
     });
+}
+
+void Renderer::renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset)
+{
+    ZoneScoped;
+    for (auto const& band: bands)
+        for (auto const& rect: chipBandRects(band, _gridMetrics, smoothScrollOffset))
+            _renderTarget->renderRectangle(rect.x,
+                                           rect.y,
+                                           vtbackend::Width::cast_from(rect.width),
+                                           vtbackend::Height::cast_from(rect.height),
+                                           band.fill);
 }
 
 void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)

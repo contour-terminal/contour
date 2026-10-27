@@ -115,3 +115,22 @@ TEST_CASE("RailGeometry.eachMarkHasItsGlyph", "[renderer][rail]")
     CHECK(railMarkCodepoint(RailMark::Running) == 0x10F002);
     CHECK(railMarkCodepoint(RailMark::UserMark) == 0x10F003);
 }
+
+TEST_CASE("RailGeometry.aChipBandIsRoundedAtItsEnds", "[renderer][rail]")
+{
+    // A band over columns 4..9 of row 2: one rectangle less a pixel at each end, and an end column a pixel
+    // shorter at top and bottom -- the corners cut, as the rail's caps are.
+    auto const metrics = railMetrics();
+    auto const band = RenderChipBand {
+        .lineOffset = LineOffset(2),
+        .columns =
+            ColumnRange { .line = LineOffset(2), .fromColumn = ColumnOffset(4), .toColumn = ColumnOffset(9) },
+        .fill = RGBAColor(0xFF, 0x45, 0x3A, 41),
+    };
+    auto constexpr Left = 200 + (4 * 16);
+    auto constexpr Right = 200 + (10 * 16);
+    CHECK(vtrasterizer::chipBandRects(band, metrics, 0)
+          == std::vector { RailRect { .x = Left + 1, .y = 64, .width = Right - Left - 2, .height = 32 },
+                           RailRect { .x = Left, .y = 65, .width = 1, .height = 30 },
+                           RailRect { .x = Right - 1, .y = 65, .width = 1, .height = 30 } });
+}

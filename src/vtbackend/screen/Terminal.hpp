@@ -102,6 +102,13 @@ namespace vtbackend
 class Screen;
 
 /// Result of applying a smooth-scroll pixel delta.
+/// Whether a frame shows a running block's time, which goes stale unless the frame is drawn again.
+enum class RunningStatus : uint8_t
+{
+    Hidden = 0, ///< No running time on display.
+    Shown,      ///< A status chip or the sticky header shows one.
+};
+
 enum class SmoothScrollResult : uint8_t
 {
     Applied,         ///< Pixel delta was applied to the viewport.
@@ -555,6 +562,12 @@ class Terminal: public IStatusLinePublishTarget
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+
+        /// Whether the frame shows a running block's time changed (@see Terminal::hasVisibleRunningStatus):
+        /// a time on display goes stale unless a frame is drawn again. Raised by the frame build -- on the
+        /// render or the parser thread, with the terminal's lock held -- under renderBufferUpdated()'s rules:
+        /// hand the work to the thread that owns it.
+        virtual void runningStatusChanged() {}
         /// As screenUpdated(), for a frame that repainted what the screen showed already rather than
         /// output: a mirror's full replay (vthost::client::ScreenMirror::fullReplay) -- the attach, a resync.
         /// A listener that does not tell the two apart need not override it.
@@ -2052,6 +2065,14 @@ class Terminal: public IStatusLinePublishTarget
     ///
     /// @param gridLine The grid line the pointer is over in the gutter, or nullopt when it left.
     void setGutterHoverLine(std::optional<LineOffset> gridLine);
+
+    /// Whether the frame last drawn shows a running block's time -- a status chip, or the sticky header --
+    /// which only a new frame moves on: what a frontend redraws once a second for. Lock-free, any thread.
+    /// @return True while such a time is on display.
+    [[nodiscard]] bool hasVisibleRunningStatus() const noexcept
+    {
+        return _runningStatus.load(std::memory_order_relaxed) == RunningStatus::Shown;
+    }
 
     /// Lights the rail of @p block as hovered, or clears it with nullopt: the pointer is over its rows.
     ///
@@ -5661,6 +5682,13 @@ class Terminal: public IStatusLinePublishTarget
     /// @param baseLine As for fillGutter().
     void fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const;
 
+    /// Fills @p output's annotations and chip bands with the status chip of every block whose command row is
+    /// drawn: over blank cells right of the command only, or not at all (placeBlockChip()).
+    /// @param output The buffer being built.
+    /// @param baseLine As for fillGutter().
+    /// @return Whether a chip of a running block was drawn: one whose time moves on.
+    [[nodiscard]] RunningStatus fillBlockChips(RenderBuffer& output, LineOffset baseLine) const;
+
     /// How many screen rows down the main page rows are drawn: the whole page, or fewer where collapsed
     /// folds hide more rows than the history can backfill and the rest of the page is blank.
     /// @return The number of drawn rows, as a screen row: every row above it is drawn.
@@ -5682,6 +5710,11 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
     std::optional<LineOffset> _gutterHoverLine;
+
+    /// Whether the last frame showed a running block's time -- a chip, or the sticky header's --, which goes
+    /// stale unless a frame is drawn again. Written by the frame build, under the lock; read lock-free by a
+    /// frontend's timer (@see hasVisibleRunningStatus).
+    std::atomic<RunningStatus> _runningStatus { RunningStatus::Hidden };
 
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
     std::optional<CommandBlockId> _hoveredCommandBlock;

@@ -554,6 +554,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// overlayClearanceChanged: the frame timer's half of requestOverlayClearanceRefresh(). GUI thread.
     void publishOverlayClearance();
 
+    /// Arms the once-a-second redraw while the terminal shows a running block's time, and stops it once it
+    /// does not. GUI thread.
+    void updateRunningStatusRefresh();
+
   public:
     QString getBellSource() const noexcept
     {
@@ -1286,6 +1290,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///         extensions or its visible header follows it. GUI thread.
     [[nodiscard]] bool pollsForegroundProcess() const noexcept;
 
+    /// @return Whether the pane redraws once a second for a running block's time on display. GUI thread.
+    [[nodiscard]] bool refreshesRunningStatus() const noexcept { return _runningStatusTimer.isActive(); }
+
     void updateColorPreference(vtbackend::ColorPreference preference);
 
     /// Applies the OS motion preference to the running terminal: under Reduce Motion the cursor glide and
@@ -1309,6 +1316,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void renderBufferUpdated() override;
     void extensionFramePublished() override;
     void screenUpdated() override;
+    /// Posts updateRunningStatusRefresh() to the session's thread: raised by the frame build, under the lock.
+    void runningStatusChanged() override;
     void screenReplayed() override;
     void pageResized() override;
 
@@ -2357,6 +2366,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Fires publishOverlayClearance() a frame after the first request, so a burst of output under a shown
     /// pill costs one placement per frame. GUI thread.
     QTimer _overlayClearanceTimer;
+
+    /// Redraws once a second while a running block's time is on display -- a status chip or the sticky
+    /// header -- which no output would move on (@see vtbackend::Terminal::hasVisibleRunningStatus). Armed
+    /// and stopped on the session's thread only, by updateRunningStatusRefresh(). GUI thread.
+    QTimer _runningStatusTimer;
 
     /// What overlayClearanceRevision reports. GUI thread.
     int _overlayClearanceRevision = 0;

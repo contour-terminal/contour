@@ -15,6 +15,8 @@
 #include <core/Environment.hpp>
 #include <core/platform/Clock.hpp>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -1010,4 +1012,95 @@ TEST_CASE("Gutter.terminal.theRailRedrawsWhenItsHoverChanges", "[gutter]")
         mc.terminal.setGutterHoverLine(LineOffset(0)); // no fold on row 0
         CHECK(mc.redraws == before);
     }
+}
+
+namespace
+{
+/// `make` typed at a `~ ❯ ` prompt with an RPROMPT of @p rprompt drawn from column @p rpromptColumn
+/// (1-based), printing one line and ending with @p exitCode, then a live prompt. The command row is screen
+/// row 0.
+[[nodiscard]] std::string commandUnderAnRprompt(std::string_view rprompt, int rpromptColumn, int exitCode)
+{
+    return std::format(
+        "\033]133;A\033\\~ ❯ \033]133;B\033\\make\033[1;{}H{}\033[1;9H\r\n\033]133;C\033\\boom\r\n{}{}",
+        rpromptColumn,
+        rprompt,
+        commandEnd(exitCode),
+        PromptStart);
+}
+
+/// The text the frame's annotations spell on screen row @p row, and the columns they take.
+struct RowAnnotation
+{
+    std::u32string text;               ///< What the cells spell.
+    std::vector<ColumnOffset> columns; ///< Each cell's column.
+};
+
+[[nodiscard]] RowAnnotation annotationOnRow(RenderBuffer const& buffer, int row)
+{
+    auto annotation = RowAnnotation {};
+    for (auto const& cell: buffer.annotations)
+        if (cell.position.line == LineOffset(row))
+        {
+            annotation.text += cell.codepoints;
+            annotation.columns.push_back(cell.position.column);
+        }
+    return annotation;
+}
+} // namespace
+
+TEST_CASE("Gutter.terminal.aChipNeverCoversAnRprompt", "[gutter][blockchip]")
+{
+    // Review Focus 1: the chip lands in the blanks between the command and the RPROMPT, two clear of it.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = RailGutter;
+    constexpr auto RpromptColumn = 69; // "[main] 14:02" in columns 68..79
+    mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", RpromptColumn, 2));
+
+    auto const buffer = renderOf(mc.terminal);
+    auto const chip = annotationOnRow(buffer, 0);
+    REQUIRE_FALSE(chip.columns.empty());
+    CHECK(unicode::convert_to<char>(std::u32string_view { chip.text }).starts_with("Failed · exit 2 · "));
+    auto const& line = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
+    for (auto const column: chip.columns)
+    {
+        CAPTURE(column);
+        CHECK(line.cellEmptyAt(column));
+    }
+    CHECK(chip.columns.back() + ColumnOffset(2) < ColumnOffset(RpromptColumn - 1));
+    REQUIRE(buffer.chipBands.size() == 1);
+    CHECK(buffer.chipBands.front().lineOffset == LineOffset(0));
+    CHECK(buffer.chipBands.front().columns.fromColumn == chip.columns.front());
+    CHECK(buffer.chipBands.front().columns.toColumn == chip.columns.back());
+}
+
+TEST_CASE("Gutter.terminal.aCollapsedChipLeavesTheMark", "[gutter][blockchip]")
+{
+    // The row filled to the edge: no run holds the chip, and the rail's ✗ is the one sign.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = RailGutter;
+    mc.writeToScreen(commandUnderAnRprompt(std::string(70, '='), 10, 2));
+
+    auto const buffer = renderOf(mc.terminal);
+    CHECK(annotationOnRow(buffer, 0).columns.empty());
+    CHECK(buffer.chipBands.empty());
+    CHECK(markAt(railCellsOf(buffer), 0) == RailMark::Cross);
+}
+
+TEST_CASE("Gutter.terminal.aRunningChipTicks", "[gutter][blockchip]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = RailGutter;
+    startCommand(mc, "sleep 9");
+    mc.wallClock.advance(std::chrono::seconds(3));
+
+    auto const running = renderOf(mc.terminal);
+    CHECK(annotationOnRow(running, 0).text == U"Running · 3s");
+    CHECK(mc.terminal.hasVisibleRunningStatus());
+    CHECK(running.chipBands.size() == 1);
+
+    mc.writeToScreen(commandEnd(0));
+    mc.writeToScreen(PromptStart);
+    (void) renderOf(mc.terminal);
+    CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
 }

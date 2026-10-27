@@ -30,7 +30,9 @@ set(vtbackend_HEADERS
     core/BlockRailKinds.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp
+    shell/BlockChipPlacement.hpp
     shell/BlockRail.hpp
+    shell/BlockStatusText.hpp
     shell/CommandBlock.hpp
     shell/CommandBlockAddress.hpp
     shell/CommandBlockRows.hpp
@@ -167,6 +169,7 @@ set(vtbackend_SOURCES
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
     shell/BlockRail.cpp
+    shell/BlockStatusText.cpp
     shell/CommandBlock.cpp
     shell/CommandBlockRows.cpp
     shell/CommandBlockPaths.cpp
@@ -318,7 +321,9 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
+        shell/BlockChipPlacement_test.cpp
         shell/BlockRail_test.cpp
+        shell/BlockStatusText_test.cpp
         shell/CommandBlock_test.cpp
         shell/CommandBlockRows_test.cpp
         shell/CommandBlockPaths_test.cpp

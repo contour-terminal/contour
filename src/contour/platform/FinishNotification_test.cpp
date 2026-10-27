@@ -7,6 +7,7 @@
 #include <contour/platform/FinishNotification.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
@@ -95,6 +96,19 @@ TEST_CASE("FinishNotification.every way of ending has one wording row", "[notifi
                               CommandEnding::Crashed,
                               CommandEnding::Interrupted })
         CHECK(wordingOf(ending).ending == ending);
+}
+
+TEST_CASE("FinishNotification.the block chip names the same detail per ending", "[notification]")
+{
+    // One fact, two surfaces (F28): the chip "Failed · exit 8" and the notification "make failed (exit 8)"
+    // add the same detail to each ending. Their words differ in case only: the chip starts a phrase, a title
+    // continues one.
+    for (auto const i: std::views::iota(std::size_t { 0 }, vtbackend::CommandEndingCount))
+    {
+        auto const ending = static_cast<vtbackend::CommandEnding>(i);
+        CAPTURE(i);
+        CHECK(vtbackend::BlockStatusWordingRows.at(i).detail == contour::platform::wordingOf(ending).detail);
+    }
 }
 
 TEST_CASE("FinishNotification.titles name the command and how it ended", "[notification]")

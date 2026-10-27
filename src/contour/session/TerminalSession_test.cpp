@@ -8268,6 +8268,30 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     CHECK(session->commandBlockTooltip().isEmpty());
 }
 
+TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, and only then",
+          "[contour][session][gutter]")
+{
+    // The frame build reports a running time on display under the lock; the session arms its once-a-second
+    // redraw on its own thread, and stops it once the time is gone.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE_FALSE(session->refreshesRunningStatus());
+
+    terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK(terminal.hasVisibleRunningStatus());
+    CHECK(session->refreshesRunningStatus());
+
+    terminal.writeToScreen(vtbackend::test::commandEnd(0));
+    terminal.writeToScreen(std::string { vtbackend::test::PromptStart });
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(terminal.hasVisibleRunningStatus());
+    CHECK_FALSE(session->refreshesRunningStatus());
+}
+
 TEST_CASE("TerminalSession: a scroll withdraws the block tooltip", "[contour][session][gutter]")
 {
     // The hovered block is found on pointer MOVEMENT, so a scroll slides another block under a stationary
