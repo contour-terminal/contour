@@ -1312,6 +1312,7 @@ if(CONTOUR_TESTING)
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
         window/TabBadge_test.cpp
+        window/ShellIntegrationOffer_test.cpp
         window/NoticeQueue_test.cpp
         window/ToastPlacement_test.cpp
         window/SaveLayoutCheck_test.cpp

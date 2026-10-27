@@ -31,6 +31,7 @@ add_library(contour_config STATIC
     ScrollBarMode.hpp
     SecureInputMode.hpp
     SettingsEditSession.cpp SettingsEditSession.hpp
+    ShellKind.hpp
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
