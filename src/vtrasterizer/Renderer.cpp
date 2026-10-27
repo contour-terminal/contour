@@ -1184,14 +1184,11 @@ void Renderer::renderBlockHighlight(std::optional<vtbackend::RenderBlockHighligh
 
     rectangle(topLeft.x, topLeft.y, width, height, highlight->tint);
 
-    // The ring inside the outline: the top and bottom edges whole, the sides between them.
-    auto const ring = std::min(_gridMetrics.rail.chips.hoverRing, std::min(width, height) / 2);
-    if (ring <= 0)
-        return;
-    rectangle(topLeft.x, topLeft.y, width, ring, highlight->ring);
-    rectangle(topLeft.x, topLeft.y + height - ring, width, ring, highlight->ring);
-    rectangle(topLeft.x, topLeft.y + ring, ring, height - (2 * ring), highlight->ring);
-    rectangle(topLeft.x + width - ring, topLeft.y + ring, ring, height - (2 * ring), highlight->ring);
+    // The ring inside the outline, but for the edges the block runs past: the page cuts it there.
+    auto const outline = RailRect { .x = topLeft.x, .y = topLeft.y, .width = width, .height = height };
+    for (auto const& edge:
+         hoverRingRects(outline, _gridMetrics.rail.chips.hoverRing, highlight->continues).all())
+        rectangle(edge.x, edge.y, edge.width, edge.height, highlight->ring);
 }
 
 void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)

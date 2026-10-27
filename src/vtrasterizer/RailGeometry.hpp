@@ -32,19 +32,55 @@ struct RailRect
     bool operator==(RailRect const&) const = default;
 };
 
-/// The few rectangles a rail row or a chip band is drawn as, held inline: built per cell per frame, so a
-/// frame allocates nothing for them (m1).
+/// The few rectangles a rail row, a chip band or a hover ring is drawn as, held inline: built per cell per
+/// frame, so a frame allocates nothing for them (m1).
 struct RailRects
 {
-    std::array<RailRect, 3> rects {}; ///< The rectangles, the first @ref count of them in use.
+    std::array<RailRect, 4> rects {}; ///< The rectangles, the first @ref count of them in use.
     std::size_t count = 0;            ///< How many are.
 
-    /// Appends @p rect; there is room for three, the most a row or a band is drawn as.
+    /// Appends @p rect; there is room for four, the most a row, a band or a ring is drawn as.
     void add(RailRect rect) noexcept { rects.at(count++) = rect; }
 
     /// @return The rectangles in use.
     [[nodiscard]] std::span<RailRect const> all() const noexcept { return std::span(rects).first(count); }
 };
+
+/// The rectangles of a hovered block's ring: the edges of @p box, @p ring pixels thick, inside it.
+///
+/// The top and bottom edges run whole, the sides between them -- except along an edge the block continues
+/// past
+/// (@p continues): the page cuts the block there, and a closed edge would say it ends, so the edge is left
+/// out and the sides reach the box's own end.
+/// @param box The block's rows, across the page.
+/// @param ring The ring's thickness in pixels; none for a ring that does not fit twice in the box.
+/// @param continues The edges the block runs past.
+/// @return The rectangles; none without a ring.
+[[nodiscard]] inline RailRects hoverRingRects(RailRect box,
+                                              int ring,
+                                              vtbackend::BlockContinuations continues) noexcept
+{
+    auto rects = RailRects {};
+    ring = std::min(ring, std::min(box.width, box.height) / 2);
+    if (ring <= 0)
+        return rects;
+
+    auto const opensAbove = continues.test(vtbackend::BlockContinues::Above);
+    auto const opensBelow = continues.test(vtbackend::BlockContinues::Below);
+    if (!opensAbove)
+        rects.add(RailRect { .x = box.x, .y = box.y, .width = box.width, .height = ring });
+    if (!opensBelow)
+        rects.add(
+            RailRect { .x = box.x, .y = box.y + box.height - ring, .width = box.width, .height = ring });
+
+    auto const sidesTop = opensAbove ? box.y : box.y + ring;
+    auto const sidesBottom = opensBelow ? box.y + box.height : box.y + box.height - ring;
+    auto const sidesHeight = sidesBottom - sidesTop;
+    rects.add(RailRect { .x = box.x, .y = sidesTop, .width = ring, .height = sidesHeight });
+    rects.add(
+        RailRect { .x = box.x + box.width - ring, .y = sidesTop, .width = ring, .height = sidesHeight });
+    return rects;
+}
 
 /// How many cells wide a rail mark is drawn: LineFlag::DoubleWidth, as a two-cell block column's glyph is.
 inline constexpr auto MarkCells = 2;

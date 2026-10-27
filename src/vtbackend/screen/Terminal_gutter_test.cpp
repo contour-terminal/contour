@@ -1373,6 +1373,56 @@ TEST_CASE("Gutter.terminal.aHoveredBlockIsTintedAndRinged", "[gutter][blockhover
     CHECK_FALSE(renderOf(mc.terminal).blockHighlight.has_value());
 }
 
+TEST_CASE("Gutter.terminal.aRingOmitsTheEdgesABlockContinuesPast", "[gutter][blockhover]")
+{
+    // The canvas clips the outline of a block that runs off the page, rather than closing it at the page's
+    // edge (m4): the highlight says which of its edges the page cuts.
+    auto const mc = tallBlock(100);
+    auto& terminal = mc->terminal;
+    auto const* const block = terminal.commandBlockAt(LineOffset(0));
+    REQUIRE(block != nullptr);
+    auto const id = block->id;
+    terminal.setHoveredCommandBlock(id);
+
+    SECTION("the whole block on the page")
+    {
+        auto small = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+        runASuccessAndAFailure(small, RailGutter);
+        small.terminal.setHoveredCommandBlock(small.terminal.commandBlockAt(LineOffset(0))->id);
+        auto const lit = renderOf(small.terminal).blockHighlight;
+        REQUIRE(lit.has_value());
+        CHECK(lit->continues.none());
+    }
+
+    SECTION("its head above the page")
+    {
+        // The live prompt is below; the page shows the block's last rows and its tail.
+        auto const lit = renderOf(terminal).blockHighlight;
+        REQUIRE(lit.has_value());
+        CHECK(lit->continues.test(BlockContinues::Above));
+        CHECK_FALSE(lit->continues.test(BlockContinues::Below));
+    }
+
+    SECTION("its tail below the page")
+    {
+        REQUIRE(terminal.viewport().scrollToTop());
+        auto const lit = renderOf(terminal).blockHighlight;
+        REQUIRE(lit.has_value());
+        CHECK_FALSE(lit->continues.test(BlockContinues::Above));
+        CHECK(lit->continues.test(BlockContinues::Below));
+    }
+
+    SECTION("a block the page holds the middle of continues both ways")
+    {
+        REQUIRE(terminal.viewport().scrollToTop());
+        REQUIRE(terminal.viewport().scrollDown(LineCount(40)));
+        auto const lit = renderOf(terminal).blockHighlight;
+        REQUIRE(lit.has_value());
+        CHECK(lit->continues.test(BlockContinues::Above));
+        CHECK(lit->continues.test(BlockContinues::Below));
+    }
+}
+
 TEST_CASE("Gutter.terminal.theTerminalRowTintsNoBlock", "[gutter][blockhover]")
 {
     // The Terminal row draws cells only.

@@ -4557,11 +4557,23 @@ void Terminal::fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) con
     if (!first)
         return;
 
+    // The page cuts an edge where the block's rows go on past it: the row beyond is still the block's.
+    auto continues = BlockContinuations {};
+    auto const continuesAt = [&](int y) {
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
+        return record != nullptr && record->id == *hovered;
+    };
+    if (continuesAt(*first - 1))
+        continues.enable(BlockContinues::Above);
+    if (continuesAt(last + 1))
+        continues.enable(BlockContinues::Below);
+
     auto const inks = blockHoverInks(_colorPalette);
     output.blockHighlight = RenderBlockHighlight { .top = baseLine + LineOffset(*first),
                                                    .height = LineCount(last - *first + 1),
                                                    .tint = inks.tint,
-                                                   .ring = inks.ring };
+                                                   .ring = inks.ring,
+                                                   .continues = continues };
 }
 
 ColumnCount Terminal::chipColumns(PillStyle style, std::u32string_view text) const noexcept

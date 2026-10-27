@@ -15,6 +15,8 @@
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
 
+#include <core/Flags.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -197,14 +199,25 @@ struct RenderChip
     bool operator==(RenderChip const&) const = default;
 };
 
+/// Which edges of a block the page cuts: the block runs on past them, so its outline has no edge there.
+enum class BlockContinues : uint8_t
+{
+    Above = 1 << 0, ///< Its head is above the page's first row.
+    Below = 1 << 1, ///< Its tail is below the page's last row.
+};
+
+/// A set of BlockContinues; empty for a block the page shows whole.
+using BlockContinuations = core::Flags<BlockContinues>;
+
 /// The block the pointer hovers on a native row, as the canvas draws it: its rows tinted under their text,
 /// and a ring around them across the page -- the grid's first column to its last.
 struct RenderBlockHighlight
 {
-    LineOffset top {};   ///< The block's first drawn screen row.
-    LineCount height {}; ///< How many rows it spans on screen, clipped to the page.
-    RGBAColor tint {};   ///< Laid over its rows, under their text.
-    RGBAColor ring {};   ///< The one-pixel ring inside its outline.
+    LineOffset top {};               ///< The block's first drawn screen row.
+    LineCount height {};             ///< How many rows it spans on screen, clipped to the page.
+    RGBAColor tint {};               ///< Laid over its rows, under their text.
+    RGBAColor ring {};               ///< The one-pixel ring inside its outline.
+    BlockContinuations continues {}; ///< The edges the page cuts: the ring is not drawn along them.
 
     bool operator==(RenderBlockHighlight const&) const = default;
 };

@@ -143,3 +143,51 @@ TEST_CASE("RailGeometry.aChipBandIsRoundedAtItsEnds", "[renderer][rail]")
                            RailRect { .x = Left, .y = 65, .width = 1, .height = 30 },
                            RailRect { .x = Right - 1, .y = 65, .width = 1, .height = 30 } });
 }
+
+TEST_CASE("RailGeometry.aRingOmitsTheEdgesABlockContinuesPast", "[renderer][rail]")
+{
+    // The outline of a block's highlight is a ring one pixel (here two) inside its box. An edge the block
+    // continues past is not drawn: the block does not end there.
+    auto const box = RailRect { .x = 100, .y = 40, .width = 80, .height = 60 };
+    auto const rects = [&](vtbackend::BlockContinuations continues) {
+        auto const ring = vtrasterizer::hoverRingRects(box, 2, continues);
+        return std::vector<RailRect>(ring.all().begin(), ring.all().end());
+    };
+    auto const top = RailRect { .x = 100, .y = 40, .width = 80, .height = 2 };
+    auto const bottom = RailRect { .x = 100, .y = 98, .width = 80, .height = 2 };
+
+    // Closed: all four edges, the sides between the top and the bottom.
+    CHECK(rects({})
+          == std::vector {
+              top,
+              bottom,
+              RailRect { .x = 100, .y = 42, .width = 2, .height = 56 },
+              RailRect { .x = 178, .y = 42, .width = 2, .height = 56 },
+          });
+
+    // Running off the top: no top edge, and the sides reach the box's top.
+    CHECK(rects({ vtbackend::BlockContinues::Above })
+          == std::vector {
+              bottom,
+              RailRect { .x = 100, .y = 40, .width = 2, .height = 58 },
+              RailRect { .x = 178, .y = 40, .width = 2, .height = 58 },
+          });
+
+    // Running off the bottom: no bottom edge, and the sides reach the box's bottom.
+    CHECK(rects({ vtbackend::BlockContinues::Below })
+          == std::vector {
+              top,
+              RailRect { .x = 100, .y = 42, .width = 2, .height = 58 },
+              RailRect { .x = 178, .y = 42, .width = 2, .height = 58 },
+          });
+
+    // Both: two sides alone.
+    CHECK(rects({ vtbackend::BlockContinues::Above, vtbackend::BlockContinues::Below })
+          == std::vector {
+              RailRect { .x = 100, .y = 40, .width = 2, .height = 60 },
+              RailRect { .x = 178, .y = 40, .width = 2, .height = 60 },
+          });
+
+    // No ring: nothing.
+    CHECK(vtrasterizer::hoverRingRects(box, 0, {}).all().empty());
+}
