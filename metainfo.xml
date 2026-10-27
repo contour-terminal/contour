@@ -144,6 +144,8 @@
           <li>Keeps the input method's candidate window at the cursor cell, including at the end of a line and while panes move or the font changes, instead of the pane's corner</li>
           <li>Draws text being composed by an input method inline, at the cursor, or to its left when it would not fit, in the terminal's default colours with a thin (one logical point) underline, in the new defaults; adds <code>input_method_editor_style</code> (<code>inline</code>, <code>highlighted</code>)</li>
           <li>Fixes text being composed by an input method not being shown on a line of plain text, and running off the right edge of the line; at the end of a line it now moves left to stay in view</li>
+          <li>Names the command a daemon restart stopped in each restored pane, with Run Again (after asking) and Dismiss</li>
+          <li>Offers Reconnect in a pane that lost its daemon connection</li>
           <li>Daemon: every window, tab and pane has a stable UUID, and each hosted shell finds its own with $CONTOUR_PANE, $CONTOUR_TAB, $CONTOUR_WINDOW and $CONTOUR_DAEMON.</li>
           <li>Daemon: serves a typed control API on its native socket: list, capture and label windows, tabs and panes, open tabs and splits, type into panes, read and wait for command blocks, and subscribe to events.</li>
           <li>Daemon: contour daemon --access-file FILE issues TCP tokens with narrower control API grants (read, screen, input, write); a call outside them is refused as forbidden, and a narrow token cannot attach.</li>

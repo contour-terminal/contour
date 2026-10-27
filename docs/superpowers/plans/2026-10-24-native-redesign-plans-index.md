@@ -58,8 +58,12 @@ re-announced as the pane moves, the cell geometry changes and the preedit change
 cell's own colours with a one-logical-point underline in Native2026, highlighted in Classic, via
 `input_method_editor_style`; a preedit that does not fit moves left to meet the right edge and only one wider than the
 line is cut). Its ledger is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-10.md`.
+Step 6.3 done (exited process: a restored pane names the command the restart stopped, with Run Again, which asks
+first and defaults to Deny, and Dismiss, cleared by the pane's next command; a pane cut off from its daemon offers
+Reconnect, which restarts the attach and takes the panes back in place by their remote session id). Its ledger is
+`docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-3.md`.
 Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
-1d), 4a, 2, 3a, 3b, 3c, 3d, 3e and 6.10. 3f follows.
+1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 6.10 and 6.3. 3f follows.
 
 ## Rules for every step
 
@@ -101,6 +105,6 @@ Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |
-| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input and 6.10 done) |
+| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10 and 6.3 done) |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.
