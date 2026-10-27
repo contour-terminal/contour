@@ -166,6 +166,7 @@ enum class ChromeColorRole : uint8_t
     FindToggleOnText, //!< A lit option toggle's glyph.
     FindToggleText,   //!< An unlit option toggle's glyph.
     FindCountText,    //!< The match count beside the field.
+    FindToggleOnRing, //!< The ring that sets a lit option toggle off an unlit one; none where its fill does.
 };
 
 /// Where a chrome colour comes from.
@@ -187,6 +188,9 @@ enum class ColorSourceKind : uint8_t
     Separator,        //!< Black on a light ground, white on a dark one, at @c contrast.separatorPercent.
     PaletteHighlight, //!< The OS palette's selected-row colour (@c Highlight).
     PaletteHighlightedText, //!< The OS palette's text on its selected row (@c HighlightedText).
+    /// A status hue's mark ink, picked by the source's @c status, where it reaches 3:1 on the OS palette's
+    /// window colour, else the window's own ink (UiStyleProvider::statusMarkOn).
+    StatusMarkOnWindow,
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -218,7 +222,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::BarSelectionText) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindCountText) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindToggleOnRing) + 1;
 
 /// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
@@ -228,7 +232,7 @@ inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::
 inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
 
 /// One past the last find bar colour role: the find bar's roles run from @c PaletteColorRoleEnd to here.
-inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindCountText) + 1;
+inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindToggleOnRing) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -872,6 +876,14 @@ namespace detail
         label(1),                         // FindToggleOnText
         label(2),                         // FindToggleText
         label(2),                         // FindCountText
+        // The wash alone can fall under 3:1 against an unlit toggle, so a lit one is also ringed: the accent,
+        // or the chrome's ink where the accent would not reach 3:1 on the window (B-I4).
+        ChromeColorSource { .kind = ColorSourceKind::StatusMarkOnWindow,
+                            .rgb = 0,
+                            .status = StatusColorRole::Running,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 }, // FindToggleOnRing
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -1320,7 +1332,9 @@ namespace detail
                     schemeColor(SchemeSlot::BarInk),    // FindToggleOnFill
                     schemeColor(SchemeSlot::Bar),       // FindToggleOnText
                     schemeOnBar(SchemeSlot::Secondary), // FindToggleText
-                    schemeColor(SchemeSlot::BarInk) },  // FindCountText
+                    schemeColor(SchemeSlot::BarInk),    // FindCountText
+                    // Inverse video already stands off the bar at 4.5:1: no ring.
+                    detail::noColor() }, // FindToggleOnRing
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

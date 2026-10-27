@@ -173,6 +173,9 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
             return faded(QGuiApplication::palette().color(QPalette::Highlight));
         case config::ColorSourceKind::PaletteHighlightedText:
             return faded(QGuiApplication::palette().color(QPalette::HighlightedText));
+        case config::ColorSourceKind::StatusMarkOnWindow:
+            return faded(_provider.statusMarkOn(static_cast<int>(source.status),
+                                                QGuiApplication::palette().color(QPalette::Window)));
         case config::ColorSourceKind::Status:
             return faded(_provider.statusColor(source.status, config::StatusInkUse::Text));
         case config::ColorSourceKind::StatusMark:

@@ -792,6 +792,7 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor findToggleOnText READ findToggleOnText NOTIFY changed)
     Q_PROPERTY(QColor findToggleText READ findToggleText NOTIFY changed)
     Q_PROPERTY(QColor findCountText READ findCountText NOTIFY changed)
+    Q_PROPERTY(QColor findToggleOnRing READ findToggleOnRing NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -882,6 +883,7 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor findToggleOnText() const { return color(config::ChromeColorRole::FindToggleOnText); }
     [[nodiscard]] QColor findToggleText() const { return color(config::ChromeColorRole::FindToggleText); }
     [[nodiscard]] QColor findCountText() const { return color(config::ChromeColorRole::FindCountText); }
+    [[nodiscard]] QColor findToggleOnRing() const { return color(config::ChromeColorRole::FindToggleOnRing); }
 
   signals:
     /// Every role may have changed colour.
@@ -916,6 +918,7 @@ class ChromePaneRoleNames: public QObject
     Q_PROPERTY(int findToggleOnText READ findToggleOnText CONSTANT)
     Q_PROPERTY(int findToggleText READ findToggleText CONSTANT)
     Q_PROPERTY(int findCountText READ findCountText CONSTANT)
+    Q_PROPERTY(int findToggleOnRing READ findToggleOnRing CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -977,6 +980,10 @@ class ChromePaneRoleNames: public QObject
     [[nodiscard]] static constexpr int findCountText() noexcept
     {
         return of(config::ChromeColorRole::FindCountText);
+    }
+    [[nodiscard]] static constexpr int findToggleOnRing() noexcept
+    {
+        return of(config::ChromeColorRole::FindToggleOnRing);
     }
 
   private:

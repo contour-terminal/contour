@@ -221,8 +221,6 @@ Popup {
 
     readonly property var _toggles: root._search ? root._search.searchToggles : []
 
-    // The Terminal row lights a toggle in inverse video; the native rows wash it in the accent and ring it.
-    readonly property bool _isCellRow: chromeStyle.layout.findBar === chromeStyle.layout.paneHeaderRow
     // The magnifier: a lens and its handle, as fractions of the icon's edge.
     readonly property real _lensFraction: 0.72
     readonly property real _handleFraction: 0.38
@@ -354,14 +352,15 @@ Popup {
                     color: toggle.checked ? chromeStyle.colors.findToggleOnText : chromeStyle.colors.findToggleText
                 }
                 // A lit toggle stands off an unlit one at 3:1: the Terminal row's inverse cells, or the
-                // native rows' accent wash with an accent ring (the chrome's ink where the accent is faint).
+                // native rows' accent wash with its ring (findToggleOnRing, which the Terminal row leaves
+                // transparent, so the ring is the row's to decide and not this file's).
                 background: Rectangle {
                     objectName: "searchBarToggleBackground"
                     radius: chromeStyle.radii.control
                     color: toggle.checked ? chromeStyle.colors.findToggleOnFill
                                           : (toggle.hovered ? chromeStyle.colors.tabHoverFill : "transparent")
-                    border.width: toggle.checked && !root._isCellRow ? chromeStyle.borderWidth : 0
-                    border.color: chromeStyle.statusMarkOn(chromeStyle.statusRunning, systemPalette.window)
+                    border.width: toggle.checked && chromeStyle.colors.findToggleOnRing.a > 0 ? chromeStyle.borderWidth : 0
+                    border.color: chromeStyle.colors.findToggleOnRing
                 }
             }
         }

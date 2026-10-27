@@ -1187,8 +1187,8 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
     using enum ChromeColorRole;
     auto const rows = std::array {
         // The find bar (F13): a lit toggle is an accent wash under the primary label, ringed in the accent
-        // (UiStyleProvider::statusMarkOn), or its cells in inverse video; an unlit one and the count, the
-        // secondary label or the bar's inks.
+        // (UiStyleProvider::statusMarkOn), or its cells in inverse video with no ring; an unlit one and the
+        // count, the secondary label or the bar's inks.
         PaneColorRow { .role = FindToggleOnFill,
                        .native = ChromeColorSource { .kind = ColorSourceKind::StatusMark,
                                                      .rgb = 0,
@@ -1203,6 +1203,14 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
             .role = FindToggleText, .native = label(2), .terminal = schemeOnBar(SchemeSlot::Secondary) },
         PaneColorRow {
             .role = FindCountText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
+        PaneColorRow { .role = FindToggleOnRing,
+                       .native = ChromeColorSource { .kind = ColorSourceKind::StatusMarkOnWindow,
+                                                     .rgb = 0,
+                                                     .status = StatusColorRole::Running,
+                                                     .slot = SchemeSlot::Background,
+                                                     .alphaPercent = 100,
+                                                     .level = 0 },
+                       .terminal = contour::config::detail::noColor() },
     };
     // Every find bar role, PaletteColorRoleEnd up to FindColorRoleEnd, has a row here.
     CHECK(rows.size() == FindColorRoleEnd - PaletteColorRoleEnd);

@@ -60,6 +60,7 @@
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
+#include <QtGui/QPalette>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -8363,6 +8364,36 @@ TEST_CASE("The find bar's toggles render the session's table and light the activ
     CHECK(background->property("color").value<QColor>()
           == colors->property("findToggleOnFill").value<QColor>());
 
+    // The lit toggle is ringed in the accent's mark ink, re-read when the palette changes (B-I4); an unlit
+    // one is not ringed.
+    auto const& provider = providerOf(engine);
+    auto const ringOn = [&provider](QColor const& window) {
+        return provider.statusMarkOn(static_cast<int>(contour::config::StatusColorRole::Running), window);
+    };
+    // A window in the accent itself puts the ring onto the window's ink, so the two rings differ.
+    auto const light = QColor(0xF6, 0xF6, 0xF6);
+    auto const accentWindow = ringOn(light);
+    REQUIRE(ringOn(accentWindow) != ringOn(light));
+    auto const saved = QGuiApplication::palette();
+    for (auto const& window: { light, accentWindow })
+    {
+        INFO("window: " << window.name().toStdString());
+        auto palette = saved;
+        palette.setColor(QPalette::Window, window);
+        QGuiApplication::setPalette(palette);
+        QCoreApplication::processEvents();
+        CHECK(background->property("border").value<QObject*>()->property("width").toReal() > 0.0);
+        CHECK(background->property("border").value<QObject*>()->property("color").value<QColor>()
+              == ringOn(window));
+    }
+    QGuiApplication::setPalette(saved);
+    QCoreApplication::processEvents();
+    auto* wholeWord = buttons[static_cast<std::size_t>(contour::session::SearchToggle::WholeWord)];
+    auto* unlit = wholeWord->findChild<QQuickItem*>(QStringLiteral("searchBarToggleBackground"));
+    REQUIRE(unlit != nullptr);
+    CHECK_FALSE(wholeWord->property("checked").toBool());
+    CHECK(unlit->property("border").value<QObject*>()->property("width").toReal() == 0.0);
+
     QMetaObject::invokeMethod(buttons[static_cast<std::size_t>(contour::session::SearchToggle::WholeWord)],
                               "clicked");
     QCoreApplication::processEvents();
@@ -8409,6 +8440,7 @@ TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[conto
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockSession session;
+    session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
     auto const chrome =
         contour::test::ChromeSetup { .row = contour::config::ChromeStyle::Terminal,
                                      .font = QGuiApplication::font(),
@@ -8435,6 +8467,12 @@ TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[conto
         REQUIRE(buttons[index] != nullptr);
         CHECK(buttons[index]->property("text").toString() == texts[index]);
     }
+    // A lit toggle is its cells in inverse video, with no ring.
+    auto* regex = buttons[static_cast<std::size_t>(contour::session::SearchToggle::Regex)];
+    REQUIRE(regex->property("checked").toBool());
+    auto* regexBackground = regex->findChild<QQuickItem*>(QStringLiteral("searchBarToggleBackground"));
+    REQUIRE(regexBackground != nullptr);
+    CHECK(regexBackground->property("border").value<QObject*>()->property("width").toReal() == 0.0);
     for (auto const& [name, glyph]: std::array { std::pair { "searchBarPrevious", QStringLiteral("↑") },
                                                  std::pair { "searchBarNext", QStringLiteral("↓") },
                                                  std::pair { "searchBarClose", QStringLiteral("×") } })
