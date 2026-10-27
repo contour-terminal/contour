@@ -279,3 +279,42 @@ TEST_CASE("ScrollbarMarks.kinds.colorsComeFromTheScheme", "[scrollbar-marks]")
         CHECK(scrollbarMarkColor(palette, Kind::UserMark) == RGBColor { 0x0A, 0x0B, 0x0C });
     }
 }
+
+TEST_CASE("ScrollbarMarks.overlayHold.column", "[scrollbar-marks]")
+{
+    // A finished command leaves a mark after every prompt, so only the marks worth a look hold an overlay bar
+    // at the bottom of the scrollback.
+    auto const expected = std::map<Kind, OverlayHold> {
+        { Kind::Command, OverlayHold::Quiet },
+        { Kind::UserMark, OverlayHold::KeepsShown },
+        { Kind::Running, OverlayHold::KeepsShown },
+        { Kind::Failure, OverlayHold::KeepsShown },
+    };
+    REQUIRE(expected.size() == ScrollbarMarkKindTable.size());
+    for (auto const& row: ScrollbarMarkKindTable)
+    {
+        INFO("kind " << std::format("{}", row.kind));
+        CHECK(row.overlay == expected.at(row.kind));
+    }
+}
+
+TEST_CASE("ScrollbarMarks.marksAbove.onlyHeldDrawnKindsAboveTheRowCount", "[scrollbar-marks]")
+{
+    auto const marks = std::array {
+        markAt(5, Kind::Command, 1),
+        markAt(7, Kind::Failure, 2),
+        markAt(40, Kind::Failure, 3),
+    };
+    auto const commandsAndUserMarks =
+        ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks };
+
+    // A failure at row 7 is above a viewport whose first row is 30.
+    CHECK(marksAbove(marks, 30, AllScrollbarMarkSources) == MarksAbove::Some);
+    // Only a command is above row 6: commands do not hold the bar. The failure on row 7 is in view.
+    CHECK(marksAbove(marks, 6, AllScrollbarMarkSources) == MarksAbove::None);
+    // A failure the bar does not draw holds nothing.
+    CHECK(marksAbove(marks, 30, commandsAndUserMarks) == MarksAbove::None);
+    // The row itself is not above.
+    CHECK(marksAbove(marks, 7, AllScrollbarMarkSources) == MarksAbove::None);
+    CHECK(marksAbove({}, 30, AllScrollbarMarkSources) == MarksAbove::None);
+}

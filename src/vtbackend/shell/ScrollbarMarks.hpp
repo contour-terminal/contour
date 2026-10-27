@@ -82,6 +82,20 @@ struct ScrollbarTick
     [[nodiscard]] bool operator==(ScrollbarTick const&) const noexcept = default;
 };
 
+/// Whether a mark of some kind keeps an overlay scrollbar shown at the bottom of the scrollback.
+enum class OverlayHold : uint8_t
+{
+    Quiet = 0,  ///< The bar hides at the bottom whether or not the mark is above the view.
+    KeepsShown, ///< While the mark is above the view the bar stays shown, so it is noticed.
+};
+
+/// Whether any mark that holds an overlay scrollbar is above the view (@see marksAbove).
+enum class MarksAbove : uint8_t
+{
+    None = 0, ///< No held mark is above the view.
+    Some,     ///< At least one is.
+};
+
 /// Everything that sets one kind of tick apart from the others.
 struct ScrollbarMarkKindRow
 {
@@ -97,6 +111,10 @@ struct ScrollbarMarkKindRow
     /// The outcome of the command blocks it stands for, whose `block_status` colour it is drawn in; none for
     /// a mark the user placed, which stands for no block.
     std::optional<CommandBlockOutcome> outcome;
+
+    /// Whether a mark of this kind above the view keeps an overlay scrollbar shown. A finished command leaves
+    /// a mark after every prompt, so only the kinds worth a look hold the bar.
+    OverlayHold overlay = OverlayHold::Quiet;
 };
 
 /// One row per kind, in enumerator order.
@@ -107,19 +125,23 @@ constexpr inline auto ScrollbarMarkKindTable = std::array {
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::Command,
                            .name = "Command",
                            .source = ScrollbarMarkSource::Commands,
-                           .outcome = CommandBlockOutcome::Success },
+                           .outcome = CommandBlockOutcome::Success,
+                           .overlay = OverlayHold::Quiet },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::UserMark,
                            .name = "UserMark",
                            .source = ScrollbarMarkSource::UserMarks,
-                           .outcome = std::nullopt },
+                           .outcome = std::nullopt,
+                           .overlay = OverlayHold::KeepsShown },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::Running,
                            .name = "Running",
                            .source = ScrollbarMarkSource::Commands,
-                           .outcome = CommandBlockOutcome::Running },
+                           .outcome = CommandBlockOutcome::Running,
+                           .overlay = OverlayHold::KeepsShown },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::Failure,
                            .name = "Failure",
                            .source = ScrollbarMarkSource::Failures,
-                           .outcome = CommandBlockOutcome::Failure },
+                           .outcome = CommandBlockOutcome::Failure,
+                           .overlay = OverlayHold::KeepsShown },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, ScrollbarMarkKindTable.size()),
@@ -196,6 +218,19 @@ constexpr inline auto ScrollbarMarkKindList = [] {
                                                         int64_t visibleRowCount,
                                                         int trackPixels,
                                                         ScrollbarMarkSources sources);
+
+/// Whether a mark that holds an overlay scrollbar is above the view.
+///
+/// A mark counts when its kind is one @p sources draws and its row's ScrollbarMarkKindRow::overlay is
+/// OverlayHold::KeepsShown: a mark the bar does not draw cannot be what keeps it on screen.
+/// @param marks The marks, in any order (Terminal::scrollbarMarkInputs()).
+/// @param firstVisibleRow The visible row at the top of the view, counted as ScrollbarMarkInput::visibleRow;
+///                        at the bottom of the scrollback it is the scrollable row count.
+/// @param sources Which kinds the bar draws (`scrollbar.marks`).
+/// @return MarksAbove::Some when such a mark lies on a row before @p firstVisibleRow.
+[[nodiscard]] MarksAbove marksAbove(std::span<ScrollbarMarkInput const> marks,
+                                    int64_t firstVisibleRow,
+                                    ScrollbarMarkSources sources) noexcept;
 
 /// The colour a tick of @p kind is drawn in under @p palette.
 ///

@@ -242,6 +242,7 @@ endif()
 
 set(_header_files
     session/HyperlinkTooltip.hpp
+    session/ScrollbarVisibility.hpp
     window/ProgramStatusBadge.hpp
     window/TabLabel.hpp
 )
@@ -1227,6 +1228,7 @@ if(CONTOUR_TESTING)
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
         session/PastePreview_test.cpp
+        session/ScrollbarVisibility_test.cpp
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp

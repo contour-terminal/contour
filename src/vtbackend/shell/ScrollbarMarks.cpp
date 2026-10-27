@@ -3,6 +3,7 @@
 
 #include <vtbackend/core/ColorPalette.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <ranges>
 #include <vector>
@@ -73,6 +74,18 @@ std::vector<ScrollbarTick> scrollbarMarks(std::span<ScrollbarMarkInput const> in
             ticks.push_back(ScrollbarTick {
                 .pixel = pixel, .kind = winner->kind, .targetStableId = winner->targetStableId });
     return ticks;
+}
+
+MarksAbove marksAbove(std::span<ScrollbarMarkInput const> marks,
+                      int64_t firstVisibleRow,
+                      ScrollbarMarkSources sources) noexcept
+{
+    auto const holds = [&](ScrollbarMarkInput const& mark) {
+        auto const& row = scrollbarMarkKindRow(mark.kind);
+        return mark.visibleRow < firstVisibleRow && sources.test(row.source)
+               && row.overlay == OverlayHold::KeepsShown;
+    };
+    return std::ranges::any_of(marks, holds) ? MarksAbove::Some : MarksAbove::None;
 }
 
 RGBColor scrollbarMarkColor(ColorPalette const& palette, ScrollbarMarkKind kind) noexcept
