@@ -48,6 +48,7 @@ set(vtpty_HEADERS
     EnvironmentBlock.hpp
     ErrnoText.hpp
     ImageSize.hpp
+    InputEcho.hpp
     MockPty.hpp
     MockViewPty.hpp
     OwnedFd.hpp

@@ -3920,8 +3920,12 @@ TEST_CASE("Config: a Classic file keeps secure input off", "[config][secureinput
 
 TEST_CASE("Config: the generated config turns secure input on", "[config][secureinput]")
 {
+    // Stated in the text, not only inherited from the edition: the generated file is what users read.
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("\nsecure_input: auto\n"));
+
     QTemporaryDir dir;
-    auto const path = writeConfig(dir, contour::config::defaultConfigString());
+    auto const path = writeConfig(dir, generated);
     CHECK(contour::config::loadConfigFromFile(path).secureInput.value()
           == contour::config::SecureInputMode::Auto);
 }
@@ -3958,6 +3962,33 @@ TEST_CASE("Config: an unknown secure_input spelling warns and keeps the edition'
     CHECK(config.secureInput.value() == SecureInputMode::Auto);
     INFO("captured error log:\n" << capture.text());
     CHECK(capture.count("maybe") == 1);
+    // The error names what would have been accepted, the aliases too.
+    CHECK(capture.contains("off, auto, false, no"));
+}
+
+TEST_CASE("Config: secure_input accepts false and no as off", "[config][secureinput]")
+{
+    // A YAML user's reflex for a switch: neither may fall back to the edition's `auto`.
+    using contour::config::SecureInputMode;
+    for (auto const spelling: { "false"sv, "no"sv, "No"sv, "FALSE"sv })
+    {
+        INFO("spelling: " << spelling);
+        QTemporaryDir dir;
+        auto const config =
+            loadFromYaml(dir,
+                         std::string { "defaults_edition: native2026\n"
+                                       "default_profile: main\n"
+                                       "secure_input: " }
+                             + std::string { spelling } + "\nprofiles:\n    main:\n        shell: /bin/sh\n");
+        CHECK(config.secureInput.value() == SecureInputMode::Off);
+    }
+}
+
+TEST_CASE("Config: secureInputModeName spells each mode as the file does", "[config][secureinput]")
+{
+    using contour::config::SecureInputMode;
+    CHECK(contour::config::secureInputModeName(SecureInputMode::Off) == "off");
+    CHECK(contour::config::secureInputModeName(SecureInputMode::Auto) == "auto");
 }
 
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")

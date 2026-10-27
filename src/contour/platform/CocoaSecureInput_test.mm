@@ -48,3 +48,29 @@ TEST_CASE("CocoaSecureInput.gateRestoresTheSystemState", "[display][secureinput]
         SKIP("The OS did not report Secure Keyboard Entry on (no login session); "
              "only the round trip is checked");
 }
+
+TEST_CASE("CocoaSecureInput.neverDisablesTwice", "[display][secureinput][cocoa]")
+{
+    // The OS counts enables per process. The test holds one of its own; an extra disable anywhere in the
+    // round trip -- the gate's, a second disable() call, the backend's destructor -- would drop the count to
+    // zero and turn secure input off under the test's hold.
+    if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))
+        SKIP("Needs CONTOUR_TEST_DISPLAY=1: turns on the machine-wide Secure Keyboard Entry");
+    EnableSecureEventInput();
+    if (IsSecureEventInputEnabled() == 0)
+    {
+        DisableSecureEventInput();
+        SKIP("The OS did not report Secure Keyboard Entry on (no login session)");
+    }
+    {
+        auto os = contour::platform::makeSecureInput();
+        {
+            auto gate = SecureInputGate { *os };
+            gate.apply(SecureInputState::On);
+            gate.apply(SecureInputState::Off);
+        }
+        os->disable(); // already off: must not reach the OS
+    }
+    CHECK(IsSecureEventInputEnabled() != 0);
+    DisableSecureEventInput();
+}

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/ImageSize.hpp>
+#include <vtpty/InputEcho.hpp>
 #include <vtpty/PageSize.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -93,16 +94,6 @@ enum class ReadOrigin : std::uint8_t
 {
     Live = 0, ///< The program on the other end wrote it.
     Replay,   ///< A mirror refilled the pane with what its program wrote before: not news.
-};
-
-/// What the terminal does with the text typed into it: the line discipline's echo and line editing, as the
-/// program running in it set them.
-enum class InputEcho : std::uint8_t
-{
-    Unknown = 0, ///< The device cannot tell: a mirrored or remote pane, a ConPTY.
-    Echoed,      ///< The terminal echoes what is typed.
-    Raw,    ///< Neither echo nor line editing: the program draws its own echo (an editor, a line editor).
-    Hidden, ///< Line editing without echo: a password prompt.
 };
 
 class Pty

@@ -2287,6 +2287,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, SecureInputMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);

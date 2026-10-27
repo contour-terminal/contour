@@ -32,10 +32,13 @@
 #include <concepts>
 #include <cstdlib>
 #include <expected>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <ranges>
+#include <span>
+#include <string>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -2825,6 +2828,28 @@ namespace
         return names;
     }
 } // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, SecureInputMode& where)
+{
+    // The table's tokens and the aliases that read as `off`; a miss is reported, naming both, and keeps
+    // the edition's default.
+    static auto const accepted = [] {
+        auto names = std::string {};
+        for (auto const& rows:
+             { std::span { detail::SecureInputModeTable }, std::span { detail::SecureInputModeAliases } })
+            for (auto const& row: rows)
+                names += names.empty() ? std::string { row.token } : std::format(", {}", row.token);
+        return names;
+    }();
+    (void) detail::loadConfigEnum(
+        node,
+        entry,
+        keyPathTo(node, entry),
+        where,
+        logger,
+        [](std::string const& token) { return secureInputModeFrom(token); },
+        accepted);
+}
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where)
 {

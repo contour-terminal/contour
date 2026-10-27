@@ -43,6 +43,23 @@ TEST_CASE("secureInputGate.disablesOnlyWhenOn", "[secureinput]")
     CHECK(gate.state() == SecureInputState::Off);
 }
 
+TEST_CASE("secureInputGate.cyclesStayBalanced", "[secureinput]")
+{
+    // A prompt, its answer, and a second prompt: each On is its own enable, matched by its own disable.
+    auto record = SecureInputRecord {};
+    auto os = RecordingSecureInput { record };
+    {
+        auto gate = SecureInputGate { os };
+        gate.apply(SecureInputState::On);
+        gate.apply(SecureInputState::Off);
+        gate.apply(SecureInputState::On);
+        CHECK(record.enables == 2);
+        CHECK(record.disables == 1);
+    }
+    CHECK(record.enables == 2);
+    CHECK(record.disables == 2);
+}
+
 TEST_CASE("secureInputGate.destructorTurnsItOff", "[secureinput]")
 {
     // Whatever owns the gate going away -- a manager, the app -- must not leave secure input on (Review

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -35,6 +36,12 @@ namespace detail
     };
     static_assert(SecureInputModeTable.size() == SecureInputModeCount,
                   "every SecureInputMode needs a spelling");
+
+    /// Spellings read as a mode but never written: a YAML user's words for a switch turned off.
+    inline constexpr auto SecureInputModeAliases = std::array {
+        ConfigEnumInfo<SecureInputMode> { SecureInputMode::Off, "false", "Off" },
+        ConfigEnumInfo<SecureInputMode> { SecureInputMode::Off, "no", "Off" },
+    };
 } // namespace detail
 
 template <>
@@ -53,6 +60,19 @@ constexpr std::span<ConfigEnumInfo<SecureInputMode> const> configEnumValues() no
         if (row.value == mode)
             return row.token;
     return values.front().token;
+}
+
+/// Reads a `secure_input` spelling: a token of the table, or an alias, ignoring ASCII case.
+/// @param token The spelling.
+/// @return The mode; none for a spelling neither the table nor the aliases know.
+[[nodiscard]] constexpr std::optional<SecureInputMode> secureInputModeFrom(std::string_view token) noexcept
+{
+    if (auto const value = configEnumFromToken<SecureInputMode>(token))
+        return value;
+    for (auto const& row: detail::SecureInputModeAliases)
+        if (detail::equalsIgnoreCase(row.token, token))
+            return row.value;
+    return std::nullopt;
 }
 
 } // namespace contour::config

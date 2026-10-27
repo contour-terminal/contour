@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/OwnedFd.hpp>
 #include <vtpty/UnixPty.hpp>
 #include <vtpty/UnixUtils.hpp>
 #include <vtpty/test/PtyReading.hpp>
@@ -269,13 +270,13 @@ namespace
 {
 
 /// Opens a second descriptor on @p pty's slave side, as the program running in it holds one.
-/// @return The descriptor, or -1.
-[[nodiscard]] int openSlaveOf(vtpty::UnixPty const& pty)
+/// @return The descriptor, closed when it goes out of scope, even past a failed REQUIRE; none on failure.
+[[nodiscard]] vtpty::OwnedFd openSlaveOf(vtpty::UnixPty const& pty)
 {
     auto path = std::array<char, 128> {};
     if (::ptsname_r(unbox<int>(pty.handle()), path.data(), path.size()) != 0)
-        return -1;
-    return ::open(path.data(), O_RDWR | O_NOCTTY);
+        return vtpty::OwnedFd { -1 };
+    return vtpty::OwnedFd { ::open(path.data(), O_RDWR | O_NOCTTY) };
 }
 
 /// Changes the slave's local flags as a program in the terminal would.
@@ -301,16 +302,16 @@ TEST_CASE("UnixPty.inputEcho.followsTheSlavesTermios", "[vtpty][unixpty][inputec
                          std::nullopt };
     CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
     REQUIRE(pty.start().has_value());
-    auto const slave = openSlaveOf(pty);
-    REQUIRE(slave >= 0);
+    auto slave = openSlaveOf(pty);
+    REQUIRE(slave.get() >= 0);
 
     CHECK(pty.inputEcho() == vtpty::InputEcho::Echoed);
-    clearLocalFlags(slave, ECHO);
+    clearLocalFlags(slave.get(), ECHO);
     CHECK(pty.inputEcho() == vtpty::InputEcho::Hidden);
-    clearLocalFlags(slave, ICANON);
+    clearLocalFlags(slave.get(), ICANON);
     CHECK(pty.inputEcho() == vtpty::InputEcho::Raw);
 
-    ::close(slave);
+    slave.reset();
     pty.close();
     CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
 }
