@@ -199,7 +199,6 @@ enum class SnapshotHost : uint8_t
     MacOS,          //!< Every row on macOS: its traffic lights, its shortcut glyphs and its title bar.
 };
 
-/// One row of the script table.
 /// What the active pane's search shows when its find bar is opened.
 enum class SnapshotFind : uint8_t
 {
@@ -208,6 +207,7 @@ enum class SnapshotFind : uint8_t
     Invalid,  //!< "a(", which does not compile: "Invalid pattern", the field tinted.
 };
 
+/// One row of the script table.
 struct SnapshotScriptRow
 {
     SnapshotScript script = SnapshotScript::SingleTab;      ///< The script this row describes.

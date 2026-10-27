@@ -254,12 +254,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
-    // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
-    // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
-    // read backwards. @see contour::session::describeSearchCase.
     // The find bar's toggles, one map per SearchToggleRows row: toggle (int), glyph, checked, tooltip,
-    // accessibleName and objectName. Maps rather than an enum the QML would have to interpret, for the reason
-    // the case affordance above is a glyph and a lit flag.
+    // accessibleName and objectName. Each says what it SHOWS rather than an enumerator QML would have to
+    // interpret: the bar once spoke raw ints and inverted every one of them, and a glyph and a lit flag
+    // cannot be read backwards. @see contour::session::SearchToggleRows.
     Q_PROPERTY(QVariantList searchToggles READ searchToggles NOTIFY searchStateChanged)
     // The viewport rows the current match covers, { first, last }; empty when there is none on screen. The
     // find bar reads it to move out of the match's way (window::placeFindBar).

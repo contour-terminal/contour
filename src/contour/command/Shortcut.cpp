@@ -35,11 +35,6 @@ namespace
                           input);
     }
 
-    /// Indexes one half of the input mappings (the key half or the char half) into @p target.
-    ///
-    /// Templated over the binding's input type so the two halves share this logic rather than
-    /// restating it — the only thing that differs between them is which member of ShortcutInput the
-    /// binding's `input` lands in, and the variant absorbs that.
     /// Whether @p preference shows @p candidate rather than @p shown, for one command.
     [[nodiscard]] bool prefers(ChordPreference preference,
                                ShortcutChord const& candidate,
@@ -55,6 +50,7 @@ namespace
         return false;
     }
 
+    /// Indexes one binding into @p target, under @p preference where the command already has a chord.
     template <typename Input>
     void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
                       ChordPreference preference,
@@ -75,6 +71,11 @@ namespace
             entry->second = chord;
     }
 
+    /// Indexes one half of the input mappings (the key half or the char half) into @p target.
+    ///
+    /// Templated over the binding's input type so the two halves share this logic rather than
+    /// restating it — the only thing that differs between them is which member of ShortcutInput the
+    /// binding's `input` lands in, and the variant absorbs that.
     template <typename Input>
     void indexBindings(std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings,
                        ChordPreference preference,

@@ -46,9 +46,10 @@ Popup {
 
     objectName: "searchBar"
 
-    // Whether the pane shows an inline header above its terminal (a window::PaneHeaderPresence's value):
-    // on the Terminal row the bar then takes that header's row (Task 11's slot).
+    // Whether the pane shows an inline header above its terminal (a window::PaneHeaderPresence's value).
     property int header: 0
+    // The pane header's find slot (PaneHeader's findSlot), which the Terminal row's bar takes in place of
+    // a grid row when placeFindBar anchors it to "headerRow"; null where the pane draws no header.
     property Item headerSlot: null
 
     // The current match's band in the terminal, where the bar would cover it: the session names its rows,
