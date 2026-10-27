@@ -34,6 +34,13 @@ add_library(contour_config STATIC
     WindowControlStyle.cpp WindowControlStyle.hpp
 )
 
+# Config.cpp's writers walk every Config member through Reflection::CallOnMembers, which unrolls one call per
+# member into a single function per writer. At the Debug build's -Og, clang's inliner and InstCombine spend
+# minutes on those two functions (over 7 minutes for the file, 14 under ASan); at -O0 the file compiles in
+# under a minute. The code only runs while a configuration is loaded or written, so nothing measurable is lost.
+set_source_files_properties(Config.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:Clang,GNU>>:-O0>")
+
 # yaml-cpp is PUBLIC because Config.hpp exposes it in its own interface, so every consumer of the
 # configuration model compiles against yaml-cpp's headers whether it names them or not.
 target_link_libraries(contour_config PUBLIC
