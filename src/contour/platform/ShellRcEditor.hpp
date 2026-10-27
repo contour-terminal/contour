@@ -14,9 +14,13 @@
 #include <core/Environment.hpp>
 #include <core/platform/FileSystem.hpp>
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
+#include <map>
+#include <string>
 #include <string_view>
 
 namespace contour::platform
@@ -32,6 +36,7 @@ enum class ShellRcError : uint8_t
     Changed,      ///< The file changed between reading it and writing to it; nothing was written.
     InvalidLine,  ///< The line is empty or spans more than one line.
     PartialWrite, ///< The append was cut short, now or earlier: the file ends in an incomplete Contour line.
+    Superuser,    ///< Contour runs as root, so a file it created in the user's home would belong to root.
 };
 
 /// What @p error means, in words for a sentence that continues "was not changed: ".
@@ -47,11 +52,35 @@ enum class ShellRcError : uint8_t
         case ShellRcError::NotAFile: return "it is not a regular file";
         case ShellRcError::Changed: return "it changed while it was being read";
         case ShellRcError::InvalidLine: return "the line to add is not a single line";
+        case ShellRcError::Superuser: return "Contour is running as root";
         case ShellRcError::PartialWrite:
             return "its last line is a cut-short Contour line; delete that line and try again";
     }
     return "unknown error";
 }
+
+/// Whose authority Contour runs with.
+enum class RunningAs : uint8_t
+{
+    User = 0,  ///< An ordinary account.
+    Superuser, ///< The superuser (effective uid 0).
+};
+
+/// @return Whom this process runs as: RunningAs::Superuser when its effective uid is 0, always
+///         RunningAs::User where there is no such thing (Windows).
+[[nodiscard]] RunningAs currentRunningAs() noexcept;
+
+/// `ZDOTDIR`: the directory zsh reads its startup files from, else `HOME`.
+inline constexpr std::string_view ZDotDirVariable = "ZDOTDIR";
+/// `XDG_CONFIG_HOME`: the directory fish reads its configuration from, else `HOME/.config`.
+inline constexpr std::string_view XdgConfigHomeVariable = "XDG_CONFIG_HOME";
+/// The variables RcEnvironment may carry: every one a startup file's location depends on, beside `HOME`.
+inline constexpr auto RcEnvironmentVariables = std::array { ZDotDirVariable, XdgConfigHomeVariable };
+
+/// The variables a session's shell is started with that name where its startup file lives
+/// (`ZDOTDIR`, `XDG_CONFIG_HOME`), by name. They win over Contour's own environment, because the shell
+/// reads its files from where its own environment says. An empty value means "unset for that shell".
+using RcEnvironment = std::map<std::string, std::string, std::less<>>;
 
 /// What inspecting a shell's startup file found.
 struct RcInspection
@@ -80,16 +109,18 @@ class IShellRcEditor
 
     /// Finds a shell's startup file and whether it loads the integration already.
     /// @param shell The shell.
+    /// @param sessionEnvironment What the shell's session sets for it, where that is known.
     /// @return The file and its state, or why it cannot be read.
     [[nodiscard]] virtual std::expected<RcInspection, ShellRcError> inspect(
-        config::ShellKind shell) const = 0;
+        config::ShellKind shell, RcEnvironment const& sessionEnvironment) const = 0;
 
     /// Appends @p line to a shell's startup file, once.
     /// @param shell The shell.
     /// @param line The line, without a line ending.
+    /// @param sessionEnvironment What the shell's session sets for it, where that is known.
     /// @return What was done, or why nothing was.
-    [[nodiscard]] virtual std::expected<RcInstall, ShellRcError> install(config::ShellKind shell,
-                                                                         std::string_view line) = 0;
+    [[nodiscard]] virtual std::expected<RcInstall, ShellRcError> install(
+        config::ShellKind shell, std::string_view line, RcEnvironment const& sessionEnvironment) = 0;
 };
 
 /// An editor for a build or a test that must not reach any file: nothing is inspectable, and nothing
@@ -99,14 +130,16 @@ class NullShellRcEditor final: public IShellRcEditor
   public:
     /// @return An inspection whose state is RcState::Unknown, so no offer follows from it.
     [[nodiscard]] std::expected<RcInspection, ShellRcError> inspect(
-        config::ShellKind /*shell*/) const override
+        config::ShellKind /*shell*/, RcEnvironment const& /*sessionEnvironment*/) const override
     {
         return RcInspection {};
     }
 
     /// @return Always ShellRcError::Unwritable.
-    [[nodiscard]] std::expected<RcInstall, ShellRcError> install(config::ShellKind /*shell*/,
-                                                                 std::string_view /*line*/) override
+    [[nodiscard]] std::expected<RcInstall, ShellRcError> install(
+        config::ShellKind /*shell*/,
+        std::string_view /*line*/,
+        RcEnvironment const& /*sessionEnvironment*/) override
     {
         return std::unexpected(ShellRcError::Unwritable);
     }
@@ -125,28 +158,38 @@ class NullShellRcEditor final: public IShellRcEditor
 
 /// The editor over a real (or injected) file system.
 ///
-/// Locates the file from `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME`; a file that is a symlink is
-/// appended through to its target. Appending reads the file again right before writing and refuses
-/// when it changed meanwhile, and reads it once more afterwards: the file system's append may report
-/// success for a write that was cut short (a close error nobody checked), so the file itself decides.
+/// Locates the file from `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME`, each read from the session's own
+/// environment where it sets one and else from Contour's; a file that is a symlink is appended through to
+/// its target. It never runs the shell to ask: a `ZDOTDIR` that only `~/.zshenv` sets is therefore not
+/// seen, and zsh then reads a `.zshrc` elsewhere than the one this appends to (the line is harmless but
+/// does not load; the card names the file it wrote, so the user can move the line). A superuser's
+/// Contour touches nothing: it would leave root-owned files in a user's home. Appending reads the file again
+/// right before writing and refuses when it changed meanwhile, and reads it once more afterwards: the file
+/// system's append may report success for a write that was cut short (a close error nobody checked), so the
+/// file itself decides.
 class FileShellRcEditor final: public IShellRcEditor
 {
   public:
     /// @param fileSystem The file system the rc files live on; must outlive the editor.
     /// @param environment Where `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME` are read from; must outlive it.
     /// @param host The host, which decides bash's file.
+    /// @param runningAs Whose authority Contour runs with; a superuser's editor refuses everything with
+    ///        ShellRcError::Superuser. A value rather than a call to the OS, so a test needs no root.
     FileShellRcEditor(core::platform::FileSystem const& fileSystem,
                       core::Environment const& environment,
-                      config::HostPlatform host);
+                      config::HostPlatform host,
+                      RunningAs runningAs);
 
-    [[nodiscard]] std::expected<RcInspection, ShellRcError> inspect(config::ShellKind shell) const override;
-    [[nodiscard]] std::expected<RcInstall, ShellRcError> install(config::ShellKind shell,
-                                                                 std::string_view line) override;
+    [[nodiscard]] std::expected<RcInspection, ShellRcError> inspect(
+        config::ShellKind shell, RcEnvironment const& sessionEnvironment) const override;
+    [[nodiscard]] std::expected<RcInstall, ShellRcError> install(
+        config::ShellKind shell, std::string_view line, RcEnvironment const& sessionEnvironment) override;
 
   private:
     core::platform::FileSystem const& _fileSystem;
     core::Environment const& _environment;
     config::HostPlatform _host;
+    RunningAs _runningAs;
 };
 
 } // namespace contour::platform

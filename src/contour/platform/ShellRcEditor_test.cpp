@@ -37,6 +37,9 @@ namespace
 namespace fs = std::filesystem;
 
 constexpr auto Line = std::string_view { "if true; then :; fi # Contour shell integration" };
+/// A session that sets nothing relevant to where a startup file lives.
+RcEnvironment const noSession {};
+
 /// The fake HOME.
 fs::path home()
 {
@@ -173,7 +176,7 @@ struct Rig
 
     explicit Rig(std::map<std::string, std::string, std::less<>> variables = { { "HOME", "/home/me" } },
                  HostPlatform host = HostPlatform::Other):
-        env { std::move(variables) }, editor { disk, env, host }
+        env { std::move(variables) }, editor { disk, env, host, RunningAs::User }
     {
     }
 };
@@ -189,23 +192,23 @@ TEST_CASE("ShellRcEditor: an absent file is Absent, and install creates it with 
           "[shellrc]")
 {
     auto rig = Rig {};
-    auto const inspection = rig.editor.inspect(ShellKind::Zsh);
+    auto const inspection = rig.editor.inspect(ShellKind::Zsh, noSession);
     REQUIRE(inspection.has_value());
     CHECK(*inspection == RcInspection { zshRc(), RcState::Absent });
     CHECK(!rig.disk.files.exists(zshRc()));
 
-    auto const installed = rig.editor.install(ShellKind::Zsh, Line);
+    auto const installed = rig.editor.install(ShellKind::Zsh, Line, noSession);
     REQUIRE(installed.has_value());
     CHECK(*installed == RcInstall::Appended);
     CHECK(rig.disk.text(zshRc()) == std::string(Line) + "\n");
-    CHECK(rig.editor.inspect(ShellKind::Zsh)->state == RcState::Installed);
+    CHECK(rig.editor.inspect(ShellKind::Zsh, noSession)->state == RcState::Installed);
 }
 
 TEST_CASE("ShellRcEditor: a file without a trailing newline gets one before the line", "[shellrc]")
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.text(zshRc()) == "export A=1\n" + std::string(Line) + "\n");
 }
 
@@ -213,7 +216,7 @@ TEST_CASE("ShellRcEditor: a file ending in a newline gets no blank line", "[shel
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1\n");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.text(zshRc()) == "export A=1\n" + std::string(Line) + "\n");
 }
 
@@ -221,7 +224,7 @@ TEST_CASE("ShellRcEditor: an existing empty file gets the line alone", "[shellrc
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.text(zshRc()) == std::string(Line) + "\n");
 }
 
@@ -229,12 +232,12 @@ TEST_CASE("ShellRcEditor: CRLF files keep their endings and the line starts on i
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1\r\nexport B=2\r\n");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.text(zshRc()) == "export A=1\r\nexport B=2\r\n" + std::string(Line) + "\n");
 
     auto unterminated = Rig {};
     unterminated.disk.files.addFile(zshRc(), "export A=1\r");
-    REQUIRE(unterminated.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(unterminated.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(unterminated.disk.text(zshRc()) == "export A=1\r\n" + std::string(Line) + "\n");
 }
 
@@ -242,11 +245,11 @@ TEST_CASE("ShellRcEditor: a second install writes nothing", "[shellrc]")
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1\n");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     auto const afterFirst = rig.disk.text(zshRc());
     rig.disk.calls.clear();
 
-    CHECK(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::AlreadyInstalled);
+    CHECK(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::AlreadyInstalled);
     CHECK(rig.disk.text(zshRc()) == afterFirst);
     CHECK(rig.disk.calls.empty());
 }
@@ -256,8 +259,8 @@ TEST_CASE("ShellRcEditor: an existing marker block counts as installed, wherever
     auto rig = Rig {};
     auto const content = "export A=1\n# >>> mine\n" + std::string(Line) + "\n# <<<\nexport B=2";
     rig.disk.files.addFile(zshRc(), content);
-    CHECK(rig.editor.inspect(ShellKind::Zsh)->state == RcState::Installed);
-    CHECK(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::AlreadyInstalled);
+    CHECK(rig.editor.inspect(ShellKind::Zsh, noSession)->state == RcState::Installed);
+    CHECK(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::AlreadyInstalled);
     CHECK(rig.disk.text(zshRc()) == content);
 }
 
@@ -296,16 +299,16 @@ TEST_CASE("ShellRcEditor: a manual install counts, and install writes nothing", 
 {
     auto zsh = Rig {};
     zsh.disk.files.addFile(zshRc(), "source ~/.config/contour/shell-integration.zsh");
-    CHECK(zsh.editor.inspect(ShellKind::Zsh)->state == RcState::Installed);
-    CHECK(zsh.editor.install(ShellKind::Zsh, Line) == RcInstall::AlreadyInstalled);
+    CHECK(zsh.editor.inspect(ShellKind::Zsh, noSession)->state == RcState::Installed);
+    CHECK(zsh.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::AlreadyInstalled);
     CHECK(zsh.disk.text(zshRc()) == "source ~/.config/contour/shell-integration.zsh");
     CHECK(!zsh.disk.touched("appendFile"));
 
     auto fish = Rig {};
     auto const fishRc = home() / ".config/fish/config.fish";
     fish.disk.files.addFile(home() / ".config/fish/conf.d/contour.fish", "# manual");
-    CHECK(fish.editor.inspect(ShellKind::Fish)->state == RcState::Installed);
-    CHECK(fish.editor.install(ShellKind::Fish, Line) == RcInstall::AlreadyInstalled);
+    CHECK(fish.editor.inspect(ShellKind::Fish, noSession)->state == RcState::Installed);
+    CHECK(fish.editor.install(ShellKind::Fish, Line, noSession) == RcInstall::AlreadyInstalled);
     CHECK(!fish.disk.files.exists(fishRc));
 }
 
@@ -352,18 +355,63 @@ TEST_CASE("ShellRcEditor: where each shell's file is", "[shellrc]")
     {
         INFO(c.expected.string());
         auto rig = Rig { c.variables, c.host };
-        REQUIRE(rig.editor.inspect(c.shell).has_value());
-        CHECK(rig.editor.inspect(c.shell)->file == c.expected);
-        REQUIRE(rig.editor.install(c.shell, Line) == RcInstall::Appended);
+        REQUIRE(rig.editor.inspect(c.shell, noSession).has_value());
+        CHECK(rig.editor.inspect(c.shell, noSession)->file == c.expected);
+        REQUIRE(rig.editor.install(c.shell, Line, noSession) == RcInstall::Appended);
         CHECK(rig.disk.text(c.expected) == std::string(Line) + "\n");
     }
+}
+
+TEST_CASE("ShellRcEditor: the session's ZDOTDIR and XDG_CONFIG_HOME win over Contour's own", "[shellrc]")
+{
+    struct Case
+    {
+        ShellKind shell;
+        RcEnvironment session;
+        fs::path expected;
+    };
+    auto const cases = std::array {
+        Case { ShellKind::Zsh, { { "ZDOTDIR", "/zdot" } }, "/zdot/.zshrc" },
+        Case { ShellKind::Zsh, { { "ZDOTDIR", "" } }, "/home/me/.zshrc" }, // removed from the shell's env
+        Case { ShellKind::Zsh, { { "ZDOTDIR", "relative" } }, "/home/me/.zshrc" },
+        Case { ShellKind::Zsh, { { "XDG_CONFIG_HOME", "/xdg" } }, "/contour-zdot/.zshrc" },
+        Case { ShellKind::Fish, { { "XDG_CONFIG_HOME", "/xdg" } }, "/xdg/fish/config.fish" },
+        Case { ShellKind::Fish, { { "XDG_CONFIG_HOME", "" } }, "/home/me/.config/fish/config.fish" },
+    };
+    for (auto const& c: cases)
+    {
+        INFO(c.expected.string());
+        // Contour's own environment sets both, to places the shell would not look.
+        auto rig = Rig {
+            { { "HOME", "/home/me" }, { "ZDOTDIR", "/contour-zdot" }, { "XDG_CONFIG_HOME", "/contour-xdg" } }
+        };
+        REQUIRE(rig.editor.inspect(c.shell, c.session).has_value());
+        CHECK(rig.editor.inspect(c.shell, c.session)->file == c.expected);
+        REQUIRE(rig.editor.install(c.shell, Line, c.session) == RcInstall::Appended);
+        CHECK(rig.disk.text(c.expected) == std::string(Line) + "\n");
+    }
+}
+
+TEST_CASE("ShellRcEditor: a superuser's Contour inspects and writes nothing", "[shellrc]")
+{
+    auto disk = RcDisk {};
+    auto const env = core::testing::FakeEnvironment { { { "HOME", "/home/me" } } };
+    auto const editor =
+        std::make_unique<FileShellRcEditor>(disk, env, HostPlatform::Other, RunningAs::Superuser);
+    for (auto const& row: ShellRows)
+    {
+        CHECK(editor->inspect(row.kind, noSession).error() == ShellRcError::Superuser);
+        CHECK(editor->install(row.kind, Line, noSession).error() == ShellRcError::Superuser);
+    }
+    CHECK(disk.calls.empty());
+    CHECK(!describe(ShellRcError::Superuser).empty());
 }
 
 TEST_CASE("ShellRcEditor: fish creates its config directory first", "[shellrc]")
 {
     auto rig = Rig {};
     REQUIRE(!rig.disk.files.isDirectory(home() / ".config/fish"));
-    REQUIRE(rig.editor.install(ShellKind::Fish, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Fish, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.files.isDirectory(home() / ".config/fish"));
     CHECK(rig.disk.text(home() / ".config/fish/config.fish") == std::string(Line) + "\n");
 }
@@ -376,8 +424,8 @@ TEST_CASE("ShellRcEditor: no HOME, no file", "[shellrc]")
         auto rig = Rig { variables };
         for (auto const& row: ShellRows)
         {
-            CHECK(rig.editor.inspect(row.kind).error() == ShellRcError::NoHome);
-            CHECK(rig.editor.install(row.kind, Line).error() == ShellRcError::NoHome);
+            CHECK(rig.editor.inspect(row.kind, noSession).error() == ShellRcError::NoHome);
+            CHECK(rig.editor.install(row.kind, Line, noSession).error() == ShellRcError::NoHome);
         }
         CHECK(rig.disk.calls.empty());
     }
@@ -387,14 +435,14 @@ TEST_CASE("ShellRcEditor: a directory or a dangling link at the rc path is NotAF
 {
     auto directory = Rig {};
     directory.disk.files.addDirectory(zshRc());
-    CHECK(directory.editor.inspect(ShellKind::Zsh).error() == ShellRcError::NotAFile);
-    CHECK(directory.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::NotAFile);
+    CHECK(directory.editor.inspect(ShellKind::Zsh, noSession).error() == ShellRcError::NotAFile);
+    CHECK(directory.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::NotAFile);
     CHECK(!directory.disk.touched("appendFile"));
 
     auto dangling = Rig {};
     dangling.disk.files.addSymlink(zshRc(), home() / "dotfiles/zshrc");
     dangling.disk.links[zshRc()] = home() / "dotfiles/zshrc";
-    CHECK(dangling.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::NotAFile);
+    CHECK(dangling.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::NotAFile);
     CHECK(!dangling.disk.touched("appendFile"));
     CHECK(!dangling.disk.files.exists(home() / "dotfiles/zshrc"));
 }
@@ -404,8 +452,8 @@ TEST_CASE("ShellRcEditor: an unreadable file is Unreadable and is left alone", "
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1\n");
     rig.disk.files.denyAccess(zshRc());
-    CHECK(rig.editor.inspect(ShellKind::Zsh).error() == ShellRcError::Unreadable);
-    CHECK(rig.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::Unreadable);
+    CHECK(rig.editor.inspect(ShellKind::Zsh, noSession).error() == ShellRcError::Unreadable);
+    CHECK(rig.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::Unreadable);
     CHECK(!rig.disk.touched("appendFile"));
 }
 
@@ -419,7 +467,7 @@ TEST_CASE("ShellRcEditor: a symlinked rc is appended through, and the link and i
     rig.disk.files.addSymlink(zshRc(), target);
     rig.disk.links[zshRc()] = target;
 
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
 
     CHECK(rig.disk.files.isSymlink(zshRc()));
     CHECK(rig.disk.text(target) == "export A=1\n" + std::string(Line) + "\n");
@@ -427,14 +475,14 @@ TEST_CASE("ShellRcEditor: a symlinked rc is appended through, and the link and i
           == (fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read));
     CHECK(rig.disk.count("appendFile", target) == 1);
     CHECK(rig.disk.count("appendFile", zshRc()) == 0);
-    CHECK(rig.editor.inspect(ShellKind::Zsh)->state == RcState::Installed);
+    CHECK(rig.editor.inspect(ShellKind::Zsh, noSession)->state == RcState::Installed);
 }
 
 TEST_CASE("ShellRcEditor: only ever appends to the rc path", "[shellrc]")
 {
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1");
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.count("appendFile", zshRc()) == 1);
     for (auto const* const forbidden: { "writeFile", "rename", "replaceFile", "openWrite", "remove" })
     {
@@ -448,7 +496,7 @@ TEST_CASE("ShellRcEditor: preserves the rc file's permissions", "[shellrc]")
     auto rig = Rig {};
     auto const perms = fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read;
     rig.disk.files.addFile(zshRc(), "export A=1\n", perms);
-    REQUIRE(rig.editor.install(ShellKind::Zsh, Line) == RcInstall::Appended);
+    REQUIRE(rig.editor.install(ShellKind::Zsh, Line, noSession) == RcInstall::Appended);
     CHECK(rig.disk.files.permissions(zshRc()).value() == perms);
 }
 
@@ -457,7 +505,7 @@ TEST_CASE("ShellRcEditor: a read-only file stays exactly as it was", "[shellrc]"
     auto rig = Rig {};
     rig.disk.files.addFile(zshRc(), "export A=1\n", fs::perms::owner_read);
     rig.disk.fault = DiskFault::ReadOnly;
-    CHECK(rig.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::Unwritable);
+    CHECK(rig.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::Unwritable);
     CHECK(rig.disk.text(zshRc()) == "export A=1\n");
 }
 
@@ -466,14 +514,14 @@ TEST_CASE("ShellRcEditor: a full disk never truncates the file", "[shellrc]")
     auto nothingWritten = Rig {};
     nothingWritten.disk.files.addFile(zshRc(), "export A=1\nexport B=2");
     nothingWritten.disk.fault = DiskFault::Full;
-    CHECK(nothingWritten.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::Unwritable);
+    CHECK(nothingWritten.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::Unwritable);
     CHECK(nothingWritten.disk.text(zshRc()) == "export A=1\nexport B=2");
     CHECK(!nothingWritten.disk.touched("writeFile"));
 
     auto midway = Rig {};
     midway.disk.files.addFile(zshRc(), "export A=1\nexport B=2");
     midway.disk.fault = DiskFault::FullMidway;
-    CHECK(midway.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::PartialWrite);
+    CHECK(midway.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::PartialWrite);
     // The user's own bytes are all still there, in place; only more bytes followed them.
     CHECK(midway.disk.text(zshRc()).starts_with("export A=1\nexport B=2"));
     CHECK(!midway.disk.touched("writeFile"));
@@ -487,7 +535,7 @@ TEST_CASE("ShellRcEditor: an append that reports success but lands only a prefix
     rig.disk.files.addFile(zshRc(), "export A=1\n");
     rig.disk.fault = DiskFault::SilentPrefix;
     rig.disk.landBytes = line.size() / 2;
-    CHECK(rig.editor.install(ShellKind::Zsh, line).error() == ShellRcError::PartialWrite);
+    CHECK(rig.editor.install(ShellKind::Zsh, line, noSession).error() == ShellRcError::PartialWrite);
     CHECK(rig.disk.text(zshRc()).starts_with("export A=1\n"));
 }
 
@@ -498,7 +546,7 @@ TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and noth
     {
         auto const line = contour::window::shellRcLine(shell, "/usr/bin/contour").value();
         auto const rc = [&](Rig const& rig) {
-            return rig.editor.inspect(shell)->file;
+            return rig.editor.inspect(shell, noSession)->file;
         };
         // Every cut from one byte up to the line minus its marker's last byte and the line ending: the
         // last two cuts leave a whole, merely unterminated or terminated line.
@@ -509,15 +557,15 @@ TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and noth
             rig.disk.files.addFile(rc(rig), "export A=1\n");
             rig.disk.fault = DiskFault::SilentPrefix;
             rig.disk.landBytes = landed;
-            REQUIRE(rig.editor.install(shell, line).error() == ShellRcError::PartialWrite);
+            REQUIRE(rig.editor.install(shell, line, noSession).error() == ShellRcError::PartialWrite);
 
-            auto const inspected = rig.editor.inspect(shell);
+            auto const inspected = rig.editor.inspect(shell, noSession);
             REQUIRE(inspected.has_value());
             CHECK(inspected->state == RcState::Partial);
 
             auto const before = rig.disk.text(rc(rig));
             rig.disk.fault = DiskFault::None;
-            CHECK(rig.editor.install(shell, line).error() == ShellRcError::PartialWrite);
+            CHECK(rig.editor.install(shell, line, noSession).error() == ShellRcError::PartialWrite);
             CHECK(rig.disk.text(rc(rig)) == before);
         }
     }
@@ -549,7 +597,7 @@ TEST_CASE("ShellRcEditor: a file edited between the read and the write is refuse
         if (read == 1)
             rig.disk.files.addFile(zshRc(), "export A=1\nexport EDITED=1\n");
     };
-    CHECK(rig.editor.install(ShellKind::Zsh, Line).error() == ShellRcError::Changed);
+    CHECK(rig.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::Changed);
     CHECK(rig.disk.text(zshRc()) == "export A=1\nexport EDITED=1\n");
     CHECK(!rig.disk.touched("appendFile"));
 }
@@ -562,7 +610,7 @@ TEST_CASE("ShellRcEditor: a file created between the read and the write is refus
     rig.disk.afterCreateDirectories = [&] {
         rig.disk.files.addFile(fishRc, "set -x RACE 1\n");
     };
-    CHECK(rig.editor.install(ShellKind::Fish, Line).error() == ShellRcError::Changed);
+    CHECK(rig.editor.install(ShellKind::Fish, Line, noSession).error() == ShellRcError::Changed);
     CHECK(rig.disk.text(fishRc) == "set -x RACE 1\n");
     CHECK(!rig.disk.touched("appendFile"));
 }
@@ -571,15 +619,15 @@ TEST_CASE("ShellRcEditor: a line that is not one line is refused", "[shellrc]")
 {
     auto rig = Rig {};
     for (auto const line: { std::string_view {}, std::string_view { "a\nb" }, std::string_view { "a\r" } })
-        CHECK(rig.editor.install(ShellKind::Zsh, line).error() == ShellRcError::InvalidLine);
+        CHECK(rig.editor.install(ShellKind::Zsh, line, noSession).error() == ShellRcError::InvalidLine);
     CHECK(!rig.disk.touched("appendFile"));
 }
 
 TEST_CASE("ShellRcEditor: an unknown shell has no file", "[shellrc]")
 {
     auto rig = Rig {};
-    CHECK(*rig.editor.inspect(ShellKind::Unknown) == RcInspection {});
-    CHECK(rig.editor.install(ShellKind::Unknown, Line).error() == ShellRcError::Unwritable);
+    CHECK(*rig.editor.inspect(ShellKind::Unknown, noSession) == RcInspection {});
+    CHECK(rig.editor.install(ShellKind::Unknown, Line, noSession).error() == ShellRcError::Unwritable);
     CHECK(rig.disk.calls.empty());
 }
 
@@ -588,19 +636,19 @@ TEST_CASE("NullShellRcEditor: inspects nothing and writes nothing", "[shellrc]")
     auto editor = NullShellRcEditor {};
     for (auto const& row: ShellRows)
     {
-        CHECK(*editor.inspect(row.kind) == RcInspection {});
-        CHECK(editor.inspect(row.kind)->state == RcState::Unknown);
-        CHECK(editor.install(row.kind, Line).error() == ShellRcError::Unwritable);
+        CHECK(*editor.inspect(row.kind, noSession) == RcInspection {});
+        CHECK(editor.inspect(row.kind, noSession)->state == RcState::Unknown);
+        CHECK(editor.install(row.kind, Line, noSession).error() == ShellRcError::Unwritable);
     }
 }
 
 TEST_CASE("ShellRcEditor: every error has words", "[shellrc]")
 {
     constexpr auto Errors =
-        std::array { ShellRcError::NoHome,      ShellRcError::Unreadable, ShellRcError::Unwritable,
-                     ShellRcError::NotAFile,    ShellRcError::Changed,    ShellRcError::InvalidLine,
-                     ShellRcError::PartialWrite };
-    static_assert(Errors.size() == std::to_underlying(ShellRcError::PartialWrite) + 1U);
+        std::array { ShellRcError::NoHome,       ShellRcError::Unreadable, ShellRcError::Unwritable,
+                     ShellRcError::NotAFile,     ShellRcError::Changed,    ShellRcError::InvalidLine,
+                     ShellRcError::PartialWrite, ShellRcError::Superuser };
+    static_assert(Errors.size() == std::to_underlying(ShellRcError::Superuser) + 1U);
     CHECK(describe(ShellRcError::NoHome) == "the home directory is not known");
     CHECK(describe(ShellRcError::Unreadable) == "the file could not be read");
     CHECK(describe(ShellRcError::Unwritable) == "the file could not be written");

@@ -822,13 +822,33 @@ void TerminalSessionManager::postNotice(window::Notice notice, TerminalSession c
         managerLog()("No window to tell: {}", notice.text);
 }
 
+namespace
+{
+    /// What @p session's shell is started with that decides where its startup files live: the profile's
+    /// own `env` entries, and an empty value for a variable the profile removes from the inherited
+    /// environment. The command override of a one-off pane is not visible here.
+    [[nodiscard]] platform::RcEnvironment rcEnvironmentOf(TerminalSession const& session)
+    {
+        auto const& shell = session.profile().shell.value();
+        auto result = platform::RcEnvironment {};
+        for (auto const name: platform::RcEnvironmentVariables)
+        {
+            if (auto const set = shell.env.find(std::string { name }); set != shell.env.end())
+                result.insert_or_assign(std::string { name }, set->second);
+            else if (std::ranges::contains(shell.removedEnvironment, name))
+                result.insert_or_assign(std::string { name }, std::string {});
+        }
+        return result;
+    }
+} // namespace
+
 void TerminalSessionManager::offerShellIntegration(TerminalSession& session, config::ShellKind shell)
 {
     // An ended pane's footer owns its bottom rows, so such a pane takes no card (and so no slot).
     if (session.endReason() != EndReason::None)
         return;
 
-    auto const inspection = _app.shellRcEditor().inspect(shell);
+    auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session));
     if (!inspection)
     {
         managerLog()("Not offering shell integration: {}.", platform::describe(inspection.error()));
@@ -865,13 +885,13 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
 std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManager::installShellIntegration(
     TerminalSession& session, config::ShellKind shell, std::string_view line)
 {
-    auto const installed = _app.shellRcEditor().install(shell, line);
+    auto const installed = _app.shellRcEditor().install(shell, line, rcEnvironmentOf(session));
 
     // The file as the user would say it: asked of the editor again, so the toast names the very file written.
     auto const* const row = config::shellRow(shell);
     auto const shellName = row != nullptr ? row->name : std::string_view {};
     auto rc = std::string { shellName };
-    if (auto const inspection = _app.shellRcEditor().inspect(shell))
+    if (auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session)))
         rc = window::displayRcPath(inspection->file, _homeDirectory);
 
     if (installed)

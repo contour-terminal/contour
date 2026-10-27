@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/ShellRcEditor.hpp>
 
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <format>
@@ -24,6 +28,27 @@ namespace
     /// fish loads every file in `conf.d`, so a `contour.fish` there is the documented manual install.
     constexpr auto AlternateInstalls = std::array {
         AlternateInstall { .shell = config::ShellKind::Fish, .file = "fish/conf.d/contour.fish" },
+    };
+
+    /// Contour's environment with what the shell's session sets laid over it.
+    class SessionEnvironment final: public core::Environment
+    {
+      public:
+        SessionEnvironment(core::Environment const& base, RcEnvironment const& session):
+            _base { base }, _session { session }
+        {
+        }
+
+        [[nodiscard]] std::optional<std::string> get(std::string_view name) const override
+        {
+            if (auto const found = _session.find(name); found != _session.end())
+                return found->second;
+            return _base.get(name);
+        }
+
+      private:
+        core::Environment const& _base;
+        RcEnvironment const& _session;
     };
 
     /// @return Whether @p path is set, absolute and so usable as the root of a startup file's path.
@@ -51,13 +76,13 @@ namespace
                     return std::unexpected(ShellRcError::NoHome);
                 return *home;
             case config::RcBase::ZDotDir:
-                if (auto zdotdir = absoluteVariable(environment, "ZDOTDIR"))
+                if (auto zdotdir = absoluteVariable(environment, ZDotDirVariable))
                     return *std::move(zdotdir);
                 if (!home)
                     return std::unexpected(ShellRcError::NoHome);
                 return *home;
             case config::RcBase::XdgConfig:
-                if (auto xdg = absoluteVariable(environment, "XDG_CONFIG_HOME"))
+                if (auto xdg = absoluteVariable(environment, XdgConfigHomeVariable))
                     return *std::move(xdg);
                 if (!home)
                     return std::unexpected(ShellRcError::NoHome);
@@ -140,6 +165,15 @@ namespace
     }
 } // namespace
 
+RunningAs currentRunningAs() noexcept
+{
+#ifdef _WIN32
+    return RunningAs::User;
+#else
+    return geteuid() == 0 ? RunningAs::Superuser : RunningAs::User;
+#endif
+}
+
 config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
 {
     auto const* const row = config::shellRow(shell);
@@ -167,38 +201,47 @@ config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
 
 FileShellRcEditor::FileShellRcEditor(core::platform::FileSystem const& fileSystem,
                                      core::Environment const& environment,
-                                     config::HostPlatform host):
-    _fileSystem { fileSystem }, _environment { environment }, _host { host }
+                                     config::HostPlatform host,
+                                     RunningAs runningAs):
+    _fileSystem { fileSystem }, _environment { environment }, _host { host }, _runningAs { runningAs }
 {
 }
 
-std::expected<RcInspection, ShellRcError> FileShellRcEditor::inspect(config::ShellKind shell) const
+std::expected<RcInspection, ShellRcError> FileShellRcEditor::inspect(
+    config::ShellKind shell, RcEnvironment const& sessionEnvironment) const
 {
     auto const* const row = config::shellRow(shell);
     if (row == nullptr)
         return RcInspection {};
-    auto const path = rcPath(_environment, *row, _host);
+    if (_runningAs == RunningAs::Superuser)
+        return std::unexpected(ShellRcError::Superuser);
+    auto const environment = SessionEnvironment { _environment, sessionEnvironment };
+    auto const path = rcPath(environment, *row, _host);
     if (!path)
         return std::unexpected(path.error());
     auto const file = readRc(_fileSystem, *path);
     if (!file)
         return std::unexpected(file.error());
     auto state = rcStateOf(shell, file->content);
-    if (state == config::RcState::Absent && hasAlternateInstall(_fileSystem, _environment, *row))
+    if (state == config::RcState::Absent && hasAlternateInstall(_fileSystem, environment, *row))
         state = config::RcState::Installed;
     return RcInspection { .file = file->path, .state = state };
 }
 
 std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellKind shell,
-                                                                  std::string_view line)
+                                                                  std::string_view line,
+                                                                  RcEnvironment const& sessionEnvironment)
 {
     auto const* const row = config::shellRow(shell);
     if (row == nullptr)
         return std::unexpected(ShellRcError::Unwritable);
+    if (_runningAs == RunningAs::Superuser)
+        return std::unexpected(ShellRcError::Superuser);
     if (line.empty() || line.find_first_of("\r\n") != std::string_view::npos)
         return std::unexpected(ShellRcError::InvalidLine);
 
-    auto const path = rcPath(_environment, *row, _host);
+    auto const environment = SessionEnvironment { _environment, sessionEnvironment };
+    auto const path = rcPath(environment, *row, _host);
     if (!path)
         return std::unexpected(path.error());
     auto const before = readRc(_fileSystem, *path);
@@ -207,7 +250,7 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     auto const state = rcStateOf(shell, before->content);
     if (state == config::RcState::Partial)
         return std::unexpected(ShellRcError::PartialWrite); // appending would only make the parse worse
-    if (state == config::RcState::Installed || hasAlternateInstall(_fileSystem, _environment, *row))
+    if (state == config::RcState::Installed || hasAlternateInstall(_fileSystem, environment, *row))
         return RcInstall::AlreadyInstalled;
 
     // Parent directories first: a fish user may have no config directory yet. Creating a directory

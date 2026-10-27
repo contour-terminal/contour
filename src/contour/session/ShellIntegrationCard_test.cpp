@@ -219,6 +219,30 @@ TEST_CASE("shell integration card: a daemon-hosted pane takes its shell from the
     CHECK(local.session->shellIntegrationCard() == HiddenStage);
 }
 
+TEST_CASE(
+    "shell integration card: the editor is told what the profile's shell environment sets for its files",
+    "[contour][session][shellintegration]")
+{
+    auto rig = Rig {};
+    auto& shell = rig.app.app().config().profile().shell.value();
+    shell.env["ZDOTDIR"] = "/zdot";
+    shell.env["UNRELATED"] = "x";
+    shell.removedEnvironment = { "XDG_CONFIG_HOME" };
+    rig.session = rig.openTab();
+    rig.pressReturn(ShellIntegrationProbeCommands);
+    REQUIRE(rig.session->shellIntegrationCard() == OfferStage);
+
+    auto const expected =
+        contour::platform::RcEnvironment { { "ZDOTDIR", "/zdot" }, { "XDG_CONFIG_HOME", "" } };
+    REQUIRE(!rig.app.shellRcEditor().inspectedEnvironments.empty());
+    CHECK(rig.app.shellRcEditor().inspectedEnvironments.back() == expected);
+
+    rig.session->acceptShellIntegrationCard();
+    rig.session->acceptShellIntegrationCard();
+    REQUIRE(rig.app.shellRcEditor().installs.size() == 1);
+    CHECK(rig.app.shellRcEditor().installs.front().sessionEnvironment == expected);
+}
+
 TEST_CASE("shell integration card: a shell whose rc file loads the script, or cannot be read, offers nothing",
           "[contour][session][shellintegration]")
 {

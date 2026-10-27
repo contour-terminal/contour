@@ -22,6 +22,7 @@ class RecordingShellRcEditor final: public platform::IShellRcEditor
     {
         config::ShellKind shell = config::ShellKind::Unknown;
         std::string line {};
+        platform::RcEnvironment sessionEnvironment {};
 
         [[nodiscard]] bool operator==(Install const&) const = default;
     };
@@ -36,18 +37,25 @@ class RecordingShellRcEditor final: public platform::IShellRcEditor
     /// Every install() asked for, in order.
     std::vector<Install> installs;
 
+    /// The session environment of every inspect() asked for, in order.
+    mutable std::vector<platform::RcEnvironment> inspectedEnvironments;
+
     [[nodiscard]] std::expected<platform::RcInspection, platform::ShellRcError> inspect(
-        config::ShellKind shell) const override
+        config::ShellKind shell, platform::RcEnvironment const& sessionEnvironment) const override
     {
+        inspectedEnvironments.push_back(sessionEnvironment);
         if (auto const found = inspections.find(shell); found != inspections.end())
             return found->second;
         return platform::RcInspection {};
     }
 
     [[nodiscard]] std::expected<platform::RcInstall, platform::ShellRcError> install(
-        config::ShellKind shell, std::string_view line) override
+        config::ShellKind shell,
+        std::string_view line,
+        platform::RcEnvironment const& sessionEnvironment) override
     {
-        installs.push_back(Install { .shell = shell, .line = std::string { line } });
+        installs.push_back(Install {
+            .shell = shell, .line = std::string { line }, .sessionEnvironment = sessionEnvironment });
         return installResult;
     }
 };

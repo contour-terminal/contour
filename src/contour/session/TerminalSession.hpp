@@ -2987,6 +2987,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Which shell this session runs, from the program in front of it; for a pane hosted by a local daemon,
     /// which has no process group of its own, from the profile's shell program.
+    ///
+    /// Known limit: a pane of a local tmux server (control mode) is "hosted" the same way, and tmux runs its
+    /// `default-shell` there, not the profile's. When the two differ, the card offers the profile's shell.
+    /// The edit is still guarded, appended and local, so it is wrong rather than harmful; the answer would
+    /// have to come from tmux (`#{pane_current_command}`).
     [[nodiscard]] config::ShellKind runningShell() const;
 
     /// @param pattern A window::CardStageRow text.

@@ -473,7 +473,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _menuBarIntegration(appearanceServices.menuBar()),
     _shellRcEditor(shellIntegration.editor
                        ? std::move(shellIntegration.editor)
-                       : std::make_unique<platform::FileShellRcEditor>(_fileSystem, env, _hostPlatform)),
+                       : std::make_unique<platform::FileShellRcEditor>(
+                             _fileSystem, env, _hostPlatform, platform::currentRunningAs())),
     _contourBinary(std::move(shellIntegration.contourBinary))
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
