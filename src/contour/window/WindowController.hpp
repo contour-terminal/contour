@@ -38,6 +38,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -76,6 +77,14 @@ enum class MenuSurface : uint8_t
 
 /// How many MenuSurface values there are.
 inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSurface::NewTab) + 1;
+
+/// Builds the announcer a window's notices speak through.
+/// @param anchor What the announcements are made against: the window while it is shown, null otherwise.
+using NoticeAnnouncerFactory =
+    std::function<std::unique_ptr<platform::Announcer>(std::function<QObject*()> anchor)>;
+
+/// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
+[[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
 ///
@@ -197,11 +206,14 @@ class WindowController:
     ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
     /// @param initialPosition The first window's remembered location, absent for additional windows.
     /// @param clock    What the held-modifier reveal measures its hold against.
+    /// @param noticeAnnouncer Builds what the window's notices are said through; the window says them only
+    ///                 while `accessibility_announcements` allows.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
-                     core::platform::IClock const& clock = core::platform::defaultSteadyClock());
+                     core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
+                     NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer());
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -1210,7 +1222,7 @@ class WindowController:
 
     // Says this window's notices to a screen reader, against the window while it is shown. Declared before
     // _notices, which speaks through it.
-    platform::QtAnnouncer _noticeAnnouncer;
+    std::unique_ptr<platform::Announcer> _noticeAnnouncer;
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;
 

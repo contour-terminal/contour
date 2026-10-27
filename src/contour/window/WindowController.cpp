@@ -58,7 +58,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    vtworkspace::WindowId windowId,
                                    config::MenuPresentation menuPresentation,
                                    std::optional<WindowPosition> initialPosition,
-                                   core::platform::IClock const& clock):
+                                   core::platform::IClock const& clock,
+                                   NoticeAnnouncerFactory const& noticeAnnouncer):
     _manager { manager },
     _windowId { windowId },
     _initialPosition { initialPosition },
@@ -84,8 +85,10 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _nativeMenus { manager.app().nativeMenuPresenter() },
     _clock { clock },
     _heldModifier { manager.app().headerRevealDelay() },
-    _noticeAnnouncer { [this]() -> QObject* { return _osWindow; } },
-    _notices { _clock, _noticeAnnouncer, [this](NoticeAction action) {
+    _noticeAnnouncer { std::make_unique<platform::GatedAnnouncer>(
+        noticeAnnouncer([this]() -> QObject* { return _osWindow; }),
+        [&config = manager.app().config()]() { return config.accessibilityAnnouncements.value(); }) },
+    _notices { _clock, *_noticeAnnouncer, [this](NoticeAction action) {
                   switch (action)
                   {
                       case NoticeAction::None: break;
@@ -110,6 +113,13 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     // reason this is injected rather than read from a global at the point of use.
     _nativeFrame =
         platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme { return effectiveColorScheme(); });
+}
+
+NoticeAnnouncerFactory qtNoticeAnnouncer()
+{
+    return [](std::function<QObject*()> anchor) -> std::unique_ptr<platform::Announcer> {
+        return std::make_unique<platform::QtAnnouncer>(std::move(anchor));
+    };
 }
 
 WindowController::~WindowController() = default;

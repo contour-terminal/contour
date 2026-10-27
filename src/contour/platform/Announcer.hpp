@@ -8,6 +8,7 @@
 #include <QtGui/QAccessible>
 
 #include <functional>
+#include <memory>
 #include <utility>
 
 namespace contour::platform
@@ -76,6 +77,29 @@ class QtAnnouncer final: public Announcer
 
   private:
     std::function<QObject*()> _anchor;
+};
+
+/// An Announcer that speaks only while a setting allows it -- the user's `accessibility_announcements` --
+/// asking on every announcement, so a configuration reload takes effect at the next one.
+class GatedAnnouncer final: public Announcer
+{
+  public:
+    /// @param inner     What speaks while allowed.
+    /// @param isAllowed Asked on every announcement, on the announcing thread.
+    GatedAnnouncer(std::unique_ptr<Announcer> inner, std::function<bool()> isAllowed):
+        _inner { std::move(inner) }, _isAllowed { std::move(isAllowed) }
+    {
+    }
+
+    void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
+    {
+        if (_isAllowed())
+            _inner->announce(message, politeness);
+    }
+
+  private:
+    std::unique_ptr<Announcer> _inner;
+    std::function<bool()> _isAllowed;
 };
 
 /// An Announcer that says nothing.

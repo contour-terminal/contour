@@ -14,6 +14,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtpty/MockPty.hpp>
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -119,6 +121,44 @@ TEST_CASE("a window's hosting notice shows until it is dismissed", "[contour][mu
     controller.dismissHostingNotice();
     CHECK(controller.hostingNotice().isEmpty());
     CHECK(changes.count() == 2);
+}
+
+TEST_CASE("a window says its notices only while accessibility_announcements allows",
+          "[contour][multiwindow][notices]")
+{
+    contour::test::TestApp app;
+    auto& manager = app.manager();
+    auto* said = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
+    auto const recording =
+        [&said](
+            std::function<QObject*()> const& /*anchor*/) -> std::unique_ptr<contour::platform::Announcer> {
+        auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+        said = announcer.get();
+        return announcer;
+    };
+    auto const* backing = manager.model().createWindow();
+    auto controller = contour::window::WindowController { manager,
+                                                          backing->id(),
+                                                          contour::config::MenuPresentation::InScene,
+                                                          std::nullopt,
+                                                          core::platform::defaultSteadyClock(),
+                                                          recording };
+    REQUIRE(said != nullptr);
+    using contour::window::Notice;
+    using contour::window::NoticeKind;
+
+    // Off, the notice still shows; nobody is told it.
+    app.app().config().accessibilityAnnouncements = false;
+    controller.notices().post(Notice { .kind = NoticeKind::Copied, .text = "Copied 3 lines" });
+    CHECK(controller.notices().toastText() == QStringLiteral("Copied 3 lines"));
+    CHECK(said->said.empty());
+
+    // On again -- as a reload sets it -- the next one is said.
+    app.app().config().accessibilityAnnouncements = true;
+    controller.notices().post(
+        Notice { .kind = NoticeKind::ConfigReloadFailed, .text = "Contour could not reload" });
+    REQUIRE(said->said.size() == 1);
+    CHECK(said->said.front().message == QStringLiteral("Contour could not reload"));
 }
 
 TEST_CASE("a local window names no host in its chrome", "[contour][multiwindow][window][hosts]")
