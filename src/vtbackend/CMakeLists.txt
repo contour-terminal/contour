@@ -406,6 +406,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_input_test.cpp
         screen/Terminal_scrollbar_marks_test.cpp
         screen/Terminal_gutter_test.cpp
+        screen/Terminal_blockfocus_test.cpp
         screen/Terminal_mirrorSeams_test.cpp
         screen/Terminal_blocks_test.cpp
         screen/Terminal_links_test.cpp

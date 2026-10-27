@@ -1887,9 +1887,10 @@ namespace
         return row;
     }
 
-    /// Every state the match modes can be in: each combination of the MatchModes flags, Trace the highest.
+    /// Every state the match modes can be in: each combination of the MatchModes flags, BlockFocus the
+    /// highest.
     constexpr auto MatchModeStates =
-        std::views::iota(0u, static_cast<unsigned>(vtbackend::MatchModes::Trace) << 1);
+        std::views::iota(0u, static_cast<unsigned>(vtbackend::MatchModes::BlockFocus) << 1);
 
     /// Whether a press can still reach @p fallback past @p configured, the configuration's bindings, which
     /// are looked up first: whether in some state of the match modes the fallback answers and no configured

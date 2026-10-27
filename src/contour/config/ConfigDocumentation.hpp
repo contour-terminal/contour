@@ -1328,6 +1328,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment}               single-step executed using custom actions. See "
     "TraceEnter/TraceStep/TraceLeave "
     "actions.\n"
+    "{comment} - BlockFocus: A command block holds the keyboard focus (FocusPreviousCommand and "
+    "FocusNextCommand).\n"
     "{comment}\n"
     "{comment} You can combine these modes by concatenating them via | and negate a single one\n"
     "{comment} by prefixing with ~.\n"

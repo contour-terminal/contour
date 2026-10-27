@@ -271,7 +271,8 @@ namespace helper
                && testMatchMode(actualModeFlags, expected, Flag::Select)
                && testMatchMode(actualModeFlags, expected, Flag::Insert)
                && testMatchMode(actualModeFlags, expected, Flag::Search)
-               && testMatchMode(actualModeFlags, expected, Flag::Trace);
+               && testMatchMode(actualModeFlags, expected, Flag::Trace)
+               && testMatchMode(actualModeFlags, expected, Flag::BlockFocus);
     }
 
 } // namespace helper

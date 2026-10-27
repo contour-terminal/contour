@@ -616,7 +616,8 @@ void Terminal::publishBindingModes() noexcept
     auto const flags = static_cast<uint8_t>(
         flagIf(displayedScreenType() == ScreenType::Alternate, Flag::AlternateScreen)
         | flagIf(applicationCursorKeys(), Flag::AppCursor) | flagIf(applicationKeypad(), Flag::AppKeypad)
-        | flagIf(selectionAvailable(), Flag::Select) | flagIf(!_search.pattern.empty(), Flag::Search));
+        | flagIf(selectionAvailable(), Flag::Select) | flagIf(!_search.pattern.empty(), Flag::Search)
+        | flagIf(_focusedCommandBlock.has_value(), Flag::BlockFocus));
     _publishedBindingModes.store(flags, std::memory_order_relaxed);
 }
 
@@ -634,6 +635,7 @@ void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
 
         // Under the lock, as every other thread moves the view: the view follows what was just written.
         followOutput();
+        reconcileCommandBlockFocus();
 
         // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
         // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
@@ -4052,15 +4054,18 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     // The block the pointer is over: on its rows (setHoveredCommandBlock), or on the strip beside them.
     auto const* const gutterHoveredRecord = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr;
     auto const attentionOf = [&](CommandBlockId id) {
+        if (_focusedCommandBlock == id)
+            return BlockAttention::Focused;
         auto const hovered =
             _hoveredCommandBlock == id || (gutterHoveredRecord != nullptr && gutterHoveredRecord->id == id);
         return hovered ? BlockAttention::Hovered : BlockAttention::Rest;
     };
     // The rail's six colours, by outcome and attention, mixed once per frame rather than once per row.
-    auto railColors = std::array<std::array<RGBColor, 2>, CommandBlockOutcomeCount> {};
+    auto railColors = std::array<std::array<RGBColor, BlockAttentionCount>, CommandBlockOutcomeCount> {};
     if (!railBlocks.empty())
         for (auto const outcome: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
-            for (auto const attention: { BlockAttention::Rest, BlockAttention::Hovered })
+            for (auto const attention:
+                 { BlockAttention::Rest, BlockAttention::Hovered, BlockAttention::Focused })
                 railColors.at(outcome).at(static_cast<std::size_t>(attention)) =
                     railColor(_colorPalette, static_cast<CommandBlockOutcome>(outcome), attention);
     auto const railRowAt = [&](int y, UserMarkPresence mark) {
@@ -4860,6 +4865,80 @@ void Terminal::setHoveredCommandBlock(std::optional<CommandBlockId> block)
     _hoveredCommandBlock = block;
     // Like the gutter's hover, the lit rail lives only in the render buffer.
     breakLoopAndRefreshRenderBuffer();
+}
+
+std::optional<CommandBlockId> Terminal::focusCommandBlock(BlockStep step)
+{
+    reconcileCommandBlockFocus();
+    auto const& grid = primaryScreen().grid();
+
+    // The blocks one can focus, oldest first: a command was typed or run (not a bare prompt), and its head
+    // is a row the viewport can be brought to.
+    struct Candidate
+    {
+        CommandBlockId id;
+        LineOffset head;
+    };
+    auto candidates = std::vector<Candidate> {};
+    for (auto const& record: commandBlocks().records())
+        if (record.state != CommandBlockState::Prompting)
+            if (auto const head = headOffsetOf(grid, record))
+                candidates.push_back({ .id = record.id, .head = *head });
+
+    auto const focused = std::ranges::find(candidates, _focusedCommandBlock, &Candidate::id);
+    auto const target = [&]() -> std::optional<std::size_t> {
+        auto const count = candidates.size();
+        auto const index = [&](auto const position) {
+            return static_cast<std::size_t>(position - candidates.begin());
+        };
+        if (focused != candidates.end())
+        {
+            auto const at = index(focused);
+            if (step == BlockStep::Previous)
+                return at > 0 ? std::optional { at - 1 } : std::nullopt;
+            return at + 1 < count ? std::optional { at + 1 } : std::nullopt;
+        }
+        if (step == BlockStep::Previous)
+        {
+            auto const bottom =
+                _viewport.topLine() + boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
+            auto const above = std::ranges::find_if(candidates | std::views::reverse,
+                                                    [&](Candidate const& c) { return c.head <= bottom; });
+            return above != candidates.rend() ? std::optional { index(above.base()) - 1 } : std::nullopt;
+        }
+        auto const top = _viewport.topLine();
+        auto const below =
+            std::ranges::find_if(candidates, [&](Candidate const& c) { return c.head >= top; });
+        return below != candidates.end() ? std::optional { index(below) } : std::nullopt;
+    }();
+    if (!target)
+        return std::nullopt;
+
+    auto const& chosen = candidates[*target];
+    if (!_viewport.isLineVisible(chosen.head))
+        std::ignore = scrollToCommandBlockHead(chosen.id);
+    _focusedCommandBlock = chosen.id;
+    publishBindingModes();
+    breakLoopAndRefreshRenderBuffer();
+    return chosen.id;
+}
+
+void Terminal::clearCommandBlockFocus()
+{
+    if (!_focusedCommandBlock)
+        return;
+    _focusedCommandBlock.reset();
+    publishBindingModes();
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::reconcileCommandBlockFocus()
+{
+    if (_focusedCommandBlock && _commandBlocks.find(*_focusedCommandBlock) == nullptr)
+    {
+        _focusedCommandBlock.reset();
+        publishBindingModes();
+    }
 }
 
 void Terminal::autoCollapseOnNewPrompt()

@@ -4348,6 +4348,8 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
             flag = MatchModes::Search;
         else if (upperArg == "TRACE")
             flag = MatchModes::Trace;
+        else if (upperArg == "BLOCKFOCUS")
+            flag = MatchModes::BlockFocus;
         else
         {
             errorLog()("Unknown input_mapping mode: {}", arg);

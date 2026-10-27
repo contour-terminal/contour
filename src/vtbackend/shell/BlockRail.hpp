@@ -30,6 +30,9 @@ enum class BlockAttention : uint8_t
     Focused,  ///< The keyboard focused it.
 };
 
+/// Number of @c BlockAttention enumerators, derived from the last one; tables indexed by attention pin to it.
+inline constexpr std::size_t BlockAttentionCount = static_cast<std::size_t>(BlockAttention::Focused) + 1;
+
 /// The facts about one drawn row that decide its rail segment and mark.
 struct RailRowFacts
 {

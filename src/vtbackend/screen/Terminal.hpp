@@ -130,6 +130,13 @@ enum class CommandBlockJumpError : uint8_t
     NotScrollable,
 };
 
+/// Which way Terminal::focusCommandBlock() moves the block focus.
+enum class BlockStep : uint8_t
+{
+    Previous = 0, ///< To the block before: older, further up.
+    Next,         ///< To the block after: newer, further down.
+};
+
 /// Why Terminal::revealStableLineAtTop() could not bring a line to the top.
 enum class RevealError : uint8_t
 {
@@ -2095,6 +2102,29 @@ class Terminal: public IStatusLinePublishTarget
     /// mutator is.
     /// @param block The hovered block, or nullopt when the pointer left every block.
     void setHoveredCommandBlock(std::optional<CommandBlockId> block);
+
+    /// Moves the keyboard's block focus one block in @p step's direction and scrolls the block's head into
+    /// view.
+    ///
+    /// From the focused block when there is one, else from the viewport: the last block whose head is at or
+    /// above its bottom row for Previous, the first whose head is at or below its top row for Next. A block
+    /// still at its prompt has no command and is skipped, as is one whose head left the grid. The focused
+    /// block's rail is lit (BlockAttention::Focused) and the binding modes carry MatchModes::BlockFocus.
+    /// Called under the terminal's lock, as every mutator is.
+    /// @param step Which way to move.
+    /// @return The block now focused; nullopt, with the focus unchanged, where there is none that way.
+    [[nodiscard]] std::optional<CommandBlockId> focusCommandBlock(BlockStep step);
+
+    /// The block the keyboard focuses, if any. Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @return Its id; nullopt while none is focused.
+    [[nodiscard]] std::optional<CommandBlockId> focusedCommandBlock() const noexcept
+    {
+        return _focusedCommandBlock;
+    }
+
+    /// Takes the keyboard's block focus away. Redraws the frame and updates the binding modes only when a
+    /// block was focused. Called under the terminal's lock, as every mutator is.
+    void clearCommandBlockFocus();
 
     // }}}
 
@@ -5766,6 +5796,14 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
     std::optional<CommandBlockId> _hoveredCommandBlock;
+
+    /// The block the keyboard focuses, if any (@see focusCommandBlock). Domain state; cleared when its record
+    /// goes (@see reconcileCommandBlockFocus).
+    std::optional<CommandBlockId> _focusedCommandBlock;
+
+    /// Drops the block focus when the focused block's record has left the store (evicted, discarded, retired
+    /// or cleared). Called under the lock after every parsed batch.
+    void reconcileCommandBlockFocus();
 
     /// The UI font's label advances, by which a native row's pills are placed (@see setPillLabelMetrics).
     PillLabelMetrics _pillLabelMetrics {};
