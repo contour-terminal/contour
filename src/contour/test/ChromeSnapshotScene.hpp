@@ -1018,6 +1018,7 @@ class ChromeSnapshotScene
             window::settingsWindowConventionsFor(variantHost(_variant)),
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); },
             _settingsState,
+            window::SettingsPreview::SessionFactory {}, // the snapshot scene has no preview session
             [] {});
     }
 

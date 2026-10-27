@@ -37,6 +37,7 @@
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/QtSaveScheduler.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/WindowController.hpp>
@@ -2472,6 +2473,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<window::NoticeModel>("Contour.Terminal", 1, 0, "NoticeModel", "Created by the window controller.");
     qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the application.");
     qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
+    qmlRegisterUncreatableType<window::SettingsPreview>("Contour.Terminal", 1, 0, "SettingsPreview", "Created by the Settings window host.");
     session::registerPermissionQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
@@ -2480,6 +2482,7 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<window::NoticeModel*>("NoticeModel*");
     qRegisterMetaType<window::SettingsController*>("SettingsController*");
     qRegisterMetaType<window::SettingsWindowHost*>("SettingsWindowHost*");
+    qRegisterMetaType<window::SettingsPreview*>("SettingsPreview*");
     // clang-format on
 
     // Constructed with the resolved style rather than default-constructed and then applied: a
@@ -2993,6 +2996,9 @@ window::SettingsWindowHost& ContourGuiApp::settingsWindow()
             window::settingsWindowConventionsFor(_hostPlatform),
             _settingsWindowFactory,
             *guiState(),
+            [this](config::Config const& preview, std::string const& profileName) {
+                return sessionsManager().createPreviewSession(preview, profileName);
+            },
             [this] {
                 auto const url = QUrl::fromLocalFile(platform::toQString(_config.configFile));
                 if (auto const opened = externalLauncher().openUrl(url); !opened)

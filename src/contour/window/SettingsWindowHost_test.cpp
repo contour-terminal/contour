@@ -78,6 +78,7 @@ struct HostFixture: ControllerFixture
                    return window::loadSettingsWindow(engine, self);
                },
                state,
+               window::SettingsPreview::SessionFactory {},
                [this] { ++configurationEdits; } }
     {
         test::installChromeStyle(engine, style);
@@ -673,6 +674,7 @@ TEST_CASE("a Settings window factory that fails leaves no window",
             return std::unexpected { SettingsWindowError::LoadFailed };
         },
         remembered,
+        window::SettingsPreview::SessionFactory {},
         [] {},
     };
 
@@ -681,4 +683,28 @@ TEST_CASE("a Settings window factory that fails leaves no window",
     CHECK(shown.error() == SettingsWindowError::LoadFailed);
     CHECK(std::format("{}", shown.error()) == "LoadFailed");
     CHECK(host.window() == nullptr);
+}
+
+TEST_CASE("a Settings window host has a preview exactly when it can make its session",
+          "[contour][gui][settingswindow][host][settingspreview]")
+{
+    auto fx = ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} };
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const hostWith = [&](window::SettingsPreview::SessionFactory factory) {
+        return std::make_unique<SettingsWindowHost>(
+            *fx.controller,
+            window::settingsWindowConventionsFor(config::HostPlatform::Other),
+            [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
+                return std::unexpected { SettingsWindowError::LoadFailed };
+            },
+            remembered,
+            std::move(factory),
+            [] {});
+    };
+
+    CHECK(hostWith({})->preview() == nullptr);
+    CHECK(hostWith([](config::Config const&, std::string const&) {
+              return std::unique_ptr<session::TerminalSession> {};
+          })->preview()
+          != nullptr);
 }

@@ -52,6 +52,7 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
                                        SettingsWindowConventions conventions,
                                        SettingsWindowFactory factory,
                                        config::GuiStateStore& state,
+                                       SettingsPreview::SessionFactory previewFactory,
                                        std::function<void()> editConfiguration,
                                        QObject* parent):
     QObject(parent),
@@ -60,6 +61,8 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
     _factory { std::move(factory) },
     _state { state },
     _editConfiguration { std::move(editConfiguration) },
+    _preview { previewFactory ? std::make_unique<SettingsPreview>(controller, std::move(previewFactory))
+                              : nullptr },
     _remembered { rememberedIn(state) },
     _lastPage { _remembered ? QString::fromStdString(_remembered->page) : QString {} }
 {

@@ -3,10 +3,12 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/PreviewTranscript.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -19,6 +21,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
 
+#include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.hpp>
@@ -354,6 +357,28 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     // they were still in use.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    return session;
+}
+
+std::unique_ptr<TerminalSession> TerminalSessionManager::createPreviewSession(config::Config const& config,
+                                                                              std::string const& profileName)
+{
+    // Not through createBackingSession(): the session is the caller's, so it is not registered, not
+    // parented to the manager and not watched for closing, and it needs no pty from the factory. Nothing
+    // reads the mock device -- no start() -- so the transcript is written to the screen directly.
+    auto session = std::make_unique<TerminalSession>(this,
+                                                     std::make_unique<vtpty::MockPty>(PreviewPageSize),
+                                                     _app,
+                                                     std::string {},
+                                                     PreviewPageSize,
+                                                     std::nullopt,
+                                                     std::make_unique<platform::NullNotifier>(),
+                                                     SessionRole::Preview,
+                                                     SessionHosting::Local);
+    // Its owner destroys it; QML must not collect what it is bound to.
+    QQmlEngine::setObjectOwnership(session.get(), QQmlEngine::CppOwnership);
+    session->applyReloadedConfig(config, profileName);
+    session->terminal().writeToScreen(PreviewTranscript);
     return session;
 }
 

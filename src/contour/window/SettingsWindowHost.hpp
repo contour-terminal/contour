@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/GuiStateStore.hpp>
+#include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 
 #include <QtCore/QObject>
@@ -62,6 +63,9 @@ class SettingsWindowHost final: public QObject
     // The `controller` property's type, which moc's code needs complete; this header only names it.
     Q_MOC_INCLUDE("contour/window/SettingsController.hpp")
     Q_PROPERTY(contour::window::SettingsController* controller READ controller CONSTANT)
+    /// The terminal the page previews the open profile in; null when the host was built without a way to make
+    /// its session (the snapshot scene's).
+    Q_PROPERTY(contour::window::SettingsPreview* preview READ preview CONSTANT)
     Q_PROPERTY(QString title READ title CONSTANT)
     Q_PROPERTY(Qt::WindowFlags windowFlags READ windowFlags CONSTANT)
     /// The page the window shows, as the page reports it: remembered when the window closes and shown again
@@ -74,6 +78,7 @@ class SettingsWindowHost final: public QObject
     /// @param factory     Builds the window on the first show.
     /// @param state       What the window remembers across restarts: its frame, screen and page. Borrowed:
     ///                    it outlives this host.
+    /// @param previewFactory Makes the preview terminal's session; null: the host has no `preview`.
     /// @param editConfiguration Opens contour.yml in the OS's editor: what the sidebar's "Edit contour.yml…"
     ///                    row runs. Called on the GUI thread.
     /// @param parent      Qt ownership.
@@ -81,6 +86,7 @@ class SettingsWindowHost final: public QObject
                        SettingsWindowConventions conventions,
                        SettingsWindowFactory factory,
                        config::GuiStateStore& state,
+                       SettingsPreview::SessionFactory previewFactory,
                        std::function<void()> editConfiguration,
                        QObject* parent = nullptr);
     ~SettingsWindowHost() override;
@@ -92,6 +98,9 @@ class SettingsWindowHost final: public QObject
 
     /// @return The controller the page edits.
     [[nodiscard]] SettingsController* controller() const noexcept { return &_controller; }
+
+    /// @return The preview terminal; null when the host has no way to make its session.
+    [[nodiscard]] SettingsPreview* preview() const noexcept { return _preview.get(); }
 
     /// @return The window title of the host's conventions.
     [[nodiscard]] QString title() const;
@@ -153,6 +162,7 @@ class SettingsWindowHost final: public QObject
     SettingsWindowFactory _factory;
     config::GuiStateStore& _state;
     std::function<void()> _editConfiguration;
+    std::unique_ptr<SettingsPreview> _preview; ///< Null without a preview session factory.
     /// What the run before left, read once at construction; consumed by the first show.
     std::optional<config::SettingsWindowState> _remembered;
     QString _lastPage;

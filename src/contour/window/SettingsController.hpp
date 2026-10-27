@@ -172,6 +172,19 @@ class SettingsController: public QObject
     /// @param appearance The appearance the terminals are drawn in from now on.
     void setColorPreference(vtbackend::ColorPreference appearance);
 
+    /// The configuration a preview terminal shows: the loaded one with the open profile draft put in place of
+    /// its profile and the open scheme draft in place of its palette, so that every change shows before it
+    /// is written. The loaded configuration unchanged while no draft is open.
+    [[nodiscard]] config::Config previewConfig() const;
+
+    /// @return The name of the profile open in the editor; the configuration's default profile while none is.
+    [[nodiscard]] std::string previewProfileName() const;
+
+    /// @param profile A profile, typically one of previewConfig().
+    /// @return The name of the scheme @p profile draws with: its simple scheme, or for a light/dark pair the
+    ///         one of the current appearance.
+    [[nodiscard]] std::string previewSchemeNameOf(config::TerminalProfile const& profile) const;
+
     [[nodiscard]] bool locked() const noexcept { return _editability == config::SettingsEditability::Locked; }
     [[nodiscard]] QString linkGesture() const { return _linkGesture; }
     [[nodiscard]] QVariantList profiles() const { return _profiles; }

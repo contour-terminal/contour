@@ -296,7 +296,9 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsSearch.hpp
         window/SettingsSections.hpp
         window/QtSaveScheduler.hpp
+        window/SettingsPreview.hpp
         window/SettingsWindowHost.hpp
+        session/PreviewTranscript.hpp
         session/PastePreview.hpp
         session/Permission.hpp
         session/PermissionPrompt.hpp
@@ -355,6 +357,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionFactory.cpp
         window/SettingsController.cpp
         window/SettingsFields.cpp
+        window/SettingsPreview.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
@@ -954,6 +957,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/CommandPaletteModel_test.cpp
             window/MultiWindow_test.cpp
             window/SettingsController_test.cpp
+            window/SettingsPreview_test.cpp
             window/SettingsWindowHost_test.cpp
             window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp

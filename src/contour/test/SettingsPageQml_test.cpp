@@ -234,6 +234,7 @@ struct SettingsPageView
                window::settingsWindowConventionsFor(config::HostPlatform::Other),
                [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); },
                state,
+               window::SettingsPreview::SessionFactory {},
                [this] { ++configurationEdits; } }
     {
         contour::test::installChromeStyle(engine, setup);

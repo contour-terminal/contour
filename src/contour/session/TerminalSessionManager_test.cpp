@@ -3714,3 +3714,31 @@ TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still he
     manager.deliverRestoreSummaryTo(window->windowId());
     CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");
 }
+
+TEST_CASE("TerminalSessionManager: a preview session is in no window and a reload leaves it alone",
+          "[manager][settingspreview]")
+{
+    contour::test::ConfiguredTestApp testApp;
+    contour::test::ScopedController const win { testApp.manager() };
+    auto* window = testApp.manager().model().window(win.id);
+    REQUIRE(window != nullptr);
+    auto const tabsBefore = window->tabCount();
+
+    auto previewed = testApp.app().config();
+    auto const previewedSize = text::FontSize { 31.0 };
+    previewed.profile().fonts.value().size = previewedSize;
+    auto const preview = testApp.manager().createPreviewSession(previewed, testApp.app().profileName());
+
+    REQUIRE(preview != nullptr);
+    CHECK(preview->role() == contour::session::SessionRole::Preview);
+    CHECK(preview->profile().fonts.value().size.pt == previewedSize.pt);
+    CHECK(window->tabCount() == tabsBefore);
+    CHECK(testApp.manager().sessionForId(preview->modelSessionId()) == nullptr);
+
+    // The reload's loop over the manager's sessions does not reach it: the owner applies what it previews.
+    contour::test::writeConfigFile(
+        testApp.configFile(), contour::test::profileConfigYaml(testApp.app().profileName(), "theme: dark\n"));
+    REQUIRE(testApp.manager().reloadAllSessions());
+    CHECK(preview->profile().fonts.value().size.pt == previewedSize.pt);
+    CHECK(window->tabCount() == tabsBefore);
+}

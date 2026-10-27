@@ -169,6 +169,10 @@ enum class SessionRole : uint8_t
     /// closes when it ends; a layout does not save its command, which names a private file that is gone by
     /// the time the layout is restored.
     CommandOutput,
+    /// The terminal Settings shows the profile being edited in: over a canned transcript on a mock device, so
+    /// no shell runs and nothing is notified. It is in no window and no layout, has no pane to close and
+    /// takes no focus; its owner (SettingsPreview) applies the configuration to it and destroys it.
+    Preview,
 };
 
 /// What became of an action that changes engine state, in a session whose terminal may be hosted elsewhere.

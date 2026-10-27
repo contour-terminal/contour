@@ -566,16 +566,37 @@ vtbackend::ColorPalette SettingsController::previewPalette() const
 {
     if (_profileAccess == DraftAccess::Closed)
         return {};
-    auto const& colors = _draft.colors.value();
+    return schemePalette(previewSchemeNameOf(_draft));
+}
+
+std::string SettingsController::previewSchemeNameOf(config::TerminalProfile const& profile) const
+{
+    auto const& colors = profile.colors.value();
     if (auto const* const simple = std::get_if<config::SimpleColorConfig>(&colors))
-        return schemePalette(simple->colorScheme);
+        return simple->colorScheme;
     auto const& dual = std::get<config::DualColorConfig>(colors);
     switch (_appearance)
     {
-        case vtbackend::ColorPreference::Light: return schemePalette(dual.colorSchemeLight);
-        case vtbackend::ColorPreference::Dark: return schemePalette(dual.colorSchemeDark);
+        case vtbackend::ColorPreference::Light: return dual.colorSchemeLight;
+        case vtbackend::ColorPreference::Dark: return dual.colorSchemeDark;
     }
-    return schemePalette(dual.colorSchemeDark);
+    return dual.colorSchemeDark;
+}
+
+config::Config SettingsController::previewConfig() const
+{
+    auto preview = _config();
+    if (_profileAccess != DraftAccess::Closed)
+        preview.profiles.value().insert_or_assign(_editingProfile.toStdString(), _draft);
+    if (_schemeAccess != DraftAccess::Closed)
+        preview.colorschemes.value().insert_or_assign(_editingScheme.toStdString(), _schemeDraft);
+    return preview;
+}
+
+std::string SettingsController::previewProfileName() const
+{
+    return _profileAccess != DraftAccess::Closed ? _editingProfile.toStdString()
+                                                 : _config().defaultProfileName.value();
 }
 
 SettingsOrigin SettingsController::profileOrigin(std::string const& name) const

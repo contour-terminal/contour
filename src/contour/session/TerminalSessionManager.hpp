@@ -202,6 +202,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         std::optional<vtpty::Process::ExecInfo> const& command = std::nullopt,
         SessionRole role = SessionRole::Shell);
 
+    /// Creates the terminal Settings previews a profile in: a SessionRole::Preview session over a mock
+    /// device, showing PreviewTranscript at PreviewPageSize, under @p config's @p profileName. It is the
+    /// caller's, in no window and not among the manager's sessions, so a configuration reload does not touch
+    /// it and no layout saves it; its configuration is applied to it by whoever owns it.
+    /// @param config      The configuration to preview: the app's with the drafts put in place.
+    /// @param profileName The profile of @p config to run under.
+    /// @return The session.
+    /// @pre GUI thread.
+    [[nodiscard]] std::unique_ptr<TerminalSession> createPreviewSession(config::Config const& config,
+                                                                        std::string const& profileName);
+
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
     /// @param profileName Profile to launch the tab with, or std::nullopt for the app default.
