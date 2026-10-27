@@ -2576,6 +2576,43 @@ TEST_CASE("NativeController.reconnect.afterTheReactorDied", "[attach][controller
     controller.stop();
 }
 
+TEST_CASE("NativeController.reconnect.restartedReactorDiesBeforeConnecting",
+          "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // A restarted run is Connecting from the moment Reconnect returns: a reactor that dies before it enters
+    // Connecting itself must still tell its owner the connection closed, not hide behind the old Failed.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto closed = std::atomic<int> { 0 };
+    auto const connection = QObject::connect(
+        &controller,
+        &contour::remote::NativeController::connectionClosed,
+        &controller,
+        [&] { ++closed; },
+        Qt::DirectConnection);
+
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    REQUIRE(waitUntil([&] { return closed.load() == 1; }));
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+    controller.stop(); // what the GUI's connectionClosed handler does
+
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(controller.connectionState() != ConnectionState::Failed);
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    CHECK(waitUntil([&] { return closed.load() == 2; }));
+
+    controller.stop();
+    QObject::disconnect(connection);
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    controller.stop();
+}
+
 TEST_CASE("NativeController.reconnect.afterAStop", "[attach][controller][reconnect][manual]")
 {
     using vthost::client::ConnectionState;

@@ -510,6 +510,9 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
         // The windows this client showed, as a reconnect inside one run resumes them; a client that follows
         // every window keeps doing so (@see ClientSupervisor::resumeIntent).
         auto const lock = std::lock_guard { _mutex };
+        // The new run is Connecting from here on: a reactor that dies before it enters Connecting itself
+        // must not find the previous run's Failed and swallow its own death (@see reactorDied).
+        _connection = vthost::client::ConnectionState::Connecting;
         if (_intent.kind != vthost::proto::AttachIntentKind::AllWindows)
             _intent = vthost::proto::AttachIntent {
                 .kind = vthost::proto::AttachIntentKind::Resume,
