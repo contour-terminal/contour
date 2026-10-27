@@ -6015,6 +6015,13 @@ TEST_CASE("Terminal.hintLabels.aLabelOverAWideCharacterIsNarrowCells", "[termina
             .name = "cjk", .regex = R"(日本\S*)", .activation = {} } };
         activateHints(mock, patterns);
         checkLabel(mock);
+
+        // The label is one character over 日's head: the continuation column beside it draws nothing, so no
+        // half of the wide glyph shows next to the label.
+        REQUIRE(mock.terminal.hintMatches().front().label.size() == 1);
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto const* continuation = cellAt(frame, 0, 1);
+        CHECK((continuation == nullptr || continuation->codepoints.empty()));
     }
 
     SECTION("a scaled cell")
@@ -6040,7 +6047,37 @@ TEST_CASE("Terminal.overlayClearance.readsWhatIsDrawn", "[terminal][overlayclear
 
     REQUIRE_FALSE(mc.terminal.foldRanges().empty());
     mc.terminal.foldState().collapse(mc.terminal.foldRanges().front().headStableId);
-    // The head, then the prompt below the folded output ("$ " ends in a plain space, which is blank), then rows
-    // past the history.
+    // The head, then the prompt below the folded output ("$ " ends in a plain space, which is blank), then
+    // rows past the history.
     CHECK(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 14, 19, 20, 20, 20, 20 });
+}
+
+TEST_CASE("Terminal.hintLabels.everySchemeDimsByItsOpacityAndKeepsItsLabelsLegible",
+          "[terminal][hintmode][hintlabels]")
+{
+    // The rest of the page is inactive while the labels are up, dimmed by the scheme's own opacity (45 % in
+    // the contour schemes, 50 % elsewhere) -- deliberately, so it may read below 4.5:1. The labels may not.
+    using vtbackend::RGBColor;
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        usePalette(mock, name);
+        mock.writeToScreen("\r\nsee https://example.com now");
+        activateHints(mock);
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        auto const& palette = mock.terminal.colorPalette();
+
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto const* unmatched = cellAt(frame, 1, 0);
+        REQUIRE(unmatched != nullptr);
+        CHECK(unmatched->attributes.foregroundColor
+              == vtbackend::mixColor(
+                  palette.defaultForeground, palette.defaultBackground, 1.0f - palette.hintUnmatchedOpacity));
+
+        auto const* label = cellAt(frame, 1, 4);
+        REQUIRE(label != nullptr);
+        CHECK(vtbackend::contrastRatio(label->attributes.foregroundColor, label->attributes.backgroundColor)
+              >= vtbackend::MinimumTextContrast);
+    }
 }

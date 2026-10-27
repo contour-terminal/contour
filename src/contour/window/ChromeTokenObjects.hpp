@@ -554,6 +554,7 @@ class ChromeElevationTokens: public QObject
     Q_PROPERTY(QObject* e1 READ e1 CONSTANT)
     Q_PROPERTY(QObject* e2 READ e2 CONSTANT)
     Q_PROPERTY(QObject* e3 READ e3 CONSTANT)
+    Q_PROPERTY(QObject* inPane READ inPane CONSTANT)
 
   public:
     /// @param tokens The resolved elevation group.
@@ -566,6 +567,11 @@ class ChromeElevationTokens: public QObject
     [[nodiscard]] QObject* e1() noexcept { return &_e1; }
     [[nodiscard]] QObject* e2() noexcept { return &_e2; }
     [[nodiscard]] QObject* e3() noexcept { return &_e3; }
+
+    /// The shadow a pill drawn in a pane (the size indicator, the reconnecting pill) casts: e2 where the
+    /// row's shadows are soft, none where they are the Terminal row's hard offset copy, which would read as a
+    /// second row beneath it. Only a real popover casts that one.
+    [[nodiscard]] QObject* inPane() noexcept { return _e2.blur() > 0 ? &_e2 : &_e0; }
 
   private:
     ChromeElevationLevel _e0;

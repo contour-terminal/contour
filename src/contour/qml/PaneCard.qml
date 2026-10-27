@@ -93,7 +93,20 @@ Item {
             // (F5: not a Minimal overlay header, which comes and goes with a held key).
             headerFindSlot: header.findSlot
             headerPresent: card.headerInline ? 1 : 0
+            overlayHost: paneOverlays
         }
+    }
+
+    // Laid exactly over the grid but outside the content's fade: the pane's own overlay (the size indicator)
+    // reads at full strength on an inactive Terminal-row card.
+    Item {
+        id: paneOverlays
+        objectName: "paneCardOverlays"
+        x: terminal.x
+        y: terminal.y
+        z: 1
+        width: terminal.width
+        height: terminal.height
     }
 
     // While the connection to the host this pane mirrors is sought again, the grid dims by the kit's pane
@@ -133,7 +146,7 @@ Item {
             objectName: "reconnectingPill"
             anchors.centerIn: parent
             shown: true
-            elevation: chromeStyle.elevation.e2.blur > 0 ? chromeStyle.elevation.e2 : chromeStyle.elevation.e0
+            elevation: chromeStyle.elevation.inPane
             text: reconnecting.hostLabel !== "" ? qsTr("Reconnecting to %1…").arg(reconnecting.hostLabel)
                                                 : qsTr("Reconnecting…")
             glyph: chromeStyle.paletteRevision < 0 ? "" : chromeStyle.badgeLook(chromeStyle.badgeKinds.working).glyph

@@ -119,7 +119,8 @@ namespace
                         0x3A3F48_rgb },
     };
 
-    /// How much of its colour an unmatched cell keeps in hint mode, in the contour schemes.
+    /// How much of its colour an unmatched cell keeps in hint mode, in the contour schemes: the canvas's 45
+    /// %, inactive content while the labels are up (@see ColorPalette::hintUnmatchedOpacity).
     constexpr auto ContourHintUnmatchedOpacity = 0.45f;
 
     /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line

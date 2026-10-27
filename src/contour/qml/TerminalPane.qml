@@ -174,12 +174,19 @@ ContourTerminal {
     // inactive pane still reads its size; a pane too narrow for the pill shows none.
     property bool sizeIndicatorHeld: false
 
+    /// Where the pane's own overlay (the size indicator) is drawn: an item its host lays exactly over this pane
+    /// but outside any fade the host applies to it (PaneCard's inactive-card fade on the Terminal row), so the
+    /// pill reads at full strength. Null: the pane itself.
+    property Item overlayHost: null
+
     Toast {
         id: sizeIndicator
         objectName: "sizeIndicator"
+        parent: pane.overlayHost ? pane.overlayHost : pane
         anchors.centerIn: parent
         z: 20
-        readonly property bool fits: implicitWidth <= pane.width - 2 * chromeStyle.space.s4
+        // Only once its row has laid out does the pill know its width; until then it does not fit anywhere.
+        readonly property bool fits: implicitContentWidth > 0 && implicitWidth <= pane.width - 2 * chromeStyle.space.s4
         shown: pane.sizeIndicatorHeld && fits
         text: pane.session && pane.session.sizeIndicatorText !== undefined ? pane.session.sizeIndicatorText : ""
         // Tabular digits, so "99 × 30" and "100 × 30" keep their digits in place as a drag goes by.
@@ -193,9 +200,15 @@ ContourTerminal {
             return Qt.font(spec)
         }
         // An in-pane pill casts no hard shadow on the Terminal row: only a real popover does.
-        elevation: chromeStyle.elevation.e2.blur > 0 ? chromeStyle.elevation.e2 : chromeStyle.elevation.e0
+        elevation: chromeStyle.elevation.inPane
         // The session announces the settled size itself, once.
         Accessible.ignored: true
+    }
+
+    // A pill held for the session that leaves would never settle for the one that comes: neither is shown.
+    onSessionChanged: {
+        pane.sizeIndicatorHeld = false
+        sizeIndicatorHold.stop()
     }
 
     Timer {

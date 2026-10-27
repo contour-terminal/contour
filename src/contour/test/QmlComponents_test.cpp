@@ -11092,8 +11092,8 @@ TEST_CASE(
     CHECK_FALSE(pill->property("shown").toBool());
 
     session.requestSizeIndicator(QStringLiteral("100 × 30"));
-    QCoreApplication::processEvents();
-    CHECK(pill->property("shown").toBool());
+    // Shown once its row has laid out, on the window's next polish: before that it knows no width to fit.
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
     CHECK(pill->property("text").toString() == QStringLiteral("100 × 30"));
     CHECK(pill->x() + (pill->width() / 2) == Catch::Approx(pane->width() / 2).margin(1));
     CHECK(pill->height() == chromeToken(scene.engine, "size", "toast"));
@@ -11187,7 +11187,52 @@ TEST_CASE("size indicator: the Terminal row draws it as one inverse row (offscre
         scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
     REQUIRE(style != nullptr);
     CHECK(pill->height() == style->property("cellHeight").toReal());
-    CHECK(pill->property("background").value<QQuickItem*>()->property("radius").toReal() == 0.0);
+    auto* background = pill->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("radius").toReal() == 0.0);
+    // Inverse video: the scheme's foreground as the fill.
+    auto const& scheme = setup.scheme.bySlot;
+    CHECK(
+        background->property("color").value<QColor>()
+        == contour::platform::toQColor(scheme[static_cast<size_t>(contour::config::SchemeSlot::Foreground)]));
+    // An in-pane pill casts no hard offset copy on this row: that is a real popover's.
+    auto* hard = pill->findChild<QQuickItem*>(QStringLiteral("elevationHardShadow"));
+    REQUIRE(hard != nullptr);
+    CHECK_FALSE(hard->isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("size indicator: an inactive Terminal-row card shows it at full strength (offscreen)",
+          "[contour][gui][qml][sizeindicator][panecard]")
+{
+    // The Terminal row fades an inactive card's content (tui.inactivePaneOpacity); the size indicator is
+    // drawn outside that fade, so a resized inactive pane reads its size as the active one does.
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& inactive = host.cardOf(panes.right());
+    REQUIRE(PaneTreeHost::partOf(inactive, "paneCardContent").opacity() < 1.0);
+    panes.rightSession.requestSizeIndicator(QStringLiteral("40 \u00D7 24"));
+    auto* pill = inactive.findChild<QQuickItem*>(QStringLiteral("sizeIndicator"));
+    REQUIRE(pill != nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
+
+    // Nothing above the pill fades it.
+    auto opacity = 1.0;
+    auto const* item = pill->parentItem();
+    while (item != nullptr)
+    {
+        opacity *= item->opacity();
+        item = item->parentItem();
+    }
+    CHECK(opacity == 1.0);
+    // And it is still centred on its own grid.
+    auto const& grid = *pill->parentItem();
+    CHECK(pill->x() + (pill->width() / 2) == Catch::Approx(grid.width() / 2).margin(1));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}

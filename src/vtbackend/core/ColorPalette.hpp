@@ -307,6 +307,10 @@ struct ColorPalette
 
     /// How much of its colour a cell outside every hint match keeps while hint mode is on: the rest is
     /// blended toward the background, so the labels stand out.
+    ///
+    /// Deliberately allowed below 4.5:1: while hint mode is up the rest of the page is inactive content,
+    /// de-emphasised so the labels -- which do reach 4.5:1 -- are what the eye finds (WCAG 1.4.3 exempts
+    /// inactive text). Leaving hint mode restores it.
     float hintUnmatchedOpacity = 0.5f;
 
     RGBColorPair indicatorStatusLineInactive = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
