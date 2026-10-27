@@ -438,6 +438,73 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("Settings reopens on the profile or scheme it showed, or on its first page",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // I4: a profile or scheme page is remembered with its entity's name, and opens only with it.
+    contour::test::QmlMessageCapture const warnings;
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const rememberPage = [&remembered](std::string page) {
+        remembered.state.settingsWindow = config::SettingsWindowState {
+            .x = 0, .y = 0, .width = 0, .height = 0, .screen = {}, .show = {}, .page = std::move(page)
+        };
+    };
+    auto const open = [&remembered]() {
+        return std::make_unique<HostFixture>(
+            window::settingsWindowConventionsFor(config::HostPlatform::Other),
+            config::UiStyle::Native,
+            &remembered);
+    };
+
+    SECTION("a profile page is written back with its name")
+    {
+        auto fx = open();
+        fx->show();
+        fx->controller->editProfile("main");
+        fx->page().setProperty("editorMode", QStringLiteral("profile"));
+        CHECK(fx->host.lastPage() == QStringLiteral("profile:main"));
+        fx->controller->editColorScheme("default");
+        fx->page().setProperty("editorMode", QStringLiteral("scheme"));
+        CHECK(fx->host.lastPage() == QStringLiteral("scheme:default"));
+        fx->page().setProperty("editorMode", QStringLiteral("keybindings"));
+        CHECK(fx->host.lastPage() == QStringLiteral("keybindings"));
+    }
+
+    SECTION("a remembered profile opens with its draft")
+    {
+        rememberPage("profile:main");
+        auto fx = open();
+        fx->show();
+        CHECK(fx->page().property("editorMode").toString() == QStringLiteral("profile"));
+        CHECK(fx->controller->editingProfile() == QStringLiteral("main"));
+        CHECK_FALSE(fx->controller->profileFields().isEmpty());
+    }
+
+    SECTION("a remembered scheme opens with its draft")
+    {
+        rememberPage("scheme:default");
+        auto fx = open();
+        fx->show();
+        CHECK(fx->page().property("editorMode").toString() == QStringLiteral("scheme"));
+        CHECK(fx->controller->editingScheme() == QStringLiteral("default"));
+    }
+
+    SECTION("a profile that is gone, or a page without its entity, opens the first page")
+    {
+        for (auto const* page: { "profile:gone", "profile", "scheme:gone", "scheme" })
+        {
+            INFO(page);
+            rememberPage(page);
+            auto fx = open();
+            fx->show();
+            CHECK(fx->page().property("editorMode").toString() == QStringLiteral("globals"));
+            CHECK(fx->controller->editingProfile().isEmpty());
+        }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("closing Settings flushes a pending edit", "[contour][gui][qml][settingswindow][host]")
 {
     contour::test::QmlMessageCapture const warnings;

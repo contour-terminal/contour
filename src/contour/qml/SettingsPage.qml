@@ -28,8 +28,44 @@ Rectangle {
     // click telling them what they already came here to do. Global settings is the one pane that
     // always exists — a fresh install has no GUI-owned profile or colour scheme to show instead.
     property string editorMode: "globals"
-    // Every page editorMode names, for a host that remembers the last one.
-    readonly property var pages: ["globals", "keybindings", "profile", "scheme"]
+    // The pages that show no entity of their own, by the id a host remembers them under.
+    readonly property var pages: ["globals", "keybindings"]
+    // The page shown, as a host remembers it: a profile or scheme page with the name of what it shows
+    // ("profile:main"), as neither means anything without it.
+    readonly property string pageId: editorMode === "profile"
+                                     ? "profile:" + (controller ? controller.editingProfile : "")
+                                     : editorMode === "scheme"
+                                       ? "scheme:" + (controller ? controller.editingScheme : "")
+                                       : editorMode
+
+    // Opens the page @p id names (see pageId), with its profile or scheme. A page this release does not
+    // know, or a profile or scheme that is gone, leaves the page where it is.
+    // Returns whether it opened it.
+    function openPage(id) {
+        if (pages.indexOf(id) >= 0) {
+            editorMode = id
+            return true
+        }
+        if (!controller)
+            return false
+        var separator = id.indexOf(":")
+        if (separator < 0)
+            return false
+        var kind = id.substring(0, separator)
+        var name = id.substring(separator + 1)
+        var list = kind === "profile" ? controller.profiles : kind === "scheme" ? controller.colorSchemes : []
+        for (var i = 0; i < list.length; ++i) {
+            if (list[i].name !== name)
+                continue
+            if (kind === "profile")
+                controller.editProfile(name)
+            else
+                controller.editColorScheme(name)
+            editorMode = kind
+            return true
+        }
+        return false
+    }
 
     // Why the controller last refused what the page asked of it -- a value the configuration would reject,
     // a name already taken, a file it could not write -- kept until the next change it saves, or until the

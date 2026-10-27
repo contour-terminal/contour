@@ -40,12 +40,17 @@ ThemedWindow
         windowController: settingsWindow.host
 
         // The page the host remembers across restarts: opened on it, and told of every change. A page the
-        // page does not know -- one an older or newer release named -- leaves it on its first page.
+        // page does not know -- one an older or newer release named, or a profile or scheme that is gone --
+        // leaves it on its first page.
+        // Written back only once restored: the page's first page settles while it is built, before it has
+        // read the one the host remembers.
+        property bool pageRestored: false
         Component.onCompleted: {
-            if (settingsWindow.host && settingsPage.pages.indexOf(settingsWindow.host.lastPage) >= 0)
-                settingsPage.editorMode = settingsWindow.host.lastPage
+            if (settingsWindow.host)
+                settingsPage.openPage(settingsWindow.host.lastPage)
+            pageRestored = true
         }
-        onEditorModeChanged: if (settingsWindow.host) settingsWindow.host.lastPage = settingsPage.editorMode
+        onPageIdChanged: if (pageRestored && settingsWindow.host) settingsWindow.host.lastPage = settingsPage.pageId
     }
 
     Shortcut
