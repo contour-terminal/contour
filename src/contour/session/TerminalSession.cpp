@@ -614,13 +614,6 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // What the pane header shows before the shell reports anything: the directory the session started in.
     refreshDisplayWorkingDirectory();
 
-#ifdef CONTOUR_EXTENSIONS
-    // A question asked while no display showed this session (a background tab) is shown now.
-    if (_extensionState && _extensionState->consent && _extensionState->consent->current())
-        QMetaObject::invokeMethod(
-            this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
-#endif
-
     // A closed session has nothing to resize: its PTY is gone. Closing a pane makes QML re-run the
     // Loader binding for the surviving panes, which re-enters setSession() -> attachDisplay() while
     // onClosed() is still unwinding, so this path really is reached after the PTY has been closed.
@@ -1061,9 +1054,15 @@ void TerminalSession::concludeRole(GuardedRole role, PermissionDecision decision
         _rememberedPermissions[role] = decision;
 
     // Whoever answered -- the user, the configuration or a remembered answer -- this drains what the role's
-    // question asks about, so the question goes. Shown, the next one opens on the next turn of the event
-    // loop, once the dialog that answered this one has closed; with none left the dialog's data empties now.
-    switch (_permissionQueue.withdraw(role))
+    // question asks about, so the question goes.
+    withdrawPermissionAsk(role);
+}
+
+void TerminalSession::withdrawPermissionAsk(PermissionAsk const& ask)
+{
+    // Shown, the next one opens on the next turn of the event loop, once the dialog that answered this one
+    // has closed; with none left the dialog's data empties now.
+    switch (_permissionQueue.withdraw(ask))
     {
         case PromptChange::Due:
             // A new question from now on: an answer still on its way to the one that went is not its answer.
@@ -1071,6 +1070,23 @@ void TerminalSession::concludeRole(GuardedRole role, PermissionDecision decision
             QMetaObject::invokeMethod(this, [this]() { showNextPermission(); }, Qt::QueuedConnection);
             break;
         case PromptChange::None: publishPendingPermission(); break;
+    }
+}
+
+void TerminalSession::offerPermissionAsk(PermissionAsk const& ask)
+{
+    switch (_permissionQueue.offer(ask))
+    {
+        case PromptChange::Due:
+            ++_shownQuestionId;
+            showNextPermission();
+            break;
+        case PromptChange::None:
+            // Already asked. Shown, what it asks may have changed since (a later font, another paste, a
+            // larger capture), so the dialog's data follows; waiting, it is built when it is shown.
+            if (_permissionQueue.current() == ask)
+                publishPendingPermission();
+            break;
     }
 }
 
@@ -1084,12 +1100,14 @@ void TerminalSession::answerPermission(int questionId, PermissionDecision decisi
             "Ignoring an answer to question {}: question {} is the one asked.", questionId, _shownQuestionId);
         return;
     }
-    // An extension's consent is answered through its own queue.
     if (auto const* const role = std::get_if<GuardedRole>(&*ask))
     {
         sessionLog()("Permission for {} answered {}, {} by user.", *role, decision, memory);
         executeRole(*role, decision, memory); // its executor withdraws the question (concludeRole)
+        return;
     }
+    // An extension's consent: recorded where its grants live, through its own queue.
+    answerExtensionConsent(decision, memory);
 }
 
 std::optional<PermissionAsk> TerminalSession::pendingPermissionAsk() const
@@ -1100,9 +1118,11 @@ std::optional<PermissionAsk> TerminalSession::pendingPermissionAsk() const
 std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
 {
     auto const ask = _permissionQueue.current();
-    auto const* const role = ask ? std::get_if<GuardedRole>(&*ask) : nullptr;
-    if (role == nullptr)
+    if (!ask)
         return std::nullopt;
+    auto const* const role = std::get_if<GuardedRole>(&*ask);
+    if (role == nullptr)
+        return consentPermissionPrompt();
 
     // Program-supplied text all: each builder makes it safe to show.
     auto const subject = resolvedWindowTitle();
@@ -1134,6 +1154,13 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
 
 void TerminalSession::publishPendingPermission()
 {
+    // An extension's question answered meanwhile through another session's prompt, or gone with a reload of
+    // the extensions, leaves its place in line: it has nothing left to ask.
+    while (_permissionQueue.current() == PermissionAsk { ExtensionConsentAsk {} }
+           && !consentPermissionPrompt())
+        if (_permissionQueue.withdraw(ExtensionConsentAsk {}) == PromptChange::Due)
+            ++_shownQuestionId;
+
     auto const prompt = currentPermissionPrompt();
     // The question shown, asked again with more to it (a larger capture, another paste, another font), is
     // another question: a click on what was shown must never grant what was not. So it takes a new id, and an
@@ -1224,20 +1251,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
             else
             {
                 sessionLog()("Permission for {} requires asking user.", role);
-                switch (_permissionQueue.offer(role))
-                {
-                    case PromptChange::Due:
-                        ++_shownQuestionId;
-                        showNextPermission();
-                        break;
-                    case PromptChange::None:
-                        // Already asked. Shown, what it asks may have changed since (a later font, another
-                        // paste, a larger capture), so the dialog's data follows; waiting, it is built when
-                        // it is shown.
-                        if (_permissionQueue.current() == PermissionAsk { role })
-                            publishPendingPermission();
-                        break;
-                }
+                offerPermissionAsk(role);
             }
             break;
         }
@@ -1245,37 +1259,6 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
 }
 
 // {{{ status-line extensions
-QString TerminalSession::pendingExtensionPermissionText() const
-{
-#ifdef CONTOUR_EXTENSIONS
-    if (_extensionState && _extensionState->consent)
-        if (auto const* const request = _extensionState->consent->current())
-            return QString::fromStdString(vtextension::consentText(*request));
-#endif
-    return {};
-}
-
-void TerminalSession::allowPendingExtension()
-{
-#ifdef CONTOUR_EXTENSIONS
-    answerExtensionConsent(vtextension::ConsentAnswer::Allowed);
-#endif
-}
-
-void TerminalSession::denyPendingExtension()
-{
-#ifdef CONTOUR_EXTENSIONS
-    answerExtensionConsent(vtextension::ConsentAnswer::Denied);
-#endif
-}
-
-void TerminalSession::dismissPendingExtension()
-{
-#ifdef CONTOUR_EXTENSIONS
-    answerExtensionConsent(vtextension::ConsentAnswer::Dismissed);
-#endif
-}
-
 vtextension::SessionExtensions const* TerminalSession::statusLineExtensions() const noexcept
 {
 #ifdef CONTOUR_EXTENSIONS
@@ -1471,17 +1454,35 @@ void TerminalSession::offerExtensionConsent(vtextension::ExtensionConsentRequest
         consent = std::make_unique<vtextension::ExtensionConsentQueue>();
     sessionLog()("Status-line extension {} asks to run its declared commands.", request.hostId);
     if (consent->offer(std::move(request), answers) == vtextension::ConsentPrompt::Due)
-        emit requestPermissionForExtension();
+        offerPermissionAsk(ExtensionConsentAsk {});
 }
 
-void TerminalSession::answerExtensionConsent(vtextension::ConsentAnswer answer)
+void TerminalSession::answerExtensionConsent(PermissionDecision decision, PermissionMemory memory)
 {
-    if (!_extensionState || !_extensionState->consent)
+    if (!_extensionState || !_extensionState->consent || _extensionState->consent->current() == nullptr)
         return;
-    // The next question opens once the dialog that answered this one has closed.
-    if (_extensionState->consent->answer(answer) == vtextension::ConsentPrompt::Due)
-        QMetaObject::invokeMethod(
-            this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
+    auto const verdict = consentVerdictFor(decision, memory);
+    if (!verdict)
+    {
+        // Allow without remembering it, or for the session: nothing an extension's grant can be. The prompt
+        // stays as it was; the dialog does not offer either.
+        sessionLog()("Ignoring an answer an extension's consent cannot take: {}, {}.", decision, memory);
+        return;
+    }
+    auto const answer = [&] {
+        switch (*verdict)
+        {
+            case ConsentVerdict::Allow: return vtextension::ConsentAnswer::Allowed;
+            case ConsentVerdict::Deny: return vtextension::ConsentAnswer::Denied;
+            case ConsentVerdict::Dismiss: break;
+        }
+        return vtextension::ConsentAnswer::Dismissed;
+    }();
+    auto const next = _extensionState->consent->answer(answer);
+    withdrawPermissionAsk(ExtensionConsentAsk {});
+    // The next extension waits its turn behind whatever else is asked meanwhile.
+    if (next == vtextension::ConsentPrompt::Due)
+        offerPermissionAsk(ExtensionConsentAsk {});
 }
 
 std::string_view TerminalSession::foregroundProcessToldToExtensions() const noexcept
@@ -1506,10 +1507,35 @@ void TerminalSession::scheduleRetiredRelease()
 {
     _app.releaseRetiredExtensionsSoon();
 }
+
+std::optional<PermissionPrompt> TerminalSession::consentPermissionPrompt() const
+{
+    if (!_extensionState || !_extensionState->consent)
+        return std::nullopt;
+    auto const* const request = _extensionState->consent->current();
+    if (request == nullptr)
+        return std::nullopt;
+    auto question = vtextension::consentQuestion(*request);
+    auto lines = std::vector<PromptLine> {};
+    lines.reserve(question.lines.size());
+    for (auto& line: question.lines)
+        lines.push_back(consentLine(std::move(line.text), line.weight));
+    return consentPrompt(std::move(question.title), std::move(lines));
+}
 #else
 TerminalSession::ExtensionStatePtr TerminalSession::createExtensionState()
 {
     return { nullptr, nullptr };
+}
+
+void TerminalSession::answerExtensionConsent(PermissionDecision /*decision*/, PermissionMemory /*memory*/)
+{
+    // No extension asks in a build without them.
+}
+
+std::optional<PermissionPrompt> TerminalSession::consentPermissionPrompt() const
+{
+    return std::nullopt;
 }
 
 void TerminalSession::extensionFramePublished()

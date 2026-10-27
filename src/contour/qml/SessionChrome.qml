@@ -22,7 +22,7 @@
 // Every session access is null-guarded: a split pane's session can be rebound to null during teardown,
 // and the single-pane session is never null, so the guards are safe for both.
 // SessionChrome is a plain Item (not a ContourTerminal), so it needs no Contour.Terminal import; its
-// sibling components (RequestPermission, DeferredBell) resolve via the implicit same-directory import.
+// sibling components (PermissionDialog, DeferredBell) resolve via the implicit same-directory import.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
@@ -333,21 +333,6 @@ Item {
         }
     }
 
-    // Asked when a status-line extension first runs one of the commands its manifest declares, with
-    // `run_command: ask`. The text names the extension, its module and every command it declares, made safe to
-    // show by the session. Every answer is remembered in the grants file, so "to all" means the same as the
-    // plain one; Abort, or closing the dialog, is no answer.
-    RequestPermission {
-        id: requestExtensionCommandsDialog
-        objectName: "extensionCommandsDialog"
-        title: qsTr("Allow this status-line extension to run commands?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
-        onYesClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
-        onNoClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
-        onRejected: if (chrome.session !== null) chrome.session.dismissPendingExtension();
-    }
-
     // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
     // keeps its own pattern, count and highlights, so a split shows the bar over the pane being
     // searched. Opened by the session's searchBarRequested signal, wired in Connections below.
@@ -485,9 +470,5 @@ Item {
 
         // The session asks another question, or what the one shown asks changed.
         function onPendingPermissionChanged() { permissionDialog.follow(chrome.session); }
-        function onRequestPermissionForExtension() {
-            requestExtensionCommandsDialog.text = chrome.session.pendingExtensionPermissionText();
-            requestExtensionCommandsDialog.open();
-        }
     }
 }

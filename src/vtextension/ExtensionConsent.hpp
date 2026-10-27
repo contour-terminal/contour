@@ -5,7 +5,9 @@
 #include <deque>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include <vtcontrol/Catalog.hpp>
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Manifest.hpp>
@@ -44,21 +46,29 @@ struct ExtensionConsentRequest
     Manifest manifest;  ///< What it declares, and the digest the answer is bound to.
 };
 
-/// The first line of a consent prompt for commands only: fixed, and free of anything a guest chose.
-inline constexpr auto ConsentHeadline = std::string_view { "A status-line extension asks to run commands." };
+/// One line of what a consent prompt says beneath its title.
+struct ConsentLine
+{
+    std::string text {}; ///< Plain text, guest text neutralized.
+    vtcontrol::ConsentWeight weight = vtcontrol::ConsentWeight::Observes; ///< Whether it can run commands.
+};
 
-/// The first line of a consent prompt that asks for control permissions too: fixed, likewise.
-inline constexpr auto ControlConsentHeadline =
-    std::string_view { "A status-line extension asks to run commands and to control the terminal." };
+/// What a consent prompt asks: a title naming who asks and for what, then its detail.
+struct ConsentQuestion
+{
+    std::string title {};              ///< "“git-stats” wants to control Contour".
+    std::vector<ConsentLine> lines {}; ///< The module, every command it may run, every permission it asks.
+};
 
 /// @param request A request.
-/// @return What the prompt asking it says: who asks, from which module, every command it may run, each
-///         verbatim, then one line `May <phrase>.` per control permission it declares (vtcontrol's
-///         consentPhraseOf). Plain text whatever the guest declares: its first line is ConsentHeadline,
-///         or ControlConsentHeadline when it declares a control permission, so that a dialog that guesses
-///         the format (Qt::mightBeRichText reads up to the first line break) finds no markup there. A
-///         manifest without `control` lines is asked exactly as before they existed.
-[[nodiscard]] std::string consentText(ExtensionConsentRequest const& request);
+/// @return What the prompt asking it says. The title is `“{name}” wants to control Contour` when the manifest
+///         declares control permissions, else `“{name}” wants to run commands`. The lines are `Module:
+///         {hostId}`, then (unless only control permissions are declared) "It may run only these, ..." and
+///         one
+///         `{name}: {command line}` per declared command, then one `May {phrase}.` per control permission
+///         (vtcontrol's consentPhraseOf), a permission that can run commands as `May {phrase} (can run
+///         commands).` with that weight. Every text the guest chose goes through neutralizedForDisplay().
+[[nodiscard]] ConsentQuestion consentQuestion(ExtensionConsentRequest const& request);
 
 /// What the user answered.
 enum class ConsentAnswer : uint8_t

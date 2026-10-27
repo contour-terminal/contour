@@ -27,11 +27,15 @@ KitDialog {
 
     readonly property var _lines: root.prompt.lines !== undefined ? root.prompt.lines : []
 
-    // The footnote type, bold: a copy, as KitDialog's heading font is.
+    // The footnote type, bold: built anew, since the token's font is shared (a copy's bold does not stick).
     readonly property font _strongFont: {
-        let strong = chromeStyle.type.footnote;
-        strong.bold = true;
-        return strong;
+        let footnote = chromeStyle.type.footnote;
+        let strong = { family: footnote.family, bold: true };
+        if (footnote.pixelSize > 0)
+            strong.pixelSize = footnote.pixelSize;
+        else
+            strong.pointSize = footnote.pointSize;
+        return Qt.font(strong);
     }
 
     function _answer(decision, memory) {

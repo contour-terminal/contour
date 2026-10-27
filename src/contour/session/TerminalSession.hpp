@@ -1095,28 +1095,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] std::optional<PermissionAsk> pendingPermissionAsk() const;
     Q_INVOKABLE void resizeTerminalToDisplaySize();
 
-    /// What the prompt asking requestPermissionForExtension() says: which extension asks, from which module,
-    /// and every command its manifest declares, made safe to show. Empty while nothing is asked, and always
-    /// in a build without extensions.
-    /// @return The prompt's text.
-    [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const;
-
-    /// Answers the extension prompt: Allow is remembered (in the grants file) for that extension's manifest.
-    Q_INVOKABLE void allowPendingExtension();
-
-    /// Answers the extension prompt: Deny is remembered too.
-    Q_INVOKABLE void denyPendingExtension();
-
-    /// Closes the extension prompt unanswered: nothing is remembered, and a new pane asks again.
-    Q_INVOKABLE void dismissPendingExtension();
-
     // The extension members below are declared, and the class laid out, the same with and without
     // CONTOUR_EXTENSIONS: translation units that see no such definition (ContourTerminalDisplay's) include
     // this header too. Only a build with extensions defines and calls them.
 
     /// Asks the user whether an extension may run its declared commands. Callable from any thread -- it is
     /// what an extension's lane calls -- and never waits: the question is posted to the GUI thread, where
-    /// requestPermissionForExtension() is emitted once it is the one to show.
+    /// it waits in the session's permission queue (pendingPermission) until it is the one to show.
     /// @param hostId Which installed extension asks.
     /// @param manifest What it declares.
     void requestExtensionPermission(std::string_view hostId, vtextension::Manifest const& manifest);
@@ -1566,6 +1551,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @p memory is Once, and withdraws @p role's question, which this answer settles.
     void concludeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
 
+    /// Puts @p ask in line: shown at once, and announced, if it is now the one to show; republished if it is
+    /// the one shown, asked again.
+    void offerPermissionAsk(PermissionAsk const& ask);
+
+    /// Takes @p ask out of line, settled: the next question is shown on the next turn of the event loop.
+    void withdrawPermissionAsk(PermissionAsk const& ask);
+
     /// Builds the prompt of the question shown, from its role's pending state; nothing while none is asked.
     [[nodiscard]] std::optional<PermissionPrompt> currentPermissionPrompt();
 
@@ -1642,8 +1634,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// pendingPermission() changed: another question is shown, the one shown was answered, or what it asks
     /// changed while it is shown.
     void pendingPermissionChanged();
-    /// A status-line extension asks to run its commands; pendingExtensionPermissionText() says what to show.
-    void requestPermissionForExtension();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
 
@@ -1990,7 +1980,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                                vtextension::IGrantStore& answers);
 
     /// Records the answer to the extension prompt, and asks the next question, if any.
-    void answerExtensionConsent(vtextension::ConsentAnswer answer);
+    /// Answers the extension consent shown with @p decision and @p memory (consentVerdictFor()), and puts the
+    /// next extension's question in line. An answer consent cannot take is logged and changes nothing.
+    void answerExtensionConsent(PermissionDecision decision, PermissionMemory memory);
+
+    /// The prompt of the extension consent shown; nothing without one (or in a build without extensions).
+    [[nodiscard]] std::optional<PermissionPrompt> consentPermissionPrompt() const;
 
     /// Has the extensions follow the foreground process while one subscribes to it, and stop when none does.
     /// GUI thread.

@@ -60,6 +60,7 @@
 #include <QtCore/QTextStream>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
+#include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
@@ -1998,55 +1999,6 @@ TEST_CASE("SessionChrome instantiates and wires a (null) session without errors 
     chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
     QCoreApplication::processEvents();
     CHECK(chrome != nullptr);
-}
-
-TEST_CASE("SessionChrome asks an extension's question and hands the answer back (offscreen)",
-          "[contour][gui][qml][extensions]")
-{
-    QQmlEngine engine;
-    MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    REQUIRE(component.isReady());
-
-    MockSession session;
-    session.extensionQuestion = QStringLiteral("status: git -C {dir} status --porcelain=v2 --branch");
-    QVariantMap initial;
-    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
-    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
-    REQUIRE(chrome != nullptr);
-    auto* const dialog = chrome->findChild<QObject*>(QStringLiteral("extensionCommandsDialog"));
-    REQUIRE(dialog != nullptr);
-
-    // The question is shown as the session words it.
-    emit session.requestPermissionForExtension();
-    QCoreApplication::processEvents();
-    CHECK(dialog->property("text").toString() == session.extensionQuestion);
-
-    SECTION("Yes allows, and so does Yes to All: every answer is remembered anyway")
-    {
-        REQUIRE(QMetaObject::invokeMethod(dialog, "yesClicked"));
-        REQUIRE(QMetaObject::invokeMethod(dialog, "yesToAllClicked"));
-        CHECK(session.extensionAllowed == 2);
-    }
-
-    SECTION("No denies")
-    {
-        REQUIRE(QMetaObject::invokeMethod(dialog, "noClicked"));
-        REQUIRE(QMetaObject::invokeMethod(dialog, "noToAllClicked"));
-        CHECK(session.extensionDenied == 2);
-    }
-
-    SECTION("closing it is no answer")
-    {
-        REQUIRE(QMetaObject::invokeMethod(dialog, "rejected"));
-        CHECK(session.extensionDismissed == 1);
-        CHECK(session.extensionAllowed == 0);
-        CHECK(session.extensionDenied == 0);
-    }
 }
 
 TEST_CASE("StatusLineItemDialog edits which extension an Extension item shows (offscreen)",
@@ -10231,6 +10183,57 @@ TEST_CASE("PermissionDialog: a program-chosen title renders as text (offscreen)"
     auto const* heading = host.part("kitDialogHeading");
     CHECK(heading->property("text").toString() == "Allow “<img src=x>” to read the screen?");
     CHECK(heading->property("textFormat").toInt() == Qt::PlainText);
+}
+
+TEST_CASE("PermissionDialog: an extension's consent sets apart what can run commands (offscreen)",
+          "[contour][gui][qml][extensions]")
+{
+    using contour::session::consentLine;
+    using contour::session::consentPrompt;
+    MockSession session;
+    auto host = PermissionChrome { session };
+    constexpr auto QuestionId = 4;
+    session.setPendingPermission(contour::session::permissionPromptMap(
+        consentPrompt(
+            "“git-stats” wants to control Contour",
+            { consentLine("Module: git-stats@/x.wasm", vtcontrol::ConsentWeight::Observes),
+              consentLine("May see the windows, tabs and panes.", vtcontrol::ConsentWeight::Observes),
+              consentLine("May type into panes (can run commands).",
+                          vtcontrol::ConsentWeight::CanRunCommands) }),
+        QuestionId));
+    REQUIRE(host.waitOpened(true));
+
+    auto const lines = permissionLines(*host.dialog);
+    REQUIRE(lines.size() == 3);
+    CHECK_FALSE(lines[1]->property("font").value<QFont>().bold());
+    CHECK(lines[2]->property("font").value<QFont>().bold());
+    auto* const remember = host.part("permissionRemember");
+    CHECK(remember->property("checked").toBool());
+    CHECK(remember->property("text").toString() == "Remember for this extension");
+
+    auto* const accept = host.part("kitDialogAccept");
+    CHECK(accept->property("enabled").toBool());
+
+    SECTION("Allow, remembered")
+    {
+        REQUIRE(QMetaObject::invokeMethod(accept, "clicked"));
+        REQUIRE(session.lastPermissionAnswer.has_value());
+        CHECK(session.lastPermissionAnswer->id == QuestionId);
+        CHECK(session.lastPermissionAnswer->decision == PermissionDecision::Allow);
+        CHECK(session.lastPermissionAnswer->memory == PermissionMemory::Persistent);
+    }
+
+    SECTION("unticked, Allow is not offered, and Deny is this once")
+    {
+        remember->setProperty("checked", false);
+        CHECK_FALSE(accept->property("enabled").toBool());
+        // Return takes Deny, the default; it would not take a disabled Allow either.
+        REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogReject"), "clicked"));
+        REQUIRE(session.lastPermissionAnswer.has_value());
+        CHECK(session.lastPermissionAnswer->decision == PermissionDecision::Deny);
+        CHECK(session.lastPermissionAnswer->memory == PermissionMemory::Once);
+    }
+    CHECK(session.permissionAnswers == 1);
 }
 
 TEST_CASE("PermissionDialog: the Terminal row's lines read on its surface (offscreen)",

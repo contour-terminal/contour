@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <vtextension/ExtensionConsent.hpp>
 
 using vtextension::ConsentAnswer;
-using vtextension::ConsentHeadline;
 using vtextension::ConsentPrompt;
-using vtextension::consentText;
+using vtextension::consentQuestion;
+using vtextension::ConsentQuestion;
 using vtextension::DeclaredCommand;
 using vtextension::displayedCommandLine;
 using vtextension::ExtensionConsentQueue;
@@ -146,80 +148,96 @@ TEST_CASE("ExtensionConsent: the command line is the full argv template", "[vtex
           == "rm<U+202E> -rf");
 }
 
-TEST_CASE("ExtensionConsent: the prompt says who asks, from where, for what", "[vtextension][extensions]")
+namespace
 {
-    auto request = gitRequest();
-    request.manifest.name = utf8(U"g\u202Eit");
-    auto const text = consentText(request);
-    CHECK(text.contains("g<U+202E>it"));
-    CHECK(text.contains("git@/usr/share/contour/extensions/git.wasm"));
-    CHECK(text.contains("status: git -C {dir} status --porcelain=v2 --branch"));
-    CHECK_FALSE(text.contains(utf8(U"\u202E")));
+/// The texts of @p question's lines, in order.
+[[nodiscard]] std::vector<std::string> textsOf(ConsentQuestion const& question)
+{
+    auto texts = std::vector<std::string> {};
+    for (auto const& line: question.lines)
+        texts.push_back(line.text);
+    return texts;
 }
 
-TEST_CASE("ExtensionConsent: the prompt's first line holds nothing the guest chose",
-          "[vtextension][extensions]")
+/// The one line of @p question whose text is @p text; fails the test without one.
+[[nodiscard]] vtextension::ConsentLine const& lineOf(ConsentQuestion const& question, std::string_view text)
 {
-    // A dialog guesses rich text from the first line alone; whatever the guest puts in its manifest is
-    // further down, and verbatim.
+    auto const found = std::ranges::find(question.lines, text, &vtextension::ConsentLine::text);
+    REQUIRE(found != question.lines.end());
+    return *found;
+}
+} // namespace
+
+TEST_CASE("ExtensionConsent: the prompt says who asks, from where, for what", "[vtextension][consent]")
+{
+    auto request = gitRequest();
+    request.manifest.name = utf8(U"g‮it");
+    auto const question = consentQuestion(request);
+    CHECK(question.title == "“g<U+202E>it” wants to run commands");
+    CHECK_FALSE(question.title.contains(utf8(U"‮")));
+    std::ignore = lineOf(question, "Module: git@/usr/share/contour/extensions/git.wasm");
+    std::ignore = lineOf(question, "status: git -C {dir} status --porcelain=v2 --branch");
+}
+
+TEST_CASE("ExtensionConsent: what a guest chose is shown as text", "[vtextension][consent]")
+{
     auto request = gitRequest();
     request.manifest.name = "<b>git</b>";
     request.manifest.commands.front().argvTemplate = { "git",
                                                        "<br>",
                                                        "<span style=\"font-size:1px\">x</span>" };
-    auto const text = consentText(request);
-    CHECK(text.substr(0, text.find('\n')) == ConsentHeadline);
-    CHECK(text.contains("Extension: \"<b>git</b>\""));
-    CHECK(text.contains("status: git <br> '<span style=\"font-size:1px\">x</span>'"));
+    auto const question = consentQuestion(request);
+    CHECK(question.title == "“<b>git</b>” wants to run commands");
+    std::ignore = lineOf(question, "status: git <br> '<span style=\"font-size:1px\">x</span>'");
 }
 
-TEST_CASE("ExtensionConsent: a prompt for commands only", "[vtextension][extensions]")
+TEST_CASE("ExtensionConsent: a prompt for commands only", "[vtextension][consent]")
 {
-    // The golden text of a manifest that declares commands and nothing else.
-    CHECK(consentText(gitRequest())
-          == "A status-line extension asks to run commands.\n"
-             "\n"
-             "Extension: \"git\"\n"
-             "Module: git@/usr/share/contour/extensions/git.wasm\n"
-             "\n"
-             "It may run only these, exactly as written ({name} is filled in by the extension):\n"
-             "\n"
-             "    status: git -C {dir} status --porcelain=v2 --branch\n"
-             "\n"
-             "Allow it? The answer is remembered until the extension's manifest changes.");
+    auto const question = consentQuestion(gitRequest());
+    CHECK(question.title == "“git” wants to run commands");
+    CHECK(textsOf(question)
+          == std::vector<std::string> {
+              "Module: git@/usr/share/contour/extensions/git.wasm",
+              "It may run only these, exactly as written ({name} is filled in by the extension):",
+              "status: git -C {dir} status --porcelain=v2 --branch",
+          });
+    for (auto const& line: question.lines)
+        CHECK(line.weight == vtcontrol::ConsentWeight::Observes);
 }
 
 TEST_CASE("consent lists control permissions", "[vtextension][consent][control]")
 {
+    using vtcontrol::ConsentWeight;
     using vtcontrol::Permission;
     auto request = gitRequest();
+    request.manifest.name = "git-stats";
     request.manifest.control = { Permission::Read, Permission::Input };
-    CHECK(consentText(request)
-          == "A status-line extension asks to run commands and to control the terminal.\n"
-             "\n"
-             "Extension: \"git\"\n"
-             "Module: git@/usr/share/contour/extensions/git.wasm\n"
-             "\n"
-             "It may run only these, exactly as written ({name} is filled in by the extension):\n"
-             "\n"
-             "    status: git -C {dir} status --porcelain=v2 --branch\n"
-             "\n"
-             "It may also control the terminal:\n"
-             "\n"
-             "    May see the windows, tabs and panes.\n"
-             "    May type into panes.\n"
-             "\n"
-             "Allow it? The answer is remembered until the extension's manifest changes.");
+    auto const question = consentQuestion(request);
+    CHECK(question.title == "“git-stats” wants to control Contour");
+    CHECK(textsOf(question)
+          == std::vector<std::string> {
+              "Module: git@/usr/share/contour/extensions/git.wasm",
+              "It may run only these, exactly as written ({name} is filled in by the extension):",
+              "status: git -C {dir} status --porcelain=v2 --branch",
+              "May see the windows, tabs and panes.",
+              "May type into panes (can run commands).",
+          });
+    CHECK(lineOf(question, "May type into panes (can run commands).").weight
+          == ConsentWeight::CanRunCommands);
+    CHECK(lineOf(question, "May see the windows, tabs and panes.").weight == ConsentWeight::Observes);
 
     SECTION("without commands")
     {
         request.manifest.commands.clear();
         request.manifest.control = { Permission::Screen, Permission::Write };
-        auto const text = consentText(request);
-        CHECK(text.substr(0, text.find('\n')) == vtextension::ControlConsentHeadline);
-        CHECK_FALSE(text.contains("It may run only these"));
-        CHECK(text.contains("    May read what panes show, and their command history.\n"
-                            "    May open, split, close and label tabs and panes.\n"));
+        auto const controlOnly = consentQuestion(request);
+        CHECK(controlOnly.title == "“git-stats” wants to control Contour");
+        CHECK(textsOf(controlOnly)
+              == std::vector<std::string> {
+                  "Module: git@/usr/share/contour/extensions/git.wasm",
+                  "May read what panes show, and their command history.",
+                  "May open, split, close and label tabs and panes (can run commands).",
+              });
     }
 }
 

@@ -200,3 +200,41 @@ TEST_CASE("PermissionQueue: one question at a time, in the order asked", "[conto
     CHECK(queue.offer(a) == PromptChange::None);
     CHECK(queue.current() == PermissionAsk { ExtensionConsentAsk {} });
 }
+
+TEST_CASE("PermissionPrompt: an answer to an extension's consent", "[contour][permission][prompt]")
+{
+    using contour::session::ConsentAnswerError;
+    using contour::session::ConsentVerdict;
+    using contour::session::consentVerdictFor;
+    CHECK(consentVerdictFor(PermissionDecision::Allow, PermissionMemory::Persistent)
+          == ConsentVerdict::Allow);
+    CHECK(consentVerdictFor(PermissionDecision::Deny, PermissionMemory::Persistent) == ConsentVerdict::Deny);
+    CHECK(consentVerdictFor(PermissionDecision::Deny, PermissionMemory::Once) == ConsentVerdict::Dismiss);
+    CHECK(consentVerdictFor(PermissionDecision::Allow, PermissionMemory::Once)
+          == std::unexpected { ConsentAnswerError::AllowMustBeRemembered });
+    CHECK(consentVerdictFor(PermissionDecision::Allow, PermissionMemory::Session)
+          == std::unexpected { ConsentAnswerError::ScopeNotOffered });
+    CHECK(consentVerdictFor(PermissionDecision::Deny, PermissionMemory::Session)
+          == std::unexpected { ConsentAnswerError::ScopeNotOffered });
+}
+
+TEST_CASE("PermissionPrompt: an extension's consent is remembered, and what can run commands stands out",
+          "[contour][permission][prompt]")
+{
+    using namespace contour::session;
+    auto const prompt = consentPrompt(
+        "“git-stats” wants to control Contour",
+        { consentLine("May see the windows, tabs and panes.", vtcontrol::ConsentWeight::Observes),
+          consentLine("May type into panes (can run commands).", vtcontrol::ConsentWeight::CanRunCommands) });
+    CHECK(prompt.title == "“git-stats” wants to control Contour");
+    CHECK(prompt.denyText == "Deny");
+    CHECK(prompt.allowText == "Allow");
+    CHECK(prompt.rememberText == ExtensionRememberText);
+    CHECK(prompt.rememberScope == PermissionMemory::Persistent);
+    CHECK(prompt.initialMemory == PermissionMemory::Persistent);
+    CHECK(prompt.defaultDecision == PermissionDecision::Deny);
+    CHECK(prompt.allowOnce == AllowOnce::Withheld);
+    REQUIRE(prompt.lines.size() == 2);
+    CHECK(prompt.lines[0].weight == PromptLineWeight::Regular);
+    CHECK(prompt.lines[1].weight == PromptLineWeight::Strong);
+}

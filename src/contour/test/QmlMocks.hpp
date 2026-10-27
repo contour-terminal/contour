@@ -398,17 +398,7 @@ class MockSession: public QObject
     /// The last answer given, if any.
     std::optional<PermissionAnswer> lastPermissionAnswer;
     int permissionAnswers = 0; ///< How often the chrome answered.
-    // }}}
-
-    // The extension prompt: what it shows, and each answer, counted.
-    [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const { return extensionQuestion; }
-    Q_INVOKABLE void allowPendingExtension() { ++extensionAllowed; }
-    Q_INVOKABLE void denyPendingExtension() { ++extensionDenied; }
-    Q_INVOKABLE void dismissPendingExtension() { ++extensionDismissed; }
-    QString extensionQuestion;  ///< What pendingExtensionPermissionText() answers.
-    int extensionAllowed = 0;   ///< How often the chrome allowed.
-    int extensionDenied = 0;    ///< How often it denied.
-    int extensionDismissed = 0; ///< How often it closed the prompt unanswered.
+                               // }}}
 
   signals:
     void lineCountChanged();
@@ -436,7 +426,6 @@ class MockSession: public QObject
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
     void onScrollOffsetChanged(int /*value*/);
     void pendingPermissionChanged();
-    void requestPermissionForExtension();
 
   private:
     QString _searchPattern;

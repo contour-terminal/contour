@@ -12,11 +12,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <vtcontrol/Catalog.hpp>
 
 namespace contour::session
 {
@@ -144,6 +147,45 @@ inline constexpr std::string_view SessionRememberText = "Don't ask again in this
 /// The prompt asking whether a command runs again.
 /// @param displayedCommandLine The command line, already made safe to show.
 [[nodiscard]] PermissionPrompt rerunPrompt(std::string_view displayedCommandLine);
+
+/// The checkbox an extension's consent prompt offers: an extension's grant can only be recorded.
+inline constexpr std::string_view ExtensionRememberText = "Remember for this extension";
+
+/// A line of an extension's consent prompt: Strong where what it allows can run commands.
+/// @param text The line, guest text already neutralized.
+/// @param weight Whether it can run commands.
+[[nodiscard]] PromptLine consentLine(std::string text, vtcontrol::ConsentWeight weight);
+
+/// The prompt asking whether an extension may run its commands and use what it declares: Deny · Allow, Deny
+/// by default, the box "Remember for this extension" ticked from the start, and Allow only with it ticked --
+/// an extension's answer lives only where its grants are recorded.
+/// @param title Who asks, for what.
+/// @param lines The detail (consentLine()).
+[[nodiscard]] PermissionPrompt consentPrompt(std::string title, std::vector<PromptLine> lines);
+
+/// What an answer to an extension's consent prompt does.
+enum class ConsentVerdict : uint8_t
+{
+    Dismiss = 0, ///< Nothing is recorded; a new pane asks again.
+    Deny,        ///< Refused, and recorded.
+    Allow,       ///< Allowed, and recorded.
+};
+
+/// Why an answer cannot be an extension's consent.
+enum class ConsentAnswerError : uint8_t
+{
+    AllowMustBeRemembered =
+        0,           ///< Allow just this once: an extension's grant has nowhere to live but the record.
+    ScopeNotOffered, ///< For the session: the consent prompt does not offer it.
+};
+
+/// The consent an answer gives: (Allow, Persistent) allows, (Deny, Persistent) denies, (Deny, Once)
+/// dismisses.
+/// @param decision The answer.
+/// @param memory How long it stands.
+/// @return The verdict, or why the pair is not one.
+[[nodiscard]] std::expected<ConsentVerdict, ConsentAnswerError> consentVerdictFor(
+    PermissionDecision decision, PermissionMemory memory) noexcept;
 
 /// @p prompt as QML reads it (TerminalSession::pendingPermission()): `id`, `title`, `lines` (`{text, weight,
 /// style}`), `denyText`, `allowText`, `rememberText`, `rememberScope`, `initialMemory`, `defaultDecision` and

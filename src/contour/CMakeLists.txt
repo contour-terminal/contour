@@ -404,7 +404,6 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ThemedWindow.qml
         qml/BellSound.qml
         qml/DeferredBell.qml
-        qml/RequestPermission.qml
         qml/SearchBar.qml
         qml/SessionChrome.qml
         qml/TitleBar.qml

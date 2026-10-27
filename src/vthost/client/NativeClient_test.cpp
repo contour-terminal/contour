@@ -1595,7 +1595,10 @@ TEST_CASE("a daemon's question keeps the control permissions it asks for",
     auto const consent = vthost::client::consentRequestOf(request);
     REQUIRE(consent.has_value());
     CHECK(consent->manifest.control == manifest.control);
-    CHECK(vtextension::consentText(*consent).contains("May type into panes."));
+    auto const question = vtextension::consentQuestion(*consent);
+    CHECK(std::ranges::any_of(question.lines, [](vtextension::ConsentLine const& line) {
+        return line.text == "May type into panes (can run commands).";
+    }));
 
     // A permission this build cannot name cannot be shown, so the question is not asked.
     auto unknown = request;

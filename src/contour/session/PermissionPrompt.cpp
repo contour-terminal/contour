@@ -121,6 +121,44 @@ PermissionPrompt rerunPrompt(std::string_view displayedCommandLine)
         { verbatim(std::string { displayedCommandLine }), prose("It is typed at the prompt and entered.") });
 }
 
+PromptLine consentLine(std::string text, vtcontrol::ConsentWeight weight)
+{
+    return PromptLine { .text = std::move(text),
+                        .weight = weight == vtcontrol::ConsentWeight::CanRunCommands
+                                      ? PromptLineWeight::Strong
+                                      : PromptLineWeight::Regular,
+                        .style = PromptLineStyle::Prose };
+}
+
+PermissionPrompt consentPrompt(std::string title, std::vector<PromptLine> lines)
+{
+    return PermissionPrompt { .title = std::move(title),
+                              .lines = std::move(lines),
+                              .denyText = "Deny",
+                              .allowText = "Allow",
+                              .rememberText = std::string { ExtensionRememberText },
+                              .rememberScope = PermissionMemory::Persistent,
+                              .initialMemory = PermissionMemory::Persistent,
+                              .defaultDecision = PermissionDecision::Deny,
+                              .allowOnce = AllowOnce::Withheld };
+}
+
+std::expected<ConsentVerdict, ConsentAnswerError> consentVerdictFor(PermissionDecision decision,
+                                                                    PermissionMemory memory) noexcept
+{
+    switch (memory)
+    {
+        case PermissionMemory::Persistent:
+            return decision == PermissionDecision::Allow ? ConsentVerdict::Allow : ConsentVerdict::Deny;
+        case PermissionMemory::Once:
+            if (decision == PermissionDecision::Allow)
+                return std::unexpected { ConsentAnswerError::AllowMustBeRemembered };
+            return ConsentVerdict::Dismiss;
+        case PermissionMemory::Session: break;
+    }
+    return std::unexpected { ConsentAnswerError::ScopeNotOffered };
+}
+
 QVariantMap permissionPromptMap(PermissionPrompt const& prompt, int questionId)
 {
     auto lines = QVariantList {};
@@ -128,8 +166,8 @@ QVariantMap permissionPromptMap(PermissionPrompt const& prompt, int questionId)
     for (auto const& line: prompt.lines)
         lines.append(QVariantMap {
             { QStringLiteral("text"), QString::fromStdString(line.text) },
-            { QStringLiteral("weight"), std::to_underlying(line.weight) },
-            { QStringLiteral("style"), std::to_underlying(line.style) },
+            { QStringLiteral("weight"), static_cast<int>(std::to_underlying(line.weight)) },
+            { QStringLiteral("style"), static_cast<int>(std::to_underlying(line.style)) },
         });
     return QVariantMap {
         { QStringLiteral("id"), questionId },
@@ -138,10 +176,10 @@ QVariantMap permissionPromptMap(PermissionPrompt const& prompt, int questionId)
         { QStringLiteral("denyText"), QString::fromStdString(prompt.denyText) },
         { QStringLiteral("allowText"), QString::fromStdString(prompt.allowText) },
         { QStringLiteral("rememberText"), QString::fromStdString(prompt.rememberText) },
-        { QStringLiteral("rememberScope"), std::to_underlying(prompt.rememberScope) },
-        { QStringLiteral("initialMemory"), std::to_underlying(prompt.initialMemory) },
-        { QStringLiteral("defaultDecision"), std::to_underlying(prompt.defaultDecision) },
-        { QStringLiteral("allowOnce"), std::to_underlying(prompt.allowOnce) },
+        { QStringLiteral("rememberScope"), static_cast<int>(std::to_underlying(prompt.rememberScope)) },
+        { QStringLiteral("initialMemory"), static_cast<int>(std::to_underlying(prompt.initialMemory)) },
+        { QStringLiteral("defaultDecision"), static_cast<int>(std::to_underlying(prompt.defaultDecision)) },
+        { QStringLiteral("allowOnce"), static_cast<int>(std::to_underlying(prompt.allowOnce)) },
     };
 }
 
