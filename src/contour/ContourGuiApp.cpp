@@ -1361,12 +1361,10 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             // Null once a connect that failed has been given up on (see _awaitAttach).
             if (!_nativeController)
                 return;
-            // Before stop(), which closes every mirror pty — the order matters.
-            // @see TerminalSession::noteTransportLost
-            _sessionManager.noteTransportLost();
-            // A Reconnect from a footer that ends here did not bring the daemon back: the panes it was for
-            // say so, with the connection's own words.
-            _sessionManager.reconnectFailed(_nativeController->failure());
+            // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
+            // that ends here did not bring the daemon back: the panes it was for say so, with the
+            // connection's own words. @see TerminalSessionManager::connectionClosed
+            _sessionManager.connectionClosed(_nativeController->failure());
             _nativeController->stop();
         },
         Qt::QueuedConnection);

@@ -2183,6 +2183,12 @@ void TerminalSessionManager::reconnectFailed(std::string_view reason)
             session->noteReconnectFailure(std::string { reason });
 }
 
+void TerminalSessionManager::connectionClosed(std::string_view reason)
+{
+    reconnectFailed(reason);
+    noteTransportLost();
+}
+
 std::expected<TerminalSession*, RestartError> TerminalSessionManager::replaceEndedSession(
     TerminalSession& ended)
 {

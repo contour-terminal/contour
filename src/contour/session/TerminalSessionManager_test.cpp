@@ -2913,6 +2913,37 @@ TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the
     CHECK(manager.sessionForId(lost.left->modelSessionId()) == lost.left);
 }
 
+TEST_CASE(
+    "TerminalSessionManager: a later connection loss is not blamed on a Reconnect that left a pane behind",
+    "[manager][paneend][reconnect]")
+{
+    using contour::session::EndReason;
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    // The returned layout omits the right pane's session, so the run stays up for it.
+    lost.factory->namedForReconnect = { &lost.left->terminal().device() };
+    lost.left->runFooterAction();
+    manager.rebindDisconnected();
+    auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
+    REQUIRE(newLeft != nullptr);
+    REQUIRE(newLeft->endReason() == EndReason::None);
+
+    // The connection then drops for good: the Reconnect's pane says so, the pane this loss just ended does
+    // not.
+    manager.connectionClosed("the connection closed");
+    newLeft->terminal().device().close();
+    newLeft->onClosed();
+
+    CHECK(lost.right->getFooterMessage() == "Could not reconnect: the connection closed.");
+    CHECK(newLeft->getFooterMessage()
+          == "Disconnected from the Contour daemon. Its sessions are still running.");
+
+    // And that ended the run: a failure now is nobody's to report.
+    manager.reconnectFailed("another");
+    CHECK(newLeft->getFooterMessage()
+          == "Disconnected from the Contour daemon. Its sessions are still running.");
+}
+
 TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
           "[manager][paneend][reconnect]")
 {

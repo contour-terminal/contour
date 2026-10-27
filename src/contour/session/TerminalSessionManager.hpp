@@ -544,6 +544,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// panes say so in their footers, as "Could not reconnect: {reason}.". Nothing when none was running.
     /// @param reason Why it ended, as the connection says it.
     void reconnectFailed(std::string_view reason);
+
+    /// The connection to the daemon ended for good: a Reconnect that was running is over (@see
+    /// reconnectFailed), and then every live pane is told it lost the connection. In that order, so the
+    /// "Could not reconnect" footer reaches only the panes that were already Disconnected, never those that
+    /// this loss has just made so. Call before the controller's stop() closes the mirror ptys.
+    /// @param reason Why the connection ended, as it says it.
+    void connectionClosed(std::string_view reason);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
