@@ -36,15 +36,17 @@ and canonical mode. Those readers show no lock and turn nothing on:
 - `sudo` and similar asked over `ssh`, where the prompt runs on another machine's terminal
 - panes whose program runs on a host Contour cannot read flags from (an SSH pane, a Windows ConPTY pane)
 
-For these, the lock is simply absent: it is never wrong in the other direction on purpose, so a lock means the
-program hides the typing, and no lock means only that Contour could not tell.
+For these, the lock is simply absent: a lock means the program hides the typing, and no lock means only that
+Contour could not tell.
 
 ### How quickly it notices
 
 Contour re-reads the flags when output reaches the pane, before each key and paste is sent, and on focus. For two
 seconds after the pane's last output or key it also checks every 100 ms while the pane has focus, then stops: an
 idle pane wakes nothing. A program that turns echo off only after more than two quiet seconds is noticed at the
-first key you type, which is read before the key goes in.
+first key you type. That key has already reached the system by then, so Secure Keyboard Entry protects the keys
+after it, not that one. The opposite case leans safe: a program that turns echo back on silently, more than two
+seconds after the last key or output, leaves the lock and Secure Keyboard Entry on until the next key or output.
 
 Panes hosted by a daemon report the same state over the native protocol, so the lock works under
 `daemon.mode: auto` as well.
