@@ -5,6 +5,7 @@
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/UiStyle.hpp>
 
+#include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
@@ -651,6 +652,31 @@ struct LayoutTokens
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
 
+/// One block chip style's pill, in points (the canvas's `blocks` board).
+struct PillTokens
+{
+    double type = 0.0; ///< The label's size.
+    int weight = 400;  ///< The label's weight, on the CSS 100-900 scale.
+    int padX = 0;      ///< The padding left and right of the label.
+    int padY = 0;      ///< The padding above and below it, for a pill fitted to its label.
+    int height = 0;    ///< The pill's height, clamped to the row; 0 fits it to the label and padding.
+    int radius = 0;    ///< Its corners' radius.
+    double ring = 0.0; ///< The ring inside its edge; 0 has none.
+
+    [[nodiscard]] bool operator==(PillTokens const&) const = default;
+};
+
+/// The native rows' block chips and rail marks, drawn by the renderer in the UI font. All zero on the
+/// Terminal row, whose chips are terminal text.
+struct BlockChipTokens
+{
+    std::array<PillTokens, vtbackend::PillStyleCount> pills {}; ///< By vtbackend::PillStyle.
+    double markType = 0.0; ///< The glyph in a rail mark (size.railMark is its disc).
+    int markWeight = 400;  ///< Its weight.
+
+    [[nodiscard]] bool operator==(BlockChipTokens const&) const = default;
+};
+
 /// How strongly an unfocused pane dims, by the chrome's tone (the kit's @c pane.dim).
 struct DimTokens
 {
@@ -693,6 +719,7 @@ struct ChromeTokenRow
     std::array<ChromeColorSource, StatusColorRoleCount> statusInk {};
     DimTokens dim {};                ///< How strongly an unfocused pane dims.
     MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
+    BlockChipTokens blockChips {};   ///< The native rows' block chips and rail marks.
 };
 
 /// The WCAG AA ratio chrome text must reach against what it sits on: the terminal's own, one entity, so a
@@ -1066,6 +1093,20 @@ namespace detail
         .paneHeader = 0, .paneGap = 1, .paneGapRows = 1, .splitHit = 8, .paneInset = 0, .paneCardRadius = 0
     };
 
+    /// The native rows' block chips, the canvas's `blocks` board: 11-pt labels -- semibold for a failure and
+    /// a running command, regular for a success's duration and the fold chip -- the status pills padded 1 x 8
+    /// at radius 9, the fold chip 0 x 10, 20 pt tall at radius 10 (size.foldChip, radius.chip) with a 0.5-pt
+    /// ring; a rail mark's glyph 9 pt bold on its 13-pt disc (size.railMark).
+    inline constexpr BlockChipTokens NativeBlockChips {
+        .pills = { PillTokens { .type = 11, .weight = 400 },
+                   PillTokens { .type = 11, .weight = 600, .padX = 8, .padY = 1, .radius = 9 },
+                   PillTokens { .type = 11, .weight = 600, .padX = 8, .padY = 1, .radius = 9 },
+                   PillTokens {
+                       .type = 11, .weight = 400, .padX = 10, .height = 20, .radius = 10, .ring = 0.5 } },
+        .markType = 9,
+        .markWeight = 700,
+    };
+
     /// The native rows' status inks, indexed by @c StatusColorRole: the status hues' mark inks, since every
     /// ink read from here is a mark (a badge, the host chip's dot, a progress bar).
     inline constexpr std::array<ChromeColorSource, StatusColorRoleCount> NativeStatusInk {
@@ -1182,6 +1223,7 @@ namespace detail
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
+        .blockChips = NativeBlockChips,
     };
 
     inline constexpr ChromeTokenRow FluentRow {
@@ -1288,6 +1330,7 @@ namespace detail
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
+        .blockChips = NativeBlockChips,
     };
 
     inline constexpr ChromeTokenRow LinuxRow {
@@ -1394,6 +1437,7 @@ namespace detail
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
+        .blockChips = NativeBlockChips,
     };
 
     inline constexpr ElevationLevel TerminalShadow {

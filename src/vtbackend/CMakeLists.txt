@@ -27,10 +27,12 @@ set(vtbackend_HEADERS
     core/CaptureLineMode.hpp
     core/ClipboardWriter.hpp
     core/CommandBlockId.hpp
+    core/BlockPill.hpp
     core/BlockRailKinds.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp
     shell/BlockChipPlacement.hpp
+    shell/BlockPill.hpp
     shell/BlockRail.hpp
     shell/BlockStatusText.hpp
     shell/CommandBlock.hpp
@@ -168,6 +170,7 @@ set(vtbackend_SOURCES
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
+    shell/BlockPill.cpp
     shell/BlockRail.cpp
     shell/BlockStatusText.cpp
     shell/CommandBlock.cpp
@@ -322,6 +325,7 @@ if(LIBTERMINAL_TESTING)
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
         shell/BlockChipPlacement_test.cpp
+        shell/BlockPill_test.cpp
         shell/BlockRail_test.cpp
         shell/BlockStatusText_test.cpp
         shell/CommandBlock_test.cpp

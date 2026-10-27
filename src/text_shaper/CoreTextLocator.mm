@@ -62,9 +62,31 @@ namespace
         return NSFontWeightRegular;
     }
 
+    /// The system's user-interface font at @p description's weight and slant: CoreText's own, which no
+    /// family name reliably reaches.
+    [[nodiscard]] CFObject<CTFontRef> systemUiFont(FontDescription const& description)
+    {
+        auto const base = CFObject<CTFontRef>(CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 16.0, nullptr));
+        if (!base)
+            return {};
+        auto const descriptor = CFObject<CTFontDescriptorRef>(CTFontCopyFontDescriptor(base.get()));
+        auto const styled = CFObject<CTFontDescriptorRef>(CTFontDescriptorCreateCopyWithAttributes(
+            descriptor.get(),
+            (__bridge CFDictionaryRef) @{
+                (id) kCTFontTraitsAttribute: @ {
+                    (id) kCTFontWeightTrait: [NSNumber numberWithDouble:makeFontWeight(description.weight)],
+                    (id) kCTFontSlantTrait:
+                        [NSNumber numberWithDouble:description.slant == FontSlant::Normal ? 0.0 : 1.0],
+                },
+            }));
+        return CFObject<CTFontRef>(CTFontCreateWithFontDescriptor(styled.get(), 16.0, nullptr));
+    }
+
     [[nodiscard]] CFObject<CTFontRef> matchFamily(std::string const& family,
                                                   FontDescription const& description)
     {
+        if (family == SystemUiFontFamily)
+            return systemUiFont(description);
         auto nativeFamily = family == "emoji" ? std::string("Apple Color Emoji")
                                               : std::string(platformFontFamily(family));
         auto const name = CFObject<CFStringRef>(

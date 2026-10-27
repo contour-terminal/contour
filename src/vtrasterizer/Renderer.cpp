@@ -181,7 +181,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _textRenderer { _gridMetrics, *_textShaper,   _fontDescriptions,
                     _fonts,       _imageRenderer, glyphScalerFor(textScalingMethod) },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
-    _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block }
+    _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block },
+    _chipRenderer { _gridMetrics, _textRenderer, _fontDescriptions, _fonts }
 {
     _textRenderer.updateFontMetrics();
     _imageRenderer.setCellSize(cellSize());
@@ -533,6 +534,7 @@ void Renderer::updateFontMetrics()
         configureTextureAtlas();
 
     _textRenderer.updateFontMetrics();
+    _chipRenderer.clearCache();
     _imageRenderer.setCellSize(cellSize());
 
     clearCache();
@@ -734,8 +736,14 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     reconcileTotalPageSize(terminal.totalPageSize());
 
     // The renderer survives tab changes; snapshot the active terminal palette before taking a render buffer.
-    _backgroundRenderer.setDefaultColor(
-        terminal.runUnderStateLock([&] { return terminal.colorPalette().defaultBackground; }));
+    // Under the same lock, the terminal learns how wide its pills are in the face this renderer draws them
+    // in -- measured once per font and chip metrics, and taken only where they changed.
+    auto const& labelMetrics = _chipRenderer.labelMetrics();
+    _pageBackground = terminal.runUnderStateLock([&] {
+        terminal.setPillLabelMetrics(labelMetrics);
+        return terminal.colorPalette().defaultBackground;
+    });
+    _backgroundRenderer.setDefaultColor(_pageBackground);
 
     executeImageDiscards();
 
@@ -850,6 +858,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             renderLines(split.mainLines);
             renderChipBands(std::span(buffer.chipBands), 0);
             renderAnnotations(std::span(buffer.annotations));
+            renderChips(std::span(buffer.chips), 0);
         });
         renderGutter(std::span(buffer.gutter), 0);
         if (statusShifted)
@@ -877,6 +886,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             // The gutter and the annotations belong to the main display, and scroll with it.
             renderChipBands(std::span(renderBuffer.get().chipBands), smoothPixelOffset);
             renderAnnotations(std::span(renderBuffer.get().annotations));
+            renderChips(std::span(renderBuffer.get().chips), smoothPixelOffset);
         });
         renderGutter(std::span(renderBuffer.get().gutter), smoothPixelOffset);
 
@@ -1054,12 +1064,46 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter,
                 renderOverlayCell(gutterRenderCell(cell), "renderGutter");
     });
 
-    // The marks, centred on the bar: text only, so no cell background covers the strip around them.
+    // The marks the UI font draws -- ✗ on its disc, ▸, ✓ -- at size.railMark, centred on the bar.
+    for (auto const& cell: gutter)
+        if (cell.mark != vtbackend::RailMark::None && drawsMarkInUiFont(cell.mark, _gridMetrics))
+        {
+            try
+            {
+                _chipRenderer.renderMark(*_renderTarget, cell, _pageBackground, smoothScrollOffset);
+            }
+            catch (std::exception const& e)
+            {
+                errorLog()("renderGutter: skipping a mark on line {} due to exception: {}",
+                           cell.lineOffset,
+                           e.what());
+            }
+        }
+
+    // The rest -- the user mark's ◆ -- as their two-cell glyphs: text only, so no cell background covers the
+    // strip around them.
     renderShiftedLeft(railMarkShift(_gridMetrics), [&] {
         for (auto const& cell: gutter)
-            if (cell.mark != vtbackend::RailMark::None)
+            if (cell.mark != vtbackend::RailMark::None && !drawsMarkInUiFont(cell.mark, _gridMetrics))
                 _textRenderer.renderCell(railMarkCell(cell));
     });
+}
+
+void Renderer::renderChips(std::span<vtbackend::RenderChip const> chips, int smoothScrollOffset)
+{
+    ZoneScoped;
+    for (auto const& chip: chips)
+    {
+        try
+        {
+            _chipRenderer.renderChip(*_renderTarget, chip, smoothScrollOffset);
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()(
+                "renderChips: skipping a chip on line {} due to exception: {}", chip.lineOffset, e.what());
+        }
+    }
 }
 
 void Renderer::renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset)

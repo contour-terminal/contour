@@ -119,7 +119,9 @@ FontSourceList DirectWriteLocator::locate(FontDescription const& fd)
     FontSourceList output;
 
     // A name that is not UTF-8 names no family, and the fallback below is used.
-    auto const familyName = core::toUtf16(fd.familyName).value_or(std::wstring {});
+    // A generic name (`system-ui`, `monospace`) as the family it means here.
+    auto const familyName =
+        core::toUtf16(std::string(platformFontFamily(fd.familyName))).value_or(std::wstring {});
 
     // Resolve each requested family independently: a missing fallback must not silently turn into
     // Consolas, and a family without an exact weight/slant still has a nearest matching face.

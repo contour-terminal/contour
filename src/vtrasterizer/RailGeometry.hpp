@@ -11,6 +11,9 @@
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/GutterCells.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <vector>
 
 namespace vtrasterizer
@@ -38,29 +41,124 @@ inline constexpr auto MarkCells = 2;
     return metrics.pageMargin.left - metrics.rail.strip + metrics.rail.barInset;
 }
 
+/// How a rail mark is drawn.
+enum class MarkShape : uint8_t
+{
+    Glyph = 0, ///< The glyph alone, in the mark's colour.
+    Disc,      ///< A disc of the mark's colour, the glyph knocked out of it in the page's.
+    Cells,     ///< Not in the UI font: the private-use glyph, in cells (the user mark's ◆).
+};
+
+/// One rail mark's face.
+struct RailMarkFace
+{
+    vtbackend::RailMark mark = vtbackend::RailMark::None; ///< The mark.
+    char32_t glyph {};                                    ///< What it says; 0 for none.
+    MarkShape shape = MarkShape::Glyph;                   ///< How it is drawn.
+};
+
+/// The canvas's marks, by RailMark: ✗ on a danger disc, the running ▸ and the hovered ✓ alone.
+inline constexpr auto RailMarkFaces = std::array {
+    RailMarkFace { .mark = vtbackend::RailMark::None, .glyph = 0, .shape = MarkShape::Cells },
+    RailMarkFace { .mark = vtbackend::RailMark::Check, .glyph = U'✓', .shape = MarkShape::Glyph },
+    RailMarkFace { .mark = vtbackend::RailMark::Cross, .glyph = U'✗', .shape = MarkShape::Disc },
+    RailMarkFace { .mark = vtbackend::RailMark::Running, .glyph = U'▸', .shape = MarkShape::Glyph },
+    RailMarkFace { .mark = vtbackend::RailMark::UserMark, .glyph = 0, .shape = MarkShape::Cells },
+};
+static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMark::UserMark) + 1);
+
+/// The face of @p mark.
+/// @param mark The mark.
+/// @return Its row in RailMarkFaces.
+[[nodiscard]] constexpr RailMarkFace const& railMarkFace(vtbackend::RailMark mark) noexcept
+{
+    return RailMarkFaces[static_cast<std::size_t>(mark)];
+}
+
+/// The box a rail mark of @p metrics is drawn in on the row at @p rowTop: a square of the mark's edge (the
+/// row's height at most), centred on the bar and on the row.
+/// @param metrics The grid's metrics.
+/// @param rowTop The row's top, in device pixels.
+/// @return The box.
+[[nodiscard]] constexpr RailRect railMarkDiscBox(GridMetrics const& metrics, int rowTop) noexcept
+{
+    auto const rowHeight = metrics.cellSize.height.as<int>();
+    auto const edge = std::min(metrics.rail.chips.markEdge, rowHeight);
+    auto const centre = railBarLeft(metrics) + (metrics.rail.bar / 2);
+    return RailRect {
+        .x = centre - (edge / 2), .y = rowTop + ((rowHeight - edge) / 2), .width = edge, .height = edge
+    };
+}
+
+/// Whether @p mark is drawn in the UI font, centred on the bar at @c size.railMark -- rather than as its
+/// two-cell private-use glyph, as the user mark is, and as every mark is where the row has no chip metrics.
+/// @param mark The mark.
+/// @param metrics The grid's metrics.
+/// @return Whether it is.
+[[nodiscard]] constexpr bool drawsMarkInUiFont(vtbackend::RailMark mark, GridMetrics const& metrics) noexcept
+{
+    return railMarkFace(mark).shape != MarkShape::Cells && metrics.rail.chips.markEdge > 0;
+}
+
+/// The box @p cell's mark covers on its row at @p rowTop: its disc's (railMarkDiscBox()), or, for a mark in
+/// cells, the whole row two cells wide.
+/// @param cell The rail cell, which carries a mark.
+/// @param metrics The grid's metrics.
+/// @param rowTop The row's top.
+/// @return The box.
+[[nodiscard]] constexpr RailRect railMarkCover(vtbackend::RenderGutterCell const& cell,
+                                               GridMetrics const& metrics,
+                                               int rowTop) noexcept
+{
+    if (drawsMarkInUiFont(cell.mark, metrics))
+        return railMarkDiscBox(metrics, rowTop);
+    auto const width = MarkCells * metrics.cellSize.width.as<int>();
+    return RailRect { .x = railBarLeft(metrics) + (metrics.rail.bar / 2) - (width / 2),
+                      .y = rowTop,
+                      .width = width,
+                      .height = metrics.cellSize.height.as<int>() };
+}
+
 /// The rectangles @p cell's rail segment is drawn as on its row: the bar, kept @c endInset clear of the end
 /// of a block it starts or ends, and at each such end a cap row one pixel narrower on either side, which is
-/// as much of @c radius as rectangles can draw. A row carrying a mark draws no bar: the mark stands in its
-/// place.
+/// as much of @c radius as rectangles can draw. On a row carrying a mark the bar stops at the mark's box and
+/// resumes below it (railMarkCover()), where the block goes on above or below the row.
 /// @param cell The rail cell.
 /// @param metrics The grid's metrics.
 /// @param smoothScrollOffset The rows' sub-cell scroll offset, in device pixels.
-/// @return The rectangles; none for a row with no segment, or with a mark.
+/// @return The rectangles; none for a row with no segment.
 [[nodiscard]] inline std::vector<RailRect> railRects(vtbackend::RenderGutterCell const& cell,
                                                      GridMetrics const& metrics,
                                                      int smoothScrollOffset)
 {
     using vtbackend::RailSegment;
-    if (cell.rail == RailSegment::None || cell.mark != vtbackend::RailMark::None)
+    if (cell.rail == RailSegment::None)
         return {};
 
     auto const& rail = metrics.rail;
     auto const rowTop = metrics.mapTopLeft(cell.lineOffset, vtbackend::ColumnOffset(0), smoothScrollOffset).y;
+    auto const rowBottom = rowTop + metrics.cellSize.height.as<int>();
     auto const startsHere = cell.rail == RailSegment::Head || cell.rail == RailSegment::Single;
     auto const endsHere = cell.rail == RailSegment::Tail || cell.rail == RailSegment::Single;
-    auto const top = rowTop + (startsHere ? rail.endInset : 0);
-    auto const bottom = rowTop + metrics.cellSize.height.as<int>() - (endsHere ? rail.endInset : 0);
     auto const x = railBarLeft(metrics);
+
+    if (cell.mark != vtbackend::RailMark::None)
+    {
+        // The mark stands in for the bar's end it sits on; the bar runs on to the rows beside it.
+        auto const box = railMarkCover(cell, metrics, rowTop);
+        auto rects = std::vector<RailRect> {};
+        if (!startsHere && box.y > rowTop)
+            rects.push_back(RailRect { .x = x, .y = rowTop, .width = rail.bar, .height = box.y - rowTop });
+        if (!endsHere && box.y + box.height < rowBottom)
+            rects.push_back(RailRect { .x = x,
+                                       .y = box.y + box.height,
+                                       .width = rail.bar,
+                                       .height = rowBottom - (box.y + box.height) });
+        return rects;
+    }
+
+    auto const top = rowTop + (startsHere ? rail.endInset : 0);
+    auto const bottom = rowBottom - (endsHere ? rail.endInset : 0);
 
     auto rects = std::vector { RailRect { .x = x, .y = top, .width = rail.bar, .height = bottom - top } };
     auto const rounded = rail.radius > 0 && rail.bar > 2;

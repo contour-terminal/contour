@@ -143,8 +143,10 @@ TEST_CASE("FontControl.gutterChromeFor.followsTheChromeRow", "[contour][geometry
                             .barRadiusPoints = 2,
                             .markPoints = 13,
                             .barEndPoints = 2,
-                            .foldChipHitPoints = 24 });
+                            .foldChipHitPoints = 24,
+                            .chips = contour::config::detail::NativeBlockChips });
     CHECK(gutterChromeFor(ChromeStyle::Terminal).form == BlockColumnForm::Glyphs);
+    CHECK(gutterChromeFor(ChromeStyle::Terminal).chips == contour::config::BlockChipTokens {});
 }
 
 TEST_CASE("FontControl.configuredGutterWidth.reservesTheRailStripAfterTheCells",
@@ -183,8 +185,12 @@ TEST_CASE("FontControl.gutterRailMetricsFor.isTheStripThePageFitReserves", "[con
     auto const layout = contour::session::configuredGutterLayout(config, mac);
     auto const rail = contour::session::gutterRailMetricsFor(layout, mac, Scale);
     CHECK(rail
-          == vtrasterizer::GutterRailMetrics {
-              .strip = 33, .bar = 5, .barInset = 12, .radius = 3, .endInset = 3 });
+          == vtrasterizer::GutterRailMetrics { .strip = 33,
+                                               .bar = 5,
+                                               .barInset = 12,
+                                               .radius = 3,
+                                               .endInset = 3,
+                                               .chips = contour::session::blockChipMetricsFor(mac, Scale) });
     CHECK(rail.strip == configuredGutterExtent(config, cell, Scale, mac).rail);
 
     // The Terminal row has no strip, so the renderer moves nothing.
@@ -192,4 +198,38 @@ TEST_CASE("FontControl.gutterRailMetricsFor.isTheStripThePageFitReserves", "[con
     CHECK(contour::session::gutterRailMetricsFor(
               contour::session::configuredGutterLayout(config, terminal), terminal, Scale)
           == vtrasterizer::GutterRailMetrics {});
+}
+
+TEST_CASE("FontControl.blockChipMetricsFor.areTheCanvasPillsAtTheScale", "[contour][geometry][gutter]")
+{
+    // The canvas's pills in device pixels: the status pills padded 1 x 8 at radius 9, the fold chip 0 x 10,
+    // 20 tall at radius 10 with a hairline ring; type sizes stay in points, as the grid's do.
+    using vtbackend::PillStyle;
+    auto const mac = gutterChromeFor(contour::config::ChromeStyle::MacOS);
+    auto const metrics = contour::session::blockChipMetricsFor(mac, 2.0);
+    auto const& failed = metrics.pills[static_cast<std::size_t>(PillStyle::Failed)];
+    CHECK(
+        failed
+        == vtrasterizer::PillMetrics { .fontSize = 11, .weight = 600, .padX = 16, .padY = 2, .radius = 18 });
+    auto const& fold = metrics.pills[static_cast<std::size_t>(PillStyle::Fold)];
+    CHECK(fold
+          == vtrasterizer::PillMetrics {
+              .fontSize = 11, .weight = 400, .padX = 20, .padY = 0, .height = 40, .radius = 20, .ring = 1 });
+    CHECK(metrics.pills[static_cast<std::size_t>(PillStyle::Success)]
+          == vtrasterizer::PillMetrics { .fontSize = 11, .weight = 400 });
+    CHECK(metrics.markEdge == 26);
+    CHECK(metrics.markFontSize == 9);
+    CHECK(metrics.markWeight == 700);
+
+    // At 1x the 0.5-pt ring is still a pixel: a hairline never vanishes.
+    CHECK(
+        contour::session::blockChipMetricsFor(mac, 1.0).pills[static_cast<std::size_t>(PillStyle::Fold)].ring
+        == 1);
+
+    // The Terminal row draws its chips in cells: no pill metrics at all.
+    auto const terminal = gutterChromeFor(contour::config::ChromeStyle::Terminal);
+    CHECK(contour::session::gutterRailMetricsFor(
+              contour::session::configuredGutterLayout(contour::config::Config {}, terminal), terminal, 2.0)
+              .chips
+          == vtrasterizer::BlockChipMetrics {});
 }

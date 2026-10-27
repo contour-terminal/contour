@@ -91,3 +91,26 @@ TEST_CASE("blockChip.aFoldChipTakesItsColumns", "[blockchip]")
     CHECK(withoutColumns(std::vector { run(10, 25) }, run(10, 25)).empty());
     CHECK(place(runs) == inRow(58, 77));
 }
+
+TEST_CASE("blockChip.aFoldChipTakesTheRunBeforeAnRprompt", "[blockchip]")
+{
+    // m6: the fold chip follows the command into the blanks before an RPROMPT, as the status chip keeps
+    // clear of it -- not after the RPROMPT, where the row's last text ends.
+    auto const fold = [](std::vector<ColumnRange> const& runs) {
+        return foldChipTextEnd(
+            BlockChipRowFacts { .pageColumns = Page, .commandStart = ColumnOffset(16), .blankRuns = runs },
+            Chip);
+    };
+
+    // A command ending at 24, an RPROMPT at 70..79: the run 24..69 holds 1 + 20 + 2.
+    CHECK(fold({ run(19, 19), run(24, 69) }) == ColumnCount(24));
+    // Exactly 1 + 20 + 2 columns hold it; one fewer does not.
+    CHECK(fold({ run(19, 19), run(24, 46) }) == ColumnCount(24));
+    CHECK_FALSE(fold({ run(19, 19), run(24, 45) }).has_value());
+    // No run holds it: the chip follows the row's last text, as it always did.
+    CHECK_FALSE(fold({ run(19, 19), run(24, 40) }).has_value());
+    // A run reaching the page's edge needs no gap after it.
+    CHECK(fold({ run(59, 79) }) == ColumnCount(59));
+    // Never inside the prompt.
+    CHECK_FALSE(fold({ run(0, 15) }).has_value());
+}

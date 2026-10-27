@@ -30,6 +30,8 @@ struct GutterChrome
     int markPoints = 0;                     ///< The rail mark's edge (@c size.railMark).
     int barEndPoints = 0;      ///< What the bar keeps clear of a block's ends (@c space.railEnd).
     int foldChipHitPoints = 0; ///< The fold chip's least hit width (@c size.foldChipHit).
+    config::BlockChipTokens
+        chips {}; ///< The pills and rail marks the UI font draws; zero on the Terminal row.
 
     bool operator==(GutterChrome const&) const = default;
 };
@@ -47,7 +49,8 @@ struct GutterChrome
                           .barRadiusPoints = row.radii.rail,
                           .markPoints = row.size.railMark,
                           .barEndPoints = row.space.railEnd,
-                          .foldChipHitPoints = row.size.foldChipHit };
+                          .foldChipHitPoints = row.size.foldChipHit,
+                          .chips = row.blockChips };
 }
 
 /// @p points of the chrome at @p scale, in whole device pixels: rounded (R-b), so the strip the page fit

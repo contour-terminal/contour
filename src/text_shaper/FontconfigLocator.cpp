@@ -278,8 +278,10 @@ FontSourceList FontconfigLocator::locate(FontDescription const& description)
     // bool const color = true;
     // FcPatternAddBool(pat.get(), FC_COLOR, color);
 
-    if (!description.familyName.empty())
-        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) description.familyName.c_str());
+    // A generic name fontconfig may not know (`system-ui`) as the family it means here.
+    auto const family = std::string(platformFontFamily(description.familyName));
+    if (!family.empty())
+        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) family.c_str());
 
     if (description.spacing != FontSpacing::Proportional)
     {

@@ -74,14 +74,24 @@ struct GenericFontFamily
     std::string_view family;  ///< The family the platform's font locator resolves it to.
 };
 
-/// The generic family names this platform's font locator resolves itself. Empty where fontconfig
-/// knows the aliases, as it does on Linux and the BSDs.
+/// The generic family of the platform's user-interface font -- what the native rows' block chips are drawn
+/// in, beside the grid's own font. CoreText answers it with the system font itself; elsewhere it is the
+/// family GenericFontFamilies names.
+inline constexpr std::string_view SystemUiFontFamily = "system-ui";
+
+/// The generic family names this platform's font locator resolves itself. Fontconfig knows `monospace` on
+/// Linux and the BSDs, but not every version knows `system-ui`, which is its `sans-serif` there.
 #ifdef _WIN32
-inline constexpr auto GenericFontFamilies = std::array { GenericFontFamily { "monospace", "Consolas" } };
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { "monospace", "Consolas" },
+                 GenericFontFamily { SystemUiFontFamily, "Segoe UI" } };
 #elifdef __APPLE__
-inline constexpr auto GenericFontFamilies = std::array { GenericFontFamily { "monospace", "Menlo" } };
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { "monospace", "Menlo" },
+                 GenericFontFamily { SystemUiFontFamily, ".AppleSystemUIFont" } };
 #else
-inline constexpr auto GenericFontFamilies = std::array<GenericFontFamily, 0> {};
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { SystemUiFontFamily, "sans-serif" } };
 #endif
 
 /// The concrete family the terminal grid's font locator uses for @p family: what a generic name such as

@@ -34,6 +34,7 @@
 #include <set>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 static std::filesystem::path testFontPath;
 
@@ -2491,6 +2492,106 @@ TEST_CASE("Renderer.lineFlash.tintsTheRowAJumpLandedOn", "[renderer][stickyheade
     CHECK(band->x == 0);
     CHECK(band->height == Height(20));
     CHECK(band->color.alpha() > 0);
+}
+
+TEST_CASE("Renderer.chips.aNativeRowsChipIsAPillInTheUiFont", "[renderer][chip]")
+{
+    // A failed block on a native row: the terminal lays out no cell for its chip, the renderer measures the
+    // UI face once and hands the terminal its advances, then draws the pill -- rounded rectangles of the
+    // chip's fill over its placed columns -- the label's glyphs in its ink from the grid's atlas over it, and
+    // the rail's ✗ as a disc of the mark's colour centred on the bar.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin.left = 30;
+    metrics.rail = GutterRailMetrics { .strip = 22, .bar = 3, .barInset = 8, .radius = 2, .endInset = 2 };
+    metrics.rail.chips.pills[static_cast<std::size_t>(PillStyle::Failed)] =
+        PillMetrics { .fontSize = 9, .weight = 600, .padX = 8, .padY = 1, .radius = 9 };
+    metrics.rail.chips.markEdge = 13;
+    metrics.rail.chips.markFontSize = 9;
+    metrics.rail.chips.markWeight = 700;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(700), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(60) }, LineCount(100) };
+    mc.terminal.settings().gutter =
+        GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+    mc.writeToScreen(vtbackend::test::commandRun("false", { "boom" }, 2));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+    REQUIRE(mc.terminal.pillLabelMetrics().measured());
+    CHECK(mc.terminal.pillLabelMetrics().cellWidth == 10);
+    CHECK(mc.terminal.pillLabelMetrics().styles[static_cast<std::size_t>(PillStyle::Failed)].padding == 16);
+
+    // The next frame is placed by the measured face.
+    (void) mc.terminal.refreshRenderBuffer();
+    fixture.renderTarget.rectangles.clear();
+    fixture.renderTarget.getMockBackend().renderCommands.clear();
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const [chips, gutter, annotations] = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return std::tuple { buffer.get().chips, buffer.get().gutter, buffer.get().annotations };
+    }();
+    REQUIRE(chips.size() == 1);
+    auto const& chip = chips.front();
+    CHECK(chip.style == PillStyle::Failed);
+    CHECK(annotations.empty());
+    REQUIRE(chip.fill.has_value());
+
+    // Seeded metrics: 10x20 cells right of a 30-px margin.
+    auto const rowTop = unbox<int>(chip.lineOffset) * 20;
+    auto const left = 30 + (unbox<int>(chip.columns.fromColumn) * 10);
+    auto const right = 30 + ((unbox<int>(chip.columns.toColumn) + 1) * 10);
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const pill = std::ranges::to<std::vector>(rectangles | std::views::filter([&](auto const& r) {
+                                                       // The rail's bar is the same hue, but opaque and in
+                                                       // the strip.
+                                                       return r.color.rgb() == chip.fill->rgb() && r.x >= 30
+                                                              && r.color.alpha() < 0xFF;
+                                                   }));
+    REQUIRE_FALSE(std::ranges::empty(pill));
+    for (auto const& r: pill)
+    {
+        CHECK(r.x >= left);
+        CHECK(r.x + unbox<int>(r.width) <= right);
+        CHECK(r.y >= rowTop);
+        CHECK(r.y + unbox<int>(r.height) <= rowTop + 20);
+        CHECK(r.color.alpha() <= chip.fill->alpha());
+    }
+    // Right-aligned: its right end meets the columns' right edge.
+    CHECK(std::ranges::max(pill
+                           | std::views::transform([](auto const& r) { return r.x + unbox<int>(r.width); }))
+          == right);
+
+    // The label's glyphs, in the chip's ink, inside the pill's columns.
+    auto const ink = vtrasterizer::atlas::normalize(chip.ink, 1.0f);
+    auto const& tiles = fixture.renderTarget.getMockBackend().renderCommands;
+    auto const label = std::ranges::to<std::vector>(
+        tiles | std::views::filter([&](auto const& tile) { return tile.color == ink; }));
+    REQUIRE_FALSE(std::ranges::empty(label));
+    for (auto const& tile: label)
+    {
+        CHECK(tile.x.value >= left);
+        CHECK(tile.x.value < right);
+    }
+
+    // The ✗: a 13-px disc in the mark's colour, centred on the bar at x 16 + 1.
+    auto const mark = std::ranges::find(gutter, RailMark::Cross, &RenderGutterCell::mark);
+    REQUIRE(mark != gutter.end());
+    auto const disc =
+        std::ranges::to<std::vector>(rectangles | std::views::filter([&](auto const& r) {
+                                         return r.color.rgb() == mark->attributes.foregroundColor && r.x < 30;
+                                     }));
+    REQUIRE_FALSE(std::ranges::empty(disc));
+    // Wider than the 3-px bar at 16 that shares its colour: the disc itself.
+    CHECK(std::ranges::min(disc | std::views::transform([](auto const& r) { return r.x; })) >= 11);
+    CHECK(std::ranges::min(disc | std::views::transform([](auto const& r) { return r.x; })) < 16);
+    CHECK(std::ranges::max(disc
+                           | std::views::transform([](auto const& r) { return r.x + unbox<int>(r.width); }))
+          <= 24);
 }
 
 TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", "[renderer][statusline]")

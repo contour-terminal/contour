@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <mutex>
+#include <ranges>
 
 using std::string;
 
@@ -102,17 +103,44 @@ geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                     .rail = rail };
 }
 
+vtrasterizer::BlockChipMetrics blockChipMetricsFor(GutterChrome const& chrome, double scale) noexcept
+{
+    auto metrics = vtrasterizer::BlockChipMetrics { .markEdge = chromeDevicePixels(chrome.markPoints, scale),
+                                                    .markFontSize = chrome.chips.markType,
+                                                    .markWeight = chrome.chips.markWeight };
+    for (auto const index: std::views::iota(std::size_t { 0 }, vtbackend::PillStyleCount))
+    {
+        auto const& tokens = chrome.chips.pills[index];
+        metrics.pills[index] = vtrasterizer::PillMetrics {
+            .fontSize = tokens.type,
+            .weight = tokens.weight,
+            .padX = chromeDevicePixels(tokens.padX, scale),
+            .padY = chromeDevicePixels(tokens.padY, scale),
+            .height = chromeDevicePixels(tokens.height, scale),
+            .radius = chromeDevicePixels(tokens.radius, scale),
+            // A hairline: at least a pixel where there is one at all.
+            .ring = tokens.ring > 0.0 ? std::max(1, static_cast<int>(std::lround(tokens.ring * scale))) : 0,
+        };
+    }
+    return metrics;
+}
+
 vtrasterizer::GutterRailMetrics gutterRailMetricsFor(vtbackend::GutterLayout const& layout,
                                                      GutterChrome const& chrome,
                                                      double scale) noexcept
 {
+    // The chips are the native rows' wherever the block column is the rail, strip or none.
+    auto metrics = vtrasterizer::GutterRailMetrics {};
+    if (chrome.form == vtbackend::BlockColumnForm::Rail)
+        metrics.chips = blockChipMetricsFor(chrome, scale);
     if (layout.rail == vtbackend::BlockRailPresence::Absent)
-        return {};
-    return vtrasterizer::GutterRailMetrics { .strip = chromeDevicePixels(chrome.stripPoints, scale),
-                                             .bar = chromeDevicePixels(chrome.barPoints, scale),
-                                             .barInset = chromeDevicePixels(chrome.barInsetPoints, scale),
-                                             .radius = chromeDevicePixels(chrome.barRadiusPoints, scale),
-                                             .endInset = chromeDevicePixels(chrome.barEndPoints, scale) };
+        return metrics;
+    metrics.strip = chromeDevicePixels(chrome.stripPoints, scale);
+    metrics.bar = chromeDevicePixels(chrome.barPoints, scale);
+    metrics.barInset = chromeDevicePixels(chrome.barInsetPoints, scale);
+    metrics.radius = chromeDevicePixels(chrome.barRadiusPoints, scale);
+    metrics.endInset = chromeDevicePixels(chrome.barEndPoints, scale);
+    return metrics;
 }
 
 geometry::GutterExtent configuredGutterExtent(config::Config const& config,

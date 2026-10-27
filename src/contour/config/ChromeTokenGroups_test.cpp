@@ -1676,3 +1676,39 @@ TEST_CASE("chromeTokens.blockColumnFormFollowsTheRow", "[chrometokens]")
         CHECK(ChromeTokenRows[i].layout.blockColumn == expected);
     }
 }
+
+TEST_CASE("chromeTokens.blockChipsAreTheCanvasPills", "[chrometokens]")
+{
+    // Every native row draws the canvas's pills; the Terminal row none, its chips being terminal text. The
+    // fold chip's height and radius are the row's size.foldChip and radius.chip, which the hit test and the
+    // QML read too.
+    using namespace contour::config;
+    using vtbackend::PillStyle;
+    for (auto const i: std::views::iota(0uz, ChromeTokenRows.size()))
+    {
+        CAPTURE(i);
+        auto const& row = ChromeTokenRows[i];
+        if (static_cast<ChromeStyle>(i) == ChromeStyle::Terminal)
+        {
+            CHECK(row.blockChips == BlockChipTokens {});
+            continue;
+        }
+        auto const& pills = row.blockChips.pills;
+        auto const& failed = pills[static_cast<std::size_t>(PillStyle::Failed)];
+        CHECK(failed == PillTokens { .type = 11, .weight = 600, .padX = 8, .padY = 1, .radius = 9 });
+        CHECK(pills[static_cast<std::size_t>(PillStyle::Running)] == failed);
+        CHECK(pills[static_cast<std::size_t>(PillStyle::Success)]
+              == PillTokens { .type = 11, .weight = 400 });
+        auto const& fold = pills[static_cast<std::size_t>(PillStyle::Fold)];
+        CHECK(fold.type == 11);
+        CHECK(fold.weight == 400);
+        CHECK(fold.padX == 10);
+        CHECK(fold.padY == 0);
+        CHECK(fold.ring == 0.5);
+        CHECK(fold.height == row.size.foldChip);
+        CHECK(fold.radius == row.radii.chip);
+        CHECK(row.blockChips.markType == 9);
+        CHECK(row.blockChips.markWeight == 700);
+        CHECK(row.size.railMark == 13);
+    }
+}

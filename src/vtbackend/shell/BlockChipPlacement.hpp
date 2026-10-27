@@ -12,6 +12,7 @@
 #include <vtbackend/shell/StickyHeader.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <vector>
@@ -71,6 +72,32 @@ struct BlockChipPlacement
                 .line = run.line, .fromColumn = taken.toColumn + ColumnOffset(1), .toColumn = run.toColumn });
     }
     return remaining;
+}
+
+/// The blank columns between a command and the fold chip after it.
+inline constexpr auto FoldChipLeadGap = ColumnCount(1);
+
+/// Where a fold chip @p chipColumns wide goes on the row @p facts describe: the FIRST blank run starting at
+/// or after the command that holds it FoldChipLeadGap after the command's text and BlockChipGap clear of
+/// whatever follows -- an RPROMPT -- or anywhere up to the page's edge. The chip keeps to the command it
+/// folds, and an RPROMPT keeps its cells, as placeBlockChip() keeps them for the status chip.
+/// @param facts The row.
+/// @param chipColumns The chip's width.
+/// @return How many columns precede the chip's lead gap -- the run's start -- or nullopt where no run holds
+///         it, and the chip follows the row's last text, clipped at the page's edge, as it always did.
+[[nodiscard]] constexpr std::optional<ColumnCount> foldChipTextEnd(BlockChipRowFacts const& facts,
+                                                                   ColumnCount chipColumns) noexcept
+{
+    auto const lastColumn = boxed_cast<ColumnOffset>(facts.pageColumns) - ColumnOffset(1);
+    for (auto const& run: facts.blankRuns)
+    {
+        if (run.fromColumn < facts.commandStart)
+            continue;
+        auto const trailing = run.toColumn >= lastColumn ? ColumnCount(0) : BlockChipGap;
+        if (run.length() >= FoldChipLeadGap + chipColumns + trailing)
+            return boxed_cast<ColumnCount>(run.fromColumn);
+    }
+    return std::nullopt;
 }
 
 /// Where a chip @p chipColumns wide goes on the row @p facts describe (R-e).

@@ -18,6 +18,7 @@
 #include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
 #include <vtbackend/shell/BlockChipPlacement.hpp>
+#include <vtbackend/shell/BlockPill.hpp>
 #include <vtbackend/shell/BlockRail.hpp>
 #include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
@@ -4141,11 +4142,38 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
 
 void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 {
+    auto const placements = foldLabelPlacements();
+    if (placements.empty())
+        return;
+
+    // A native row's chip is a pill the renderer shapes: the label rides along, and no cell is laid out.
+    if (drawsPills())
+    {
+        auto const inks = pillInks(_colorPalette, PillStyle::Fold);
+        for (auto const& placement: placements)
+        {
+            auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
+            if (auto const columns = foldLabelExtent(screenLine,
+                                                     placement.textColumns,
+                                                     pageSize().columns,
+                                                     unbox<std::size_t>(placement.labelColumns),
+                                                     ColumnCount(1)))
+                output.chips.push_back(RenderChip { .lineOffset = screenLine,
+                                                    .columns = *columns,
+                                                    .style = PillStyle::Fold,
+                                                    .text = placement.label,
+                                                    .ink = inks.ink,
+                                                    .fill = inks.fill,
+                                                    .ring = inks.ring });
+        }
+        return;
+    }
+
     auto const colors = foldChipColors(_colorPalette);
     auto const attributes = gutterCellAttributes(
         RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground });
     auto const fill = RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F)));
-    for (auto const& placement: foldLabelPlacements())
+    for (auto const& placement: placements)
     {
         auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
         layoutFoldLabel(output.annotations,
@@ -4158,7 +4186,7 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
         if (auto const drawn = foldLabelExtent(screenLine,
                                                placement.textColumns,
                                                pageSize().columns,
-                                               placement.label.size(),
+                                               unbox<std::size_t>(placement.labelColumns),
                                                ColumnCount(1)))
             output.chipBands.push_back(
                 RenderChipBand { .lineOffset = screenLine, .columns = *drawn, .fill = fill });
@@ -4173,7 +4201,7 @@ std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position,
         auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
                                             placement.textColumns,
                                             pageSize().columns,
-                                            placement.label.size(),
+                                            unbox<std::size_t>(placement.labelColumns),
                                             minimumHitColumns);
         if (extent && extent->contains(position))
             return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
@@ -4228,10 +4256,25 @@ std::vector<Terminal::FoldLabelPlacement> Terminal::foldLabelPlacements() const
 
         auto const gridLine = LineOffset(*lastDrawn);
         auto const hidden = static_cast<uint64_t>(range.lastStableId - range.firstStableId + 1);
+        auto label = collapsedFoldLabel(hidden);
+        auto const labelColumns = chipColumns(PillStyle::Fold, label);
+
+        // After the command, in the blanks before an RPROMPT where they hold it (m6); else after the row's
+        // last text, clipped at the page's edge.
+        auto const& line = grid.lineAt(gridLine);
+        auto const runs = blankRunsOf(line, LineOffset(0), pageSize().columns);
+        auto const textEnd =
+            foldChipTextEnd(BlockChipRowFacts { .pageColumns = pageSize().columns,
+                                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
+                                                                    ? line.promptEndOffset()
+                                                                    : ColumnOffset(0),
+                                                .blankRuns = runs },
+                            labelColumns);
         placements.push_back(FoldLabelPlacement { .range = range,
                                                   .gridLine = gridLine,
-                                                  .textColumns = grid.lineAt(gridLine).trimmedColumns(),
-                                                  .label = collapsedFoldLabel(hidden) });
+                                                  .textColumns = textEnd.value_or(line.trimmedColumns()),
+                                                  .label = std::move(label),
+                                                  .labelColumns = labelColumns });
     }
     return placements;
 }
@@ -4370,20 +4413,38 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
                 if (auto const taken = foldLabelExtent(baseLine + screenRow,
                                                        label.textColumns,
                                                        pageColumns,
-                                                       label.label.size(),
+                                                       unbox<std::size_t>(label.labelColumns),
                                                        ColumnCount(1)))
                     runs = withoutColumns(runs, *taken);
+        auto const outcome = outcomeOf(*record);
+        auto const style = pillStyleOf(outcome);
         auto const placement =
             placeBlockChip(BlockChipRowFacts { .pageColumns = pageColumns,
                                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
                                                                    ? line.promptEndOffset()
                                                                    : ColumnOffset(0),
                                                .blankRuns = runs },
-                           ColumnCount::cast_from(text.size()));
+                           chipColumns(style, text));
         if (placement.kind == BlockChipPlacementKind::CollapsedToRail)
             continue;
+        if (record->state == CommandBlockState::Running)
+            status = RunningStatus::Shown;
 
-        auto const colors = blockChipColors(_colorPalette, outcomeOf(*record));
+        // A native row's chip is a pill the renderer shapes, right-aligned in the columns placed for it.
+        if (drawsPills())
+        {
+            auto const inks = pillInks(_colorPalette, style);
+            output.chips.push_back(RenderChip { .lineOffset = placement.columns.line,
+                                                .columns = placement.columns,
+                                                .style = style,
+                                                .text = text,
+                                                .ink = inks.ink,
+                                                .fill = inks.fill,
+                                                .ring = inks.ring });
+            continue;
+        }
+
+        auto const colors = blockChipColors(_colorPalette, outcome);
         layoutRenderText(
             output.annotations,
             text,
@@ -4397,10 +4458,25 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
                 .columns = placement.columns,
                 .fill =
                     RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F))) });
-        if (record->state == CommandBlockState::Running)
-            status = RunningStatus::Shown;
     }
     return status;
+}
+
+ColumnCount Terminal::chipColumns(PillStyle style, std::u32string_view text) const noexcept
+{
+    if (drawsPills())
+        if (auto const columns = _pillLabelMetrics.columnsOf(style, text))
+            return *columns;
+    return ColumnCount::cast_from(text.size());
+}
+
+void Terminal::setPillLabelMetrics(PillLabelMetrics const& metrics)
+{
+    if (_pillLabelMetrics == metrics)
+        return;
+    _pillLabelMetrics = metrics;
+    // The pills' columns change with the face: the chips are placed afresh.
+    breakLoopAndRefreshRenderBuffer();
 }
 
 Terminal::GatheredStickyHeader Terminal::stickyHeaderInput() const

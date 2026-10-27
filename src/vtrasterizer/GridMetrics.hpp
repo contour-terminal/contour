@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 
@@ -57,8 +59,35 @@ struct PageMargin
     int bottom;
 };
 
-/// The block rail's strip after the gutter's cells, in device pixels. All zero where there is no strip --
-/// the Terminal row, whose block column is cells, or a gutter with nothing for the rail to show.
+/// One pill style's geometry, in device pixels but for its type size, which is in points as the grid's is.
+struct PillMetrics
+{
+    double fontSize = 0.0; ///< The label's size in points; 0 takes the grid font's.
+    int weight = 400;      ///< The label's weight, on the CSS 100-900 scale.
+    int padX = 0;          ///< The padding left and right of the label.
+    int padY = 0;          ///< The padding above and below it, for a pill fitted to its label.
+    int height = 0;        ///< The pill's height, clamped to the row; 0 fits it to the label and padding.
+    int radius = 0;        ///< Its corners' radius, clamped to half its height.
+    int ring = 0;          ///< The ring's width inside its edge, where the style has one.
+
+    bool operator==(PillMetrics const&) const = default;
+};
+
+/// The native rows' block chips and rail marks, drawn in the UI font: what the chrome row's tokens say, at
+/// the display's scale. All zero on the Terminal row, which draws its chips in cells.
+struct BlockChipMetrics
+{
+    std::array<PillMetrics, vtbackend::PillStyleCount> pills {}; ///< By vtbackend::PillStyle.
+    int markEdge = 0;          ///< A rail mark's disc, and the box its glyph is centred in.
+    double markFontSize = 0.0; ///< The mark glyph's size in points.
+    int markWeight = 400;      ///< The mark glyph's weight.
+
+    bool operator==(BlockChipMetrics const&) const = default;
+};
+
+/// The block rail's strip after the gutter's cells, and the native rows' chips, in device pixels. The strip's
+/// fields are zero where there is no strip -- the Terminal row, whose block column is cells, or a gutter with
+/// nothing for the rail to show -- and the chips' on the Terminal row alone.
 struct GutterRailMetrics
 {
     int strip = 0;    ///< The strip's width, ending at the grid's column 0.
@@ -66,6 +95,7 @@ struct GutterRailMetrics
     int barInset = 0; ///< The bar's left edge within the strip.
     int radius = 0;   ///< The radius of the bar's rounded ends; 0 draws them square.
     int endInset = 0; ///< What the bar keeps clear of a block's first row's top and last row's bottom.
+    BlockChipMetrics chips {}; ///< The chips and marks drawn in the UI font, which the strip needs not.
 
     bool operator==(GutterRailMetrics const&) const = default;
 };

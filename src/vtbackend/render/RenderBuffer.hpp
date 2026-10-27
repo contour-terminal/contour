@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/BlockRailKinds.hpp>
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
@@ -178,6 +179,24 @@ struct RenderChipBand
     bool operator==(RenderChipBand const&) const = default;
 };
 
+/// A block chip on a native row: a pill whose label the renderer shapes in the UI font, drawn over the
+/// blank columns the terminal placed it in.
+///
+/// The text rides along, not cells: the label is proportional, and only the renderer, which holds the
+/// face, knows where each glyph goes. The Terminal row's chips stay annotation cells over a RenderChipBand.
+struct RenderChip
+{
+    LineOffset lineOffset {};             ///< The screen row.
+    ColumnRange columns {};               ///< The columns it was placed in, both ends included.
+    PillStyle style = PillStyle::Success; ///< What it says: its weight, padding and pill.
+    std::u32string text {};               ///< Its label.
+    RGBColor ink {};                      ///< The label's colour, legible over the pill over the page.
+    std::optional<RGBAColor> fill {};     ///< The pill's fill; none draws the label alone.
+    std::optional<RGBAColor> ring {};     ///< The hairline inside the pill's edge; none draws no ring.
+
+    bool operator==(RenderChip const&) const = default;
+};
+
 /// Marks @p cells as one shaping group: the text shaper takes them as a single run, first to last.
 /// @param cells The cells, left to right; none is marked when it is empty.
 void markShapingGroup(std::span<RenderCell> cells) noexcept;
@@ -252,6 +271,10 @@ struct RenderBuffer
     /// The bands under the chips among @ref annotations, drawn before them.
     std::vector<RenderChipBand> chipBands {};
 
+    /// The block chips of a native row, drawn as pills by the renderer: the Terminal row's are
+    /// @ref annotations over @ref chipBands instead.
+    std::vector<RenderChip> chips {};
+
     std::optional<RenderCursor> cursor {};
 
     /// The sticky command header covering the main page's first row on this frame, if any.
@@ -281,6 +304,7 @@ struct RenderBuffer
         statusBar.reset();
         annotations.clear();
         chipBands.clear();
+        chips.clear();
         cursor.reset();
         lineFlash.reset();
         if (stickyHeader)

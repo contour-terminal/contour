@@ -1053,6 +1053,27 @@ struct RowAnnotation
         }
     return annotation;
 }
+
+/// The pill the frame draws on screen row @p row, if one.
+[[nodiscard]] std::optional<RenderChip> chipOnRow(RenderBuffer const& buffer, int row)
+{
+    auto const chip = std::ranges::find(buffer.chips, LineOffset(row), &RenderChip::lineOffset);
+    return chip != buffer.chips.end() ? std::optional { *chip } : std::nullopt;
+}
+
+/// Measured faces whose every codepoint advances @p advance pixels in @p cellWidth-pixel cells, each pill
+/// @p padding pixels wider than its label.
+[[nodiscard]] PillLabelMetrics uniformPillMetrics(int advance, int cellWidth, int padding)
+{
+    auto metrics = PillLabelMetrics { .cellWidth = cellWidth };
+    for (auto& face: metrics.styles)
+    {
+        face.advances.fill(advance);
+        face.widest = advance;
+        face.padding = padding;
+    }
+    return metrics;
+}
 } // namespace
 
 TEST_CASE("Gutter.terminal.aChipNeverCoversAnRprompt", "[gutter][blockchip]")
@@ -1064,20 +1085,21 @@ TEST_CASE("Gutter.terminal.aChipNeverCoversAnRprompt", "[gutter][blockchip]")
     mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", RpromptColumn, 2));
 
     auto const buffer = renderOf(mc.terminal);
-    auto const chip = annotationOnRow(buffer, 0);
-    REQUIRE_FALSE(chip.columns.empty());
-    CHECK(unicode::convert_to<char>(std::u32string_view { chip.text }).starts_with("Failed · exit 2 · "));
+    auto const chip = chipOnRow(buffer, 0);
+    REQUIRE(chip.has_value());
+    CHECK(chip->style == PillStyle::Failed);
+    CHECK(unicode::convert_to<char>(std::u32string_view { chip->text }).starts_with("Failed · exit 2 · "));
     auto const& line = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
-    for (auto const column: chip.columns)
+    for (auto const column:
+         std::views::iota(unbox<int>(chip->columns.fromColumn), unbox<int>(chip->columns.toColumn) + 1))
     {
         CAPTURE(column);
-        CHECK(line.cellEmptyAt(column));
+        CHECK(line.cellEmptyAt(ColumnOffset(column)));
     }
-    CHECK(chip.columns.back() + ColumnOffset(2) < ColumnOffset(RpromptColumn - 1));
-    REQUIRE(buffer.chipBands.size() == 1);
-    CHECK(buffer.chipBands.front().lineOffset == LineOffset(0));
-    CHECK(buffer.chipBands.front().columns.fromColumn == chip.columns.front());
-    CHECK(buffer.chipBands.front().columns.toColumn == chip.columns.back());
+    CHECK(chip->columns.toColumn + ColumnOffset(2) < ColumnOffset(RpromptColumn - 1));
+    // A pill: no cell is laid out for it, and no band is drawn under cells.
+    CHECK(buffer.annotations.empty());
+    CHECK(buffer.chipBands.empty());
 }
 
 TEST_CASE("Gutter.terminal.aCollapsedChipLeavesTheMark", "[gutter][blockchip]")
@@ -1088,8 +1110,8 @@ TEST_CASE("Gutter.terminal.aCollapsedChipLeavesTheMark", "[gutter][blockchip]")
     mc.writeToScreen(commandUnderAnRprompt(std::string(70, '='), 10, 2));
 
     auto const buffer = renderOf(mc.terminal);
+    CHECK_FALSE(chipOnRow(buffer, 0).has_value());
     CHECK(annotationOnRow(buffer, 0).columns.empty());
-    CHECK(buffer.chipBands.empty());
     CHECK(markAt(railCellsOf(buffer), 0) == RailMark::Cross);
 }
 
@@ -1101,14 +1123,53 @@ TEST_CASE("Gutter.terminal.aRunningChipTicks", "[gutter][blockchip]")
     mc.wallClock.advance(std::chrono::seconds(3));
 
     auto const running = renderOf(mc.terminal);
-    CHECK(annotationOnRow(running, 0).text == U"Running · 3s");
+    REQUIRE(chipOnRow(running, 0).has_value());
+    CHECK(chipOnRow(running, 0)->text == U"Running · 3s");
+    CHECK(chipOnRow(running, 0)->style == PillStyle::Running);
     CHECK(mc.terminal.hasVisibleRunningStatus());
-    CHECK(running.chipBands.size() == 1);
+    CHECK(running.chips.size() == 1);
 
     mc.writeToScreen(commandEnd(0));
     mc.writeToScreen(PromptStart);
     (void) renderOf(mc.terminal);
     CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
+}
+
+TEST_CASE("Gutter.terminal.theTerminalRowKeepsItsCellChips", "[gutter][blockchip]")
+{
+    // The Terminal row draws its chips in terminal text over a band: a TUI draws nothing in a second font.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = GutterSettings { .exitStatus = true };
+    mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", 69, 2));
+    // Measured faces change nothing there.
+    mc.terminal.setPillLabelMetrics(uniformPillMetrics(3, 10, 0));
+
+    auto const buffer = renderOf(mc.terminal);
+    CHECK(buffer.chips.empty());
+    auto const chip = annotationOnRow(buffer, 0);
+    CHECK(unicode::convert_to<char>(std::u32string_view { chip.text }).starts_with("Failed · exit 2 · "));
+    CHECK(chip.columns.size() == chip.text.size());
+    CHECK(buffer.chipBands.size() == 1);
+}
+
+TEST_CASE("Gutter.terminal.aPillCoversItsMeasuredColumns", "[gutter][blockchip]")
+{
+    // The pill is placed over the whole columns its measured label and padding take, rounded up -- so it
+    // never covers a non-blank cell however its proportional label falls -- and it keeps the right edge.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = RailGutter;
+    mc.writeToScreen(commandUnderAnRprompt("[main] 14:02", 69, 2));
+    auto const unmeasured = chipOnRow(renderOf(mc.terminal), 0);
+    REQUIRE(unmeasured.has_value());
+    CHECK(unmeasured->columns.length() == ColumnCount::cast_from(unmeasured->text.size()));
+
+    // 5-px advances in 10-px cells with 16 px of padding: 5n + 16 pixels.
+    mc.terminal.setPillLabelMetrics(uniformPillMetrics(5, 10, 16));
+    auto const measured = chipOnRow(renderOf(mc.terminal), 0);
+    REQUIRE(measured.has_value());
+    auto const pixels = (5 * static_cast<int>(measured->text.size())) + 16;
+    CHECK(measured->columns.length() == ColumnCount((pixels + 9) / 10));
+    CHECK(measured->columns.toColumn == unmeasured->columns.toColumn);
 }
 
 TEST_CASE("Gutter.terminal.theLargestFoldIsOneChip", "[gutter]")
@@ -1120,26 +1181,25 @@ TEST_CASE("Gutter.terminal.theLargestFoldIsOneChip", "[gutter]")
     REQUIRE(mc->terminal.collapseLastFold());
 
     auto const buffer = renderOf(mc->terminal);
-    auto const annotations = annotationsOf(buffer);
     // The fold chip after the command, and the block's status chip right of it on the same row: apart.
-    REQUIRE(annotations.size() == 2);
-    CHECK(annotations[0].text == U"4,094 lines hidden ⌄");
-    CHECK(annotations[1].position.line == annotations[0].position.line);
-    CHECK(annotations[1].position.column >= annotations[0].position.column
-                                                + ColumnOffset::cast_from(annotations[0].text.size())
-                                                + boxed_cast<ColumnOffset>(BlockChipGap));
-    REQUIRE(buffer.chipBands.size() == 1); // a success's status chip has no band
-    auto const& band = buffer.chipBands.front();
-    CHECK(band.lineOffset == annotations[0].position.line);
+    REQUIRE(buffer.chips.size() == 2);
+    auto const& fold = buffer.chips[0];
+    auto const& status = buffer.chips[1];
+    CHECK(fold.style == PillStyle::Fold);
+    CHECK(fold.text == U"4,094 lines hidden ⌄");
+    CHECK(status.lineOffset == fold.lineOffset);
+    CHECK(status.columns.fromColumn
+          >= fold.columns.toColumn + ColumnOffset(1) + boxed_cast<ColumnOffset>(BlockChipGap));
     auto const& line = mc->terminal.primaryScreen().grid().lineAt(
-        mc->terminal.viewport().translateScreenToGridLine(band.lineOffset));
+        mc->terminal.viewport().translateScreenToGridLine(fold.lineOffset));
     for (auto const column:
-         std::views::iota(unbox<int>(band.columns.fromColumn), unbox<int>(band.columns.toColumn) + 1))
+         std::views::iota(unbox<int>(fold.columns.fromColumn), unbox<int>(fold.columns.toColumn) + 1))
         CHECK(line.cellEmptyAt(ColumnOffset(column)));
 
     auto const longer = tallBlock(100'000);
     CHECK_FALSE(longer->terminal.collapseLastFold());
-    CHECK(annotationsOf(renderOf(longer->terminal)).empty());
+    CHECK(std::ranges::none_of(renderOf(longer->terminal).chips,
+                               [](RenderChip const& chip) { return chip.style == PillStyle::Fold; }));
 }
 
 TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchip]")
@@ -1152,7 +1212,8 @@ TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchi
     mc.writeToScreen(PromptStart);
     REQUIRE(mc.terminal.collapseLastFold());
 
-    auto const annotations = annotationsOf(renderOf(mc.terminal));
-    REQUIRE(annotations.size() == 1);
-    CHECK(annotations[0].text == U"3 lines hidden ⌄");
+    auto const buffer = renderOf(mc.terminal);
+    REQUIRE(buffer.chips.size() == 1);
+    CHECK(buffer.chips[0].text == U"3 lines hidden ⌄");
+    CHECK(buffer.chips[0].style == PillStyle::Fold);
 }

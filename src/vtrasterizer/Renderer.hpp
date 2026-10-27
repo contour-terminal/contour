@@ -6,6 +6,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <vtrasterizer/BackgroundRenderer.hpp>
+#include <vtrasterizer/ChipRenderer.hpp>
 #include <vtrasterizer/CursorRenderer.hpp>
 #include <vtrasterizer/DecorationRenderer.hpp>
 #include <vtrasterizer/Decorator.hpp>
@@ -429,6 +430,12 @@ class Renderer
     /// @param smoothScrollOffset  The rows' sub-cell scroll offset, in device pixels.
     void renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset);
 
+    /// Draws a native row's block chips as pills, their labels in the UI font (@see ChipRenderer), over the
+    /// cells already drawn. A chip that fails to draw is logged and skipped, so the frame goes on.
+    /// @param chips  The frame's chips (RenderBuffer::chips).
+    /// @param smoothScrollOffset  The rows' sub-cell scroll offset, in device pixels.
+    void renderChips(std::span<vtbackend::RenderChip const> chips, int smoothScrollOffset);
+
     /// Draws the annotations -- render-only text such as a collapsed fold's `N lines hidden ⌄` -- over the
     /// cells already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which
     /// selection, copying and the accessibility bridge walk.
@@ -656,6 +663,13 @@ class Renderer
     TextRenderer _textRenderer;
     DecorationRenderer _decorationRenderer;
     CursorRenderer _cursorRenderer;
+
+    /// The native rows' pills and rail marks, in the UI font through _textRenderer's shaper and atlas.
+    ChipRenderer _chipRenderer;
+
+    /// The page's colour on this frame, read with the palette under the terminal's lock: what a rail mark's
+    /// disc knocks its glyph out in. Render thread only.
+    vtbackend::RGBColor _pageBackground {};
 };
 
 } // namespace vtrasterizer

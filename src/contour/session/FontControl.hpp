@@ -103,8 +103,17 @@ class TerminalSession;
                                                           double scale,
                                                           GutterChrome const& chrome);
 
+/// The native rows' block chips and rail marks in device pixels, as the renderer draws them in the UI font:
+/// @p chrome's tokens at @p scale, the type sizes left in points as the grid's are.
+/// @param chrome The session's gutter chrome.
+/// @param scale The device-pixel ratio.
+/// @return The metrics; all zero on the Terminal row.
+[[nodiscard]] vtrasterizer::BlockChipMetrics blockChipMetricsFor(GutterChrome const& chrome,
+                                                                 double scale) noexcept;
+
 /// The block rail's strip in device pixels, as the renderer draws it: what @p layout reserves under
-/// @p chrome at @p scale, and the bar's metrics within it. All zero where the layout has no strip.
+/// @p chrome at @p scale, and the bar's metrics within it -- all zero where the layout has no strip -- and,
+/// wherever the block column is the rail, the chips' (blockChipMetricsFor()).
 /// @param layout The gutter's segments.
 /// @param chrome The session's gutter chrome.
 /// @param scale The device-pixel ratio.

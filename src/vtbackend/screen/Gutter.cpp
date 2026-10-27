@@ -2,6 +2,7 @@
 #include <vtbackend/screen/Gutter.hpp>
 
 #include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/shell/BlockChipPlacement.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -422,14 +423,11 @@ namespace
         &finishedHeadRule,
     });
 
-    /// The blank column between a row's text and its fold label.
-    constexpr auto FoldLabelGap = 1;
-
     /// The column a fold label starts at, for the drawing and the click alike.
     /// @param textColumns How many columns of the row hold text.
     [[nodiscard]] constexpr ColumnOffset foldLabelStart(ColumnCount textColumns) noexcept
     {
-        return ColumnOffset(unbox<int>(textColumns) + FoldLabelGap);
+        return ColumnOffset(unbox<int>(textColumns + FoldChipLeadGap));
     }
 
     /// Digits per thousands group in a fold label's count.

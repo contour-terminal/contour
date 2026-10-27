@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/CaptureLineMode.hpp>
 #include <vtbackend/core/ClipboardWriter.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
@@ -2076,6 +2077,16 @@ class Terminal: public IStatusLinePublishTarget
     {
         return _runningStatus.load(std::memory_order_relaxed) == RunningStatus::Shown;
     }
+
+    /// Takes the UI font's label advances the renderer measured (@see PillLabelMetrics), which a native row's
+    /// chips are placed by: how many columns each pill covers. Called by the renderer on the render thread
+    /// when its fonts or chip metrics change -- the externally driven geometry the constructor cannot know --
+    /// under the terminal's lock, as every mutator is. Refreshes the frame only when the metrics changed.
+    /// @param metrics The measured faces; unmeasured until a renderer has measured them.
+    void setPillLabelMetrics(PillLabelMetrics const& metrics);
+
+    /// The UI font's label advances last taken (@see setPillLabelMetrics); unmeasured until then.
+    [[nodiscard]] PillLabelMetrics const& pillLabelMetrics() const noexcept { return _pillLabelMetrics; }
 
     /// Lights the rail of @p block as hovered, or clears it with nullopt: the pointer is over its rows.
     ///
@@ -5648,8 +5659,9 @@ class Terminal: public IStatusLinePublishTarget
     {
         FoldRange range;         ///< The collapsed fold.
         LineOffset gridLine;     ///< The row the label is drawn on: the head's logical line's last drawn row.
-        ColumnCount textColumns; ///< How many columns of that row hold text.
+        ColumnCount textColumns; ///< The columns before the chip's lead gap: the command's, not an RPROMPT's.
         std::u32string label;    ///< The label, as collapsedFoldLabel() spells it.
+        ColumnCount labelColumns; ///< The columns the chip covers: its cells, or its measured pill.
     };
 
     /// The labels of the collapsed folds on display, each where it is drawn.
@@ -5722,6 +5734,22 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
     std::optional<CommandBlockId> _hoveredCommandBlock;
+
+    /// The UI font's label advances, by which a native row's pills are placed (@see setPillLabelMetrics).
+    PillLabelMetrics _pillLabelMetrics {};
+
+    /// The columns a chip of @p style saying @p text covers: the measured pill on a native row (the block
+    /// column drawn as the rail), one per codepoint on the Terminal row or before the renderer measured.
+    /// @param style The chip's style.
+    /// @param text Its label.
+    /// @return The columns.
+    [[nodiscard]] ColumnCount chipColumns(PillStyle style, std::u32string_view text) const noexcept;
+
+    /// Whether this terminal's chips are pills the renderer draws (BlockColumnForm::Rail), or cells.
+    [[nodiscard]] bool drawsPills() const noexcept
+    {
+        return _settings.gutter.blockColumnForm == BlockColumnForm::Rail;
+    }
 
     /// fillGutter()'s per-frame scratch: the block of each drawn row and of the rows beyond the page's two
     /// edges. A member so a frame reuses its storage; written only while a frame is built, under the lock.
