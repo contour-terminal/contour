@@ -36,7 +36,7 @@ Item {
     /// the dropped card used to separate.
     property bool showSeparator: false
 
-    // Emitted when the user commits a change; the page forwards it to SettingsController.setProfileField.
+    // Emitted when the user commits a change; the page forwards it to SettingsController.commitProfileField.
     signal edited(string key, var value)
 
     /// The text a text editor shows for `value`; @p fallback stands in for no value at all.

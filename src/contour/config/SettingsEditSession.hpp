@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace contour::config
@@ -55,6 +56,10 @@ class SaveScheduler
 /// How long the save model waits after the last change before it writes: a slider dragged across its
 /// range writes once, not once per step.
 inline constexpr auto SettingsSaveDebounce = std::chrono::milliseconds { 300 };
+
+/// What the page says while `gui_config_locked` refuses every change.
+inline constexpr std::string_view SettingsLockedMessage =
+    "Settings are locked by gui_config_locked in contour.yml.";
 
 /// Whether Settings may write the GUI side files at all.
 enum class SettingsEditability : uint8_t

@@ -17,6 +17,7 @@
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/SizeIndicator.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/ManualSaveScheduler.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
@@ -993,10 +994,13 @@ class ChromeSnapshotScene
                 REQUIRE(_settingsDir.isValid());
                 return std::make_unique<window::SettingsController>(
                     [this]() -> config::Config const& { return _config; },
-                    std::make_shared<config::FileGuiConfigStore>(
-                        _settingsFiles, std::filesystem::path(_settingsDir.path().toStdU16String())),
-                    [] {},
-                    nullptr,
+                    window::SettingsControllerServices {
+                        .store = std::make_shared<config::FileGuiConfigStore>(
+                            _settingsFiles, std::filesystem::path(_settingsDir.path().toStdU16String())),
+                        .reload = [] { return std::expected<void, std::string> {}; },
+                        .gpuInventory = nullptr,
+                        .scheduler = std::make_shared<ManualSaveScheduler>(),
+                    },
                     vtbackend::ColorPreference::Dark);
         }
         return nullptr;

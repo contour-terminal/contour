@@ -45,6 +45,7 @@ Rectangle {
         }
         function onChanged() { root.errorMessage = "" }
         function onDraftChanged() { root.errorMessage = "" }
+        function onGlobalFieldsChanged() { root.errorMessage = "" }
         function onSchemeDraftChanged() { root.errorMessage = "" }
         function onEditingSchemeChanged() { root.errorMessage = "" }
     }
@@ -219,11 +220,11 @@ Rectangle {
         onConfirmed: {
             if (!root.controller) return
             if (root.pendingDeleteKind === "profile")
-                root.controller.deleteProfile(root.pendingDeleteName)
+                root.controller.requestDeleteProfile(root.pendingDeleteName)
             else if (isLinkPattern)
                 root.controller.removeLinkPattern(parseInt(root.pendingDeleteKind.split(":")[1]))
             else
-                root.controller.deleteColorScheme(root.pendingDeleteName)
+                root.controller.requestDeleteScheme(root.pendingDeleteName)
         }
     }
 
@@ -363,8 +364,8 @@ Rectangle {
                                     root.controller.editProfile(modelData.name)
                                     root.editorMode = "profile"
                                 }
-                                onSetDefaultRequested: if (root.controller) root.controller.setDefaultProfile(modelData.name)
-                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameProfile(modelData.name, newName) }
+                                onSetDefaultRequested: if (root.controller) root.controller.requestDefaultProfile(modelData.name)
+                                onRenameRequested: (newName) => { if (root.controller) root.controller.requestRenameProfile(modelData.name, newName) }
                                 onDeleteRequested: root.requestDelete("profile", modelData.name)
                             }
                         }
@@ -378,7 +379,7 @@ Rectangle {
                             accent: true
                             enabled: root.controller && !root.controller.locked
                             onClicked: {
-                                root.controller.newProfile(root.controller.defaultProfile)
+                                root.controller.addProfile()
                                 root.editorMode = "profile"
                             }
                         }
@@ -411,7 +412,7 @@ Rectangle {
                                     root.controller.editColorScheme(modelData.name)
                                     root.editorMode = "scheme"
                                 }
-                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameColorScheme(modelData.name, newName) }
+                                onRenameRequested: (newName) => { if (root.controller) root.controller.requestRenameScheme(modelData.name, newName) }
                                 onDeleteRequested: root.requestDelete("scheme", modelData.name)
                             }
                         }
@@ -425,7 +426,8 @@ Rectangle {
                             accent: true
                             enabled: root.controller && !root.controller.locked
                             onClicked: {
-                                root.controller.newColorScheme("")
+                                root.controller.duplicateScheme(root.controller.editingScheme.length > 0
+                                                                ? root.controller.editingScheme : "default")
                                 root.editorMode = "scheme"
                             }
                         }
@@ -628,7 +630,7 @@ Rectangle {
                                                 options: modelData.options
                                                 problem: modelData.problem || ""
                                                 editable: root.controller && !root.controller.editingReadOnly
-                                                onEdited: (key, value) => root.controller.setProfileField(key, value)
+                                                onEdited: (key, value) => root.controller.commitProfileField(key, value)
                                             }
                                         }
                                     }
@@ -783,32 +785,20 @@ Rectangle {
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
                                 spacing: 8
+                                // Every change applies as it is made; a profile defined in contour.yml or built in
+                                // is edited through a copy of it.
                                 Button {
-                                    objectName: "saveProfileButton"
-                                    text: qsTr("Save")
-                                    highlighted: true
+                                    objectName: "duplicateProfileButton"
+                                    text: qsTr("Duplicate to Edit")
+                                    visible: root.controller && root.controller.editingReadOnly
                                     enabled: root.controller && !root.controller.locked
-                                             && !root.controller.editingReadOnly
-                                             && root.controller.editingProfile.length > 0
-                                    onClicked: root.controller.saveProfile()
-                                }
-                                ToolSeparator {}
-                                TextField {
-                                    id: saveAsField
-                                    objectName: "saveAsField"
-                                    Layout.preferredWidth: 180
-                                    placeholderText: qsTr("New profile name")
-                                    selectByMouse: true
+                                    onClicked: root.controller.duplicate(root.controller.editingProfile)
                                 }
                                 Button {
-                                    objectName: "saveProfileAsButton"
-                                    text: qsTr("Save As")
-                                    enabled: root.controller && !root.controller.locked
-                                             && saveAsField.text.trim().length > 0
-                                    onClicked: {
-                                        if (root.controller.saveProfileAs(saveAsField.text.trim()))
-                                            saveAsField.clear()
-                                    }
+                                    objectName: "revertChangesButton"
+                                    text: qsTr("Revert Changes")
+                                    enabled: root.controller && !root.controller.locked && root.controller.hasChanges
+                                    onClicked: root.controller.revertChanges()
                                 }
                                 Item { Layout.fillWidth: true }
                                 // Delete lives on the profile list row (hover trashcan / right-click),
@@ -868,13 +858,13 @@ Rectangle {
                                             options: modelData.options
                                             optionLabels: modelData.optionLabels || []
                                             editable: root.controller && !root.controller.locked
-                                            onEdited: (key, value) => root.controller.setGlobalField(key, value)
+                                            onEdited: (key, value) => root.controller.commitGlobalField(key, value)
                                         }
                                         Button {
                                             text: qsTr("Reset")
                                             visible: modelData.overridden
                                             enabled: root.controller && !root.controller.locked
-                                            onClicked: root.controller.resetGlobalField(modelData.key)
+                                            onClicked: root.controller.commitGlobalReset(modelData.key)
                                         }
                                     }
                                 }

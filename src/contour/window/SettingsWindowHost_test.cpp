@@ -110,7 +110,7 @@ struct HostFixture: ControllerFixture
             else
                 continue;
             auto const key = row.value("key").toString();
-            controller->setProfileField(key, value);
+            REQUIRE(controller->setProfileField(key, value).has_value());
             return key;
         }
         FAIL("the profile draft offers no scalar field");

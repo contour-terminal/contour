@@ -49,9 +49,8 @@ std::expected<void, SettingsError> SettingsEditSession::stage(SideFile const& fi
                                                               std::optional<std::string> bytes)
 {
     if (_editability == SettingsEditability::Locked)
-        return std::unexpected(
-            SettingsError { .kind = SettingsErrorKind::Locked,
-                            .message = "Settings are locked by gui_config_locked in contour.yml." });
+        return std::unexpected(SettingsError { .kind = SettingsErrorKind::Locked,
+                                               .message = std::string { SettingsLockedMessage } });
 
     if (!_touched.contains(file))
     {

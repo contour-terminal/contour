@@ -376,21 +376,17 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
     auto* item = fx.item();
     REQUIRE(item != nullptr);
 
-    // Start a new profile through the page's "New profile…" button.
+    // Add a profile through the page's "New profile" button: it is staged under "New Profile" and opened.
     clickButton(item->findChild<QObject*>("newProfileButton"));
-    CHECK(fx.controller->editingProfile().isEmpty()); // an unsaved new draft
+    CHECK(fx.controller->editingProfile() == "New Profile");
     CHECK(!fx.controller->profileFields().isEmpty()); // its fields are exposed for editing
+    CHECK_FALSE(fx.controller->editingReadOnly());
 
-    // Type a name and Save As.
-    auto* saveAsField = item->findChild<QObject*>("saveAsField");
-    REQUIRE(saveAsField != nullptr);
-    saveAsField->setProperty("text", "work");
-    clickButton(item->findChild<QObject*>("saveProfileAsButton"));
-
-    // The side file exists, the reloaded config carries it, and the page now edits it.
-    CHECK(std::filesystem::exists(fx.configDir / "profiles" / "work.yml"));
-    CHECK(fx.cfg.findProfile("work") != nullptr);
-    CHECK(fx.controller->editingProfile() == "work");
+    // The debounce writes it: the side file exists, and the reloaded config carries it.
+    fx.scheduler->fire();
+    CHECK(std::filesystem::exists(fx.configDir / "profiles" / "New Profile.yml"));
+    CHECK(fx.cfg.findProfile("New Profile") != nullptr);
+    CHECK(fx.controller->editingProfile() == "New Profile");
 
     // No QML binding errors were raised while driving the page.
     CHECK(warnings.count([](QString const& w) {
@@ -541,9 +537,7 @@ TEST_CASE("SettingsPage's indicator editor is wired to the controller", "[contou
 
     // A GUI-owned profile, so the draft is editable (a contour.yml one is shown read-only).
     clickButton(item->findChild<QObject*>("newProfileButton"));
-    item->findChild<QObject*>("saveAsField")->setProperty("text", "work");
-    clickButton(item->findChild<QObject*>("saveProfileAsButton"));
-    REQUIRE(fx.controller->editingProfile() == "work");
+    REQUIRE(fx.controller->editingProfile() == "New Profile");
     REQUIRE(!fx.controller->editingReadOnly());
     fx.page->setProperty("editorMode", "profile");
     fx.settle();
@@ -696,8 +690,6 @@ TEST_CASE("SettingsPage's link pattern list adds, previews and removes patterns"
 
     // A GUI-owned profile, so the draft is editable.
     clickButton(item->findChild<QObject*>("newProfileButton"));
-    item->findChild<QObject*>("saveAsField")->setProperty("text", "work");
-    clickButton(item->findChild<QObject*>("saveProfileAsButton"));
     REQUIRE(!fx.controller->editingReadOnly());
     fx.page->setProperty("editorMode", "profile");
     fx.settle();
@@ -759,8 +751,6 @@ TEST_CASE("SettingsPage's link pattern list takes what is typed, one field after
     auto* page = fx.item();
     REQUIRE(page != nullptr);
     clickButton(page->findChild<QObject*>("newProfileButton"));
-    page->findChild<QObject*>("saveAsField")->setProperty("text", "work");
-    clickButton(page->findChild<QObject*>("saveProfileAsButton"));
     REQUIRE(!fx.controller->editingReadOnly());
     fx.page->setProperty("editorMode", "profile");
     auto window = fx.activeWindow(QSize(1000, 800));
@@ -821,9 +811,12 @@ TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the cur
     auto const fileSystem = core::platform::NativeFileSystem {};
     auto const controller = contour::window::SettingsController(
         [&]() -> config::Config const& { return cfg; },
-        std::make_shared<config::FileGuiConfigStore>(fileSystem, configDir),
-        [&]() {},
-        std::make_shared<FakeGpuInventory>(),
+        window::SettingsControllerServices {
+            .store = std::make_shared<config::FileGuiConfigStore>(fileSystem, configDir),
+            .reload = [] { return std::expected<void, std::string> {}; },
+            .gpuInventory = std::make_shared<FakeGpuInventory>(),
+            .scheduler = std::make_shared<contour::test::ManualSaveScheduler>(),
+        },
         vtbackend::ColorPreference::Dark);
     auto const row = globalRow(controller, "renderer.gpu");
     REQUIRE(!row.isEmpty());
@@ -973,6 +966,7 @@ TEST_CASE("SettingsPage shows the stored value again when it refuses a typed one
     {
         auto const key = QStringLiteral("ui_font_size");
         typeInto(key, "11.5");
+        fx.scheduler->fire();
         CHECK(fx.cfg.uiFontSize.value() == 11.5);
         CHECK(shown(key) == "11.5");
         CHECK(fx.errors.isEmpty());
@@ -1034,6 +1028,7 @@ TEST_CASE("SettingsPage says why it refused a value until the next change it sav
 
     // The next value the page saves takes the reason away.
     typeInto("8");
+    fx.scheduler->fire();
     CHECK(fx.cfg.gutter.value().lineNumberWidth == 8);
     CHECK_FALSE(banner->isVisible());
 
@@ -1043,8 +1038,9 @@ TEST_CASE("SettingsPage says why it refused a value until the next change it sav
 TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save the change",
           "[contour][gui][qml][settings]")
 {
-    // Neither editor can send a value the page refuses, but a change it cannot write is refused all the same,
-    // and the model is left as it was: nothing rebuilds the row, so only the editor can take the change back.
+    // Neither editor can send a value the page refuses, but a change it cannot write is refused all the same
+    // once the debounce writes it: the settings.yml draft goes back to what is in effect, and the row with
+    // it.
     contour::test::QmlMessageCapture const warnings;
 
     auto fx = PageFixture(OneProfile, std::make_shared<UnwritableStore>());
@@ -1070,7 +1066,10 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
         REQUIRE(editor(key, "QQuickSwitch").property("checked").toBool() == stored);
 
         press(editor(key, "QQuickSwitch"), Qt::Key_Space);
-        REQUIRE(fx.errors == QStringList { QString::fromUtf8(UnwritableStore::Reason) });
+        fx.scheduler->fire();
+        fx.settle();
+        REQUIRE(fx.errors.size() == qsizetype { 1 });
+        CHECK(fx.errors.front().contains(QString::fromUtf8(UnwritableStore::Reason)));
         CHECK(editor(key, "QQuickSwitch").property("checked").toBool() == stored);
 
         // ... and goes on following the value, as when a Reset moves it.
@@ -1084,7 +1083,10 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
         REQUIRE(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
 
         press(editor(key, "QQuickComboBox"), Qt::Key_Down);
-        REQUIRE(fx.errors == QStringList { QString::fromUtf8(UnwritableStore::Reason) });
+        fx.scheduler->fire();
+        fx.settle();
+        REQUIRE(fx.errors.size() == qsizetype { 1 });
+        CHECK(fx.errors.front().contains(QString::fromUtf8(UnwritableStore::Reason)));
         CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
 
         required(rowOf(*page, key)).setProperty("value", "relative");
@@ -1092,6 +1094,41 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsController: an unwritable directory rolls the control back", "[settings]")
+{
+    // Review Focus 3: the write fails with the OS's reason, and the row shows the value still in effect.
+    auto fx = ControllerFixture(OneProfile, std::make_shared<UnwritableStore>());
+    {
+        std::filesystem::create_directories(fx.configDir / "profiles");
+        auto out = std::ofstream(fx.configDir / "profiles" / "work.yml");
+        out << config::emitProfileYaml(*fx.cfg.findProfile("main"));
+    }
+    fx.cfg = config::Config {};
+    config::loadConfigFromFile(fx.cfg, fx.configPath);
+    fx.controller->refresh();
+    fx.controller->editProfile("work");
+    REQUIRE_FALSE(fx.controller->editingReadOnly());
+    auto const fontSize = [&fx] {
+        for (auto const& raw: fx.controller->profileFields())
+            if (raw.toMap().value("key").toString() == "font_size")
+                return raw.toMap().value("value").toDouble();
+        return 0.0;
+    };
+    auto const inEffect = fx.cfg.findProfile("work")->fonts.value().size.pt;
+    REQUIRE(inEffect != 15.0);
+
+    fx.controller->commitProfileField("font_size", 15.0);
+    REQUIRE(fontSize() == 15.0);
+    CHECK(fx.controller->hasChanges());
+    fx.scheduler->fire();
+
+    REQUIRE(fx.errors.size() == qsizetype { 1 });
+    CHECK(fx.errors.front().contains(QString::fromUtf8(UnwritableStore::Reason)));
+    CHECK(fx.errors.front().contains("profiles/work.yml"));
+    CHECK(fontSize() == inEffect);
+    CHECK_FALSE(fx.controller->hasChanges());
 }
 
 TEST_CASE("SettingRow shows what is wrong with its value under it", "[contour][gui][qml][settings][links]")
@@ -1194,6 +1231,8 @@ TEST_CASE("SettingsPage follows a configuration reload while it is open", "[cont
 
     // Typing the width from before the reload is a change now, and it is saved.
     window.typeOver(field(), "6");
+    view.settle();
+    settings->flushPendingChanges();
     view.settle();
     CHECK(testApp.app().config().gutter.value().lineNumberWidth == 6);
     CHECK(globalRow(*settings, key).value("overridden").toBool());
@@ -1361,7 +1400,7 @@ TEST_CASE("SettingsPage announces each refusal, and drops it with the pane or dr
 
     SECTION("another pane drops it")
     {
-        REQUIRE_FALSE(fx.controller->setGlobalField("gutter.line_number_width", 11));
+        fx.controller->commitGlobalField("gutter.line_number_width", 11);
         REQUIRE(banner->isVisible());
         fx.page->setProperty("editorMode", "keybindings");
         CHECK_FALSE(banner->isVisible());
@@ -1369,21 +1408,21 @@ TEST_CASE("SettingsPage announces each refusal, and drops it with the pane or dr
 
     SECTION("a change to the profile draft drops it")
     {
-        fx.controller->newProfile("main");
+        fx.controller->addProfile();
         fx.page->setProperty("editorMode", "profile");
-        REQUIRE_FALSE(fx.controller->saveProfileAs(""));
+        fx.controller->commitGlobalField("gutter.line_number_width", 11);
         REQUIRE(banner->isVisible());
-        fx.controller->setProfileField("maximized", true);
+        fx.controller->commitProfileField("maximized", true);
         CHECK_FALSE(banner->isVisible());
     }
 
     SECTION("a change to the colour scheme draft drops it")
     {
-        fx.controller->newColorScheme("");
+        fx.controller->duplicateScheme("default");
         fx.page->setProperty("editorMode", "scheme");
-        REQUIRE_FALSE(fx.controller->saveColorScheme(""));
+        fx.controller->commitGlobalField("gutter.line_number_width", 11);
         REQUIRE(banner->isVisible());
-        fx.controller->setSchemeColor("background", "#102030");
+        fx.controller->commitSchemeColor("background", "#102030");
         CHECK_FALSE(banner->isVisible());
     }
 

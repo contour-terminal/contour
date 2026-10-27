@@ -2,10 +2,10 @@
 // The color-scheme editor: a scrollable grid of swatch cards (default fg/bg, the 8 normal and 8
 // bright ANSI colors, and the command-block slots) bound to SettingsController.schemeColors
 // ({ key, label, color, colorSource }). Each card shows a live swatch and an editable "#rrggbb" field;
-// committing writes the slot back through SettingsController.setSchemeColor. A command-block slot the
+// committing applies the slot live through SettingsController.commitSchemeColor. A command-block slot the
 // scheme leaves unset shows the colour the palette derives, says that it follows it, and is written only
 // once a colour is committed to it; a slot pinned that way offers to follow again. A pinned footer bar
-// carries the scheme name + Save / Delete.
+// offers a copy of the scheme to edit: only a GUI side-file scheme takes a change.
 //
 // A hex field is used deliberately instead of a native ColorDialog: QtQuick.Dialogs is not guaranteed
 // present on every target, and a hard import of it would break page loading where it is absent.
@@ -130,7 +130,7 @@ Item {
                                 /// Commits the colour the field shows, once all six digits are there.
                                 function commit() {
                                     if (root.controller && hexField.acceptableInput)
-                                        root.controller.setSchemeColor(slot.modelData.key, hexField.text)
+                                        root.controller.commitSchemeColor(slot.modelData.key, hexField.text)
                                 }
                                 // Leaving the field commits a changed colour only, so tabbing through a derived
                                 // swatch pins nothing. Return commits the colour shown, changed or not: that is
@@ -146,7 +146,7 @@ Item {
             }
         }
 
-        // Save / delete bar for the scheme, pinned below the scrolling palette.
+        // The scheme's action bar, pinned below the scrolling palette.
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: footerRow.implicitHeight + 20
@@ -162,32 +162,11 @@ Item {
                 anchors.rightMargin: 12
                 spacing: 8
 
-                TextField {
-                    id: schemeNameField
-                    objectName: "schemeNameField"
-                    Layout.preferredWidth: 200
-                    placeholderText: qsTr("Scheme name")
-                    // The initial value; a one-way binding to editingScheme would break the moment the user
-                    // types, and then selecting a different scheme would leave the stale typed name — so
-                    // Save would write the newly selected scheme's colors under the wrong name. Re-seed
-                    // imperatively, but only when the edited scheme's IDENTITY changes (editingSchemeChanged
-                    // fires for select/new/save/delete, NOT for color tweaks), so a name being typed for a
-                    // new or renamed scheme survives while its colors are edited.
-                    text: root.controller ? root.controller.editingScheme : ""
-                    selectByMouse: true
-                    Connections {
-                        target: root.controller
-                        function onEditingSchemeChanged() {
-                            schemeNameField.text = root.controller ? root.controller.editingScheme : ""
-                        }
-                    }
-                }
                 Button {
-                    objectName: "saveSchemeButton"
-                    text: qsTr("Save scheme")
-                    highlighted: true
-                    enabled: root.controller && !root.controller.locked && schemeNameField.text.trim().length > 0
-                    onClicked: root.controller.saveColorScheme(schemeNameField.text.trim())
+                    objectName: "duplicateSchemeButton"
+                    text: qsTr("Duplicate to Edit")
+                    enabled: root.controller && !root.controller.locked && root.controller.editingScheme.length > 0
+                    onClicked: root.controller.duplicateScheme(root.controller.editingScheme)
                 }
                 Item { Layout.fillWidth: true }
                 // Delete lives on the color-scheme list row (hover trashcan / right-click), routed

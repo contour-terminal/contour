@@ -34,6 +34,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
+#include <contour/window/QtSaveScheduler.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
@@ -2928,19 +2929,25 @@ void ContourGuiApp::expireRestoreSummaryAfterLayout()
 window::SettingsController& ContourGuiApp::settingsController()
 {
     // Its collaborators: the app's live configuration, a side-file store rooted at the configuration
-    // directory, and an apply step that reloads every session after a save.
+    // directory, a debounce timer, and a reload of every session after Settings wrote a side file. That
+    // reload runs onConfigurationReloaded(), the one refresh of the page after a save as after a hand edit.
     if (!_settingsController)
         _settingsController = std::make_unique<window::SettingsController>(
             [this]() -> config::Config const& { return _config; },
-            std::make_shared<config::FileGuiConfigStore>(_fileSystem, _config.configFile.parent_path()),
-            [this]() {
-                if (auto const reloaded = _sessionManager.reloadAllSessions(); !reloaded)
-                    errorLog()("Failed to reload configuration. {}", reloaded.error());
-                // The GUI chrome theme is re-applied by reloadAllSessions() itself. The window controls
-                // are QML bindings on their provider, so re-applying their style makes every window follow.
-                applyWindowControlStyle(_config.windowControlStyle.value());
+            window::SettingsControllerServices {
+                .store = std::make_shared<config::FileGuiConfigStore>(_fileSystem,
+                                                                      _config.configFile.parent_path()),
+                .reload = [this]() -> std::expected<void, std::string> {
+                    auto reloaded = _sessionManager.reloadAllSessions();
+                    // The GUI chrome theme is re-applied by reloadAllSessions() itself. The window controls
+                    // are QML bindings on their provider, so re-applying their style makes every window
+                    // follow.
+                    applyWindowControlStyle(_config.windowControlStyle.value());
+                    return reloaded;
+                },
+                .gpuInventory = _gpuInventory,
+                .scheduler = std::make_shared<window::QtSaveScheduler>(),
             },
-            _gpuInventory,
             _colorPreference);
     return *_settingsController;
 }

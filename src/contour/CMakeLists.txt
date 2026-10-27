@@ -290,6 +290,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
+        window/QtSaveScheduler.hpp
         window/SettingsWindowHost.hpp
         session/PastePreview.hpp
         session/Permission.hpp
