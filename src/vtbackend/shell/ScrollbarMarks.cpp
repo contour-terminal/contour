@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <optional>
 #include <ranges>
+#include <variant>
 #include <vector>
 
 namespace vtbackend
@@ -92,6 +93,14 @@ RGBColor scrollbarMarkColor(ColorPalette const& palette, ScrollbarMarkKind kind)
 {
     if (auto const outcome = scrollbarMarkKindRow(kind).outcome)
         return palette.blockStatusColor(*outcome);
+    if (kind == ScrollbarMarkKind::SearchMatch)
+    {
+        // Yellow means search. A highlight that borrows the cell's own colours names none, and the tick
+        // then falls back to the scheme's yellow.
+        if (auto const* const fill = std::get_if<RGBColor>(&palette.searchHighlight.background))
+            return *fill;
+        return palette.normalColor(3);
+    }
     return palette.foldMarkerHoverColors().foreground;
 }
 

@@ -889,7 +889,7 @@ TEST_CASE("SettingsPage renders the command-block settings from the descriptors"
         if (raw.toMap().value("title").toString() == "Command blocks")
             for (auto const& field: raw.toMap().value("fields").toList())
                 groupKeys.push_back(field.toMap().value("key").toString());
-    CHECK(groupKeys.size() == qsizetype { 10 });
+    CHECK(groupKeys.size() == qsizetype { 12 });
     CHECK(groupKeys.contains("sticky_header_mode"));
     for (auto const& key: groupKeys)
         CHECK(rowOf(*item, key) != nullptr);

@@ -103,7 +103,11 @@ namespace detail
         ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
             vtbackend::ScrollbarMarkSource::Commands, "commands", "Other commands" },
         ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
+            vtbackend::ScrollbarMarkSource::Running, "running", "Running commands" },
+        ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
             vtbackend::ScrollbarMarkSource::UserMarks, "user_marks", "Vi line marks" },
+        ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
+            vtbackend::ScrollbarMarkSource::SearchMatches, "search_matches", "Search matches" },
     };
 } // namespace detail
 

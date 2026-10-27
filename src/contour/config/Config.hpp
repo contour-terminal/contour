@@ -603,7 +603,8 @@ struct ScrollBarConfig
     bool hideScrollbarInAltScreen { true };
 
     /// Which marks the scrollbar draws as ticks (`scrollbar.marks`: a YAML list of `failures`, `commands`,
-    /// `user_marks`; `[]` draws none).
+    /// `running`, `user_marks`, `search_matches`; `[]` draws none). The profile seeds it from its edition
+    /// (EditionDefaults::scrollBarMarks); a ScrollBarConfig built on its own draws every kind.
     ///
     /// Read by TerminalSession, which filters the terminal's marks with it. The terminal itself reports
     /// every mark and never consults this, so it is not mapped into vtbackend::Settings.
@@ -1074,9 +1075,10 @@ struct EditionDefaults
     /// (`hyperlink_hover_tooltip`). A `bool` because the YAML key it seeds is one: Config's documented
     /// carve-out; the session converts it at the boundary.
     bool hyperlinkHoverTooltip;
-    ScrollBarModePreference scrollBarMode; ///< The profile's `scrollbar.mode`.
-    vtbackend::PreeditStyle preeditStyle;  ///< How an input method's preedit is drawn.
-    SecureInputMode secureInput;           ///< `secure_input`: the lock and Secure Keyboard Entry.
+    ScrollBarModePreference scrollBarMode;          ///< The profile's `scrollbar.mode`.
+    vtbackend::PreeditStyle preeditStyle;           ///< How an input method's preedit is drawn.
+    SecureInputMode secureInput;                    ///< `secure_input`: the lock and Secure Keyboard Entry.
+    vtbackend::ScrollbarMarkSources scrollBarMarks; ///< The profile's `scrollbar.marks`.
 };
 
 namespace detail
@@ -1130,6 +1132,10 @@ namespace detail
             .scrollBarMode = ScrollBarModePreference::Always,
             .preeditStyle = vtbackend::PreeditStyle::Highlighted,
             .secureInput = SecureInputMode::Off,
+            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
+                                vtbackend::ScrollbarMarkSource::Commands,
+                                vtbackend::ScrollbarMarkSource::Running,
+                                vtbackend::ScrollbarMarkSource::UserMarks },
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1154,6 +1160,9 @@ namespace detail
             .scrollBarMode = ScrollBarModePreference::System,
             .preeditStyle = vtbackend::PreeditStyle::Inline,
             .secureInput = SecureInputMode::Auto,
+            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
+                                vtbackend::ScrollbarMarkSource::Running,
+                                vtbackend::ScrollbarMarkSource::SearchMatches },
         },
     };
 
@@ -1252,7 +1261,8 @@ struct TerminalProfile
     ConfigEntry<HistoryConfig, documentation::History> history { HistoryConfig {
         .maxHistoryLineCount = editionDefaults(defaultsEdition).scrollback } };
     ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar { ScrollBarConfig {
-        .mode = editionDefaults(defaultsEdition).scrollBarMode } };
+        .mode = editionDefaults(defaultsEdition).scrollBarMode,
+        .marks = editionDefaults(defaultsEdition).scrollBarMarks } };
     ConfigEntry<StickyHeaderConfig, documentation::StickyHeader> stickyHeader {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};

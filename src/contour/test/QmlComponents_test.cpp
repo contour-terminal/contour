@@ -2558,14 +2558,17 @@ namespace
 {
     return QVariantMap { { QStringLiteral("position"), position },
                          { QStringLiteral("kind"), static_cast<int>(kind) },
+                         { QStringLiteral("style"),
+                           static_cast<int>(vtbackend::scrollbarMarkKindRow(kind).style) },
                          { QStringLiteral("targetLine"), targetLine } };
 }
 
-/// One colour per ScrollbarMarkKind, in enumerator order: Command, UserMark, Running, Failure.
+/// One colour per ScrollbarMarkKind, in enumerator order: Command, UserMark, SearchMatch, Running, Failure.
 [[nodiscard]] QVariantList markColors()
 {
     return QVariantList { QVariant::fromValue(QColor(Qt::gray)),
                           QVariant::fromValue(QColor(Qt::cyan)),
+                          QVariant::fromValue(QColor(Qt::magenta)),
                           QVariant::fromValue(QColor(Qt::yellow)),
                           QVariant::fromValue(QColor(Qt::red)) };
 }

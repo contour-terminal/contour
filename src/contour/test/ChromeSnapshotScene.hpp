@@ -578,6 +578,8 @@ class ChromeSnapshotScene
         auto const tick = [](double position, vtbackend::ScrollbarMarkKind kind, qint64 targetLine) {
             return QVariantMap { { QStringLiteral("position"), position },
                                  { QStringLiteral("kind"), static_cast<int>(kind) },
+                                 { QStringLiteral("style"),
+                                   static_cast<int>(vtbackend::scrollbarMarkKindRow(kind).style) },
                                  { QStringLiteral("targetLine"), targetLine } };
         };
         session->setHistoryLineCount(SnapshotHistoryLines);

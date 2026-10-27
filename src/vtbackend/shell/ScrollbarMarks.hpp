@@ -31,8 +31,16 @@ enum class ScrollbarMarkKind : uint8_t
 {
     Command = 0, ///< A finished command that succeeded, or whose exit status is unknown.
     UserMark,    ///< A line the user marked with vi `mm` (LineFlag::UserMark).
+    SearchMatch, ///< A row the active search matches.
     Running,     ///< A command that is still running.
     Failure,     ///< A finished command that exited non-zero, or was killed.
+};
+
+/// How a tick of some kind is drawn.
+enum class ScrollbarTickStyle : uint8_t
+{
+    Solid = 0, ///< Filled with the kind's colour.
+    Hollow,    ///< A one-point outline in the kind's colour: something still going on.
 };
 
 /// The groups of marks `scrollbar.marks` switches on, one bit each.
@@ -41,9 +49,11 @@ enum class ScrollbarMarkKind : uint8_t
 /// a YAML list: flags that genuinely combine.
 enum class ScrollbarMarkSource : uint8_t
 {
-    Failures = 1 << 0,  ///< ScrollbarMarkKind::Failure.
-    Commands = 1 << 1,  ///< ScrollbarMarkKind::Command and ScrollbarMarkKind::Running.
-    UserMarks = 1 << 2, ///< ScrollbarMarkKind::UserMark.
+    Failures = 1 << 0,      ///< ScrollbarMarkKind::Failure.
+    Commands = 1 << 1,      ///< ScrollbarMarkKind::Command.
+    UserMarks = 1 << 2,     ///< ScrollbarMarkKind::UserMark.
+    Running = 1 << 3,       ///< ScrollbarMarkKind::Running.
+    SearchMatches = 1 << 4, ///< ScrollbarMarkKind::SearchMatch.
 };
 
 /// A set of ScrollbarMarkSource bits.
@@ -51,9 +61,8 @@ using ScrollbarMarkSources = core::Flags<ScrollbarMarkSource>;
 
 /// Every source -- the default, so a user who never heard of the setting sees every tick.
 constexpr inline auto AllScrollbarMarkSources = ScrollbarMarkSources {
-    ScrollbarMarkSource::Failures,
-    ScrollbarMarkSource::Commands,
-    ScrollbarMarkSource::UserMarks,
+    ScrollbarMarkSource::Failures, ScrollbarMarkSource::Commands,      ScrollbarMarkSource::UserMarks,
+    ScrollbarMarkSource::Running,  ScrollbarMarkSource::SearchMatches,
 };
 
 /// One mark the scrollbar may draw, as Terminal::scrollbarMarkInputs() reports it.
@@ -66,7 +75,7 @@ struct ScrollbarMarkInput
     /// What the mark stands for.
     ScrollbarMarkKind kind {};
 
-    /// The line a click brings to the top: a block's head, or the user-marked line itself.
+    /// The line a click brings to the top: a block's head, or the user-marked or matched line itself.
     int64_t targetStableId {};
 
     [[nodiscard]] bool operator==(ScrollbarMarkInput const&) const noexcept = default;
@@ -119,6 +128,9 @@ struct ScrollbarMarkKindRow
     /// a mark after every prompt, so only the kinds worth a look hold the bar. No default, so a row that
     /// forgets it does not compile.
     OverlayHold overlay;
+
+    /// How a tick of this kind is drawn. No default, so a row that forgets it does not compile.
+    ScrollbarTickStyle style;
 };
 
 /// One row per kind, in enumerator order.
@@ -130,22 +142,32 @@ constexpr inline auto ScrollbarMarkKindTable = std::array {
                            .name = "Command",
                            .source = ScrollbarMarkSource::Commands,
                            .outcome = CommandBlockOutcome::Success,
-                           .overlay = OverlayHold::Quiet },
+                           .overlay = OverlayHold::Quiet,
+                           .style = ScrollbarTickStyle::Solid },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::UserMark,
                            .name = "UserMark",
                            .source = ScrollbarMarkSource::UserMarks,
                            .outcome = std::nullopt,
-                           .overlay = OverlayHold::KeepsShown },
+                           .overlay = OverlayHold::KeepsShown,
+                           .style = ScrollbarTickStyle::Solid },
+    ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::SearchMatch,
+                           .name = "SearchMatch",
+                           .source = ScrollbarMarkSource::SearchMatches,
+                           .outcome = std::nullopt,
+                           .overlay = OverlayHold::Quiet,
+                           .style = ScrollbarTickStyle::Solid },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::Running,
                            .name = "Running",
-                           .source = ScrollbarMarkSource::Commands,
+                           .source = ScrollbarMarkSource::Running,
                            .outcome = CommandBlockOutcome::Running,
-                           .overlay = OverlayHold::KeepsShown },
+                           .overlay = OverlayHold::KeepsShown,
+                           .style = ScrollbarTickStyle::Hollow },
     ScrollbarMarkKindRow { .kind = ScrollbarMarkKind::Failure,
                            .name = "Failure",
                            .source = ScrollbarMarkSource::Failures,
                            .outcome = CommandBlockOutcome::Failure,
-                           .overlay = OverlayHold::KeepsShown },
+                           .overlay = OverlayHold::KeepsShown,
+                           .style = ScrollbarTickStyle::Solid },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, ScrollbarMarkKindTable.size()),
@@ -239,9 +261,10 @@ constexpr inline auto ScrollbarMarkKindList = [] {
 /// The colour a tick of @p kind is drawn in under @p palette.
 ///
 /// A kind that stands for command blocks takes the scheme's `block_status` colour of its outcome (the
-/// gutter's, so a block reads the same in both places); a user mark, which stands for none, takes the fold
-/// column's hovered text colour -- the scheme's full-strength text colour unless it sets one -- apart from
-/// every outcome.
+/// gutter's, so a block reads the same in both places); a search match takes the colour of the scheme's
+/// search highlight, opaque, and the scheme's own yellow where that highlight borrows the cell's colours; a
+/// user mark, which stands for no block, takes the fold column's hovered text colour -- the scheme's
+/// full-strength text colour unless it sets one -- apart from every outcome.
 /// @param palette The session's colour palette.
 /// @param kind The kind of tick.
 /// @return Its colour.

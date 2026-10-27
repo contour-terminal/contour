@@ -1473,10 +1473,12 @@ TEST_CASE("SettingsController: the command-block profile fields round-trip throu
     CHECK(rowWithKey(fields, "sticky_header_show_evicted").value("value").toBool() == false);
     CHECK(rowWithKey(fields, "notify_on_command_finish_min_duration").value("value").toInt() == 42);
 
-    SECTION("all three scrollbar sources off is an empty list, not the default")
+    SECTION("every scrollbar source off is an empty list, not the default")
     {
         fx.controller->setProfileField("scrollbar_marks_failures", false);
+        fx.controller->setProfileField("scrollbar_marks_running", false);
         fx.controller->setProfileField("scrollbar_marks_user_marks", false);
+        fx.controller->setProfileField("scrollbar_marks_search_matches", false);
         REQUIRE(fx.controller->saveProfile());
         auto const* saved = fx.cfg.findProfile("blocks");
         REQUIRE(saved != nullptr);
@@ -1505,7 +1507,9 @@ TEST_CASE("SettingsController: the command-block profile fields form their own g
     CHECK(keys
           == QStringList { "scrollbar_marks_failures",
                            "scrollbar_marks_commands",
+                           "scrollbar_marks_running",
                            "scrollbar_marks_user_marks",
+                           "scrollbar_marks_search_matches",
                            "sticky_header_mode",
                            "sticky_header_show_evicted",
                            "notify_on_command_finish_when",
@@ -1537,7 +1541,7 @@ TEST_CASE("SettingsController: the command-block profile fields form their own g
     // The commands source marks the commands the failures source does not: a failed command has one mark.
     auto const commandsHelp = rowWithKey(fields, "scrollbar_marks_commands").value("help").toString();
     CHECK(commandsHelp.contains("did not fail"));
-    CHECK(commandsHelp.contains("still running"));
+    CHECK(rowWithKey(fields, "scrollbar_marks_running").value("help").toString().contains("still running"));
 
     // A pane is hidden wherever it is off screen -- behind another tab, a zoomed sibling or a minimised
     // window -- not only when its tab is not shown.

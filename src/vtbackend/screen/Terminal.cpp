@@ -5119,6 +5119,16 @@ std::vector<ScrollbarMarkInput> Terminal::scrollbarMarkInputs() const
         inputs.push_back(ScrollbarMarkInput {
             .visibleRow = visibleRowOf(id), .kind = ScrollbarMarkKind::UserMark, .targetStableId = id });
 
+    // The rows of the published tally that are still where they were walked: a match on a row since evicted
+    // has no tick, and nor has one found under another numbering of the rows (a reflow) or on another page.
+    if (_searchMatchRows.page == displayedPageIndex()
+        && _searchMatchRows.idGeneration == grid.stableIdGeneration())
+        for (auto const id: _searchMatchRows.rows)
+            if (grid.lineOffsetOf(id))
+                inputs.push_back(ScrollbarMarkInput { .visibleRow = visibleRowOf(id),
+                                                      .kind = ScrollbarMarkKind::SearchMatch,
+                                                      .targetStableId = id });
+
     return inputs;
 }
 
@@ -5134,6 +5144,7 @@ uint64_t Terminal::scrollbarMarksRevision() const
         .blockRevision = blockRevision,
         .userMarkRevision = userMarkRevision,
         .foldRevision = _foldState.revision(),
+        .searchRevision = _searchMatchRowsRevision,
         .stableIdGeneration = grid.stableIdGeneration(),
         .stableFloor = grid.stableRangeFloor(),
         .displayedPage = _displayedPage,
@@ -9022,6 +9033,7 @@ void Terminal::compileSearch()
 {
     _search.query.reset();
     _searchMatchMemo.clear();
+    dropSearchMatchRows();
     _search.problem.reset();
     if (_search.pattern.empty())
         return;
@@ -9058,6 +9070,7 @@ void Terminal::endSearchQuery(SearchPatternError error)
     _search.problem = error;
     _search.query.reset();
     _searchMatchMemo.clear();
+    dropSearchMatchRows();
     _eventListener.searchQueryEnded();
 }
 
@@ -9095,6 +9108,27 @@ std::optional<TerminalSearchTally> Terminal::beginSearchTally(CellLocation posit
     };
 }
 
+void Terminal::publishSearchMatchRows(SearchTallyWalk const& walk, PageIndex page)
+{
+    auto const rows = walk.matchedRows();
+    auto const idGeneration = pageAt(page).grid().stableIdGeneration();
+    if (_searchMatchRows.page == page && _searchMatchRows.idGeneration == idGeneration
+        && std::ranges::equal(_searchMatchRows.rows, rows))
+        return;
+    _searchMatchRows = SearchMatchRows { .rows = std::vector(rows.begin(), rows.end()),
+                                         .idGeneration = idGeneration,
+                                         .page = page };
+    ++_searchMatchRowsRevision;
+}
+
+void Terminal::dropSearchMatchRows() noexcept
+{
+    if (_searchMatchRows.rows.empty())
+        return;
+    _searchMatchRows.rows.clear();
+    ++_searchMatchRowsRevision;
+}
+
 std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(TerminalSearchTally& tally,
                                                                               LineCount budget)
 {
@@ -9104,6 +9138,10 @@ std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(Te
         tally.page = displayedPageIndex();
     }
     auto const progress = tally.walk.step(displayedPage().grid(), budget);
+    // Only the query still active owns the ticks: a walk of one the user has since replaced says nothing
+    // about the new one.
+    if (tally.walk.query() == _search.query)
+        publishSearchMatchRows(tally.walk, tally.page);
     // Only the query still active is ended: a walk of one the user has since replaced says nothing about it.
     if (!progress && tally.walk.query() == _search.query)
         endSearchQuery(progress.error());
@@ -9208,6 +9246,7 @@ void Terminal::clearSearch()
     _search.pattern.clear();
     _search.query.reset();
     _searchMatchMemo.clear();
+    dropSearchMatchRows();
     _search.problem.reset();
     publishBindingModes();
     _search.origin = SearchOrigin::Typed;

@@ -28,6 +28,7 @@ void SearchTallyWalk::restart(Grid const& grid)
     _nearest.reset();
     _nearestOrdinal = 0;
     _last.reset();
+    _matchedRows.clear();
     _progress = _limit == 0 ? WalkProgress::Finished : WalkProgress::Running;
 }
 
@@ -94,6 +95,9 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
                 _nearestOrdinal = _tally.total;
             }
             _last = cell;
+            // Matches arrive top down, so a row's matches are adjacent.
+            if (_matchedRows.empty() || _matchedRows.back() != cell.row)
+                _matchedRows.push_back(cell.row);
         }
 
         _rowsLastStep += boxed_cast<LineCount>(segment.last - *row) + LineCount(1);

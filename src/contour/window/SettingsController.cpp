@@ -100,8 +100,8 @@ namespace
     }
 
     /// Builds one `scrollbar.marks` source as a checkbox. The YAML list holds the sources that are on,
-    /// so the row is "is this source in the list" -- three checkboxes rather than a list editor, because
-    /// the list is a set of three known values, not free text.
+    /// so the row is "is this source in the list" -- one checkbox per source rather than a list editor,
+    /// because the list is a set of known values, not free text.
     /// @param source The source this row switches.
     /// @return The descriptor.
     ProfileFieldDescriptor scrollbarMarkField(QString key,
@@ -570,13 +570,22 @@ namespace
                       vtbackend::ScrollbarMarkSource::Failures),
                   scrollbarMarkField("scrollbar_marks_commands",
                                      "Scrollbar marks: other commands",
-                                     "Mark every command that did not fail on the scrollbar, finished or "
-                                     "still running. A failed command is marked by the row above alone.",
+                                     "Mark every finished command that did not fail on the scrollbar. A "
+                                     "failed command is marked by the row above alone.",
                                      vtbackend::ScrollbarMarkSource::Commands),
+                  scrollbarMarkField("scrollbar_marks_running",
+                                     "Scrollbar marks: running commands",
+                                     "Mark every command that is still running on the scrollbar, as a "
+                                     "hollow tick.",
+                                     vtbackend::ScrollbarMarkSource::Running),
                   scrollbarMarkField("scrollbar_marks_user_marks",
                                      "Scrollbar marks: user marks",
                                      "Mark the lines you marked with Vi mode's mm on the scrollbar.",
                                      vtbackend::ScrollbarMarkSource::UserMarks),
+                  scrollbarMarkField("scrollbar_marks_search_matches",
+                                     "Scrollbar marks: search matches",
+                                     "Mark the rows the active search matches on the scrollbar, in yellow.",
+                                     vtbackend::ScrollbarMarkSource::SearchMatches),
                   enumFieldFromTable<vtbackend::StickyHeaderMode>(
                       "sticky_header_mode",
                       "Sticky command header",

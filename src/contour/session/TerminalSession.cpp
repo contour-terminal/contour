@@ -272,7 +272,8 @@ namespace
     /// the process table, and a header or extension a second behind a program change is in time.
     constexpr auto ForegroundProcessPollInterval = std::chrono::seconds { 1 };
 
-    /// @p ticks as QML reads them: one { position, kind, targetLine } map per tick, top first.
+    /// @p ticks as QML reads them: one { position, kind, style, targetLine } map per tick, top first. `style`
+    /// is a ScrollbarTickStyle: 0 solid, 1 hollow.
     /// @param ticks The bucketed ticks.
     /// @param trackPixels The track they were bucketed for; each position is a fraction of it.
     /// @return The list the scrollbarMarks property reports.
@@ -286,6 +287,8 @@ namespace
                 { QStringLiteral("position"),
                   static_cast<double>(tick.pixel) / static_cast<double>(trackPixels) },
                 { QStringLiteral("kind"), static_cast<int>(tick.kind) },
+                { QStringLiteral("style"),
+                  static_cast<int>(vtbackend::scrollbarMarkKindRow(tick.kind).style) },
                 { QStringLiteral("targetLine"), static_cast<qint64>(tick.targetStableId) },
             });
         return list;
@@ -3513,6 +3516,9 @@ void TerminalSession::refreshSearchStatus()
 
 void TerminalSession::publishSearchState()
 {
+    // The tally's matched rows are the scrollbar's search ticks: every step, and the pattern going away,
+    // may have moved them.
+    requestScrollbarMarksRefresh();
     emit searchStateChanged();
     announceSearchFocusedRows();
 }

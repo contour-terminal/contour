@@ -5477,12 +5477,36 @@ class Terminal: public IStatusLinePublishTarget
         uint64_t blockRevision = 0;      ///< CommandBlockStore::revision()
         uint64_t userMarkRevision = 0;   ///< UserMarkIndex::revision()
         uint64_t foldRevision = 0;       ///< FoldState::revision()
+        uint64_t searchRevision = 0;     ///< _searchMatchRowsRevision
         uint64_t stableIdGeneration = 0; ///< What the heads' and marks' ids mean
         int64_t stableFloor = 0;         ///< Eviction moves every row up
         PageIndex displayedPage {};      ///< canRevealScrollback(): the page on display
 
         bool operator==(ScrollbarMarksInputs const&) const = default;
     };
+
+    /// The rows the active query's tally has matched so far, as continueSearchTally() last published them:
+    /// what scrollbarMarkInputs() draws SearchMatch ticks from.
+    struct SearchMatchRows
+    {
+        std::vector<int64_t> rows {}; ///< Stable ids, ascending, one per row.
+        uint64_t idGeneration = 0;    ///< The Grid::stableIdGeneration() they belong to.
+        PageIndex page {};            ///< The page whose grid was walked.
+    };
+
+    /// Replaces the published match rows with @p walk's. @see _searchMatchRows
+    /// @param walk The tally walk just stepped, over the grid of @p page.
+    /// @param page The page it walks.
+    void publishSearchMatchRows(SearchTallyWalk const& walk, PageIndex page);
+
+    /// Drops the published match rows, as the query they belong to is gone.
+    void dropSearchMatchRows() noexcept;
+
+    /// @see SearchMatchRows
+    SearchMatchRows _searchMatchRows {};
+
+    /// Moves whenever _searchMatchRows changes; scrollbarMarksRevision() folds it in.
+    uint64_t _searchMatchRowsRevision = 0;
 
     /// @see scrollbarMarksRevision
     mutable ScrollbarMarksInputs _scrollbarMarksInputs {};

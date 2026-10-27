@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <memory>
@@ -127,6 +128,30 @@ TEST_CASE("searchWalk.chunkedEqualsUnchunked", "[searchwalk]")
         }
     }
     CHECK(oracle(grid, *compiled(U"needle"), tenthNeedle).ordinal == 10);
+}
+
+TEST_CASE("searchWalk.matchedRowsAreTheStableIdsOfTheRowsMatched", "[searchwalk]")
+{
+    // Three rows match, one of them twice: the walk reports each row once, by stable id, top down.
+    auto mock = MockTerm<> { PageSize { LineCount(10), ColumnCount(30) }, LineCount(100) };
+    writeRows(mock, 10, [](int row) -> std::string {
+        switch (row)
+        {
+            case 1: return "needle";
+            case 4: return "needle and needle";
+            case 8: return "a needle";
+            default: return "hay";
+        }
+    });
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto const drained =
+        drain(SearchTallyWalk { compiled(U"needle"), grid, CellLocation {} }, grid, SearchWalkStepLines);
+    REQUIRE(drained.walk.tally().total == 4);
+
+    auto const expected = std::array { grid.stableLineIdOf(rowWritten(grid, 1)),
+                                       grid.stableLineIdOf(rowWritten(grid, 4)),
+                                       grid.stableLineIdOf(rowWritten(grid, 8)) };
+    CHECK(std::ranges::equal(drained.walk.matchedRows(), expected));
 }
 
 TEST_CASE("searchWalk.aRegexStepFeedsTheEngineOneSegmentBudget", "[searchwalk]")

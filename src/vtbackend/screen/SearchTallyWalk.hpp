@@ -10,6 +10,8 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
+#include <vector>
 
 namespace vtbackend
 {
@@ -58,6 +60,10 @@ class SearchTallyWalk
     /// @return The matches counted so far; @c ordinal is set once the walk has passed a match at the
     /// position.
     [[nodiscard]] SearchMatchTally tally() const noexcept { return _tally; }
+
+    /// @return The stable ids of the rows the matches counted so far begin on, ascending, one per row however
+    ///         many matches the row holds.
+    [[nodiscard]] std::span<int64_t const> matchedRows() const noexcept { return _matchedRows; }
 
     /// @return The last match the walk found at or before the position, where it still is in @p grid.
     [[nodiscard]] std::optional<CellLocation> nearestAtOrBefore(Grid const& grid) const;
@@ -116,6 +122,7 @@ class SearchTallyWalk
     std::optional<StableCell> _nearest {}; ///< The last match at or before the position.
     size_t _nearestOrdinal = 0;            ///< The ordinal of @ref _nearest.
     std::optional<StableCell> _last {};    ///< The last match.
+    std::vector<int64_t> _matchedRows {};  ///< @see matchedRows
     LineCount _rowsLastStep {};
     size_t _headLookups = 0; ///< @see headLookups
     WalkProgress _progress = WalkProgress::Running;

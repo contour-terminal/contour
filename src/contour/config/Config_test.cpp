@@ -1247,10 +1247,13 @@ TEST_CASE("Config: scrollbar.marks loads a list of mark sources", "[config][scro
     using vtbackend::ScrollbarMarkSources;
     QTemporaryDir dir;
 
-    // The profile's scrollbar.marks after loading a scrollbar block whose marks line is @p marksLine.
-    auto const marksAfter = [&](std::string_view marksLine) {
-        auto const config = loadFromYaml(dir,
-                                         std::format(R"(
+    // The profile's scrollbar.marks after loading a scrollbar block whose marks line is @p marksLine, in a
+    // file headed by @p header.
+    auto const marksAfterIn = [&](std::string_view header, std::string_view marksLine) {
+        // The path-taking loader, which picks the edition from the file the way startup does.
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir,
+                                                                            std::format(R"(
+{}
 default_profile: main
 profiles:
     main:
@@ -1259,22 +1262,47 @@ profiles:
             position: Right
             {}
 )",
-                                                     marksLine));
+                                                                                        header,
+                                                                                        marksLine)));
         auto const* profile = config.profile("main");
         REQUIRE(profile != nullptr);
         return profile->scrollbar.value().marks;
     };
+    auto const marksAfter = [&](std::string_view marksLine) {
+        return marksAfterIn("", marksLine);
+    };
 
-    SECTION("absent: every source, the default")
+    SECTION("absent: the edition's default")
     {
-        CHECK(marksAfter("") == vtbackend::AllScrollbarMarkSources);
+        CHECK(marksAfterIn("defaults_edition: classic", "")
+              == ScrollbarMarkSources { ScrollbarMarkSource::Failures,
+                                        ScrollbarMarkSource::Commands,
+                                        ScrollbarMarkSource::Running,
+                                        ScrollbarMarkSource::UserMarks });
+        CHECK(marksAfter("") == marksAfterIn("defaults_edition: classic", ""));
+        CHECK(marksAfterIn("defaults_edition: native2026", "")
+              == ScrollbarMarkSources { ScrollbarMarkSource::Failures,
+                                        ScrollbarMarkSource::Running,
+                                        ScrollbarMarkSource::SearchMatches });
+        for (auto const edition:
+             { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
+            CHECK(contour::config::TerminalProfile { .defaultsEdition = edition }.scrollbar.value().marks
+                  == contour::config::editionDefaults(edition).scrollBarMarks);
     }
 
     SECTION("a list names exactly the sources it lists, in any case")
     {
         CHECK(marksAfter("marks: [failures, user_marks]")
               == ScrollbarMarkSources { ScrollbarMarkSource::Failures, ScrollbarMarkSource::UserMarks });
-        CHECK(marksAfter("marks: [Commands]") == ScrollbarMarkSources { ScrollbarMarkSource::Commands });
+        CHECK(marksAfter("marks: [running]") == ScrollbarMarkSources { ScrollbarMarkSource::Running });
+        CHECK(marksAfter("marks: [Search_Matches]")
+              == ScrollbarMarkSources { ScrollbarMarkSource::SearchMatches });
+    }
+
+    SECTION("commands keeps covering the running commands it always did")
+    {
+        CHECK(marksAfter("marks: [Commands]")
+              == ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::Running });
     }
 
     SECTION("[] switches every tick off")
@@ -1304,7 +1332,7 @@ profiles:
     SECTION("a scalar is not a list: reported, and the setting is left alone")
     {
         auto capture = core::log::ScopedCapture { "error" };
-        CHECK(marksAfter("marks: failures") == vtbackend::AllScrollbarMarkSources);
+        CHECK(marksAfter("marks: failures") == marksAfter(""));
         INFO("captured error log:\n" << capture.text());
         CHECK(capture.contains("profiles.main.scrollbar.marks"));
     }
@@ -1316,12 +1344,13 @@ TEST_CASE("Config: scrollbar.marks round-trips through the writer", "[config][sc
     using vtbackend::ScrollbarMarkSources;
 
     // `contour generate config` spells the default out, so a user editing it sees every token.
-    CHECK(contour::config::defaultConfigString().contains("marks: [failures, commands, user_marks]"));
+    CHECK(contour::config::defaultConfigString().contains("marks: [failures, running, search_matches]"));
 
     auto const cases = std::array {
         ScrollbarMarkSources {},
         ScrollbarMarkSources { ScrollbarMarkSource::Failures },
-        ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks },
+        ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::Running },
+        ScrollbarMarkSources { ScrollbarMarkSource::SearchMatches, ScrollbarMarkSource::UserMarks },
         vtbackend::AllScrollbarMarkSources,
     };
     for (auto const marks: cases)
@@ -3670,12 +3699,17 @@ TEST_CASE("Config: every scrollbar mark source is described by its table", "[con
     using namespace contour::config;
     using vtbackend::ScrollbarMarkSource;
 
-    checkEnumerators(std::array {
-        ScrollbarMarkSource::Failures, ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks });
+    checkEnumerators(std::array { ScrollbarMarkSource::Failures,
+                                  ScrollbarMarkSource::Commands,
+                                  ScrollbarMarkSource::Running,
+                                  ScrollbarMarkSource::UserMarks,
+                                  ScrollbarMarkSource::SearchMatches });
     // The spellings the documentation promises.
     CHECK(configEnumToken(ScrollbarMarkSource::Failures) == "failures");
     CHECK(configEnumToken(ScrollbarMarkSource::Commands) == "commands");
+    CHECK(configEnumToken(ScrollbarMarkSource::Running) == "running");
     CHECK(configEnumToken(ScrollbarMarkSource::UserMarks) == "user_marks");
+    CHECK(configEnumToken(ScrollbarMarkSource::SearchMatches) == "search_matches");
 
     // The default shows every source the table offers, and nothing it does not: a row added without its
     // bit in AllScrollbarMarkSources would be a tick no profile shows unless it lists the token.
@@ -7867,17 +7901,19 @@ constexpr auto MalformedEntryCases = std::array {
                                         == contour::config::ScrollBarConfig {}.position;
                              } },
     // A list-valued key given one word: it costs the list, not its siblings.
-    MalformedEntryCase { .topLevel = {},
-                         .inProfile = "        scrollbar:\n"
-                                      "            position: left\n"
-                                      "            marks: failures\n",
-                         .key = "profiles.main.scrollbar.marks",
-                         .keptDefault =
-                             [](contour::config::Config const& config) {
-                                 auto const& scrollbar = mainProfile(config).scrollbar.value();
-                                 return scrollbar.marks == vtbackend::AllScrollbarMarkSources
-                                        && scrollbar.position == contour::config::ScrollBarPosition::Left;
-                             } },
+    MalformedEntryCase {
+        .topLevel = {},
+        .inProfile = "        scrollbar:\n"
+                     "            position: left\n"
+                     "            marks: failures\n",
+        .key = "profiles.main.scrollbar.marks",
+        .keptDefault =
+            [](contour::config::Config const& config) {
+                auto const& scrollbar = mainProfile(config).scrollbar.value();
+                return scrollbar.marks
+                           == contour::config::editionDefaults(config.defaultsEdition).scrollBarMarks
+                       && scrollbar.position == contour::config::ScrollBarPosition::Left;
+            } },
     MalformedEntryCase { .topLevel = {},
                          .inProfile = "        sticky_header: always\n",
                          .key = "profiles.main.sticky_header",

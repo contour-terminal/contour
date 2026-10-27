@@ -1731,6 +1731,12 @@ void markCursorLine(vtbackend::Terminal& terminal)
     return session.scrollbarMarks().at(index).toMap().value(QStringLiteral("targetLine")).toLongLong();
 }
 
+/// How @p session's tick @p index is drawn: 0 solid, 1 hollow (vtbackend::ScrollbarTickStyle).
+[[nodiscard]] int markStyle(contour::session::TerminalSession const& session, qsizetype index)
+{
+    return session.scrollbarMarks().at(index).toMap().value(QStringLiteral("style")).toInt();
+}
+
 /// The colour @p session publishes for ticks of @p kind.
 [[nodiscard]] QColor markColor(contour::session::TerminalSession const& session,
                                vtbackend::ScrollbarMarkKind kind)
@@ -1870,6 +1876,60 @@ TEST_CASE("TerminalSession: scrollbar marks follow the command blocks, and a cli
         pane->refreshScrollbarMarks();
         CHECK(markKindsOf(*pane) == std::vector { ScrollbarMarkKind::Running });
     }
+}
+
+TEST_CASE("TerminalSession: a running block's tick is hollow, and the others are solid",
+          "[contour][session][scrollbar-marks]")
+{
+    using vtbackend::ScrollbarMarkKind;
+
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(
+        testApp.app(),
+        registerMarkedScrollbarProfile(testApp.app(), "marked", vtbackend::AllScrollbarMarkSources));
+    auto& terminal = pane->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 2));
+    terminal.writeToScreen(vtbackend::test::commandRun("ls", numberedOutput(3), 0));
+    terminal.writeToScreen(vtbackend::test::commandStarted("tail -f log"));
+    writeFiller(terminal, 60);
+    pane->setScrollbarMarkTrackPixels(200);
+    pane->refreshScrollbarMarks();
+
+    REQUIRE(markKindsOf(*pane)
+            == std::vector {
+                ScrollbarMarkKind::Failure, ScrollbarMarkKind::Command, ScrollbarMarkKind::Running });
+    for (auto const index: std::views::iota(qsizetype { 0 }, pane->scrollbarMarks().size()))
+    {
+        INFO("tick " << index);
+        auto const kind = markKindsOf(*pane).at(static_cast<size_t>(index));
+        CHECK(markStyle(*pane, index) == static_cast<int>(vtbackend::scrollbarMarkKindRow(kind).style));
+    }
+    CHECK(markStyle(*pane, 2) == static_cast<int>(vtbackend::ScrollbarTickStyle::Hollow));
+    CHECK(markStyle(*pane, 0) == static_cast<int>(vtbackend::ScrollbarTickStyle::Solid));
+}
+
+TEST_CASE("TerminalSession: a profile without the commands source leaves a finished success unticked",
+          "[contour][session][scrollbar-marks]")
+{
+    // Native2026's default marks: failures, running commands and search matches. A success leaves none.
+    using vtbackend::ScrollbarMarkKind;
+
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(
+        testApp.app(),
+        registerMarkedScrollbarProfile(
+            testApp.app(),
+            "native",
+            contour::config::editionDefaults(contour::config::DefaultsEdition::Native2026).scrollBarMarks));
+    auto& terminal = pane->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("ls", numberedOutput(3), 0));
+    terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 2));
+    terminal.writeToScreen(vtbackend::test::commandStarted("tail -f log"));
+    writeFiller(terminal, 60);
+    pane->setScrollbarMarkTrackPixels(200);
+    pane->refreshScrollbarMarks();
+
+    CHECK(markKindsOf(*pane) == std::vector { ScrollbarMarkKind::Failure, ScrollbarMarkKind::Running });
 }
 
 TEST_CASE("TerminalSession: no shell integration, or scrollbar.marks: [], leaves the scrollbar unmarked",
@@ -4426,6 +4486,39 @@ void allowHistory(contour::session::TerminalSession& session, int rows)
         vtbackend::HistoryLimits::plain(vtbackend::MaxHistoryLineCount(vtbackend::LineCount(rows))));
 }
 } // namespace
+
+TEST_CASE("TerminalSession: the rows a search matches are ticked, and clearing the search removes them",
+          "[contour][session][scrollbar-marks][search]")
+{
+    using vtbackend::ScrollbarMarkKind;
+
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(
+        testApp.app(),
+        registerMarkedScrollbarProfile(testApp.app(), "marked", vtbackend::AllScrollbarMarkSources));
+    auto& terminal = pane->terminal();
+    terminal.writeToScreen("needle one\r\nhay\r\nneedle two\r\nneedle and needle\r\n");
+    writeFiller(terminal, 60);
+    pane->setScrollbarMarkTrackPixels(2000);
+    pane->refreshScrollbarMarks();
+    REQUIRE(pane->scrollbarMarks().isEmpty());
+
+    pane->searchBarOpened();
+    pane->setSearchPattern(QStringLiteral("needle"));
+    pane->refreshSearchStatus(); // the debounce firing: the first step runs inline
+    drainSearchTally(*pane);
+    pane->refreshScrollbarMarks();
+
+    // Three rows, the last matching twice.
+    CHECK(markKindsOf(*pane) == std::vector(3, ScrollbarMarkKind::SearchMatch));
+    CHECK(markStyle(*pane, 0) == static_cast<int>(vtbackend::ScrollbarTickStyle::Solid));
+    CHECK(markColor(*pane, ScrollbarMarkKind::SearchMatch) != markColor(*pane, ScrollbarMarkKind::Failure));
+
+    pane->setSearchPattern(QString {});
+    pane->refreshSearchStatus();
+    pane->refreshScrollbarMarks();
+    CHECK(pane->scrollbarMarks().isEmpty());
+}
 
 TEST_CASE("TerminalSession: the count is walked in steps and the lock is free between them",
           "[contour][session][search]")
