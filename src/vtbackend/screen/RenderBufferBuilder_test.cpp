@@ -845,41 +845,109 @@ TEST_CASE("RenderBufferBuilder.aPreeditIsDrawnOnARowOfMixedRenditions", "[render
     CHECK(cells[1].attributes.flags.contains(CellFlag::InputMethodPreedit));
 }
 
-TEST_CASE("RenderBufferBuilder.aLongPreeditIsClippedAtTheRightEdge", "[renderbuffer][ime]")
+namespace
 {
+
+/// Which emitter a row goes through: a row of one rendition is emitted whole (renderTrivialLine), a row of
+/// several cell by cell (renderCell). The preedit has to come out the same through both.
+enum class RowKind : uint8_t
+{
+    Uniform = 0,
+    MixedRenditions,
+};
+
+/// @p mc with its top row turned to one of mixed renditions, its cursor put back at @p cursor.
+void mixRenditionsOfTheTopRow(MockTerm<>& mc, CellLocation cursor)
+{
+    mc.writeToScreen(
+        std::format("\033[1;1H\033[1mX\033[mY\033[{};{}H", cursor.line.value + 1, cursor.column.value + 1));
+    auto const lock = std::lock_guard { mc.terminal };
+    REQUIRE_FALSE(mc.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
+}
+
+/// A composing terminal, as composingTerm() builds it, whose top row is of @p kind.
+[[nodiscard]] std::unique_ptr<MockTerm<>> composingTermOn(RowKind kind,
+                                                          PreeditStyle style,
+                                                          CellLocation cursor,
+                                                          std::string_view preedit)
+{
+    auto mc = composingTerm(style, cursor, "");
+    if (kind == RowKind::MixedRenditions)
+        mixRenditionsOfTheTopRow(*mc, cursor);
+    mc->terminal.updateInputMethodPreeditString(std::string { preedit });
+    return mc;
+}
+
+/// The column of the cell drawing @p text on the top row, or nothing.
+[[nodiscard]] std::optional<ColumnOffset> columnOf(DrawnFrame const& frame, std::u32string_view text)
+{
+    auto const row = frame.topRowFrom(ColumnOffset(0));
+    auto const cell = std::ranges::find(row, std::u32string { text }, &RenderCell::codepoints);
+    if (cell == row.end())
+        return std::nullopt;
+    return cell->position.column;
+}
+
+} // namespace
+
+TEST_CASE("RenderBufferBuilder.aPreeditIsPlacedOnTheLine", "[renderbuffer][ime]")
+{
+    auto const kind = GENERATE(RowKind::Uniform, RowKind::MixedRenditions);
     auto const style = GENERATE(PreeditStyle::Highlighted, PreeditStyle::Inline);
     static constexpr auto LastColumn = ColumnOffset(9);
-    auto const pastTheEdgeOr = [](std::u32string_view const unwanted) {
-        return [unwanted](RenderCell const& cell) {
-            return cell.position.column > LastColumn
-                   || cell.codepoints.find_first_of(unwanted) != std::u32string::npos;
-        };
+    INFO("row kind " << static_cast<int>(kind) << ", style " << static_cast<int>(style));
+
+    auto const nothingPastTheEdge = [](DrawnFrame const& frame) {
+        return std::ranges::none_of(frame.cells, [](RenderCell const& cell) {
+            return cell.position.line == LineOffset(0)
+                   && cell.position.column + ColumnOffset(std::max<int>(1, cell.width)) - 1 > LastColumn;
+        });
     };
 
-    SECTION("wide clusters past the edge are not drawn")
+    SECTION("a wide first cluster in the last column moves left to meet the edge")
     {
-        // Eight columns of preedit from column 6: only に and ほ fit.
-        auto const mc =
-            composingTerm(style, { .line = LineOffset(0), .column = ColumnOffset(6) }, "にほんご");
-        auto const frame = drawnFrame(*mc);
-        CHECK(std::ranges::none_of(frame.cells, pastTheEdgeOr(U"んご")));
-        auto const drawn = frame.topRowFrom(ColumnOffset(6));
-        auto const lastCluster = std::ranges::find(drawn, std::u32string { U"ほ" }, &RenderCell::codepoints);
-        REQUIRE(lastCluster != drawn.end());
-        CHECK(lastCluster->position.column + ColumnOffset(lastCluster->width) - 1 == LastColumn);
+        // After a full line the cursor is wrap-pending on the last cell, where に does not fit.
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = LastColumn }, "にほ"));
+        CHECK(columnOf(frame, U"に") == ColumnOffset(6));
+        CHECK(columnOf(frame, U"ほ") == ColumnOffset(8));
+        CHECK(nothingPastTheEdge(frame));
         REQUIRE(frame.cursor.has_value());
         CHECK(frame.cursor->position.column <= LastColumn);
     }
 
-    SECTION("a wide cluster that would straddle the edge is not drawn")
+    SECTION("a preedit running past the edge moves left whole")
     {
-        auto const mc = composingTerm(style, { .line = LineOffset(0), .column = ColumnOffset(8) }, "aにb");
-        auto const frame = drawnFrame(*mc);
-        CHECK(std::ranges::any_of(frame.cells, [](RenderCell const& cell) {
-            return cell.codepoints == U"a" && cell.position.column == ColumnOffset(8);
-        }));
-        CHECK(std::ranges::none_of(frame.cells, pastTheEdgeOr(U"にb")));
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = ColumnOffset(6) }, "にほんご"));
+        CHECK(columnOf(frame, U"に") == ColumnOffset(2));
+        CHECK(columnOf(frame, U"ご") == ColumnOffset(8));
+        CHECK(nothingPastTheEdge(frame));
         REQUIRE(frame.cursor.has_value());
         CHECK(frame.cursor->position.column <= LastColumn);
+    }
+
+    SECTION("only a preedit wider than the line is cut, before a cluster that would straddle the edge")
+    {
+        auto const frame = drawnFrame(*composingTermOn(
+            kind, style, { .line = LineOffset(0), .column = ColumnOffset(3) }, "abcdefghiにj"));
+        CHECK(columnOf(frame, U"a") == ColumnOffset(0));
+        CHECK(columnOf(frame, U"i") == ColumnOffset(8));
+        CHECK_FALSE(columnOf(frame, U"に").has_value());
+        CHECK_FALSE(columnOf(frame, U"j").has_value());
+        CHECK(nothingPastTheEdge(frame));
+    }
+
+    SECTION("a cluster of no width keeps one cell per column")
+    {
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = ColumnOffset(2) }, "\u200Bab"));
+        CHECK(columnOf(frame, U"a") == ColumnOffset(3));
+        CHECK(columnOf(frame, U"b") == ColumnOffset(4));
+        auto const columns =
+            frame.topRowFrom(ColumnOffset(0))
+            | std::views::transform([](RenderCell const& cell) { return cell.position.column; })
+            | std::ranges::to<std::vector>();
+        CHECK(std::ranges::adjacent_find(columns) == columns.end());
     }
 }

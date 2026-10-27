@@ -4,6 +4,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
+#include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/RedrawCoalescer.hpp>
 #include <contour/display/RenderState.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -638,14 +639,16 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     bool _locationReportPending = false;
     /// @see cellGeometryRevision
     int _cellGeometryRevision = 0;
-    /// The rectangle inputMethodQuery(Qt::ImCursorRectangle) last answered from a cell, in item-local
-    /// logical coordinates; nothing until the first such answer.
+    /// The cell inputMethodQuery(Qt::ImCursorRectangle) last anchored the candidate window at; nothing
+    /// until the first answer, and forgotten when the display is bound to another session.
     ///
-    /// Answered again whenever the cursor names no cell -- scrolled out of the viewport, or outside a page
-    /// that a resize has just shrunk -- so the candidate window stays where it was instead of jumping to the
-    /// pane's origin. GUI thread only: the query refuses grid-backed questions on any other thread before
-    /// it gets here. Mutable because Qt's query is const, and this is a cache of its answer, not state.
-    mutable std::optional<QRectF> _lastImeRectangle;
+    /// Anchored at again whenever the cursor names no cell -- scrolled out of the viewport, or outside a
+    /// page that a resize has just shrunk -- so the candidate window stays where it was instead of jumping
+    /// to the pane's origin. A cell rather than its rectangle, so that what is answered follows the margins,
+    /// the gutter, the font and the pixel ratio as they change. GUI thread only: the query refuses
+    /// grid-backed questions on any other thread before it gets here. Mutable because Qt's query is const,
+    /// and this is a cache of its answer, not state.
+    mutable std::optional<ImeAnchor> _lastImeAnchor;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
     /// The cursor column of the frame prepareFrameRhi() drew last.

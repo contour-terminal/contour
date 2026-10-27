@@ -4,12 +4,15 @@
 #include <contour/geometry/CellRectangle.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/screen/PreeditPlacement.hpp>
 
 #include <vtrasterizer/GridMetrics.hpp>
 
 #include <QtCore/QRectF>
 
+#include <cstdint>
 #include <optional>
+#include <string_view>
 
 namespace contour::display
 {
@@ -36,10 +39,11 @@ namespace contour::display
 
 /// The cell an input method's candidate window anchors at, for a cursor at @p cursor.
 ///
-/// The cursor's own cell when it names one. After text runs to the last column the cursor is
-/// wrap-pending, one past the last cell (column == page width): that names no cell, but the user is
-/// still composing on that line, so the line's last cell stands in. Anywhere else outside the page
-/// there is no cell to anchor at, and the caller keeps the rectangle it last answered.
+/// The cursor's own cell when it names one. A cursor at column == page width -- the sentinel
+/// Terminal::contains() admits, one past the last cell -- names no cell, but is still on its line, so
+/// the line's last cell stands in. (A wrap-pending cursor is not that: the grid keeps it on the last
+/// cell and flags the pending wrap, so it anchors at itself.) Anywhere else outside the page there is
+/// no cell to anchor at, and the caller keeps the anchor it last answered.
 ///
 /// @param cursor   Cursor position in grid coordinates (viewport-relative line/column).
 /// @param pageSize The page the grid currently holds.
@@ -56,6 +60,37 @@ namespace contour::display
         return lastCell;
 
     return std::nullopt;
+}
+
+/// The cell a candidate window anchors at, and how many columns it spans.
+struct ImeAnchor
+{
+    vtbackend::CellLocation cell {}; ///< The cell, in grid coordinates.
+    uint8_t width = 1;               ///< How many columns it spans: 2 under a wide glyph.
+};
+
+/// Where the candidate window anchors while @p preedit is composed at @p anchor: the preedit's first cell.
+///
+/// That is @p anchor itself, unless the preedit does not fit from there and is drawn further left (@see
+/// vtbackend::placePreedit, which the render buffer places it by too), and as wide as the preedit's first
+/// cluster rather than the grid's glyph beneath it.
+///
+/// @param anchor      The cursor's anchor cell (@see imeAnchorCell).
+/// @param preedit     What the input method is composing; empty when it is composing nothing.
+/// @param lineColumns How many columns the cursor's line has.
+/// @param cellWidth   The width of the grid's cell at @p anchor, for when nothing is composed.
+/// @return The anchor.
+[[nodiscard]] inline ImeAnchor imePreeditAnchor(vtbackend::CellLocation anchor,
+                                                std::string_view preedit,
+                                                vtbackend::ColumnCount lineColumns,
+                                                uint8_t cellWidth)
+{
+    if (preedit.empty())
+        return { .cell = anchor, .width = cellWidth };
+    auto const placement = vtbackend::placePreedit(preedit, anchor.column, lineColumns);
+    auto const width =
+        placement.clusters.empty() ? uint8_t { 1 } : unbox<uint8_t>(placement.clusters.front().width);
+    return { .cell = { .line = anchor.line, .column = placement.start }, .width = width };
 }
 
 /// Computes the IME cursor rectangle (Qt::ImCursorRectangle) in ITEM-LOCAL LOGICAL coordinates.

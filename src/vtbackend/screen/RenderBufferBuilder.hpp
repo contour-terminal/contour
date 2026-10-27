@@ -6,6 +6,7 @@
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/PreeditPlacement.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <gsl/pointers>
@@ -251,16 +252,19 @@ class RenderBufferBuilder
                         GraphicsAttributes textAttributes,
                         std::u32string_view text);
 
-    /// Emits render cells for text whose cell boundaries are not yet known -- the IME preedit
-    /// string -- segmenting it into grapheme clusters and measuring each.
-    /// @see renderGridText for text that comes from the grid.
-    /// @param columnLimit How many columns the text may cover: the first cluster that would end past them
-    ///                    is not drawn, and neither is anything after it.
+    /// Emits the render cells of the preedit's clusters, from @p screenPosition on.
+    /// @see renderGridText for text that comes from the grid, whose cell boundaries the grid has decided.
     /// @return How many columns were covered.
-    ColumnCount renderUtf8Text(CellLocation screenPosition,
-                               GraphicsAttributes attributes,
-                               std::string_view text,
-                               ColumnCount columnLimit);
+    ColumnCount renderPreedit(CellLocation screenPosition,
+                              GraphicsAttributes attributes,
+                              std::span<PreeditCluster const> clusters);
+
+    /// The columns of the line being built: the page's, or half of them on a DECDWL line.
+    [[nodiscard]] ColumnCount currentLineColumns() const noexcept;
+
+    /// Where the preedit is drawn on the cursor's line, placed on first use in a frame.
+    /// @pre The cursor is set, and the line being built is the cursor's.
+    [[nodiscard]] PreeditPlacement const& preeditPlacement();
 
     /// The display column a grid column draws at.
     ///
@@ -356,6 +360,7 @@ class RenderBufferBuilder
     mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
     mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
+    std::optional<PreeditPlacement> _preeditPlacement; ///< @see preeditPlacement
 
     int _prevWidth = 0;
     bool _prevHasCursor = false;

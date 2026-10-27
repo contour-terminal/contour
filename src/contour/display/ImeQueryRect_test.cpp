@@ -116,12 +116,39 @@ TEST_CASE("imeAnchorCell.interiorCellsAnchorAtThemselves", "[contour][ime]")
             CHECK(imeAnchorCell(cursorAt(line, column), pageSize) == cursorAt(line, column));
 }
 
-TEST_CASE("imeAnchorCell.clampsTheWrapPendingColumn", "[contour][ime]")
+TEST_CASE("imeAnchorCell.clampsTheSentinelColumn", "[contour][ime]")
 {
-    // Typing to the last column leaves the cursor wrap-pending, one past the last cell. The candidate
-    // window belongs at the last cell of that line, not at the pane's origin.
+    // Column == page width, one past the last cell, which Terminal::contains() admits. It names no cell; the
+    // line's last cell stands in. (The grid keeps a wrap-pending cursor on the last cell itself.)
     CHECK(imeAnchorCell(cursorAt(2, 4), page(3, 4)) == cursorAt(2, 3));
     CHECK(imeAnchorCell(cursorAt(0, 4), page(3, 4)) == cursorAt(0, 3));
+}
+
+TEST_CASE("imePreeditAnchor.anchorsAtThePreeditsFirstCell", "[contour][ime]")
+{
+    using contour::display::imePreeditAnchor;
+    auto constexpr Columns = ColumnCount(10);
+
+    SECTION("nothing composed: the cursor's cell, as wide as the grid's glyph")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 4), "", Columns, 2);
+        CHECK(anchor.cell == cursorAt(1, 4));
+        CHECK(anchor.width == 2);
+    }
+
+    SECTION("a preedit that fits: the cursor's cell, as wide as its first cluster")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 4), "にほ", Columns, 1);
+        CHECK(anchor.cell == cursorAt(1, 4));
+        CHECK(anchor.width == 2);
+    }
+
+    SECTION("a preedit moved left to fit: where it is drawn")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 9), "にほ", Columns, 1);
+        CHECK(anchor.cell == cursorAt(1, 6));
+        CHECK(anchor.width == 2);
+    }
 }
 
 TEST_CASE("imeAnchorCell.outsideThePageHasNoAnchor", "[contour][ime]")

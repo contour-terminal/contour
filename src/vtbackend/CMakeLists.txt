@@ -45,6 +45,7 @@ set(vtbackend_HEADERS
     grid/GraphemeClusters.hpp
     grid/Grid.hpp
     screen/Gutter.hpp
+    screen/PreeditPlacement.hpp
     screen/GutterSettings.hpp
     vt/HierarchicalContext.hpp
     vt/ProgramStatus.hpp
@@ -187,6 +188,7 @@ set(vtbackend_SOURCES
     graphics/MessageParser.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
+    screen/PreeditPlacement.cpp
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
     graphics/KittyGraphics.cpp
@@ -319,6 +321,7 @@ if(LIBTERMINAL_TESTING)
         shell/CommandLineText_test.cpp
         shell/Folding_test.cpp
         screen/Gutter_test.cpp
+        screen/PreeditPlacement_test.cpp
         shell/PromptRegion_test.cpp
         screen/LinkDetector_test.cpp
         links/LinkDetectionPolicy_test.cpp

@@ -1176,6 +1176,11 @@ void Terminal::updateInputMethodPreeditString(std::string preeditString)
     screenUpdated();
 }
 
+std::string Terminal::inputMethodPreeditString() const
+{
+    return inputMethodData().preeditString;
+}
+
 InputMethodData Terminal::inputMethodData() const
 {
     auto const _ = std::scoped_lock { _inputMethodMutex };

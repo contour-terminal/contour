@@ -10,7 +10,6 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
 #include <algorithm>
@@ -25,17 +24,6 @@ namespace vtbackend
 
 namespace
 {
-    /// Width of a grapheme cluster, in columns.
-    ///
-    /// This used to be a private copy of the rule that handled VS16 but not VS15, which meant the
-    /// renderer and the grid could disagree about how wide the same cluster was. Both now ask
-    /// libunicode.
-    ColumnCount graphemeClusterWidth(std::u32string_view cluster) noexcept
-    {
-        assert(!cluster.empty());
-        return ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster));
-    }
-
     constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept
     {
         if (holds_alternative<CellForegroundColor>(configuredColor))
@@ -920,33 +908,20 @@ void RenderBufferBuilder::renderGridText(CellLocation screenPosition,
     // on a wide glyph is not extended across that glyph's second column on this path.
 }
 
-ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
-                                                GraphicsAttributes textAttributes,
-                                                std::string_view text,
-                                                ColumnCount columnLimit)
+ColumnCount RenderBufferBuilder::renderPreedit(CellLocation screenPosition,
+                                               GraphicsAttributes textAttributes,
+                                               std::span<PreeditCluster const> clusters)
 {
     auto columnCountRendered = ColumnCount(0);
 
-    auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
-    for (u32string const& graphemeCluster: graphemeClusterSegmenter)
+    for (auto const& [graphemeCluster, width]: clusters)
     {
-        auto const width = graphemeClusterWidth(graphemeCluster);
-        // Cut, not wrapped: the next row holds cells the program owns. A wide cluster that would straddle
-        // the limit is left out whole, and so is everything after it.
-        if (columnCountRendered + ColumnCount::cast_from(width) > columnLimit)
-            break;
-
         auto const gridPosition =
             gridPositionOf(screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
                                                 textAttributes.backgroundColor);
-        // std::cout << std::format(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
-        //            columnOffset,
-        //            width,
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
 
         _output->cells.emplace_back(makeRenderCellExplicit(
             _terminal->colorPalette(),
@@ -976,12 +951,28 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
                 displayColumn(screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i))));
         }
 
-        columnCountRendered += ColumnCount::cast_from(width);
+        columnCountRendered += width;
         _lineNr = screenPosition.line;
         _prevWidth = 0;
         _prevHasCursor = false;
     }
     return columnCountRendered;
+}
+
+ColumnCount RenderBufferBuilder::currentLineColumns() const noexcept
+{
+    // DECDWL halves them, as it doubles every cell's width.
+    return _currentLineFlags.test(LineFlag::DoubleWidth) ? _screen->pageSize().columns / 2
+                                                         : _screen->pageSize().columns;
+}
+
+PreeditPlacement const& RenderBufferBuilder::preeditPlacement()
+{
+    // Placed once a frame, on the cursor's own line, whose flags are the current ones whenever this is asked.
+    if (!_preeditPlacement)
+        _preeditPlacement =
+            placePreedit(_inputMethodData.preeditString, _cursorPosition->column, currentLineColumns());
+    return *_preeditPlacement;
 }
 
 GraphicsAttributes RenderBufferBuilder::preeditAttributes() const noexcept
@@ -1010,22 +1001,29 @@ void RenderBufferBuilder::overlayInputMethodEditor(size_t frontIndex, LineOffset
 {
     if (!_cursorPosition || _inputMethodData.preeditString.empty())
         return;
-
-    auto const screenPosition = CellLocation { .line = line, .column = _cursorPosition->column };
-    auto const rowCells = _output->cells.size() - frontIndex;
-    if (gridPositionOf(screenPosition) != *_cursorPosition
-        || unbox<size_t>(screenPosition.column) >= rowCells)
+    if (gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line
+        != _cursorPosition->line)
         return;
 
+    auto const screenPosition = CellLocation { .line = line, .column = preeditPlacement().start };
+    auto const rowCells = _output->cells.size() - frontIndex;
     auto const preeditFront = _output->cells.size();
-    if (!tryRenderInputMethodEditor(screenPosition, *_cursorPosition))
+    if (!tryRenderInputMethodEditor(screenPosition, gridPositionOf(screenPosition)))
         return;
     // This row is already emitted whole: nothing is left to skip.
+    auto const columns = unbox<size_t>(_inputMethodSkipColumns) + 1;
     _inputMethodSkipColumns = ColumnCount(0);
 
-    // One render cell per column on both sides, so the preedit's cells take the place of the row's own
-    // from the cursor's column on. Its cut at the edge keeps that range inside the row.
+    // The preedit's cells take the place of the row's own from its first column on, one for one. Both sides
+    // emit one render cell per column, which is what makes that a move -- checked rather than assumed, for a
+    // row whose cells and columns disagree would come out with cells missing or doubled.
     auto const at = frontIndex + unbox<size_t>(screenPosition.column);
+    auto const moved = _output->cells.size() - preeditFront;
+    if (moved != columns || at + moved > frontIndex + rowCells)
+    {
+        _output->cells.resize(preeditFront);
+        return;
+    }
     auto const preedit = std::span(_output->cells).subspan(preeditFront);
     std::ranges::move(preedit, _output->cells.begin() + static_cast<std::ptrdiff_t>(at));
     _output->cells.resize(preeditFront);
@@ -1036,30 +1034,25 @@ void RenderBufferBuilder::overlayInputMethodEditor(size_t frontIndex, LineOffset
 
 bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition)
 {
-    // Render IME preeditString if available and screen position matches cursor position.
-    if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
+    // The preedit is drawn where it is placed on the cursor's line: at the cursor, or left of it when that is
+    // what keeps it on the line.
+    if (_cursorPosition && !_inputMethodData.preeditString.empty()
+        && gridPosition.line == _cursorPosition->line && gridPosition.column == preeditPlacement().start)
     {
         auto const textAttributes = preeditAttributes();
 
         if (!_output->cells.empty())
             _output->cells.back().groupEnd = true;
 
-        // The columns left on this line; DECDWL halves them, as it doubles every cell's width.
-        auto const lineColumns = _currentLineFlags.test(LineFlag::DoubleWidth)
-                                     ? _screen->pageSize().columns / 2
-                                     : _screen->pageSize().columns;
-        auto const columnsLeft = lineColumns - boxed_cast<ColumnCount>(screenPosition.column);
-
-        _inputMethodSkipColumns =
-            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, columnsLeft);
+        _inputMethodSkipColumns = renderPreedit(screenPosition, textAttributes, preeditPlacement().clusters);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
             // After the preedit, as an input method's caret is -- but never past the line's last cell, where
-            // a preedit cut at the edge would put it.
+            // a preedit that ends at the edge would put it.
             if (_output->cursor.has_value())
-                _output->cursor->position.column = std::min(
-                    _output->cursor->position.column + ColumnOffset::cast_from(_inputMethodSkipColumns),
-                    boxed_cast<ColumnOffset>(lineColumns) - 1);
+                _output->cursor->position.column =
+                    std::min(screenPosition.column + ColumnOffset::cast_from(_inputMethodSkipColumns),
+                             boxed_cast<ColumnOffset>(currentLineColumns()) - 1);
             _output->cells.at(_output->cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart =
                 true;
             _output->cells.back().groupEnd = true;

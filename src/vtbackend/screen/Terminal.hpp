@@ -2328,6 +2328,10 @@ class Terminal: public IStatusLinePublishTarget
     /// Updates the IME preedit-string to be rendered when IME is composing a new input.
     /// Passing an empty string effectively disables IME rendering.
     void updateInputMethodPreeditString(std::string preeditString);
+
+    /// What the input method is composing, as the frontend last handed it over; empty when nothing is.
+    /// Takes the composition's own mutex, not the state lock, so a caller may hold that lock or not.
+    [[nodiscard]] std::string inputMethodPreeditString() const;
     // }}}
 
     /// Takes the state lock as a frontend does, to change what the parser thread changes. Until unlock(), the

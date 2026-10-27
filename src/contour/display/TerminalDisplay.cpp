@@ -246,6 +246,9 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     if (_session == newSession)
         return;
 
+    // The cell the candidate window was anchored at belongs to the session it was answered for.
+    _lastImeAnchor.reset();
+
     // A null newSession means "detach": the split-pane QML binding (PaneNode.qml
     // `session: root.node ? root.node.session : null`) transiently resolves to null while a pane's Loader
     // is still active during a split collapse, so the `session` property WRITE can arrive here as nullptr.
@@ -1502,24 +1505,25 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             // One locked GridMetrics copy, for this case only: it yields the cell size AND the page
             // margin tear-free, where two separate reads could straddle a concurrent font apply.
             //
-            // Never an empty rectangle: that sends the candidate window to the pane's origin. A cursor that
-            // names no cell (scrolled out of the viewport, or outside a page a resize just shrank) answers
-            // the rectangle answered last, and before any answer the first cell's.
+            // Never an empty rectangle: that sends the candidate window to the pane's origin. While
+            // composing, the anchor is the preedit's first cell, which is left of the cursor where the
+            // preedit is moved to fit the line. A cursor that names no cell (scrolled out of the viewport, or
+            // outside a page a resize just shrank) answers the cell anchored at last, and before any answer
+            // the first cell.
             auto const metrics = _renderer->gridMetrics();
             auto const lock = std::lock_guard { term };
             auto const& screen = term.currentScreen();
-            auto const anchor = term.isCursorInViewport()
-                                    ? imeAnchorCell(screen.cursor().position, term.pageSize())
-                                    : std::nullopt;
-            if (!anchor)
-                return _lastImeRectangle.value_or(imeCursorRectangle(
-                    metrics.pageMargin, metrics.cellSize, vtbackend::CellLocation {}, 1, devicePixelRatio()));
-            _lastImeRectangle = imeCursorRectangle(metrics.pageMargin,
-                                                   metrics.cellSize,
-                                                   *anchor,
-                                                   screen.cellWidthAt(*anchor),
-                                                   devicePixelRatio());
-            return *_lastImeRectangle;
+            auto const pageSize = term.pageSize();
+            if (auto const cell = term.isCursorInViewport()
+                                      ? imeAnchorCell(screen.cursor().position, pageSize)
+                                      : std::nullopt)
+                _lastImeAnchor = imePreeditAnchor(
+                    *cell, term.inputMethodPreeditString(), pageSize.columns, screen.cellWidthAt(*cell));
+            auto const anchor = _lastImeAnchor && imeCursorAddressable(_lastImeAnchor->cell, pageSize)
+                                    ? *_lastImeAnchor
+                                    : ImeAnchor {};
+            return imeCursorRectangle(
+                metrics.pageMargin, metrics.cellSize, anchor.cell, anchor.width, devicePixelRatio());
         }
         case Qt::ImCursorPosition: {
             // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
