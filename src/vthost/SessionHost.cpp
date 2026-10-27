@@ -464,19 +464,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         [this, id] {
             // Pump thread -> loop thread; the host may already be gone at
             // drain time only if the loop is too, so `this` stays valid.
-            _loop.post([this, id] {
-                auto const hosted = _sessions.find(id.value);
-                if (hosted == _sessions.end())
-                    return;
-                // What the output changed of the indicator's other items, as a frame would repaint it: for a
-                // client to be sent, so not while none is attached, and once per loop turn however many
-                // batches arrived meanwhile.
-                if (hosted->second->hasExtensions() && hasScreenMirrors())
-                    hosted->second->requestStatusLineRepaint();
-                typeInitialInputAtPrompt(id);
-                for (auto* observer: _streamSubscribers)
-                    observer->sessionScreenUpdated(id);
-            });
+            _loop.post([this, id] { onSessionScreenUpdated(id); });
         },
         /*onBell=*/
         [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
@@ -773,6 +761,21 @@ void SessionHost::holdInitialInput(SessionId session, std::string input)
     pending->fallback.emplace(
         _loop, _loop.clock().now() + InitialInputFallback, &initialInputFallbackExpired, pending.get());
     _initialInputs.insert_or_assign(session.value, std::move(pending));
+}
+
+void SessionHost::onSessionScreenUpdated(SessionId session)
+{
+    auto const hosted = _sessions.find(session.value);
+    if (hosted == _sessions.end())
+        return;
+    // What the output changed of the indicator's other items, as a frame would repaint it: for a
+    // client to be sent, so not while none is attached, and once per loop turn however many
+    // batches arrived meanwhile.
+    if (hosted->second->hasExtensions() && hasScreenMirrors())
+        hosted->second->requestStatusLineRepaint();
+    typeInitialInputAtPrompt(session);
+    for (auto* observer: _streamSubscribers)
+        observer->sessionScreenUpdated(session);
 }
 
 void SessionHost::typeInitialInputAtPrompt(SessionId session)

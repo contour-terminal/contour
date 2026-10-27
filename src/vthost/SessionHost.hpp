@@ -1122,6 +1122,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Holds @p input for @p session until its first prompt, arming the fallback. Loop thread.
     void holdInitialInput(vtworkspace::SessionId session, std::string input);
 
+    /// Forwards a screen update of @p session to the stream subscribers, repainting the status line first
+    /// when extensions draw into it and a client mirrors the screen. Loop thread, the pump's post.
+    void onSessionScreenUpdated(vtworkspace::SessionId session);
+
     /// Types @p session's held input if its terminal shows a prompt (an unfinished command block): the seeded
     /// records are all finished, so one is the shell's own. Loop thread, after a screen update.
     void typeInitialInputAtPrompt(vtworkspace::SessionId session);
