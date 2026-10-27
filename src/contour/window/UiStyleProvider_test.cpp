@@ -575,6 +575,44 @@ TEST_CASE("UiStyleProvider takes Running from the platform accent", "[contour][u
     }
 }
 
+TEST_CASE("UiStyleProvider.contrastWash keeps a hovered primary label at 3:1 on every accent",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+    using vtbackend::operator""_rgb;
+
+    auto const composite = [](QColor const& wash, QColor const& fill) {
+        auto const a = wash.alphaF();
+        auto const mix = [a](float top, float bottom) {
+            return (top * a) + (bottom * (1.0F - a));
+        };
+        return QColor::fromRgbF(mix(wash.redF(), fill.redF()),
+                                mix(wash.greenF(), fill.greenF()),
+                                mix(wash.blueF(), fill.blueF()));
+    };
+    auto const contrast = [](QColor const& a, QColor const& b) {
+        return vtbackend::contrastRatio(contour::platform::toRGBColor(a), contour::platform::toRGBColor(b));
+    };
+
+    constexpr auto Levels = std::array<uint8_t, 6> { 0x00, 0x40, 0x80, 0xA0, 0xC0, 0xFF };
+    constexpr auto MinimumLabelContrast = 3.0;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux);
+    auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+    for (auto const [r, g, b]: std::views::cartesian_product(Levels, Levels, Levels))
+    {
+        inputs.appearance.accent = vtbackend::RGBColor { r, g, b };
+        auto const provider = UiStyleProvider(inputs);
+        auto const fill = provider.accentColor();
+        auto const ink = provider.onStatusColor(UiStyleProvider::statusRunning());
+        CAPTURE(fill.name().toStdString(), ink.name().toStdString());
+        // Hovered and pressed lay the same wash.
+        CHECK(contrast(composite(provider.contrastWash(ink), fill), ink) >= MinimumLabelContrast);
+        // And it never costs the label contrast it had.
+        CHECK(contrast(composite(provider.contrastWash(ink), fill), ink) >= contrast(fill, ink));
+    }
+}
+
 TEST_CASE("UiStyleProvider resolves the colour roles", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;

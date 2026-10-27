@@ -317,6 +317,11 @@ QColor UiStyleProvider::wash(QColor const& base) const
     return platform::atOpacity(base, _tokens.hoverWashPercent);
 }
 
+QColor UiStyleProvider::contrastWash(QColor const& ink) const
+{
+    return wash(onColor(ink));
+}
+
 QColor UiStyleProvider::modalScrim(QColor const& base) const
 {
     return platform::atOpacity(base, _tokens.modalScrimPercent);

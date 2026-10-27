@@ -163,8 +163,9 @@ Item {
 
     // A card button: its label in the tab type on a control-rounded fill, `size.footerButton` high; bracketed
     // by the chip glyphs on the Terminal row, where it has no fill of its own. Hovered or pressed, it lays
-    // its own ink over the fill at the style's hover strength. It takes no Tab focus: assistive technology
-    // presses it through its action, and Escape answers the card from wherever the focus is.
+    // the wash away from its label over the fill at the style's hover strength. It takes no Tab focus:
+    // assistive technology presses it through its action, and Escape answers the card from wherever the
+    // focus is.
     component CardButton: Rectangle {
         id: button
 
@@ -174,6 +175,10 @@ Item {
         property color ink
         /// The button's fill.
         property color fill
+        /// What the button lays over its fill while hovered or pressed: the wash away from the label, so
+        /// the label's contrast only grows. Native rows only; the Terminal row's brackets are its feedback.
+        readonly property color hoverWash: chromeStyle.paletteRevision < 0 ? "transparent"
+                                                                          : chromeStyle.contrastWash(button.ink)
 
         /// A left click, or the accessibility press action.
         signal clicked()
@@ -195,7 +200,7 @@ Item {
             anchors.fill: parent
             radius: button.radius
             // Native rows only: the Terminal row's brackets are all the feedback a cell has.
-            color: (buttonHover.hovered || buttonTap.pressed) && !card.bracketed ? chromeStyle.wash(button.ink)
+            color: (buttonHover.hovered || buttonTap.pressed) && !card.bracketed ? button.hoverWash
                                                                                  : "transparent"
         }
 

@@ -855,6 +855,17 @@ class UiStyleProvider: public QObject
     /// @return @p base at the style's hover alpha.
     [[nodiscard]] Q_INVOKABLE QColor wash(QColor const& base) const;
 
+    /// The hover and pressed wash for a control whose label is drawn in @p ink on a fill of its own.
+    ///
+    /// wash() of the ink would move the fill toward the label and cost it contrast: on a mid-tone accent
+    /// the label would fall below 3:1. This is wash() of the colour opposite to @p ink (onColor(): black
+    /// for light ink, white for dark ink), so the fill moves away from the label and the label's contrast
+    /// can only grow.
+    ///
+    /// @param ink The label's colour.
+    /// @return The wash to lay between the fill and the label.
+    [[nodiscard]] Q_INVOKABLE QColor contrastWash(QColor const& ink) const;
+
     /// The scrim a modal popup dims its window with.
     ///
     /// Every popup surface in the Quick Controls half of a style declares one of these as its

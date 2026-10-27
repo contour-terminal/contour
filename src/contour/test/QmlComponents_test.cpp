@@ -14096,6 +14096,9 @@ TEST_CASE("shell integration card: every ink reads at 4.5:1 on every row, scheme
         auto const buttonFill = over(colorOf(button), fill);
         auto const& label = PaneTreeHost::partOf(button, (std::string { name } + "Label").c_str());
         CHECK(contrastOf(colorOf(label), buttonFill) >= 4.5);
+        // Hovered and pressed lay the same wash: the label must stay at the mark floor over it.
+        auto const wash = button.property("hoverWash").value<QColor>();
+        CHECK(contrastOf(colorOf(label), over(wash, buttonFill)) >= 3.0);
     }
 }
 // }}}
