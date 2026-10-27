@@ -89,6 +89,9 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     Q_PROPERTY(session::TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+    // Bumped whenever the cell-to-item mapping moves without the item moving (font size, DPI, margins): a
+    // binding over a rowBand() call reads it, since a Q_INVOKABLE carries no notify of its own.
+    Q_PROPERTY(int cellGeometryRevision READ cellGeometryRevision NOTIFY cellGeometryChanged)
     QML_ELEMENT
 
     session::TerminalSession* getSessionHelper() { return _session; }
@@ -409,6 +412,8 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
+    /// The cell size, the page margins or the content scale changed: every rowBand() answer may have moved.
+    void cellGeometryChanged();
 
   public:
     Q_INVOKABLE [[nodiscard]] int pageLineCount() const noexcept
@@ -436,6 +441,9 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// @param last  The last row.
     /// @return `{ top, bottom }` in item coordinates; empty before the renderer exists.
     Q_INVOKABLE [[nodiscard]] QVariantMap rowBand(int first, int last) const;
+
+    /// @return How many times the cell geometry has changed (@ref cellGeometryChanged); a value to bind on.
+    [[nodiscard]] int cellGeometryRevision() const noexcept { return _cellGeometryRevision; }
 
   private:
     // helper methods
@@ -624,6 +632,8 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// Guards against piling up accessible-location posts while a resize or divider drag commits one
     /// geometry change per input event. GUI thread only, hence a plain bool.
     bool _locationReportPending = false;
+    /// @see cellGeometryRevision
+    int _cellGeometryRevision = 0;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
     /// The cursor column of the frame prepareFrameRhi() drew last.

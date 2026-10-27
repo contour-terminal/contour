@@ -565,6 +565,7 @@ class StubContourTerminal: public QQuickItem
     // Terminal.qml / TerminalPane read `fontSize` and connect a window-level `opacityChanged`; expose both
     // so the pane instantiates against the stub.
     Q_PROPERTY(double fontSize READ fontSize CONSTANT)
+    Q_PROPERTY(int cellGeometryRevision READ cellGeometryRevision NOTIFY cellGeometryChanged)
   public:
     [[nodiscard]] QObject* session() const { return _session; }
     void setSession(QObject* s)
@@ -577,21 +578,37 @@ class StubContourTerminal: public QQuickItem
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
 
-    /// The band rows @p first to @p last take, as TerminalDisplay::rowBand answers: no margin, 20-pixel rows.
+    /// The band rows @p first to @p last take, as TerminalDisplay::rowBand answers: no margin, rows of
+    /// @ref setRowHeight's height (20 pixels until it is called).
     Q_INVOKABLE [[nodiscard]] QVariantMap rowBand(int first, int last) const
     {
-        auto constexpr RowHeight = 20.0;
-        auto const band = window::rowBandOf(first, last, 0.0, RowHeight);
+        auto const band = window::rowBandOf(first, last, 0.0, _rowHeight);
         return { { QStringLiteral("top"), band.top }, { QStringLiteral("bottom"), band.bottom } };
+    }
+
+    /// @return How many times @ref setRowHeight changed the rows, as TerminalDisplay counts its cell
+    /// geometry.
+    [[nodiscard]] int cellGeometryRevision() const noexcept { return _cellGeometryRevision; }
+
+    /// Changes the rows' height as a zoom does, and says so as TerminalDisplay does.
+    /// @param height The new row height, in item pixels.
+    void setRowHeight(double height)
+    {
+        _rowHeight = height;
+        ++_cellGeometryRevision;
+        emit cellGeometryChanged();
     }
 
   signals:
     void sessionChanged(QObject* /*session*/);
     void showNotification(QString const& /*title*/, QString const& /*body*/);
-    void terminated(); //!< TerminalPane's onTerminated handler binds to this.
+    void terminated();          //!< TerminalPane's onTerminated handler binds to this.
+    void cellGeometryChanged(); //!< The rows moved under an unmoved item.
 
   private:
     QObject* _session = nullptr;
+    double _rowHeight = 20.0;
+    int _cellGeometryRevision = 0;
 };
 
 /// A stand-in for window::NewDefaultsNotice, the `newDefaults` context property Main.qml's banner reads.

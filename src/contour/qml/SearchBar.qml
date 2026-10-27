@@ -53,10 +53,15 @@ Popup {
     property Item headerSlot: null
 
     // The current match's band in the terminal, where the bar would cover it: the session names its rows,
-    // the terminal says where they are. Empty -- top and bottom 0 -- while there is none.
+    // the terminal says where they are. Empty -- top and bottom 0 -- while there is none. rowBand() is a
+    // call, not a property, so the binding also reads the terminal's cellGeometryRevision: a zoom moves
+    // the rows under an unmoved terminal, and the band must follow it.
     readonly property var _rows: (root._search && root._search.searchFocusedRows) ? root._search.searchFocusedRows : ({})
+    readonly property int _cellGeometryRevision: (root.displayItem && root.displayItem.cellGeometryRevision !== undefined)
+                                                 ? root.displayItem.cellGeometryRevision : 0
     readonly property var _band: (root._rows.first !== undefined && root.displayItem
-                                  && typeof root.displayItem.rowBand === "function")
+                                  && typeof root.displayItem.rowBand === "function"
+                                  && root._cellGeometryRevision >= 0)
                                  ? root.displayItem.rowBand(root._rows.first, root._rows.last)
                                  : ({ top: 0, bottom: 0 })
 

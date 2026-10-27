@@ -8339,6 +8339,61 @@ TEST_CASE("The find bar moves to the bottom when the current match is under it (
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("The find bar follows the current match when a zoom moves the rows (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    // Over the C++ stub, not a QML fake: a fake's rowBand() is a QML function whose reads the binding would
+    // track by itself, so only a Q_INVOKABLE shows whether the bar re-reads the band on a zoom.
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(
+        engine,
+        contour::test::ChromeSetup { .row = contour::config::ChromeStyle::MacOS,
+                                     .font = QGuiApplication::font(),
+                                     .windowControls = contour::config::WindowControlStyle::Windows });
+    MockSession session;
+    engine.rootContext()->setContextProperty("mockSession", &session);
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "import Contour.Terminal\n"
+                          "Window {\n"
+                          "  width: 800; height: 400; visible: true\n"
+                          "  property alias display: displayItem\n"
+                          "  property alias bar: barItem\n"
+                          "  ContourTerminal { id: displayItem; anchors.fill: parent }\n"
+                          "  SearchBar { id: barItem; session: mockSession; displayItem: displayItem }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBarZoomHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO("errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const window = std::unique_ptr<QObject>(component.create());
+    REQUIRE(window != nullptr);
+    auto* display = qobject_cast<StubContourTerminal*>(window->property("display").value<QObject*>());
+    auto* bar = window->property("bar").value<QObject*>();
+    REQUIRE(display != nullptr);
+    REQUIRE(bar != nullptr);
+    QMetaObject::invokeMethod(bar, "open");
+    QCoreApplication::processEvents();
+
+    // Row 1 is 20-40 at 20-pixel rows, under the bar's 8-40: the bar goes to the bottom right.
+    session.setSearchFocusedRows({ { QStringLiteral("first"), 1 }, { QStringLiteral("last"), 1 } });
+    QCoreApplication::processEvents();
+    CHECK(bar->property("y").toReal() == 360.0);
+
+    // Zoomed to 50-pixel rows, row 1 is 50-100, clear of it: back at the top, with no step taken.
+    display->setRowHeight(50.0);
+    QCoreApplication::processEvents();
+    CHECK(bar->property("y").toReal() == 8.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("The find bar's toggles render the session's table and light the active one (offscreen)",
           "[contour][gui][qml][search]")
 {

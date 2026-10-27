@@ -1614,6 +1614,10 @@ void TerminalDisplay::notifyCellGeometryChanged()
     // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
     // on screen without moving this item -- geometryChange() stays silent for them.
     reportAccessibleLocation();
+
+    // And every row band: the find bar re-reads where the current match lies (SearchBar's _band).
+    ++_cellGeometryRevision;
+    emit cellGeometryChanged();
 }
 // }}}
 
