@@ -135,6 +135,9 @@ namespace
         ActionCategory { .name = "ShowAbout", .category = CommandCategory::Contour },
         ActionCategory { .name = "MinimizeWindow", .category = CommandCategory::Window },
         ActionCategory { .name = "ZoomWindow", .category = CommandCategory::Window },
+        ActionCategory { .name = "FocusNextArea", .category = CommandCategory::Window },
+        ActionCategory { .name = "FocusPreviousArea", .category = CommandCategory::Window },
+        ActionCategory { .name = "FocusToolbar", .category = CommandCategory::Window },
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.

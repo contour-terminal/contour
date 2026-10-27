@@ -172,6 +172,9 @@ struct MoveTabToNewWindow{};  // tear the current tab off into a window of its o
 struct ShowAbout{};           // show the version of Contour
 struct MinimizeWindow{};      // minimize this window
 struct ZoomWindow{};          // maximize this window, or restore it from maximized
+struct FocusNextArea{};       // move keyboard focus to the next of terminal, tabs and toolbar
+struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal, tabs and toolbar
+struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -291,7 +294,10 @@ using Action = std::variant<CancelSelection,
                             MoveTabToNewWindow,
                             ShowAbout,
                             MinimizeWindow,
-                            ZoomWindow>;
+                            ZoomWindow,
+                            FocusNextArea,
+                            FocusPreviousArea,
+                            FocusToolbar>;
 
 /// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
 /// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
@@ -626,6 +632,13 @@ namespace documentation
     constexpr inline std::string_view ZoomWindow {
         "Maximizes this window, or restores it when it is maximized (the macOS Zoom)."
     };
+    constexpr inline std::string_view FocusNextArea {
+        "Moves keyboard focus to the next area of the window: terminal, tabs, toolbar, and back."
+    };
+    constexpr inline std::string_view FocusPreviousArea {
+        "Moves keyboard focus to the previous area of the window: terminal, toolbar, tabs, and back."
+    };
+    constexpr inline std::string_view FocusToolbar { "Moves keyboard focus to the window's toolbar." };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
         "window until it is closed; the settings page is where the choice is made permanent."
@@ -936,6 +949,10 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ShowAbout", Action { ShowAbout {} }, documentation::ShowAbout },
         ActionCatalogEntry { "MinimizeWindow", Action { MinimizeWindow {} }, documentation::MinimizeWindow },
         ActionCatalogEntry { "ZoomWindow", Action { ZoomWindow {} }, documentation::ZoomWindow },
+        ActionCatalogEntry { "FocusNextArea", Action { FocusNextArea {} }, documentation::FocusNextArea },
+        ActionCatalogEntry {
+            "FocusPreviousArea", Action { FocusPreviousArea {} }, documentation::FocusPreviousArea },
+        ActionCatalogEntry { "FocusToolbar", Action { FocusToolbar {} }, documentation::FocusToolbar },
     };
     return catalog;
 }

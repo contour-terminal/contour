@@ -126,6 +126,12 @@ inline constexpr std::array MenuReachabilityExemptions {
                                 .reason = "the drag and Move Tab Left/Right cover it" },
     MenuReachabilityExemption { .action = "OpenContextMenu",
                                 .reason = "it opens the menu it would be a row of" },
+    MenuReachabilityExemption { .action = "FocusNextArea",
+                                .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption { .action = "FocusPreviousArea",
+                                .reason = "moves keyboard focus into the window's chrome" },
+    MenuReachabilityExemption { .action = "FocusToolbar",
+                                .reason = "moves keyboard focus into the window's chrome" },
 };
 
 } // namespace contour::command

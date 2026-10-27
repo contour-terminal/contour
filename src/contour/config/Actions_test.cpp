@@ -96,6 +96,13 @@ TEST_CASE("actions::fromString names the window's Minimize and Zoom", "[actions]
     CHECK(std::holds_alternative<actions::ZoomWindow>(*actions::fromString("ZoomWindow")));
 }
 
+TEST_CASE("actions::fromString names the three chrome focus actions", "[actions][parse]")
+{
+    CHECK(std::holds_alternative<actions::FocusNextArea>(*actions::fromString("FocusNextArea")));
+    CHECK(std::holds_alternative<actions::FocusPreviousArea>(*actions::fromString("FocusPreviousArea")));
+    CHECK(std::holds_alternative<actions::FocusToolbar>(*actions::fromString("FocusToolbar")));
+}
+
 TEST_CASE("actions::filterRepeatableActions drops ClosePane on auto-repeat", "[actions][repeat]")
 {
     std::vector<actions::Action> const held {

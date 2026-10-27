@@ -244,6 +244,7 @@ set(_header_files
     session/HyperlinkTooltip.hpp
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
+    window/ChromeFocus.hpp
     window/ProgramStatusBadge.hpp
     window/SecureInputPolicy.hpp
     window/SecureLockPlacement.hpp
@@ -1249,6 +1250,7 @@ if(CONTOUR_TESTING)
         platform/NotificationOccasion_test.cpp
         platform/SecureInputGate_test.cpp
         platform/SessionVisibility_test.cpp
+        window/ChromeFocus_test.cpp
         window/HeldModifierReveal_test.cpp
         window/FindBarPlacement_test.cpp
         window/LinkPillPlacement_test.cpp

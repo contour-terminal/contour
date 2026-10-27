@@ -135,3 +135,38 @@ TEST_CASE("copying with Ctrl+C still clears the selection", "[bindings]")
     CHECK(std::holds_alternative<actions::CopySelection>(found->binding[0]));
     CHECK(std::holds_alternative<actions::CancelSelection>(found->binding[1]));
 }
+
+namespace
+{
+template <typename Action>
+bool binds(InputMappings const& mappings, vtbackend::Key key, Modifiers modifiers)
+{
+    return std::ranges::any_of(mappings.keyMappings, [&](auto const& mapping) {
+        return mapping.input == key && mapping.modifiers == modifiers && mapping.modes == MatchModes {}
+               && mapping.binding.size() == 1 && std::holds_alternative<Action>(mapping.binding.front());
+    });
+}
+} // namespace
+
+TEST_CASE("Native2026 binds the chrome focus chords and Classic none of them", "[bindings]")
+{
+    auto const& native = defaultInputMappings(DefaultsEdition::Native2026);
+    CHECK(binds<actions::FocusNextArea>(native, vtbackend::Key::F6, Modifiers { Modifier::Control }));
+    CHECK(binds<actions::FocusPreviousArea>(
+        native, vtbackend::Key::F6, Modifiers { Modifier::Control, Modifier::Shift }));
+#ifdef __APPLE__
+    CHECK(binds<actions::FocusToolbar>(native, vtbackend::Key::F5, Modifiers { Modifier::Control }));
+#else
+    CHECK(std::ranges::none_of(native.keyMappings, [](auto const& mapping) {
+        return std::holds_alternative<actions::FocusToolbar>(mapping.binding.front());
+    }));
+#endif
+
+    auto const& classic = defaultInputMappings(DefaultsEdition::Classic);
+    CHECK(std::ranges::none_of(classic.keyMappings, [](auto const& mapping) {
+        auto const& action = mapping.binding.front();
+        return std::holds_alternative<actions::FocusNextArea>(action)
+               || std::holds_alternative<actions::FocusPreviousArea>(action)
+               || std::holds_alternative<actions::FocusToolbar>(action);
+    }));
+}

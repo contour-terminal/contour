@@ -1525,6 +1525,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ShowAbout);
     bool operator()(actions::MinimizeWindow);
     bool operator()(actions::ZoomWindow);
+    bool operator()(actions::FocusNextArea);
+    bool operator()(actions::FocusPreviousArea);
+    bool operator()(actions::FocusToolbar);
     bool operator()(actions::SpeakSelection);
     bool operator()(actions::StopSpeaking);
     bool operator()(actions::SetTabBarVisibility);

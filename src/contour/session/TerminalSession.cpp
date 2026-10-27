@@ -6429,6 +6429,21 @@ bool TerminalSession::operator()(actions::ZoomWindow)
     return true;
 }
 
+bool TerminalSession::operator()(actions::FocusNextArea)
+{
+    return false;
+}
+
+bool TerminalSession::operator()(actions::FocusPreviousArea)
+{
+    return false;
+}
+
+bool TerminalSession::operator()(actions::FocusToolbar)
+{
+    return false;
+}
+
 bool TerminalSession::operator()(actions::MoveTabTo event)
 {
     _manager->moveTabTo(event.position, this);
