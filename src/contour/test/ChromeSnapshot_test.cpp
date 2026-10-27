@@ -83,6 +83,23 @@ namespace
 }
 } // namespace
 
+namespace
+{
+/// @return The dialogs @p scene's script left open: the kit dialog it raised, and the window's own.
+[[nodiscard]] std::vector<QObject const*> openedDialogs(
+    contour::test::snapshot::ChromeSnapshotScene const& scene)
+{
+    auto dialogs = std::vector<QObject const*> {};
+    if (auto const* overlay = scene.overlay(); overlay != nullptr && overlay->property("opened").toBool())
+        dialogs.push_back(overlay);
+    for (auto const* name: { "aboutDialog", "saveLayoutDialog", "permissionDialog" })
+        if (auto const* dialog = scene.root().findChild<QObject*>(QString::fromLatin1(name));
+            dialog != nullptr && dialog->property("opened").toBool())
+            dialogs.push_back(dialog);
+    return dialogs;
+}
+} // namespace
+
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
 {
@@ -217,6 +234,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* toast = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeToast"));
                 REQUIRE(toast != nullptr);
                 CHECK(toast->property("shown").toBool());
+                // Fully shown: the picture is taken once its fade-in ran out.
+                CHECK(toast->opacity() == 1.0);
                 CHECK(toast->property("text").toString() == QStringLiteral("Copied 3 lines"));
                 if (variant.row == contour::config::ChromeStyle::MacOS)
                 {
@@ -503,6 +522,17 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
         }
+
+        // A sheet hangs below the band, never over the tab strip: every dialog the script opened.
+        if (variant.row == contour::config::ChromeStyle::MacOS && titleBar->isVisible())
+            for (auto const* dialog: openedDialogs(scene))
+            {
+                INFO("dialog: " << dialog->objectName().toStdString());
+                auto const* surface = dialog->property("background").value<QQuickItem*>();
+                REQUIRE(surface != nullptr);
+                CHECK(surface->mapToScene(QPointF(0, 0)).y()
+                      >= titleBar->mapToScene(QPointF(0, titleBar->height())).y() - 0.5);
+            }
     }
 }
 

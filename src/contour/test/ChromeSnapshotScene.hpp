@@ -717,11 +717,15 @@ class ChromeSnapshotScene
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); });
     }
 
-    /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it.
+    /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it. Waits
+    /// for its fade-in to run out, or the picture would catch it invisible.
     void showToast()
     {
         _controller.notices().post(
             window::Notice { .kind = window::NoticeKind::Copied, .text = ToastText.toStdString() });
+        auto const* toast = _root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, PopupSettleMs));
     }
 
     /// The question a script's session asks: what the session publishes for it (permissionPromptMap()).

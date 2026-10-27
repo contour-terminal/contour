@@ -84,6 +84,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -10627,6 +10628,204 @@ TEST_CASE("Save Layout: the Terminal row's Replace reads on its fill (offscreen)
     REQUIRE(label != nullptr);
     REQUIRE(fill != nullptr);
     CHECK(contrastOn(label, fillOf(fill)) >= 4.5);
+}
+// }}}
+
+// {{{ Dialogs on the display: what fits, what is cut, where the body starts
+namespace
+{
+/// The questions the snapshot scripts ask -- a paste and an extension's consent -- and one whose verbatim
+/// line and checkbox are wider than the dialog's own width in any chrome font.
+[[nodiscard]] std::vector<QVariantMap> displayedQuestions()
+{
+    using contour::session::consentLine;
+    using vtcontrol::ConsentWeight;
+    auto const preview =
+        contour::session::PastePreview { .lines = { "git log --oneline --graph --decorate --all",
+                                                    "cmake --build out/release -j 8" },
+                                         .moreLines = 48'211 };
+    auto const wide =
+        contour::session::PastePreview { .lines = { std::string(120, 'x') + " --and-a-long-flag", "y" },
+                                         .moreLines = 3 };
+    auto wideQuestion =
+        contour::session::permissionPromptMap(contour::session::bigPastePrompt("zsh", 2'400'000, wide), 3);
+    wideQuestion.insert(QStringLiteral("rememberText"),
+                        QStringLiteral("Don't ask again for any paste into this session or any other one"));
+    return {
+        contour::session::permissionPromptMap(contour::session::bigPastePrompt("zsh", 2'400'000, preview), 1),
+        wideQuestion,
+        contour::session::permissionPromptMap(
+            contour::session::consentPrompt(
+                "“git-stats” wants to control Contour",
+                { consentLine("Module: git-stats@/usr/share/contour/extensions/git-stats.wasm",
+                              ConsentWeight::Observes),
+                  consentLine("May see the windows, tabs and panes.", ConsentWeight::Observes),
+                  consentLine("May read what panes show, and their command history.",
+                              ConsentWeight::Observes),
+                  consentLine("May type into panes (can run commands).", ConsentWeight::CanRunCommands) }),
+            2),
+    };
+}
+
+/// @return Whether @p item is a scroll bar that shows.
+[[nodiscard]] bool isShownScrollBar(QQuickItem const& item)
+{
+    return item.inherits("QQuickScrollBar") && item.isVisible() && item.opacity() > 0.0;
+}
+
+/// Appends @p root and every item beneath it to @p items.
+void collectItemsBeneath(QQuickItem* root, QList<QQuickItem*>& items)
+{
+    items.append(root);
+    for (auto* child: root->childItems())
+        collectItemsBeneath(child, items);
+}
+
+/// The gap between @p dialog's heading and the top of its part named @p next.
+[[nodiscard]] qreal headingGap(QObject const& dialog, QString const& next)
+{
+    auto const* content = dialog.property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    auto const headings = itemsNamed(*content, QStringLiteral("kitDialogHeading"));
+    auto const below = itemsNamed(*content, next);
+    REQUIRE(headings.size() == 1);
+    REQUIRE(below.size() == 1);
+    auto const* heading = headings.front();
+    return below.front()->y() - (heading->y() + heading->height());
+}
+
+/// The kit's own gap under its heading: a dialog with a message.
+[[nodiscard]] qreal kitHeadingGap(contour::test::ChromeSetup const& setup)
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, setup);
+    DialogHost const host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close this tab?") },
+                                              { "message", QStringLiteral("“cmake” is still running.") } });
+    QCoreApplication::processEvents();
+    return headingGap(*dialog, QStringLiteral("kitDialogMessage"));
+}
+} // namespace
+
+TEST_CASE("PermissionDialog: on the Terminal row nothing runs past its border (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    for (auto const& question: displayedQuestions())
+    {
+        INFO("question: " << question.value("title").toString().toStdString());
+        MockSession session;
+        auto host = PermissionChrome { session, terminalRowSetup("contour-dark") };
+        session.setPendingPermission(question);
+        REQUIRE(host.waitOpened(true));
+        auto* const scroll = host.part("permissionLines");
+        REQUIRE(QTest::qWaitFor([&] { return scroll->height() > 0.0; }, 2000));
+        QCoreApplication::processEvents();
+
+        auto const* content = host.dialog->property("contentItem").value<QQuickItem*>();
+        REQUIRE(content != nullptr);
+        auto const inner = host.dialog->property("availableWidth").toReal();
+        auto const cell = host.engine.rootContext()
+                              ->contextProperty(QStringLiteral("chromeStyle"))
+                              .value<QObject*>()
+                              ->property("cellWidth")
+                              .toReal();
+        REQUIRE(cell > 0.0);
+
+        // Sized in whole cells, and its content no wider than inside its border.
+        auto const width = host.dialog->property("width").toReal();
+        CHECK(std::abs((width / cell) - std::round(width / cell)) < 0.01);
+        CHECK(content->implicitWidth() <= inner + 0.5);
+
+        // The checkbox and both buttons sit inside the border.
+        for (auto const* name: { "permissionRemember", "kitDialogReject", "kitDialogAccept" })
+        {
+            INFO("part: " << name);
+            auto* const part = host.part(QString::fromLatin1(name));
+            auto const box = part->mapRectToItem(content, QRectF(0, 0, part->width(), part->height()));
+            CHECK(box.left() >= -0.5);
+            CHECK(box.right() <= inner + 0.5);
+        }
+
+        // The e2 elevation: a hard copy of the box, one cell over and one down, no wider than the box.
+        auto* const surface = host.dialog->property("background").value<QQuickItem*>();
+        REQUIRE(surface != nullptr);
+        auto under = QList<QQuickItem*> {};
+        collectItemsBeneath(surface, under);
+        auto const hard = std::ranges::find_if(
+            under, [](QQuickItem const* item) { return item->objectName() == "elevationHardShadow"; });
+        REQUIRE(hard != under.end());
+        CHECK((*hard)->isVisible());
+        CHECK((*hard)->width() == Catch::Approx(surface->width()));
+        CHECK((*hard)->x() == Catch::Approx(cell));
+
+        // No scroll bar chrome, and every line whole: wrapped, never cut, the last one in view.
+        auto beneath = QList<QQuickItem*> {};
+        collectItemsBeneath(scroll, beneath);
+        auto const shownBars =
+            std::ranges::count_if(beneath, [](QQuickItem const* item) { return isShownScrollBar(*item); });
+        CHECK(shownBars == 0);
+        auto const lines = permissionLines(*host.dialog);
+        REQUIRE_FALSE(lines.isEmpty());
+        for (auto const* line: lines)
+        {
+            INFO("line: " << line->property("text").toString().toStdString());
+            CHECK_FALSE(line->property("truncated").toBool());
+            CHECK(line->width() <= scroll->width() + 0.5);
+        }
+        auto const* last = lines.back();
+        CHECK(last->mapRectToItem(scroll, QRectF(0, 0, last->width(), last->height())).bottom()
+              <= scroll->height() + 0.5);
+    }
+}
+
+TEST_CASE("PermissionDialog: its body starts under the heading as the kit's message does (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    auto const setup = contour::test::defaultChromeSetup();
+    auto const expected = kitHeadingGap(setup);
+    MockSession session;
+    auto host = PermissionChrome { session, setup };
+    session.setPendingPermission(pasteQuestion(1));
+    REQUIRE(host.waitOpened(true));
+    QCoreApplication::processEvents();
+    CHECK(headingGap(*host.dialog, QStringLiteral("kitDialogBody")) == Catch::Approx(expected).margin(0.5));
+}
+
+TEST_CASE("Save Layout: its body starts under the heading as the kit's message does (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    auto const setup = contour::test::defaultChromeSetup();
+    auto const expected = kitHeadingGap(setup);
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    auto host = makeSaveLayoutHost(engine, controller, setup);
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+    QCoreApplication::processEvents();
+    CHECK(headingGap(*host.dialog, QStringLiteral("kitDialogBody")) == Catch::Approx(expected).margin(0.5));
+}
+
+TEST_CASE("Save Layout: on the Terminal row a taken name's message wraps rather than being cut (offscreen)",
+          "[contour][gui][qml][layout]")
+{
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    controller.existing = { "dev" };
+    auto host = makeSaveLayoutHost(engine, controller, terminalRowSetup("contour-dark"));
+    REQUIRE(host.dialog != nullptr);
+    openSaveLayoutPrompt(controller);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+    host.nameField()->setProperty("text", QStringLiteral("dev"));
+    QCoreApplication::processEvents();
+
+    auto* const message = host.part(QStringLiteral("saveLayoutTakenMessage"));
+    REQUIRE(message != nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return message->width() > 0.0; }, 2000));
+    CHECK(message->property("text").toString() == QStringLiteral("“dev” already exists."));
+    CHECK_FALSE(message->property("truncated").toBool());
 }
 // }}}
 

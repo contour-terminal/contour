@@ -28,6 +28,9 @@ KitDialog {
     readonly property var _lines: root.prompt.lines !== undefined ? root.prompt.lines : []
     // The most the lines may take: half of what the dialog hangs in.
     readonly property real _linesRoom: root.parent ? root.parent.height / 2 : linesColumn.implicitHeight
+    // A row laid out on the character grid (the Terminal row): its scroll area draws no Qt scroll bar, and a
+    // verbatim line wraps there rather than being cut, since a cell grid has no ellipsis to spare.
+    readonly property bool _onGrid: chromeStyle.widthQuantum > 1
 
     function _answer(decision, memory) {
         if (root._answered)
@@ -49,6 +52,8 @@ KitDialog {
     defaultButton: root.prompt.defaultDecision === Permission.Allow ? KitDialog.Accept : KitDialog.Reject
     // Escape is no answer to keep: it is answered below, as Deny for this once (never the box's scope).
     closePolicy: Popup.NoAutoClose
+    // The checkbox's line is the widest control the body holds.
+    bodyControlsWidth: permissionRemember.implicitWidth
 
     /// Shows @p question: opens the dialog, or, while it is open, shows what the question asks now. A question
     /// other than the one shown starts afresh -- unanswered, the box as the question sets it.
@@ -83,6 +88,10 @@ KitDialog {
             clip: true
             contentWidth: availableWidth
             contentHeight: linesColumn.implicitHeight
+            // Never sideways: the lines wrap at its width. Upright, the bar shows on overflow only, and on the
+            // grid not at all until the row has a thumb column of its own -- the wheel and keys still scroll.
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: root._onGrid ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
 
             ColumnLayout {
                 id: linesColumn
@@ -102,8 +111,10 @@ KitDialog {
                         font: modelData.weight === Permission.Strong ? chromeStyle.type.footnoteStrong
                                                                      : chromeStyle.type.footnote
                         color: sys.windowText
-                        wrapMode: modelData.style === Permission.Verbatim ? Text.NoWrap : Text.Wrap
-                        elide: modelData.style === Permission.Verbatim ? Text.ElideRight : Text.ElideNone
+                        readonly property bool _cut: modelData.style === Permission.Verbatim && !root._onGrid
+                        wrapMode: _cut ? Text.NoWrap
+                                       : modelData.style === Permission.Verbatim ? Text.WrapAnywhere : Text.Wrap
+                        elide: _cut ? Text.ElideRight : Text.ElideNone
                     }
                 }
             }

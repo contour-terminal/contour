@@ -104,13 +104,14 @@ KitDialog {
             spacing: chromeStyle.space.s4
 
             Label {
+                objectName: "saveLayoutTakenMessage"
                 Layout.fillWidth: true
                 text: qsTr("“%1” already exists.").arg(root.check.trimmed)
-                // A name the user typed: text, never markup.
+                // A name the user typed: text, never markup. Wrapped, never cut beside Replace?.
                 textFormat: Text.PlainText
                 font: chromeStyle.type.footnote
                 color: sys.windowText
-                elide: Text.ElideRight
+                wrapMode: Text.Wrap
             }
 
             Button {

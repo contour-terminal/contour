@@ -2,9 +2,10 @@
 // The kit's modal dialog: a heading, a message and an accept/reject pair on a PopupSurface.
 //
 // Built on QtQuick.Controls' in-scene Dialog, never QtQuick.Dialogs (see ConfirmDialog.qml). Where it
-// appears is a token: a sheet attached to the window's top edge when `layout.dialog` is `layout.sheet`,
+// appears is a token: a sheet hanging below the window's band when `layout.dialog` is `layout.sheet`,
 // centred otherwise. Its width, insets, fonts and colours all come from the `chromeStyle` tokens, so this
-// file never learns which style is active.
+// file never learns which style is active. It is never narrower than its widest row of controls -- the
+// buttons, and whatever the body names in `bodyControlsWidth` -- and in whole cells where the chrome is.
 //
 // Keyboard: the modal popup keeps focus inside itself, Esc rejects it, and Enter takes the default button
 // (the accept button, unless `defaultButton` names the reject one) -- never a disabled accept.
@@ -32,6 +33,8 @@ Dialog {
     property string description: message
     /// What sits between the message and the buttons: a dialog's own controls (a field, a checkbox, lines).
     property alias bodyData: bodySlot.data
+    /// The widest row of the body's controls (a checkbox's line), which the dialog grows to hold; 0 for none.
+    property real bodyControlsWidth: 0
 
     /// Which button takes the initial focus and Enter.
     enum DefaultButton {
@@ -56,13 +59,27 @@ Dialog {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
-    width: chromeStyle.size.dialogWidth
     padding: chromeStyle.space.s8
 
-    // The sheet hangs from the window's top edge; every other row centres.
+    // The token's width, grown to hold the widest row of controls, in whole width quanta (cells on the
+    // Terminal row, pixels elsewhere) -- and never wider than what it hangs in, less a margin either side.
+    readonly property real _controlsWidth: Math.max(buttonRow.implicitWidth, root.bodyControlsWidth)
+    readonly property real _wantedWidth: Math.max(chromeStyle.size.dialogWidth,
+                                                  root._controlsWidth + root.leftPadding + root.rightPadding)
+    readonly property real _room: parent ? parent.width - 2 * chromeStyle.space.s8 : root._wantedWidth
+    width: Math.min(chromeStyle.widthQuantum * Math.ceil(root._wantedWidth / chromeStyle.widthQuantum),
+                    chromeStyle.widthQuantum * Math.floor(root._room / chromeStyle.widthQuantum))
+
+    // The sheet hangs below the window's band and banners: from where the window says its content starts
+    // (Main.qml's `sheetTop`), in the parent's coordinates, never above the parent's own top -- a dialog
+    // parented to a pane hangs from the pane. Every other row centres.
     readonly property bool _isSheet: chromeStyle.layout.dialog === chromeStyle.layout.sheet
+    readonly property var _window: parent ? parent.Window.window : null
+    readonly property real _sheetTop: root._window && root._window.sheetTop !== undefined
+                                      ? Math.max(0, parent.mapFromItem(null, 0, root._window.sheetTop).y)
+                                      : 0
     x: parent ? (parent.width - width) / 2 : 0
-    y: _isSheet || !parent ? 0 : (parent.height - height) / 2
+    y: !parent ? 0 : _isSheet ? root._sheetTop : (parent.height - height) / 2
 
     // The text colours come from the application palette directly, as ConfirmDialog's do. The popup's
     // inherited palette is not enough: a binding to `root.palette.windowText` is taken before the popup
@@ -73,7 +90,11 @@ Dialog {
         colorGroup: SystemPalette.Active
     }
 
-    background: PopupSurface {}
+    // Lifted by e2. Where e2 has no blur (the Terminal row) that is a hard copy of the box one cell over and
+    // one down; elsewhere the style's own popup shadow, as every popup's.
+    background: PopupSurface {
+        elevation: chromeStyle.elevation.e2.blur > 0 ? null : chromeStyle.elevation.e2
+    }
 
     // A Popup is not an Item and cannot carry the Accessible or Keys attached properties, so the content does.
     contentItem: ColumnLayout {
@@ -100,9 +121,11 @@ Dialog {
             textFormat: Text.PlainText
         }
 
+        // Taking no room without a message: the body then starts where the message would.
         Label {
             objectName: "kitDialogMessage"
             Layout.fillWidth: true
+            visible: root.message.length > 0
             text: root.message
             font: chromeStyle.type.footnote
             color: sys.windowText
@@ -119,6 +142,7 @@ Dialog {
         }
 
         RowLayout {
+            id: buttonRow
             Layout.fillWidth: true
             Layout.topMargin: chromeStyle.space.s4
             spacing: chromeStyle.space.s4

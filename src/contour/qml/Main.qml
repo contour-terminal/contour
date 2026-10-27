@@ -73,6 +73,8 @@ ThemedWindow
     //     defaults to shown before `win` resolves.
     property int tabBarPosition: win ? win.tabBarPosition : 0
     property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
+    // Where a sheet hangs from (KitDialog): the top of the content, below the band and the banners.
+    readonly property real sheetTop: content.y
 
     // Whether a full-screen band rests below the menu bar AppKit reveals over the window's top, as a native
     // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar
