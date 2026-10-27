@@ -143,9 +143,16 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         x: vbar.atRightEdge ? parent.width - vbar.width : 0
-        visible: (chrome.session ? chrome.session.isScrollbarVisible : false) && vbar.hasScrollback
+        // Whether the bar is wanted: the session's decision (an overlay bar hides at the bottom), and history to
+        // move through. It shows and hides by fading over motion.standard (a cross-fade under Reduce Motion);
+        // only once fully faded out is it gone, so a hidden bar takes no press.
+        readonly property bool wanted: (chrome.session ? chrome.session.isScrollbarVisible : false)
+                                       && vbar.hasScrollback
+        opacity: vbar.wanted ? 1.0 : 0.0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.standard } }
         orientation: Qt.Vertical
-        policy: visible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+        policy: vbar.wanted ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
         minimumSize: 0.1
         size: chrome.session
             ? chrome.session.pageLineCount / (chrome.session.pageLineCount + chrome.session.historyLineCount)
@@ -196,6 +203,7 @@ Item {
             implicitWidth: chromeStyle.size.scrollbar
             radius: chromeStyle.radii.scrollbar
             color: vbar.glyphThumb ? "transparent" : vbar.thumbColor
+            Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
 
             Column {
                 visible: vbar.glyphThumb
@@ -210,6 +218,7 @@ Item {
                         text: chromeStyle.scrollThumbGlyph
                         font: chromeStyle.type.body
                         color: vbar.thumbColor
+                        Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
                     }
                 }
             }
@@ -221,6 +230,7 @@ Item {
             color: vbar.engaged && !vbar.glyphThumb && chromeStyle.paletteRevision >= 0
                 ? chromeStyle.colorOn(chromeStyle.roles.scrollbarTrack, vbar.paneBackground)
                 : "transparent"
+            Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
         }
 
         // Tick marks over the track (`scrollbar.marks`): where commands ran, failed or are still running, and

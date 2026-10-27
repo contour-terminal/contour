@@ -2293,7 +2293,7 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
         CHECK(host.bar->width() == Catch::Approx(host.thin));
         CHECK(host.bar->x() == Catch::Approx(host.paneWidth - host.thin));
         CHECK(host.bar->height() == Catch::Approx(host.chrome->height())); // vertical anchors still span
-        CHECK(host.bar->isVisible());
+        CHECK(QTest::qWaitFor([&] { return host.bar->isVisible(); }));
 
         // Rebinding back to null (pane teardown) must not stretch it either.
         host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
@@ -2329,11 +2329,11 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
     {
         host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
         QCoreApplication::processEvents();
-        REQUIRE(host.bar->isVisible());
+        REQUIRE(QTest::qWaitFor([&] { return host.bar->isVisible(); }));
 
         session->setScrollbarVisible(false);
         QCoreApplication::processEvents();
-        CHECK_FALSE(host.bar->isVisible());
+        CHECK(QTest::qWaitFor([&] { return !host.bar->isVisible(); })); // once faded out
     }
 
     INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
@@ -2380,7 +2380,8 @@ TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens
     session->setScrollbarVisible(true);
     session->setHistoryLineCount(1000);
     host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
-    QCoreApplication::processEvents();
+    // Faded in, over motion.standard, before a press can reach it.
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->opacity() == 1.0; }));
 
     // The track and the inset beside it, toward the pane's edge, so the hit area reaches the edge.
     CHECK(host.bar->width()
@@ -2391,20 +2392,21 @@ TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens
     REQUIRE(handle != nullptr);
     CHECK(handle->width() == chromeToken(engine, "size", "scrollbar"));
     CHECK(handle->property("radius").toReal() == chromeToken(engine, "radii", "scrollbar"));
-    CHECK(handle->property("color").value<QColor>()
-          == colorOnPane(engine, ChromeColorRole::ScrollbarThumb, dark));
+    auto const resting = colorOnPane(engine, ChromeColorRole::ScrollbarThumb, dark);
+    CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == resting; }));
 
     // Engaged (pressed, as hovered), the thumb takes the active colour and the track shows.
     auto* window = qobject_cast<QQuickWindow*>(host.window.get());
     REQUIRE(window != nullptr);
     QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
     REQUIRE(QTest::qWaitFor([&] { return host.bar->property("pressed").toBool(); }));
-    CHECK(handle->property("color").value<QColor>()
-          == colorOnPane(engine, ChromeColorRole::ScrollbarThumbActive, dark));
+    // The colours change over motion.fast.
+    auto const active = colorOnPane(engine, ChromeColorRole::ScrollbarThumbActive, dark);
+    CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == active; }));
     auto* track = host.bar->property("background").value<QQuickItem*>();
     REQUIRE(track != nullptr);
-    CHECK(track->property("color").value<QColor>()
-          == colorOnPane(engine, ChromeColorRole::ScrollbarTrack, dark));
+    auto const trackColor = colorOnPane(engine, ChromeColorRole::ScrollbarTrack, dark);
+    CHECK(QTest::qWaitFor([&] { return track->property("color").value<QColor>() == trackColor; }));
     QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
     REQUIRE(QTest::qWaitFor([&] { return !host.bar->property("pressed").toBool(); }));
 
@@ -2417,7 +2419,7 @@ TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens
     auto const lightThumb = colorOnPane(engine, ChromeColorRole::ScrollbarThumb, QColor(0xFA, 0xFA, 0xF8));
     CHECK(lightThumb.lightnessF() < 0.5);
     if (!host.bar->property("engaged").toBool())
-        CHECK(handle->property("color").value<QColor>() == lightThumb);
+        CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == lightThumb; }));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -2436,7 +2438,7 @@ TEST_CASE("SessionChrome: an overlay bar hidden at the bottom takes no presses (
     host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
     QCoreApplication::processEvents();
 
-    CHECK_FALSE(host.bar->isVisible());
+    CHECK(QTest::qWaitFor([&] { return !host.bar->isVisible(); }));
     // What a press at the pane's right edge lands on is not the bar.
     auto const edge = QPointF(host.paneWidth - 1, host.chrome->height() / 2);
     CHECK(host.chrome->childAt(edge.x(), edge.y()) != host.bar);
@@ -2610,6 +2612,9 @@ TEST_CASE("SessionChrome draws the scrollbar's marks, and a click on one jumps t
     auto const bind = [&](MockSession& bound) {
         host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&bound)));
         QCoreApplication::processEvents();
+        // A shown bar fades in over motion.standard; only then does every press reach it.
+        REQUIRE(QTest::qWaitFor(
+            [&] { return host.bar->opacity() == 1.0 || !host.bar->property("wanted").toBool(); }));
     };
 
     // At the bottom of 1000 rows of history under a 25-row page, the page is the track's last 2.4 %: far
@@ -2732,7 +2737,7 @@ TEST_CASE("SessionChrome draws the scrollbar's marks, and a click on one jumps t
         auto plain = createScrollableSession();
         bind(*plain);
         CHECK(markTicksOf(*layer).empty());
-        CHECK(host.bar->isVisible());
+        CHECK(QTest::qWaitFor([&] { return host.bar->isVisible(); }));
         CHECK(host.bar->width() == Catch::Approx(host.thin));
         CHECK(host.bar->x() == Catch::Approx(host.paneWidth - host.thin));
     }
@@ -2766,11 +2771,11 @@ TEST_CASE("SessionChrome draws the scrollbar's marks, and a click on one jumps t
         bind(*session);
         auto const ticks = markTicksOf(*layer);
         REQUIRE(ticks.size() == 2);
-        REQUIRE(ticks[0]->isVisible());
+        REQUIRE(QTest::qWaitFor([&] { return ticks[0]->isVisible(); }));
 
         session->setScrollbarVisible(false);
         QCoreApplication::processEvents();
-        CHECK_FALSE(ticks[0]->isVisible());
+        CHECK(QTest::qWaitFor([&] { return !ticks[0]->isVisible(); })); // with the bar, once faded out
     }
 
     INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
@@ -2797,7 +2802,7 @@ TEST_CASE("SessionChrome lets a glide finish with the pointer on the scrollbar (
     session.setScrollbarVisible(true);
     session.setHistoryLineCount(1000);
     host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&session)));
-    QCoreApplication::processEvents();
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->opacity() == 1.0; })); // faded in
 
     auto const* handle = host.bar->property("contentItem").value<QQuickItem*>();
     REQUIRE(handle != nullptr);
@@ -2996,6 +3001,7 @@ TEST_CASE("SessionChrome over a live session: a click on a tick puts its block's
         ticks = markTicksOf(*layer);
     }
     REQUIRE(ticks.size() == 2);
+    REQUIRE(QTest::qWaitFor([&] { return h.bar->opacity() == 1.0; })); // faded in, so the click reaches it
     auto const target =
         h.live.session->scrollbarMarks().at(1).toMap().value(QStringLiteral("targetLine")).toLongLong();
 
@@ -11472,6 +11478,87 @@ TEST_CASE("size indicator: an inactive Terminal-row card shows it at full streng
     // And it is still centred on its own grid.
     auto const& grid = *pill->parentItem();
     CHECK(pill->x() + (pill->width() / 2) == Catch::Approx(grid.width() / 2).margin(1));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
+
+// {{{ Overlay motion
+namespace
+{
+/// The durations of the number animations under @p item: the Behaviors it fades and slides by.
+[[nodiscard]] std::vector<int> numberAnimationDurations(QObject const& item)
+{
+    auto durations = std::vector<int> {};
+    for (auto const* child: item.findChildren<QObject*>())
+        if (child->inherits("QQuickNumberAnimation"))
+            durations.push_back(child->property("duration").toInt());
+    return durations;
+}
+} // namespace
+
+TEST_CASE("overlay motion: the overlay bar fades out over the standard duration (offscreen)",
+          "[contour][gui][qml][motion]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->opacity() == 1.0; }));
+
+    auto const standard = static_cast<int>(chromeToken(engine, "motion", "standard"));
+    CHECK(std::ranges::contains(numberAnimationDurations(*host.bar), standard));
+
+    session->setScrollbarVisible(false);
+    QCoreApplication::processEvents();
+    // Still fading: visible, and partly transparent on the way out.
+    CHECK(host.bar->isVisible());
+    CHECK(QTest::qWaitFor([&] { return host.bar->opacity() < 1.0; }));
+    // Gone once it reaches 0, so a hidden bar takes no press.
+    CHECK(QTest::qWaitFor([&] { return !host.bar->isVisible(); }, standard * 10));
+    CHECK(host.bar->opacity() == 0.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("overlay motion: Reduce Motion cross-fades and keeps the hold (offscreen)",
+          "[contour][gui][qml][motion]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    setup.accessibility.motion = contour::config::MotionPreference::Reduced;
+
+    SECTION("the size pill and its hold")
+    {
+        auto scene = SizeIndicatorScene { { 600 }, 0, setup };
+        auto* pill = scene.pill(0);
+        CHECK(pill->property("enterOffset").toReal() == 0.0);
+        auto* hold = scene.panes.front()->findChild<QObject*>(QStringLiteral("sizeIndicatorHold"));
+        REQUIRE(hold != nullptr);
+        // A hold is no animation: as long as without Reduce Motion.
+        CHECK(hold->property("interval").toInt() == 600);
+        CHECK(hold->property("interval").toInt() == scene.linger());
+    }
+
+    SECTION("the overlay bar's fade")
+    {
+        QQmlEngine engine;
+        MockTabController controller;
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, setup);
+        auto host = createChromeInWindow(engine);
+        auto session = createScrollableSession();
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        QCoreApplication::processEvents();
+        auto const durations = numberAnimationDurations(*host.bar);
+        REQUIRE_FALSE(durations.empty());
+        CHECK(std::ranges::all_of(durations,
+                                  [](int ms) { return ms == contour::config::ReducedMotionCrossFadeMs; }));
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
