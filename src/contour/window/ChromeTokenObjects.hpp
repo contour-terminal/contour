@@ -661,9 +661,6 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int onHover READ onHover CONSTANT)
     Q_PROPERTY(int onHoverOrFocus READ onHoverOrFocus CONSTANT)
     Q_PROPERTY(int paletteTopPercent READ paletteTopPercent CONSTANT)
-    Q_PROPERTY(int findBar READ findBar CONSTANT)
-    Q_PROPERTY(int overlay READ overlay CONSTANT)
-    Q_PROPERTY(int paneHeaderRow READ paneHeaderRow CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -729,18 +726,6 @@ class ChromeLayoutTokens: public QObject
 
     /// @return The command palette's top edge, in percent of the window's height.
     [[nodiscard]] int paletteTopPercent() const noexcept { return _tokens.paletteTopPercent; }
-
-    /// @return Where the find bar sits, a config::FindBarHost as its underlying value.
-    [[nodiscard]] int findBar() const noexcept { return static_cast<int>(_tokens.findBar); }
-    /// @return The QML names of config::FindBarHost's enumerators.
-    [[nodiscard]] static constexpr int overlay() noexcept
-    {
-        return static_cast<int>(config::FindBarHost::Overlay);
-    }
-    [[nodiscard]] static constexpr int paneHeaderRow() noexcept
-    {
-        return static_cast<int>(config::FindBarHost::PaneHeaderRow);
-    }
 
   private:
     config::LayoutTokens _tokens {};

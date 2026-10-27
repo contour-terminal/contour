@@ -2763,11 +2763,9 @@ void TerminalSession::searchBarClosed()
     // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
     _isSearchBarOpen.store(false, std::memory_order_relaxed);
     _searchTallyTimer.stop();
-    // And the count being walked: its posted steps find the ticket moved on. A jump it was to make goes
-    // with it, or reopening the bar would move the cursor nobody asked to move.
-    _searchWalk.reset();
-    ++_searchWalkTicket;
-    _pendingSearchJump = PendingSearchJump::None;
+    // And the count being walked: a jump it was to make goes with it, or reopening the bar would move the
+    // cursor nobody asked to move.
+    abandonSearchWalk();
 
     // Cleared BECAUSE the timer was just stopped: the flag is otherwise only cleared where the timer
     // fires, so stopping it mid-window would strand the flag set for the rest of the session -- and a
@@ -2822,12 +2820,17 @@ void TerminalSession::setSearchPattern(QString const& pattern)
     scheduleSearchTally();
 }
 
-void TerminalSession::probeSearchLocked()
+void TerminalSession::abandonSearchWalk()
 {
-    // A new pattern or new options: whatever was being walked counted something else.
     _searchWalk.reset();
     ++_searchWalkTicket;
     _pendingSearchJump = PendingSearchJump::None;
+}
+
+void TerminalSession::probeSearchLocked()
+{
+    // A new pattern or new options: whatever was being walked counted something else.
+    abandonSearchWalk();
 
     auto const& search = _terminal.search();
     if (search.pattern.empty())
@@ -3117,13 +3120,11 @@ QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivit
 
 void TerminalSession::publishSearchToggles(vtbackend::SearchOptions options)
 {
-    _searchCaseTooltip = renderSearchCaseTooltip(options.caseSensitivity);
-
     auto const tooltipOf = [&](SearchToggle toggle, ToggleState state) -> QString {
         auto const on = state == ToggleState::On;
         switch (toggle)
         {
-            case SearchToggle::Case: return _searchCaseTooltip;
+            case SearchToggle::Case: return renderSearchCaseTooltip(options.caseSensitivity);
             case SearchToggle::Regex:
                 return on ? tr("Regular expression: on") : tr("Regular expression: off");
             case SearchToggle::WholeWord: return on ? tr("Whole word: on") : tr("Whole word: off");
@@ -3131,13 +3132,13 @@ void TerminalSession::publishSearchToggles(vtbackend::SearchOptions options)
         core::unreachable();
     };
 
+    auto const fromView = [](std::string_view text) {
+        return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+    };
     _searchToggles.clear();
     for (auto const& row: SearchToggleRows)
     {
         auto const affordance = describeSearchToggle(row.toggle, options);
-        auto const fromView = [](std::string_view text) {
-            return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
-        };
         _searchToggles.append(QVariantMap {
             { QStringLiteral("toggle"), static_cast<int>(row.toggle) },
             { QStringLiteral("glyph"), fromView(affordance.glyph) },
@@ -4910,15 +4911,17 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
-    return focusOrOpenSearch(SearchWrapEdge::Top);
+    focusOrOpenSearch(SearchWrapEdge::Top);
+    return true; // The chord is the session's either way.
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    return focusOrOpenSearch(SearchWrapEdge::Bottom);
+    focusOrOpenSearch(SearchWrapEdge::Bottom);
+    return true; // The chord is the session's either way.
 }
 
-bool TerminalSession::focusOrOpenSearch(SearchWrapEdge edge)
+void TerminalSession::focusOrOpenSearch(SearchWrapEdge edge)
 {
     auto const hasPattern = core::locked(_terminal, [&]() { return !_terminal.search().pattern.empty(); });
     if (!hasPattern)
@@ -4926,11 +4929,10 @@ bool TerminalSession::focusOrOpenSearch(SearchWrapEdge edge)
         // Find Next with nothing to find opens the find bar (Review Focus 5): nothing goes to the
         // application, and the cursor stays. Posted, as searchPromptRequested() posts it.
         platform::postToObject(this, [this]() { emit searchBarRequested(); });
-        return true;
+        return;
     }
     // Through the bar's own stepping, so F3 and ⌘G wrap like Enter does (R-h).
     stepSearch(edge);
-    return true;
 }
 
 bool TerminalSession::focusAdjacentSearchMatch(SearchWrapEdge edge)

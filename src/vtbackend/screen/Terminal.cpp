@@ -8651,10 +8651,9 @@ SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limi
     auto tally = beginSearchTally(position, limit);
     if (!tally)
         return SearchMatchTally {};
-    auto const everyRow = boxed_cast<LineCount>(displayedPage().historyLineCount() + pageSize().lines);
-    auto progress = continueSearchTally(*tally, everyRow);
+    auto progress = continueSearchTally(*tally, displayedPage().grid().linesUsed());
     while (progress && *progress == WalkProgress::Running)
-        progress = continueSearchTally(*tally, everyRow);
+        progress = continueSearchTally(*tally, displayedPage().grid().linesUsed());
     return progress ? tally->walk.tally() : SearchMatchTally {};
 }
 
@@ -8673,11 +8672,8 @@ std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(Te
 {
     if (tally.page != displayedPageIndex())
     {
-        auto const& walk = tally.walk;
-        tally = TerminalSearchTally {
-            .walk = SearchTallyWalk { walk.query(), displayedPage().grid(), walk.position(), walk.limit() },
-            .page = displayedPageIndex(),
-        };
+        tally.walk.restart(displayedPage().grid());
+        tally.page = displayedPageIndex();
     }
     auto const progress = tally.walk.step(displayedPage().grid(), budget);
     // Only the query still active is ended: a walk of one the user has since replaced says nothing about it.
@@ -8704,8 +8700,7 @@ std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocati
 SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
 {
     auto match = searchReverseWithin(from, budget);
-    auto const wholeGridFits =
-        boxed_cast<LineCount>(displayedPage().historyLineCount()) + pageSize().lines <= budget;
+    auto const wholeGridFits = displayedPage().grid().linesUsed() <= budget;
     if (!match && wholeGridFits)
     {
         // Small enough to answer for every row: the last match, below @p from, is where a finished walk
@@ -8737,15 +8732,9 @@ optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     // Through the compiled query: compiling it, and resolving its case policy, is done once per pattern by
     // this class's own setters, never per keystroke of an incremental search.
-    auto const matchLocation = _search.query
-                                   ? settleSearch(displayedPage().searchFrom(*_search.query, searchPosition))
-                                   : std::nullopt;
-
-    if (matchLocation)
-        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
-
-    screenUpdated();
-    return matchLocation;
+    return revealSearchMatch(_search.query
+                                 ? settleSearch(displayedPage().searchFrom(*_search.query, searchPosition))
+                                 : std::nullopt);
 }
 
 std::optional<CellLocation> Terminal::searchNextMatch(CellLocation cursorPosition)
@@ -8815,8 +8804,7 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     // The probe's search, bounded by the grid itself: every row it has.
-    auto const everyRow = boxed_cast<LineCount>(displayedPage().historyLineCount()) + pageSize().lines;
-    return revealSearchMatch(searchReverseWithin(searchPosition, everyRow));
+    return revealSearchMatch(searchReverseWithin(searchPosition, displayedPage().grid().linesUsed()));
 }
 
 CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept

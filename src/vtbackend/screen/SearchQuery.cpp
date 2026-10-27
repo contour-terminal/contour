@@ -483,12 +483,12 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::m
         // with no text, or not a whole word where one is asked for is dropped, and the search resumes at the
         // next place a match may begin.
         auto position = std::size_t { 0 };
+        auto found = std::wsmatch {}; // Reused: each search would otherwise allocate its own sub-matches.
         while (position <= subject.units.size())
         {
             auto const from = subject.units.begin() + static_cast<std::ptrdiff_t>(position);
             auto const flags =
                 position == 0 ? std::regex_constants::match_default : std::regex_constants::match_prev_avail;
-            auto found = std::wsmatch {};
             if (!std::regex_search(from, subject.units.end(), found, *_regex, flags))
                 break;
             auto const begin = position + static_cast<std::size_t>(found.position(0));

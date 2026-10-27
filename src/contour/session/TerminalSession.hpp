@@ -388,6 +388,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
 
+    /// Drops the count being walked: its posted steps find the ticket moved on, and the jump it was to make
+    /// goes with it.
+    void abandonSearchWalk();
+
     /// Installs what the active search's pattern and options say into the bar's state, under the lock: a
     /// refused pattern as Invalid, otherwise the bounded probe (R-e), moving the vi cursor onto what it
     /// found.
@@ -436,8 +440,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Find Next (@p edge Top) or Find Previous (Bottom): steps and wraps as the bar does, or, with no
     /// pattern, asks for the find bar.
-    /// @return Always true: the chord is the session's either way. The action-handler contract is a bool.
-    [[nodiscard]] bool focusOrOpenSearch(SearchWrapEdge edge);
+    void focusOrOpenSearch(SearchWrapEdge edge);
 
     /// One step towards @p edge's direction, without wrapping: what vi's `n` and `N` do.
     /// @return Whether a match was stepped to; a bool, as the action handlers it backs return one.
@@ -2037,7 +2040,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     SearchStatus _searchStatus;
     QString _searchPatternText;
     QString _searchSummary;
-    QString _searchCaseTooltip;
     QVariantList _searchToggles;
     /// @see searchFocusedRows. GUI thread only.
     QVariantMap _searchFocusedRows;

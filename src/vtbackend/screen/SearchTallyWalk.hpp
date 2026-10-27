@@ -81,11 +81,10 @@ class SearchTallyWalk
     /// @return The query being counted.
     [[nodiscard]] std::shared_ptr<SearchQuery const> const& query() const noexcept { return _query; }
 
-    /// @return The position the ordinal is reported for, as given.
-    [[nodiscard]] CellLocation position() const noexcept { return _position; }
-
-    /// @return The match limit, as given.
-    [[nodiscard]] size_t limit() const noexcept { return _limit; }
+    /// Starts over from @p grid's top, with an empty tally: the rows read so far no longer exist as such, or
+    /// the walk moves to another grid (the terminal's other page). Keeps the query, the position and the
+    /// limit.
+    void restart(Grid const& grid);
 
   private:
     /// A cell named by its row's stable id, so it stays put while rows scroll.
@@ -98,9 +97,6 @@ class SearchTallyWalk
 
     /// The segment holding @p row, found by walking back to its line's head: counted. @see headLookups
     [[nodiscard]] SearchSegment segmentFromHead(Grid const& grid, LineOffset row);
-
-    /// Starts over from @p grid's top, with an empty tally: the rows read so far no longer exist as such.
-    void restart(Grid const& grid);
 
     [[nodiscard]] static std::optional<CellLocation> locate(Grid const& grid,
                                                             std::optional<StableCell> cell) noexcept;

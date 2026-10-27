@@ -173,7 +173,7 @@ Item {
     Item {
         id: findSlotItem
         objectName: "paneHeaderFindSlot"
-        x: nameLabel.x + nameLabel.width + header.gap
+        x: cwdLabel.x // Where the directory starts: after the name.
         width: Math.max(0, header.width - header.trailing - x)
         height: header.height
     }

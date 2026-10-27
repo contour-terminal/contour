@@ -85,9 +85,8 @@ struct SearchMatchTally
 /// A case policy resolved against an actual needle: how the comparison will be done.
 ///
 /// Distinct from @c SearchCaseSensitivity, which is what the user asked for -- @c Smart is a rule,
-/// not an answer. This is the answer, and it is named rather than left a @c bool because it is
-/// threaded through call sites where a bare @c true says nothing (@c Screen::searchFrom) and stored
-/// on @c Search, where a @c bool member would be a finding by this project's own rule.
+/// not an answer. This is the answer, which SearchQuery::compile() settles once per pattern and folds the
+/// needle and the subject by; named rather than left a @c bool, by this project's own rule.
 enum class CaseComparison : uint8_t
 {
     Folded = 0, //!< Letters compare equal regardless of case.

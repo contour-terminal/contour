@@ -1862,7 +1862,6 @@ TEST_CASE("UiStyleProvider publishes the find bar's tokens and placement", "[con
     CHECK(tokenOf(mac, "size", "findBar").toReal() == 32.0);
     CHECK(tokenOf(mac, "size", "findBarWidth").toReal() == 380.0);
     CHECK(tokenOf(mac, "radii", "findBar").toReal() == 8.0);
-    CHECK(tokenOf(mac, "layout", "findBar").toInt() == tokenOf(mac, "layout", "overlay").toInt());
     auto const placement = mac.findBarPlacement(0, 800, 400, 10, 30);
     CHECK(placement.value("anchor").toString() == QStringLiteral("bottomRight"));
     CHECK(placement.value("x").toReal() == 412.0);
@@ -1881,8 +1880,6 @@ TEST_CASE("UiStyleProvider publishes the find bar's tokens and placement", "[con
     // The two insets are a cell across and a row down (F16).
     CHECK(tokenOf(terminal, "space", "findBarInset").toReal() == Catch::Approx(terminal.widthQuantum()));
     CHECK(tokenOf(terminal, "space", "findBarInsetRows").toReal() == Catch::Approx(terminal.cellHeight()));
-    CHECK(tokenOf(terminal, "layout", "findBar").toInt()
-          == tokenOf(terminal, "layout", "paneHeaderRow").toInt());
     CHECK(terminal.findBarPlacement(1, 800, 400, 0, 0).value("anchor").toString()
           == QStringLiteral("headerRow"));
     CHECK(terminal.property("findPreviousGlyph").toString() == QStringLiteral("↑"));
