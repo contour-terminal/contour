@@ -3924,8 +3924,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     struct Hover
     {
         /// What the tooltip names: the OSC 8 link's URI, or a detected link's target where it differs from
-        /// its text; empty over none.
-        std::string uri;
+        /// its text; none over neither.
+        HoveredLink link;
         std::optional<input::MouseCursorShape> targetShape; ///< Over something to open; else the default.
         bool decidesPointerShape = false;                   ///< Whether this move decides the shape.
     };
@@ -3938,17 +3938,19 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         auto const decidesPointerShape = decidesPointerShapeForCell || (chordChanged && _display != nullptr);
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
         // Read only on a new cell, where the tooltip is updated (below).
-        auto const tooltipTarget = [&]() -> std::string {
+        auto const tooltipTarget = [&]() -> HoveredLink {
             if (!decidesPointerShapeForCell)
-                return {};
+                return std::monostate {};
             if (auto const link = _terminal.tryGetHoveringHyperlink())
-                return link->uri;
-            return hoveredDetectedLinkTooltip();
+                return OscLinkTarget { .uri = link->uri };
+            if (auto const& text = hoveredDetectedLinkTooltip(); !text.empty())
+                return DetectedLinkText { .text = text };
+            return std::monostate {};
         };
         auto const pointsAtTarget = decidesPointerShape
                                     && (_terminal.linkPointerShape() == vtbackend::LinkPointerShape::Hand
                                         || _terminal.collapsedFoldLabelAt(pos).has_value());
-        return Hover { .uri = tooltipTarget(),
+        return Hover { .link = tooltipTarget(),
                        .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
                                                      : std::nullopt,
                        .decidesPointerShape = decidesPointerShape };
@@ -3966,7 +3968,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
 
     // The hover state (tooltip) follows the cell, not the chord.
     if (decidesPointerShapeForCell)
-        updateHyperlinkHover(hover.uri, pos);
+        updateHyperlinkHover(hover.link, pos);
 }
 
 namespace
@@ -4208,13 +4210,13 @@ std::string const& TerminalSession::hoveredDetectedLinkTooltip()
     return _detectedLinkTooltip.text;
 }
 
-void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
+void TerminalSession::updateHyperlinkHover(HoveredLink const& link, vtbackend::CellLocation cell)
 {
     if (!_config.hyperlinkHoverTooltip.value())
         return;
 
-    auto const change = _hyperlinkHover.update(uri, cell, MaxTooltipLength);
-    if (!change.changed)
+    auto const change = _hyperlinkHover.update(link, cell, MaxTooltipLength);
+    if (change.change == HoverChange::Unchanged)
         return;
 
     _hyperlinkTooltipText = QString::fromStdString(change.text);
@@ -4477,7 +4479,7 @@ void TerminalSession::leaveGrid()
 
 void TerminalSession::clearHyperlinkHover()
 {
-    if (!_hyperlinkHover.clear().changed)
+    if (_hyperlinkHover.clear().change == HoverChange::Unchanged)
         return;
 
     _hyperlinkTooltipText.clear();

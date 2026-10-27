@@ -190,4 +190,16 @@ std::string describeLinkGesture(config::Config const& config, ShortcutStyle styl
         "{} ({}{} inside applications that use the mouse)", plain, modifiersText(bypass, style), plain);
 }
 
+std::string linkOpenHint(std::optional<vtbackend::Modifiers> follow,
+                         vtbackend::Modifiers bypass,
+                         ShortcutStyle style)
+{
+    if (!follow)
+        return {};
+    // The glyph style reads as a gesture, "⌘-click"; the text style as the shortcut column spells a chord.
+    auto const click =
+        style == ShortcutStyle::MacGlyphs ? std::string_view { "-click" } : std::string_view { "Click" };
+    return std::format("{}{}{} to open", modifiersText(bypass, style), modifiersText(*follow, style), click);
+}
+
 } // namespace contour::command

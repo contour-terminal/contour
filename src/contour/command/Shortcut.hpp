@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -245,5 +246,16 @@ using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
 /// @param style  How to spell the modifiers.
 /// @return The gesture, spelled for a user.
 [[nodiscard]] std::string describeLinkGesture(config::Config const& config, ShortcutStyle style);
+
+/// The link pill's hint: how a click opens the link under the pointer, "⌘-click to open" or
+/// "Ctrl+Click to open". Rendered from the configured binding, never written as a literal.
+/// @param follow The FollowHyperlink binding's modifiers; nullopt when no binding follows links.
+/// @param bypass What a click needs on top of @p follow: the bypass modifiers while an application takes the
+///               mouse, none otherwise.
+/// @param style  How to spell the modifiers.
+/// @return The hint; empty when no binding follows links.
+[[nodiscard]] std::string linkOpenHint(std::optional<vtbackend::Modifiers> follow,
+                                       vtbackend::Modifiers bypass,
+                                       ShortcutStyle style);
 
 } // namespace contour::command

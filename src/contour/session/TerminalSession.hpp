@@ -491,9 +491,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
   private:
     /// Feeds the hovered-link tracker and publishes any change to QML.
     ///
-    /// @param uri  The hyperlink under the pointer, or empty when there is none.
+    /// @param link The link under the pointer; std::monostate over none.
     /// @param cell Where the pointer is, in viewport coordinates.
-    void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
+    void updateHyperlinkHover(HoveredLink const& link, vtbackend::CellLocation cell);
 
     /// What the tooltip says for the detected link under the pointer (detectedLinkTooltip()). The caller
     /// holds the terminal lock.

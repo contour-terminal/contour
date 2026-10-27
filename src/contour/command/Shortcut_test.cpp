@@ -246,3 +246,20 @@ TEST_CASE("shortcutIndex is the chord index rendered", "[contour][palette]")
         }
     }
 }
+
+TEST_CASE("linkOpenHint names the configured gesture", "[contour][palette]")
+{
+    using vtbackend::Modifier;
+    CHECK(linkOpenHint(Modifiers { Modifier::Super }, Modifiers {}, ShortcutStyle::MacGlyphs)
+          == "⌘-click to open");
+    CHECK(linkOpenHint(Modifiers { Modifier::Control }, Modifiers {}, ShortcutStyle::Text)
+          == "Ctrl+Click to open");
+    // While an application takes the clicks, the hint names the bypass chord too.
+    CHECK(linkOpenHint(Modifiers { Modifier::Super }, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs)
+          == "⇧⌘-click to open");
+    CHECK(linkOpenHint(Modifiers { Modifier::Control }, Modifiers { Modifier::Shift }, ShortcutStyle::Text)
+          == "Shift+Ctrl+Click to open");
+    // No binding follows links: no hint at all.
+    CHECK(linkOpenHint(std::nullopt, Modifiers {}, ShortcutStyle::Text).empty());
+    CHECK(linkOpenHint(std::nullopt, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs).empty());
+}

@@ -5,10 +5,15 @@
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <core/Utils.hpp>
+
 #include <format>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace contour::session
@@ -50,6 +55,55 @@ namespace
             return std::nullopt;
 
         return vtbackend::localPathOfFileUrl(std::string { uri }, *localHost);
+    }
+
+    /// What separates two parts of a breadcrumb: U+203A between spaces.
+    constexpr auto BreadcrumbSeparator = std::string_view { " \u203A " };
+
+    /// @p uri as a breadcrumb, its host and its non-empty decoded path segments, or nullopt where it has no
+    /// authority to read one from (mailto:, a bare word).
+    [[nodiscard]] std::optional<std::string> breadcrumbOf(std::string_view uri)
+    {
+        constexpr auto AuthorityMark = std::string_view { "://" };
+        auto const schemeEnd = uri.find(AuthorityMark);
+        if (schemeEnd == std::string_view::npos)
+            return std::nullopt;
+
+        // The query and the fragment go, then the authority's user info and port.
+        auto rest = uri.substr(schemeEnd + AuthorityMark.size());
+        rest = rest.substr(0, rest.find_first_of("?#"));
+        auto const pathStart = rest.find('/');
+        auto authority = rest.substr(0, pathStart);
+        auto const path = pathStart == std::string_view::npos ? std::string_view {} : rest.substr(pathStart);
+        if (auto const at = authority.rfind('@'); at != std::string_view::npos)
+            authority = authority.substr(at + 1);
+        // A port follows the last colon, unless that colon sits inside a bracketed IPv6 address.
+        if (auto const colon = authority.rfind(':');
+            colon != std::string_view::npos && authority.find(']', colon) == std::string_view::npos)
+            authority = authority.substr(0, colon);
+
+        auto parts = std::vector<std::string> {};
+        if (!authority.empty())
+            parts.emplace_back(authority);
+        for (auto const segment: path | std::views::split('/'))
+            if (!std::ranges::empty(segment))
+                parts.push_back(core::unescapeURL(std::string_view { segment.begin(), segment.end() }));
+
+        auto crumb = std::string {};
+        for (auto const& part: parts)
+        {
+            if (!crumb.empty())
+                crumb += BreadcrumbSeparator;
+            crumb += part;
+        }
+        return crumb;
+    }
+
+    /// @p text made safe to show and elided to @p maxLength codepoints.
+    [[nodiscard]] std::string shown(std::string_view text, size_t maxLength)
+    {
+        return elideMiddle(vtbackend::sanitizeCommandLine(text, vtbackend::SanitizePurpose::Display),
+                           maxLength);
     }
 } // namespace
 
@@ -97,30 +151,66 @@ std::string detectedLinkTooltip(vtbackend::DetectedLink const& link)
     return shown == link.text ? std::string {} : shown;
 }
 
-HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri,
+std::string linkPillText(std::string_view uri, std::optional<std::string_view> localHost, size_t maxLength)
+{
+    if (uri.empty())
+        return {};
+
+    // A local file is its path. A file elsewhere keeps its scheme, as the tooltip did: the path alone would
+    // read as one on this machine.
+    if (auto const path = localFilePath(uri, localHost))
+        return shown(*path, maxLength);
+    if (uri.starts_with("file://"))
+        return shown(uri, maxLength);
+    return shown(breadcrumbOf(uri).value_or(std::string { uri }), maxLength);
+}
+
+std::string linkPillText(vtbackend::DetectedLink const& link, size_t maxLength)
+{
+    if (link.target.kind != vtbackend::LinkKind::Path)
+        return linkPillText(link.target.target, std::nullopt, maxLength);
+
+    auto path = link.target.target;
+    if (link.target.location)
+        path += std::format(":{}:{}", link.target.location->line, link.target.location->column);
+    return shown(path, maxLength);
+}
+
+HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(HoveredLink const& link,
                                                             vtbackend::CellLocation cell,
                                                             size_t maxLength)
 {
-    if (uri.empty())
+    if (std::holds_alternative<std::monostate>(link))
         return clear();
 
     // Still the same link: say nothing, so the tooltip's show delay is not restarted, and so the
     // tooltip does not slide along as the pointer traces the text.
-    if (uri == _uri)
+    if (link == _link)
         return {};
 
-    _uri = std::string { uri };
+    _link = link;
     _anchor = cell;
-    return { .changed = true, .text = hyperlinkTooltipText(uri, _localHost(), maxLength), .anchor = _anchor };
+    auto text = std::visit(
+        [&](auto const& hovered) -> std::string {
+            using Hovered = std::decay_t<decltype(hovered)>;
+            if constexpr (std::is_same_v<Hovered, OscLinkTarget>)
+                return linkPillText(hovered.uri, _localHost(), maxLength);
+            else if constexpr (std::is_same_v<Hovered, DetectedLinkText>)
+                return hovered.text;
+            else
+                return {};
+        },
+        link);
+    return { .change = HoverChange::Changed, .text = std::move(text), .anchor = _anchor };
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()
 {
-    if (_uri.empty())
+    if (std::holds_alternative<std::monostate>(_link))
         return {};
 
-    _uri.clear();
-    return { .changed = true, .text = {}, .anchor = _anchor };
+    _link = std::monostate {};
+    return { .change = HoverChange::Changed, .text = {}, .anchor = _anchor };
 }
 
 } // namespace contour::session
