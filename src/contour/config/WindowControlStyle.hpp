@@ -61,6 +61,13 @@ enum class WindowControlPresentation : uint8_t
     TrafficLight, //!< A small colored dot that reveals its glyph while the group is hovered.
 };
 
+/// What a @c Button presentation's hover and pressed fill is drawn with.
+enum class ControlWash : uint8_t
+{
+    Highlight = 0, //!< The palette highlight at the chrome's hover wash (UiStyleTokens::hoverWashPercent).
+    KitFill, //!< The kit's @c fill.4 (FillAlphas[3]): black 5 % on a light chrome, white 6 % on a dark one.
+};
+
 /// What one window control does. Also the index into @c WindowControlTokens::dotColors.
 enum class WindowControlKind : uint8_t
 {
@@ -121,6 +128,19 @@ struct WindowControlTokens
     /// faces, so the one glyph that is not in the array above.
     std::string_view restoreGlyph;
 
+    /// The icon fonts the controls prefer, the first installed one winning (@see controlGlyphsFor); an empty
+    /// entry is none. An array rather than a span so the defaulted comparison below still exists.
+    std::array<std::string_view, 2> iconFamilies;
+
+    /// The glyph each control is drawn with in an icon font, indexed by @c WindowControlKind.
+    std::array<std::string_view, WindowControlCount> iconGlyphs;
+
+    /// The restore glyph in an icon font.
+    std::string_view iconRestoreGlyph;
+
+    /// What a hovered or pressed @c Button is filled with.
+    ControlWash wash;
+
     /// Defaulted so a style derived from another (Breeze from Windows) can be checked against it as
     /// a whole rather than field by field, which is what keeps such a test honest when a field is
     /// added.
@@ -160,6 +180,13 @@ namespace detail
         .inactiveDotColor = 0,
         .glyphs = { "✕", "—", "▢" },
         .restoreGlyph = "❐",
+        // Windows 11's caption glyphs; Windows 10 has the same code points in Segoe MDL2 Assets. Neither
+        // exists elsewhere, where the Unicode glyphs above are drawn in the chrome font instead.
+        .iconFamilies = { "Segoe Fluent Icons", "Segoe MDL2 Assets" },
+        .iconGlyphs = { "\uE8BB", "\uE921", "\uE922" },
+        .iconRestoreGlyph = "\uE923",
+        // The kit's fill.4, as Windows 11 lights its caption buttons.
+        .wash = ControlWash::KitFill,
     };
 
     // Traffic lights at the leading edge, in macOS's own order and colors. The glyphs are the ones
@@ -184,15 +211,22 @@ namespace detail
         // Zoom is a toggle on macOS and shows the same glyph either way, but the two arrows are
         // turned inward to say the window is coming back.
         .restoreGlyph = "⤡",
+        // A traffic light has no icon font and no fill.
+        .iconFamilies = {},
+        .iconGlyphs = {},
+        .iconRestoreGlyph = {},
+        .wash = ControlWash::Highlight,
     };
 
-    // Breeze differs from Windows in two values and agrees on the other seven, so it says only the
-    // two rather than restating the row: a glyph or an order that drifted between them would be a
-    // silent inconsistency no reader would spot in two adjacent literal blocks.
+    // Breeze differs from Windows in the values it states and agrees on the rest, so it says only those
+    // rather than restating the row: a glyph or an order that drifted between them would be a silent
+    // inconsistency no reader would spot in two adjacent literal blocks.
     inline constexpr auto PlasmaTokens = [] {
         auto tokens = WindowsTokens;
-        tokens.hoverCornerPercent = 100;   // a circular hover fill rather than a full-height rectangle
-        tokens.closeHoverColor = 0xC9312B; // Breeze's own red
+        tokens.hoverCornerPercent = 100;      // a circular hover fill rather than a full-height rectangle
+        tokens.closeHoverColor = 0xC9312B;    // Breeze's own red
+        tokens.iconFamilies = {};             // never Windows' Segoe glyphs, even where they are installed
+        tokens.wash = ControlWash::Highlight; // the chrome's ordinary hover wash, not the Windows kit's
         return tokens;
     }();
 

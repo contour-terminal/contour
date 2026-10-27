@@ -18,6 +18,7 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/session/EndReason.hpp>
@@ -61,10 +62,12 @@
 #include <QtCore/QDirIterator>
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QHash>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QMimeData>
 #include <QtCore/QObject>
+#include <QtCore/QRectF>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
@@ -136,6 +139,10 @@ class MockTabController: public QAbstractListModel
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
     Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
+    // Mirrors WindowController's maximise button as the OS drives it; a test sets it with
+    // setNativeMaximizeVisual().
+    Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
+    Q_PROPERTY(bool nativeMaximizePressed READ nativeMaximizePressed NOTIFY nativeMaximizeVisualChanged)
 
   public:
     MockTabController() = default;
@@ -155,6 +162,43 @@ class MockTabController: public QAbstractListModel
     }
     /// Mirrors TerminalDisplay::toggleTitleBar(): flips the native-decoration axis.
     Q_INVOKABLE void toggleTitleBar() { setTitleBarVisible(!_titleBarVisible); }
+
+    [[nodiscard]] bool nativeMaximizeHovered() const noexcept
+    {
+        return _nativeMaximizeVisual != contour::platform::CaptionButtonVisual::Rest;
+    }
+    [[nodiscard]] bool nativeMaximizePressed() const noexcept
+    {
+        return _nativeMaximizeVisual == contour::platform::CaptionButtonVisual::Pressed;
+    }
+    /// What the caption adapter reports, as WindowController's binding would hear it.
+    void setNativeMaximizeVisual(contour::platform::CaptionButtonVisual visual)
+    {
+        _nativeMaximizeVisual = visual;
+        emit nativeMaximizeVisualChanged();
+    }
+
+    /// Mirrors WindowController::setCaptionButtonRect(): records the rectangle and its owner by kind.
+    Q_INVOKABLE void setCaptionButtonRect(
+        QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height)
+    {
+        captionRects[kind] = QRectF { x, y, width, height };
+        captionOwners[kind] = owner;
+    }
+    /// Mirrors WindowController::clearCaptionButtonRect(): records the call, and forgets the rectangle when
+    /// @p owner reported it last.
+    Q_INVOKABLE void clearCaptionButtonRect(QObject* owner, int kind)
+    {
+        clearedCaptionKinds.push_back(kind);
+        if (captionOwners.value(kind) != owner)
+            return;
+        captionRects.remove(kind);
+        captionOwners.remove(kind);
+    }
+
+    QHash<int, QRectF> captionRects {};      ///< The rectangles WindowControls.qml last reported, by kind.
+    QHash<int, QObject*> captionOwners {};   ///< The control that reported each rectangle last, by kind.
+    std::vector<int> clearedCaptionKinds {}; ///< Every clearCaptionButtonRect() kind, in order.
 
     /// Mirrors WindowController::triggerContextMenuAction(): what ActionContextMenu.qml calls on a pick.
     Q_INVOKABLE void triggerContextMenuAction(int actionId) { lastTriggeredActionId = actionId; }
@@ -350,10 +394,13 @@ class MockTabController: public QAbstractListModel
     void tabContextMenuRequested(int /*index*/);
     void newTabMenuModelChanged();
     void newTabMenuRequested();
+    void nativeMaximizeVisualChanged();
 
   private:
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
+    contour::platform::CaptionButtonVisual _nativeMaximizeVisual =
+        contour::platform::CaptionButtonVisual::Rest;
     int _count = 3;
     int _activeTabIndex = 0;
     bool _titleBarVisible = true;
@@ -8293,8 +8340,7 @@ void skipUnlessOffscreen()
     return buildQmlHost(engine, source, QStringLiteral("TabItemBorderTestHost.qml"));
 }
 
-/// Builds the REAL TitleBar with its window controls enabled, under @p uiStyle and
-/// @p windowControlStyle.
+/// Builds the REAL TitleBar with its window controls enabled, under the chrome @p setup.
 ///
 /// The one place TitleBar is instantiated for a test, so a change to how it is instantiated -- a new
 /// required property, say -- lands on every test at once rather than on whichever host builder the
@@ -8303,23 +8349,21 @@ void skipUnlessOffscreen()
 ///
 /// @param engine             The engine to build in. Both style providers are installed on it.
 /// @param controller         The mock the bar binds to.
-/// @param uiStyle            The chrome style, i.e. what decides the extents.
-/// @param windowControlStyle The window-control style, i.e. what decides side, order and shape.
+/// @param setup              The chrome row (what decides the extents) and the window-control style (what
+///                           decides side, order and shape).
 /// @param extraChildren      QML appended after the bar, e.g. a ResizeBorder over it.
 /// @param width              The host window's width. Wide by default, so the tab strip's 70% cap
 ///                           leaves the drag region real width and "left of the tabs" and "right of
 ///                           the drag region" are genuinely different places to be.
 /// @return The host Window; the bar is reachable via findChild("titleBar").
-[[nodiscard]] QmlHost makeTitleBarHost(
-    QQmlEngine& engine,
-    MockTabController& controller,
-    contour::config::UiStyle uiStyle = contour::config::UiStyle::Native,
-    contour::config::WindowControlStyle windowControlStyle = contour::config::WindowControlStyle::Windows,
-    QString const& extraChildren = {},
-    int width = 900)
+[[nodiscard]] QmlHost makeTitleBarHostWith(QQmlEngine& engine,
+                                           MockTabController& controller,
+                                           contour::test::ChromeSetup const& setup,
+                                           QString const& extraChildren = {},
+                                           int width = 900)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine, uiStyle, windowControlStyle);
+    contour::test::installChromeStyle(engine, setup);
 
     auto const source = QStringLiteral("import QtQuick\n"
                                        "import QtQuick.Window\n"
@@ -8344,6 +8388,22 @@ void skipUnlessOffscreen()
                             .arg(extraChildren);
 
     return buildQmlHost(engine, source, QStringLiteral("TitleBarTestHost.qml"));
+}
+
+/// makeTitleBarHostWith() for @p uiStyle resolved against HostPlatform::Other, with @p windowControlStyle.
+[[nodiscard]] QmlHost makeTitleBarHost(
+    QQmlEngine& engine,
+    MockTabController& controller,
+    contour::config::UiStyle uiStyle = contour::config::UiStyle::Native,
+    contour::config::WindowControlStyle windowControlStyle = contour::config::WindowControlStyle::Windows,
+    QString const& extraChildren = {},
+    int width = 900)
+{
+    return makeTitleBarHostWith(engine,
+                                controller,
+                                contour::test::defaultChromeSetup(uiStyle, windowControlStyle),
+                                extraChildren,
+                                width);
 }
 } // namespace
 
@@ -9136,12 +9196,16 @@ TEST_CASE("Every window control takes its width from the active chrome style (of
     //
     // Except for the LAST traffic light, which is a bare dot: its gap would have no neighbour on the
     // far side of it, so it would be a clickable strip in what reads as bare title bar. macOS draws
-    // close, minimize, maximize in that order, so maximize is the one.
-    auto const trafficLights = style == contour::config::WindowControlStyle::MacOS;
+    // close, minimize, maximize in that order, so maximize is the one; the Windows order ends in close.
+    //
+    // The Terminal row draws every style's controls as cells (config::presentationFor).
+    auto const trafficLights =
+        style == contour::config::WindowControlStyle::MacOS || uiStyle == contour::config::UiStyle::Terminal;
+    auto const lastAction = style == contour::config::WindowControlStyle::MacOS ? "maximize" : "close";
     auto const expectedFor = [&](std::string_view action) {
         if (!trafficLights)
             return provider->windowControlWidth();
-        return action == "maximize" ? provider->trafficLightDotSize()
+        return action == lastAction ? provider->trafficLightDotSize()
                                     : provider->trafficLightDotSize() + provider->trafficLightGap();
     };
 
@@ -9277,6 +9341,244 @@ TEST_CASE("Traffic lights are drawn as cells in the terminal chrome and as shape
     // Terminal counts in cells, so it is a character instead -- and a circle here would be the one
     // part of the bar that did not line up with the terminal below it.
     CHECK(!drawsACircle(contour::config::UiStyle::Terminal));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+
+/// The chrome setup of a Windows host's title bar on @p row: the Windows controls, and no icon font
+/// installed, so the glyphs do not depend on the machine's fonts.
+[[nodiscard]] contour::test::ChromeSetup windowsChromeOn(contour::config::ChromeStyle row)
+{
+    return contour::test::ChromeSetup { .row = row,
+                                        .font = QGuiApplication::font(),
+                                        .windowControls = contour::config::WindowControlStyle::Windows };
+}
+
+/// @return @p engine's chromeStyle provider.
+[[nodiscard]] contour::window::UiStyleProvider& chromeProviderOf(QQmlEngine& engine)
+{
+    auto* provider = engine.rootContext()
+                         ->contextProperty(QStringLiteral("chromeStyle"))
+                         .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    return *provider;
+}
+
+/// @return The chrome colour role @p name of @p engine's chromeStyle.
+[[nodiscard]] QColor chromeColorOf(QQmlEngine& engine, char const* name)
+{
+    return chromeProviderOf(engine).colors()->property(name).value<QColor>();
+}
+
+/// Activates @p window and waits until it is.
+void activate(QQuickWindow& window)
+{
+    window.requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(&window));
+}
+
+} // namespace
+
+TEST_CASE("the native hover state lights the maximise button (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host =
+        makeTitleBarHostWith(engine, controller, windowsChromeOn(contour::config::ChromeStyle::Fluent));
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    activate(*window);
+    auto const* fill = findItemNamed(*window->contentItem(), QStringLiteral("windowControlFill_maximize"));
+    auto const* glyph = findItemNamed(*window->contentItem(), QStringLiteral("windowControlGlyph_maximize"));
+    REQUIRE(fill != nullptr);
+    REQUIRE(glyph != nullptr);
+    auto const fillColor = [&] {
+        return fill->property("color").value<QColor>();
+    };
+    auto const glyphColor = [&] {
+        return glyph->property("color").value<QColor>();
+    };
+
+    CHECK(fillColor().alpha() == 0);
+
+    controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Hover);
+    // The Windows style washes with the kit's fill.
+    CHECK(fillColor() == chromeColorOf(engine, "captionWash"));
+    CHECK(glyphColor() != chromeColorOf(engine, "captionGlyphPressed"));
+
+    controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Pressed);
+    CHECK(fillColor() == chromeColorOf(engine, "captionWash"));
+    REQUIRE(window->isActive());
+    CHECK(glyphColor().rgba() == chromeColorOf(engine, "captionGlyphPressed").rgba());
+
+    controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Rest);
+    CHECK(fillColor().alpha() == 0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the caption buttons report their rectangles (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host =
+        makeTitleBarHostWith(engine, controller, windowsChromeOn(contour::config::ChromeStyle::Fluent));
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    auto const& provider = chromeProviderOf(engine);
+    auto const maximize = static_cast<int>(contour::config::WindowControlKind::Maximize);
+    auto const* slot = findItemNamed(*window->contentItem(), QStringLiteral("windowControl_maximize"));
+    REQUIRE(slot != nullptr);
+
+    REQUIRE(QTest::qWaitFor([&] { return controller.captionRects.contains(maximize); }, 2000));
+    auto const reported = controller.captionRects.value(maximize);
+    CHECK(reported == sceneRectOf(*slot));
+    CHECK(reported.width() == Catch::Approx(provider.windowControlWidth()).margin(1.0));
+    CHECK(reported.height() == Catch::Approx(provider.chromeHeight()).margin(1.0));
+    // Every control reports, not only the maximise one.
+    CHECK(controller.captionRects.size() == static_cast<qsizetype>(contour::config::WindowControlCount));
+
+    // The trailing controls follow the window's edge once the bar is laid out again.
+    window->setWidth(window->width() + 100);
+    CHECK(QTest::qWaitFor([&] { return controller.captionRects.value(maximize).x() == reported.x() + 100; },
+                          2000));
+
+    // Handed to the native frame (show_title_bar), the controls go, and each says so.
+    auto* bar = host->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+    bar->setProperty("useCustomWindowControls", false);
+    CHECK(QTest::qWaitFor([&] { return controller.captionRects.isEmpty(); }, 2000));
+    for (auto const kind: std::views::iota(0, static_cast<int>(contour::config::WindowControlCount)))
+        CHECK(std::ranges::find(controller.clearedCaptionKinds, kind)
+              != controller.clearedCaptionKinds.end());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the caption buttons keep their rectangles across a change of side (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    // A side change swaps the leading and trailing Loaders, and the two do not go in a fixed order: the
+    // new controls may report before the old ones are destroyed. What the old ones clear on their way out
+    // must not take the new ones' rectangles with it, or Snap Layouts stay off until the next move.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host =
+        makeTitleBarHostWith(engine, controller, windowsChromeOn(contour::config::ChromeStyle::Fluent));
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    auto* provider = engine.rootContext()
+                         ->contextProperty(QStringLiteral("windowControls"))
+                         .value<contour::window::WindowControlStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    auto const maximize = static_cast<int>(contour::config::WindowControlKind::Maximize);
+    REQUIRE(QTest::qWaitFor([&] { return controller.captionRects.contains(maximize); }, 2000));
+
+    // Both ways round, so whichever order the Loaders go in, one of the swaps puts the new controls first.
+    for (auto const style:
+         { contour::config::WindowControlStyle::MacOS, contour::config::WindowControlStyle::Windows })
+    {
+        INFO("style " << static_cast<int>(style));
+        auto const before = controller.captionRects.value(maximize);
+        provider->setStyle(style);
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* slot =
+                    findItemNamed(*window->contentItem(), QStringLiteral("windowControl_maximize"));
+                return slot != nullptr && sceneRectOf(*slot) != before;
+            },
+            2000));
+        QCoreApplication::processEvents();
+        auto const* slot = findItemNamed(*window->contentItem(), QStringLiteral("windowControl_maximize"));
+        REQUIRE(slot != nullptr);
+        CHECK(QTest::qWaitFor([&] { return controller.captionRects.value(maximize) == sceneRectOf(*slot); },
+                              2000));
+        CHECK(controller.captionRects.size() == static_cast<qsizetype>(contour::config::WindowControlCount));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("an inactive window dims the caption glyphs (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host =
+        makeTitleBarHostWith(engine, controller, windowsChromeOn(contour::config::ChromeStyle::Fluent));
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    activate(*window);
+    auto const* glyph = findItemNamed(*window->contentItem(), QStringLiteral("windowControlGlyph_close"));
+    REQUIRE(glyph != nullptr);
+    auto const glyphColor = [&] {
+        return glyph->property("color").value<QColor>();
+    };
+
+    CHECK(glyphColor() == QGuiApplication::palette().color(QPalette::Active, QPalette::WindowText));
+
+    // Another window takes the focus.
+    auto other = QQuickWindow {};
+    other.show();
+    activate(other);
+    REQUIRE(QTest::qWaitFor([&] { return !window->isActive(); }, 2000));
+    // By value: the binding hands back the colour in another spec than the role's.
+    CHECK(glyphColor().rgba() == chromeColorOf(engine, "captionGlyphInactive").rgba());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Terminal row draws a Windows host's controls as scheme-inked cells (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host =
+        makeTitleBarHostWith(engine, controller, windowsChromeOn(contour::config::ChromeStyle::Terminal));
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    activate(*window);
+    auto const& provider = chromeProviderOf(engine);
+
+    struct Cell
+    {
+        char const* action;
+        contour::config::StatusColorRole role;
+    };
+    auto lefts = std::vector<qreal> {};
+    // Trailing, in Windows' order.
+    for (auto const& cell: { Cell { .action = "minimize", .role = contour::config::StatusColorRole::Warning },
+                             Cell { .action = "maximize", .role = contour::config::StatusColorRole::Success },
+                             Cell { .action = "close", .role = contour::config::StatusColorRole::Danger } })
+    {
+        INFO("control: " << cell.action);
+        auto const* text = findItemNamed(
+            *window->contentItem(), QStringLiteral("windowControlCell_") + QLatin1StringView(cell.action));
+        REQUIRE(text != nullptr);
+        CHECK(text->property("color").value<QColor>() == provider.statusInk(static_cast<int>(cell.role)));
+        lefts.push_back(sceneRectOf(*text).left());
+    }
+    CHECK(std::ranges::is_sorted(lefts));
+
+    // The maximise cell is where the caption adapter looks for it too.
+    CHECK(QTest::qWaitFor(
+        [&] {
+            return controller.captionRects.contains(
+                static_cast<int>(contour::config::WindowControlKind::Maximize));
+        },
+        2000));
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

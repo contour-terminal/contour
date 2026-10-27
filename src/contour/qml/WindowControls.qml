@@ -27,7 +27,9 @@ RowLayout {
     // than one at a time, which is how macOS does it and what makes the three read as one control.
     // The handler sits on the controls' own row rather than on this layout, so the inert inset
     // beside them does not reveal anything: the pointer has to have reached a control.
-    readonly property bool groupHovered: groupHover.hovered
+    // On Windows the OS drives the maximise control while the pointer is over it (Snap Layouts), and Qt then
+    // sees no hover of its own: the controller's word counts as the pointer reaching the group too.
+    readonly property bool groupHovered: groupHover.hovered || !!root.controller.nativeMaximizeHovered
 
     // Whether the window is maximized, so the maximize control can show its restore face. Read once
     // here rather than per delegate.
@@ -121,6 +123,64 @@ RowLayout {
         return root.windowMaximized ? button.restoreGlyph : button.glyph
     }
 
+    // The font a button draws its glyph in: the style's icon font where one is installed (the provider
+    // decides), else the chrome's own, at the chrome's size either way.
+    function glyphFontFor(button) {
+        const base = chromeStyle.windowControlFont
+        if (button.font === "")
+            return base
+        return base.pixelSize > 0 ? Qt.font({ family: button.font, pixelSize: base.pixelSize })
+                                  : Qt.font({ family: button.font, pointSize: base.pointSize })
+    }
+
+    // The fill a hovered or pressed button takes: the style's own (the close button's red), else its wash --
+    // the kit's fill on Windows, the chrome's ordinary highlight wash elsewhere.
+    function fillFor(button) {
+        if (button.hoverFill !== "")
+            return button.hoverFill
+        return button.wash === "kitFill" ? chromeStyle.colors.captionWash : chromeStyle.wash(systemPalette.highlight)
+    }
+
+    // A button's glyph: legible on the style's own fill, dimmed on an inactive window, a step down while
+    // pressed, the palette's text otherwise.
+    function glyphColorFor(button, lit, held) {
+        if (lit && button.hoverFill !== "")
+            return chromeStyle.onColor(button.hoverFill)
+        if (!root.window.active)
+            return chromeStyle.colors.captionGlyphInactive
+        if (held)
+            return chromeStyle.colors.captionGlyphPressed
+        return systemPalette.windowText
+    }
+
+    // A dot's colour: the scheme's status hue on the Terminal row (the provider's `hasDot`), the style's own
+    // elsewhere; and a window-level fade while the window is inactive.
+    function dotColorFor(button) {
+        if (!root.window.active)
+            return button.hasDot ? chromeStyle.colors.captionGlyphInactive : windowControls.inactiveDotColor
+        return button.hasDot ? chromeStyle.statusInk(button.dotRole) : button.dotColor
+    }
+
+    // Asked of every control whenever the group may have moved in the scene, so each reports its rectangle
+    // again: the caption adapter hit-tests the maximise control against it (Snap Layouts). The group's own
+    // place, the slot TitleBar holds it in (which a layout pass moves after a resize), and the window's size.
+    signal sceneGeometryChanged()
+    onXChanged: root.sceneGeometryChanged()
+    onYChanged: root.sceneGeometryChanged()
+    Connections {
+        target: root.parent
+        ignoreUnknownSignals: true
+        function onXChanged() { root.sceneGeometryChanged() }
+        function onYChanged() { root.sceneGeometryChanged() }
+    }
+    Connections {
+        target: root.window
+        // A stand-in window (a test's) may have no size of its own to follow.
+        ignoreUnknownSignals: true
+        function onWidthChanged() { root.sceneGeometryChanged() }
+        function onHeightChanged() { root.sceneGeometryChanged() }
+    }
+
     // One traffic light, minus the light itself: both chromes draw the same CONTROL -- same width,
     // same accessible button, same hit target -- and differ only in what paints the dot, so that
     // difference is all either delegate below has to state.
@@ -181,6 +241,9 @@ RowLayout {
         Layout.preferredHeight: root.trafficLights ? root.trafficLightBand : -1
         spacing: 0
 
+        onXChanged: root.sceneGeometryChanged()
+        onYChanged: root.sceneGeometryChanged()
+
         HoverHandler {
             id: groupHover
         }
@@ -201,6 +264,34 @@ RowLayout {
                 required property int index
 
                 readonly property bool lastInGroup: slot.index === repeater.count - 1
+
+                // Whether the OS drives this control (the maximise control, under Snap Layouts), and how.
+                readonly property bool isMaximize: slot.modelData.action === "maximize"
+                readonly property bool nativeHovered: slot.isMaximize && !!root.controller.nativeMaximizeHovered
+                readonly property bool nativePressed: slot.isMaximize && !!root.controller.nativeMaximizePressed
+
+                // Tells the controller where this control sits in the scene, in logical pixels, or that it
+                // is gone. The slot is the owner token: on a change of side the new controls may report
+                // before these are destroyed, and only what this slot reported may it clear.
+                function reportRect() {
+                    if (!slot.visible) {
+                        root.controller.clearCaptionButtonRect(slot, slot.modelData.kind)
+                        return
+                    }
+                    const rect = slot.mapToItem(null, 0, 0, slot.width, slot.height)
+                    root.controller.setCaptionButtonRect(slot, slot.modelData.kind, rect.x, rect.y, rect.width, rect.height)
+                }
+                Component.onCompleted: slot.reportRect()
+                Component.onDestruction: root.controller.clearCaptionButtonRect(slot, slot.modelData.kind)
+                onXChanged: slot.reportRect()
+                onYChanged: slot.reportRect()
+                onWidthChanged: slot.reportRect()
+                onHeightChanged: slot.reportRect()
+                onVisibleChanged: slot.reportRect()
+                Connections {
+                    target: root
+                    function onSceneGeometryChanged() { slot.reportRect() }
+                }
 
                 // Named after what it does rather than where it sits, so a test (or an accessibility
                 // inspector) can find the close button without knowing which style put it where.
@@ -228,13 +319,18 @@ RowLayout {
                         // literal: these sit in the same bar as the tab strip, so in a one-row chrome
                         // a pinned 44px would be the one part that never joins the grid.
                         implicitWidth: chromeStyle.windowControlWidth
+
+                        // Lit while hovered, here or (the maximise control) where the OS drives it; held while
+                        // pressed, likewise.
+                        readonly property bool lit: control.hovered || slot.nativeHovered
+                        readonly property bool held: control.pressed || slot.nativePressed
                         // The glyphs are Unicode window-control symbols, not code, so they render fine
                         // in the default UI font. The chrome font is used rather than a pinned point
                         // size, and resolveChromeFont() is what decides whether that is the platform UI
                         // font or the terminal's — so no "monospace"/"Monospace" family is ever pinned
                         // HERE, which on some platforms (notably macOS) has no match and forces an
                         // expensive font-family-alias populate on startup.
-                        font: chromeStyle.windowControlFont
+                        font: root.glyphFontFor(slot.modelData)
                         // Window controls must not steal keyboard focus from the terminal.
                         focusPolicy: Qt.NoFocus
 
@@ -248,6 +344,7 @@ RowLayout {
                         // chrome's ordinary hover wash.
                         background: Item {
                             Rectangle {
+                                objectName: "windowControlFill_" + slot.modelData.action
                                 anchors.centerIn: parent
 
                                 // How round the style wants its fill, as a fraction. At 0 the fill is
@@ -262,9 +359,7 @@ RowLayout {
                                 height: parent.height
                                 radius: Math.min(width, height) / 2 * roundness
 
-                                color: !control.hovered ? "transparent"
-                                     : slot.modelData.hoverFill !== "" ? slot.modelData.hoverFill
-                                     : chromeStyle.wash(systemPalette.highlight)
+                                color: control.lit || control.held ? root.fillFor(slot.modelData) : "transparent"
                             }
                         }
 
@@ -273,10 +368,10 @@ RowLayout {
                         // fill it goes white instead: those fills are saturated enough that the
                         // palette's text color would disappear into them.
                         contentItem: Text {
+                            objectName: "windowControlGlyph_" + slot.modelData.action
                             text: control.text
                             font: control.font
-                            color: control.hovered && slot.modelData.hoverFill !== ""
-                                 ? chromeStyle.onColor(slot.modelData.hoverFill) : systemPalette.windowText
+                            color: root.glyphColorFor(slot.modelData, control.lit, control.held)
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -303,8 +398,7 @@ RowLayout {
                             // All three grey out together while the window is inactive: that is most of
                             // how a stack of macOS windows reads at a glance, and it is a window-level
                             // fact rather than a per-button one.
-                            color: root.window.active ? slot.modelData.dotColor
-                                                      : windowControls.inactiveDotColor
+                            color: root.dotColorFor(slot.modelData)
 
                             // The glyph appears inside the dot only while the group is hovered, sized
                             // to fit within the dot rather than at the chrome font's own size.
@@ -334,6 +428,7 @@ RowLayout {
                         lastInGroup: slot.lastInGroup
 
                         Text {
+                            objectName: "windowControlCell_" + slot.modelData.action
                             x: 0
                             width: chromeStyle.trafficLightDotSize
                             anchors.verticalCenter: parent.verticalCenter
@@ -364,8 +459,7 @@ RowLayout {
                             // text color instead dropped all three to one monochrome row for as long
                             // as the pointer was over the group, which read as the macOS controls
                             // turning into some other style's under the cursor.
-                            color: root.window.active ? slot.modelData.dotColor
-                                                      : windowControls.inactiveDotColor
+                            color: root.dotColorFor(slot.modelData)
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }

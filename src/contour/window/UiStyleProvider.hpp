@@ -966,6 +966,9 @@ class UiStyleProvider: public QObject
 /// Whether a font family is installed. A @c bool by the @c std::predicate shape firstAvailableFamily takes.
 using FontFamilyAvailability = std::function<bool(std::string_view family)>;
 
+/// @return Whether a family is installed, as the font database answers it: production's availability.
+[[nodiscard]] FontFamilyAvailability fontDatabaseAvailability();
+
 /// resolveChromeFont() with the installed font families injected: the overload above asks the font
 /// database, a test passes a fake so its outcome does not depend on the fonts of the machine it runs on.
 ///

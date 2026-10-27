@@ -663,11 +663,12 @@ TEST_CASE("Main.qml loads under every chrome row (offscreen)", "[contour][gui][q
         REQUIRE(style != nullptr);
         CHECK(style->property("chromeStyle").toString() == QString::fromLatin1(name));
         // The row's host decides its window controls: traffic lights on the leading edge on macOS,
-        // buttons on the trailing edge everywhere else.
+        // buttons on the trailing edge everywhere else -- drawn as cells on the Terminal row.
         auto const* controls = engine.rootContext()->contextProperty("windowControls").value<QObject*>();
         REQUIRE(controls != nullptr);
         auto const isMac = host == contour::config::HostPlatform::MacOS;
-        CHECK(controls->property("presentation").toString() == (isMac ? "trafficLight" : "button"));
+        auto const dots = isMac || row == contour::config::ChromeStyle::Terminal;
+        CHECK(controls->property("presentation").toString() == (dots ? "trafficLight" : "button"));
         CHECK(controls->property("side").toString() == (isMac ? "leading" : "trailing"));
         CHECK(root->findChild<QQuickItem*>(QStringLiteral("titleBar")) != nullptr);
     }

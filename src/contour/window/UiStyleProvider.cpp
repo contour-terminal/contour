@@ -854,12 +854,17 @@ QColor UiStyleProvider::errorColor() const
     return statusColor(static_cast<int>(config::StatusColorRole::Danger));
 }
 
-QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)
+FontFamilyAvailability fontDatabaseAvailability()
 {
-    return resolveChromeFont(config, row, profileName, [](std::string_view family) {
+    return [](std::string_view family) {
         return QFontDatabase::hasFamily(
             QString::fromUtf8(family.data(), static_cast<qsizetype>(family.size())));
-    });
+    };
+}
+
+QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)
+{
+    return resolveChromeFont(config, row, profileName, fontDatabaseAvailability());
 }
 
 QFont resolveChromeFont(config::Config const& config,

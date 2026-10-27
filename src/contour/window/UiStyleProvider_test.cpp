@@ -1713,6 +1713,41 @@ TEST_CASE("UiStyleProvider: the pane text reads at 4.5:1 on every row, appearanc
     }
 }
 
+TEST_CASE("UiStyleProvider: the caption glyphs read on every row, appearance and bundled scheme",
+          "[contour][uistyle][windowcontrols]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            CAPTURE(index);
+            auto inputs =
+                contour::window::chromeInputsFor(static_cast<ChromeStyle>(index), QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const role = [&provider](char const* roleName) {
+                return tokenOf(provider, "colors", roleName).value<QColor>();
+            };
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    // The bar the controls sit on, and a pressed control's fill over it.
+                    auto const bar = over(role("tabWellFill"), window);
+                    auto const pressed = over(role("captionWash"), bar);
+                    CHECK(contrastOf(over(role("captionGlyphPressed"), pressed), pressed) >= 4.5);
+                    // An inactive window's glyphs: an inactive component's, held to a mark's 3:1.
+                    CHECK(contrastOf(over(role("captionGlyphInactive"), bar), bar) >= 3.0);
+                });
+        }
+    }
+}
+
 TEST_CASE("UiStyleProvider: the pane dim is the kit's token", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;

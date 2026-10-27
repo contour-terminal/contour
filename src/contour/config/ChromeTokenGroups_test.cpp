@@ -823,6 +823,13 @@ TEST_CASE("chromeTokens.bandColourRoles", "[chrometokens]")
         BandColorRow { .role = ChipText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
         BandColorRow {
             .role = ChipTextStrong, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
+        BandColorRow {
+            .role = CaptionWash, .native = fill(4), .terminal = contour::config::detail::noColor() },
+        BandColorRow {
+            .role = CaptionGlyphPressed, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
+        BandColorRow { .role = CaptionGlyphInactive,
+                       .native = label(3),
+                       .terminal = contour::config::detail::schemeOnBar(SchemeSlot::Secondary) },
     };
     // Every role from TabWellFill up to the pane roles has a row here (chromeTokens.paneColourRoles has
     // those).

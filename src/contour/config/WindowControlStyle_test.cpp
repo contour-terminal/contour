@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/WindowControlLook.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
 #include <core/testing/Environment.hpp>
@@ -7,6 +8,8 @@
 
 #include <algorithm>
 #include <array>
+#include <string_view>
+#include <vector>
 
 using contour::config::configEnumValues;
 using contour::config::HostPlatform;
@@ -219,11 +222,90 @@ TEST_CASE("WindowControlStyle: the two platform conventions actually differ", "[
     CHECK(plasma.side == WindowControlSide::Trailing);
     CHECK(plasma.hoverCornerPercent > windows.hoverCornerPercent);
 
-    // And it differs from Windows in NOTHING else: revert its two stated deltas and the whole row
-    // must come back. This is what the derivation buys -- stated as a test so that a later edit
-    // adding a third difference has to say so here too.
+    // And it differs from Windows in NOTHING else: revert its stated deltas -- the round fill, Breeze red, no
+    // Segoe icon font, the highlight wash -- and the whole row must come back. This is what the derivation
+    // buys -- stated as a test so that a later edit adding another difference has to say so here too.
     auto reverted = plasma;
     reverted.hoverCornerPercent = windows.hoverCornerPercent;
     reverted.closeHoverColor = windows.closeHoverColor;
+    reverted.iconFamilies = windows.iconFamilies;
+    reverted.wash = windows.wash;
     CHECK(reverted == windows);
+}
+
+namespace
+{
+/// A font database that has exactly the families named.
+struct InstalledFonts
+{
+    std::vector<std::string_view> families {};
+
+    [[nodiscard]] bool operator()(std::string_view family) const
+    {
+        return std::ranges::find(families, family) != families.end();
+    }
+};
+} // namespace
+
+TEST_CASE("the Windows row draws Segoe Fluent glyphs where installed", "[windowcontrols]")
+{
+    using contour::config::ControlGlyphs;
+    using contour::config::controlGlyphsFor;
+    auto const& windows = windowControlTokens(WindowControlStyle::Windows);
+    auto const iconGlyphs = std::array<std::string_view, 3> { "\uE8BB", "\uE921", "\uE922" };
+
+    CHECK(controlGlyphsFor(windows, InstalledFonts { .families = { "Segoe MDL2 Assets" } })
+          == ControlGlyphs { .family = "Segoe MDL2 Assets", .glyphs = iconGlyphs, .restore = "\uE923" });
+    CHECK(controlGlyphsFor(windows,
+                           InstalledFonts { .families = { "Segoe MDL2 Assets", "Segoe Fluent Icons" } })
+              .family
+          == "Segoe Fluent Icons");
+    CHECK(controlGlyphsFor(windows, InstalledFonts {})
+          == ControlGlyphs { .family = {}, .glyphs = { "✕", "—", "▢" }, .restore = "❐" });
+}
+
+TEST_CASE("Breeze never borrows the Segoe glyphs", "[windowcontrols]")
+{
+    auto const everything = [](std::string_view) {
+        return true;
+    };
+    auto const glyphs =
+        contour::config::controlGlyphsFor(windowControlTokens(WindowControlStyle::Plasma), everything);
+    CHECK(glyphs.family.empty());
+    CHECK(glyphs.glyphs == windowControlTokens(WindowControlStyle::Plasma).glyphs);
+    // A traffic light names no icon font either.
+    CHECK(contour::config::controlGlyphsFor(windowControlTokens(WindowControlStyle::MacOS), everything)
+              .family.empty());
+}
+
+TEST_CASE("the Terminal row draws dots on every host", "[windowcontrols]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::presentationFor;
+    for (auto const style: ConcreteStyles)
+    {
+        CAPTURE(static_cast<int>(style));
+        CHECK(presentationFor(windowControlTokens(style), ChromeStyle::Terminal)
+              == WindowControlPresentation::TrafficLight);
+        // Elsewhere each style keeps its own shape.
+        CHECK(presentationFor(windowControlTokens(style), ChromeStyle::Fluent)
+              == windowControlTokens(style).presentation);
+    }
+    CHECK(presentationFor(windowControlTokens(WindowControlStyle::Windows), ChromeStyle::Fluent)
+          == WindowControlPresentation::Button);
+
+    // Each dot's hue says what it does: close the danger, minimise the warning, maximise the success.
+    using contour::config::DotRoles;
+    using contour::config::StatusColorRole;
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Close)] == StatusColorRole::Danger);
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Minimize)] == StatusColorRole::Warning);
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Maximize)] == StatusColorRole::Success);
+}
+
+TEST_CASE("the Windows row washes with the kit fill", "[windowcontrols]")
+{
+    using contour::config::ControlWash;
+    CHECK(windowControlTokens(WindowControlStyle::Windows).wash == ControlWash::KitFill);
+    CHECK(windowControlTokens(WindowControlStyle::Plasma).wash == ControlWash::Highlight);
+    CHECK(windowControlTokens(WindowControlStyle::MacOS).wash == ControlWash::Highlight);
 }

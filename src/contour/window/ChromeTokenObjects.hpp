@@ -1059,6 +1059,9 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor chipFill READ chipFill NOTIFY changed)
     Q_PROPERTY(QColor chipText READ chipText NOTIFY changed)
     Q_PROPERTY(QColor chipTextStrong READ chipTextStrong NOTIFY changed)
+    Q_PROPERTY(QColor captionWash READ captionWash NOTIFY changed)
+    Q_PROPERTY(QColor captionGlyphPressed READ captionGlyphPressed NOTIFY changed)
+    Q_PROPERTY(QColor captionGlyphInactive READ captionGlyphInactive NOTIFY changed)
     Q_PROPERTY(QColor paneGapFill READ paneGapFill NOTIFY changed)
     Q_PROPERTY(QColor paneCardBorder READ paneCardBorder NOTIFY changed)
     Q_PROPERTY(QColor paneHeaderFill READ paneHeaderFill NOTIFY changed)
@@ -1159,6 +1162,15 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor chipFill() const { return color(config::ChromeColorRole::ChipFill); }
     [[nodiscard]] QColor chipText() const { return color(config::ChromeColorRole::ChipText); }
     [[nodiscard]] QColor chipTextStrong() const { return color(config::ChromeColorRole::ChipTextStrong); }
+    [[nodiscard]] QColor captionWash() const { return color(config::ChromeColorRole::CaptionWash); }
+    [[nodiscard]] QColor captionGlyphPressed() const
+    {
+        return color(config::ChromeColorRole::CaptionGlyphPressed);
+    }
+    [[nodiscard]] QColor captionGlyphInactive() const
+    {
+        return color(config::ChromeColorRole::CaptionGlyphInactive);
+    }
     [[nodiscard]] QColor paneGapFill() const { return color(config::ChromeColorRole::PaneGapFill); }
     [[nodiscard]] QColor paneCardBorder() const { return color(config::ChromeColorRole::PaneCardBorder); }
     [[nodiscard]] QColor paneHeaderFill() const { return color(config::ChromeColorRole::PaneHeaderFill); }

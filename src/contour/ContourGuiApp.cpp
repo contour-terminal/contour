@@ -2529,7 +2529,9 @@ int ContourGuiApp::terminalGuiAction()
     // constructed object is a usable object, and the first frame must already draw the right
     // controls. applyWindowControlStyle() below exists for the reloads that follow.
     _windowControlStyleProvider = make_unique<window::WindowControlStyleProvider>(
-        resolvedWindowControlStyle(_config.windowControlStyle.value()));
+        resolvedWindowControlStyle(_config.windowControlStyle.value()),
+        _chromeStyle,
+        window::fontDatabaseAvailability());
 
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");

@@ -20,6 +20,9 @@
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 
+#include <functional>
+#include <string_view>
+
 namespace contour::test
 {
 
@@ -37,6 +40,11 @@ struct ChromeSetup
     config::ChromeDensity density {}; ///< The chrome density the tokens resolve with.
     /// Whether the OS turns secure keyboard entry on: the words beside the lock. None unless a test names it.
     platform::SecureInputSupport secureInput = platform::SecureInputSupport::None;
+    /// Whether a font family is installed, for the window controls' icon font: none by default, so a test's
+    /// glyphs never depend on the fonts of the machine it runs on.
+    std::function<bool(std::string_view)> isFontInstalled = [](std::string_view) {
+        return false;
+    };
 };
 
 /// Installs the chrome's design tokens on @p engine, as ContourGuiApp does for the real one.
@@ -67,7 +75,8 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
         &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 
-    auto* controls = new contour::window::WindowControlStyleProvider(setup.windowControls, &engine);
+    auto* controls = new contour::window::WindowControlStyleProvider(
+        setup.windowControls, setup.row, setup.isFontInstalled, &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("windowControls"), controls);
 
     // The popups' drop shadow is served as an image, exactly as ContourGuiApp serves it: without

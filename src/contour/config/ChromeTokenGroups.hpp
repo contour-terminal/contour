@@ -147,6 +147,13 @@ enum class ChromeColorRole : uint8_t
     ChipText,       //!< A chip's text.
     ChipTextStrong, //!< A chip's emphasised text (the host name).
 
+    // The caption buttons (WindowControls.qml).
+    CaptionWash,         //!< A hovered or pressed caption button's fill, where its style washes with the kit.
+    CaptionGlyphPressed, //!< A pressed caption button's glyph.
+    /// The caption glyphs, and the Terminal row's control cells, of an inactive window. Held to 3:1, as
+    /// @c TabTextDimmed is: WCAG 1.4.3 exempts an inactive component, and a glyph is a mark.
+    CaptionGlyphInactive,
+
     // The pane cards (resolved against the card's own background, see UiStyleProvider::colorOn).
     PaneGapFill,           //!< The backdrop the cards and the gap between them sit on.
     PaneCardBorder,        //!< A card's one-device-pixel border.
@@ -1165,6 +1172,9 @@ namespace detail
         fill(4),    // ChipFill
         label(2),   // ChipText
         label(1),   // ChipTextStrong
+        fill(4),    // CaptionWash
+        label(2),   // CaptionGlyphPressed
+        label(3),   // CaptionGlyphInactive
         // The gap is the chrome scheme's background 4 L points darker (mac-dark: #101216 under #1C1E24).
         schemeShade(SchemeSlot::Background, -4), // PaneGapFill
         separator(),                             // PaneCardBorder
@@ -1932,6 +1942,11 @@ namespace detail
                     schemeColor(SchemeSlot::Bar),    // ChipFill
                     schemeColor(SchemeSlot::BarInk), // ChipText
                     schemeColor(SchemeSlot::BarInk), // ChipTextStrong
+                    // A control is a cell: no fill behind it, the bar's ink pressed, ANSI 8 where it reads
+                    // on the bar (else the ink) on an inactive window.
+                    detail::noColor(),                  // CaptionWash
+                    schemeColor(SchemeSlot::BarInk),    // CaptionGlyphPressed
+                    schemeOnBar(SchemeSlot::Secondary), // CaptionGlyphInactive
                     // A pane is its own cells: the header is a bar row, the split a line in ANSI 8.
                     schemeColor(SchemeSlot::Background), // PaneGapFill
                     schemeColor(SchemeSlot::Background), // PaneCardBorder

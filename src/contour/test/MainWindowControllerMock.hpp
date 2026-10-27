@@ -318,22 +318,29 @@ class MainWindowControllerMock: public QAbstractListModel
     // }}}
 
     // {{{ The caption buttons the OS drives
-    /// Mirrors WindowController::setCaptionButtonRect(): records the rectangle; out-of-range kinds ignored.
-    Q_INVOKABLE void setCaptionButtonRect(int kind, qreal x, qreal y, qreal width, qreal height)
+    /// Mirrors WindowController::setCaptionButtonRect(): records the rectangle and its owner; out-of-range
+    /// kinds ignored.
+    Q_INVOKABLE void setCaptionButtonRect(
+        QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height)
     {
         if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
             return;
         captionRects[static_cast<size_t>(kind)] =
             platform::LogicalRect { .x = x, .y = y, .width = width, .height = height };
+        captionOwners[static_cast<size_t>(kind)] = owner;
     }
 
-    /// Mirrors WindowController::clearCaptionButtonRect(): forgets the rectangle and records the call.
-    Q_INVOKABLE void clearCaptionButtonRect(int kind)
+    /// Mirrors WindowController::clearCaptionButtonRect(): records the call, and forgets the rectangle when
+    /// @p owner reported it last.
+    Q_INVOKABLE void clearCaptionButtonRect(QObject* owner, int kind)
     {
         clearedCaptionKinds.push_back(kind);
         if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
             return;
+        if (captionOwners[static_cast<size_t>(kind)] != owner)
+            return;
         captionRects[static_cast<size_t>(kind)].reset();
+        captionOwners[static_cast<size_t>(kind)] = nullptr;
     }
 
     /// Mirrors WindowController::nativeMaximizeHovered().
@@ -360,6 +367,8 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// The rectangles WindowControls.qml last reported, by config::WindowControlKind.
     std::array<std::optional<platform::LogicalRect>, config::WindowControlCount> captionRects {};
+    /// The control that reported each rectangle last, by config::WindowControlKind.
+    std::array<QObject*, config::WindowControlCount> captionOwners {};
     std::vector<int> clearedCaptionKinds {}; ///< Every clearCaptionButtonRect() kind, in order.
     // }}}
 

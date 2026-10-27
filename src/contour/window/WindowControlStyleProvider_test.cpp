@@ -7,20 +7,43 @@
 // the tree to catch it.
 
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
 #include <QtCore/QStringList>
 #include <QtCore/QVariantMap>
+#include <QtGui/QGuiApplication>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
+#include <string_view>
+#include <utility>
+
 #include <QtTest/QSignalSpy>
 
+using contour::config::ChromeStyle;
+using contour::config::StatusColorRole;
 using contour::config::WindowControlStyle;
 using contour::window::WindowControlStyleProvider;
 
 namespace
 {
+
+/// @return Whether a font family is installed, as on a machine with no Segoe font.
+[[nodiscard]] bool noFonts(std::string_view /*family*/)
+{
+    return false;
+}
+
+/// @return A provider for @p style on @p row, with @p isInstalled for its icon font.
+[[nodiscard]] WindowControlStyleProvider providerFor(
+    WindowControlStyle style,
+    ChromeStyle row = ChromeStyle::ContourLinux,
+    std::function<bool(std::string_view)> isInstalled = noFonts)
+{
+    return WindowControlStyleProvider { style, row, std::move(isInstalled) };
+}
 
 /// The `action` of each button, in draw order -- i.e. exactly what the Repeater walks.
 [[nodiscard]] QStringList actionsOf(WindowControlStyleProvider const& provider)
@@ -46,11 +69,11 @@ TEST_CASE("WindowControlStyleProvider: each style draws its own order", "[window
 {
     // The three orders are the visible difference between the styles, and getting one wrong puts
     // the close button where the user's muscle memory has minimize.
-    CHECK(actionsOf(WindowControlStyleProvider { WindowControlStyle::Windows })
+    CHECK(actionsOf(providerFor(WindowControlStyle::Windows))
           == QStringList { "minimize", "maximize", "close" });
-    CHECK(actionsOf(WindowControlStyleProvider { WindowControlStyle::MacOS })
+    CHECK(actionsOf(providerFor(WindowControlStyle::MacOS))
           == QStringList { "close", "minimize", "maximize" });
-    CHECK(actionsOf(WindowControlStyleProvider { WindowControlStyle::Plasma })
+    CHECK(actionsOf(providerFor(WindowControlStyle::Plasma))
           == QStringList { "minimize", "maximize", "close" });
 }
 
@@ -60,11 +83,11 @@ TEST_CASE("WindowControlStyleProvider: side and presentation reach QML by name",
     // are pinned rather than merely exercised. Names rather than the enumerators' underlying values
     // for the same reason each button's `action` is one: a bare 0/1 in the QML means whatever this
     // header's declaration order happens to say, and reordering the enum would silently invert it.
-    auto const windows = WindowControlStyleProvider { WindowControlStyle::Windows };
+    auto const windows = providerFor(WindowControlStyle::Windows);
     CHECK(windows.side() == QStringLiteral("trailing"));
     CHECK(windows.presentation() == QStringLiteral("button"));
 
-    auto const macos = WindowControlStyleProvider { WindowControlStyle::MacOS };
+    auto const macos = providerFor(WindowControlStyle::MacOS);
     CHECK(macos.side() == QStringLiteral("leading"));
     CHECK(macos.presentation() == QStringLiteral("trafficLight"));
 }
@@ -74,7 +97,7 @@ TEST_CASE("WindowControlStyleProvider: every row carries a glyph for both window
     for (auto const style:
          { WindowControlStyle::Windows, WindowControlStyle::MacOS, WindowControlStyle::Plasma })
     {
-        auto const provider = WindowControlStyleProvider { style };
+        auto const provider = providerFor(style);
         for (auto const& row: provider.buttons())
         {
             auto const map = row.toMap();
@@ -101,7 +124,7 @@ TEST_CASE("WindowControlStyleProvider: an unset color is empty, not black", "[wi
     // The reason these cross as strings at all: QML's color value type has no validity to test, so
     // an unset QColor would arrive indistinguishable from black -- a black hover fill on every
     // button, and a black dot where the style meant "use the chrome's own wash".
-    auto const windows = WindowControlStyleProvider { WindowControlStyle::Windows };
+    auto const windows = providerFor(WindowControlStyle::Windows);
 
     CHECK(rowFor(windows, QStringLiteral("close")).value(QStringLiteral("hoverFill")).toString()
           == QStringLiteral("#c42b1c"));
@@ -118,7 +141,7 @@ TEST_CASE("WindowControlStyleProvider: an unset color is empty, not black", "[wi
 
 TEST_CASE("WindowControlStyleProvider: a traffic light states every dot's color", "[windowcontrols]")
 {
-    auto const macos = WindowControlStyleProvider { WindowControlStyle::MacOS };
+    auto const macos = providerFor(WindowControlStyle::MacOS);
 
     CHECK(rowFor(macos, QStringLiteral("close")).value(QStringLiteral("dotColor")).toString()
           == QStringLiteral("#ff5f57"));
@@ -139,15 +162,15 @@ TEST_CASE("WindowControlStyleProvider: Breeze rounds its hover fill", "[windowco
 {
     // The axis that proves shape and side are independent: Plasma sits where Windows does and
     // differs only in how its hover fill is drawn.
-    CHECK(WindowControlStyleProvider { WindowControlStyle::Windows }.hoverCornerPercent() == 0);
-    CHECK(WindowControlStyleProvider { WindowControlStyle::Plasma }.hoverCornerPercent() == 100);
+    CHECK(providerFor(WindowControlStyle::Windows).hoverCornerPercent() == 0);
+    CHECK(providerFor(WindowControlStyle::Plasma).hoverCornerPercent() == 100);
 }
 
 TEST_CASE("WindowControlStyleProvider: a live change notifies exactly once", "[windowcontrols]")
 {
     // The whole reason this is a second provider rather than more properties on chromeStyle: the
     // settings page changes it without a restart, which only works if the bindings are told.
-    auto provider = WindowControlStyleProvider { WindowControlStyle::Windows };
+    auto provider = providerFor(WindowControlStyle::Windows);
     auto changes = QSignalSpy { &provider, &WindowControlStyleProvider::changed };
 
     provider.setStyle(WindowControlStyle::MacOS);
@@ -164,3 +187,65 @@ TEST_CASE("WindowControlStyleProvider: a live change notifies exactly once", "[w
     CHECK(changes.count() == 2);
     CHECK(provider.side() == QStringLiteral("trailing"));
 }
+
+TEST_CASE("WindowControlStyleProvider: the Terminal row draws scheme-inked dots", "[windowcontrols]")
+{
+    auto const provider = providerFor(WindowControlStyle::Windows, ChromeStyle::Terminal);
+    CHECK(provider.presentation() == QStringLiteral("trafficLight"));
+    // Windows' place and order, trailing: minimise, maximise, close.
+    CHECK(provider.side() == QStringLiteral("trailing"));
+    CHECK(actionsOf(provider) == QStringList { "minimize", "maximize", "close" });
+
+    auto const close = rowFor(provider, QStringLiteral("close"));
+    CHECK(close.value(QStringLiteral("hasDot")).toBool());
+    CHECK(close.value(QStringLiteral("dotRole")).toInt() == static_cast<int>(StatusColorRole::Danger));
+    CHECK(rowFor(provider, QStringLiteral("minimize")).value(QStringLiteral("dotRole")).toInt()
+          == static_cast<int>(StatusColorRole::Warning));
+    CHECK(rowFor(provider, QStringLiteral("maximize")).value(QStringLiteral("dotRole")).toInt()
+          == static_cast<int>(StatusColorRole::Success));
+}
+
+TEST_CASE("WindowControlStyleProvider: the Fluent row draws Segoe glyphs with the kit fill",
+          "[windowcontrols]")
+{
+    auto const segoeFluent = [](std::string_view family) {
+        return family == "Segoe Fluent Icons";
+    };
+    auto const provider = providerFor(WindowControlStyle::Windows, ChromeStyle::Fluent, segoeFluent);
+    CHECK(provider.presentation() == QStringLiteral("button"));
+
+    auto const close = rowFor(provider, QStringLiteral("close"));
+    CHECK(close.value(QStringLiteral("font")).toString() == QStringLiteral("Segoe Fluent Icons"));
+    CHECK(close.value(QStringLiteral("glyph")).toString() == QString::fromUtf8("\uE8BB"));
+    CHECK(rowFor(provider, QStringLiteral("maximize")).value(QStringLiteral("restoreGlyph")).toString()
+          == QString::fromUtf8("\uE923"));
+    CHECK(close.value(QStringLiteral("wash")).toString() == QStringLiteral("kitFill"));
+    CHECK_FALSE(close.value(QStringLiteral("hasDot")).toBool());
+
+    // Without the font, the Unicode glyphs in the chrome font.
+    auto const bare =
+        rowFor(providerFor(WindowControlStyle::Windows, ChromeStyle::Fluent), QStringLiteral("close"));
+    CHECK(bare.value(QStringLiteral("font")).toString().isEmpty());
+    CHECK(bare.value(QStringLiteral("glyph")).toString() == QString::fromUtf8("✕"));
+
+    CHECK(rowFor(providerFor(WindowControlStyle::Plasma), QStringLiteral("close"))
+              .value(QStringLiteral("wash"))
+              .toString()
+          == QStringLiteral("highlight"));
+}
+
+#ifdef _WIN32
+TEST_CASE("WindowControlStyleProvider: a Windows host draws its caption in a Segoe icon font",
+          "[native][win32][caption]")
+{
+    if (QGuiApplication::platformName() != QStringLiteral("windows"))
+        SKIP("Requires the native Windows platform.");
+    // The real font database: Windows 11 ships Segoe Fluent Icons, Windows 10 (and a server SKU without it)
+    // Segoe MDL2 Assets.
+    auto const provider = providerFor(
+        WindowControlStyle::Windows, ChromeStyle::Fluent, contour::window::fontDatabaseAvailability());
+    auto const font = rowFor(provider, QStringLiteral("close")).value(QStringLiteral("font")).toString();
+    INFO("icon font: " << font.toStdString());
+    CHECK((font == QStringLiteral("Segoe Fluent Icons") || font == QStringLiteral("Segoe MDL2 Assets")));
+}
+#endif

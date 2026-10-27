@@ -35,6 +35,7 @@ add_library(contour_config STATIC
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
+    WindowControlLook.hpp
     WindowControlStyle.cpp WindowControlStyle.hpp
 )
 

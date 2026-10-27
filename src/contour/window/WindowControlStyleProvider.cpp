@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/WindowControlLook.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
 #include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
 #include <cstddef>
+#include <utility>
 
 namespace contour::window
 {
@@ -27,10 +29,21 @@ namespace
         return {};
     }
 
-    /// The glyph @p kind is drawn with, per @p tokens.
-    [[nodiscard]] QString glyphOf(config::WindowControlTokens const& tokens, config::WindowControlKind kind)
+    /// The glyph @p kind is drawn with, per @p glyphs.
+    [[nodiscard]] QString glyphOf(config::ControlGlyphs const& glyphs, config::WindowControlKind kind)
     {
-        return QString::fromUtf8(tokens.glyphs[static_cast<size_t>(kind)]);
+        return QString::fromUtf8(glyphs.glyphs[static_cast<size_t>(kind)]);
+    }
+
+    /// What QML calls @p wash: a string for the reason `action` is one.
+    [[nodiscard]] QString washOf(config::ControlWash wash)
+    {
+        switch (wash)
+        {
+            case config::ControlWash::Highlight: return QStringLiteral("highlight");
+            case config::ControlWash::KitFill: return QStringLiteral("kitFill");
+        }
+        return {};
     }
 
     /// @p rgb as the "#rrggbb" string QML assigns to a color property, or an EMPTY string when it
@@ -46,8 +59,11 @@ namespace
     }
 } // namespace
 
-WindowControlStyleProvider::WindowControlStyleProvider(config::WindowControlStyle resolved, QObject* parent):
-    QObject { parent }, _style { resolved }
+WindowControlStyleProvider::WindowControlStyleProvider(config::WindowControlStyle resolved,
+                                                       config::ChromeStyle row,
+                                                       std::function<bool(std::string_view)> isFontInstalled,
+                                                       QObject* parent):
+    QObject { parent }, _style { resolved }, _row { row }, _isFontInstalled { std::move(isFontInstalled) }
 {
 }
 
@@ -72,7 +88,7 @@ QString WindowControlStyleProvider::side() const
 
 QString WindowControlStyleProvider::presentation() const
 {
-    switch (config::windowControlTokens(_style).presentation)
+    switch (config::presentationFor(config::windowControlTokens(_style), _row))
     {
         case config::WindowControlPresentation::Button: return QStringLiteral("button");
         case config::WindowControlPresentation::TrafficLight: return QStringLiteral("trafficLight");
@@ -96,19 +112,33 @@ QVariantList WindowControlStyleProvider::buttons() const
     // index in step: the QML iterates this with a Repeater and reads each row's own fields, so
     // adding a control -- or a style that orders them differently -- changes no QML at all.
     auto const& tokens = config::windowControlTokens(_style);
+    auto const glyphs = config::controlGlyphsFor(tokens, _isFontInstalled);
+    auto const font = QString::fromUtf8(glyphs.family);
+    auto const wash = washOf(tokens.wash);
+    // Dots are inked from the scheme on the Terminal row (config::DotRoles); elsewhere they keep the style's
+    // own colours.
+    auto const hasDot = _row == config::ChromeStyle::Terminal;
     auto rows = QVariantList {};
 
     for (auto const kind: tokens.order)
     {
-        auto const glyph = glyphOf(tokens, kind);
+        auto const glyph = glyphOf(glyphs, kind);
 
         auto row = QVariantMap {};
         row[QStringLiteral("action")] = actionOf(kind);
+        // What the controller keys the caption rectangles by: config::WindowControlKind's value.
+        row[QStringLiteral("kind")] = static_cast<int>(kind);
         row[QStringLiteral("glyph")] = glyph;
         // Only maximize has a second state, but every row carries the field so the delegate can read
         // it unconditionally; for the others it simply equals `glyph`.
         row[QStringLiteral("restoreGlyph")] =
-            kind == config::WindowControlKind::Maximize ? QString::fromUtf8(tokens.restoreGlyph) : glyph;
+            kind == config::WindowControlKind::Maximize ? QString::fromUtf8(glyphs.restore) : glyph;
+        // The icon font, or empty for the chrome font.
+        row[QStringLiteral("font")] = font;
+        row[QStringLiteral("wash")] = wash;
+        // A QML-facing bool: whether the dot takes the scheme's status ink below.
+        row[QStringLiteral("hasDot")] = hasDot;
+        row[QStringLiteral("dotRole")] = static_cast<int>(config::DotRoles[static_cast<size_t>(kind)]);
         row[QStringLiteral("dotColor")] = colorOrUnset(tokens.dotColors[static_cast<size_t>(kind)]);
         // The close button is the only one any style tints on hover, and it is the only one whose
         // hover says something the palette cannot -- so the field is per row rather than per style.

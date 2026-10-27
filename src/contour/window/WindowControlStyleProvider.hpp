@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>
+
+#include <functional>
+#include <string_view>
 
 namespace contour::window
 {
@@ -40,7 +44,8 @@ class WindowControlStyleProvider: public QObject
     /// reordering @c config::WindowControlSide would silently invert.
     Q_PROPERTY(QString side READ side NOTIFY changed)
 
-    /// The shape the controls are drawn as: "button" or "trafficLight". @see side.
+    /// The shape the controls are drawn as: "button" or "trafficLight" (config::presentationFor, so every
+    /// style draws dots on the Terminal row). @see side.
     Q_PROPERTY(QString presentation READ presentation NOTIFY changed)
 
     /// The controls, in draw order. @see buttons().
@@ -54,12 +59,20 @@ class WindowControlStyleProvider: public QObject
     Q_PROPERTY(QString inactiveDotColor READ inactiveDotColor NOTIFY changed)
 
   public:
-    /// @param resolved A concrete style, i.e. the result of @c config::resolveWindowControlStyle.
-    ///                 @c Auto is accepted but resolves to the historical Windows appearance rather
-    ///                 than to the host's -- resolving is the caller's job, because only the
-    ///                 composition root knows the environment to resolve against.
-    /// @param parent   Qt ownership.
-    explicit WindowControlStyleProvider(config::WindowControlStyle resolved, QObject* parent = nullptr);
+    /// @param resolved        A concrete style, i.e. the result of @c config::resolveWindowControlStyle.
+    ///                        @c Auto is accepted but resolves to the historical Windows appearance rather
+    ///                        than to the host's -- resolving is the caller's job, because only the
+    ///                        composition root knows the environment to resolve against.
+    /// @param row             The chrome row the controls sit on, fixed for the provider's life as the
+    ///                        chrome's own row is.
+    /// @param isFontInstalled Whether a font family is installed (QFontDatabase::hasFamily in production),
+    /// for
+    ///                        the style's icon font (config::controlGlyphsFor).
+    /// @param parent          Qt ownership.
+    WindowControlStyleProvider(config::WindowControlStyle resolved,
+                               config::ChromeStyle row,
+                               std::function<bool(std::string_view)> isFontInstalled,
+                               QObject* parent = nullptr);
 
     /// Re-points this at @p resolved.
     ///
@@ -86,6 +99,8 @@ class WindowControlStyleProvider: public QObject
 
   private:
     config::WindowControlStyle _style;
+    config::ChromeStyle _row;
+    std::function<bool(std::string_view)> _isFontInstalled;
 };
 
 } // namespace contour::window
