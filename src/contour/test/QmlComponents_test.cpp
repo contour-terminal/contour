@@ -7831,101 +7831,6 @@ TEST_CASE("Traffic lights are drawn as cells in the terminal chrome and as shape
 namespace
 {
 
-/// A stand-in for TerminalSession carrying exactly the search surface SearchBar.qml binds to.
-///
-/// The real session needs a PTY, a render thread and a display; the bar needs four properties, five
-/// invokables and one signal. Mocking that surface is what makes the bar's BEHAVIOUR -- what it shows,
-/// what it enables, what it does to focus -- testable offscreen, and it doubles as a check that the
-/// bar reads nothing else.
-class MockSearchSession: public QObject
-{
-    Q_OBJECT
-
-    Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
-    Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
-    Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
-    Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
-    // The affordance as the bar consumes it -- a glyph and a lit flag, not an enumerator. Mirrors
-    // TerminalSession, which resolves it through describeSearchCase.
-    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
-    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
-    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
-
-  public:
-    [[nodiscard]] QString searchPattern() const { return _pattern; }
-    [[nodiscard]] QString searchSummary() const { return _summary; }
-    [[nodiscard]] bool searchHasMatches() const { return _hasMatches; }
-    [[nodiscard]] bool searchNavigable() const { return _navigable; }
-    [[nodiscard]] QString searchCaseGlyph() const
-    {
-        return QString::fromUtf8(contour::session::describeSearchCase(_caseMode).glyph.data());
-    }
-    // The real session renders this through tr(); the bar only needs a non-empty string here.
-    [[nodiscard]] QString searchCaseTooltip() const { return QStringLiteral("match case"); }
-    [[nodiscard]] bool searchCasePinned() const
-    {
-        return contour::session::describeSearchCase(_caseMode).pinned == contour::session::CasePinned::Yes;
-    }
-
-    Q_INVOKABLE void setSearchPattern(QString const& pattern)
-    {
-        ++setPatternCalls;
-        _pattern = pattern;
-        // A crude stand-in for the real tally, enough to drive every state the bar can render.
-        if (pattern.isEmpty())
-        {
-            _summary.clear();
-            _hasMatches = true;
-            _navigable = false;
-        }
-        else if (pattern == QStringLiteral("zzz"))
-        {
-            _summary = QStringLiteral("No results");
-            _hasMatches = false;
-            _navigable = false;
-        }
-        else
-        {
-            _summary = QStringLiteral("1 of 3");
-            _hasMatches = true;
-            _navigable = true;
-        }
-        emit searchStateChanged();
-    }
-
-    Q_INVOKABLE void cycleSearchCaseSensitivity()
-    {
-        _caseMode = contour::session::nextSearchCase(_caseMode);
-        emit searchStateChanged();
-    }
-
-    Q_INVOKABLE void searchBarOpened() { ++openNotifications; }
-    Q_INVOKABLE void searchBarClosed() { ++closeNotifications; }
-
-    int openNotifications = 0;
-    int closeNotifications = 0;
-    /// Counts the pushes FROM the field, so a re-seed that bounces back can be told from a keystroke.
-    int setPatternCalls = 0;
-    [[nodiscard]] vtbackend::SearchCaseSensitivity caseMode() const { return _caseMode; }
-
-    Q_INVOKABLE void searchNext() { ++nextCalls; }
-    Q_INVOKABLE void searchPrevious() { ++previousCalls; }
-    Q_INVOKABLE void clearSearch() { setSearchPattern(QString {}); }
-
-    int nextCalls = 0;
-    int previousCalls = 0;
-
-  signals:
-    void searchStateChanged();
-
-  private:
-    QString _pattern;
-    QString _summary;
-    bool _hasMatches = true;
-    bool _navigable = false;
-    vtbackend::SearchCaseSensitivity _caseMode = vtbackend::SearchCaseSensitivity::Smart;
-};
-
 struct SearchBarHost
 {
     std::unique_ptr<QObject> window;
@@ -7942,38 +7847,46 @@ struct SearchBarHost
 /// @param alternate The session `useAlternate` on the host rebinds it to, standing in for the tab
 ///                  switch SessionChrome performs under a bar that stays open. Defaults to @p session,
 ///                  so a host that never flips the flag sees exactly one binding.
-[[nodiscard]] SearchBarHost openSearchBar(QQmlEngine& engine,
-                                          MockSearchSession& session,
-                                          MockSearchSession* alternate = nullptr)
+[[nodiscard]] SearchBarHost openSearchBar(
+    QQmlEngine& engine,
+    MockSession& session,
+    MockSession* alternate = nullptr,
+    contour::test::ChromeSetup const& chrome = contour::test::ChromeSetup {
+        .row = contour::config::ChromeStyle::MacOS,
+        .font = QGuiApplication::font(),
+        .windowControls = contour::config::WindowControlStyle::Windows })
 {
-    contour::test::installChromeStyle(engine);
+    contour::test::installChromeStyle(engine, chrome);
     engine.rootContext()->setContextProperty("mockSession", &session);
     engine.rootContext()->setContextProperty("mockSessionAlt", alternate != nullptr ? alternate : &session);
 
     QQmlComponent component(&engine);
     component.setData(
-        QByteArrayLiteral("import QtQuick\n"
-                          "import QtQuick.Window\n"
-                          "import Contour.Ui\n"
-                          "Window {\n"
-                          "  id: host\n"
-                          "  width: 800; height: 600; visible: true\n"
-                          "  property int focusRestores: 0\n"
-                          "  property bool useAlternate: false\n"
-                          "  property alias searchBarItem: barItem\n"
-                          // Stands in for the ContourTerminal the bar docks against: the bar reads its
-                          // width to place itself and calls forceActiveFocus() on it when it closes.
-                          "  Item {\n"
-                          "    id: fakeDisplay\n"
-                          "    anchors.fill: parent\n"
-                          "    function forceActiveFocus() { host.focusRestores++; }\n"
-                          "  }\n"
-                          "  SearchBar {\n"
-                          "    id: barItem\n"
-                          "    session: host.useAlternate ? mockSessionAlt : mockSession\n"
-                          "    displayItem: fakeDisplay\n"
-                          "  }\n"
-                          "}\n"),
+        QByteArrayLiteral(
+            "import QtQuick\n"
+            "import QtQuick.Window\n"
+            "import Contour.Ui\n"
+            "Window {\n"
+            "  id: host\n"
+            "  width: 800; height: 400; visible: true\n"
+            "  property int focusRestores: 0\n"
+            "  property bool useAlternate: false\n"
+            "  property alias searchBarItem: barItem\n"
+            // Stands in for the ContourTerminal the bar docks against: the bar reads its
+            // size and its rows' band to place itself, and calls forceActiveFocus() on it when
+            // it closes. Rows are 20 pixels, from the top.
+            "  Item {\n"
+            "    id: fakeDisplay\n"
+            "    anchors.fill: parent\n"
+            "    function forceActiveFocus() { host.focusRestores++; }\n"
+            "    function rowBand(first, last) { return { top: first * 20, bottom: (last + 1) * 20 }; }\n"
+            "  }\n"
+            "  SearchBar {\n"
+            "    id: barItem\n"
+            "    session: host.useAlternate ? mockSessionAlt : mockSession\n"
+            "    displayItem: fakeDisplay\n"
+            "  }\n"
+            "}\n"),
         QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBarTestHost.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
@@ -7999,6 +7912,26 @@ struct SearchBarHost
     return host;
 }
 
+/// The item of @p bar named @p name, found in its visual tree: a Repeater's delegates are not QObject
+/// children of the popup, so findChild() does not reach them.
+[[nodiscard]] QQuickItem* searchBarPart(QObject const& bar, QString const& name)
+{
+    auto const* content = bar.property("contentItem").value<QQuickItem*>();
+    if (content == nullptr)
+        return nullptr;
+    auto const found = contour::test::itemsNamed(*content, name);
+    return found.empty() ? nullptr : found.front();
+}
+
+/// The toggle buttons of @p bar, in the session table's order.
+[[nodiscard]] std::vector<QQuickItem*> searchToggleButtons(QObject const& bar)
+{
+    auto buttons = std::vector<QQuickItem*> {};
+    for (auto const& row: contour::session::SearchToggleRows)
+        buttons.push_back(searchBarPart(bar, QString::fromUtf8(row.objectName)));
+    return buttons;
+}
+
 } // namespace
 
 TEST_CASE("The find bar drives the session's search and restores focus (offscreen)",
@@ -8006,7 +7939,7 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
 {
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
-    MockSearchSession session;
+    MockSession session;
 
     auto const host = openSearchBar(engine, session);
     REQUIRE(host.bar != nullptr);
@@ -8053,7 +7986,7 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
 
     SECTION("the case toggle cycles all three policies, and shows which one is active")
     {
-        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        auto* toggle = searchBarPart(*host.bar, QStringLiteral("searchBarCaseToggle"));
         REQUIRE(toggle != nullptr);
 
         // Asserted through what the BUTTON shows, not through enumerator values: an earlier version
@@ -8061,22 +7994,17 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
         CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
         CHECK_FALSE(toggle->property("checked").toBool()); // smart is not "pinned"
 
-        // Smart -> Sensitive: still the capitalised glyph, now lit.
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        QCoreApplication::processEvents();
+        auto const press = [&] {
+            QMetaObject::invokeMethod(toggle, "clicked");
+            QCoreApplication::processEvents();
+        };
+        press(); // Smart -> Sensitive: still the capitalised glyph, now lit.
         CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
         CHECK(toggle->property("checked").toBool());
-
-        // Sensitive -> Insensitive: the lowercase glyph is the one that means "ignoring case".
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        QCoreApplication::processEvents();
+        press(); // Sensitive -> Insensitive: the lowercase glyph is the one that means "ignoring case".
         CHECK(toggle->property("text").toString() == QStringLiteral("aa"));
         CHECK(toggle->property("checked").toBool());
-
-        // Insensitive -> Smart closes the cycle. Two states could not express the third, which is
-        // why this is not the binary Aa every other find bar has.
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        QCoreApplication::processEvents();
+        press(); // Insensitive -> Smart closes the cycle.
         CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
         CHECK_FALSE(toggle->property("checked").toBool());
     }
@@ -8149,7 +8077,7 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
         // way out but the mouse.
         auto* window = qobject_cast<QQuickWindow*>(host.window.get());
         REQUIRE(window != nullptr);
-        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        auto* toggle = searchBarPart(*host.bar, QStringLiteral("searchBarCaseToggle"));
         REQUIRE(toggle != nullptr);
 
         QMetaObject::invokeMethod(toggle, "forceActiveFocus");
@@ -8172,7 +8100,7 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
         // path a click does.
         auto* window = qobject_cast<QQuickWindow*>(host.window.get());
         REQUIRE(window != nullptr);
-        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        auto* toggle = searchBarPart(*host.bar, QStringLiteral("searchBarCaseToggle"));
         REQUIRE(toggle != nullptr);
 
         QMetaObject::invokeMethod(toggle, "forceActiveFocus");
@@ -8181,12 +8109,12 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
 
         QTest::keyClick(window, Qt::Key_Space); // Smart -> Sensitive
         QCoreApplication::processEvents();
-        REQUIRE(session.caseMode() == vtbackend::SearchCaseSensitivity::Sensitive);
+        REQUIRE(session.searchOptions.caseSensitivity == vtbackend::SearchCaseSensitivity::Sensitive);
         CHECK(toggle->property("checked").toBool());
 
         QTest::keyClick(window, Qt::Key_Space); // Sensitive -> Insensitive: still pinned, still lit
         QCoreApplication::processEvents();
-        REQUIRE(session.caseMode() == vtbackend::SearchCaseSensitivity::Insensitive);
+        REQUIRE(session.searchOptions.caseSensitivity == vtbackend::SearchCaseSensitivity::Insensitive);
         CHECK(toggle->property("checked").toBool());
         CHECK(toggle->property("text").toString() == QStringLiteral("aa"));
     }
@@ -8204,8 +8132,8 @@ TEST_CASE("The find bar hands its open state over when the pane is rebound (offs
     // the bottom -- while the session arriving is never told at all and never shows a count.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
-    MockSearchSession first;
-    MockSearchSession second;
+    MockSession first;
+    MockSession second;
     second.setSearchPattern(QStringLiteral("beta")); // the incoming pane is mid-search
 
     auto const host = openSearchBar(engine, first, &second);
@@ -8236,6 +8164,172 @@ TEST_CASE("The find bar hands its open state over when the pane is rebound (offs
     QCoreApplication::processEvents();
     CHECK(second.closeNotifications == 1);
     CHECK(first.closeNotifications == 1);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+TEST_CASE("The find bar sits at its pane's top right with the design's extents (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+
+    CHECK(host.bar->property("x").toReal() == 412.0);
+    CHECK(host.bar->property("y").toReal() == 8.0);
+    CHECK(host.bar->property("width").toReal() == 380.0);
+    CHECK(host.bar->property("height").toReal() == 32.0);
+    auto* background = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarBackground"));
+    REQUIRE(background != nullptr);
+    CHECK(background->property("radius").toReal() == 8.0);
+    for (auto* toggle: searchToggleButtons(*host.bar))
+    {
+        REQUIRE(toggle != nullptr);
+        CHECK(toggle->width() == 24.0);
+        CHECK(toggle->height() == 22.0);
+    }
+    auto* count = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCount"));
+    REQUIRE(count != nullptr);
+    CHECK(count->property("font").value<QFont>().featureValue(QFont::Tag("tnum")) == 1);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The find bar moves to the bottom when the current match is under it (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+
+    // Row 0 is 0-20, under the bar's 8-40: the bar goes to the bottom right.
+    session.setSearchFocusedRows({ { QStringLiteral("first"), 0 }, { QStringLiteral("last"), 0 } });
+    QCoreApplication::processEvents();
+    CHECK(host.bar->property("y").toReal() == 360.0);
+
+    // Row 10 is 200-220, clear of it: back at the top.
+    session.setSearchFocusedRows({ { QStringLiteral("first"), 10 }, { QStringLiteral("last"), 10 } });
+    QCoreApplication::processEvents();
+    CHECK(host.bar->property("y").toReal() == 8.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The find bar's toggles render the session's table and light the active one (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+
+    auto const buttons = searchToggleButtons(*host.bar);
+    REQUIRE(buttons.size() == contour::session::SearchToggleRows.size());
+    auto const texts = std::array { QStringLiteral("Aa"), QStringLiteral(".*"), QStringLiteral("ab") };
+    REQUIRE(texts.size() == buttons.size());
+    for (auto const index: std::views::iota(std::size_t { 0 }, buttons.size()))
+    {
+        REQUIRE(buttons[index] != nullptr);
+        CHECK(buttons[index]->property("text").toString() == texts[index]);
+    }
+
+    auto* regex = buttons[static_cast<std::size_t>(contour::session::SearchToggle::Regex)];
+    CHECK(regex->property("checked").toBool());
+    auto* background = regex->findChild<QQuickItem*>(QStringLiteral("searchBarToggleBackground"));
+    REQUIRE(background != nullptr);
+    auto const* style =
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    CHECK(background->property("color").value<QColor>()
+          == colors->property("findToggleOnFill").value<QColor>());
+
+    QMetaObject::invokeMethod(buttons[static_cast<std::size_t>(contour::session::SearchToggle::WholeWord)],
+                              "clicked");
+    QCoreApplication::processEvents();
+    CHECK(session.toggledOptions == std::vector<int> { 2 });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The find bar tints the field and says so on a miss and on an invalid pattern (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+    auto* field = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarField"));
+    auto* count = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCount"));
+    REQUIRE(field != nullptr);
+    REQUIRE(count != nullptr);
+    auto const* style =
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const error = style->property("errorColor").value<QColor>();
+
+    for (auto const& summary: { QStringLiteral("No results"), QStringLiteral("Invalid pattern") })
+    {
+        INFO(summary.toStdString());
+        session.setSearchSummary(
+            summary, MockSession::SearchMatchPresence::None, MockSession::SearchNavigation::None);
+        QCoreApplication::processEvents();
+        CHECK(count->property("text").toString() == summary);
+        CHECK(count->property("color").value<QColor>() == error);
+        auto const* palette = field->property("palette").value<QObject*>();
+        REQUIRE(palette != nullptr);
+        CHECK(palette->property("highlight").value<QColor>() == error);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const chrome =
+        contour::test::ChromeSetup { .row = contour::config::ChromeStyle::Terminal,
+                                     .font = QGuiApplication::font(),
+                                     .windowControls = contour::config::WindowControlStyle::Windows };
+    auto const host = openSearchBar(engine, session, nullptr, chrome);
+    REQUIRE(host.bar != nullptr);
+    auto const* style =
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const cellHeight = style->property("cellHeight").toReal();
+    auto const cellWidth = style->property("widthQuantum").toReal();
+
+    CHECK(host.bar->property("height").toReal() == Catch::Approx(cellHeight));
+    CHECK(host.bar->property("width").toReal() == Catch::Approx(48 * cellWidth));
+    auto* background = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarBackground"));
+    REQUIRE(background != nullptr);
+    CHECK(background->property("radius").toReal() == 0.0);
+
+    auto const buttons = searchToggleButtons(*host.bar);
+    auto const texts = std::array { QStringLiteral("[Aa]"), QStringLiteral("[.*]"), QStringLiteral("[ab]") };
+    REQUIRE(texts.size() == buttons.size());
+    for (auto const index: std::views::iota(std::size_t { 0 }, buttons.size()))
+    {
+        REQUIRE(buttons[index] != nullptr);
+        CHECK(buttons[index]->property("text").toString() == texts[index]);
+    }
+    for (auto const& [name, glyph]: std::array { std::pair { "searchBarPrevious", QStringLiteral("↑") },
+                                                 std::pair { "searchBarNext", QStringLiteral("↓") },
+                                                 std::pair { "searchBarClose", QStringLiteral("×") } })
+    {
+        auto* button = host.bar->findChild<QQuickItem*>(QString::fromUtf8(name));
+        REQUIRE(button != nullptr);
+        CHECK(button->property("text").toString() == glyph);
+    }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -9449,7 +9543,7 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
 {
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
-    MockSearchSession session;
+    MockSession session;
     MockPaletteController controller;
     contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("mockSession", &session);

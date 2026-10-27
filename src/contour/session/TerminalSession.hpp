@@ -257,10 +257,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
     // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
     // read backwards. @see contour::session::describeSearchCase.
-    // Derived from searchToggles' Case row: SearchBar.qml's case button still binds these three.
-    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
-    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
-    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
     // The find bar's toggles, one map per SearchToggleRows row: toggle (int), glyph, checked, tooltip,
     // accessibleName and objectName. Maps rather than an enum the QML would have to interpret, for the reason
     // the case affordance above is a glyph and a lit flag.
@@ -329,16 +325,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _searchStatus.navigation == MatchNavigation::Available;
     }
 
-    /// The case toggle's glyph. @see searchToggles
-    [[nodiscard]] QString searchCaseGlyph() const
-    {
-        return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
-    }
-    /// The case toggle's tooltip. @see searchToggles
-    [[nodiscard]] QString searchCaseTooltip() const { return _searchCaseTooltip; }
-    /// Whether the case toggle is lit. @see searchToggles
-    [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
-
     /// The find bar's toggles, as maps. @see Q_PROPERTY searchToggles
     [[nodiscard]] QVariantList searchToggles() const { return _searchToggles; }
 
@@ -352,9 +338,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// re-runs as for a new pattern. Out-of-range values do nothing.
     /// @param toggle A SearchToggle, as an int (QML-facing).
     Q_INVOKABLE void toggleSearchOption(int toggle);
-
-    /// Presses the case toggle: toggleSearchOption(SearchToggle::Case). SearchBar.qml's case button calls it.
-    Q_INVOKABLE void cycleSearchCaseSensitivity();
 
     /// The find bar opened, or closed. Told rather than inferred: only the bar knows, and a tally is
     /// worth computing only while something displays it.
@@ -2054,7 +2037,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
-    SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
     QString _searchPatternText;
     QString _searchSummary;
     QString _searchCaseTooltip;

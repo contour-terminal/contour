@@ -4252,9 +4252,6 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
         session->toggleSearchOption(Case);
         CHECK(caseToggle()[QStringLiteral("glyph")] == QStringLiteral("Aa"));
         CHECK_FALSE(caseToggle()[QStringLiteral("checked")].toBool());
-        // The case button SearchBar.qml binds reads the same row.
-        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
-        CHECK_FALSE(session->searchCasePinned());
     }
 
     SECTION("closing the bar stops the tallying but keeps the pattern lit for F3")

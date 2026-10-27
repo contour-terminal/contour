@@ -3,16 +3,22 @@
 
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/SearchStatus.hpp>
+#include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/PaneState.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
+#include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 #include <QtQuick/QQuickItem>
 
+#include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace contour::test
@@ -70,6 +76,14 @@ class MockSession: public QObject
     Q_PROPERTY(int sessionEnd READ sessionEnd NOTIFY sessionEndChanged)
     Q_PROPERTY(QString endMessage READ endMessage NOTIFY sessionEndChanged)
     Q_PROPERTY(int restartOffer READ restartOffer NOTIFY sessionEndChanged)
+    // Mirrors TerminalSession's find bar surface (SearchBar.qml): the pattern, the summary and its flags,
+    // the toggles as maps, and the current match's viewport rows.
+    Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
+    Q_PROPERTY(QVariantList searchToggles READ searchToggles NOTIFY searchStateChanged)
+    Q_PROPERTY(QVariantMap searchFocusedRows READ searchFocusedRows NOTIFY searchFocusedRowsChanged)
     // }}}
 
   public:
@@ -252,6 +266,99 @@ class MockSession: public QObject
     int dismissals = 0; ///< How often dismiss() ran.
     // }}}
 
+    // {{{ The find bar
+    [[nodiscard]] QString searchPattern() const { return _searchPattern; }
+    [[nodiscard]] QString searchSummary() const { return _searchSummary; }
+    [[nodiscard]] bool searchHasMatches() const { return _searchHasMatches; }
+    [[nodiscard]] bool searchNavigable() const { return _searchNavigable; }
+    [[nodiscard]] QVariantMap searchFocusedRows() const { return _searchFocusedRows; }
+
+    /// The toggles as TerminalSession publishes them, from the same table and the same answers.
+    [[nodiscard]] QVariantList searchToggles() const
+    {
+        auto toggles = QVariantList {};
+        for (auto const& row: session::SearchToggleRows)
+        {
+            auto const affordance = session::describeSearchToggle(row.toggle, searchOptions);
+            toggles.append(QVariantMap {
+                { QStringLiteral("toggle"), static_cast<int>(row.toggle) },
+                { QStringLiteral("glyph"), QString::fromUtf8(affordance.glyph) },
+                { QStringLiteral("checked"), affordance.state == session::ToggleState::On },
+                { QStringLiteral("tooltip"), QString::fromUtf8(row.accessibleName) },
+                { QStringLiteral("accessibleName"), QString::fromUtf8(row.accessibleName) },
+                { QStringLiteral("objectName"), QString::fromUtf8(row.objectName) },
+            });
+        }
+        return toggles;
+    }
+
+    /// Takes @p pattern as the field pushes it, and answers it crudely: empty is idle, "zzz" no match, and
+    /// anything else "1 of 3".
+    Q_INVOKABLE void setSearchPattern(QString const& pattern)
+    {
+        ++setPatternCalls;
+        _searchPattern = pattern;
+        if (pattern.isEmpty())
+            setSearchSummary({}, SearchMatchPresence::Some, SearchNavigation::None);
+        else if (pattern == QStringLiteral("zzz"))
+            setSearchSummary(QStringLiteral("No results"), SearchMatchPresence::None, SearchNavigation::None);
+        else
+            setSearchSummary(QStringLiteral("1 of 3"), SearchMatchPresence::Some, SearchNavigation::Some);
+    }
+
+    /// Records a pressed toggle and moves its option on, as TerminalSession::toggleSearchOption does.
+    Q_INVOKABLE void toggleSearchOption(int toggle)
+    {
+        toggledOptions.push_back(toggle);
+        if (toggle < 0 || std::cmp_greater_equal(toggle, session::SearchToggleRows.size()))
+            return;
+        searchOptions = session::nextSearchOptions(static_cast<session::SearchToggle>(toggle), searchOptions);
+        emit searchStateChanged();
+    }
+
+    Q_INVOKABLE void searchBarOpened() { ++openNotifications; }
+    Q_INVOKABLE void searchBarClosed() { ++closeNotifications; }
+    Q_INVOKABLE void searchNext() { ++nextCalls; }
+    Q_INVOKABLE void searchPrevious() { ++previousCalls; }
+
+    /// Whether the mocked search matched: drives the field's tint.
+    enum class SearchMatchPresence : uint8_t
+    {
+        None = 0,
+        Some,
+    };
+    /// Whether stepping would go anywhere.
+    enum class SearchNavigation : uint8_t
+    {
+        None = 0,
+        Some,
+    };
+
+    /// Publishes a summary, as a tally or an invalid pattern would.
+    void setSearchSummary(QString summary, SearchMatchPresence presence, SearchNavigation navigation)
+    {
+        _searchSummary = std::move(summary);
+        _searchHasMatches = presence == SearchMatchPresence::Some;
+        _searchNavigable = navigation == SearchNavigation::Some;
+        emit searchStateChanged();
+    }
+
+    /// Publishes the current match's viewport rows; an empty map for none.
+    void setSearchFocusedRows(QVariantMap rows)
+    {
+        _searchFocusedRows = std::move(rows);
+        emit searchFocusedRowsChanged();
+    }
+
+    vtbackend::SearchOptions searchOptions {}; ///< The toggles' state.
+    std::vector<int> toggledOptions;           ///< Every toggle pressed, in order.
+    int openNotifications = 0;                 ///< How often the bar said it opened.
+    int closeNotifications = 0;                ///< How often it said it closed.
+    int setPatternCalls = 0;                   ///< Pushes from the field, to tell a re-seed from a keystroke.
+    int nextCalls = 0;                         ///< searchNext() calls.
+    int previousCalls = 0;                     ///< searchPrevious() calls.
+    // }}}
+
     // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
     Q_INVOKABLE void applyPendingFontChange(bool, bool) {}
     Q_INVOKABLE void applyPendingPaste(bool, bool) {}
@@ -286,6 +393,8 @@ class MockSession: public QObject
     void titleChanged();
     void paneProgramStatusChanged();
     void sessionEndChanged();
+    void searchStateChanged();
+    void searchFocusedRowsChanged();
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
@@ -297,6 +406,11 @@ class MockSession: public QObject
     void requestPermissionForExtension();
 
   private:
+    QString _searchPattern;
+    QString _searchSummary;
+    bool _searchHasMatches = true;
+    bool _searchNavigable = false;
+    QVariantMap _searchFocusedRows;
     int _columns = 80;
     int _lines = 25;
     int _historyLineCount = 0;
@@ -462,6 +576,15 @@ class StubContourTerminal: public QQuickItem
         }
     }
     [[nodiscard]] double fontSize() const { return 12.0; }
+
+    /// The band rows @p first to @p last take, as TerminalDisplay::rowBand answers: no margin, 20-pixel rows.
+    Q_INVOKABLE [[nodiscard]] QVariantMap rowBand(int first, int last) const
+    {
+        auto constexpr RowHeight = 20.0;
+        auto const band = window::rowBandOf(first, last, 0.0, RowHeight);
+        return { { QStringLiteral("top"), band.top }, { QStringLiteral("bottom"), band.bottom } };
+    }
+
   signals:
     void sessionChanged(QObject* /*session*/);
     void showNotification(QString const& /*title*/, QString const& /*body*/);

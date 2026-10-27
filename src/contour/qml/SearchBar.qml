@@ -19,6 +19,7 @@
 // something the QML compiler rejects.
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Popup {
     id: root
@@ -40,17 +41,40 @@ Popup {
     // focus and the user is only trying to leave Vi mode.
     modal: false
     focus: true
-    padding: chromeStyle.borderWidth
+    padding: 0
     closePolicy: Popup.NoAutoClose
 
-    // Docked to the pane's top-right, where VS Code and Windows Terminal both put it. Bound rather
-    // than assigned once, so it follows a pane resize or a split drag.
+    objectName: "searchBar"
+
+    // Whether the pane shows an inline header above its terminal (a window::PaneHeaderPresence's value):
+    // on the Terminal row the bar then takes that header's row (Task 11's slot).
+    property int header: 0
+    property Item headerSlot: null
+
+    // The current match's band in the terminal, where the bar would cover it: the session names its rows,
+    // the terminal says where they are. Empty -- top and bottom 0 -- while there is none.
+    readonly property var _rows: (root._search && root._search.searchFocusedRows) ? root._search.searchFocusedRows : ({})
+    readonly property var _band: (root._rows.first !== undefined && root.displayItem
+                                  && typeof root.displayItem.rowBand === "function")
+                                 ? root.displayItem.rowBand(root._rows.first, root._rows.last)
+                                 : ({ top: 0, bottom: 0 })
+
+    // Where the bar goes, decided once in C++ (window::placeFindBar): top right, under a header, or out of
+    // the current match's way at the bottom right. Bound, so it follows a resize, a split drag or a step.
+    readonly property var placement: root.displayItem
+                                     ? chromeStyle.findBarPlacement(root.header, root.displayItem.width,
+                                                                    root.displayItem.height,
+                                                                    root._band.top, root._band.bottom)
+                                     : ({ anchor: "topRight", x: 0, y: 0, width: 0 })
+
     parent: root.displayItem
-    x: root.displayItem ? root.displayItem.width - width - chromeStyle.shadowMargin : 0
-    y: chromeStyle.shadowMargin
-    // The backstop for a pane narrower than the bar, where the x above goes negative and would clip
-    // the field off the left edge. TabColorFlyout documents the same rule.
-    margins: chromeStyle.shadowMargin
+    x: root.placement.x
+    y: root.placement.y
+    width: root.placement.width
+    height: chromeStyle.size.findBar
+    // None: the placement already keeps the bar inside its pane, and a margin would clamp it off the
+    // design's place (F7). The shadow is drawn outside the surface, past the popup's own bounds.
+    margins: 0
 
     SystemPalette {
         id: systemPalette
@@ -60,7 +84,10 @@ Popup {
     // Mandatory, not decorative: `ui_style` defaults to Native, which pins Fusion -- a Qt style whose
     // control files are not ours to edit -- so a background left to the style would be unshadowed and
     // differently shaped from every other popup here. See PopupSurface.qml.
-    background: PopupSurface {}
+    background: PopupSurface {
+        objectName: "searchBarBackground"
+        radius: chromeStyle.radii.findBar
+    }
 
     // One guarded alias rather than the same test repeated at every use: null while a split pane is
     // being torn down, and null for the lightweight MOCK sessions several offscreen tests bind, which
@@ -72,15 +99,8 @@ Popup {
     readonly property bool _hasMatches: root._search ? root._search.searchHasMatches : true
     readonly property bool _navigable: root._search ? root._search.searchNavigable : false
 
-    // The glyph and the lit state come from the session already resolved, rather than as an
-    // enumerator this file would have to interpret. It spoke raw integers once and inverted every one
-    // of them -- the glyph, both tooltips and the cycle order. @see describeSearchCase.
-    readonly property string _caseGlyph: root._search ? root._search.searchCaseGlyph : "Aa"
-    readonly property bool _casePinned: root._search ? root._search.searchCasePinned : false
-    readonly property string _caseTooltip: root._search ? root._search.searchCaseTooltip : ""
-
-    // The tint a fruitless search takes: the Danger status token (UiStyleProvider::errorColor), the
-    // same on every chrome row, rather than a literal here.
+    // The tint a fruitless search or a refused pattern takes: the Danger status token
+    // (UiStyleProvider::errorColor), the same on every chrome row, rather than a literal here.
     readonly property color errorColor: chromeStyle.errorColor
 
     // Which session was last told this bar is open, which is emphatically NOT "whatever session is
@@ -166,14 +186,6 @@ Popup {
         field.selectAll();
     }
 
-    // Three states rather than VS Code's two, because issue #1410 asks for smart case AND a way to
-    // override it, and two cannot express three. WHICH three, and in what order, is decided in C++
-    // where the enum is -- `(mode + 1) % 3` here hard-coded a count this file cannot see.
-    function cycleCase() {
-        if (root._search)
-            root._search.cycleSearchCaseSensitivity();
-    }
-
     // The search can be cleared from outside this bar -- Ctrl+Shift+H, or entering Vi Insert mode --
     // and the terminal then holds no pattern while the field still shows one. Resync only in that
     // direction: the field is the source of truth while the user is typing into it.
@@ -197,26 +209,66 @@ Popup {
         event.accepted = true;
     }
 
-    contentItem: Row {
+    readonly property var _toggles: root._search ? root._search.searchToggles : []
+
+    // The Terminal row lights a toggle in inverse video; the native rows wash it in the accent and ring it.
+    readonly property bool _isCellRow: chromeStyle.layout.findBar === chromeStyle.layout.paneHeaderRow
+    // The magnifier: a lens and its handle, as fractions of the icon's edge.
+    readonly property real _lensFraction: 0.72
+    readonly property real _handleFraction: 0.38
+    readonly property real _half: 0.5
+
+    contentItem: RowLayout {
         id: bar
-        spacing: chromeStyle.labelGap
+        spacing: chromeStyle.space.s2
 
         // The field handles Escape itself so the caret case is direct; this catches the same key when
         // focus has tabbed onto one of the buttons, where an unhandled Escape would otherwise leave the
         // only modeless popup in the application with no way out but the mouse.
         Keys.onEscapePressed: root.close();
 
-        // {{{ The term, with its count inside the field — where VS Code puts it, and what keeps the
-        // bar from growing a separate column that shifts every time the count changes width.
+        // Leading padding, then the magnifier where the row draws one.
+        Item {
+            Layout.preferredWidth: chromeStyle.space.s5 - bar.spacing
+            visible: Layout.preferredWidth > 0
+        }
+
+        Item {
+            objectName: "searchBarIcon"
+            visible: chromeStyle.size.findIcon > 0
+            Layout.preferredWidth: chromeStyle.size.findIcon
+            Layout.preferredHeight: chromeStyle.size.findIcon
+            Layout.alignment: Qt.AlignVCenter
+
+            Rectangle {
+                id: lens
+                width: parent.width * root._lensFraction
+                height: width
+                radius: width * root._half
+                color: "transparent"
+                border.width: chromeStyle.borderWidth
+                border.color: chromeStyle.colors.findToggleText
+            }
+            Rectangle {
+                width: parent.width * root._handleFraction
+                height: chromeStyle.borderWidth
+                color: chromeStyle.colors.findToggleText
+                x: lens.width - width * root._half
+                y: lens.height - height * root._half
+                rotation: 45
+            }
+        }
+
         TextField {
             id: field
             objectName: "searchBarField"
-            anchors.verticalCenter: parent.verticalCenter
-            width: chromeStyle.cellWidth * 26
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
             placeholderText: qsTr("Find")
-            // Room for the count that floats over the field's right end, so a long term scrolls
-            // rather than running underneath "9999+ matches".
-            rightPadding: count.width + 2 * chromeStyle.labelPadding
+            font: chromeStyle.type.body
+
+            Accessible.role: Accessible.EditableText
+            Accessible.name: qsTr("Find")
 
             // Both chrome styles draw a focused field's edge in the Highlight role -- ContourTui says
             // so outright, and Fusion's focus frame uses it too -- so re-pointing that one role is how
@@ -234,80 +286,122 @@ Popup {
             // shortcut so the caret stays in the field the whole time.
             Keys.onReturnPressed: (event) => root.step(event);
             Keys.onEnterPressed: (event) => root.step(event);
-
-            Label {
-                id: count
-                objectName: "searchBarCount"
-                anchors.right: parent.right
-                anchors.rightMargin: chromeStyle.labelPadding
-                anchors.verticalCenter: parent.verticalCenter
-                text: root._search ? root._search.searchSummary : ""
-                // Dimmed against the term: it reports on the search rather than being part of it.
-                // Turns to the error color when the term matches nothing, which is the same signal the
-                // field's own edge carries -- stated twice on purpose, since the edge is a hairline.
-                color: root._hasMatches
-                       ? Qt.rgba(systemPalette.windowText.r, systemPalette.windowText.g,
-                                 systemPalette.windowText.b, 0.62)
-                       : root.errorColor
-            }
-        }
-        // }}}
-
-        ToolButton {
-            objectName: "searchBarCaseToggle"
-            anchors.verticalCenter: parent.verticalCenter
-            text: root._caseGlyph
-            // Deliberately NOT `checkable`. A checkable button toggles `checked` itself on click, and
-            // that write only gets corrected when the binding's value actually changes -- so cycling
-            // Sensitive -> Insensitive, where pinned stays true, left the button unlit while the policy
-            // was pinned. Three states cannot be driven by a two-state toggle; the model is the only
-            // one that knows, so `checked` stays a pure binding and the click only asks for the cycle.
-            //
-            // Lit means "you pinned this"; unlit is smart case, which is what the terminal has always
-            // done and what an untouched bar opens with.
-            checked: root._casePinned
-            onClicked: root.cycleCase()
-            ToolTip.visible: hovered
-            ToolTip.text: root._caseTooltip
         }
 
-        // The style's own rule where it has one, and nothing where it does not: ContourTui draws a
-        // box-drawing separator between chrome groups, Native leaves them abutting.
+        // The count, in tabular digits so "2 of 5" does not shift as it counts. In the error colour on a
+        // miss or a refused pattern, the same signal the field's edge carries.
         Label {
-            anchors.verticalCenter: parent.verticalCenter
-            text: chromeStyle.tabSeparator
-            visible: text.length > 0
-            color: systemPalette.mid
+            id: count
+            objectName: "searchBarCount"
+            Layout.alignment: Qt.AlignVCenter
+            text: root._search ? root._search.searchSummary : ""
+            font.family: chromeStyle.type.footnote.family
+            font.pixelSize: chromeStyle.type.footnote.pixelSize
+            font.weight: chromeStyle.type.footnote.weight
+            font.features: { "tnum": 1 }
+            color: root._hasMatches ? chromeStyle.colors.findCountText : root.errorColor
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        // The options, one per row of the session's table (SearchToggleRows): case, regex, whole word.
+        // Modelled by COUNT, each button reading its row: the session publishes a new list on every change,
+        // and a list model would rebuild every button -- dropping the keyboard focus a toggle press is
+        // made with.
+        Repeater {
+            model: root._toggles.length
+
+            delegate: ToolButton {
+                id: toggle
+                required property int index
+                readonly property var modelData: root._toggles[index]
+                objectName: modelData.objectName
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredWidth: chromeStyle.size.findToggleWidth
+                Layout.preferredHeight: chromeStyle.size.findToggleHeight
+                text: chromeStyle.chipOpenGlyph + modelData.glyph + chromeStyle.chipCloseGlyph
+                font.family: chromeStyle.type.footnote.family
+                font.pixelSize: chromeStyle.type.footnote.pixelSize
+                // Deliberately NOT `checkable`. A checkable button toggles `checked` itself on click, and
+                // that write is corrected only when the binding's value changes -- so cycling Sensitive ->
+                // Insensitive, where the case toggle stays lit, left it unlit while the policy was pinned.
+                // The session is the only one that knows; `checked` stays a pure binding.
+                checked: modelData.checked
+                onClicked: if (root._search) root._search.toggleSearchOption(modelData.toggle);
+                ToolTip.visible: hovered
+                ToolTip.text: modelData.tooltip
+
+                Accessible.role: Accessible.Button
+                Accessible.name: modelData.accessibleName
+                Accessible.checkable: true
+                Accessible.checked: modelData.checked
+
+                contentItem: Label {
+                    text: toggle.text
+                    font: toggle.font
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    color: toggle.checked ? chromeStyle.colors.findToggleOnText : chromeStyle.colors.findToggleText
+                }
+                // A lit toggle stands off an unlit one at 3:1: the Terminal row's inverse cells, or the
+                // native rows' accent wash with an accent ring (the chrome's ink where the accent is faint).
+                background: Rectangle {
+                    objectName: "searchBarToggleBackground"
+                    radius: chromeStyle.radii.control
+                    color: toggle.checked ? chromeStyle.colors.findToggleOnFill
+                                          : (toggle.hovered ? chromeStyle.colors.tabHoverFill : "transparent")
+                    border.width: toggle.checked && !root._isCellRow ? chromeStyle.borderWidth : 0
+                    border.color: chromeStyle.statusMarkOn(chromeStyle.statusRunning, systemPalette.window)
+                }
+            }
         }
 
         ToolButton {
             objectName: "searchBarPrevious"
-            anchors.verticalCenter: parent.verticalCenter
-            text: "▴"
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: chromeStyle.size.findButtonWidth
+            Layout.preferredHeight: chromeStyle.size.findButtonHeight
+            text: chromeStyle.findPreviousGlyph
             enabled: root._navigable
             onClicked: if (root._search) root._search.searchPrevious();
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Previous match — Shift+Enter")
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Previous match")
         }
 
         ToolButton {
             objectName: "searchBarNext"
-            anchors.verticalCenter: parent.verticalCenter
-            text: "▾"
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: chromeStyle.size.findButtonWidth
+            Layout.preferredHeight: chromeStyle.size.findButtonHeight
+            text: chromeStyle.findNextGlyph
             enabled: root._navigable
             onClicked: if (root._search) root._search.searchNext();
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Next match — Enter")
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Next match")
         }
 
         ToolButton {
             objectName: "searchBarClose"
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: chromeStyle.size.findButtonWidth
+            Layout.preferredHeight: chromeStyle.size.findButtonHeight
             // The style's own close affordance, so this bar closes with the same glyph as every tab.
             text: chromeStyle.closeGlyph
             onClicked: root.close()
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Close — Esc")
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Close find")
+        }
+
+        // Trailing padding.
+        Item {
+            Layout.preferredWidth: chromeStyle.space.s2 - bar.spacing
+            visible: Layout.preferredWidth > 0
         }
     }
 }

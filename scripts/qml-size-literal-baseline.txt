@@ -7,7 +7,6 @@ src/contour/qml/ConfirmDialog.qml 13
 src/contour/qml/LinkPatternList.qml 8
 src/contour/qml/PopupSurface.qml 1
 src/contour/qml/SaveLayoutDialog.qml 5
-src/contour/qml/SearchBar.qml 2
 src/contour/qml/SessionChrome.qml 11
 src/contour/qml/SettingRow.qml 23
 src/contour/qml/SettingsListItem.qml 19

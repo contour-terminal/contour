@@ -364,6 +364,7 @@ Item {
         id: searchBar
         session: chrome.session
         displayItem: chrome.displayItem
+        header: 0
     }
 
     // Play the session's bell, at once or once multimedia is ready.

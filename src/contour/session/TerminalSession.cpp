@@ -2900,11 +2900,6 @@ void TerminalSession::toggleSearchOption(int toggle)
     publishSearchState();
 }
 
-void TerminalSession::cycleSearchCaseSensitivity()
-{
-    toggleSearchOption(static_cast<int>(SearchToggle::Case));
-}
-
 void TerminalSession::searchNext()
 {
     stepSearch(SearchWrapEdge::Top);
@@ -3122,7 +3117,6 @@ QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivit
 
 void TerminalSession::publishSearchToggles(vtbackend::SearchOptions options)
 {
-    _searchCase = describeSearchCase(options.caseSensitivity);
     _searchCaseTooltip = renderSearchCaseTooltip(options.caseSensitivity);
 
     auto const tooltipOf = [&](SearchToggle toggle, ToggleState state) -> QString {

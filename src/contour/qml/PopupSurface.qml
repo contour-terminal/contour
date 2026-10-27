@@ -90,7 +90,9 @@ Rectangle {
                                 ? 3 * Math.max(1, Math.round((chromeStyle.shadowBlur + 1) / 2))
                                 : 0
     readonly property int _margin: root._reach + Math.abs(chromeStyle.shadowOffsetY)
-    readonly property int _corner: root._margin + chromeStyle.radius
+    // The surface's own radius, not the style's: a popup that overrides `radius` (the find bar's) keeps a
+    // shadow whose corners follow its own.
+    readonly property int _corner: root._margin + root.radius
 
     BorderImage {
         visible: root.elevation === null && chromeStyle.hasPopupShadow && root._margin > 0
@@ -103,7 +105,7 @@ Rectangle {
 
         source: "image://popupshadow/" + chromeStyle.shadowBlur
               + "/" + Math.round(chromeStyle.shadowOffsetY)
-              + "/" + chromeStyle.radius
+              + "/" + root.radius
               // The colour WITHOUT its leading '#': that character starts a URL fragment, and Qt
               // would strip everything after it before the provider ever saw the id.
               + "/" + root._tint.toString().substring(1)

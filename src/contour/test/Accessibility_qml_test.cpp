@@ -11,6 +11,7 @@
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
 #include <contour/session/EndReason.hpp>
+#include <contour/session/SearchStatus.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -377,6 +378,86 @@ TEST_CASE("accessibility: an ended pane's footer is an alert named by its messag
         REQUIRE(button != nullptr);
         CHECK(button->property("role").toInt() == QAccessible::Button);
         CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the find bar names its field, its count, its toggles and its buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::MockSession session;
+    session.setSearchPattern(QStringLiteral("needle"));
+    engine.rootContext()->setContextProperty("mockSession", &session);
+
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "Window {\n"
+                          "  width: 800; height: 400; visible: true\n"
+                          "  property alias bar: barItem\n"
+                          "  Item { id: display; anchors.fill: parent }\n"
+                          "  SearchBar { id: barItem; session: mockSession; displayItem: display }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBarA11yHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const window = std::unique_ptr<QObject>(component.create());
+    REQUIRE(window != nullptr);
+    auto* bar = window->property("bar").value<QObject*>();
+    REQUIRE(bar != nullptr);
+    QMetaObject::invokeMethod(bar, "open");
+    QCoreApplication::processEvents();
+
+    // Through the visual tree: a Repeater's delegates (the toggles) are not QObject children of the popup.
+    auto* content = bar->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    auto const attachedOf = [content](QString const& name) {
+        auto const parts = partsNamed(*content, name);
+        REQUIRE(parts.size() == 1);
+        auto* part = parts.front();
+        auto* attached = accessibleAttachedOf(part);
+        REQUIRE(attached != nullptr);
+        return attached;
+    };
+
+    auto const* field = attachedOf(QStringLiteral("searchBarField"));
+    CHECK(field->property("role").toInt() == QAccessible::EditableText);
+    CHECK(field->property("name").toString() == QStringLiteral("Find"));
+
+    auto const* count = attachedOf(QStringLiteral("searchBarCount"));
+    CHECK(count->property("role").toInt() == QAccessible::StaticText);
+    CHECK(count->property("name").toString() == session.searchSummary());
+
+    auto const toggleNames = std::array { QStringLiteral("Match case"),
+                                          QStringLiteral("Regular expression"),
+                                          QStringLiteral("Whole word") };
+    static_assert(toggleNames.size() == contour::session::SearchToggleRows.size());
+    for (auto const index: std::views::iota(std::size_t { 0 }, toggleNames.size()))
+    {
+        auto const* toggle =
+            attachedOf(QString::fromUtf8(contour::session::SearchToggleRows[index].objectName));
+        INFO("toggle " << index);
+        CHECK(toggle->property("role").toInt() == QAccessible::Button);
+        CHECK(toggle->property("name").toString() == toggleNames[index]);
+        CHECK(toggle->property("checkable").toBool());
+    }
+
+    for (auto const& [name, label]:
+         std::array { std::pair { "searchBarPrevious", QStringLiteral("Previous match") },
+                      std::pair { "searchBarNext", QStringLiteral("Next match") },
+                      std::pair { "searchBarClose", QStringLiteral("Close find") } })
+    {
+        auto const* button = attachedOf(QString::fromUtf8(name));
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == label);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
