@@ -1031,9 +1031,14 @@ gated on `Capability::InputEcho` (`input-echo`, 12):
 The daemon reads it from the hosted PTY (`UnixPty::inputEcho()`, under the device's own lock, never the
 terminal's; `TappingPty` forwards it) on the loop thread at each flush, before the session's output, after
 input the client sent, and in a snapshot, and sends it only when it differs from what that connection was
-last told. The client stores it on the pane's `ChannelPty`, where the session reads it on the GUI thread
-when the output that follows it lands. A value the client does not know reads as `Unknown`. tmux panes have
-no such field and stay `Unknown`.
+last told. A program may turn echo off after its prompt, or back on without printing, with no output or
+input to carry the change: so a connection that shares the capability also runs a coarse idle check
+(`FlushPolicy::inputEchoCheck`, 250 ms), on the loop's clock, that reads every followed session's echo when it
+is due and rides the flush machinery (a flush armed for the next check, superseded by any earlier one). The
+client stores the value on the pane's `ChannelPty` on the reactor thread, which then runs the pane's observer
+(`vtpty::Pty::setInputEchoObserver`); the session installs one that posts to its own thread and re-reads the
+echo there, so the lock appears without waiting for output. A value the client does not know reads as
+`Unknown`. tmux panes have no such field and stay `Unknown`.
 
 ### Who configures a daemon session
 

@@ -27,6 +27,10 @@ struct FlushPolicy
     core::platform::SteadyDuration echoWindow = std::chrono::milliseconds { 50 };
     /// How long bulk output is held back to coalesce into one increment.
     core::platform::SteadyDuration coalesceDelay = std::chrono::milliseconds { 20 };
+    /// How often a connection that mirrors the echo state asks each followed session's PTY for it when no
+    /// output or input has: a program may turn echo off after its prompt, or back on without printing, and
+    /// nothing else would say so. Coarse on purpose: it bounds how late a lock appears, not a frame.
+    core::platform::SteadyDuration inputEchoCheck = std::chrono::milliseconds { 250 };
 };
 
 /// Why a flush is scheduled.

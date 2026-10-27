@@ -13,9 +13,11 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -181,6 +183,17 @@ class Pty
     /// Unknown.
     /// @return The echo state, as the program in the terminal last set it.
     [[nodiscard]] virtual InputEcho inputEcho() const noexcept { return InputEcho::Unknown; }
+
+    /// Called when a device that learns of its echo state from elsewhere (a mirrored pane, told by its
+    /// daemon) is told a different one. Runs on the thread that learned it, never under the terminal lock; it
+    /// only posts to its owner, and must not call back into the device.
+    using InputEchoObserver = std::function<void()>;
+
+    /// Installs @p observer, replacing any earlier one; an empty one removes it. The owner removes its own
+    /// before it goes: once this returns with an empty observer, none is running. A device that cannot be
+    /// told of a change (a local PTY, which is only ever asked) never calls it.
+    /// @param observer What to run on a change of inputEcho().
+    virtual void setInputEchoObserver(InputEchoObserver observer) { std::ignore = observer; }
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);

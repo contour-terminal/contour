@@ -245,3 +245,30 @@ TEST_CASE("ChannelPty answers the echo its peer last reported", "[vtpty][channel
     pty.setInputEcho(vtpty::InputEcho::Echoed);
     CHECK(pty.inputEcho() == vtpty::InputEcho::Echoed);
 }
+
+TEST_CASE("ChannelPty tells its observer of a change of the peer's echo, and only of a change",
+          "[vtpty][channelpty][inputecho]")
+{
+    auto pty = vtpty::ChannelPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) } };
+    auto calls = 0;
+    auto seen = std::vector<vtpty::InputEcho> {};
+    pty.setInputEchoObserver([&] {
+        ++calls;
+        seen.push_back(pty.inputEcho()); // the value is stored before the observer runs
+    });
+
+    pty.setInputEcho(vtpty::InputEcho::Unknown); // what it already held
+    CHECK(calls == 0);
+    pty.setInputEcho(vtpty::InputEcho::Hidden);
+    CHECK(calls == 1);
+    pty.setInputEcho(vtpty::InputEcho::Hidden); // told again, unchanged
+    CHECK(calls == 1);
+    pty.setInputEcho(vtpty::InputEcho::Echoed);
+    CHECK(calls == 2);
+    CHECK(seen == std::vector { vtpty::InputEcho::Hidden, vtpty::InputEcho::Echoed });
+
+    // An empty observer removes it: a later change calls nothing.
+    pty.setInputEchoObserver({});
+    pty.setInputEcho(vtpty::InputEcho::Hidden);
+    CHECK(calls == 2);
+}

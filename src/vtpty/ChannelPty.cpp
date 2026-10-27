@@ -20,6 +20,21 @@ void ChannelPty::setResizeSink(ResizeSink sink)
     _resizeSink = std::move(sink);
 }
 
+void ChannelPty::setInputEcho(InputEcho echo)
+{
+    if (_inputEcho.exchange(echo, std::memory_order_relaxed) == echo)
+        return;
+    auto const lock = std::lock_guard { _observerMutex };
+    if (_inputEchoObserver)
+        _inputEchoObserver();
+}
+
+void ChannelPty::setInputEchoObserver(InputEchoObserver observer)
+{
+    auto const lock = std::lock_guard { _observerMutex };
+    _inputEchoObserver = std::move(observer);
+}
+
 void ChannelPty::feed(std::string_view data)
 {
     append(data, ReadOrigin::Live);

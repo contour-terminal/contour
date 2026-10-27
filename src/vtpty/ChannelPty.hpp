@@ -81,9 +81,10 @@ class ChannelPty: public Pty
     [[nodiscard]] int resizesAfterClose() const noexcept;
 
     /// Stores what the peer's terminal does with typed text, as the peer last reported it (a daemon's
-    /// SessionInputEcho). Any thread: the reactor stores, the GUI thread reads.
+    /// SessionInputEcho), and runs the observer when that differs from what it held. Any thread: the reactor
+    /// stores, the GUI thread reads.
     /// @param echo The peer's echo state.
-    void setInputEcho(InputEcho echo) noexcept { _inputEcho.store(echo, std::memory_order_relaxed); }
+    void setInputEcho(InputEcho echo);
 
     /// @return The echo the peer last reported; Unknown before it reported any, or for a peer that does
     ///         not report it (a tmux pane, an older daemon).
@@ -93,6 +94,7 @@ class ChannelPty: public Pty
     }
 
     // vtpty::Pty overrides
+    void setInputEchoObserver(InputEchoObserver observer) override;
     [[nodiscard]] PtySlave& slave() noexcept override { return _slave; }
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
@@ -129,6 +131,10 @@ class ChannelPty: public Pty
     PageSize _pageSize;
     /// @see setInputEcho
     std::atomic<InputEcho> _inputEcho { InputEcho::Unknown };
+    /// Guards _inputEchoObserver, and is held while it runs, so that removing it waits out a running call.
+    /// Not _mutex, which the reader's wait holds. @see setInputEchoObserver
+    std::mutex _observerMutex;
+    InputEchoObserver _inputEchoObserver;
     std::optional<ImageSize> _pixelSize;
     WriteSink _writeSink;
     ResizeSink _resizeSink;

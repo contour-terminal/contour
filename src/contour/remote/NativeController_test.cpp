@@ -2071,6 +2071,50 @@ TEST_CASE("a pane closed as its connection ends is closed once the same daemon a
     pane.terminal.reset();
 }
 
+TEST_CASE("the daemon's echo report reaches the pane's device and its observer, with no output after it",
+          "[attach][controller][inputecho]")
+{
+    // sudo may turn echo off after its prompt printed: nothing follows, so the daemon's idle check tells the
+    // client (FlushPolicy::inputEchoCheck, short here: it is a setting, not a sleep), and the controller
+    // routes the report to the pane's device and wakes its owner (vtpty::Pty::setInputEchoObserver).
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("prompt");
+    auto const setEchoOnDaemon = [&](vtpty::InputEcho echo) {
+        daemon.onDaemon([&] {
+            auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+            dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(echo);
+            return 0;
+        });
+    };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("prompt"));
+    REQUIRE(controller.isBound(session.value));
+
+    auto woken = std::atomic<int> { 0 };
+    pane.pty().setInputEchoObserver([&woken] { ++woken; }); // runs on the reactor thread
+    CHECK(pane.pty().inputEcho() == vtpty::InputEcho::Unknown);
+
+    setEchoOnDaemon(vtpty::InputEcho::Hidden);
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+    CHECK(woken.load() == 1);
+
+    setEchoOnDaemon(vtpty::InputEcho::Echoed);
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Echoed; }));
+    CHECK(woken.load() == 2);
+
+    pane.pty().setInputEchoObserver({}); // before the counter goes
+    controller.stop();
+    pane.terminal.reset();
+}
+
 TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attach][controller][reconnect]")
 {
     // The daemon may have been upgraded or downgraded meanwhile: what was agreed is the new connection's.

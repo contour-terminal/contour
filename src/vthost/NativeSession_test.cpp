@@ -1104,10 +1104,10 @@ struct NativeSessionFlushTester
         return session.snapshotPending(id);
     }
 
-    /// Accepts a bare ClientHello as if it had arrived: the connection attaches and queues its snapshots.
-    static void handshake(NativeSession& session)
+    /// Accepts @p hello as if it had arrived: the connection attaches and queues its snapshots.
+    static void handshake(NativeSession& session, proto::ClientHello hello = {})
     {
-        REQUIRE(session.completeHandshake(proto::DecodedFrame { .pdu = proto::ClientHello {} }));
+        REQUIRE(session.completeHandshake(proto::DecodedFrame { .pdu = std::move(hello) }));
     }
 
     /// Lets go of @p session as run() does when its client leaves, advancing @p clock past every deadline
@@ -4594,11 +4594,12 @@ struct FlushHarness
 
     /// Connects a client, accepts its hello and lets its attach snapshots stream to it.
     /// @param id The session whose snapshot is waited for.
+    /// @param hello What the client says of itself.
     /// @return The client, past its attach snapshots.
-    FlushClient& attach(vtworkspace::SessionId id)
+    FlushClient& attach(vtworkspace::SessionId id, proto::ClientHello hello = {})
     {
         auto& client = connect();
-        NativeSessionFlushTester::handshake(*client.session);
+        NativeSessionFlushTester::handshake(*client.session, std::move(hello));
         CHECK(turnUntil(h.loop, [&] {
             return !NativeSessionFlushTester::snapshotPending(*client.session, id)
                    && std::ranges::any_of(client.received, endsSnapshotRun);
@@ -5912,4 +5913,55 @@ TEST_CASE("an AF_UNIX connection holds every grant", "[vthost][native][grants]")
     REQUIRE(h.session->grants() == vtcontrol::ControlGrants::none());
     std::ignore = h.exchange({ controlApiHello(), controlCall(1, "workspace.list") }, 2);
     CHECK(h.session->grants() == vtcontrol::ControlGrants::all());
+}
+
+TEST_CASE("an echo change with no output after it reaches a viewer by the idle check",
+          "[vthost][native][flush][inputecho]")
+{
+    // sudo may turn echo off after it printed its prompt: nothing prints, nothing is typed, and only the
+    // idle check (FlushPolicy::inputEchoCheck) can tell the viewer. On a ManualClock, so no wait is real.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto const interval = f.h.options.services.flush.inputEchoCheck;
+    auto& client = f.attach(id, inputEchoHello());
+    REQUIRE(inputEchoFrames(client.received).empty());
+
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    // Not before the interval: the check is coarse, not a poll of every flush.
+    f.clock.advance(interval - 1ms);
+    turnIdle(f.h.loop);
+    CHECK(inputEchoFrames(client.received).empty());
+
+    f.clock.advance(1ms);
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    CHECK(inputEchoFrames(client.received)[0].second.session == id.value);
+    CHECK(inputEchoFrames(client.received)[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+
+    // Unchanged across many intervals: nothing more is sent, and the check keeps itself armed.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 4))
+    {
+        f.clock.advance(interval);
+        turnIdle(f.h.loop);
+    }
+    CHECK(inputEchoFrames(client.received).size() == 1);
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // Back on, again with no output: told at the next check.
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Echoed);
+    f.clock.advance(interval);
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 2; }));
+    CHECK(inputEchoFrames(client.received)[1].second.echo == std::to_underlying(vtpty::InputEcho::Echoed));
+}
+
+TEST_CASE("a viewer that does not mirror the echo state arms no idle check",
+          "[vthost][native][flush][inputecho]")
+{
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attach(id);
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.clock.advance(f.h.options.services.flush.inputEchoCheck * 4);
+    turnIdle(f.h.loop);
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+    CHECK(inputEchoFrames(client.received).empty());
 }

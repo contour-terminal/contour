@@ -652,6 +652,12 @@ class NativeSession final: public SessionStreamEvents
     /// @param session The session.
     void pushInputEcho(vtworkspace::SessionId session);
 
+    /// The idle check of the echo state (FlushPolicy::inputEchoCheck): once it is due, asks every followed
+    /// session's PTY for its echo, so a change with no output or input after it still reaches the client; and
+    /// arms the flush that makes the next one. Loop thread, from the flusher. A connection that does not
+    /// mirror the echo state does nothing.
+    void checkInputEchoWhenDue();
+
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
     /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
@@ -879,6 +885,8 @@ class NativeSession final: public SessionStreamEvents
     /// What this connection was last told of each session's echo, as its wire byte; absent is Unknown, which
     /// a client assumes before it is told anything.
     std::unordered_map<uint64_t, uint8_t> _inputEchoSent;
+    /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
+    core::platform::SteadyTimePoint _nextInputEchoCheck {};
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer

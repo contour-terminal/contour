@@ -2910,6 +2910,61 @@ TEST_CASE("TerminalSessionManager: a focused password prompt turns secure input 
     CHECK(doubles.record.disables == 0);
 }
 
+TEST_CASE("TerminalSessionManager: a daemon's echo report locks the pane with no output after it",
+          "[manager][secureinput]")
+{
+    // A daemon-hosted pane is told its echo state over the native protocol, from the reactor thread; the
+    // program may turn echo off after its prompt, so nothing prints after the report. The session reads it
+    // on its own thread when told (vtpty::Pty::setInputEchoObserver).
+    auto doubles = SecureInputDoubles {};
+    auto channels = std::vector<vtpty::ChannelPty*> {};
+    auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    factory->makePty = [&channels](vtbackend::PageSize size) {
+        auto pty = std::make_unique<vtpty::ChannelPty>(size);
+        channels.push_back(pty.get());
+        return pty;
+    };
+    auto app = std::make_unique<contour::test::TestApp>(
+        std::move(factory),
+        nullptr,
+        nullptr,
+        nullptr,
+        contour::test::TestApp::testHostIdentity(),
+        nullptr,
+        contour::test::TestEnvironment::Overrides {},
+        nullptr,
+        contour::test::appearanceServicesWith(doubles.accessibility, doubles.appearance, doubles.record));
+    app->app().config().secureInput = contour::config::SecureInputMode::Auto;
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    REQUIRE(channels.size() == 1);
+    drainPosted();
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+
+    channels[0]->setInputEcho(vtpty::InputEcho::Hidden);
+    drainPosted();
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
+    CHECK(secureRoleAt(*window, 0) == 1);
+    CHECK(doubles.record.enables == 1);
+
+    // Told again: no new lock, no new call.
+    channels[0]->setInputEcho(vtpty::InputEcho::Hidden);
+    drainPosted();
+    CHECK(doubles.record.enables == 1);
+
+    channels[0]->setInputEcho(vtpty::InputEcho::Echoed);
+    drainPosted();
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+    CHECK(doubles.record.disables == 1);
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("TerminalSessionManager: closing the prompt's pane, its window, or the manager turns it off",
           "[manager][secureinput]")
 {

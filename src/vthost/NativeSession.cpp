@@ -489,6 +489,22 @@ void NativeSession::pushInputEcho(SessionId session)
     emitSessionEvent(proto::SessionInputEcho { .session = session.value, .echo = echo });
 }
 
+void NativeSession::checkInputEchoWhenDue()
+{
+    if (!mirrorsInputEcho() || _closed)
+        return;
+    auto const now = _loop.clock().now();
+    if (now >= _nextInputEchoCheck)
+    {
+        _nextInputEchoCheck = now + _services.flush.inputEchoCheck;
+        for (auto const& [session, follow]: _followed)
+            pushInputEcho(SessionId { session });
+    }
+    // The next check rides a flush of its own; an earlier flush that output arms runs this again, and
+    // supersedes the one armed here, which then finds its deadline moved.
+    scheduleFlush(_nextInputEchoCheck);
+}
+
 void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
 {
     // A question is asked in its pane: one in a window this client does not show waits for a client that
@@ -581,6 +597,7 @@ core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint d
         pushInputEcho(SessionId { session });
     for (auto const session: std::exchange(_inputEchoPending, {}))
         pushInputEcho(SessionId { session });
+    checkInputEchoWhenDue();
     for (auto const session: std::exchange(_pendingSessions, {}))
         if (snapshotPending(SessionId { session }))
             _pendingSessions.insert(session);
@@ -1988,6 +2005,10 @@ void NativeSession::attachClient(uint64_t serial,
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
+    // The idle check of the echo state starts one interval from now.
+    _nextInputEchoCheck = _loop.clock().now() + _services.flush.inputEchoCheck;
+    if (mirrorsInputEcho())
+        scheduleFlush(_nextInputEchoCheck);
 
     // The window/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.

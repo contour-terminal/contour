@@ -467,6 +467,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _overlayClearanceTimer.setInterval(ScrollbarMarksFrameInterval);
     connect(&_overlayClearanceTimer, &QTimer::timeout, this, &TerminalSession::publishOverlayClearance);
 
+    // A device told of its echo by a daemon says so from the reactor thread, with no output to carry it: the
+    // lock is re-read on this session's own thread, where the terminal's lock is not held.
+    _terminal.device().setInputEchoObserver(
+        [this] { platform::postToObject(this, [this] { refreshInputEcho(); }); });
+
     configureTerminal();
     connectFinishNoticeEvents();
 
@@ -499,6 +504,8 @@ TerminalSession::~TerminalSession()
     // First: a path probe that answers from now on finds nothing to hand its result to.
     _postTarget->withdraw();
     _terminating = true;
+    // The observer names this session: once removed, the reactor's no longer posting to it.
+    _terminal.device().setInputEchoObserver({});
 
     // Stop forwarding renderBufferUpdated() before anything is torn down: the status-line command cache
     // inside _terminal calls it from a pool thread and is only quiesced when _terminal is destroyed,
