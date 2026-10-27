@@ -240,6 +240,8 @@ void WindowController::presentSurface(MenuSurface surface, command::MenuTree tre
                                // against the menu that was SHOWN and the target it was opened for, both held
                                // by value here, and this window is held weakly.
                                auto const self = QPointer<WindowController> { this };
+                               if (!self)
+                                   return;
                                auto onAction = [self, surface, target](actions::Action const& action) {
                                    if (self)
                                        platform::postToObject(self.data(), [self, surface, target, action] {
@@ -247,13 +249,14 @@ void WindowController::presentSurface(MenuSurface surface, command::MenuTree tre
                                        });
                                };
                                auto const route =
-                                   presentMenu(_menuPresentation,
-                                               _nativeMenus,
+                                   presentMenu(self->_menuPresentation,
+                                               self->_nativeMenus,
                                                tree,
                                                { .window = window.data(), .position = std::nullopt },
                                                pickFromShown(tree.actions, std::move(onAction)));
-                               if (route == MenuRoute::InScene)
-                                   showInScene(surface, tree);
+                               // presentMenu() ran a nested event loop: this window may be gone by now.
+                               if (route == MenuRoute::InScene && self)
+                                   self->showInScene(surface, tree);
                            });
 }
 
