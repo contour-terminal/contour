@@ -739,10 +739,10 @@ struct DrawnFrame
     /// @param from The first column wanted.
     [[nodiscard]] std::vector<RenderCell> topRowFrom(ColumnOffset from) const
     {
-        auto row = cells | std::views::filter([&](RenderCell const& cell) {
-                       return cell.position.line == LineOffset(0) && cell.position.column >= from;
-                   })
-                   | std::ranges::to<std::vector>();
+        auto row = std::ranges::to<std::vector>(cells | std::views::filter([&](RenderCell const& cell) {
+                                                    return cell.position.line == LineOffset(0)
+                                                           && cell.position.column >= from;
+                                                }));
         std::ranges::sort(row, {}, [](RenderCell const& cell) { return cell.position.column; });
         return row;
     }
@@ -947,10 +947,9 @@ TEST_CASE("RenderBufferBuilder.aPreeditIsPlacedOnTheLine", "[renderbuffer][ime]"
             *composingTermOn(kind, style, { .line = LineOffset(0), .column = ColumnOffset(2) }, "\u200Bab"));
         CHECK(columnOf(frame, U"a") == ColumnOffset(3));
         CHECK(columnOf(frame, U"b") == ColumnOffset(4));
-        auto const columns =
+        auto const columns = std::ranges::to<std::vector>(
             frame.topRowFrom(ColumnOffset(0))
-            | std::views::transform([](RenderCell const& cell) { return cell.position.column; })
-            | std::ranges::to<std::vector>();
+            | std::views::transform([](RenderCell const& cell) { return cell.position.column; }));
         CHECK(std::ranges::adjacent_find(columns) == columns.end());
     }
 }
