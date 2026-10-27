@@ -18,6 +18,7 @@ using contour::config::GuiStateError;
 using contour::config::GuiStateFileName;
 using contour::config::NewDefaultsOffer;
 using contour::config::SettingsWindowState;
+using contour::config::ShellKind;
 using contour::config::WindowShowState;
 
 namespace
@@ -191,4 +192,64 @@ TEST_CASE("GuiStateStore: a Settings window entry that is not a map is ignored",
     REQUIRE(loaded.has_value());
     CHECK(loaded->settingsWindow == std::nullopt);
     CHECK(loaded->dismissedOffers == std::vector { NewDefaultsOffer::ExistingConfig });
+}
+
+TEST_CASE("GuiStateStore: dismissed shells round-trip", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    auto const state = GuiState { .dismissedShellIntegrations = { ShellKind::Zsh, ShellKind::Fish } };
+    REQUIRE(store.save(state).has_value());
+    auto const written = fileSystem.readFile(stateFile()).value();
+    INFO(written);
+    CHECK(written.contains("dismissed_shell_integration: [zsh, fish]"));
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == state);
+}
+
+TEST_CASE("GuiStateStore: an unknown shell token is skipped, a known one kept", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_shell_integration: [zsh, csh, \"\", -zsh]\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == GuiState { .dismissedShellIntegrations = { ShellKind::Zsh } });
+}
+
+TEST_CASE("GuiStateStore: shells that are not a list are malformed", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_shell_integration: zsh\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE_FALSE(loaded.has_value());
+    CHECK(loaded.error() == GuiStateError::Malformed);
+}
+
+TEST_CASE("GuiStateStore: saving one list keeps the other and what this release does not know",
+          "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(
+        fileSystem,
+        "dismissed_new_defaults: [existing_config]\ndismissed_shell_integration: [csh]\nwindow_hint: wide\n");
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+
+    auto state = store.load().value();
+    CHECK(state == GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig } });
+    state.dismissedShellIntegrations.push_back(ShellKind::Bash);
+    REQUIRE(store.save(state).has_value());
+
+    auto const written = fileSystem.readFile(stateFile()).value();
+    INFO(written);
+    CHECK(written.contains("dismissed_new_defaults: [existing_config]"));
+    CHECK(written.contains("dismissed_shell_integration: [bash, csh]"));
+    CHECK(written.contains("window_hint: wide"));
+    CHECK(FileGuiStateStore { fileSystem, configDir() }.load().value() == state);
+
+    // Answering the new-defaults banner afterwards must not wipe "Not Now".
+    state.dismissedOffers.push_back(NewDefaultsOffer::SettingsOverride);
+    REQUIRE(store.save(state).has_value());
+    CHECK(FileGuiStateStore { fileSystem, configDir() }.load().value().dismissedShellIntegrations
+          == std::vector<ShellKind> { ShellKind::Bash });
 }

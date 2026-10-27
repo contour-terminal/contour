@@ -876,6 +876,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
+            platform/ShellRcEditor_test.cpp
             platform/WindowShadowController_test.cpp
             platform/WindowShadowGeometry_test.cpp
             platform/WindowShadowTiles_test.cpp

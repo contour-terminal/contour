@@ -3,6 +3,7 @@
 
 #include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
+#include <contour/config/ShellKind.hpp>
 
 #include <core/platform/FileSystem.hpp>
 
@@ -67,6 +68,10 @@ struct GuiState
     /// The Settings window as it last closed; none before it ever did.
     std::optional<SettingsWindowState> settingsWindow {};
 
+    /// The shells whose "install shell integration" card the user answered "Not Now" to, in the order
+    /// they did. A card is never offered again for these; Settings still installs.
+    std::vector<ShellKind> dismissedShellIntegrations {};
+
     [[nodiscard]] bool operator==(GuiState const&) const = default;
 };
 
@@ -120,10 +125,11 @@ inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 /// The production GuiStateStore: GuiStateFileName in the configuration directory, read and written through
 /// the injected file system, durably (see contour::config::writeFileDurably).
 ///
-/// The file reads `dismissed_new_defaults: [existing_config]` and `settings_window: { x, y, width, height,
-/// screen, show: normal|maximized, page }`. A token no offer answers to is skipped, so a file written by a
-/// newer release still loads, and a save keeps those tokens and any other keys. A `settings_window` that is
-/// not a map is no state; an unknown `show` word is `normal`.
+/// The file reads `dismissed_new_defaults: [existing_config]`, `dismissed_shell_integration: [zsh]` and
+/// `settings_window: { x, y, width, height, screen, show: normal|maximized, page }`. A token no offer or
+/// shell answers to is skipped, so a file written by a newer release still loads, and a save keeps those
+/// tokens and any other keys. A `settings_window` that is not a map is no state; an unknown `show` word is
+/// `normal`.
 /// Saving over a file that does not load first copies it to `gui-state.yml.bak` (GuiStateBackupSuffix),
 /// and saves nothing when that copy fails.
 class FileGuiStateStore final: public GuiStateStore

@@ -29,6 +29,7 @@ add_library(contour_platform STATIC
     FontFamilySource.cpp FontFamilySource.hpp
     NotificationOccasion.hpp
     SessionVisibility.hpp
+    ShellRcEditor.cpp ShellRcEditor.hpp
     # These translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
     # elsewhere. Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT.
     DBusNotificationTransport.cpp DBusNotificationTransport.hpp
@@ -118,6 +119,7 @@ target_link_libraries(contour_platform PUBLIC
     contour_config
     core::base
     core::log
+    core::platform
     Qt6::Core
     Qt6::DBus
     Qt6::Gui

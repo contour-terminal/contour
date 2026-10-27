@@ -7,8 +7,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,8 +19,40 @@ namespace contour::config
 
 namespace
 {
-    /// The key the dismissed offers are listed under.
-    constexpr auto DismissedOffersKey = std::string_view { "dismissed_new_defaults" };
+    /// How the new-defaults offers a user answered are spelled in the file.
+    struct OfferCodec
+    {
+        using Item = NewDefaultsOffer;
+        static constexpr auto Key = std::string_view { "dismissed_new_defaults" };
+
+        [[nodiscard]] static std::optional<Item> parse(std::string const& token)
+        {
+            return configEnumFromToken<NewDefaultsOffer>(token);
+        }
+
+        [[nodiscard]] static std::string spell(Item item) { return std::string { configEnumToken(item) }; }
+    };
+
+    /// How the shells whose install offer a user declined are spelled in the file: by their row's name.
+    struct ShellCodec
+    {
+        using Item = ShellKind;
+        static constexpr auto Key = std::string_view { "dismissed_shell_integration" };
+
+        [[nodiscard]] static std::optional<Item> parse(std::string const& token)
+        {
+            auto const row = std::ranges::find(ShellRows, std::string_view { token }, &ShellRow::name);
+            if (row == ShellRows.end())
+                return std::nullopt;
+            return row->kind;
+        }
+
+        [[nodiscard]] static std::string spell(Item item)
+        {
+            auto const* const row = shellRow(item);
+            return row != nullptr ? std::string { row->name } : std::string {};
+        }
+    };
 
     /// The key the Settings window's state is kept under.
     constexpr auto SettingsWindowKey = std::string_view { "settings_window" };
@@ -77,9 +111,32 @@ namespace
         }
     }
 
+    /// The items @p document lists under @p Codec's key.
+    /// @param document A parsed GUI state document, a map.
+    /// @return The items it knows, in order, skipping a token this release does not know (a newer
+    ///         release wrote it); none when the key is absent; GuiStateError::Malformed when it is not a
+    ///         list.
+    template <typename Codec>
+    [[nodiscard]] std::expected<std::vector<typename Codec::Item>, GuiStateError> listedItems(
+        YAML::Node const& document)
+    {
+        auto const list = document[std::string { Codec::Key }];
+        if (!list)
+            return std::vector<typename Codec::Item> {};
+        if (!list.IsSequence())
+            return std::unexpected { GuiStateError::Malformed };
+        auto items = std::vector<typename Codec::Item> {};
+        for (auto const& entry: list)
+            if (entry.IsScalar())
+                if (auto const item = Codec::parse(entry.as<std::string>()))
+                    items.push_back(*item);
+        return items;
+    }
+
     /// The state @p document holds.
     /// @param document A parsed GUI state document.
-    /// @return The state, or GuiStateError::Malformed when it is not a map, or its offers are not a list.
+    /// @return The state, or GuiStateError::Malformed when it is not a map, or one of its lists is not a
+    /// list.
     [[nodiscard]] std::expected<GuiState, GuiStateError> guiStateOf(YAML::Node const& document)
     {
         try
@@ -90,19 +147,14 @@ namespace
                 return std::unexpected { GuiStateError::Malformed };
             auto state = GuiState {};
             state.settingsWindow = settingsWindowOf(document[std::string { SettingsWindowKey }]);
-            auto const offers = document[std::string { DismissedOffersKey }];
+            auto offers = listedItems<OfferCodec>(document);
             if (!offers)
-                return state;
-            if (!offers.IsSequence())
-                return std::unexpected { GuiStateError::Malformed };
-            for (auto const& entry: offers)
-            {
-                // A token this release does not know is one a newer release wrote: skip it, keep the rest.
-                if (!entry.IsScalar())
-                    continue;
-                if (auto const offer = configEnumFromToken<NewDefaultsOffer>(entry.as<std::string>()))
-                    state.dismissedOffers.push_back(*offer);
-            }
+                return std::unexpected { offers.error() };
+            auto shells = listedItems<ShellCodec>(document);
+            if (!shells)
+                return std::unexpected { shells.error() };
+            state.dismissedOffers = *std::move(offers);
+            state.dismissedShellIntegrations = *std::move(shells);
             return state;
         }
         catch (YAML::Exception const&)
@@ -111,36 +163,47 @@ namespace
         }
     }
 
-    /// The tokens of @p offers that name no offer this release knows.
-    /// @param offers A `dismissed_new_defaults` node.
+    /// The tokens of @p list that name no item of @p Codec this release knows.
+    /// @param list The node under @p Codec's key.
     /// @return Its unknown scalar entries, in order.
-    [[nodiscard]] std::vector<std::string> unknownTokens(YAML::Node const& offers)
+    template <typename Codec>
+    [[nodiscard]] std::vector<std::string> unknownTokens(YAML::Node const& list)
     {
         auto tokens = std::vector<std::string> {};
-        if (offers.IsSequence())
-            for (auto const& entry: offers)
-                if (entry.IsScalar() && !configEnumFromToken<NewDefaultsOffer>(entry.as<std::string>()))
+        if (list.IsSequence())
+            for (auto const& entry: list)
+                if (entry.IsScalar() && !Codec::parse(entry.as<std::string>()))
                     tokens.push_back(entry.as<std::string>());
         return tokens;
+    }
+
+    /// Stores @p items under @p Codec's key of @p document, keeping the tokens already there that
+    /// this release does not know, after the known ones.
+    template <typename Codec>
+    void storeList(YAML::Node& document, std::vector<typename Codec::Item> const& items)
+    {
+        auto const key = std::string { Codec::Key };
+        auto list = YAML::Node { YAML::NodeType::Sequence };
+        for (auto const item: items)
+            list.push_back(Codec::spell(item));
+        for (auto const& token: unknownTokens<Codec>(document[key]))
+            list.push_back(token);
+        list.SetStyle(YAML::EmitterStyle::Flow);
+        document[key] = list;
     }
 
     /// The document that stores @p state over @p previous, the document the file held.
     ///
     /// What this release does not know survives the rewrite: every other key of @p previous, and the
-    /// tokens of its list that name no offer this release knows, after the known ones.
+    /// tokens of its lists that name nothing this release knows, after the known ones.
     /// @param state The state to spell.
     /// @param previous The file's current document, a map; an empty node when there is none.
-    /// @return `dismissed_new_defaults: [token, …]`, any other keys, and a trailing newline.
+    /// @return `dismissed_new_defaults: [token, …]`, `dismissed_shell_integration: [token, …]`, any other
+    ///         keys, and a trailing newline.
     [[nodiscard]] std::string emitGuiState(GuiState const& state, YAML::Node previous)
     {
-        auto const key = std::string { DismissedOffersKey };
-        auto offers = YAML::Node { YAML::NodeType::Sequence };
-        for (auto const offer: state.dismissedOffers)
-            offers.push_back(std::string { configEnumToken(offer) });
-        for (auto const& token: unknownTokens(previous[key]))
-            offers.push_back(token);
-        offers.SetStyle(YAML::EmitterStyle::Flow);
-        previous[key] = offers;
+        storeList<OfferCodec>(previous, state.dismissedOffers);
+        storeList<ShellCodec>(previous, state.dismissedShellIntegrations);
         if (state.settingsWindow)
             previous[std::string { SettingsWindowKey }] = settingsWindowNode(*state.settingsWindow);
         else
