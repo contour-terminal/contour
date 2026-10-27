@@ -455,6 +455,11 @@ void TerminalSessionManager::windowStateChanged(vtworkspace::WindowId window)
     notifyDisplaysExposureChanged(window);
 }
 
+void TerminalSessionManager::windowExposed(vtworkspace::WindowId window)
+{
+    notifyDisplaysExposureChanged(window);
+}
+
 void TerminalSessionManager::focusedSessionSeen()
 {
     if (_focusedSession != nullptr

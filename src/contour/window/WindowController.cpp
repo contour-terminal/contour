@@ -2116,6 +2116,9 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // measured from them is only answerable now -- long after titleBarVisibleChanged,
                 // which the other frame gates ride on, has been and gone.
                 emit nativeControlsInsetChanged();
+                // The state change of a restore comes before the platform exposes the surface, so the
+                // running times were decided while it was still hidden; decide them again now.
+                _manager.windowExposed(_windowId);
                 break;
 
             case QEvent::ApplicationPaletteChange:

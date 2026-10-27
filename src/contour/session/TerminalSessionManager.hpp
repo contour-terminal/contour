@@ -695,6 +695,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window whose state changed.
     void windowStateChanged(vtworkspace::WindowId window);
 
+    /// @p window's surface was exposed. A restore, an un-occlusion or a desktop switch is announced by the
+    /// platform BEFORE the surface is exposed, so windowStateChanged() still finds it hidden; this is the
+    /// re-decision of what the displays' frames are for, once it is not.
+    /// @param window The window whose surface was exposed.
+    void windowExposed(vtworkspace::WindowId window);
+
     /// Where @p session sits relative to what the user is looking at, for finish notifications.
     ///
     /// Gathers the four facts -- terminal focus, the hosting tab's selection, a zoomed sibling, the

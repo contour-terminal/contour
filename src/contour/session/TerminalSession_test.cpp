@@ -63,6 +63,7 @@
 #include <QtCore/QThread>
 #include <QtGui/QClipboard>
 #include <QtGui/QColor>
+#include <QtGui/QExposeEvent>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QHoverEvent>
 #include <QtGui/QMouseEvent>
@@ -8473,6 +8474,46 @@ TEST_CASE("TerminalSession: a minimised window's time is not redrawn when the fr
     QCoreApplication::processEvents();
     CHECK(terminal.hasVisibleRunningStatus());
     CHECK_FALSE(session->refreshesRunningStatus());
+}
+
+TEST_CASE("TerminalSession: a restored window's running time ticks again once it is exposed",
+          "[contour][session][gutter]")
+{
+    // The real order of a restore: the window-state change arrives while the surface is still not exposed,
+    // and the expose that follows is the only thing that says the frames are wanted again.
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedControllerWithOsWindow const window { testApp.manager() };
+    window.osWindow->create();
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    auto surface = contour::test::FakeDisplaySurface {};
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+    auto& terminal = session->terminal();
+
+    terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    REQUIRE(session->refreshesRunningStatus());
+
+    // Minimised: the state change finds the surface hidden and the tick stops.
+    surface.exposureValue = contour::session::DisplayExposure::Hidden;
+    testApp.manager().windowStateChanged(window.id);
+    REQUIRE_FALSE(session->refreshesRunningStatus());
+
+    // Restored: the state change still finds it hidden ...
+    testApp.manager().windowStateChanged(window.id);
+    CHECK_FALSE(session->refreshesRunningStatus());
+
+    // ... and the expose, arriving after, brings the tick back.
+    surface.exposureValue = contour::session::DisplayExposure::Exposed;
+    auto expose = QExposeEvent { QRegion { 0, 0, 640, 400 } };
+    QCoreApplication::sendEvent(window.osWindow.get(), &expose);
+    CHECK(session->refreshesRunningStatus());
+
+    session->detachDisplay(surface);
 }
 
 TEST_CASE("TerminalSession: a click beside the fold chip still opens it", "[contour][session][gutter]")
