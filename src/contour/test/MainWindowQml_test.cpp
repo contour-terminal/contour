@@ -3237,7 +3237,13 @@ TEST_CASE("icon-only tabs cannot hold the lock, so it falls to the next host: th
         auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
         showWindow(*root, 900);
         if (!tabDelegates(*root).back()->property("iconOnly").toBool())
-            continue; // a Flat strip has no icon-only form: its tabs hold the lock
+        {
+            // A strip with no icon-only form at this width: its tabs hold the lock, so neither the chip
+            // nor the pane has to.
+            CHECK(root->property("tabsOnScreen").toBool());
+            CHECK_FALSE(root->property("secureLockInPane").toBool());
+            continue;
+        }
 
         CHECK_FALSE(root->property("tabsOnScreen").toBool());
         // The Pill row's band is on screen and holds the lock as its chip; with no band, the pane does.
