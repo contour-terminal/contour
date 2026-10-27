@@ -543,6 +543,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// thread, the lock held or not: it only posts, at most one post in flight.
     void requestOverlayClearanceRefresh();
 
+    /// Bumps overlayClearanceRevision and emits overlayClearanceChanged: the frame timer's half of
+    /// requestOverlayClearanceRefresh(). GUI thread.
+    void publishOverlayClearance();
+
   public:
     QString getBellSource() const noexcept
     {
@@ -2213,6 +2217,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Collapses repeated clearance refresh requests to at most one post in flight.
     std::atomic_flag _overlayClearancePostPending = ATOMIC_FLAG_INIT;
+
+    /// Fires publishOverlayClearance() a frame after the first request, so a burst of output under a shown
+    /// pill costs one placement per frame. GUI thread.
+    QTimer _overlayClearanceTimer;
 
     /// What overlayClearanceRevision reports. GUI thread.
     int _overlayClearanceRevision = 0;

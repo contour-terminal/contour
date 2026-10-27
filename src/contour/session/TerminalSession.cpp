@@ -463,6 +463,9 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _scrollbarMarksTimer.setSingleShot(true);
     _scrollbarMarksTimer.setInterval(ScrollbarMarksFrameInterval);
     connect(&_scrollbarMarksTimer, &QTimer::timeout, this, &TerminalSession::refreshScrollbarMarks);
+    _overlayClearanceTimer.setSingleShot(true);
+    _overlayClearanceTimer.setInterval(ScrollbarMarksFrameInterval);
+    connect(&_overlayClearanceTimer, &QTimer::timeout, this, &TerminalSession::publishOverlayClearance);
 
     configureTerminal();
     connectFinishNoticeEvents();
@@ -555,6 +558,9 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
     // detaches the display and attaches it to another session, and switching back brought the tooltip back
     // at the cell it had been entered at, wherever the pointer then was.
     clearHovers();
+    // A size indicator still held on the display that goes would never settle: its next display's first
+    // resize must read as the page, not as this burst's zoom.
+    _sizeIndicatorBurst = SizeIndicatorBurst::Idle;
     _display = nullptr;
 }
 
@@ -3991,7 +3997,9 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // while another window had the focus arrives with the next move, not as a key).
     if (decidesPointerShapeForCell)
         updateHyperlinkHover(hover.link, pos);
-    else if (hover.chord == vtbackend::LinkRevealChange::Changed)
+    // Whatever the cell did: a move onto the next cell of the same link updates no target, but the chord it
+    // carries may still change whether the pill shows.
+    if (hover.chord == vtbackend::LinkRevealChange::Changed)
         refreshLinkTarget(_linkTarget.text);
 }
 
@@ -4262,11 +4270,14 @@ void TerminalSession::refreshLinkTarget(QString text)
         vtbackend::Modifiers bypass;
     };
     auto const state = _terminal.runUnderStateLock([&] {
+        // A plain click goes to the application only while it tracks the mouse, input is allowed and vi mode
+        // is Insert (Terminal::allowPassMouseEventToApp): only then does following a link need the bypass.
+        auto const applicationTakesClicks = _terminal.mouseProtocol().has_value() && _terminal.allowInput()
+                                            && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert;
         return LinkState { .pointer = _terminal.hoverPointer(),
                            .held = _terminal.followModifiers(),
-                           .bypass = _terminal.mouseProtocol().has_value()
-                                         ? _config.bypassMouseProtocolModifiers.value()
-                                         : vtbackend::Modifiers {} };
+                           .bypass = applicationTakesClicks ? _config.bypassMouseProtocolModifiers.value()
+                                                            : vtbackend::Modifiers {} };
     });
 
     // Re-read at every decision, so a configuration reload takes effect with the next one.
@@ -4298,12 +4309,20 @@ void TerminalSession::requestOverlayClearanceRefresh()
         return;
 
     // Posted to the session's own thread, where QML reads the clearance; postToObject drops it if the session
-    // dies first.
+    // dies first. The timer belongs to that thread, so it is started there, and a burst of output within a
+    // frame rides on the one already running: one placement per frame however fast output arrives.
     platform::postToObject(this, [this]() {
-        _overlayClearancePostPending.clear(std::memory_order_release);
-        ++_overlayClearanceRevision;
-        emit overlayClearanceChanged();
+        if (!_overlayClearanceTimer.isActive())
+            _overlayClearanceTimer.start();
     });
+}
+
+void TerminalSession::publishOverlayClearance()
+{
+    // Cleared first, so output arriving from here on asks for the next frame's.
+    _overlayClearancePostPending.clear(std::memory_order_release);
+    ++_overlayClearanceRevision;
+    emit overlayClearanceChanged();
 }
 
 QVariantMap TerminalSession::overlayClearance() const

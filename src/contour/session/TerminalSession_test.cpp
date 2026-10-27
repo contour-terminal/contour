@@ -12958,7 +12958,7 @@ TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again
     writePageLink(*session);
     auto changes = QSignalSpy(session.session.get(), &TerminalSession::overlayClearanceChanged);
 
-    SECTION("while it shows: posted from the parser thread, published once on the GUI thread")
+    SECTION("while it shows: posted from the parser thread, published once a frame on the GUI thread")
     {
         session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
         REQUIRE(session->linkTargetShown());
@@ -12969,17 +12969,81 @@ TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again
         } }.join();
         CHECK(changes.count() == 0);
 
-        QCoreApplication::processEvents();
+        // A frame later, once, for the whole burst.
+        REQUIRE(changes.wait(1000));
         CHECK(changes.count() == 1);
         CHECK(session->overlayClearanceRevision() == before + 1);
+        CHECK_FALSE(changes.wait(100));
+
+        // More output under the pill asks again.
+        std::thread { [&] { session->terminal().writeToScreen("\r\nyet more"); } }.join();
+        REQUIRE(changes.wait(1000));
+        CHECK(session->overlayClearanceRevision() == before + 2);
     }
 
     SECTION("while it does not: nothing is asked")
     {
         REQUIRE_FALSE(session->linkTargetShown());
         std::thread { [&] { session->terminal().writeToScreen("\r\nmore"); } }.join();
-        QCoreApplication::processEvents();
-        CHECK(changes.count() == 0);
+        CHECK_FALSE(changes.wait(100));
     }
 }
 // }}}
+
+TEST_CASE("TerminalSession: a move onto the next cell of a link with the follow modifier shows the pill",
+          "[contour][session][hyperlink]")
+{
+    // Ctrl went down while another window had the focus; the first move that carries it lands on the link's
+    // next cell, which changes no target.
+    TestApp testApp;
+    testApp.app().config().hyperlinkHoverTooltip = false;
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+    REQUIRE_FALSE(session->linkTargetShown());
+
+    auto const nextCell =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) };
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { vtbackend::Modifier::Control }, nextCell, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+}
+
+TEST_CASE("TerminalSession: the pill names the bypass chord only where a plain click goes to the application",
+          "[contour][session][hyperlink]")
+{
+    // In vi normal mode a click is the terminal's even while an application tracks the mouse: the hint is the
+    // plain gesture there.
+    using vtbackend::Modifier;
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    session->terminal().writeToScreen("\033[?1000h");
+    session->terminal().inputHandler().setMode(vtbackend::ViMode::Normal);
+
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { Modifier::Control }, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+    CHECK(session->linkTargetHint().toStdString()
+          == contour::command::linkOpenHint(vtbackend::Modifiers { Modifier::Control },
+                                            vtbackend::Modifiers {},
+                                            contour::command::platformShortcutStyle()));
+}
+
+TEST_CASE("TerminalSession: a size indicator held when the display goes is no burst on the next one",
+          "[contour][session][sizeindicator]")
+{
+    // A tab switch detaches the display within the hold: the pill's timer goes with it, so nothing settles
+    // the burst. The next display's first resize reads as the page, not as the zoom.
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    REQUIRE((*pane)(contour::actions::IncreaseFontSize {}));
+    REQUIRE(pane->sizeIndicatorText().endsWith(QStringLiteral(" pt")));
+
+    pane->detachDisplay(*pane.surface);
+    pane->attachDisplay(*pane.surface);
+    pane->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    CHECK(pane->sizeIndicatorText() == pageTextOf(*pane));
+}
