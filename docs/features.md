@@ -11,6 +11,7 @@
 :material-check-bold:{.check-mark}  High-DPI support. <br/>
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Hint mode](demo/hint-mode.md) for keyboard-driven selection of URLs, file paths, git hashes, and more <br/>
+:material-check-bold:{.check-mark}  [Drag and drop](demo/drag-and-drop.md): drop a tab on a pane edge to split it, or files to type their escaped paths <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
 :material-check-bold:{.check-mark}  [Command blocks](demo/command-blocks.md): an exit-status gutter, line numbers, per-line timestamps, folding, scrollbar marks and a sticky command header <br/>
 :material-check-bold:{.check-mark}  [Restored sessions](demo/command-blocks.md#restored-sessions): history comes back above a "Restored" divider, with one toast saying what was restored <br/>
