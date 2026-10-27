@@ -5,7 +5,9 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
+#include <contour/config/Config.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
@@ -107,6 +109,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
 
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
@@ -933,6 +936,242 @@ void WindowController::resetTabColor(int index)
     if (auto* tab = tabAtRow(index); tab != nullptr)
         _manager.model().resetTabColor(tab->id(), vtworkspace::TabColorSource::User);
 }
+
+// {{{ Keyboard focus in the chrome
+namespace
+{
+    /// A Qt key and the chrome key it is.
+    struct QtChromeKeyRow
+    {
+        Qt::Key qt;
+        window::ChromeKey key;
+    };
+
+    inline constexpr auto QtChromeKeyRows = std::array {
+        QtChromeKeyRow { .qt = Qt::Key_Left, .key = window::ChromeKey::Left },
+        QtChromeKeyRow { .qt = Qt::Key_Right, .key = window::ChromeKey::Right },
+        QtChromeKeyRow { .qt = Qt::Key_Home, .key = window::ChromeKey::Home },
+        QtChromeKeyRow { .qt = Qt::Key_End, .key = window::ChromeKey::End },
+        QtChromeKeyRow { .qt = Qt::Key_Return, .key = window::ChromeKey::Return },
+        QtChromeKeyRow { .qt = Qt::Key_Enter, .key = window::ChromeKey::Return },
+        QtChromeKeyRow { .qt = Qt::Key_Space, .key = window::ChromeKey::Space },
+        QtChromeKeyRow { .qt = Qt::Key_Backspace, .key = window::ChromeKey::Backspace },
+        QtChromeKeyRow { .qt = Qt::Key_Delete, .key = window::ChromeKey::Delete },
+        QtChromeKeyRow { .qt = Qt::Key_Escape, .key = window::ChromeKey::Escape },
+    };
+
+    [[nodiscard]] window::ChromeKey chromeKeyOf(int qtKey) noexcept
+    {
+        auto const row =
+            std::ranges::find(QtChromeKeyRows, qtKey, [](auto const& r) { return static_cast<int>(r.qt); });
+        return row != QtChromeKeyRows.end() ? row->key : window::ChromeKey::Other;
+    }
+
+    /// Qt's keypad flag marks where a key sits, not a chord; the chrome ignores it.
+    [[nodiscard]] window::ChromeKeyModifier chromeModifierOf(Qt::KeyboardModifiers modifiers) noexcept
+    {
+        modifiers &= ~Qt::KeypadModifier;
+        if (modifiers == Qt::NoModifier)
+            return window::ChromeKeyModifier::None;
+        if (modifiers == Qt::AltModifier)
+            return window::ChromeKeyModifier::Alt;
+        return window::ChromeKeyModifier::Other;
+    }
+
+    /// The number of function keys a focus chord can be bound to (F1..F12).
+    inline constexpr auto ChordFunctionKeyCount = 12;
+    static_assert(static_cast<int>(vtbackend::Key::F12) - static_cast<int>(vtbackend::Key::F1)
+                      == ChordFunctionKeyCount - 1,
+                  "the function keys must be contiguous for the Qt mapping below");
+
+    /// The terminal key for a function key of Qt's numbering, which the focus chords are bound to.
+    [[nodiscard]] std::optional<vtbackend::Key> functionKeyOf(int qtKey) noexcept
+    {
+        auto const offset = qtKey - static_cast<int>(Qt::Key_F1);
+        if (offset < 0 || offset >= ChordFunctionKeyCount)
+            return std::nullopt;
+        return static_cast<vtbackend::Key>(static_cast<int>(vtbackend::Key::F1) + offset);
+    }
+} // namespace
+
+void WindowController::enterChromeArea(window::ChromeArea area)
+{
+    if (area == window::ChromeArea::Terminal)
+    {
+        leaveChrome();
+        return;
+    }
+    _chromeArea = area;
+    _focusedTabIndex = area == window::ChromeArea::Tabs ? std::max(activeTabIndex(), 0) : -1;
+    _focusedToolbarIndex = area == window::ChromeArea::Toolbar ? 0 : -1;
+    emit chromeFocusChanged();
+}
+
+void WindowController::moveChromeFocus(window::ChromeFocusAction action)
+{
+    enterChromeArea(window::chromeFocusTarget(action, _chromeArea, _chromePresence));
+}
+
+void WindowController::leaveChrome()
+{
+    if (_chromeArea == window::ChromeArea::Terminal)
+        return;
+    _chromeArea = window::ChromeArea::Terminal;
+    _focusedTabIndex = -1;
+    _focusedToolbarIndex = -1;
+    emit chromeFocusChanged();
+    if (_activeDisplay != nullptr)
+        _activeDisplay->forceActiveFocus();
+}
+
+void WindowController::setChromePresence(bool tabsShown, int toolbarItems)
+{
+    _toolbarItemCount = std::max(toolbarItems, 0);
+    _chromePresence = window::ChromeAreaPresence {
+        .tabs = tabsShown ? window::AreaPresence::Present : window::AreaPresence::Absent,
+        .toolbar = _toolbarItemCount > 0 ? window::AreaPresence::Present : window::AreaPresence::Absent,
+    };
+    if (!window::isPresent(_chromeArea, _chromePresence))
+        leaveChrome();
+    else
+        clampChromeFocus();
+}
+
+void WindowController::clampChromeFocus()
+{
+    auto const tabs = _chromeArea == window::ChromeArea::Tabs;
+    auto const toolbar = _chromeArea == window::ChromeArea::Toolbar;
+    if (!tabs && !toolbar)
+        return;
+    auto const items = tabs ? count() : _toolbarItemCount;
+    if (items <= 0)
+    {
+        leaveChrome();
+        return;
+    }
+    auto& focused = tabs ? _focusedTabIndex : _focusedToolbarIndex;
+    auto const clamped = std::clamp(focused, 0, items - 1);
+    if (clamped == focused)
+        return;
+    focused = clamped;
+    emit chromeFocusChanged();
+}
+
+std::optional<window::ChromeFocusAction> WindowController::chromeFocusActionFor(
+    int qtKey, Qt::KeyboardModifiers modifiers) const
+{
+    auto const* session = activeSession();
+    auto const key = functionKeyOf(qtKey);
+    if (session == nullptr || !key)
+        return std::nullopt;
+
+    // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
+    auto const chord = input::makeModifiers(modifiers).chord;
+    auto const* bound = config::apply(session->config().inputMappings.value().keyMappings, *key, chord, 0);
+    if (bound == nullptr)
+        return std::nullopt;
+    for (auto const& action: *bound)
+    {
+        if (std::holds_alternative<actions::FocusNextArea>(action))
+            return window::ChromeFocusAction::Next;
+        if (std::holds_alternative<actions::FocusPreviousArea>(action))
+            return window::ChromeFocusAction::Previous;
+        if (std::holds_alternative<actions::FocusToolbar>(action))
+            return window::ChromeFocusAction::Toolbar;
+    }
+    return std::nullopt;
+}
+
+bool WindowController::chromeKey(int qtKey, int qtModifiers)
+{
+    auto const modifiers = Qt::KeyboardModifiers { qtModifiers };
+    if (auto const action = chromeFocusActionFor(qtKey, modifiers))
+    {
+        moveChromeFocus(*action);
+        return true;
+    }
+    if (_chromeArea == window::ChromeArea::Terminal)
+        return false;
+    return runChromeCommand(
+        window::chromeCommandFor(_chromeArea, chromeKeyOf(qtKey), chromeModifierOf(modifiers)));
+}
+
+bool WindowController::runChromeCommand(window::ChromeCommand command)
+{
+    using window::ChromeCommand;
+    auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
+    switch (command)
+    {
+        case ChromeCommand::None: return false;
+        case ChromeCommand::FocusPrevious:
+        case ChromeCommand::FocusNext:
+        case ChromeCommand::FocusFirst:
+        case ChromeCommand::FocusLast: {
+            auto& focused = inTabs ? _focusedTabIndex : _focusedToolbarIndex;
+            auto const moved =
+                window::focusedIndexAfter(command, focused, inTabs ? count() : _toolbarItemCount);
+            if (moved != focused)
+            {
+                focused = moved;
+                emit chromeFocusChanged();
+            }
+            return true;
+        }
+        case ChromeCommand::Activate:
+            if (!inTabs)
+                return false; // a toolbar item is pressed by the item itself
+            activateTab(_focusedTabIndex);
+            return true;
+        case ChromeCommand::Close: closeTabAskingIfBusy(_focusedTabIndex); return true;
+        case ChromeCommand::MoveLeft:
+        case ChromeCommand::MoveRight: {
+            auto const target = _focusedTabIndex + (command == ChromeCommand::MoveLeft ? -1 : 1);
+            if (target >= 0 && target < count())
+            {
+                moveTab(_focusedTabIndex, target);
+                _focusedTabIndex = target;
+                emit chromeFocusChanged();
+            }
+            return true;
+        }
+        case ChromeCommand::Leave: leaveChrome(); return true;
+    }
+    return false;
+}
+
+void WindowController::closeTabAskingIfBusy(int row)
+{
+    auto* tab = tabAtRow(row);
+    if (tab == nullptr)
+        return;
+
+    auto activities = std::vector<window::PaneActivity> {};
+    auto program = std::string {};
+    tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (!pane.isLeaf())
+            return;
+        auto const* session = _manager.sessionForId(pane.session());
+        auto const activity = session != nullptr ? session->paneActivity() : window::PaneActivity::Unknown;
+        activities.push_back(activity);
+        if (activity == window::PaneActivity::Running && program.empty())
+            program = session->foregroundProcessName();
+    });
+
+    if (window::closeConfirmationFor(activities) == window::CloseConfirmation::None)
+    {
+        closeTabAtIndex(row);
+        return;
+    }
+    auto* active = _manager.sessionForId(tab->activePane()->session());
+    emit closeTabConfirmationRequested(
+        row, resolvedTabLabel(tab, active, row), QString::fromStdString(program));
+}
+
+void WindowController::confirmCloseTab(int row)
+{
+    closeTabAtIndex(row);
+}
+// }}}
 
 void WindowController::closeTabAtIndex(int index)
 {

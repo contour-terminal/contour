@@ -245,6 +245,7 @@ set(_header_files
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
     window/ChromeFocus.hpp
+    window/ChromeKeys.hpp
     window/ProgramStatusBadge.hpp
     window/SecureInputPolicy.hpp
     window/SecureLockPlacement.hpp
@@ -837,6 +838,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/NativeWindowFrame_test.cpp
             window/WindowPositionStore_test.cpp
             window/AppMenuBar_test.cpp
+            window/ChromeFocusController_test.cpp
             window/ContextMenuModel_test.cpp
             window/MenuRouting_test.cpp
             window/SettingsWindowRules_test.cpp
@@ -1251,6 +1253,7 @@ if(CONTOUR_TESTING)
         platform/SecureInputGate_test.cpp
         platform/SessionVisibility_test.cpp
         window/ChromeFocus_test.cpp
+        window/ChromeKeys_test.cpp
         window/HeldModifierReveal_test.cpp
         window/FindBarPlacement_test.cpp
         window/LinkPillPlacement_test.cpp

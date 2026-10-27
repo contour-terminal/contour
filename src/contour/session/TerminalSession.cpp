@@ -1689,6 +1689,14 @@ std::string TerminalSession::foregroundProcessName() const
     return _terminal.device().foregroundProcessName().value_or(std::string {});
 }
 
+window::PaneActivity TerminalSession::paneActivity() const
+{
+    // Same rule as foregroundProcessName(): a remote-hosted pane's program is the host's to name.
+    if (_hosting == SessionHosting::Remote)
+        return window::PaneActivity::Unknown;
+    return window::paneActivityOf(_profile.shell.value().program, _terminal.device().foregroundProcessName());
+}
+
 void TerminalSession::updateColorPreference(vtbackend::ColorPreference preference)
 {
     if (preference == _currentColorPreference)
@@ -6431,17 +6439,20 @@ bool TerminalSession::operator()(actions::ZoomWindow)
 
 bool TerminalSession::operator()(actions::FocusNextArea)
 {
-    return false;
+    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Next);
+    return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousArea)
 {
-    return false;
+    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Previous);
+    return true;
 }
 
 bool TerminalSession::operator()(actions::FocusToolbar)
 {
-    return false;
+    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Toolbar);
+    return true;
 }
 
 bool TerminalSession::operator()(actions::MoveTabTo event)

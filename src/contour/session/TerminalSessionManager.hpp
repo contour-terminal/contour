@@ -12,6 +12,7 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/window/ChromeFocus.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WindowController.hpp>
@@ -400,6 +401,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Maximizes the window hosting @p acting, or restores it when it is maximized.
     /// @param acting The session that received the action; its hosting window is the target.
     void zoomWindow(TerminalSession* acting);
+    /// Moves keyboard focus through the chrome of the window hosting @p session (the focus actions).
+    /// @param session The session that received the action; its hosting window is the target.
+    /// @param action Where focus goes.
+    void moveChromeFocus(TerminalSession const& session, window::ChromeFocusAction action);
     /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
     /// keybinding that names no color), routed exactly like beginTabTitleEdit().
     /// @param acting The session that received the keybinding; its hosting window is the target.

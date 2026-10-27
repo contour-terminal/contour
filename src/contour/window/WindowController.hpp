@@ -12,6 +12,8 @@
 #include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/window/ChromeFocus.hpp>
+#include <contour/window/ChromeKeys.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
@@ -131,6 +133,13 @@ class WindowController:
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
     Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
+    // Keyboard focus in the chrome: a window::ChromeArea as its underlying value (Terminal means the chrome
+    // has no focus, so the focus ring is hidden), and the focused item of the tab well and of the toolbar
+    // (-1 outside its area). Set only by the focus actions and by keys inside the chrome, never by a pointer
+    // press, so a ring that shows is a ring for keyboard focus.
+    Q_PROPERTY(int chromeFocusArea READ chromeFocusArea NOTIFY chromeFocusChanged)
+    Q_PROPERTY(int focusedTabIndex READ focusedTabIndex NOTIFY chromeFocusChanged)
+    Q_PROPERTY(int focusedToolbarIndex READ focusedToolbarIndex NOTIFY chromeFocusChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(
         contour::session::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
@@ -301,6 +310,40 @@ class WindowController:
     /// SetTabColor action when it names no color). No-op when this window has no active tab. Emits
     /// tabColorPickRequested() with the active tab's row so exactly that TabItem opens its flyout.
     Q_INVOKABLE void beginActiveTabColorPick();
+
+    // {{{ Keyboard focus in the chrome
+    /// @return The focused window::ChromeArea as its underlying value.
+    [[nodiscard]] int chromeFocusArea() const noexcept { return static_cast<int>(_chromeArea); }
+    /// @return The row of the focused tab while the tab well has focus, else -1.
+    [[nodiscard]] int focusedTabIndex() const noexcept { return _focusedTabIndex; }
+    /// @return The index of the focused toolbar item while the toolbar has focus, else -1.
+    [[nodiscard]] int focusedToolbarIndex() const noexcept { return _focusedToolbarIndex; }
+    /// Moves focus between the terminal, the tab well and the toolbar (the three focus actions), skipping
+    /// an area that is not shown. Entering the tab well focuses the active tab; entering the toolbar, its
+    /// first item; reaching the terminal is leaveChrome().
+    /// @param action Where focus goes.
+    void moveChromeFocus(window::ChromeFocusAction action);
+    /// Reports what the chrome shows, as QML knows it. If the focused area is no longer shown, focus
+    /// returns to the terminal.
+    /// Booleans are the carve-out for a QML-facing Q_INVOKABLE (AGENT.md, enum class over bool).
+    /// @param tabsShown Whether the tab well is shown.
+    /// @param toolbarItems How many items the toolbar holds; 0 when it is absent.
+    Q_INVOKABLE void setChromePresence(bool tabsShown, int toolbarItems);
+    /// Offers a key press in the chrome. The key is first matched against the active session's key
+    /// bindings for the three focus actions (so Ctrl+F6 cycles from inside the chrome too, and a rebound
+    /// chord follows); otherwise it is looked up in ChromeKeyRows for the focused area. A toolbar item is
+    /// pressed by QML itself, so Return and Space there are left unhandled.
+    /// @param qtKey The Qt::Key of the event.
+    /// @param qtModifiers The event's Qt::KeyboardModifiers.
+    /// @return Whether the key was handled, so QML should accept the event (a QML-facing carve-out).
+    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers);
+    /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
+    /// focus). No-op when the chrome has no focus.
+    Q_INVOKABLE void leaveChrome();
+    /// Closes the tab at @p row after the user confirmed the question closeTabConfirmationRequested() asked.
+    /// @param row The tab's row.
+    Q_INVOKABLE void confirmCloseTab(int row);
+    // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
     /// back with the name the user types.
@@ -942,6 +985,14 @@ class WindowController:
     void tabBarPositionChanged();
     void tabBarVisibilityChanged();
     void tabBarShouldShowChanged();
+    /// The chrome focus moved: the area, the focused tab or the focused toolbar item changed.
+    void chromeFocusChanged();
+    /// Closing the tab at @p row would end a running program, so the window asks first; QML shows the
+    /// dialog and calls confirmCloseTab() on "Close".
+    /// @param row The tab's row.
+    /// @param tabLabel The tab's resolved label.
+    /// @param program The running program's name.
+    void closeTabConfirmationRequested(int row, QString const& tabLabel, QString const& program);
     void activeSessionChanged();
     void chromeHeightChanged();
     /// @see hostingNotice
@@ -1141,6 +1192,26 @@ class WindowController:
     // pointer crosses between strip and grid mid-scroll.
     input::HorizontalWheelGesture _tabStripWheelGesture;
     int _tabStripWheelAccumulator = 0;
+
+    // {{{ Keyboard focus in the chrome (GUI thread only)
+    /// Moves focus into @p area, seeding the focused item of the area it enters.
+    void enterChromeArea(window::ChromeArea area);
+    /// Keeps the focused item inside the area after the tab count or the toolbar changed.
+    void clampChromeFocus();
+    /// Runs @p command on the focused area. @return Whether it was handled.
+    [[nodiscard]] bool runChromeCommand(window::ChromeCommand command);
+    /// The focus action the active session's key bindings give a key press, if any.
+    [[nodiscard]] std::optional<window::ChromeFocusAction> chromeFocusActionFor(
+        int qtKey, Qt::KeyboardModifiers modifiers) const;
+    /// Closes the tab at @p row, asking first when a program runs in one of its panes.
+    void closeTabAskingIfBusy(int row);
+
+    window::ChromeArea _chromeArea = window::ChromeArea::Terminal;
+    window::ChromeAreaPresence _chromePresence {};
+    int _focusedTabIndex = -1;
+    int _focusedToolbarIndex = -1;
+    int _toolbarItemCount = 0;
+    // }}}
 
     // {{{ Command palette
     // The sources this window's palette draws from, held by value and in PRECEDENCE order (see

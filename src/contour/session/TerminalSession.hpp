@@ -25,6 +25,7 @@
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SizeIndicator.hpp>
+#include <contour/window/ChromeKeys.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
@@ -995,6 +996,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// call, so a caller asking often caches it, or reads the polled getForegroundProcessName().
     /// @return The name; empty for a remote-hosted pane, a device with no process group, or when unknown.
     [[nodiscard]] std::string foregroundProcessName() const;
+
+    /// Whether a program other than the shell is in front of this session's shell, which decides if closing
+    /// its tab asks first. GUI thread; one query of the process table.
+    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process.
+    [[nodiscard]] window::PaneActivity paneActivity() const;
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
