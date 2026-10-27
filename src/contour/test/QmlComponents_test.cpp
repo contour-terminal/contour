@@ -387,10 +387,13 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/MenuSwatchRow.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsNavItem.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsListItem.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsSidebar.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsGroup.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsRow.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsGroupsPage.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsSectionPage.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ProfilePage.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ConfirmDialog.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemeEditor.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPatternList.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml"),
@@ -12678,7 +12681,7 @@ TEST_CASE("KitSwitch: the knob does not animate under Reduce Motion (offscreen)"
     auto* knob = kit.part("switchKnob");
     auto const off = knob->x();
     kit.item()->setProperty("checked", true);
-    auto const target = kit.item()->width() - knob->width() - (off);
+    auto const target = kit.item()->width() - knob->width() - off;
     if (motion == MotionPreference::Reduced)
     {
         // The knob is where it ends at once.
@@ -13067,9 +13070,9 @@ namespace
 [[nodiscard]] QColor kitOver(QColor top, QColor bottom)
 {
     auto const alpha = top.alphaF();
-    return QColor::fromRgbF(top.redF() * alpha + bottom.redF() * (1 - alpha),
-                            top.greenF() * alpha + bottom.greenF() * (1 - alpha),
-                            top.blueF() * alpha + bottom.blueF() * (1 - alpha));
+    return QColor::fromRgbF((top.redF() * alpha) + (bottom.redF() * (1 - alpha)),
+                            (top.greenF() * alpha) + (bottom.greenF() * (1 - alpha)),
+                            (top.blueF() * alpha) + (bottom.blueF() * (1 - alpha)));
 }
 
 /// The contrast ratio of @p ink over @p ground.

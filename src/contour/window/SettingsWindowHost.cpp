@@ -52,15 +52,23 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
                                        SettingsWindowConventions conventions,
                                        SettingsWindowFactory factory,
                                        config::GuiStateStore& state,
+                                       std::function<void()> editConfiguration,
                                        QObject* parent):
     QObject(parent),
     _controller { controller },
     _conventions { conventions },
     _factory { std::move(factory) },
     _state { state },
+    _editConfiguration { std::move(editConfiguration) },
     _remembered { rememberedIn(state) },
     _lastPage { _remembered ? QString::fromStdString(_remembered->page) : QString {} }
 {
+}
+
+void SettingsWindowHost::editConfigurationFile()
+{
+    if (_editConfiguration)
+        _editConfiguration();
 }
 
 void SettingsWindowHost::setLastPage(QString const& page)
@@ -73,8 +81,8 @@ void SettingsWindowHost::setLastPage(QString const& page)
 
 SettingsWindowHost::~SettingsWindowHost()
 {
-    // A window destroyed with its host is no close: it neither writes nor remembers, and its last signals must
-    // not reach a host half torn down.
+    // A window destroyed with its host is no close: it neither writes nor remembers, and its last signals
+    // must not reach a host half torn down.
     if (_window)
         _window->disconnect(this);
 }

@@ -78,6 +78,20 @@ enum class SettingsControl : uint8_t
 /// How many controls there are.
 inline constexpr std::size_t SettingsControlCount = static_cast<std::size_t>(SettingsControl::ColorWell) + 1;
 
+/// The token a row's `controlName` carries for each control, in enumerator order: the names the page
+/// chooses a kit control by.
+inline constexpr auto SettingsControlTokens = std::array<std::string_view, SettingsControlCount> {
+    "switch", "segmented", "popUp", "stepper", "slider", "textField", "fontPicker", "colorWell",
+};
+
+/// The token a row's `controlName` carries for @p control.
+/// @param control The control.
+/// @return Its token.
+[[nodiscard]] constexpr std::string_view settingsControlToken(SettingsControl control) noexcept
+{
+    return SettingsControlTokens[static_cast<std::size_t>(control)];
+}
+
 /// The unit a number is shown in.
 enum class NumberUnit : uint8_t
 {
@@ -87,6 +101,37 @@ enum class NumberUnit : uint8_t
     Milliseconds, ///< " ms".
     Lines,        ///< A count of lines, its thousands grouped with a thin space: "10 000".
 };
+
+/// How a unit reads beside a number, as the stepper and the slider show it.
+struct NumberUnitRow
+{
+    NumberUnit unit = NumberUnit::None; ///< The unit.
+    std::string_view suffix {};         ///< What follows the number; empty for none.
+    double displayFactor = 1.0;         ///< What the shown number is the value times.
+};
+
+/// How each unit reads, one row per unit in enumerator order. A Lines count shows no suffix here: its
+/// thousands grouping is formatNumber()'s, for text that is not typed into.
+inline constexpr auto NumberUnitRows = std::array {
+    NumberUnitRow { .unit = NumberUnit::None, .suffix = "", .displayFactor = 1.0 },
+    NumberUnitRow { .unit = NumberUnit::Percent, .suffix = "%", .displayFactor = 100.0 },
+    NumberUnitRow { .unit = NumberUnit::Points, .suffix = "pt", .displayFactor = 1.0 },
+    NumberUnitRow { .unit = NumberUnit::Milliseconds, .suffix = "ms", .displayFactor = 1.0 },
+    NumberUnitRow { .unit = NumberUnit::Lines, .suffix = "", .displayFactor = 1.0 },
+};
+
+static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, NumberUnitRows.size()),
+                                  [](std::size_t i) {
+                                      return static_cast<std::size_t>(NumberUnitRows[i].unit) == i;
+                                  }),
+              "NumberUnitRows lists the units in enumerator order");
+
+/// @param unit A unit.
+/// @return Its row.
+[[nodiscard]] constexpr NumberUnitRow const& numberUnitRow(NumberUnit unit) noexcept
+{
+    return NumberUnitRows[static_cast<std::size_t>(unit)];
+}
 
 /// The values a number may take, and how it is shown.
 struct NumberRange

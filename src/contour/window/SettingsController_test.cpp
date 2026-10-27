@@ -3170,6 +3170,7 @@ TEST_CASE("SettingsController: every row names a control its type accepts", "[se
         REQUIRE(row.contains("control"));
         auto const control = static_cast<SettingsControl>(row.value("control").toInt());
         CHECK(controlAccepts(control, *type));
+        CHECK(row.value("controlName").toString().toStdString() == settingsControlToken(control));
         if (*type == SettingsValueType::Enum)
             CHECK(row.value("optionLabels").toStringList().size()
                   == row.value("options").toStringList().size());
@@ -3179,6 +3180,9 @@ TEST_CASE("SettingsController: every row names a control its type accepts", "[se
             CHECK(row.contains("max"));
             CHECK(row.value("min").toDouble() <= row.value("max").toDouble());
             CHECK(row.value("step").toDouble() > 0.0);
+            auto const unit = static_cast<NumberUnit>(row.value("unit").toInt());
+            CHECK(row.value("unitText").toString().toStdString() == numberUnitRow(unit).suffix);
+            CHECK(row.value("displayFactor").toDouble() == numberUnitRow(unit).displayFactor);
         }
     }
 }
@@ -3207,6 +3211,8 @@ TEST_CASE("SettingsController: the rows the canvas shows take its controls", "[s
         CHECK(dim.value("help").toString() == "How far a pane without focus steps back.");
         CHECK(dim.value("control").toInt() == static_cast<int>(SettingsControl::Slider));
         CHECK(dim.value("unit").toInt() == static_cast<int>(NumberUnit::Percent));
+        CHECK(dim.value("unitText").toString() == "%");
+        CHECK(dim.value("displayFactor").toDouble() == 100.0);
         CHECK(dim.value("min").toDouble() == 0.0);
         CHECK(dim.value("max").toDouble() == 1.0);
     }

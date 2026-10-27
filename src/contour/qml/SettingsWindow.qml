@@ -36,8 +36,7 @@ ThemedWindow
         objectName: "settingsPage"
         anchors.fill: parent
         focus: true
-        controller: settingsWindow.host ? settingsWindow.host.controller : null
-        windowController: settingsWindow.host
+        host: settingsWindow.host
 
         // The page the host remembers across restarts: opened on it, and told of every change. A page the
         // page does not know -- one an older or newer release named, or a profile or scheme that is gone --
@@ -50,7 +49,7 @@ ThemedWindow
                 settingsPage.openPage(settingsWindow.host.lastPage)
             pageRestored = true
         }
-        onPageIdChanged: if (pageRestored && settingsWindow.host) settingsWindow.host.lastPage = settingsPage.pageId
+        onCurrentPageChanged: if (pageRestored && settingsWindow.host) settingsWindow.host.lastPage = settingsPage.currentPage
     }
 
     Shortcut

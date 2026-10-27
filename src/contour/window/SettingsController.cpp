@@ -465,7 +465,9 @@ namespace
                          std::optional<SettingsControl> control)
     {
         row[QStringLiteral("type")] = toQString(settingsValueTypeToken(type));
-        row[QStringLiteral("control")] = static_cast<int>(controlOf(type, optionLabels, range, control));
+        auto const chosen = controlOf(type, optionLabels, range, control);
+        row[QStringLiteral("control")] = static_cast<int>(chosen);
+        row[QStringLiteral("controlName")] = toQString(settingsControlToken(chosen));
         if (type == SettingsValueType::Enum)
             row[QStringLiteral("optionLabels")] = optionLabels;
         if (type == SettingsValueType::Int || type == SettingsValueType::Double)
@@ -476,6 +478,8 @@ namespace
             row[QStringLiteral("step")] = shown.step;
             row[QStringLiteral("decimals")] = shown.decimals;
             row[QStringLiteral("unit")] = static_cast<int>(shown.unit);
+            row[QStringLiteral("unitText")] = toQString(numberUnitRow(shown.unit).suffix);
+            row[QStringLiteral("displayFactor")] = numberUnitRow(shown.unit).displayFactor;
         }
     }
 

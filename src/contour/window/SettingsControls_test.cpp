@@ -3,8 +3,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string_view>
@@ -14,9 +16,13 @@ using contour::window::defaultControlFor;
 using contour::window::formatNumber;
 using contour::window::NumberRange;
 using contour::window::NumberUnit;
+using contour::window::numberUnitRow;
+using contour::window::NumberUnitRows;
 using contour::window::SettingsControl;
 using contour::window::SettingsControlCount;
 using contour::window::SettingsControlRules;
+using contour::window::settingsControlToken;
+using contour::window::SettingsControlTokens;
 using contour::window::SettingsValueType;
 using contour::window::SettingsValueTypeCount;
 using namespace std::string_view_literals;
@@ -99,4 +105,36 @@ TEST_CASE("SettingsControls: a number reads in its unit", "[settingscontrols]")
           == "12.5 pt");
     CHECK(formatNumber(250, NumberRange { .unit = NumberUnit::Milliseconds }) == "250 ms");
     CHECK(formatNumber(3.14159, NumberRange { .decimals = 2 }) == "3.14");
+}
+
+TEST_CASE("SettingsControls: every control has a distinct name the page chooses it by", "[settingscontrols]")
+{
+    for (auto const index: std::views::iota(std::size_t { 0 }, SettingsControlCount))
+    {
+        auto const control = static_cast<SettingsControl>(index);
+        CHECK_FALSE(settingsControlToken(control).empty());
+        CHECK(std::ranges::count(SettingsControlTokens, settingsControlToken(control)) == 1);
+    }
+    CHECK(settingsControlToken(SettingsControl::Switch) == "switch"sv);
+    CHECK(settingsControlToken(SettingsControl::FontPicker) == "fontPicker"sv);
+}
+
+TEST_CASE("SettingsControls: a unit's suffix and factor read as formatNumber reads it", "[settingscontrols]")
+{
+    // The shown number (value times the factor), then the suffix, is what formatNumber writes for every unit
+    // that has one; a Lines count shows no suffix, and keeps formatNumber's grouping to itself.
+    for (auto const& row: NumberUnitRows)
+    {
+        if (row.unit == NumberUnit::Lines)
+        {
+            CHECK(row.suffix.empty());
+            continue;
+        }
+        auto const range =
+            NumberRange { .min = 0.0, .max = 1000.0, .step = 1.0, .decimals = 0, .unit = row.unit };
+        auto const shown = std::format("{:.0f}", 15.0 * row.displayFactor);
+        auto const expected = row.suffix.empty() ? shown : std::format("{} {}", shown, row.suffix);
+        CHECK(formatNumber(15.0, range) == expected);
+    }
+    CHECK(numberUnitRow(NumberUnit::Percent).displayFactor == 100.0);
 }

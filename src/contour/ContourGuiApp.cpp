@@ -2988,11 +2988,18 @@ std::shared_ptr<config::GuiStateStore> const& ContourGuiApp::guiState()
 window::SettingsWindowHost& ContourGuiApp::settingsWindow()
 {
     if (!_settingsWindow)
-        _settingsWindow =
-            std::make_unique<window::SettingsWindowHost>(settingsController(),
-                                                         window::settingsWindowConventionsFor(_hostPlatform),
-                                                         _settingsWindowFactory,
-                                                         *guiState());
+        _settingsWindow = std::make_unique<window::SettingsWindowHost>(
+            settingsController(),
+            window::settingsWindowConventionsFor(_hostPlatform),
+            _settingsWindowFactory,
+            *guiState(),
+            [this] {
+                auto const url = QUrl::fromLocalFile(platform::toQString(_config.configFile));
+                if (auto const opened = externalLauncher().openUrl(url); !opened)
+                    errorLog()("Could not open the configuration file \"{}\": {}.",
+                               _config.configFile.string(),
+                               platform::describe(opened.error()));
+            });
     return *_settingsWindow;
 }
 

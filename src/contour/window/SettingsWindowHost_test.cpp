@@ -57,6 +57,7 @@ struct HostFixture: ControllerFixture
     QQmlEngine engine;
     test::IncubationDriver incubation;
     int factoryCalls = 0;                 ///< How often the host asked for its window to be built.
+    int configurationEdits = 0;           ///< How often the host was asked to open contour.yml in an editor.
     test::InMemoryGuiStateStore ownState; ///< What the host remembers, unless the case shares another's.
     config::GuiStateStore& state;         ///< What the host remembers across closes and restarts.
     SettingsWindowHost host;
@@ -76,7 +77,8 @@ struct HostFixture: ControllerFixture
                    ++factoryCalls;
                    return window::loadSettingsWindow(engine, self);
                },
-               state }
+               state,
+               [this] { ++configurationEdits; } }
     {
         test::installChromeStyle(engine, style);
         engine.setIncubationController(&incubation);
@@ -105,7 +107,7 @@ struct HostFixture: ControllerFixture
     /// @return The key of the edited field.
     [[nodiscard]] QString draftAProfileField()
     {
-        auto* newProfile = page().findChild<QObject*>("newProfileButton");
+        auto* newProfile = page().findChild<QObject*>("addProfileButton");
         REQUIRE(newProfile != nullptr);
         QMetaObject::invokeMethod(newProfile, "clicked");
         incubation.settle();
@@ -172,6 +174,17 @@ TEST_CASE("the Settings window opens once, however often it is asked for",
     CHECK(second.color() == QGuiApplication::palette().color(QPalette::Active, QPalette::Window));
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window opens contour.yml in the editor it was given",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    auto fx = HostFixture {};
+    REQUIRE(fx.configurationEdits == 0);
+    fx.host.editConfigurationFile();
+    CHECK(fx.configurationEdits == 1);
+    fx.host.editConfigurationFile();
+    CHECK(fx.configurationEdits == 2);
 }
 
 TEST_CASE("the Settings window comes back in front", "[contour][gui][qml][settingswindow][host]")
@@ -311,7 +324,7 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     auto const key = fx.draftAProfileField();
     auto const editing = fx.controller->editingProfile();
     auto const drafted = fx.profileFieldValue(key);
-    REQUIRE(fx.page().property("editorMode").toString() == "profile");
+    REQUIRE(fx.page().property("currentPage").toString().startsWith("profile:"));
 
     // The state the window reopens in: the one it closed in.
     auto states = Qt::WindowStates { Qt::WindowNoState };
@@ -334,7 +347,7 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     CHECK(&fx.show() == &settings);
     CHECK(settings.windowStates() == states);
 
-    CHECK(fx.page().property("editorMode").toString() == "profile");
+    CHECK(fx.page().property("currentPage").toString().startsWith("profile:"));
     CHECK(fx.controller->editingProfile() == editing);
     CHECK(fx.profileFieldValue(key) == drafted);
 
@@ -457,10 +470,10 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Settings reopens on the profile or scheme it showed, or on its first page",
+TEST_CASE("Settings reopens on the page it showed, or on its first page",
           "[contour][gui][qml][settingswindow][host]")
 {
-    // I4: a profile or scheme page is remembered with its entity's name, and opens only with it.
+    // I4: a profile page is remembered with its profile's name, and opens only with it.
     contour::test::QmlMessageCapture const warnings;
     auto remembered = test::InMemoryGuiStateStore {};
     auto const rememberPage = [&remembered](std::string page) {
@@ -475,18 +488,20 @@ TEST_CASE("Settings reopens on the profile or scheme it showed, or on its first 
             &remembered);
     };
 
-    SECTION("a profile page is written back with its name")
+    SECTION("a page is written back with its name")
     {
         auto fx = open();
         fx->show();
-        fx->controller->editProfile("main");
-        fx->page().setProperty("editorMode", QStringLiteral("profile"));
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("profile:main"))));
         CHECK(fx->host.lastPage() == QStringLiteral("profile:main"));
-        fx->controller->editColorScheme("default");
-        fx->page().setProperty("editorMode", QStringLiteral("scheme"));
-        CHECK(fx->host.lastPage() == QStringLiteral("scheme:default"));
-        fx->page().setProperty("editorMode", QStringLiteral("keybindings"));
-        CHECK(fx->host.lastPage() == QStringLiteral("keybindings"));
+        CHECK(fx->controller->editingProfile() == QStringLiteral("main"));
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("profile:main:links"))));
+        CHECK(fx->host.lastPage() == QStringLiteral("profile:main:links"));
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("section:keyboard"))));
+        CHECK(fx->host.lastPage() == QStringLiteral("section:keyboard"));
     }
 
     SECTION("a remembered profile opens with its draft")
@@ -494,29 +509,33 @@ TEST_CASE("Settings reopens on the profile or scheme it showed, or on its first 
         rememberPage("profile:main");
         auto fx = open();
         fx->show();
-        CHECK(fx->page().property("editorMode").toString() == QStringLiteral("profile"));
+        CHECK(fx->page().property("currentPage").toString() == QStringLiteral("profile:main"));
         CHECK(fx->controller->editingProfile() == QStringLiteral("main"));
         CHECK_FALSE(fx->controller->profileFields().isEmpty());
     }
 
-    SECTION("a remembered scheme opens with its draft")
+    SECTION("a remembered section opens, and so does the id an older release wrote")
     {
-        rememberPage("scheme:default");
+        rememberPage("section:appearance");
         auto fx = open();
         fx->show();
-        CHECK(fx->page().property("editorMode").toString() == QStringLiteral("scheme"));
-        CHECK(fx->controller->editingScheme() == QStringLiteral("default"));
+        CHECK(fx->page().property("currentPage").toString() == QStringLiteral("section:appearance"));
+
+        remembered.state.settingsWindow->page = "keybindings";
+        auto older = open();
+        older->show();
+        CHECK(older->page().property("currentPage").toString() == QStringLiteral("section:keyboard"));
     }
 
-    SECTION("a profile that is gone, or a page without its entity, opens the first page")
+    SECTION("a profile that is gone, or a page this release does not know, opens the first page")
     {
-        for (auto const* page: { "profile:gone", "profile", "scheme:gone", "scheme" })
+        for (auto const* page: { "profile:gone", "profile", "scheme:default", "section:gone", "section", "" })
         {
             INFO(page);
             rememberPage(page);
             auto fx = open();
             fx->show();
-            CHECK(fx->page().property("editorMode").toString() == QStringLiteral("globals"));
+            CHECK(fx->page().property("currentPage").toString() == QStringLiteral("section:general"));
             CHECK(fx->controller->editingProfile().isEmpty());
         }
     }
@@ -654,6 +673,7 @@ TEST_CASE("a Settings window factory that fails leaves no window",
             return std::unexpected { SettingsWindowError::LoadFailed };
         },
         remembered,
+        [] {},
     };
 
     auto const shown = host.show(nullptr);

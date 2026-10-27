@@ -444,15 +444,17 @@ if(CONTOUR_FRONTEND_GUI)
         qml/CommandPalette.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
+        qml/SettingsSidebar.qml
+        qml/SettingsGroup.qml
+        qml/SettingsRow.qml
+        qml/SettingsGroupsPage.qml
+        qml/SettingsSectionPage.qml
+        qml/ProfilePage.qml
         qml/SettingsWindow.qml
-        qml/SettingsNavItem.qml
-        qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
         qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
         qml/PopupSurface.qml
-        qml/SettingRow.qml
-        qml/SettingsSection.qml
         qml/ColorSchemeEditor.qml
         qml/StatusLineIndicatorEditor.qml
         qml/LinkPatternList.qml

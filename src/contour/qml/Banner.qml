@@ -24,6 +24,10 @@ Control {
     property string actionText
     /// The dismiss button's label.
     property string dismissText: qsTr("Dismiss")
+    /// Whether the banner offers a dismiss button; a state of the page rather than an event has none.
+    property bool dismissible: true
+    /// The action button's objectName, for a host whose action has a name of its own.
+    property string actionName: "bannerAction"
 
     signal actionTriggered()
     signal dismissed()
@@ -78,7 +82,7 @@ Control {
         }
 
         Button {
-            objectName: "bannerAction"
+            objectName: root.actionName
             // The label sits on the banner's fill, not on the window, so it takes the banner's text colour.
             palette.buttonText: chromeStyle.colors.bannerText
             visible: root.actionText.length > 0
@@ -90,6 +94,7 @@ Control {
 
         Button {
             objectName: "bannerDismiss"
+            visible: root.dismissible
             // The label sits on the banner's fill, not on the window, so it takes the banner's text colour.
             palette.buttonText: chromeStyle.colors.bannerText
             text: root.dismissText

@@ -120,9 +120,11 @@ FocusScope {
                     // Return, or leaving the field.
                     onEditingFinished: {
                         const entered = root.normalized(field.text);
+                        // Shown again before it is asked for another: the caller may rebuild this control in
+                        // answer, and a handler must not touch what its own signal destroyed.
+                        root.showHex();
                         if (entered.length > 0 && entered !== root.hex.toLowerCase())
                             root.committed(entered);
-                        root.showHex();
                     }
                 }
             }

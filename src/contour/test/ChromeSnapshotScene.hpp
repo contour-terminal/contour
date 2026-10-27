@@ -1017,7 +1017,8 @@ class ChromeSnapshotScene
             *_settings,
             window::settingsWindowConventionsFor(variantHost(_variant)),
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); },
-            _settingsState);
+            _settingsState,
+            [] {});
     }
 
     /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it. Waits

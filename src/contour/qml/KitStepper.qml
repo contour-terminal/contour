@@ -108,6 +108,12 @@ FocusScope {
                 color: chromeStyle.colors.controlText
                 selectByMouse: true
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
+                // Digits, and a sign; a decimal point (or a comma, for a user whose locale writes one) only
+                // where the value has decimals. The field is read back with Number(), which knows no group
+                // separator, so none is taken: 1.000 in a whole number is typed as 1000, not read as 1.
+                validator: RegularExpressionValidator {
+                    regularExpression: root.decimals > 0 ? /-?[0-9]*[.,]?[0-9]*/ : /-?[0-9]*/
+                }
                 text: root.value.toFixed(root.decimals)
                 Accessible.ignored: true
 
@@ -117,13 +123,24 @@ FocusScope {
                     root.showValue();
                     field.focus = false;
                 }
-                // Return, or leaving the field.
-                onEditingFinished: {
+                // Return, or leaving the field. A validator holds editingFinished back for text it does not
+                // accept (a lone sign, nothing at all), so Return asks as well, and a field left with such
+                // text shows the value again.
+                function commitEntry() {
                     const typed = Number(field.text.replace(",", "."));
-                    if (field.text.trim().length > 0 && Number.isFinite(typed))
-                        root.commit(typed);
+                    const entered = field.text.trim().length > 0 && Number.isFinite(typed);
+                    // The value is shown again before it is asked for another: the caller may rebuild this
+                    // control in answer, and a handler must not touch what its own signal destroyed.
                     root.showValue();
+                    if (entered)
+                        root.commit(typed);
                 }
+                Keys.onReturnPressed: field.commitEntry()
+                Keys.onEnterPressed: field.commitEntry()
+                onEditingFinished: field.commitEntry()
+                // Left later, and only if the focus has not come back: leaving the field commits through
+                // editingFinished first.
+                onActiveFocusChanged: if (!activeFocus) Qt.callLater(() => { if (!field.activeFocus) root.showValue() })
             }
 
             // The arrows at the field's trailing edge.

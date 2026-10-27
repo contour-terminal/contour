@@ -74,11 +74,14 @@ class SettingsWindowHost final: public QObject
     /// @param factory     Builds the window on the first show.
     /// @param state       What the window remembers across restarts: its frame, screen and page. Borrowed:
     ///                    it outlives this host.
+    /// @param editConfiguration Opens contour.yml in the OS's editor: what the sidebar's "Edit contour.yml…"
+    ///                    row runs. Called on the GUI thread.
     /// @param parent      Qt ownership.
     SettingsWindowHost(SettingsController& controller,
                        SettingsWindowConventions conventions,
                        SettingsWindowFactory factory,
                        config::GuiStateStore& state,
+                       std::function<void()> editConfiguration,
                        QObject* parent = nullptr);
     ~SettingsWindowHost() override;
 
@@ -114,6 +117,11 @@ class SettingsWindowHost final: public QObject
     /// rule sees the close. The close is a no-op before the first show.
     Q_INVOKABLE void closeSettings();
 
+    /// Opens contour.yml in the OS's editor, as the sidebar's "Edit contour.yml…" row asks: runs the
+    /// injected `editConfiguration`. What Settings has staged is not written first; the file it opens is the
+    /// hand-maintained one, which Settings never writes.
+    Q_INVOKABLE void editConfigurationFile();
+
     /// @return The window, or null before the first successful show.
     [[nodiscard]] QQuickWindow* window() const noexcept { return _window.get(); }
 
@@ -144,6 +152,7 @@ class SettingsWindowHost final: public QObject
     SettingsWindowConventions _conventions;
     SettingsWindowFactory _factory;
     config::GuiStateStore& _state;
+    std::function<void()> _editConfiguration;
     /// What the run before left, read once at construction; consumed by the first show.
     std::optional<config::SettingsWindowState> _remembered;
     QString _lastPage;
