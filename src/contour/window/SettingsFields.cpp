@@ -568,10 +568,12 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
         { SettingsGroup::ProfileKeyboard,
           "⌥",
           {
-              boolField("option_key_as_alt",
-                        "Option key as Alt",
-                        "Treat the macOS Option key as Alt modifier.",
-                        [](auto& p) -> auto& { return p.optionKeyAsAlt.value(); }),
+              enumFieldFromTable<config::OptionAsAlt>(
+                  "option_as_alt",
+                  "Use Option as Meta",
+                  "The other Option key keeps typing accents like é and ü.",
+                  [](TerminalProfile const& p) { return p.optionAsAlt.value(); },
+                  [](TerminalProfile& p, auto v) { p.optionAsAlt = v; }),
           } },
         { SettingsGroup::ProfileHistory,
           "≡",

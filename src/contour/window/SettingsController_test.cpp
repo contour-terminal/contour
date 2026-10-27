@@ -3077,7 +3077,7 @@ TEST_CASE("SettingsController: every field group appears exactly once", "[settin
         all.insert(static_cast<int>(row.group));
     CHECK(named == all);
 
-    CHECK(rowWithKey(fx.controller->profileFields(), "option_key_as_alt").value("group").toInt()
+    CHECK(rowWithKey(fx.controller->profileFields(), "option_as_alt").value("group").toInt()
           == static_cast<int>(SettingsGroup::ProfileKeyboard));
     CHECK(rowWithKey(fx.controller->globalFields(), "chrome_density").value("group").toInt()
           == static_cast<int>(SettingsGroup::AppearanceChrome));
@@ -3598,4 +3598,33 @@ TEST_CASE("settings: the font picker lists the injected families, and the bundle
     fx.restartController();
     fx.controller->refresh();
     CHECK(fx.controller->fontFamilies() == QStringList { "JetBrains Mono", "Iosevka" });
+}
+
+TEST_CASE("SettingsController: option_as_alt is a segmented row of the four settings",
+          "[settings][optionasalt]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->addProfile();
+    fx.scheduler->fire();
+    REQUIRE_FALSE(fx.controller->editingReadOnly());
+
+    auto const row = rowWithKey(fx.controller->profileFields(), "option_as_alt");
+    REQUIRE_FALSE(row.isEmpty());
+    CHECK(row.value("label").toString() == "Use Option as Meta");
+    CHECK(row.value("help").toString()
+          == "The other Option key keeps typing accents like \u00e9 and \u00fc.");
+    CHECK(row.value("options").toStringList() == QStringList { "off", "left", "right", "both" });
+    CHECK(row.value("optionLabels").toStringList() == QStringList { "Off", "Left", "Right", "Both" });
+    CHECK(row.value("control").toInt() == static_cast<int>(SettingsControl::Segmented));
+    CHECK(row.value("controlName").toString() == "segmented");
+    CHECK(row.value("value").toString() == "off");
+    CHECK(row.value("group").toInt() == static_cast<int>(SettingsGroup::ProfileKeyboard));
+
+    fx.controller->commitProfileField("option_as_alt", "left");
+    fx.scheduler->fire();
+    auto const written = fx.fileContent("profiles/New Profile.yml");
+    REQUIRE(written.has_value());
+    CHECK(written->contains("option_as_alt: left\n"));
+    CHECK(fx.cfg.findProfile("New Profile")->optionAsAlt.value() == config::OptionAsAlt::Left);
+    CHECK(rowWithKey(fx.controller->profileFields(), "option_as_alt").value("value").toString() == "left");
 }

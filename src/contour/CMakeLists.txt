@@ -1239,6 +1239,7 @@ if(CONTOUR_TESTING)
         config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
         config/NewDefaultsOffer_test.cpp
+        config/OptionAsAlt_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/ScrollBarMode_test.cpp
         config/TabBarMode_test.cpp

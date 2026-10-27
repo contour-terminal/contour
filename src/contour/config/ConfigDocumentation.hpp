@@ -3304,21 +3304,24 @@ constexpr StringLiteral FileOpenerWeb {
 };
 
 constexpr StringLiteral OptionKeyAsAltConfig {
-    "{comment} Tells Contour how to handle Option-Key events on MacOS.\n"
+    "{comment} Which Option keys act as Alt (Meta) on macOS: off, left, right or both. The other Option key\n"
+    "{comment} keeps typing accents like \u00e9 and \u00fc. true and false are still read, as both and off.\n"
     "{comment} This value is ignored on other platforms.\n"
     "{comment}\n"
-    "{comment} Default: false\n"
+    "{comment} Default: off\n"
     "option_as_alt: {}\n"
     "\n"
 };
 
 constexpr StringLiteral OptionKeyAsAltWeb {
-    "section tells Contour how to handle Option-Key events on MacOS.\n"
+    "section tells Contour which Option keys act as Alt (Meta) on macOS: `off`, `left`, `right` or `both`.\n"
+    "The other Option key keeps typing accents like \u00e9 and \u00fc. `true` and `false` are still read, as "
+    "`both` and `off`.\n"
     "This value is ignored on other platforms.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
-    "    option_as_alt: false\n"
+    "    option_as_alt: left\n"
     "```\n"
     "\n"
 };

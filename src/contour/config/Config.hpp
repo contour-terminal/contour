@@ -12,6 +12,7 @@
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/HostUrl.hpp>
+#include <contour/config/OptionAsAlt.hpp>
 #include <contour/config/PreeditStyle.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/config/SecureInputMode.hpp>
@@ -1386,7 +1387,7 @@ struct TerminalProfile
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
     ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
-    ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
+    ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
 
 /// One chrome-focus chord of the Native2026 defaults.
@@ -2387,6 +2388,8 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, SecureInputMode& where);
+    /// Reads `option_as_alt`: a token, or the boolean it was before it named sides (@see parseOptionAsAlt).
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, OptionAsAlt& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);

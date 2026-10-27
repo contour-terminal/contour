@@ -1927,7 +1927,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "tab_color", where.tabColor);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
-        loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
+        loadFromEntry(child, "option_as_alt", where.optionAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
@@ -3771,6 +3771,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         else
             errorLog()("Unknown pixel_reporting value '{}'; keeping {}.", rawValue, where);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, OptionAsAlt& where)
+{
+    // The tokens, then the booleans the setting was before it named sides: an old file keeps working, and an
+    // unrecognized word is reported and leaves the value as it was.
+    (void) detail::loadConfigEnum(
+        node, entry, keyPathTo(node, entry), where, logger, parseOptionAsAlt, "off, left, right, both");
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

@@ -27,6 +27,7 @@ add_library(contour_config STATIC
     LayoutStore.cpp LayoutStore.hpp
     ModifierNames.hpp
     NewDefaultsOffer.hpp
+    OptionAsAlt.hpp
     ScrollBarMode.hpp
     SecureInputMode.hpp
     SettingsEditSession.cpp SettingsEditSession.hpp

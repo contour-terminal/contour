@@ -1545,6 +1545,90 @@ profiles:
     }
 }
 
+TEST_CASE("Config: option_as_alt names the Option keys that act as Alt", "[config][optionasalt]")
+{
+    using contour::config::OptionAsAlt;
+
+    // The profile's option_as_alt after loading a contour.yml that opens with @p header and whose profile
+    // carries @p line. Read the way the application reads it, so the file's edition applies.
+    auto const optionAfter = [](std::string_view header, std::string_view line) {
+        QTemporaryDir dir;
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir,
+                                                                            std::format(R"({}
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        {}
+)",
+                                                                                        header,
+                                                                                        line)));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        return profile->optionAsAlt.value();
+    };
+
+    SECTION("a token loads, and so does the boolean it replaces")
+    {
+        CHECK(optionAfter("", "option_as_alt: true") == OptionAsAlt::Both);
+        CHECK(optionAfter("", "option_as_alt: false") == OptionAsAlt::Off);
+        CHECK(optionAfter("", "option_as_alt: left") == OptionAsAlt::Left);
+        CHECK(optionAfter("", "option_as_alt: Right") == OptionAsAlt::Right);
+        CHECK(optionAfter("", "option_as_alt: both") == OptionAsAlt::Both);
+        CHECK(optionAfter("", "option_as_alt: off") == OptionAsAlt::Off);
+    }
+
+    SECTION("an unknown word keeps the default, and is reported by its key path")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        CHECK(optionAfter("", "option_as_alt: sideways") == OptionAsAlt::Off);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("sideways"));
+        CHECK(capture.contains("profiles.main.option_as_alt"));
+        CHECK(capture.contains("off, left, right, both"));
+    }
+
+    SECTION("a profile without the key is Off in every edition")
+    {
+        CHECK(optionAfter("", "") == OptionAsAlt::Off);
+        CHECK(optionAfter("defaults_edition: native2026", "") == OptionAsAlt::Off);
+        CHECK(optionAfter("defaults_edition: classic", "") == OptionAsAlt::Off);
+    }
+
+    SECTION("every setting round-trips through the writer, as its token")
+    {
+        for (auto const& info: contour::config::configEnumValues<OptionAsAlt>())
+        {
+            INFO("setting " << info.token);
+            QTemporaryDir dir;
+            auto const source = loadFromYaml(dir, "default_profile: main\n");
+            auto profile = *source.findProfile("main");
+            profile.optionAsAlt.value() = info.value;
+            auto const written = contour::config::emitProfileYaml(profile);
+            CHECK(written.contains(std::format("option_as_alt: {}\n", info.token)));
+            writeSideFile(dir, "profiles/roundtrip.yml", written);
+
+            auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+            auto const* roundTripped = reloaded.findProfile("roundtrip");
+            REQUIRE(roundTripped != nullptr);
+            CHECK(roundTripped->optionAsAlt.value() == info.value);
+        }
+    }
+
+    SECTION("the generated config documents the setting, and spells the default out")
+    {
+        auto const generated = contour::config::defaultConfigString();
+        CHECK(generated.contains("option_as_alt: off\n"));
+        CHECK(generated.contains("Which Option keys act as Alt (Meta) on macOS: off, left, right or both."));
+        auto const parsed = YAML::Load(generated);
+        auto const defaults = contour::config::Config {};
+        auto const written = parsed["profiles"][defaults.defaultProfileName.value()]["option_as_alt"];
+        REQUIRE(written.IsScalar());
+        CHECK(contour::config::configEnumFromToken<OptionAsAlt>(written.as<std::string>())
+              == OptionAsAlt::Off);
+    }
+}
+
 TEST_CASE("Config: folding loads from YAML and reaches the emulation settings", "[config]")
 {
     QTemporaryDir dir;
