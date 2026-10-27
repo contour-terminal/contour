@@ -139,4 +139,4 @@ TEST_CASE("Permission: the log spells each value", "[contour][permission][qml]")
     CHECK(std::format("{}", PermissionMemory::Persistent) == "persistent");
 }
 
-#include "Permission_test.moc"
+#include <Permission_test.moc>

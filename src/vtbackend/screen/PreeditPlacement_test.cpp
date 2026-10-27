@@ -22,8 +22,13 @@ namespace
 /// The clusters of @p placement, as text.
 [[nodiscard]] std::vector<std::u32string> textsOf(vtbackend::PreeditPlacement const& placement)
 {
-    return placement.clusters | std::views::transform(&vtbackend::PreeditCluster::text)
-           | std::ranges::to<std::vector>();
+    // A loop, not `| std::ranges::to<std::vector>()`: Clang 22 cannot instantiate libstdc++ 14's
+    // range-adaptor pipe for it (forward_like), which is what CI's Ubuntu runners pair.
+    auto texts = std::vector<std::u32string> {};
+    texts.reserve(placement.clusters.size());
+    for (auto const& cluster: placement.clusters)
+        texts.push_back(cluster.text);
+    return texts;
 }
 
 constexpr auto Line = ColumnCount(10);

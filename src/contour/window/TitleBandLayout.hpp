@@ -128,7 +128,7 @@ struct TitleBandRule
     std::optional<TabStripGate> strip;            ///< The tab-bar gate, or any.
     std::optional<HostNotice> notice;             ///< The host chip's notice, or any.
     std::optional<config::ChromeDensity> density; ///< The chrome density, or any.
-    config::TabBarPosition position;              ///< The configured tab-bar edge.
+    config::TabBarPosition position {};           ///< The configured tab-bar edge.
     TitleBand answer; ///< The answer, before the full-screen step (resolveTitleBand).
 };
 
