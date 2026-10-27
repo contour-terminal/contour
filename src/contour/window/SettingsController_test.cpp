@@ -3459,8 +3459,7 @@ TEST_CASE("SettingsController: a profile saved by hand in a state that does not 
     CHECK(fx.fileContent(path) == "this: [is not\n  a profile");
 }
 
-TEST_CASE("SettingsController: a profile deleted by hand is not re-created by the next commit",
-          "[settings]")
+TEST_CASE("SettingsController: a profile deleted by hand is not re-created by the next commit", "[settings]")
 {
     // N3, the deleted file.
     auto fx = Fixture(BasicConfig);
@@ -3475,6 +3474,42 @@ TEST_CASE("SettingsController: a profile deleted by hand is not re-created by th
     fx.fire();
 
     CHECK_FALSE(fx.fileContent(path).has_value());
+}
+
+TEST_CASE("SettingsController: a profile name that folds equal to another is refused", "[settings]")
+{
+    // N5: on Windows and macOS `Office` and `office` are one file, so a pending write and an existing name
+    // both count.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    fx.openSideProfile("other");
+    REQUIRE(fx.controller->renameProfile("work", "Office").has_value()); // pending, not on disk yet
+
+    auto const pending = fx.controller->renameProfile("other", "office");
+    REQUIRE_FALSE(pending.has_value());
+    CHECK(pending.error().kind == config::SettingsErrorKind::NameTaken);
+
+    auto const existing = fx.controller->renameProfile("other", "MAIN");
+    REQUIRE_FALSE(existing.has_value());
+    CHECK(existing.error().kind == config::SettingsErrorKind::NameTaken);
+
+    CHECK(fx.controller->renameProfile("other", "elsewhere").has_value());
+}
+
+TEST_CASE("SettingsController: a scheme name that folds equal to another is refused", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("one");
+    fx.openSideScheme("two");
+    REQUIRE(fx.controller->renameColorScheme("one", "Third").has_value()); // pending, not on disk yet
+
+    auto const pending = fx.controller->renameColorScheme("two", "third");
+    REQUIRE_FALSE(pending.has_value());
+    CHECK(pending.error().kind == config::SettingsErrorKind::NameTaken);
+
+    auto const existing = fx.controller->renameColorScheme("two", "DEFAULT");
+    REQUIRE_FALSE(existing.has_value());
+    CHECK(existing.error().kind == config::SettingsErrorKind::NameTaken);
 }
 
 TEST_CASE("SettingsController: a hand edit of settings.yml before Settings opens is not written over",

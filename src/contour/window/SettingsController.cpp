@@ -997,12 +997,29 @@ void SettingsController::commitProfileField(QString const& key, QVariant const& 
     report(setProfileField(key, value));
 }
 
+namespace
+{
+    /// Whether @p a and @p b are one name once case is folded: on Windows and macOS, `Work` and `work` are
+    /// one file.
+    [[nodiscard]] bool sameNameFolded(std::string const& a, std::string const& b)
+    {
+        return QString::fromStdString(a).toCaseFolded() == QString::fromStdString(b).toCaseFolded();
+    }
+} // namespace
+
 bool SettingsController::profileNameTaken(std::string const& name) const
 {
     auto const file = config::profileFile(name);
     auto const read = _services.store->read(file);
+    auto const foldsEqual = [&name](auto const& other) {
+        return sameNameFolded(name, other);
+    };
     return _config().findProfile(name) != nullptr || (read && read->has_value())
-           || _session->pendingFor(file) == config::PendingChange::Write;
+           || _session->pendingFor(file) == config::PendingChange::Write
+           || std::ranges::any_of(_config().profiles.value(),
+                                  [&](auto const& entry) { return foldsEqual(entry.first); })
+           || std::ranges::any_of(_session->pendingWrites(config::SideFileKind::Profile),
+                                  [&](config::SideFile const& pending) { return foldsEqual(pending.name); });
 }
 
 bool SettingsController::isSideFileProfile(std::string const& name) const
@@ -1674,7 +1691,12 @@ bool SettingsController::schemeNameTaken(std::string const& name) const
 {
     return colorSchemeSideFileExists(name) || isInlineColorScheme(name)
            || _config().colorschemes.value().contains(name)
-           || _session->pendingFor(config::colorSchemeFile(name)) == config::PendingChange::Write;
+           || _session->pendingFor(config::colorSchemeFile(name)) == config::PendingChange::Write
+           || std::ranges::any_of(_config().colorschemes.value(),
+                                  [&](auto const& entry) { return sameNameFolded(name, entry.first); })
+           || std::ranges::any_of(
+               _session->pendingWrites(config::SideFileKind::ColorScheme),
+               [&](config::SideFile const& pending) { return sameNameFolded(name, pending.name); });
 }
 
 std::expected<QString, SettingsError> SettingsController::duplicateColorScheme(QString const& name)

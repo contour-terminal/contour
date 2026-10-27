@@ -181,6 +181,10 @@ class SettingsEditSession
     /// @return What is staged for @p file and not yet written.
     [[nodiscard]] PendingChange pendingFor(SideFile const& file) const;
 
+    /// @param kind The kind of side file.
+    /// @return The files of @p kind with new bytes staged and not yet written, in no particular order.
+    [[nodiscard]] std::vector<SideFile> pendingWrites(SideFileKind kind) const;
+
   private:
     /// What the session knows of one file it saw.
     struct TouchedFile

@@ -167,6 +167,15 @@ bool SettingsEditSession::hasPending() const noexcept
     return !_pending.empty();
 }
 
+std::vector<SideFile> SettingsEditSession::pendingWrites(SideFileKind kind) const
+{
+    auto files = std::vector<SideFile> {};
+    for (auto const& [file, pending]: _pending)
+        if (file.kind == kind && pending.bytes)
+            files.push_back(file);
+    return files;
+}
+
 PendingChange SettingsEditSession::pendingFor(SideFile const& file) const
 {
     auto const found = _pending.find(file);
