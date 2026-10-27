@@ -6,6 +6,7 @@
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/NativeCaptionButtons.hpp>
 
+#include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -45,6 +46,33 @@ TEST_CASE("the factory is null off Windows", "[caption-buttons]")
     auto const adapter = contour::platform::makeNativeCaptionButtons();
     REQUIRE(adapter != nullptr);
     CHECK(dynamic_cast<NullNativeCaptionButtons*>(adapter.get()) != nullptr);
+}
+#else
+TEST_CASE("the factory builds the Win32 adapter, which leaves a non-native window alone", "[caption-buttons]")
+{
+    // Built before any window, as the application builds it before the QGuiApplication exists: the adapter
+    // is the Win32 one on every Windows build, and decides on each call whether the plugin is native.
+    auto const adapter = contour::platform::makeNativeCaptionButtons();
+    REQUIRE(adapter != nullptr);
+    CHECK(dynamic_cast<NullNativeCaptionButtons*>(adapter.get()) == nullptr);
+    if (QGuiApplication::platformName() == QStringLiteral("windows"))
+        SKIP("Covered under the native platform by Win32CaptionButtons_test.cpp.");
+
+    auto calls = 0;
+    auto window = QWindow {};
+    window.create();
+    adapter->attach(window,
+                    CaptionBinding {
+                        .layout =
+                            [&calls] {
+                                ++calls;
+                                return CaptionLayout {};
+                            },
+                        .visual = [&calls](CaptionButtonVisual) { ++calls; },
+                        .toggleMaximize = [&calls] { ++calls; },
+                    });
+    adapter->detach(window);
+    CHECK(calls == 0);
 }
 #endif
 

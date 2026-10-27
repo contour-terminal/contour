@@ -112,3 +112,11 @@ caf = "caf" # "caf\xC3\xA9" -- café written as explicit UTF-8 bytes.
 ine = "ine"   # From `l[ine.]` in the vi.motion `b` test.
 nd = "nd"     # From `a[nd]` in the vi.motion `b` test.
 hree = "hree" # From `T[hree]` in the vi.motion `b` test.
+
+# Win32's TrackMouseEvent flags (TME_LEAVE, TME_NONCLIENT) read as the word "TME". The spelling is
+# Microsoft's, not ours to rename. Scoped to the one file that asks for a mouse-leave notification.
+[type.win32-track-mouse]
+extend-glob = ["Win32CaptionButtons.cpp"]
+
+[type.win32-track-mouse.extend-words]
+TME = "TME" # The TRACKMOUSEEVENT flag prefix.

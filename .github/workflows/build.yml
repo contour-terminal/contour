@@ -1226,6 +1226,31 @@ jobs:
             exit 1
           }
           if ($status -ne 0) { exit 1 }
+      - name: "verify the Win32 chrome tests actually ran"
+        # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
+        # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
+        # pass. windows-latest has a desktop, so a skip here is a regression.
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_QUICK_BACKEND: software
+          CONTOUR_TEST_DISPLAY: "1"
+        run: |
+          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_gui_test.exe"
+          # A missing binary must not read as "nothing skipped".
+          if (-not (Test-Path $binary)) {
+            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+            exit 1
+          }
+          Write-Output "--- $binary [win32]"
+          $output = & $binary '[win32]' 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Output $output
+          if ($output -match 'skipped') {
+            Write-Output "::error::$binary [win32] reported SKIPPED; the Win32 chrome is not being exercised on Windows"
+            exit 1
+          }
+          if ($status -ne 0) { exit 1 }
       - name: "Install Wix Toolset"
         run: |
           # Use this to list all available versions

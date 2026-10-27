@@ -871,6 +871,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/LauncherProgressSink_test.cpp
             platform/NativeCaptionButtons_test.cpp
             platform/NativeWindowFrame_test.cpp
+            platform/Win32CaptionButtons_test.cpp
             window/WindowPositionStore_test.cpp
             window/AppMenuBar_test.cpp
             window/ChromeFocusController_test.cpp
@@ -1075,6 +1076,17 @@ if(CONTOUR_FRONTEND_GUI)
                 PROPERTIES
                     ENVIRONMENT
                         "CONTOUR_TEST_DISPLAY=1;QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;${CONTOUR_QML_TEST_ENVIRONMENT}"
+                    RUN_SERIAL TRUE
+                    TIMEOUT 120
+                    LABELS "native;windows")
+            # The caption's hit test again at 150 %: Snap Layouts must trigger over the maximise button,
+            # and nowhere else, after a move to a monitor of another scale.
+            add_test(NAME contour_windows_native_scaled_test
+                     COMMAND $<TARGET_FILE:contour_gui_test> "[win32][hittest]")
+            set_tests_properties(contour_windows_native_scaled_test
+                PROPERTIES
+                    ENVIRONMENT
+                        "CONTOUR_TEST_DISPLAY=1;QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;QT_SCALE_FACTOR=1.5;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     RUN_SERIAL TRUE
                     TIMEOUT 120
                     LABELS "native;windows")

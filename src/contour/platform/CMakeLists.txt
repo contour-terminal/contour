@@ -66,6 +66,7 @@ add_library(contour_platform STATIC
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     PopupShadow.cpp PopupShadow.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
+    Win32CaptionButtons.cpp Win32CaptionButtons.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
     WindowDecoration.hpp
     WindowResizeGrid.cpp WindowResizeGrid.hpp
