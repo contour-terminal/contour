@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace vtrasterizer
@@ -28,6 +30,20 @@ struct RailRect
     int height = 0; ///< Height.
 
     bool operator==(RailRect const&) const = default;
+};
+
+/// The few rectangles a rail row or a chip band is drawn as, held inline: built per cell per frame, so a
+/// frame allocates nothing for them (m1).
+struct RailRects
+{
+    std::array<RailRect, 3> rects {}; ///< The rectangles, the first @ref count of them in use.
+    std::size_t count = 0;            ///< How many are.
+
+    /// Appends @p rect; there is room for three, the most a row or a band is drawn as.
+    void add(RailRect rect) noexcept { rects.at(count++) = rect; }
+
+    /// @return The rectangles in use.
+    [[nodiscard]] std::span<RailRect const> all() const noexcept { return std::span(rects).first(count); }
 };
 
 /// How many cells wide a rail mark is drawn: LineFlag::DoubleWidth, as a two-cell block column's glyph is.
@@ -127,9 +143,9 @@ static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMa
 /// @param metrics The grid's metrics.
 /// @param smoothScrollOffset The rows' sub-cell scroll offset, in device pixels.
 /// @return The rectangles; none for a row with no segment.
-[[nodiscard]] inline std::vector<RailRect> railRects(vtbackend::RenderGutterCell const& cell,
-                                                     GridMetrics const& metrics,
-                                                     int smoothScrollOffset)
+[[nodiscard]] inline RailRects railRects(vtbackend::RenderGutterCell const& cell,
+                                         GridMetrics const& metrics,
+                                         int smoothScrollOffset)
 {
     using vtbackend::RailSegment;
     if (cell.rail == RailSegment::None)
@@ -146,26 +162,27 @@ static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMa
     {
         // The mark stands in for the bar's end it sits on; the bar runs on to the rows beside it.
         auto const box = railMarkCover(cell, metrics, rowTop);
-        auto rects = std::vector<RailRect> {};
+        auto rects = RailRects {};
         if (!startsHere && box.y > rowTop)
-            rects.push_back(RailRect { .x = x, .y = rowTop, .width = rail.bar, .height = box.y - rowTop });
+            rects.add(RailRect { .x = x, .y = rowTop, .width = rail.bar, .height = box.y - rowTop });
         if (!endsHere && box.y + box.height < rowBottom)
-            rects.push_back(RailRect { .x = x,
-                                       .y = box.y + box.height,
-                                       .width = rail.bar,
-                                       .height = rowBottom - (box.y + box.height) });
+            rects.add(RailRect { .x = x,
+                                 .y = box.y + box.height,
+                                 .width = rail.bar,
+                                 .height = rowBottom - (box.y + box.height) });
         return rects;
     }
 
     auto const top = rowTop + (startsHere ? rail.endInset : 0);
     auto const bottom = rowBottom - (endsHere ? rail.endInset : 0);
 
-    auto rects = std::vector { RailRect { .x = x, .y = top, .width = rail.bar, .height = bottom - top } };
+    auto rects = RailRects {};
+    rects.add(RailRect { .x = x, .y = top, .width = rail.bar, .height = bottom - top });
     auto const rounded = rail.radius > 0 && rail.bar > 2;
     if (rounded && startsHere)
-        rects.push_back(RailRect { .x = x + 1, .y = top - 1, .width = rail.bar - 2, .height = 1 });
+        rects.add(RailRect { .x = x + 1, .y = top - 1, .width = rail.bar - 2, .height = 1 });
     if (rounded && endsHere)
-        rects.push_back(RailRect { .x = x + 1, .y = bottom, .width = rail.bar - 2, .height = 1 });
+        rects.add(RailRect { .x = x + 1, .y = bottom, .width = rail.bar - 2, .height = 1 });
     return rects;
 }
 
@@ -175,9 +192,9 @@ static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMa
 /// @param metrics The grid's metrics.
 /// @param smoothScrollOffset The rows' sub-cell scroll offset, in device pixels.
 /// @return The middle, then the left and the right end column.
-[[nodiscard]] inline std::vector<RailRect> chipBandRects(vtbackend::RenderChipBand const& band,
-                                                         GridMetrics const& metrics,
-                                                         int smoothScrollOffset)
+[[nodiscard]] inline RailRects chipBandRects(vtbackend::RenderChipBand const& band,
+                                             GridMetrics const& metrics,
+                                             int smoothScrollOffset)
 {
     auto const left = metrics.mapTopLeft(band.lineOffset, band.columns.fromColumn, smoothScrollOffset);
     auto const right = metrics
@@ -186,10 +203,11 @@ static_assert(RailMarkFaces.size() == static_cast<std::size_t>(vtbackend::RailMa
                                        smoothScrollOffset)
                            .x;
     auto const height = metrics.cellSize.height.as<int>();
-    return std::vector {
-        RailRect { .x = left.x + 1, .y = left.y, .width = right - left.x - 2, .height = height },
-        RailRect { .x = left.x, .y = left.y + 1, .width = 1, .height = height - 2 },
-        RailRect { .x = right - 1, .y = left.y + 1, .width = 1, .height = height - 2 },
+    return RailRects {
+        .rects = { RailRect { .x = left.x + 1, .y = left.y, .width = right - left.x - 2, .height = height },
+                   RailRect { .x = left.x, .y = left.y + 1, .width = 1, .height = height - 2 },
+                   RailRect { .x = right - 1, .y = left.y + 1, .width = 1, .height = height - 2 } },
+        .count = 3,
     };
 }
 

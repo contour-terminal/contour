@@ -33,6 +33,13 @@
 namespace vtrasterizer
 {
 
+/// Whether an overlay cell -- one outside RenderBuffer::cells -- is drawn on its background or bare.
+enum class OverlayGround : uint8_t
+{
+    Painted = 0, ///< Background, then text: a gutter or annotation cell.
+    Bare,        ///< Text alone: a rail mark, over the strip.
+};
+
 struct RenderCursor
 {
     crispy::Point position;
@@ -448,7 +455,9 @@ class Renderer
     ///
     /// @param cell  The cell to draw.
     /// @param what  The caller, named in the log line.
-    void renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what);
+    /// @param ground  Whether its background is drawn too, or its text alone (a rail mark's, which no cell
+    ///                background may cover the strip around).
+    void renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what, OverlayGround ground);
 
     /// Draws the sticky command header over screen row @p row: an opaque band across the page's
     /// @p columns, the header's cells and its chip where the terminal laid them out, and a one-pixel

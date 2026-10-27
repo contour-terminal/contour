@@ -2659,6 +2659,44 @@ TEST_CASE("Renderer.blockHighlight.tintsUnderTheTextAndRingsTheBlock", "[rendere
     CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.x == 199 && r.width == Width(1); }));
 }
 
+TEST_CASE("Renderer.gutter.theTerminalRowsCellsStayWhereTheyAre", "[renderer][rail]")
+{
+    // The Terminal row has no strip: renderGutter() moves none of its cells, however the rest of the rail's
+    // metrics read. Each gutter glyph lands inside the gutter's own columns, left of the page.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin.left = 100;
+    metrics.rail = GutterRailMetrics { .strip = 0, .bar = 3, .barInset = 8, .radius = 2, .endInset = 2 };
+    metrics.rail.chips.markEdge = 13;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(400), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    auto const gutter = GutterSettings {
+        .foldMarkers = true, .exitStatus = true, .lineNumbers = LineNumberMode::Absolute, .lineNumberWidth = 3
+    };
+    mc.terminal.settings().gutter = gutter;
+    mc.writeToScreen(vtbackend::test::commandRun("false", { "boom" }, 2));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+    (void) mc.terminal.refreshRenderBuffer();
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const gutterLeft = 100 - (vtbackend::gutterLayoutFor(gutter).totalColumns * 10);
+    auto const& tiles = fixture.renderTarget.getMockBackend().renderCommands;
+    auto const inGutter = std::ranges::to<std::vector>(
+        tiles | std::views::filter([](auto const& tile) { return tile.x.value < 100; }));
+    REQUIRE_FALSE(inGutter.empty());
+    for (auto const& tile: inGutter)
+    {
+        CAPTURE(tile.x.value);
+        CHECK(tile.x.value >= gutterLeft);
+        // On the cell grid: the test font's glyphs start at their cell's left edge, and no shift moved them.
+        CHECK((100 - tile.x.value) % 10 == 0);
+    }
+}
+
 TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", "[renderer][statusline]")
 {
     // DECSASD selects the host-writable status line, so the cursor is its own. The page's smooth scroll moves

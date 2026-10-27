@@ -25,9 +25,11 @@ namespace
     [[nodiscard]] std::optional<std::chrono::steady_clock::duration> durationOf(
         CommandBlockRecord const& record, std::chrono::system_clock::time_point now)
     {
+        // A running time ticks in whole seconds, the step it is redrawn at: "0s" in its first second, not
+        // a count of milliseconds no redraw keeps up with (m4).
         if (record.state == CommandBlockState::Running && record.commandStartedAt)
             return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                now - *record.commandStartedAt);
+                std::chrono::floor<std::chrono::seconds>(now - *record.commandStartedAt));
         return record.duration;
     }
 
@@ -75,6 +77,9 @@ namespace
         return text;
     }
 
+    /// A running command's time in its first second: whole seconds, as it is redrawn (m4).
+    constexpr auto RunningFirstSecond = std::string_view { "0s" };
+
     /// @p count @p unit, its plural for any count but one.
     [[nodiscard]] std::string counted(long long count, std::string_view unit)
     {
@@ -107,7 +112,13 @@ std::string blockStatusText(CommandBlockRecord const& record, std::chrono::syste
                               wording.label,
                               shownDetail(wording, record),
                               now,
-                              [](auto duration) { return formatCommandDuration(duration); }),
+                              [&](auto duration) {
+                                  // Whole seconds while running, the first one too: "0s", never "0ms".
+                                  if (record.state == CommandBlockState::Running
+                                      && duration < std::chrono::seconds(1))
+                                      return std::string { RunningFirstSecond };
+                                  return formatCommandDuration(duration);
+                              }),
                   " · ");
 }
 
@@ -118,7 +129,12 @@ std::string spokenBlockStatus(CommandBlockRecord const& record, std::chrono::sys
                               wording.spokenLabel,
                               shownDetail(wording, record),
                               now,
-                              [](auto duration) { return spokenCommandDuration(duration); }),
+                              [&](auto duration) {
+                                  if (record.state == CommandBlockState::Running
+                                      && duration < std::chrono::seconds(1))
+                                      return counted(0, "second");
+                                  return spokenCommandDuration(duration);
+                              }),
                   ", ");
 }
 

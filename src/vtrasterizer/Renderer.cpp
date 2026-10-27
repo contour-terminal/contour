@@ -1052,18 +1052,21 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter,
 
     // The bars, opaque, in the strip: rectangles draw before any glyph of the step, so the marks go over.
     for (auto const& cell: gutter)
-        for (auto const& rect: railRects(cell, _gridMetrics, smoothScrollOffset))
+    {
+        auto const rects = railRects(cell, _gridMetrics, smoothScrollOffset);
+        for (auto const& rect: rects.all())
             _renderTarget->renderRectangle(rect.x,
                                            rect.y,
                                            vtbackend::Width::cast_from(rect.width),
                                            vtbackend::Height::cast_from(rect.height),
                                            vtbackend::RGBAColor(cell.railColor));
+    }
 
     // The timestamps and line numbers, left of the strip; where there is none, where they always were.
     renderShiftedLeft(cellGutterShift(_gridMetrics), [&] {
         for (auto const& cell: gutter)
             if (!isRailCell(cell))
-                renderOverlayCell(gutterRenderCell(cell), "renderGutter");
+                renderOverlayCell(gutterRenderCell(cell), "renderGutter", OverlayGround::Painted);
     });
 
     // The marks the UI font draws -- ✗ on its disc, ▸, ✓ -- at size.railMark, centred on the bar.
@@ -1087,7 +1090,7 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter,
     renderShiftedLeft(railMarkShift(_gridMetrics), [&] {
         for (auto const& cell: gutter)
             if (cell.mark != vtbackend::RailMark::None && !drawsMarkInUiFont(cell.mark, _gridMetrics))
-                _textRenderer.renderCell(railMarkCell(cell));
+                renderOverlayCell(railMarkCell(cell), "renderGutter", OverlayGround::Bare);
     });
 }
 
@@ -1112,26 +1115,32 @@ void Renderer::renderChipBands(std::span<vtbackend::RenderChipBand const> bands,
 {
     ZoneScoped;
     for (auto const& band: bands)
-        for (auto const& rect: chipBandRects(band, _gridMetrics, smoothScrollOffset))
+    {
+        auto const rects = chipBandRects(band, _gridMetrics, smoothScrollOffset);
+        for (auto const& rect: rects.all())
             _renderTarget->renderRectangle(rect.x,
                                            rect.y,
                                            vtbackend::Width::cast_from(rect.width),
                                            vtbackend::Height::cast_from(rect.height),
                                            band.fill);
+    }
 }
 
 void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)
 {
     ZoneScoped;
     for (auto const& cell: annotations)
-        renderOverlayCell(cell, "renderAnnotations");
+        renderOverlayCell(cell, "renderAnnotations", OverlayGround::Painted);
 }
 
-void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what)
+void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell,
+                                 std::string_view what,
+                                 OverlayGround ground)
 {
     try
     {
-        _backgroundRenderer.renderCell(cell);
+        if (ground == OverlayGround::Painted)
+            _backgroundRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
     }
     catch (std::exception const& e)

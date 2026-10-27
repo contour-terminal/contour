@@ -77,6 +77,11 @@ TEST_CASE("blockStatus.aRunningCommandCountsFromItsStart", "[blockstatus]")
     running.duration = std::nullopt;
     CHECK(blockStatusText(running, Started + 8'700ms) == "Running · 8s");
     CHECK(spokenBlockStatus(running, Started + 8'700ms) == "Running, 8 seconds");
+    // m4: a running time ticks in whole seconds, its first second too -- not "3ms".
+    CHECK(blockStatusText(running, Started + 3ms) == "Running · 0s");
+    CHECK(blockStatusText(running, Started + 999ms) == "Running · 0s");
+    CHECK(spokenBlockStatus(running, Started + 999ms) == "Running, 0 seconds");
+    CHECK(blockStatusText(running, Started + 2'999ms) == "Running · 2s");
 }
 
 TEST_CASE("blockStatus.aPromptSaysNothing", "[blockstatus]")

@@ -10,6 +10,7 @@
 #include <vtbackend/shell/BlockRail.hpp>
 #include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -1197,10 +1198,22 @@ TEST_CASE("Gutter.terminal.theLargestFoldIsOneChip", "[gutter]")
          std::views::iota(unbox<int>(fold.columns.fromColumn), unbox<int>(fold.columns.toColumn) + 1))
         CHECK(line.cellEmptyAt(ColumnOffset(column)));
 
+    // Scrolled to its head, so the row a fold chip would sit on is drawn: its status chip is there -- the
+    // frame does place chips on that row -- and no fold chip beside it, nor a click that would open one.
     auto const longer = tallBlock(100'000);
-    CHECK_FALSE(longer->terminal.collapseLastFold());
-    CHECK(std::ranges::none_of(renderOf(longer->terminal).chips,
-                               [](RenderChip const& chip) { return chip.style == PillStyle::Fold; }));
+    auto& terminal = longer->terminal;
+    CHECK_FALSE(terminal.collapseLastFold());
+    REQUIRE(terminal.viewport().scrollToTop());
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.chips.size() == 1);
+    CHECK(frame.chips[0].lineOffset == LineOffset(0));
+    CHECK(frame.chips[0].style == PillStyle::Success);
+    for (auto const column: std::views::iota(0, unbox<int>(terminal.pageSize().columns)))
+        CHECK_FALSE(
+            terminal
+                .collapsedFoldLabelAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) },
+                                      ColumnCount(1))
+                .has_value());
 }
 
 TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchip]")
@@ -1289,4 +1302,90 @@ TEST_CASE("Gutter.terminal.aHoverTintFoldsWithItsBlock", "[gutter][blockhover]")
     REQUIRE(lit.has_value());
     CHECK(lit->top == LineOffset(3));
     CHECK(lit->height == LineCount(1));
+}
+
+TEST_CASE("Gutter.terminal.aRunningTimeCountsOnlyWhileOnDisplay", "[gutter][blockchip]")
+{
+    // I2: what the once-a-second redraw asks is whether a running time is on display -- a chip's, or the
+    // sticky header's -- and nothing else.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) }, LineCount(100) };
+    mc.terminal.settings().gutter = RailGutter;
+
+    SECTION("a running header whose command row is off the page")
+    {
+        mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+        startCommand(mc, "make");
+        printLines(mc, "line", 20);
+        auto const buffer = renderOf(mc.terminal);
+        REQUIRE(buffer.stickyHeader.has_value());
+        CHECK(buffer.chips.empty());
+        CHECK(mc.terminal.hasVisibleRunningStatus());
+    }
+    SECTION("an off-page command row with no header")
+    {
+        mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Never;
+        startCommand(mc, "make");
+        printLines(mc, "line", 20);
+        auto const buffer = renderOf(mc.terminal);
+        CHECK_FALSE(buffer.stickyHeader.has_value());
+        CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
+    }
+    SECTION("the alternate screen")
+    {
+        startCommand(mc, "vim");
+        (void) renderOf(mc.terminal);
+        REQUIRE(mc.terminal.hasVisibleRunningStatus());
+        mc.writeToScreen("\033[?1049h");
+        (void) renderOf(mc.terminal);
+        CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
+    }
+    SECTION("exit status off")
+    {
+        mc.terminal.settings().gutter.exitStatus = false;
+        mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Never;
+        startCommand(mc, "make");
+        auto const buffer = renderOf(mc.terminal);
+        CHECK(buffer.chips.empty());
+        CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
+    }
+}
+
+TEST_CASE("Gutter.terminal.aCrossfadeSnapshotLeavesTheRunningTime", "[gutter][blockchip]")
+{
+    // m8: whether a running time is on display is a fact of the frames drawn. The crossfade's snapshot of the
+    // outgoing page is built, never drawn, and must not change it -- here, though the command's row has
+    // scrolled off since the last frame, that frame still shows its chip.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) }, LineCount(100) };
+    mc.terminal.settings().gutter = RailGutter;
+    mc.terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Fade;
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Never;
+    mc.writeToScreen("\033[?64h"); // DECPCCM: the page on display follows the cursor's
+    startCommand(mc, "make");
+    (void) renderOf(mc.terminal);
+    REQUIRE(mc.terminal.hasVisibleRunningStatus());
+
+    printLines(mc, "line", 20); // the command row scrolls off; no frame is drawn
+    mc.writeToScreen("\033[U"); // NP: the next page, crossfaded from a snapshot of this one
+    CHECK(mc.terminal.hasVisibleRunningStatus());
+}
+
+TEST_CASE("Gutter.blankRunsOf.onlyTrulyBlankCells", "[gutter][blockchip]")
+{
+    // m2: a chip goes over cells that show nothing. A wide character's right half and a reverse-video space
+    // show something, though neither holds a codepoint of its own that is not blank.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(12) } };
+    mc.writeToScreen("ab\xE3\x81\x82 \033[7m \033[m"); // a b あ(2..3) ' '(4) reverse ' '(5)
+    auto const& line = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
+    auto const runs = blankRunsOf(line, LineOffset(0), ColumnCount(12));
+    auto const blank = [&](int column) {
+        return std::ranges::any_of(runs, [&](ColumnRange const& run) {
+            return run.contains(CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) });
+        });
+    };
+    CHECK_FALSE(blank(2));
+    CHECK_FALSE(blank(3)); // the wide character's continuation
+    CHECK(blank(4));
+    CHECK_FALSE(blank(5)); // a reverse-video space is a block of the foreground
+    CHECK(blank(6));
+    CHECK(blank(11));
 }

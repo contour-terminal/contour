@@ -8284,6 +8284,17 @@ TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, an
     CHECK(terminal.hasVisibleRunningStatus());
     CHECK(session->refreshesRunningStatus());
 
+    // I1: a pane nobody sees -- its display detached on a tab switch -- stops ticking, though its last frame
+    // still shows the time; re-attached, it ticks again without waiting for a change.
+    session->detachDisplay(*session.surface);
+    CHECK_FALSE(session->refreshesRunningStatus());
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK(terminal.hasVisibleRunningStatus());
+    CHECK_FALSE(session->refreshesRunningStatus());
+    session->attachDisplay(*session.surface);
+    CHECK(session->refreshesRunningStatus());
+
     terminal.writeToScreen(vtbackend::test::commandEnd(0));
     terminal.writeToScreen(std::string { vtbackend::test::PromptStart });
     (void) vtbackend::test::drawFrame(terminal);

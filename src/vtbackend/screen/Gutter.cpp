@@ -628,13 +628,17 @@ std::vector<ColumnRange> blankRunsOf(Line const& line, LineOffset screenLine, Co
 {
     auto const defaultBackground = GraphicsAttributes {}.backgroundColor;
     auto const& storage = line.storage();
+    // A cell that shows nothing: no codepoint, or a space, on the default background -- and neither the right
+    // half of a wide character or of a text-sizing block, which hold no codepoint of their own, nor a
+    // reverse-video space, which shows the foreground as a block (m2).
+    auto const shownFlags = NoTextCellFlags | CellFlag::Inverse;
     auto const isBlank = [&](ColumnOffset column) {
         if (column >= boxed_cast<ColumnOffset>(line.size()))
             return true;
         if (!line.cellEmptyAt(column))
             return false;
         auto const& attributes = line.isBlank() ? storage.fillAttrs : storage.sgr[unbox<std::size_t>(column)];
-        return attributes.backgroundColor == defaultBackground;
+        return attributes.backgroundColor == defaultBackground && !attributes.flags.any(shownFlags);
     };
 
     auto runs = std::vector<ColumnRange> {};

@@ -5696,14 +5696,20 @@ class Terminal: public IStatusLinePublishTarget
     /// command wrapped it.
     /// @param output The buffer being built.
     /// @param baseLine As for fillGutter().
-    void fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const;
+    /// @param placements The frame's collapsed folds, foldLabelPlacements()'s: looked up once per frame.
+    void fillFoldLabels(RenderBuffer& output,
+                        LineOffset baseLine,
+                        std::span<FoldLabelPlacement const> placements) const;
 
     /// Fills @p output's annotations and chip bands with the status chip of every block whose command row is
     /// drawn: over blank cells right of the command only, or not at all (placeBlockChip()).
     /// @param output The buffer being built.
     /// @param baseLine As for fillGutter().
     /// @return Whether a chip of a running block was drawn: one whose time moves on.
-    [[nodiscard]] RunningStatus fillBlockChips(RenderBuffer& output, LineOffset baseLine) const;
+    /// @param foldLabels The frame's collapsed folds, whose chips take their columns.
+    [[nodiscard]] RunningStatus fillBlockChips(RenderBuffer& output,
+                                               LineOffset baseLine,
+                                               std::span<FoldLabelPlacement const> foldLabels) const;
 
     /// How many screen rows down the main page rows are drawn: the whole page, or fewer where collapsed
     /// folds hide more rows than the history can backfill and the rest of the page is blank.
@@ -5767,9 +5773,21 @@ class Terminal: public IStatusLinePublishTarget
         return _settings.gutter.blockColumnForm == BlockColumnForm::Rail;
     }
 
-    /// fillGutter()'s per-frame scratch: the block of each drawn row and of the rows beyond the page's two
-    /// edges. A member so a frame reuses its storage; written only while a frame is built, under the lock.
+    /// The frame's block of each drawn row and of the rows beyond the page's two edges
+    /// (fillDrawnRowBlocks()), which the rail, the chips and the hover read. A member so a frame reuses its
+    /// storage; written only while a frame is built, under the lock.
     mutable std::vector<CommandBlockRecord const*> _railBlocks;
+
+    /// Looks up the block of each drawn row, and of the rows just beyond the page's edges, into _railBlocks:
+    /// once per frame, before the gutter, the chips and the hover read them. Empty on a page without blocks.
+    void fillDrawnRowBlocks() const;
+
+    /// The block of drawn row @p y in @p blocks (fillDrawnRowBlocks()'s layout, -1 the row above the page).
+    /// @param blocks The frame's blocks.
+    /// @param y A drawn row, or -1 or the drawn row count for the rows beyond the page's edges.
+    /// @return Its block; nullptr for none, or where @p blocks holds no rows.
+    [[nodiscard]] static CommandBlockRecord const* drawnRowBlockOf(
+        std::span<CommandBlockRecord const* const> blocks, int y) noexcept;
     // }}}
 
     // {{{ Sticky command header

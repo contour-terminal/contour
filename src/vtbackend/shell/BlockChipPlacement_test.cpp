@@ -90,6 +90,9 @@ TEST_CASE("blockChip.aFoldChipTakesItsColumns", "[blockchip]")
     CHECK(withoutColumns(std::vector { run(30, 40) }, run(10, 25)) == std::vector { run(30, 40) });
     CHECK(withoutColumns(std::vector { run(10, 25) }, run(10, 25)).empty());
     CHECK(place(runs) == inRow(58, 77));
+    // Where the fold chip takes the columns the status chip would have had, it moves left of it -- what
+    // the row would look like if the taken columns were still counted blank is 58..77.
+    CHECK(place(withoutColumns(std::vector { run(17, 79) }, run(50, 70))) == inRow(28, 47));
 }
 
 TEST_CASE("blockChip.aFoldChipTakesTheRunBeforeAnRprompt", "[blockchip]")

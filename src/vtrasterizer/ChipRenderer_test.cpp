@@ -16,6 +16,12 @@ using namespace vtrasterizer;
 
 namespace
 {
+/// @p rects as a vector, to compare with one.
+[[nodiscard]] std::vector<vtrasterizer::RailRect> rectsOf(vtrasterizer::RailRects const& rects)
+{
+    return { rects.all().begin(), rects.all().end() };
+}
+
 /// 10x20 cells, no margin, a 22-px strip with a 3-px bar at 8, and the canvas's pills at 1x.
 [[nodiscard]] GridMetrics chipMetrics()
 {
@@ -197,21 +203,21 @@ TEST_CASE("ChipRenderer.theBarResumesBelowAMark", "[renderer][chip][rail]")
     cell.mark = RailMark::Cross;
 
     cell.rail = RailSegment::Head;
-    CHECK(railRects(cell, metrics, 0)
+    CHECK(rectsOf(railRects(cell, metrics, 0))
           == std::vector { RailRect { .x = 16, .y = 56, .width = 3, .height = 4 } });
 
     cell.rail = RailSegment::Body;
-    CHECK(railRects(cell, metrics, 0)
+    CHECK(rectsOf(railRects(cell, metrics, 0))
           == std::vector { RailRect { .x = 16, .y = 40, .width = 3, .height = 3 },
                            RailRect { .x = 16, .y = 56, .width = 3, .height = 4 } });
 
     cell.rail = RailSegment::Single;
-    CHECK(railRects(cell, metrics, 0).empty());
+    CHECK(rectsOf(railRects(cell, metrics, 0)).empty());
 
     // A user mark is two cells over the whole row: no bar beside it.
     cell.rail = RailSegment::Body;
     cell.mark = RailMark::UserMark;
-    CHECK(railRects(cell, metrics, 0).empty());
+    CHECK(rectsOf(railRects(cell, metrics, 0)).empty());
 }
 
 TEST_CASE("ChipRenderer.cssWeightsAreFontWeights", "[renderer][chip]")

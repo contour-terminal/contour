@@ -15,6 +15,12 @@ using vtrasterizer::RailRect;
 
 namespace
 {
+/// @p rects as a vector, to compare with one.
+[[nodiscard]] std::vector<vtrasterizer::RailRect> rectsOf(vtrasterizer::RailRects const& rects)
+{
+    return { rects.all().begin(), rects.all().end() };
+}
+
 /// 16x32 cells, the grid at x 200, and the canvas's rail at scale 2: a 44 px strip, a 6 px bar 16 px into
 /// it, rounded by 4 and kept 4 clear of a block's ends.
 [[nodiscard]] GridMetrics railMetrics()
@@ -48,31 +54,34 @@ TEST_CASE("RailGeometry.aHeadIsRoundedAtTheTop", "[renderer][rail]")
 
     // The bar starts endInset below the row's top and runs on into the next row; one cap row, a pixel
     // narrower each side, rounds its top.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Head), metrics, 0)
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Head), metrics, 0))
           == std::vector { RailRect { .x = BarX, .y = (3 * 32) + 4, .width = 6, .height = 28 },
                            RailRect { .x = BarX + 1, .y = (3 * 32) + 3, .width = 4, .height = 1 } });
 
     // A body row is the bar through the whole row, square.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Body), metrics, 0)
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Body), metrics, 0))
           == std::vector { RailRect { .x = BarX, .y = 3 * 32, .width = 6, .height = 32 } });
 
     // A tail ends endInset above the row's bottom, rounded there.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Tail), metrics, 0)
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Tail), metrics, 0))
           == std::vector { RailRect { .x = BarX, .y = 3 * 32, .width = 6, .height = 28 },
                            RailRect { .x = BarX + 1, .y = (3 * 32) + 28, .width = 4, .height = 1 } });
 
     // A single row is kept clear of both ends, and rounded at both.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Single), metrics, 0)
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Single), metrics, 0))
           == std::vector { RailRect { .x = BarX, .y = (3 * 32) + 4, .width = 6, .height = 24 },
                            RailRect { .x = BarX + 1, .y = (3 * 32) + 3, .width = 4, .height = 1 },
                            RailRect { .x = BarX + 1, .y = (3 * 32) + 28, .width = 4, .height = 1 } });
 
     // The smooth scroll moves it with the rows.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Body), metrics, -5).front().y == (3 * 32) - 5);
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Body), metrics, -5)).front().y
+          == (3 * 32) - 5);
 
     // No segment, no bar; and a mark on the row stands in for the bar there.
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::None, RailMark::UserMark), metrics, 0).empty());
-    CHECK(vtrasterizer::railRects(railCell(3, RailSegment::Head, RailMark::Cross), metrics, 0).empty());
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::None, RailMark::UserMark), metrics, 0))
+              .empty());
+    CHECK(rectsOf(vtrasterizer::railRects(railCell(3, RailSegment::Head, RailMark::Cross), metrics, 0))
+              .empty());
 }
 
 TEST_CASE("RailGeometry.theCellsMoveLeftOfTheStrip", "[renderer][rail]")
@@ -129,7 +138,7 @@ TEST_CASE("RailGeometry.aChipBandIsRoundedAtItsEnds", "[renderer][rail]")
     };
     auto constexpr Left = 200 + (4 * 16);
     auto constexpr Right = 200 + (10 * 16);
-    CHECK(vtrasterizer::chipBandRects(band, metrics, 0)
+    CHECK(rectsOf(vtrasterizer::chipBandRects(band, metrics, 0))
           == std::vector { RailRect { .x = Left + 1, .y = 64, .width = Right - Left - 2, .height = 32 },
                            RailRect { .x = Left, .y = 65, .width = 1, .height = 30 },
                            RailRect { .x = Right - 1, .y = 65, .width = 1, .height = 30 } });

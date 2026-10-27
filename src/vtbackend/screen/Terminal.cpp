@@ -1322,9 +1322,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     // After both branches: the gutter and the fold labels belong to the main display whichever page it is
     // showing, and each is a no-op on a page folding does not apply to.
+    // Once per frame for all of them: each drawn row's block, and the collapsed folds' chips (m1).
+    fillDrawnRowBlocks();
+    auto const foldLabels = foldLabelPlacements();
     fillGutter(output, baseLine);
-    fillFoldLabels(output, baseLine);
-    auto const chipStatus = fillBlockChips(output, baseLine);
+    fillFoldLabels(output, baseLine, foldLabels);
+    auto const chipStatus = fillBlockChips(output, baseLine, foldLabels);
     fillBlockHighlight(output, baseLine);
 
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
@@ -4034,31 +4037,13 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     auto const hoveredHead =
         _gutterHoverLine ? foldCovering(foldRanges(), grid.stableLineIdOf(*_gutterHoverLine)) : std::nullopt;
 
-    // The rail: each drawn row's block and those of the rows just beyond the page's two edges, looked up once
-    // per row -- never by walking a block's rows, so a frame costs the drawn rows times a block lookup
-    // however tall the blocks are. Index 0 is the row above the page, index rows + 1 the row below it.
-    auto const rows = unbox<int>(drawnRowLimit());
-    // Kept across frames, so drawing allocates only when the page grows.
-    auto& railBlocks = _railBlocks;
-    railBlocks.clear();
-    if (layout.rail == BlockRailPresence::Present)
-    {
-        for (auto const y: std::views::iota(-1, rows + 1))
-            railBlocks.push_back(commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y))));
-        // A row beyond an edge exists only where the translation moved past the edge row: at the top of the
-        // history, or below the last line, it is held to the edge row itself.
-        auto const edgeHeld = [&](int beyond, int edge) {
-            return _viewport.translateScreenToGridLine(LineOffset(beyond))
-                   == _viewport.translateScreenToGridLine(LineOffset(edge));
-        };
-        if (rows > 0 && edgeHeld(-1, 0))
-            railBlocks.front() = nullptr;
-        if (rows > 0 && edgeHeld(rows, rows - 1))
-            railBlocks.back() = nullptr;
-    }
+    // The rail reads each drawn row's block, and those of the rows just beyond the page's two edges, as
+    // fillDrawnRowBlocks() looked them up for this frame.
+    auto const railBlocks = layout.rail == BlockRailPresence::Present
+                                ? std::span<CommandBlockRecord const* const> { _railBlocks }
+                                : std::span<CommandBlockRecord const* const> {};
     auto const railRecordAt = [&](int y) {
-        auto const index = y + 1;
-        return railBlocks.at(static_cast<size_t>(index));
+        return drawnRowBlockOf(railBlocks, y);
     };
     auto const railIdOf = [&](int y) -> std::optional<CommandBlockId> {
         auto const* const record = railRecordAt(y);
@@ -4071,6 +4056,13 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
             _hoveredCommandBlock == id || (gutterHoveredRecord != nullptr && gutterHoveredRecord->id == id);
         return hovered ? BlockAttention::Hovered : BlockAttention::Rest;
     };
+    // The rail's six colours, by outcome and attention, mixed once per frame rather than once per row.
+    auto railColors = std::array<std::array<RGBColor, 2>, CommandBlockOutcomeCount> {};
+    if (!railBlocks.empty())
+        for (auto const outcome: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
+            for (auto const attention: { BlockAttention::Rest, BlockAttention::Hovered })
+                railColors.at(outcome).at(static_cast<std::size_t>(attention)) =
+                    railColor(_colorPalette, static_cast<CommandBlockOutcome>(outcome), attention);
     auto const railRowAt = [&](int y, UserMarkPresence mark) {
         auto row = GutterRow {};
         if (railBlocks.empty())
@@ -4091,7 +4083,8 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
         if (record != nullptr)
         {
             row.outcome = facts.outcome;
-            row.railColor = railColor(_colorPalette, facts.outcome, facts.attention);
+            row.railColor = railColors.at(static_cast<std::size_t>(facts.outcome))
+                                .at(static_cast<std::size_t>(facts.attention));
         }
         // A status mark is the rail's own ink; a user mark keeps the colour the glyph column gives it.
         row.railMarkColor =
@@ -4141,9 +4134,10 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     }
 }
 
-void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
+void Terminal::fillFoldLabels(RenderBuffer& output,
+                              LineOffset baseLine,
+                              std::span<FoldLabelPlacement const> placements) const
 {
-    auto const placements = foldLabelPlacements();
     if (placements.empty())
         return;
 
@@ -4376,7 +4370,9 @@ namespace
     }
 } // namespace
 
-RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine) const
+RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
+                                       LineOffset baseLine,
+                                       std::span<FoldLabelPlacement const> foldLabels) const
 {
     // The chip tells how a block ended, a job of exit status's; and only the primary page has blocks.
     if (!_settings.gutter.exitStatus || !foldingAppliesToDisplayedPage())
@@ -4387,12 +4383,11 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
     auto const pageColumns = pageSize().columns;
     auto status = RunningStatus::Hidden;
     auto lastBlock = std::optional<CommandBlockId> {};
-    auto const foldLabels = foldLabelPlacements();
 
     // Each block once, at its first drawn row: the chip goes on its command row, wherever that is drawn.
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
     {
-        auto const* const record = commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y)));
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
         if (record == nullptr || record->id == lastBlock)
             continue;
         lastBlock = record->id;
@@ -4466,6 +4461,39 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
     return status;
 }
 
+void Terminal::fillDrawnRowBlocks() const
+{
+    // Each drawn row's block and those of the rows just beyond the page's two edges, looked up once per row
+    // -- never by walking a block's rows, so a frame costs the drawn rows times a block lookup however tall
+    // the blocks are. Index 0 is the row above the page, index rows + 1 the row below it. Kept across
+    // frames, so a frame allocates only when the page grows.
+    _railBlocks.clear();
+    if (!foldingAppliesToDisplayedPage())
+        return;
+    auto const rows = unbox<int>(drawnRowLimit());
+    for (auto const y: std::views::iota(-1, rows + 1))
+        _railBlocks.push_back(commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y))));
+    // A row beyond an edge exists only where the translation moved past the edge row: at the top of the
+    // history, or below the last line, it is held to the edge row itself.
+    auto const edgeHeld = [&](int beyond, int edge) {
+        return _viewport.translateScreenToGridLine(LineOffset(beyond))
+               == _viewport.translateScreenToGridLine(LineOffset(edge));
+    };
+    if (rows > 0 && edgeHeld(-1, 0))
+        _railBlocks.front() = nullptr;
+    if (rows > 0 && edgeHeld(rows, rows - 1))
+        _railBlocks.back() = nullptr;
+}
+
+CommandBlockRecord const* Terminal::drawnRowBlockOf(std::span<CommandBlockRecord const* const> blocks,
+                                                    int y) noexcept
+{
+    if (y < -1)
+        return nullptr;
+    auto const index = static_cast<std::size_t>(y) + 1;
+    return index < blocks.size() ? blocks[index] : nullptr;
+}
+
 std::optional<CommandBlockId> Terminal::hoveredBlock() const
 {
     if (_hoveredCommandBlock)
@@ -4496,7 +4524,7 @@ void Terminal::fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) con
     auto last = 0;
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
     {
-        auto const* const record = commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y)));
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
         if (record == nullptr || record->id != *hovered)
             continue;
         if (!first)
@@ -8009,13 +8037,16 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
 
         auto const savedChanges = _changes.load();
         auto const savedFrameID = _lastFrameID.load();
+        auto const savedRunningStatus = _runningStatus.load(std::memory_order_relaxed);
 
-        // The build alone: no frame of the display's, so neither link detection nor _screenDirty sees it.
+        // The build alone: no frame of the display's, so neither link detection nor _screenDirty sees it --
+        // nor whether a running time is on display, which only a frame drawn says (m8).
         RenderBuffer snapshotBuffer;
         fillRenderBufferInternal(snapshotBuffer, false);
 
         _changes.store(savedChanges);
         _lastFrameID.store(savedFrameID);
+        _runningStatus.store(savedRunningStatus, std::memory_order_relaxed);
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
         _screenTransition.snapshotCursor = snapshotBuffer.cursor;

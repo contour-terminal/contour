@@ -471,7 +471,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     // Once a second, the coarsest step a running time is shown in ("Running · 8s").
     _runningStatusTimer.setInterval(RunningStatusRefreshInterval);
     connect(&_runningStatusTimer, &QTimer::timeout, this, [this]() {
-        if (_terminal.hasVisibleRunningStatus())
+        if (_display != nullptr && _terminal.hasVisibleRunningStatus())
             scheduleRedraw();
         else
             _runningStatusTimer.stop();
@@ -587,6 +587,9 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
     // resize must read as the page, not as this burst's zoom.
     _sizeIndicatorBurst = SizeIndicatorBurst::Idle;
     _display = nullptr;
+    // A pane nobody sees -- in another tab, a minimised window -- builds no frame that would take its running
+    // time back, so its redraw stops here rather than waking the app once a second for good (I1).
+    _runningStatusTimer.stop();
 }
 
 display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcept
@@ -670,6 +673,10 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // configureDisplay() only runs from createRenderer(), i.e. once for the first session, so the
     // ceiling has to be (re)derived here too. See updateImageCanvasCeiling() for the null-checks.
     updateImageCanvasCeiling();
+
+    // A running time the last frame showed ticks again: no frame raises the change it would need, as the
+    // flag did not move while the display was away (I1).
+    updateRunningStatusRefresh();
 
     // The font this display draws in, for the status-line extensions; later changes are told by the
     // display once it has applied them.
@@ -4558,8 +4565,9 @@ vtbackend::ColumnCount TerminalSession::foldChipHitColumns() const
 {
     if (_display == nullptr)
         return vtbackend::ColumnCount(1);
+    // The published cell size, lock-free: asked on every pointer move over the page (m5).
     return session::foldChipHitColumns(
-        _gutterChrome, _display->devicePixelRatio(), unbox<int>(_display->gridMetrics().cellSize.width));
+        _gutterChrome, _display->devicePixelRatio(), unbox<int>(_display->cellSize().width));
 }
 
 void TerminalSession::runningStatusChanged()
@@ -4571,8 +4579,9 @@ void TerminalSession::runningStatusChanged()
 
 void TerminalSession::updateRunningStatusRefresh()
 {
-    // Read when it runs rather than carried in the post: a later frame may already have taken it back.
-    if (!_terminal.hasVisibleRunningStatus())
+    // Read when it runs rather than carried in the post: a later frame may already have taken it back. A
+    // pane with no display shows nothing, whatever its last frame did.
+    if (_display == nullptr || !_terminal.hasVisibleRunningStatus())
         _runningStatusTimer.stop();
     else if (!_runningStatusTimer.isActive())
         _runningStatusTimer.start();
