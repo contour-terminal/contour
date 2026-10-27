@@ -8494,7 +8494,7 @@ TEST_CASE("The find bar tints the field and says so on a miss and on an invalid 
     auto const* style =
         engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
     REQUIRE(style != nullptr);
-    auto const error = style->property("errorColor").value<QColor>();
+    auto const error = style->property("colors").value<QObject*>()->property("findErrorText").value<QColor>();
 
     for (auto const& summary: { QStringLiteral("No results"), QStringLiteral("Invalid pattern") })
     {

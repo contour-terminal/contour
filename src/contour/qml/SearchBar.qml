@@ -117,9 +117,9 @@ Popup {
     readonly property bool _hasMatches: root._search ? root._search.searchHasMatches : true
     readonly property bool _navigable: root._search ? root._search.searchNavigable : false
 
-    // The tint a fruitless search or a refused pattern takes: the Danger status token
-    // (UiStyleProvider::errorColor), the same on every chrome row, rather than a literal here.
-    readonly property color errorColor: chromeStyle.errorColor
+    // The tint a fruitless search or a refused pattern takes, the findErrorText role: the Danger hue on the
+    // native rows; on the Terminal row the scheme's red where it reads on the bar, else the bar's ink.
+    readonly property color errorColor: chromeStyle.colors.findErrorText
 
     // Which session was last told this bar is open, which is emphatically NOT "whatever session is
     // bound right now": the bar OUTLIVES a rebind, because SessionChrome re-targets on every tab

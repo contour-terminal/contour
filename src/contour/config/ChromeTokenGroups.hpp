@@ -167,6 +167,7 @@ enum class ChromeColorRole : uint8_t
     FindToggleText,   //!< An unlit option toggle's glyph.
     FindCountText,    //!< The match count beside the field.
     FindToggleOnRing, //!< The ring that sets a lit option toggle off an unlit one; none where its fill does.
+    FindErrorText,    //!< The count, and the field's edge, on a miss or a refused pattern.
 };
 
 /// Where a chrome colour comes from.
@@ -222,7 +223,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::BarSelectionText) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindToggleOnRing) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
 
 /// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
@@ -232,7 +233,7 @@ inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::
 inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
 
 /// One past the last find bar colour role: the find bar's roles run from @c PaletteColorRoleEnd to here.
-inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindToggleOnRing) + 1;
+inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -888,6 +889,13 @@ namespace detail
                             .slot = SchemeSlot::Background,
                             .alphaPercent = 100,
                             .level = 0 }, // FindToggleOnRing
+        // The Danger status hue as text, by the chrome's tone: what UiStyleProvider::errorColor paints.
+        ChromeColorSource { .kind = ColorSourceKind::Status,
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 }, // FindErrorText
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -1339,7 +1347,10 @@ namespace detail
                     schemeOnBar(SchemeSlot::Secondary), // FindToggleText
                     schemeColor(SchemeSlot::BarInk),    // FindCountText
                     // Inverse video already stands off the bar at 4.5:1: no ring.
-                    detail::noColor() }, // FindToggleOnRing
+                    detail::noColor(), // FindToggleOnRing
+                    // The scheme's red where it reads on the bar at 4.5:1, else the bar's ink: the status
+                    // hues follow the OS palette's tone, not the bar's.
+                    schemeOnBar(SchemeSlot::Danger) }, // FindErrorText
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

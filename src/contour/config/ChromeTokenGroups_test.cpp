@@ -1212,6 +1212,14 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
                                                      .alphaPercent = 100,
                                                      .level = 0 },
                        .terminal = contour::config::detail::noColor() },
+        PaneColorRow { .role = FindErrorText,
+                       .native = ChromeColorSource { .kind = ColorSourceKind::Status,
+                                                     .rgb = 0,
+                                                     .status = StatusColorRole::Danger,
+                                                     .slot = SchemeSlot::Background,
+                                                     .alphaPercent = 100,
+                                                     .level = 0 },
+                       .terminal = schemeOnBar(SchemeSlot::Danger) },
     };
     // Every find bar role, PaletteColorRoleEnd up to FindColorRoleEnd, has a row here.
     CHECK(rows.size() == FindColorRoleEnd - PaletteColorRoleEnd);

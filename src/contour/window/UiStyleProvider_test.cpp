@@ -1915,6 +1915,9 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
                 CHECK(contrastOf(over(role("findToggleOnText"), lit), lit) >= MinimumTextContrast);
                 CHECK(contrastOf(over(role("findToggleText"), window), window) >= MinimumTextContrast);
                 CHECK(contrastOf(over(role("findCountText"), window), window) >= MinimumTextContrast);
+                // A miss or a refused pattern reads the count in the error colour, on the same ground.
+                CHECK(contrastOf(over(role("findErrorText"), window), window) >= MinimumTextContrast);
+                CHECK(role("findErrorText") == provider.errorColor());
                 auto const ring = role("findToggleOnRing");
                 CHECK(ring == provider.statusMarkOn(static_cast<int>(StatusColorRole::Running), window));
                 CHECK(contrastOf(ring, window) >= MinimumMarkContrast);
@@ -1940,6 +1943,7 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
         CHECK(contrastOf(role("findToggleOnFill"), bar) >= MinimumMarkContrast);
         CHECK(contrastOf(role("findToggleText"), bar) >= MinimumTextContrast);
         CHECK(contrastOf(role("findCountText"), bar) >= MinimumTextContrast);
+        CHECK(contrastOf(role("findErrorText"), bar) >= MinimumTextContrast);
         CHECK(role("findToggleOnRing").alpha() == 0);
     }
 }
