@@ -31,7 +31,7 @@ enum class ShellRcError : uint8_t
     NotAFile,     ///< The path is a directory, a dangling link or something else but a regular file.
     Changed,      ///< The file changed between reading it and writing to it; nothing was written.
     InvalidLine,  ///< The line is empty or spans more than one line.
-    PartialWrite, ///< The append failed halfway; the file may end in an incomplete line.
+    PartialWrite, ///< The append was cut short, now or earlier: the file ends in an incomplete Contour line.
 };
 
 /// What @p error means, in words for a sentence that continues "was not changed: ".
@@ -48,7 +48,7 @@ enum class ShellRcError : uint8_t
         case ShellRcError::Changed: return "it changed while it was being read";
         case ShellRcError::InvalidLine: return "the line to add is not a single line";
         case ShellRcError::PartialWrite:
-            return "the write was cut short and the file may end in a partial line";
+            return "its last line is a cut-short Contour line; delete that line and try again";
     }
     return "unknown error";
 }
@@ -115,7 +115,10 @@ class NullShellRcEditor final: public IShellRcEditor
 /// What a startup file's text says about the integration.
 /// @param shell The shell the file is for.
 /// @param content The file's bytes.
-/// @return Installed when the file holds config::ShellRcMarker, or a line that is not a comment and
+/// @return Partial when the last line has no line ending and is the beginning of Contour's line (the
+///         shell's config::ShellRow::guard) without its config::ShellRcMarker, which is what an append
+///         cut short by a full disk leaves behind; a user's own unterminated last line is never that.
+///         Else Installed when the file holds config::ShellRcMarker, or a line that is not a comment and
 ///         either runs `generate integration shell <name>` or sources `shell-integration.<name>`;
 ///         else Absent.
 [[nodiscard]] config::RcState rcStateOf(config::ShellKind shell, std::string_view content);
@@ -124,7 +127,8 @@ class NullShellRcEditor final: public IShellRcEditor
 ///
 /// Locates the file from `HOME`, `ZDOTDIR` and `XDG_CONFIG_HOME`; a file that is a symlink is
 /// appended through to its target. Appending reads the file again right before writing and refuses
-/// when it changed meanwhile.
+/// when it changed meanwhile, and reads it once more afterwards: the file system's append may report
+/// success for a write that was cut short (a close error nobody checked), so the file itself decides.
 class FileShellRcEditor final: public IShellRcEditor
 {
   public:

@@ -6,6 +6,7 @@
 // system and a fake environment; no test reaches the real HOME.
 
 #include <contour/platform/ShellRcEditor.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <core/testing/Environment.hpp>
 
@@ -46,9 +47,11 @@ fs::path home()
 enum class DiskFault : uint8_t
 {
     None = 0,
-    ReadOnly,   ///< "Permission denied": nothing is written.
-    Full,       ///< "No space left on device": nothing is written.
-    FullMidway, ///< Half of the bytes land, then "No space left on device".
+    ReadOnly,     ///< "Permission denied": nothing is written.
+    Full,         ///< "No space left on device": nothing is written.
+    FullMidway,   ///< Half of the bytes land, then "No space left on device".
+    SilentPrefix, ///< Only the first `landBytes` land, yet the append reports success (an ignored close
+                  ///< error).
 };
 
 /// An in-memory disk that records every mutating call, can fail an append, resolves symlinks the way a
@@ -64,6 +67,7 @@ struct RcDisk final: vthost::testing::ForwardingFileSystem
     mutable std::vector<Call> calls;
     std::map<fs::path, fs::path> links;
     DiskFault fault = DiskFault::None;
+    std::size_t landBytes = 0;                  ///< How many bytes DiskFault::SilentPrefix lets through.
     mutable std::function<void(int)> afterRead; ///< Gets the 1-based read count.
     mutable int reads = 0;
     std::function<void()> afterCreateDirectories; ///< Runs once the directories exist.
@@ -106,6 +110,7 @@ struct RcDisk final: vthost::testing::ForwardingFileSystem
             case DiskFault::FullMidway:
                 std::ignore = files.appendFile(path, content.substr(0, content.size() / 2));
                 return std::unexpected("No space left on device");
+            case DiskFault::SilentPrefix: return files.appendFile(path, content.substr(0, landBytes));
         }
         return {};
     }
@@ -472,6 +477,67 @@ TEST_CASE("ShellRcEditor: a full disk never truncates the file", "[shellrc]")
     // The user's own bytes are all still there, in place; only more bytes followed them.
     CHECK(midway.disk.text(zshRc()).starts_with("export A=1\nexport B=2"));
     CHECK(!midway.disk.touched("writeFile"));
+}
+
+TEST_CASE("ShellRcEditor: an append that reports success but lands only a prefix is a PartialWrite",
+          "[shellrc]")
+{
+    auto const line = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
+    auto rig = Rig {};
+    rig.disk.files.addFile(zshRc(), "export A=1\n");
+    rig.disk.fault = DiskFault::SilentPrefix;
+    rig.disk.landBytes = line.size() / 2;
+    CHECK(rig.editor.install(ShellKind::Zsh, line).error() == ShellRcError::PartialWrite);
+    CHECK(rig.disk.text(zshRc()).starts_with("export A=1\n"));
+}
+
+TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and nothing more is appended",
+          "[shellrc]")
+{
+    for (auto const shell: { ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish })
+    {
+        auto const line = contour::window::shellRcLine(shell, "/usr/bin/contour").value();
+        auto const rc = [&](Rig const& rig) {
+            return rig.editor.inspect(shell)->file;
+        };
+        // Every cut from one byte up to the line minus its marker's last byte and the line ending: the
+        // last two cuts leave a whole, merely unterminated or terminated line.
+        for (auto const landed: std::views::iota(std::size_t { 1 }, line.size()))
+        {
+            INFO("shell " << static_cast<int>(shell) << " landed " << landed);
+            auto rig = Rig {};
+            rig.disk.files.addFile(rc(rig), "export A=1\n");
+            rig.disk.fault = DiskFault::SilentPrefix;
+            rig.disk.landBytes = landed;
+            REQUIRE(rig.editor.install(shell, line).error() == ShellRcError::PartialWrite);
+
+            auto const inspected = rig.editor.inspect(shell);
+            REQUIRE(inspected.has_value());
+            CHECK(inspected->state == RcState::Partial);
+
+            auto const before = rig.disk.text(rc(rig));
+            rig.disk.fault = DiskFault::None;
+            CHECK(rig.editor.install(shell, line).error() == ShellRcError::PartialWrite);
+            CHECK(rig.disk.text(rc(rig)) == before);
+        }
+    }
+}
+
+TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's line is Partial", "[shellrc]")
+{
+    CHECK(rcStateOf(ShellKind::Zsh, "export A=1\nif [ \"$TERM_PROGRAM\" = contour ]; then eval \"$('/x/c")
+          == RcState::Partial);
+    CHECK(rcStateOf(ShellKind::Zsh, "export A=1\nif [ \"$TERM") == RcState::Partial);
+    CHECK(rcStateOf(ShellKind::Fish,
+                    "if test \"$TERM_PROGRAM\" = contour; '/x/c' generate integration shell fi")
+          == RcState::Partial);
+    // The user's own unterminated last line is not ours.
+    CHECK(rcStateOf(ShellKind::Zsh, "export A=1\nexport B=2") == RcState::Absent);
+    CHECK(rcStateOf(ShellKind::Zsh, "export A=1\n") == RcState::Absent);
+    // A whole line, with or without its line ending, is Installed.
+    auto const line = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
+    CHECK(rcStateOf(ShellKind::Zsh, line) == RcState::Installed);
+    CHECK(rcStateOf(ShellKind::Zsh, line + "\n") == RcState::Installed);
 }
 
 TEST_CASE("ShellRcEditor: a file edited between the read and the write is refused", "[shellrc]")

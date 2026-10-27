@@ -29,6 +29,7 @@ enum class RcState : uint8_t
     Unknown = 0, ///< Not inspected, or not inspectable.
     Absent,      ///< The file does not load it.
     Installed,   ///< The file loads it.
+    Partial,     ///< The file ends in a cut-short copy of Contour's line, which breaks the shell.
 };
 
 /// The language a shell's startup file is written in, which decides how the line is quoted.
@@ -52,6 +53,7 @@ struct ShellRow
     ShellKind kind = ShellKind::Unknown;
     std::string_view name {}; ///< As `contour generate integration shell <name>` spells it.
     RcSyntax syntax = RcSyntax::Posix;
+    std::string_view guard {}; ///< Opens the appended line: runs the rest only in a shell Contour started.
     RcBase base = RcBase::Home;
     std::string_view rcFile {};      ///< Relative to @c base.
     std::string_view rcFileMacOS {}; ///< Relative to @c base, on macOS.
@@ -62,18 +64,21 @@ inline constexpr auto ShellRows = std::array {
     ShellRow { .kind = ShellKind::Bash,
                .name = "bash",
                .syntax = RcSyntax::Posix,
+               .guard = R"(if [ "$TERM_PROGRAM" = contour ]; then )",
                .base = RcBase::Home,
                .rcFile = ".bashrc",
                .rcFileMacOS = ".bash_profile" },
     ShellRow { .kind = ShellKind::Zsh,
                .name = "zsh",
                .syntax = RcSyntax::Posix,
+               .guard = R"(if [ "$TERM_PROGRAM" = contour ]; then )",
                .base = RcBase::ZDotDir,
                .rcFile = ".zshrc",
                .rcFileMacOS = ".zshrc" },
     ShellRow { .kind = ShellKind::Fish,
                .name = "fish",
                .syntax = RcSyntax::Fish,
+               .guard = R"(if test "$TERM_PROGRAM" = contour; )",
                .base = RcBase::XdgConfig,
                .rcFile = "fish/config.fish",
                .rcFileMacOS = "fish/config.fish" },

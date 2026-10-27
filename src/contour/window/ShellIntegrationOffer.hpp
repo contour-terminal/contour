@@ -251,13 +251,11 @@ namespace detail
     switch (row->syntax)
     {
         case config::RcSyntax::Posix:
-            return std::string(R"x(if [ "$TERM_PROGRAM" = contour ]; then eval "$()x") + quoted
-                   + " generate integration shell " + std::string(row->name) + R"x( to -)"; fi )x"
-                   + std::string(config::ShellRcMarker);
+            return std::string(row->guard) + R"x(eval "$()x" + quoted + " generate integration shell "
+                   + std::string(row->name) + R"x( to -)"; fi )x" + std::string(config::ShellRcMarker);
         case config::RcSyntax::Fish:
-            return std::string("if test \"$TERM_PROGRAM\" = contour; ") + quoted
-                   + " generate integration shell " + std::string(row->name) + " to - | source; end "
-                   + std::string(config::ShellRcMarker);
+            return std::string(row->guard) + quoted + " generate integration shell " + std::string(row->name)
+                   + " to - | source; end " + std::string(config::ShellRcMarker);
     }
     return std::unexpected(ShellRcLineError::UnknownShell);
 }

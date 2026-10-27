@@ -126,6 +126,18 @@ namespace
             return alternate.shell == row.kind && fileSystem.exists(*base / alternate.file);
         });
     }
+
+    /// Whether @p content's last line has no line ending and only begins Contour's line for @p row.
+    [[nodiscard]] bool endsInPartialLine(config::ShellRow const& row, std::string_view content) noexcept
+    {
+        if (content.empty() || content.ends_with('\n'))
+            return false;
+        auto const lastLine = trimmed(content.substr(content.find_last_of('\n') + 1));
+        if (lastLine.empty() || lastLine.ends_with(config::ShellRcMarker))
+            return false;
+        // A cut anywhere in the guard, or after it: the guard is a prefix of the line, or the line of it.
+        return row.guard.starts_with(lastLine) || lastLine.starts_with(row.guard);
+    }
 } // namespace
 
 config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
@@ -133,6 +145,8 @@ config::RcState rcStateOf(config::ShellKind shell, std::string_view content)
     auto const* const row = config::shellRow(shell);
     if (row == nullptr)
         return config::RcState::Absent;
+    if (endsInPartialLine(*row, content))
+        return config::RcState::Partial;
     if (content.contains(config::ShellRcMarker))
         return config::RcState::Installed;
 
@@ -169,10 +183,10 @@ std::expected<RcInspection, ShellRcError> FileShellRcEditor::inspect(config::She
     auto const file = readRc(_fileSystem, *path);
     if (!file)
         return std::unexpected(file.error());
-    auto const installed = rcStateOf(shell, file->content) == config::RcState::Installed
-                           || hasAlternateInstall(_fileSystem, _environment, *row);
-    return RcInspection { .file = file->path,
-                          .state = installed ? config::RcState::Installed : config::RcState::Absent };
+    auto state = rcStateOf(shell, file->content);
+    if (state == config::RcState::Absent && hasAlternateInstall(_fileSystem, _environment, *row))
+        state = config::RcState::Installed;
+    return RcInspection { .file = file->path, .state = state };
 }
 
 std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellKind shell,
@@ -190,8 +204,10 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     auto const before = readRc(_fileSystem, *path);
     if (!before)
         return std::unexpected(before.error());
-    if (rcStateOf(shell, before->content) == config::RcState::Installed
-        || hasAlternateInstall(_fileSystem, _environment, *row))
+    auto const state = rcStateOf(shell, before->content);
+    if (state == config::RcState::Partial)
+        return std::unexpected(ShellRcError::PartialWrite); // appending would only make the parse worse
+    if (state == config::RcState::Installed || hasAlternateInstall(_fileSystem, _environment, *row))
         return RcInstall::AlreadyInstalled;
 
     // Parent directories first: a fish user may have no config directory yet. Creating a directory
@@ -217,12 +233,13 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     chunk += line;
     chunk += '\n';
 
-    if (_fileSystem.appendFile(before->resolved, chunk))
-        return RcInstall::Appended;
-
-    // Nothing is truncated or restored on a failed write: an append can only have added bytes, so the
-    // user's own lines are intact. Say so when some of ours landed.
+    // The append's own verdict is not trusted: it can report success for a write whose tail never reached
+    // the disk. Nothing is truncated or restored either way: an append can only have added bytes, so the
+    // user's own lines are intact. The file, read again, says what landed.
+    std::ignore = _fileSystem.appendFile(before->resolved, chunk);
     auto const after = readRc(_fileSystem, *path);
+    if (after && after->content == before->content + chunk)
+        return RcInstall::Appended;
     if (after && after->content != before->content)
         return std::unexpected(ShellRcError::PartialWrite);
     return std::unexpected(ShellRcError::Unwritable);
