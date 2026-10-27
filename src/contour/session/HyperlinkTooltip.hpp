@@ -51,12 +51,6 @@ namespace contour::session
                                                std::optional<std::string_view> localHost,
                                                size_t maxLength);
 
-/// What the hover tooltip says for a detected link: its target where that differs from what is printed (a
-/// template's expansion, a relative path's absolute form with its location), else nothing.
-/// @param link The link.
-/// @return The text; empty for no tooltip.
-[[nodiscard]] std::string detectedLinkTooltip(vtbackend::DetectedLink const& link);
-
 /// What the link pill says for an OSC 8 target (spec R-f).
 ///
 /// A URL with an authority reads as its host and its non-empty, decoded path segments joined by " › "

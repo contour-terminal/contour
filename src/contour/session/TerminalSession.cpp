@@ -22,6 +22,7 @@
     #include <vtextension/ExtensionConsent.hpp>
     #include <vtextension/SessionExtensions.hpp>
 #endif
+#include <contour/command/Shortcut.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/LocalFileAction.hpp>
@@ -882,6 +883,10 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 void TerminalSession::screenUpdated()
 {
     ZoneScoped;
+    // The parser thread, maybe under the state lock: while the link pill shows, the page under it may have
+    // filled where it stands, so QML is asked to place it again -- posted, and only while it shows.
+    if (_linkTargetVisibility.load(std::memory_order_relaxed) == LinkPillVisibility::Shown)
+        requestOverlayClearanceRefresh();
     // Ahead of the display check: the tab badge's unseen-output dot is for the sessions that have no
     // display -- a background tab's panes are not loaded at all. A tmux pane's capture-pane refill arrives
     // as bytes like any other, so its device says where what the parser just read came from.
@@ -3887,6 +3892,16 @@ bool TerminalSession::willRun(config::ActionList const& actions) const
     return _allowKeyMappings || config::containsAction<actions::ToggleAllKeyMaps>(actions);
 }
 
+namespace
+{
+    /// Whether a pointer move decides the pointer's shape.
+    enum class PointerShapeDecision : uint8_t
+    {
+        Kept = 0, ///< The shape stays as it is.
+        Decided,  ///< This move decides it: a new cell, a stale shape, or a chord that changes it.
+    };
+} // namespace
+
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                                          vtbackend::CellLocation pos,
                                          vtbackend::PixelCoordinate pixelPosition)
@@ -3923,19 +3938,23 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // asks the filesystem: a printed path is a link only once detection has found the file, off this thread.
     struct Hover
     {
-        /// What the tooltip names: the OSC 8 link's URI, or a detected link's target where it differs from
-        /// its text; none over neither.
+        /// What the link pill names: the OSC 8 link's URI, or a detected link's pill text; none over
+        /// neither, and none on a move within the cell.
         HoveredLink link;
         std::optional<input::MouseCursorShape> targetShape; ///< Over something to open; else the default.
-        bool decidesPointerShape = false;                   ///< Whether this move decides the shape.
+        PointerShapeDecision pointerShape = PointerShapeDecision::Kept; ///< Whether this move decides it.
+        /// Whether the chord this move carries changes how links are presented: the pill's visibility
+        /// too, re-decided below even without a new cell.
+        vtbackend::LinkRevealChange chord = vtbackend::LinkRevealChange::Unchanged;
     };
     // Through runUnderStateLock(): a move the application tracks is reported, as a press is.
     auto const hover = _terminal.runUnderStateLock([&]() -> Hover {
         // The chord first, so that the shape below is read for the chord this move carries; the terminal's
         // own pass over it in sendMouseMoveEvent() then finds nothing new.
-        auto const chordChanged =
-            _terminal.updateHeldModifiers(modifiers) == vtbackend::LinkRevealChange::Changed;
-        auto const decidesPointerShape = decidesPointerShapeForCell || (chordChanged && _display != nullptr);
+        auto const chord = _terminal.updateHeldModifiers(modifiers);
+        auto const decidesPointerShape =
+            decidesPointerShapeForCell
+            || (chord == vtbackend::LinkRevealChange::Changed && _display != nullptr);
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
         // Read only on a new cell, where the tooltip is updated (below).
         auto const tooltipTarget = [&]() -> HoveredLink {
@@ -3943,7 +3962,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                 return std::monostate {};
             if (auto const link = _terminal.tryGetHoveringHyperlink())
                 return OscLinkTarget { .uri = link->uri };
-            if (auto const& text = hoveredDetectedLinkTooltip(); !text.empty())
+            if (auto const& text = hoveredDetectedLinkText(); !text.empty())
                 return DetectedLinkText { .text = text };
             return std::monostate {};
         };
@@ -3953,10 +3972,12 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         return Hover { .link = tooltipTarget(),
                        .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
                                                      : std::nullopt,
-                       .decidesPointerShape = decidesPointerShape };
+                       .pointerShape =
+                           decidesPointerShape ? PointerShapeDecision::Decided : PointerShapeDecision::Kept,
+                       .chord = chord };
     });
 
-    if (hover.decidesPointerShape)
+    if (hover.pointerShape == PointerShapeDecision::Decided)
     {
         _isPointerShapeStale = false;
         _pointerShapeCell = pos;
@@ -3966,9 +3987,12 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             setDefaultCursor();
     }
 
-    // The hover state (tooltip) follows the cell, not the chord.
+    // The hovered link follows the cell; whether its pill shows follows the chord as well (a modifier pressed
+    // while another window had the focus arrives with the next move, not as a key).
     if (decidesPointerShapeForCell)
         updateHyperlinkHover(hover.link, pos);
+    else if (hover.chord == vtbackend::LinkRevealChange::Changed)
+        refreshLinkTarget(_linkTarget.text);
 }
 
 namespace
@@ -4190,36 +4214,33 @@ namespace
     constexpr auto MaxTooltipLength = size_t { 100 };
 } // namespace
 
-std::string const& TerminalSession::hoveredDetectedLinkTooltip()
+std::string const& TerminalSession::hoveredDetectedLinkText()
 {
     // A new link is read by pointer, not copied; within the one last read, nothing is read at all. Keyed on
     // the index too, as a new detector's ids start over; and kept elided, so a move along one link copies
-    // at most a tooltip's worth.
+    // at most a pill's worth.
     auto const id = _terminal.hoveringLinkId();
     auto const* const index = _terminal.detectedLinks();
-    if (id != _detectedLinkTooltip.link || index != _detectedLinkTooltip.index)
+    if (id != _hoveredDetectedLink.link || index != _hoveredDetectedLink.index)
     {
         auto const* const link = index != nullptr ? index->find(id) : nullptr;
-        _detectedLinkTooltip = DetectedLinkTooltip {
+        _hoveredDetectedLink = HoveredDetectedLink {
             .index = index,
             .link = id,
-            .text =
-                link != nullptr ? elideMiddle(detectedLinkTooltip(*link), MaxTooltipLength) : std::string {},
+            .text = link != nullptr ? linkPillText(*link, MaxTooltipLength) : std::string {},
         };
     }
-    return _detectedLinkTooltip.text;
+    return _hoveredDetectedLink.text;
 }
 
 void TerminalSession::updateHyperlinkHover(HoveredLink const& link, vtbackend::CellLocation cell)
 {
-    if (!_config.hyperlinkHoverTooltip.value())
-        return;
-
+    // Tracked whatever hyperlink_hover_tooltip says: the key decides when the target shows, not whether it is
+    // known (refreshLinkTarget()).
     auto const change = _hyperlinkHover.update(link, cell, MaxTooltipLength);
     if (change.change == HoverChange::Unchanged)
         return;
 
-    _hyperlinkTooltipText = QString::fromStdString(change.text);
     // The anchor is only meaningful while something is shown, and computing it needs a display.
     if (!change.text.empty() && _display != nullptr)
         _hyperlinkTooltipAnchor = geometry::cellRectangle(_display->gridMetrics().pageMargin,
@@ -4227,7 +4248,89 @@ void TerminalSession::updateHyperlinkHover(HoveredLink const& link, vtbackend::C
                                                           change.anchor,
                                                           1,
                                                           _display->devicePixelRatio());
-    emit hyperlinkHoverChanged();
+    refreshLinkTarget(QString::fromStdString(change.text));
+}
+
+void TerminalSession::refreshLinkTarget(QString text)
+{
+    // Read where the parser thread writes it: the chord the terminal last heard, and whether an application
+    // takes the mouse, in which case a click needs the bypass modifiers too.
+    struct LinkState
+    {
+        vtbackend::LinkPointer pointer;
+        vtbackend::FollowModifiers held;
+        vtbackend::Modifiers bypass;
+    };
+    auto const state = _terminal.runUnderStateLock([&] {
+        return LinkState { .pointer = _terminal.hoverPointer(),
+                           .held = _terminal.followModifiers(),
+                           .bypass = _terminal.mouseProtocol().has_value()
+                                         ? _config.bypassMouseProtocolModifiers.value()
+                                         : vtbackend::Modifiers {} };
+    });
+
+    // Re-read at every decision, so a configuration reload takes effect with the next one.
+    auto const reveal = linkTargetRevealOf(_config.hyperlinkHoverTooltip.value());
+    auto next = LinkTarget {
+        .text = std::move(text),
+        .hint = QString::fromStdString(command::linkOpenHint(
+            config::followHyperlinkModifiers(_config), state.bypass, command::platformShortcutStyle())),
+        .visibility = LinkPillVisibility::Hidden,
+    };
+    next.visibility = linkPillVisibility(reveal, state.pointer, state.held, next.text.toStdString());
+    if (next == _linkTarget)
+        return;
+
+    _linkTarget = std::move(next);
+    _linkTargetVisibility.store(_linkTarget.visibility, std::memory_order_relaxed);
+    emit linkTargetChanged();
+
+    // The tooltip SessionChrome.qml draws until the link pill replaces it: the target while the pill would
+    // show.
+    auto const tooltip = linkTargetShown() ? _linkTarget.text : QString {};
+    if (std::exchange(_hyperlinkTooltipText, tooltip) != tooltip)
+        emit hyperlinkHoverChanged();
+}
+
+void TerminalSession::requestOverlayClearanceRefresh()
+{
+    if (_overlayClearancePostPending.test_and_set(std::memory_order_acq_rel))
+        return;
+
+    // Posted to the session's own thread, where QML reads the clearance; postToObject drops it if the session
+    // dies first.
+    platform::postToObject(this, [this]() {
+        _overlayClearancePostPending.clear(std::memory_order_release);
+        ++_overlayClearanceRevision;
+        emit overlayClearanceChanged();
+    });
+}
+
+QVariantMap TerminalSession::overlayClearance() const
+{
+    if (_display == nullptr)
+        return {};
+
+    auto const clearance = core::locked(_terminal, [&] { return _terminal.overlayClearance(); });
+    auto const dpr = _display->devicePixelRatio();
+    auto const metrics = _display->gridMetrics();
+    auto const cell = _display->cellSize();
+    auto const listOf = [](std::vector<int> const& values) {
+        auto list = QVariantList {};
+        list.reserve(static_cast<qsizetype>(values.size()));
+        for (auto const value: values)
+            list.append(value);
+        return list;
+    };
+    return {
+        { QStringLiteral("marginLeft"), metrics.pageMargin.left / dpr },
+        { QStringLiteral("marginTop"), metrics.pageMargin.top / dpr },
+        { QStringLiteral("cellWidth"), unbox<double>(cell.width) / dpr },
+        { QStringLiteral("cellHeight"), unbox<double>(cell.height) / dpr },
+        { QStringLiteral("columns"), clearance.columns },
+        { QStringLiteral("trailingBlank"), listOf(clearance.trailingBlankColumns) },
+        { QStringLiteral("avoidRows"), listOf(clearance.avoidRows) },
+    };
 }
 
 void TerminalSession::clearGutterHover()
@@ -4482,8 +4585,7 @@ void TerminalSession::clearHyperlinkHover()
     if (_hyperlinkHover.clear().change == HoverChange::Unchanged)
         return;
 
-    _hyperlinkTooltipText.clear();
-    emit hyperlinkHoverChanged();
+    refreshLinkTarget(QString {});
 }
 
 void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
@@ -4534,8 +4636,10 @@ void TerminalSession::paneSeen()
 void TerminalSession::onHeldModifiersChanged(vtbackend::Modifiers held)
 {
     if (_terminal.runUnderStateLock([&]() { return _terminal.updateHeldModifiers(held); })
-        == vtbackend::LinkRevealChange::Changed)
-        refreshPointerShape();
+        == vtbackend::LinkRevealChange::Unchanged)
+        return;
+    refreshPointerShape();
+    refreshLinkTarget(_linkTarget.text);
 }
 
 void TerminalSession::refreshPointerShape()
@@ -6839,7 +6943,7 @@ void TerminalSession::configureTerminal()
         _terminal.setLinkPatterns(configured.linkPatterns);
         _terminal.setLinkDetectionPolicy(configured.linkDetection);
         // A new table means a new detector, whose link ids start over.
-        _detectedLinkTooltip = {};
+        _hoveredDetectedLink = {};
         _terminal.setLinkDecorationMode(configured.linkDecorationMode);
         _terminal.setLinkFollowModifiers(configured.linkFollowModifiers);
         _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());

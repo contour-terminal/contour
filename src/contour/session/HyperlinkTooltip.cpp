@@ -143,14 +143,6 @@ std::string hyperlinkTooltipText(std::string_view uri,
         maxLength);
 }
 
-std::string detectedLinkTooltip(vtbackend::DetectedLink const& link)
-{
-    auto shown = link.target.target;
-    if (link.target.kind == vtbackend::LinkKind::Path && link.target.location)
-        shown += std::format(":{}:{}", link.target.location->line, link.target.location->column);
-    return shown == link.text ? std::string {} : shown;
-}
-
 std::string linkPillText(std::string_view uri, std::optional<std::string_view> localHost, size_t maxLength)
 {
     if (uri.empty())

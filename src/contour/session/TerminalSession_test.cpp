@@ -15,6 +15,7 @@
 // plus its shell process — leaked.
 
 #include <contour/ContourGuiApp.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/FinishNotification.hpp>
@@ -7675,13 +7676,13 @@ TEST_CASE("TerminalSession: pointer motion over the sticky header acts on the he
     auto const belowHeader = QPointF(40, 20); // column 4 of row 1
 
     scene.hover(belowHeader);
-    REQUIRE_FALSE(session.hyperlinkTooltipText().isEmpty());
+    REQUIRE_FALSE(session.linkTargetText().isEmpty());
     REQUIRE(terminal.isMouseHoveringHyperlink());
 
     SECTION("the link the pointer came from ends, and the one beneath the header is never hovered")
     {
         scene.hover(overHeader);
-        CHECK(session.hyperlinkTooltipText().isEmpty());
+        CHECK(session.linkTargetText().isEmpty());
         CHECK_FALSE(terminal.isMouseHoveringHyperlink());
     }
 
@@ -7698,7 +7699,7 @@ TEST_CASE("TerminalSession: pointer motion over the sticky header acts on the he
 
         // Back onto the very cell it left from.
         scene.hover(belowHeader);
-        CHECK_FALSE(session.hyperlinkTooltipText().isEmpty());
+        CHECK_FALSE(session.linkTargetText().isEmpty());
         CHECK(terminal.isMouseHoveringHyperlink());
         CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
     }
@@ -7708,7 +7709,7 @@ TEST_CASE("TerminalSession: pointer motion over the sticky header acts on the he
         REQUIRE(terminal.viewport().scrollToBottom());
         REQUIRE_FALSE(vtbackend::test::drawFrame(terminal).stickyHeader.has_value());
         scene.hover(overHeader);
-        CHECK_FALSE(session.hyperlinkTooltipText().isEmpty());
+        CHECK_FALSE(session.linkTargetText().isEmpty());
         CHECK(terminal.isMouseHoveringHyperlink());
     }
 }
@@ -7760,7 +7761,7 @@ TEST_CASE("TerminalSession: a pointer that leaves the grid stops hovering its li
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) };
     session->sendMouseMoveEvent(vtbackend::Modifiers {}, onLink, vtbackend::PixelCoordinate {});
     REQUIRE(terminal.isMouseHoveringHyperlink());
-    REQUIRE_FALSE(session->hyperlinkTooltipText().isEmpty());
+    REQUIRE_FALSE(session->linkTargetText().isEmpty());
 
     SECTION("into the gutter")
     {
@@ -7768,7 +7769,7 @@ TEST_CASE("TerminalSession: a pointer that leaves the grid stops hovering its li
               == ConsumedByGutter::Yes);
         CHECK_FALSE(terminal.isMouseHoveringHyperlink());
         CHECK(terminal.tryGetHoveringHyperlink() == nullptr); // what the frame underlines
-        CHECK(session->hyperlinkTooltipText().isEmpty());
+        CHECK(session->linkTargetText().isEmpty());
     }
 
     SECTION("out of the window")
@@ -7776,7 +7777,7 @@ TEST_CASE("TerminalSession: a pointer that leaves the grid stops hovering its li
         session->onPointerLeft();
         CHECK_FALSE(terminal.isMouseHoveringHyperlink());
         CHECK(terminal.tryGetHoveringHyperlink() == nullptr);
-        CHECK(session->hyperlinkTooltipText().isEmpty());
+        CHECK(session->linkTargetText().isEmpty());
     }
 
     SECTION("back onto the cell it left from: the link is hovered again, tooltip and all")
@@ -7784,7 +7785,7 @@ TEST_CASE("TerminalSession: a pointer that leaves the grid stops hovering its li
         session->onPointerLeft();
         session->sendMouseMoveEvent(vtbackend::Modifiers {}, onLink, vtbackend::PixelCoordinate {});
         CHECK(terminal.isMouseHoveringHyperlink());
-        CHECK_FALSE(session->hyperlinkTooltipText().isEmpty());
+        CHECK_FALSE(session->linkTargetText().isEmpty());
         CHECK(session.surface->cursorShapes.back() == MouseCursorShape::PointingHand);
     }
 }
@@ -8049,7 +8050,7 @@ TEST_CASE("TerminalSession: a scroll on the parser thread leaves the block toolt
     CHECK(session->commandBlockTooltipAnchor().isEmpty());
 }
 
-TEST_CASE("TerminalSession: a scroll on the parser thread leaves the hyperlink tooltip to the GUI thread",
+TEST_CASE("TerminalSession: a scroll withdraws the link target, on the GUI thread",
           "[contour][session][hyperlink][threading]")
 {
     // The block tooltip's case, for the hyperlink's: output that scrolls a scrolled-back viewport reports the
@@ -8069,17 +8070,17 @@ TEST_CASE("TerminalSession: a scroll on the parser thread leaves the hyperlink t
         vtbackend::Modifiers {},
         vtbackend::CellLocation { .line = vtbackend::LineOffset(1), .column = vtbackend::ColumnOffset(1) },
         vtbackend::PixelCoordinate {});
-    REQUIRE_FALSE(session->hyperlinkTooltipText().isEmpty());
-    QSignalSpy const spy(session.session.get(), &TerminalSession::hyperlinkHoverChanged);
+    REQUIRE_FALSE(session->linkTargetText().isEmpty());
+    QSignalSpy const spy(session.session.get(), &TerminalSession::linkTargetChanged);
 
     // One more line at the bottom of the page scrolls it, and the scrolled-back viewport follows.
     std::thread { [&] { session->terminal().writeToScreen("\033[24;1H\n"); } }.join();
     CHECK(spy.count() == 0);
-    CHECK_FALSE(session->hyperlinkTooltipText().isEmpty());
+    CHECK_FALSE(session->linkTargetText().isEmpty());
 
     QCoreApplication::processEvents();
     CHECK(spy.count() == 1);
-    CHECK(session->hyperlinkTooltipText().isEmpty());
+    CHECK(session->linkTargetText().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a path that names no file shows no hand, Ctrl or not",
@@ -8141,7 +8142,7 @@ TEST_CASE("TerminalSession: hovering a detected path shows where it resolved", "
         {},
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) },
         {});
-    CHECK(session->hyperlinkTooltipText().toStdString() == resolvedInWorkDirectory("notes.txt") + ":3:1");
+    CHECK(session->linkTargetText().toStdString() == resolvedInWorkDirectory("notes.txt") + ":3:1");
 }
 
 TEST_CASE("TerminalSession: each detected link under the pointer shows its own tooltip",
@@ -8159,7 +8160,7 @@ TEST_CASE("TerminalSession: each detected link under the pointer shows its own t
                                     vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
                                                               .column = vtbackend::ColumnOffset(column) },
                                     {});
-        return session->hyperlinkTooltipText().toStdString();
+        return session->linkTargetText().toStdString();
     };
     auto const second = static_cast<int>(first.size()) + 2;
 
@@ -8169,7 +8170,7 @@ TEST_CASE("TerminalSession: each detected link under the pointer shows its own t
     CHECK(tooltipAt(1) == resolvedInWorkDirectory("one.txt") + ":3:1"); // and back
 }
 
-TEST_CASE("TerminalSession: hovering a detected link printed as it opens shows no tooltip",
+TEST_CASE("TerminalSession: a detected link printed as it opens names its target in the pill",
           "[contour][session][links]")
 {
     TestApp testApp;
@@ -8181,7 +8182,8 @@ TEST_CASE("TerminalSession: hovering a detected link printed as it opens shows n
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(8) },
         {});
     REQUIRE(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::PointingHand);
-    CHECK(session->hyperlinkTooltipText().isEmpty());
+    // The pill names what is printed all the same: the canvas's pill names a printed URL (R-f).
+    CHECK(session->linkTargetText() == QStringLiteral("example.com \u203A page"));
 }
 
 TEST_CASE("TerminalSession: the context menu pins a detected path once it is confirmed",
@@ -8953,10 +8955,10 @@ TEST_CASE("TerminalSession: a display that goes away takes the tooltips with it"
                                     vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
                                                               .column = vtbackend::ColumnOffset(1) },
                                     vtbackend::PixelCoordinate {});
-        REQUIRE_FALSE(session->hyperlinkTooltipText().isEmpty());
+        REQUIRE_FALSE(session->linkTargetText().isEmpty());
 
         session->detachDisplay(*session.surface);
-        CHECK(session->hyperlinkTooltipText().isEmpty());
+        CHECK(session->linkTargetText().isEmpty());
     }
 }
 
@@ -12775,5 +12777,208 @@ TEST_CASE("TerminalSession: size_indicator_on_resize: false raises nothing",
     pane->sizeIndicatorSettled(true);
     CHECK(requests.count() == 0);
     CHECK(said->said.empty());
+}
+// }}}
+
+// {{{ Link target
+namespace
+{
+
+/// The first cell of an OSC 8 link written at the page's top left.
+constexpr auto OnFirstLink =
+    vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) };
+
+/// Writes an OSC 8 link to https://example.com/page at the cursor.
+void writePageLink(contour::session::TerminalSession& session)
+{
+    session.terminal().writeToScreen("\033]8;;https://example.com/page\033\\link\033]8;;\033\\");
+}
+
+/// Presses (or releases) Ctrl, the Classic follow modifier, as a key event alone.
+void sendControl(contour::session::TerminalSession& session, vtbackend::KeyboardEventType type)
+{
+    auto const held = type == vtbackend::KeyboardEventType::Release
+                          ? vtbackend::KeyboardModifiers { vtbackend::Modifier::Control }
+                          : vtbackend::KeyboardModifiers {};
+    session.sendKeyEvent(vtbackend::Key::LeftControl, held, type, std::chrono::steady_clock::now());
+}
+
+/// The pill's text for https://example.com/page.
+[[nodiscard]] QString pageBreadcrumb()
+{
+    return QStringLiteral("example.com › page");
+}
+
+/// The ints of the list @p map holds under @p key.
+[[nodiscard]] std::vector<int> intsAt(QVariantMap const& map, QString const& key)
+{
+    return std::ranges::to<std::vector>(map.value(key).toList()
+                                        | std::views::transform([](QVariant const& v) { return v.toInt(); }));
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: the target pill shows while the follow modifier is held over a link",
+          "[contour][session][hyperlink]")
+{
+    using contour::session::TerminalSession;
+    TestApp testApp;
+    testApp.app().config().hyperlinkHoverTooltip = false; // the Native2026 reveal
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetText() == pageBreadcrumb());
+    CHECK_FALSE(session->linkTargetShown());
+    // The tooltip SessionChrome draws until the pill replaces it says nothing either.
+    CHECK(session->hyperlinkTooltipText().isEmpty());
+
+    auto changes = QSignalSpy(session.session.get(), &TerminalSession::linkTargetChanged);
+    sendControl(*session, vtbackend::KeyboardEventType::Press);
+    CHECK(session->linkTargetShown());
+    CHECK(session->linkTargetHint().toStdString()
+          == contour::command::linkOpenHint(vtbackend::Modifiers { vtbackend::Modifier::Control },
+                                            vtbackend::Modifiers {},
+                                            contour::command::platformShortcutStyle()));
+    CHECK(session->hyperlinkTooltipText() == pageBreadcrumb());
+    CHECK(changes.count() == 1);
+
+    sendControl(*session, vtbackend::KeyboardEventType::Release);
+    CHECK_FALSE(session->linkTargetShown());
+    CHECK(session->hyperlinkTooltipText().isEmpty());
+    CHECK(changes.count() == 2);
+}
+
+TEST_CASE("TerminalSession: Classic shows the target on hover", "[contour][session][hyperlink]")
+{
+    TestApp testApp;
+    REQUIRE(testApp.app().config().hyperlinkHoverTooltip.value());
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+    CHECK(session->linkTargetText() == pageBreadcrumb());
+    CHECK_FALSE(session->linkTargetHint().isEmpty());
+}
+
+TEST_CASE("TerminalSession: a move that brings the follow modifier along shows the pill",
+          "[contour][session][hyperlink]")
+{
+    // Ctrl went down while another window had the focus: no key event comes, the next move carries it.
+    TestApp testApp;
+    testApp.app().config().hyperlinkHoverTooltip = false;
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+    REQUIRE_FALSE(session->linkTargetShown());
+
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { vtbackend::Modifier::Control }, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK_FALSE(session->linkTargetShown());
+}
+
+TEST_CASE("TerminalSession: while an application takes the mouse the pill names the bypass chord",
+          "[contour][session][hyperlink]")
+{
+    // A click goes to the application unless the bypass modifier is held too: no pill invites one that would
+    // not follow, and the one shown names the whole chord.
+    using vtbackend::Modifier;
+    TestApp testApp;
+    testApp.app().config().hyperlinkHoverTooltip = false;
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    session->terminal().writeToScreen("\033[?1000h");
+
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { Modifier::Control }, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK_FALSE(session->linkTargetShown());
+
+    session->sendMouseMoveEvent(vtbackend::Modifiers { Modifier::Control, Modifier::Shift },
+                                OnFirstLink,
+                                vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+    CHECK(session->linkTargetHint().toStdString()
+          == contour::command::linkOpenHint(vtbackend::Modifiers { Modifier::Control },
+                                            vtbackend::Modifiers { Modifier::Shift },
+                                            contour::command::platformShortcutStyle()));
+}
+
+TEST_CASE("TerminalSession: a link at the prompt places the pill off the prompt row",
+          "[contour][session][hyperlink]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    constexpr auto Prompt = std::string_view { "$ https://x.y" };
+    session->terminal().writeToScreen(Prompt);
+
+    auto const clearance = session->overlayClearance();
+    auto const columns = clearance.value(QStringLiteral("columns")).toInt();
+    CHECK(columns == session->pageColumnsCount());
+    auto const avoid = intsAt(clearance, QStringLiteral("avoidRows"));
+    CHECK(std::ranges::contains(avoid, 0));
+    auto const blank = intsAt(clearance, QStringLiteral("trailingBlank"));
+    REQUIRE_FALSE(blank.empty());
+    CHECK(blank.front() == columns - static_cast<int>(Prompt.size()));
+
+    // Without a display there is nowhere to place anything.
+    CHECK(makeDisplaylessSession(testApp.app())->overlayClearance().isEmpty());
+}
+
+TEST_CASE("TerminalSession: the target is still followed when the pill has nowhere to go",
+          "[contour][session][hyperlink]")
+{
+    // A full-screen program paints every cell: no place is blank, the pill shows nowhere -- but it is still
+    // shown as far as the session knows, and the link still opens.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("\033[44m\033[2J\033[1;1H");
+    writePageLink(*session);
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { vtbackend::Modifier::Control }, OnFirstLink, vtbackend::PixelCoordinate {});
+    CHECK(session->linkTargetShown());
+
+    auto const blank = intsAt(session->overlayClearance(), QStringLiteral("trailingBlank"));
+    REQUIRE_FALSE(blank.empty());
+    CHECK(std::ranges::all_of(blank, [](int cells) { return cells == 0; }));
+
+    CHECK((*session)(contour::actions::FollowHyperlink {}));
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back() == QUrl(QStringLiteral("https://example.com/page")));
+}
+
+TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again, on the GUI thread",
+          "[contour][session][hyperlink][threading]")
+{
+    using contour::session::TerminalSession;
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writePageLink(*session);
+    auto changes = QSignalSpy(session.session.get(), &TerminalSession::overlayClearanceChanged);
+
+    SECTION("while it shows: posted from the parser thread, published once on the GUI thread")
+    {
+        session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+        REQUIRE(session->linkTargetShown());
+        auto const before = session->overlayClearanceRevision();
+        std::thread { [&] {
+            session->terminal().writeToScreen("\r\nmore");
+            session->terminal().writeToScreen("\r\nand more");
+        } }.join();
+        CHECK(changes.count() == 0);
+
+        QCoreApplication::processEvents();
+        CHECK(changes.count() == 1);
+        CHECK(session->overlayClearanceRevision() == before + 1);
+    }
+
+    SECTION("while it does not: nothing is asked")
+    {
+        REQUIRE_FALSE(session->linkTargetShown());
+        std::thread { [&] { session->terminal().writeToScreen("\r\nmore"); } }.join();
+        QCoreApplication::processEvents();
+        CHECK(changes.count() == 0);
+    }
 }
 // }}}

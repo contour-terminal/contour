@@ -411,39 +411,3 @@ TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hy
         CHECK(codepointCount(entered.text) == 40);
     }
 }
-
-TEST_CASE("HyperlinkTooltip: a detected link shows its target only where it differs from the text",
-          "[contour][hyperlink][links]")
-{
-    using vtbackend::DetectedLink;
-    using vtbackend::LinkKind;
-    using vtbackend::LinkLocation;
-    using vtbackend::LinkTarget;
-    using vtbackend::PathKind;
-    auto const link = [](std::string text, LinkTarget target) {
-        return DetectedLink { .id = {}, .target = std::move(target), .text = std::move(text), .spans = {} };
-    };
-
-    CHECK(contour::session::detectedLinkTooltip(link("https://x.y/",
-                                                     LinkTarget { .kind = LinkKind::Url,
-                                                                  .target = "https://x.y/",
-                                                                  .location = std::nullopt,
-                                                                  .pathKind = PathKind::Missing,
-                                                                  .directory = {} }))
-              .empty());
-    CHECK(contour::session::detectedLinkTooltip(
-              link("src/a.cpp:12:5",
-                   LinkTarget { .kind = LinkKind::Path,
-                                .target = "/w/src/a.cpp",
-                                .location = LinkLocation { .line = 12, .column = 5 },
-                                .pathKind = PathKind::File,
-                                .directory = "/w" }))
-          == "/w/src/a.cpp:12:5");
-    CHECK(contour::session::detectedLinkTooltip(link("ABC-1",
-                                                     LinkTarget { .kind = LinkKind::Custom,
-                                                                  .target = "https://jira/browse/ABC-1",
-                                                                  .location = std::nullopt,
-                                                                  .pathKind = PathKind::Missing,
-                                                                  .directory = {} }))
-          == "https://jira/browse/ABC-1");
-}

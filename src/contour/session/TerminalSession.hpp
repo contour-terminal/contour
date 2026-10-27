@@ -48,6 +48,7 @@
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QVariant>
+#include <QtCore/QVariantMap>
 #include <QtQml/QJSValue>
 
 #include <algorithm>
@@ -223,8 +224,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
-    // The OSC 8 hyperlink under the pointer. Empty means no tooltip. Both change together, so one
-    // signal serves them: the anchor without its text describes nothing.
+    // The link under the pointer, for the link pill: what it opens (linkPillText()), how a click opens it
+    // (linkOpenHint()), and whether the pill shows (linkPillVisibility(); a bool, the QML carve-out). One
+    // signal serves the three: they change together.
+    Q_PROPERTY(QString linkTargetText READ linkTargetText NOTIFY linkTargetChanged)
+    Q_PROPERTY(QString linkTargetHint READ linkTargetHint NOTIFY linkTargetChanged)
+    Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
+    // Bumped while the pill shows and the page changes under it, so QML asks overlayClearance() again.
+    Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
+    // The hover tooltip, which SessionChrome.qml draws until the link pill replaces it: the link target while
+    // the pill would show, else empty. Both change together, so one signal serves them.
     Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
     Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
     // The command block under the pointer in the gutter's block column; an empty anchor means no tooltip.
@@ -290,8 +299,34 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Whole seconds since the session started, by the app's injected steady clock.
     int getUptime() const noexcept;
 
-    /// What the hyperlink tooltip should say, or empty for "show nothing".
+    /// What the hyperlink tooltip should say, or empty for "show nothing": the link target while the pill
+    /// would show (linkTargetShown()). GUI thread.
     [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
+
+    /// What the link under the pointer opens, as the pill says it (linkPillText()); empty over none. GUI
+    /// thread.
+    [[nodiscard]] QString linkTargetText() const { return _linkTarget.text; }
+
+    /// How a click opens the link under the pointer (command::linkOpenHint()); empty where no binding follows
+    /// links. GUI thread.
+    [[nodiscard]] QString linkTargetHint() const { return _linkTarget.hint; }
+
+    /// Whether the link pill shows (linkPillVisibility()). A bool for QML, the documented carve-out. GUI
+    /// thread.
+    [[nodiscard]] bool linkTargetShown() const noexcept
+    {
+        return _linkTarget.visibility == LinkPillVisibility::Shown;
+    }
+
+    /// How often the page changed under a shown pill; QML re-reads overlayClearance() when it moves.
+    [[nodiscard]] int overlayClearanceRevision() const noexcept { return _overlayClearanceRevision; }
+
+    /// Where an overlay over the grid may go (vtbackend::Terminal::overlayClearance()), with the display's
+    /// geometry in logical pixels: `marginLeft`, `marginTop` (the first drawn row's top), `cellWidth`,
+    /// `cellHeight`, `columns`, `trailingBlank` (one entry per drawn row) and `avoidRows`. GUI thread; takes
+    /// the terminal lock.
+    /// @return The map window::UiStyleProvider::linkPillPlacement() reads; empty without a display.
+    Q_INVOKABLE [[nodiscard]] QVariantMap overlayClearance() const;
 
     // {{{ Find bar
     /// The active search pattern, or empty when nothing is being searched for.
@@ -495,10 +530,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param cell Where the pointer is, in viewport coordinates.
     void updateHyperlinkHover(HoveredLink const& link, vtbackend::CellLocation cell);
 
-    /// What the tooltip says for the detected link under the pointer (detectedLinkTooltip()). The caller
-    /// holds the terminal lock.
-    /// @return The text; empty over no detected link, or one printed as it opens. Valid until the next call.
-    [[nodiscard]] std::string const& hoveredDetectedLinkTooltip();
+    /// What the pill says for the detected link under the pointer (linkPillText()). The caller holds the
+    /// terminal lock.
+    /// @return The text; empty over no detected link. Valid until the next call.
+    [[nodiscard]] std::string const& hoveredDetectedLinkText();
+
+    /// Re-decides whether the link pill shows and what its hint says, from the link under the pointer, the
+    /// held modifiers and whether an application takes the mouse; emits linkTargetChanged (and the tooltip's
+    /// signal) on a change. GUI thread; takes the terminal lock.
+    /// @param text The link target's text (linkPillText()); empty over none.
+    void refreshLinkTarget(QString text);
+
+    /// Arranges for overlayClearanceChanged on the GUI thread within a frame. Callable from the parser
+    /// thread, the lock held or not: it only posts, at most one post in flight.
+    void requestOverlayClearanceRefresh();
 
   public:
     QString getBellSource() const noexcept
@@ -1622,6 +1667,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @see getForegroundProcessName
     void foregroundProcessNameChanged();
     void hyperlinkHoverChanged();
+    /// The link target's text, hint or visibility changed.
+    void linkTargetChanged();
+    /// The page under a shown link pill changed: re-read overlayClearance().
+    void overlayClearanceChanged();
     /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
     void commandBlockHoverChanged();
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
@@ -2133,23 +2182,44 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::Point _accumulatedAngleScroll;
     input::HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
-    /// The tooltip last worked out for a detected link, by the link's id and the index holding it, so that
-    /// tracing one link along its cells reads nothing from the index (hoveredDetectedLinkTooltip()). GUI
+    /// The pill text last worked out for a detected link, by the link's id and the index holding it, so that
+    /// tracing one link along its cells reads nothing from the index (hoveredDetectedLinkText()). GUI
     /// thread only. Also reset when a configuration reload may have replaced the detector, whose ids start
     /// over: a new index may reuse the old one's address.
-    struct DetectedLinkTooltip
+    struct HoveredDetectedLink
     {
         vtbackend::LinkIndex const* index = nullptr; ///< The index it was read from; none at first.
         vtbackend::LinkId link {};                   ///< The link it was worked out for; none at first.
-        /// detectedLinkTooltip() of that link, elided as the tooltip shows it; empty for none.
+        /// linkPillText() of that link; empty for none.
         std::string text;
     };
-    DetectedLinkTooltip _detectedLinkTooltip {};
+    HoveredDetectedLink _hoveredDetectedLink {};
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+
+    /// What the link pill says and whether it shows. GUI thread.
+    struct LinkTarget
+    {
+        QString text; ///< linkPillText() of the link; empty over none.
+        QString hint; ///< command::linkOpenHint().
+        LinkPillVisibility visibility = LinkPillVisibility::Hidden; ///< linkPillVisibility().
+
+        [[nodiscard]] bool operator==(LinkTarget const&) const = default;
+    };
+    LinkTarget _linkTarget {};
+
+    /// _linkTarget's visibility, mirrored for screenUpdated() on the parser thread, which asks for a
+    /// clearance refresh only while the pill shows. Written on the GUI thread alone.
+    std::atomic<LinkPillVisibility> _linkTargetVisibility = LinkPillVisibility::Hidden;
+
+    /// Collapses repeated clearance refresh requests to at most one post in flight.
+    std::atomic_flag _overlayClearancePostPending = ATOMIC_FLAG_INIT;
+
+    /// What overlayClearanceRevision reports. GUI thread.
+    int _overlayClearanceRevision = 0;
 
     /// The command block whose tooltip is showing, if any (@see commandBlockTooltip).
     std::optional<vtbackend::CommandBlockId> _hoveredBlock {};

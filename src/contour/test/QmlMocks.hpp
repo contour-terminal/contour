@@ -54,6 +54,12 @@ class MockSession: public QObject
     // Mirrors TerminalSession's hyperlink tooltip pair. Both change together, so one signal serves them.
     Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
     Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
+    // Mirrors TerminalSession's link target, for the link pill: its text, its hint and whether it shows
+    // change together; the clearance's revision moves on its own.
+    Q_PROPERTY(QString linkTargetText READ linkTargetText NOTIFY linkTargetChanged)
+    Q_PROPERTY(QString linkTargetHint READ linkTargetHint NOTIFY linkTargetChanged)
+    Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
+    Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
     // Mirrors TerminalSession's block-column tooltip: the anchor, and the invocable its text is read
     // through whenever the anchor moves.
     Q_PROPERTY(
@@ -127,6 +133,28 @@ class MockSession: public QObject
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
     [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
     [[nodiscard]] QRectF hyperlinkTooltipAnchor() const { return _hyperlinkTooltipAnchor; }
+    [[nodiscard]] QString linkTargetText() const { return _linkTargetText; }
+    [[nodiscard]] QString linkTargetHint() const { return _linkTargetHint; }
+    [[nodiscard]] bool linkTargetShown() const { return _linkTargetShown; }
+    [[nodiscard]] int overlayClearanceRevision() const { return _overlayClearanceRevision; }
+    Q_INVOKABLE [[nodiscard]] QVariantMap overlayClearance() const { return _overlayClearance; }
+
+    /// Publishes the link under the pointer, the way TerminalSession does. A bool, as its QML property is.
+    void setLinkTarget(QString text, QString hint, bool shown)
+    {
+        _linkTargetText = std::move(text);
+        _linkTargetHint = std::move(hint);
+        _linkTargetShown = shown;
+        emit linkTargetChanged();
+    }
+
+    /// Publishes where an overlay may go, and bumps the revision QML re-reads it on.
+    void setOverlayClearance(QVariantMap clearance)
+    {
+        _overlayClearance = std::move(clearance);
+        ++_overlayClearanceRevision;
+        emit overlayClearanceChanged();
+    }
     [[nodiscard]] QRectF commandBlockTooltipAnchor() const { return _commandBlockTooltipAnchor; }
     Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const { return _commandBlockTooltipText; }
 
@@ -417,6 +445,8 @@ class MockSession: public QObject
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
     void hyperlinkHoverChanged();
+    void linkTargetChanged();
+    void overlayClearanceChanged();
     void commandBlockHoverChanged();
     void scrollbarMarksChanged();
     void opacityChanged();
@@ -450,6 +480,11 @@ class MockSession: public QObject
     bool _scrollbarVisible = false;
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+    QString _linkTargetText;
+    QString _linkTargetHint;
+    bool _linkTargetShown = false;
+    int _overlayClearanceRevision = 0;
+    QVariantMap _overlayClearance;
     QString _commandBlockTooltipText;
     QRectF _commandBlockTooltipAnchor;
     QVariantList _scrollbarMarks;
