@@ -94,6 +94,17 @@ static_assert(PinnedCellFlagBits.size() == vtbackend::CellFlagList.size(),
               "A CellFlag was added or removed. Add (or drop) its row in PinnedCellFlagBits, which is "
               "what freezes the wire encoding.");
 
+namespace
+{
+    /// The cell flags @p raw names, less those a grid never holds (vtbackend::RenderOnlyCellFlags).
+    [[nodiscard]] vtbackend::CellFlags cellFlagsFromWire(uint32_t raw) noexcept
+    {
+        auto flags = vtbackend::CellFlags::fromValue(raw);
+        flags.disable(vtbackend::RenderOnlyCellFlags);
+        return flags;
+    }
+} // namespace
+
 uint32_t rawColor(vtbackend::Color color) noexcept
 {
     static_assert(sizeof(vtbackend::Color) == sizeof(uint32_t));
@@ -151,7 +162,7 @@ vtbackend::GraphicsAttributes fillAttrsOf(proto::WireLine const& line)
     attrs.foregroundColor = colorFromRaw(line.fillForeground);
     attrs.backgroundColor = colorFromRaw(line.fillBackground);
     attrs.underlineColor = colorFromRaw(line.fillUnderlineColor);
-    attrs.flags = vtbackend::CellFlags::fromValue(line.fillFlags);
+    attrs.flags = cellFlagsFromWire(line.fillFlags);
     return attrs;
 }
 
@@ -163,7 +174,7 @@ void applyWireCell(vtbackend::LineSoA& soa,
     auto const attrs = vtbackend::GraphicsAttributes { .foregroundColor = colorFromRaw(cell.foreground),
                                                        .backgroundColor = colorFromRaw(cell.background),
                                                        .underlineColor = colorFromRaw(cell.underlineColor),
-                                                       .flags = vtbackend::CellFlags::fromValue(cell.flags) };
+                                                       .flags = cellFlagsFromWire(cell.flags) };
     vtbackend::writeCellToSoA(soa, column, cell.codepoint, cell.width, attrs, hyperlink);
     for (auto const extra: cell.clusterExtras)
         vtbackend::appendCodepointToCluster(

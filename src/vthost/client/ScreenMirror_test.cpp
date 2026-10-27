@@ -2227,6 +2227,35 @@ TEST_CASE("a fractionally scaled wire cell takes its mirrored line off the batch
     CHECK(mirrored.shape == written.shape);
 }
 
+TEST_CASE("a render-only cell flag never comes off the wire", "[vthost][mirror]")
+{
+    // InputMethodPreedit is put on render cells only, never in a grid, so no honest peer sends it; a cell
+    // carrying it would draw a preedit underline under text nobody is composing.
+    auto const sent = vtbackend::GraphicsAttributes {
+        .flags = vtbackend::CellFlags { vtbackend::CellFlag::Bold, vtbackend::CellFlag::InputMethodPreedit }
+    };
+
+    SECTION("a cell")
+    {
+        auto mirrored = vtbackend::LineSoA {};
+        vtbackend::initializeLineSoA(mirrored, vtbackend::ColumnCount(4));
+        auto cell = vthost::wireCellOf(sent);
+        cell.codepoint = U'x';
+        vthost::applyWireCell(mirrored, 1, cell, vtbackend::HyperlinkId {});
+        CHECK(mirrored.sgr[1].flags.test(vtbackend::CellFlag::Bold));
+        CHECK_FALSE(mirrored.sgr[1].flags.test(vtbackend::CellFlag::InputMethodPreedit));
+    }
+
+    SECTION("a line's fill")
+    {
+        auto line = vthost::proto::WireLine {};
+        line.fillFlags = sent.flags.value();
+        auto const fill = vthost::fillAttrsOf(line);
+        CHECK(fill.flags.test(vtbackend::CellFlag::Bold));
+        CHECK_FALSE(fill.flags.test(vtbackend::CellFlag::InputMethodPreedit));
+    }
+}
+
 TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[vthost][mirror]")
 {
     auto h = MirrorHarness {};

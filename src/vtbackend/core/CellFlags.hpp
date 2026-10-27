@@ -72,6 +72,10 @@ enum class CellFlag : uint32_t
 
 using CellFlags = core::Flags<CellFlag>;
 
+/// The flags only the render buffer puts on a cell, never a grid: a cell read from anywhere else -- the
+/// native wire, say -- that carries one is lying, and is read without it.
+inline constexpr auto RenderOnlyCellFlags = CellFlags { CellFlag::InputMethodPreedit };
+
 /// Every `CellFlag`, in declaration order, excluding `None`.
 ///
 /// The formatter below *names* one flag; this *enumerates* them, which naming cannot do. Any code that
