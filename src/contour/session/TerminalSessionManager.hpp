@@ -329,6 +329,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that was right-clicked.
     void openContextMenu(TerminalSession* acting);
 
+    /// Opens the menu of one command block over the pane of @p acting: the block's header and rows alone,
+    /// where the context menu adds the pane's own. Makes that pane active first, as openContextMenu() does.
+    /// No-ops if @p acting has no hosting window.
+    /// @param acting The session the block is in.
+    /// @param block The block, pinned by id.
+    /// @param anchor Where the menu opens, in the window's coordinates; at the pointer when absent.
+    void openBlockMenu(TerminalSession* acting,
+                       vtbackend::CommandBlockId block,
+                       std::optional<QPointF> anchor);
+
     /// Records that the command @p id was just run, and persists the updated list.
     ///
     /// App-wide, not per-window: "recently used" is a fact about the USER, so a command run in one
@@ -1045,6 +1055,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
   signals:
     void multimediaReadyChanged();
+
+    /// A pane asked for the menu of one command block, before the menu is routed to the window that hosts it.
+    /// @param acting The session the block is in.
+    /// @param block The block, by id.
+    void blockMenuRequested(TerminalSession* acting, vtbackend::CommandBlockId block);
 
     /// A pane asked for its context menu, before the menu is routed to the window that hosts it.
     ///

@@ -479,6 +479,22 @@ class WindowController:
     /// pane the active one — so "the active pane" here IS the pane the user clicked.
     void openContextMenu();
 
+    /// Shows the menu of @p block of @p session: its header and its rows, below @p anchor or at the pointer.
+    /// Pinned to @p session and @p block: picking a row after either has gone does nothing.
+    /// @param session The session the block is in.
+    /// @param block The block, by id.
+    /// @param anchor Where the menu opens, in this window's coordinates; at the pointer when absent.
+    void openBlockMenu(session::TerminalSession& session,
+                       vtbackend::CommandBlockId block,
+                       std::optional<QPointF> anchor);
+
+    /// Where the pane menu was asked to open, in the window's coordinates; a null point for the pointer.
+    /// What the QML pops the menu at when it is shown in the scene.
+    [[nodiscard]] Q_INVOKABLE QPointF contextMenuAnchor() const noexcept
+    {
+        return _contextMenuAnchor.value_or(QPointF {});
+    }
+
     /// The context menu, as QML consumes it: a list of rows, each a QVariantMap of
     /// { kind, title, enabled, checkable, checked, actionId, children }.
     ///
@@ -1167,7 +1183,11 @@ class WindowController:
     /// native presentation is posted, so it runs once the press handler that asked for it has returned.
     /// @param surface The surface the menu opens from.
     /// @param tree The resolved menu.
-    void presentSurface(MenuSurface surface, command::MenuTree tree);
+    /// @param anchor Where it opens, in the window's coordinates; the pointer when absent. A position, not a
+    ///        flag.
+    void presentSurface(MenuSurface surface,
+                        command::MenuTree tree,
+                        std::optional<QPointF> anchor = std::nullopt);
 
     /// Publishes @p tree as @p surface's in-scene menu model, and asks the QML to pop it.
     /// @param surface The surface whose QML menu should open.
@@ -1293,6 +1313,9 @@ class WindowController:
     /// or "Paste" would then land on a terminal the user never pointed at. A QPointer, so a pane that dies
     /// under the open menu makes the row a no-op rather than a use-after-free.
     QPointer<session::TerminalSession> _contextMenuSession;
+
+    /// Where the pane menu opens, when it was not at the pointer. @see contextMenuAnchor
+    std::optional<QPointF> _contextMenuAnchor {};
     // }}}
 
     /// What a click on the tray message last shown does, besides bringing the window forward.

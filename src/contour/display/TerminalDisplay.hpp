@@ -220,6 +220,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// virtual one: without it the two names are ambiguous here and the surface stays abstract. The
     /// answer is QQuickItem's, unchanged.
     [[nodiscard]] QQuickWindow* window() const final { return QQuickItem::window(); }
+    [[nodiscard]] QPointF mapToWindow(QPointF local) const final { return mapToScene(local); }
 
     /// Announces a caret move to the platform: refreshes the IME cursor rectangle and, when assistive
     /// technology is listening, the accessible caret. The IME update is kept alongside the accessibility

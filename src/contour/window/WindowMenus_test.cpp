@@ -14,13 +14,16 @@
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <QtCore/QPointF>
 #include <QtCore/QString>
 #include <QtCore/QUrl>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
+#include <QtGui/QClipboard>
 #include <QtGui/QColor>
+#include <QtGui/QGuiApplication>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -87,8 +90,16 @@ using contour::window::WindowController;
 struct NativeMenuApp
 {
     contour::test::RecordingMenuPresenter* presenter = nullptr; ///< Owned by the app; set as it is built.
-    TestApp app { nullptr, nullptr, nullptr, nullptr,   TestApp::testHostIdentity(),
-                  nullptr, {},      nullptr, services() };
+    // Sessions run over a mock PTY: the menus here may be opened over a real session.
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>(),
+                  nullptr,
+                  nullptr,
+                  nullptr,
+                  TestApp::testHostIdentity(),
+                  nullptr,
+                  {},
+                  nullptr,
+                  services() };
 
     /// The app's null services, but for the recording presenter.
     [[nodiscard]] contour::platform::AppearanceServices services()
@@ -362,6 +373,118 @@ TEST_CASE("the pane and title-bar menus still pop in the scene", "[contour][wind
     window->openTitleBarContextMenu();
 
     CHECK(requested.count() == 1);
+}
+
+namespace
+{
+/// Writes a failed `make` into @p session's terminal and returns its block's id.
+[[nodiscard]] vtbackend::CommandBlockId runFailedMake(contour::session::TerminalSession& session)
+{
+    session.terminal().writeToScreen(vtbackend::test::commandRun("make", { "built" }, 2));
+    auto const* const record = session.terminal().commandBlockAt(vtbackend::LineOffset(0));
+    REQUIRE(record != nullptr);
+    return record->id;
+}
+
+/// The clipboard's text, which a menu row that does nothing leaves alone.
+[[nodiscard]] QString clipboardText()
+{
+    return QGuiApplication::clipboard()->text();
+}
+} // namespace
+
+TEST_CASE("the block menu opens on the pane surface with its header", "[contour][windowmenus][blockmenu]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
+    auto const created = createSessionTabs(app.manager(), *window, 1);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    auto const block = runFailedMake(*session);
+    auto requested = QSignalSpy { window.controller, &WindowController::contextMenuRequested };
+
+    window->openBlockMenu(*session, block, QPointF { 4, 40 });
+
+    CHECK(requested.count() == 1);
+    auto const rows = window->contextMenuModel();
+    REQUIRE_FALSE(rows.isEmpty());
+    CHECK(rows.front().toMap()["kind"].toString() == "header");
+    CHECK(rows.front().toMap()["title"].toString() == "make");
+    CHECK(actionIdOf(rows, "Copy Output").has_value());
+    CHECK(window->contextMenuAnchor() == QPointF { 4, 40 });
+
+    // The pane menu has no anchor of its own: it opens at the pointer again.
+    window->openContextMenu();
+    CHECK(window->contextMenuAnchor().isNull());
+}
+
+TEST_CASE("a native block menu is anchored where it was asked for", "[contour][windowmenus][blockmenu]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const created = createSessionTabs(native.app.manager(), *window, 1);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    window->openBlockMenu(*session, runFailedMake(*session), QPointF { 4, 40 });
+    QCoreApplication::sendPostedEvents();
+
+    REQUIRE(native.presenter->anchors.size() == 1);
+    CHECK(native.presenter->anchors.front().position == std::optional { QPointF { 4, 40 } });
+    CHECK(native.presenter->trees.front().nodes.front().kind
+          == contour::command::ContextMenuEntryKind::Header);
+}
+
+TEST_CASE("a pick after the pane closed does nothing", "[contour][windowmenus][blockmenu]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const created = createSessionTabs(native.app.manager(), *window, 2);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    auto const block = runFailedMake(*session);
+
+    window->openBlockMenu(*session, block, std::nullopt);
+    QCoreApplication::sendPostedEvents();
+    REQUIRE(native.presenter->trees.size() == 1);
+    auto const copyOutput = actionIndexOf(native.presenter->trees.front(), "Copy Output");
+
+    QGuiApplication::clipboard()->setText(QStringLiteral("untouched"));
+    native.app.manager().model().closeTab(window->windowId(), created.tabs.back());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+    native.presenter->pick(copyOutput);
+    QCoreApplication::sendPostedEvents();
+    CHECK(clipboardText() == QStringLiteral("untouched"));
+}
+
+TEST_CASE("a pick after the block was evicted does nothing", "[contour][windowmenus][blockmenu]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    auto blocks = native.app.app().config().commandBlocks.value();
+    blocks.maxRecords = 1;
+    native.app.app().config().commandBlocks = blocks;
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const created = createSessionTabs(native.app.manager(), *window, 1);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    auto const first = runFailedMake(*session);
+
+    window->openBlockMenu(*session, first, std::nullopt);
+    QCoreApplication::sendPostedEvents();
+    REQUIRE(native.presenter->trees.size() == 1);
+    auto const copyOutput = actionIndexOf(native.presenter->trees.front(), "Copy Output");
+
+    session->terminal().writeToScreen(vtbackend::test::commandRun("ls", { "files" }, 0));
+    REQUIRE(session->terminal().commandBlocks().find(first) == nullptr);
+
+    QGuiApplication::clipboard()->setText(QStringLiteral("untouched"));
+    native.presenter->pick(copyOutput);
+    QCoreApplication::sendPostedEvents();
+    CHECK(clipboardText() == QStringLiteral("untouched"));
 }
 
 TEST_CASE("the menu bar sees this window's tabs", "[contour][windowmenus][menubar]")

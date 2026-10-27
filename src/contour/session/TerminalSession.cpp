@@ -24,6 +24,7 @@
 #endif
 #include <contour/command/Shortcut.hpp>
 #include <contour/session/ExitCode.hpp>
+#include <contour/session/FontControl.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/LocalFileAction.hpp>
 #include <contour/session/Logging.hpp>
@@ -3053,11 +3054,11 @@ void TerminalSession::handlePendingBlockEvents()
 
     if (events.changedRecords == ChangedRecords::None)
         return;
-    // The signal has QML read the tooltip's text afresh.
-    if (_hoveredBlock
+    // The block under the pointer changed: where its button sits may have.
+    if (_hoveredBlock && _blockHoverRow
         && (events.changedRecords == ChangedRecords::Unlisted
             || std::ranges::binary_search(events.changed, *_hoveredBlock)))
-        emit commandBlockHoverChanged();
+        updateCommandBlockHover(_hoveredBlock, *_blockHoverRow); // its head may have come, or gone
     withdrawFinishNoticeIfNextCommandStarted(events.lastCommand);
 }
 
@@ -3785,8 +3786,13 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
     // scrolls a scrolled-back viewport reports the move from the parser thread, and the hover state is the
     // GUI thread's. postToObject targets `this`, so Qt drops the call if the session dies first.
     // An overlay scrollbar shows while scrolled back, so the visibility is re-announced on the same thread.
+    // The block is the exception: it is found from the screen row the pointer stands at, which stays, so it
+    // is decided again for what slid under it.
     platform::postToObject(this, [this]() {
+        auto const row = _blockHoverRow;
         clearHovers();
+        if (row)
+            refreshBlockHoverAt(*row);
         refreshScrollbarVisibility();
     });
     // The current match's viewport rows move with the scroll. Posted for the same reason, and because this
@@ -4185,6 +4191,25 @@ namespace
     };
 } // namespace
 
+namespace
+{
+    /// The block beside @p gridLine in the gutter's block column.
+    ///
+    /// Only the primary page has command blocks. Beside any other -- a full-screen application's -- the block
+    /// column is empty, and the primary page's block at the same row is not what is beside it.
+    /// @param terminal The terminal, locked.
+    /// @param gridLine The grid line beside the pointer.
+    /// @return The block's id, or nullopt beside none.
+    [[nodiscard]] std::optional<vtbackend::CommandBlockId> blockBeside(vtbackend::Terminal const& terminal,
+                                                                       vtbackend::LineOffset gridLine)
+    {
+        if (!terminal.foldingAppliesToDisplayedPage())
+            return std::nullopt;
+        auto const* const record = terminal.commandBlockAt(gridLine);
+        return record != nullptr ? std::optional { record->id } : std::nullopt;
+    }
+} // namespace
+
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                                          vtbackend::CellLocation pos,
                                          vtbackend::PixelCoordinate pixelPosition)
@@ -4229,6 +4254,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         /// Whether the chord this move carries changes how links are presented: the pill's visibility
         /// too, re-decided below even without a new cell.
         vtbackend::LinkRevealChange chord = vtbackend::LinkRevealChange::Unchanged;
+        /// The block under the pointer, decided on a move onto another row only.
+        std::optional<std::optional<vtbackend::CommandBlockId>> block {};
     };
     // Read from the display before the lock is taken, as for a press.
     auto const foldChipHit = foldChipHitColumns();
@@ -4241,6 +4268,15 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             decidesPointerShapeForCell
             || (chord == vtbackend::LinkRevealChange::Changed && _display != nullptr);
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
+
+        // The block the pointer is over its rows lights its rail and anchors its button; found on a move onto
+        // another row, the only move that can change it.
+        auto hoveredBlock = std::optional<std::optional<vtbackend::CommandBlockId>> {};
+        if (_blockHoverRow != std::optional { pos.line })
+        {
+            hoveredBlock = blockBeside(_terminal, _terminal.viewport().translateScreenToGridLine(pos.line));
+            _terminal.setHoveredCommandBlock(*hoveredBlock);
+        }
         // Read only on a new cell, where the hovered link is updated (below).
         auto const hoveredLink = [&]() -> HoveredLink {
             if (!decidesPointerShapeForCell)
@@ -4259,8 +4295,12 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                                                      : std::nullopt,
                        .pointerShape =
                            decidesPointerShape ? PointerShapeDecision::Decided : PointerShapeDecision::Kept,
-                       .chord = chord };
+                       .chord = chord,
+                       .block = hoveredBlock };
     });
+
+    if (hover.block)
+        updateCommandBlockHover(*hover.block, pos.line);
 
     if (hover.pointerShape == PointerShapeDecision::Decided)
     {
@@ -4291,22 +4331,6 @@ namespace
     [[nodiscard]] constexpr bool isBlockColumn(vtbackend::GutterSegmentKind segment) noexcept
     {
         return segment == vtbackend::GutterSegmentKind::BlockColumn;
-    }
-
-    /// The block beside @p gridLine in the gutter's block column.
-    ///
-    /// Only the primary page has command blocks. Beside any other -- a full-screen application's -- the block
-    /// column is empty, and the primary page's block at the same row is not what is beside it.
-    /// @param terminal The terminal, locked.
-    /// @param gridLine The grid line beside the pointer.
-    /// @return The block's id, or nullopt beside none.
-    [[nodiscard]] std::optional<vtbackend::CommandBlockId> blockBeside(vtbackend::Terminal const& terminal,
-                                                                       vtbackend::LineOffset gridLine)
-    {
-        if (!terminal.foldingAppliesToDisplayedPage())
-            return std::nullopt;
-        auto const* const record = terminal.commandBlockAt(gridLine);
-        return record != nullptr ? std::optional { record->id } : std::nullopt;
     }
 } // namespace
 
@@ -4419,7 +4443,27 @@ void TerminalSession::runBindingForBlock(vtbackend::MouseButton button,
 
 void TerminalSession::openBlockMenu(vtbackend::CommandBlockId block)
 {
-    withContextMenuBlock(block, [this] { (*this)(actions::OpenContextMenu {}); });
+    openBlockMenuAt(block, std::nullopt);
+}
+
+void TerminalSession::openBlockMenuAt(vtbackend::CommandBlockId block, std::optional<QPointF> anchor)
+{
+    // Not while a left-drag selection is in flight, for the reason OpenContextMenu is not (the popup takes
+    // the release that would end it).
+    if (core::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
+        return;
+
+    // Given in the display's coordinates; a menu is anchored in its window's.
+    if (anchor && _display != nullptr)
+        anchor = _display->mapToWindow(*anchor);
+    _manager->openBlockMenu(this, block, anchor);
+}
+
+void TerminalSession::openBlockActions()
+{
+    if (!_hoveredBlock || _blockActionsAnchor.isEmpty())
+        return;
+    openBlockMenuAt(*_hoveredBlock, _blockActionsAnchor.bottomLeft());
 }
 
 void TerminalSession::withContextMenuBlock(vtbackend::CommandBlockId block, std::invocable auto&& action)
@@ -4660,66 +4704,77 @@ void TerminalSession::clearGutterHover()
     _isPointerShapeStale = true;
 
     core::locked(_terminal, [&] { _terminal.setGutterHoverLine(std::nullopt); });
-    updateCommandBlockHover(std::nullopt, vtbackend::LineOffset(0));
+    clearBlockHover();
 }
 
 void TerminalSession::updateCommandBlockHover(std::optional<vtbackend::CommandBlockId> block,
                                               vtbackend::LineOffset screenRow)
 {
-    if (_hoveredBlock == block)
-        return;
-
+    _blockHoverRow = screenRow;
     _hoveredBlock = block;
-    // The block column is the gutter's last column, -1, whatever else the gutter shows.
-    _commandBlockTooltipAnchor =
-        block && _display != nullptr
-            ? geometry::cellRectangle(
-                  _display->gridMetrics().pageMargin,
-                  _display->cellSize(),
-                  vtbackend::CellLocation { .line = screenRow, .column = vtbackend::ColumnOffset(-1) },
-                  1,
-                  _display->devicePixelRatio())
-            : QRectF {};
-    emit commandBlockHoverChanged();
+
+    auto const anchor = block && _display != nullptr
+                            ? core::locked(_terminal, [&] { return blockActionsAnchorLocked(*block); })
+                            : QRectF {};
+    if (std::exchange(_blockActionsAnchor, anchor) != anchor)
+        emit blockActionsAnchorChanged();
 }
 
-QString TerminalSession::commandBlockTooltip() const
+QRectF TerminalSession::blockActionsAnchorLocked(vtbackend::CommandBlockId block) const
 {
-    if (!_hoveredBlock)
+    // Only the primary page has blocks, and the rail only draws over it.
+    if (_display == nullptr || !_terminal.foldingAppliesToDisplayedPage())
         return {};
-
-    auto const lock = std::scoped_lock { _terminal };
-    auto const* record = _terminal.commandBlocks().find(*_hoveredBlock);
+    auto const* const record = _terminal.commandBlocks().find(block);
     if (record == nullptr)
         return {};
-
-    // When the command started; a block that never reached its command has only its prompt's time, and one
-    // a ;C opened only its command's.
-    auto const startedAt =
-        _terminal.localTimeOf(record->commandStartedAt.or_else([&] { return record->promptStartedAt; })
-                                  .value_or(std::chrono::system_clock::time_point {}));
-    auto text = commandBlockTooltipText(*record, startedAt);
-    if (text.empty())
+    auto const head = vtbackend::headOffsetOf(_terminal.primaryScreen().grid(), *record);
+    if (!head)
         return {};
 
-    // What a click beside its head does: the fold hangs there, and so does the status mark.
-    auto const hint = [&] {
-        auto const head = vtbackend::headOffsetOf(_terminal.primaryScreen().grid(), *record);
-        if (!head)
-            return BlockTooltipHint::RightClickOnly;
-        switch (_terminal.blockColumnPressAt(*head))
-        {
-            case vtbackend::BlockColumnPress::ToggleFold:
-                return _terminal.foldState().isCollapsed(record->headStableId) ? BlockTooltipHint::Expand
-                                                                               : BlockTooltipHint::Collapse;
-            case vtbackend::BlockColumnPress::OpenBlockMenu: return BlockTooltipHint::Menu;
-            case vtbackend::BlockColumnPress::Swallow: return BlockTooltipHint::RightClickOnly;
-        }
-        return BlockTooltipHint::RightClickOnly;
-    }();
-    text += '\n';
-    text += blockTooltipHintText(hint);
-    return QString::fromStdString(text);
+    // Its first visible row: the head, or the page's top where the head has scrolled off above.
+    auto const& viewport = _terminal.viewport();
+    auto const firstLine = std::max(*head, viewport.topLine());
+    auto const row = viewport.translateGridToScreenCoordinate(firstLine);
+
+    auto const metrics = _display->gridMetrics();
+    auto const cell = _display->cellSize();
+    auto const scale = _display->devicePixelRatio();
+    auto const cellRect = geometry::cellRectangle(
+        metrics.pageMargin,
+        cell,
+        vtbackend::CellLocation { .line = row, .column = vtbackend::ColumnOffset(-1) },
+        1,
+        scale);
+    if (_gutterChrome.form != vtbackend::BlockColumnForm::Rail)
+        return cellRect; // the glyph column's cell: the block column is the one before column 0
+
+    // The rail's strip, between the gutter's cells and column 0.
+    auto const strip = configuredGutterExtent(_config, cell, scale, _gutterChrome).rail;
+    auto const width = static_cast<double>(strip) / scale;
+    return QRectF { (static_cast<double>(metrics.pageMargin.left) / scale) - width,
+                    cellRect.top(),
+                    width,
+                    cellRect.height() };
+}
+
+void TerminalSession::clearBlockHover()
+{
+    if (!_hoveredBlock && !_blockHoverRow)
+        return;
+    core::locked(_terminal, [&] { _terminal.setHoveredCommandBlock(std::nullopt); });
+    updateCommandBlockHover(std::nullopt, vtbackend::LineOffset(0));
+    _blockHoverRow.reset(); // no pointer to decide a block for
+}
+
+void TerminalSession::refreshBlockHoverAt(vtbackend::LineOffset screenRow)
+{
+    auto const block = core::locked(_terminal, [&] {
+        auto const found = blockBeside(_terminal, _terminal.viewport().translateScreenToGridLine(screenRow));
+        _terminal.setHoveredCommandBlock(found);
+        return found;
+    });
+    updateCommandBlockHover(block, screenRow);
 }
 
 void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
@@ -4881,6 +4936,7 @@ void TerminalSession::clearHovers()
 {
     clearHyperlinkHover();
     clearGutterHover();
+    clearBlockHover(); // the grid's too: the gutter's flag is not set over the rows
 }
 
 void TerminalSession::leaveGrid()
@@ -5153,6 +5209,47 @@ bool TerminalSession::operator()(actions::OpenContextMenu)
     return true;
 }
 
+command::BlockMenuState TerminalSession::blockMenuStateLocked(vtbackend::CommandBlockRecord const& block)
+{
+    // Whether its output folds, and how it stands: a fold hangs on the head row.
+    auto const fold = [&] {
+        if (!_config.folding.value().enabled)
+            return command::FoldPresence::None;
+        auto const head = vtbackend::headOffsetOf(terminal().primaryScreen().grid(), block);
+        if (!head || !terminal().foldContaining(*head))
+            return command::FoldPresence::None;
+        return terminal().foldState().isCollapsed(block.headStableId) ? command::FoldPresence::Collapsed
+                                                                      : command::FoldPresence::Expanded;
+    }();
+
+    // When the command started; a block that never reached its command has only its prompt's time.
+    auto const startedAt =
+        terminal().localTimeOf(block.commandStartedAt.or_else([&] { return block.promptStartedAt; })
+                                   .value_or(std::chrono::system_clock::time_point {}));
+    return command::BlockMenuState {
+        .id = block.id,
+        .header = commandBlockHeaderLines(block, startedAt, terminal().wallTimeNow()),
+        .output = block.state == vtbackend::CommandBlockState::Prompting ? command::OutputPresence::Absent
+                                                                         : command::OutputPresence::Present,
+        .commandLine = block.commandLine.empty() ? command::CommandLinePresence::Absent
+                                                 : command::CommandLinePresence::Present,
+        .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
+                                                    : command::PromptPresence::Absent,
+        .fold = fold,
+    };
+}
+
+std::optional<command::BlockMenuState> TerminalSession::blockMenuState(vtbackend::CommandBlockId block)
+{
+    return core::locked(_terminal, [&]() -> std::optional<command::BlockMenuState> {
+        auto const* const record =
+            terminal().targetedCommandBlock(vtbackend::CommandBlockTarget::Pointer, block);
+        if (record == nullptr)
+            return std::nullopt;
+        return blockMenuStateLocked(*record);
+    });
+}
+
 command::ContextMenuState TerminalSession::contextMenuState()
 {
     auto profileNames = std::vector<std::string> {};
@@ -5229,39 +5326,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
         }();
 
         // ...with what its rows may act on.
-        auto const blockUnderCursor = [&]() -> std::optional<command::BlockMenuState> {
-            if (block == nullptr)
-                return std::nullopt;
-
-            // Whether its output folds, and how it stands: a fold hangs on the head row.
-            auto const fold = [&] {
-                if (!_config.folding.value().enabled)
-                    return command::FoldPresence::None;
-                auto const head = vtbackend::headOffsetOf(terminal().primaryScreen().grid(), *block);
-                if (!head || !terminal().foldContaining(*head))
-                    return command::FoldPresence::None;
-                return terminal().foldState().isCollapsed(block->headStableId)
-                           ? command::FoldPresence::Collapsed
-                           : command::FoldPresence::Expanded;
-            }();
-
-            // When the command started; a block that never reached its command has only its prompt's time.
-            auto const startedAt =
-                terminal().localTimeOf(block->commandStartedAt.or_else([&] { return block->promptStartedAt; })
-                                           .value_or(std::chrono::system_clock::time_point {}));
-            return command::BlockMenuState {
-                .id = block->id,
-                .header = commandBlockHeaderLines(*block, startedAt, terminal().wallTimeNow()),
-                .output = block->state == vtbackend::CommandBlockState::Prompting
-                              ? command::OutputPresence::Absent
-                              : command::OutputPresence::Present,
-                .commandLine = block->commandLine.empty() ? command::CommandLinePresence::Absent
-                                                          : command::CommandLinePresence::Present,
-                .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
-                                                            : command::PromptPresence::Absent,
-                .fold = fold,
-            };
-        }();
+        auto const blockUnderCursor =
+            block != nullptr ? std::optional { blockMenuStateLocked(*block) } : std::nullopt;
 
         return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),

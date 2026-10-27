@@ -904,6 +904,23 @@ void TerminalSessionManager::openContextMenu(TerminalSession* acting)
     controller->openContextMenu();
 }
 
+void TerminalSessionManager::openBlockMenu(TerminalSession* acting,
+                                           vtbackend::CommandBlockId block,
+                                           std::optional<QPointF> anchor)
+{
+    emit blockMenuRequested(acting, block);
+
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
+        return;
+
+    // The menu's rows run against this pane, so it is the active one while the menu stands.
+    if (auto const* tab = paneActionTargetTab(acting); tab != nullptr)
+        activateSessionPane(*tab, *acting);
+
+    controller->openBlockMenu(*acting, block, anchor);
+}
+
 void TerminalSessionManager::recordCommand(std::string const& id)
 {
     // Prepared here too, not just in openCommandPalette(). Depending on the palette having been opened

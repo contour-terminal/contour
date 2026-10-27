@@ -13,6 +13,8 @@
 
 #include <text_shaper/Font.hpp>
 
+#include <QtCore/QPointF>
+
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -77,6 +79,12 @@ class DisplaySurface
     /// before the first show). Used to reach the screen behind the window; the session does not touch
     /// window geometry, which is @c display::WindowHost's job.
     [[nodiscard]] virtual QQuickWindow* window() const = 0;
+
+    /// @p local, a point in this surface's item-local logical coordinates, in its window's coordinates: what
+    /// a native menu is anchored by.
+    /// @param local The point in the surface's own coordinates.
+    /// @return The same point in the window's; @p local unchanged while there is no window.
+    [[nodiscard]] virtual QPointF mapToWindow(QPointF local) const = 0;
     // }}}
 
     // {{{ Metrics the terminal is sized and reported in

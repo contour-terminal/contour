@@ -161,6 +161,20 @@ void WindowController::openContextMenu()
     presentSurface(MenuSurface::Pane, resolveMenu(command::buildContextMenu(state)));
 }
 
+void WindowController::openBlockMenu(session::TerminalSession& session,
+                                     vtbackend::CommandBlockId block,
+                                     std::optional<QPointF> anchor)
+{
+    auto const state = session.blockMenuState(block);
+    if (!state)
+        return;
+
+    // The pane the rows were built for, held for the reason openContextMenu() holds it. A row names its
+    // block by id: one evicted since resolves to nothing, and does nothing.
+    _contextMenuSession = &session;
+    presentSurface(MenuSurface::Pane, resolveMenu(command::buildBlockMenu(*state)), anchor);
+}
+
 void WindowController::triggerContextMenuAction(int actionId)
 {
     triggerSurfaceAction(MenuSurface::Pane, actionId);
@@ -217,8 +231,14 @@ command::MenuTree WindowController::resolveMenu(std::span<command::ContextMenuEn
         entries, command::chordIndex(_manager.app().config()), command::platformShortcutStyle());
 }
 
-void WindowController::presentSurface(MenuSurface surface, command::MenuTree tree)
+void WindowController::presentSurface(MenuSurface surface,
+                                      command::MenuTree tree,
+                                      std::optional<QPointF> anchor)
 {
+    // Only the pane menu is opened anywhere but at the pointer; the others have no anchor to remember.
+    if (surface == MenuSurface::Pane)
+        _contextMenuAnchor = anchor;
+
     if (_menuPresentation == config::MenuPresentation::InScene)
     {
         showInScene(surface, std::move(tree));
@@ -233,6 +253,7 @@ void WindowController::presentSurface(MenuSurface surface, command::MenuTree tre
                            [this,
                             surface,
                             tree = std::move(tree),
+                            anchor,
                             target = currentMenuTarget(),
                             window = QPointer<QWindow> { _osWindow }] {
                                // The presenter blocks until the menu closes, and Qt keeps delivering events
@@ -252,7 +273,7 @@ void WindowController::presentSurface(MenuSurface surface, command::MenuTree tre
                                    presentMenu(self->_menuPresentation,
                                                self->_nativeMenus,
                                                tree,
-                                               { .window = window.data(), .position = std::nullopt },
+                                               { .window = window.data(), .position = anchor },
                                                pickFromShown(tree.actions, std::move(onAction)));
                                // presentMenu() ran a nested event loop: this window may be gone by now.
                                if (route == MenuRoute::InScene && self)

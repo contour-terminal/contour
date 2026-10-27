@@ -67,6 +67,7 @@
 #include <QtGui/QHoverEvent>
 #include <QtGui/QMouseEvent>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -7582,6 +7583,12 @@ TEST_CASE(
     auto menuBlock = std::optional<vtbackend::CommandBlockId> {};
     auto menuRequests = 0;
     QObject::connect(&testApp.app().sessionsManager(),
+                     &contour::session::TerminalSessionManager::blockMenuRequested,
+                     [&](contour::session::TerminalSession* /*acting*/, vtbackend::CommandBlockId block) {
+                         ++menuRequests;
+                         menuBlock = block;
+                     });
+    QObject::connect(&testApp.app().sessionsManager(),
                      &contour::session::TerminalSessionManager::contextMenuRequested,
                      [&](contour::session::TerminalSession* acting) {
                          ++menuRequests;
@@ -8277,7 +8284,7 @@ TEST_CASE("TerminalSession: a reload that moves the grid refits the page, once",
     }
 }
 
-TEST_CASE("TerminalSession: hovering a block's gutter row describes the block", "[contour][session][gutter]")
+TEST_CASE("TerminalSession: hovering a block's rows anchors its actions", "[contour][session][gutter]")
 {
     using contour::session::ConsumedByGutter;
     using contour::session::TerminalSession;
@@ -8286,41 +8293,78 @@ TEST_CASE("TerminalSession: hovering a block's gutter row describes the block", 
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
     runFailingCommand(*session);
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
-    REQUIRE(session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn))
-            == ConsumedByGutter::Yes);
-    CHECK(spy.count() == 1);
-    auto const text = session->commandBlockTooltip().toStdString();
-    CHECK(text.starts_with("Exit code 2\n"));
-    CHECK(text.contains("$ make"));
-    // And what a click does there: its output folds.
-    CHECK(text.ends_with("\nClick to collapse · Right-click for actions"));
-    CHECK(session->commandBlockTooltipAnchor().width() > 0);
+    SECTION("beside it, in the block column")
+    {
+        REQUIRE(session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn))
+                == ConsumedByGutter::Yes);
+        CHECK(spy.count() == 1);
+        auto const anchor = session->blockActionsAnchor();
+        CHECK(anchor.width() > 0);
+        CHECK(anchor.height() > 0);
 
-    // Collapsed, the click expands it.
-    REQUIRE(session->terminal().toggleFoldContaining(vtbackend::LineOffset(0)));
-    CHECK(session->commandBlockTooltip().toStdString().ends_with(
-        "\nClick to expand · Right-click for actions"));
-    REQUIRE(session->terminal().toggleFoldContaining(vtbackend::LineOffset(0)));
+        // Another row of the same block: the button stays beside its first row.
+        session->sendGutterHoverEvent(gutterHit(1, GutterSegmentKind::BlockColumn));
+        CHECK(spy.count() == 1);
+        CHECK(session->blockActionsAnchor() == anchor);
 
-    // Another row of the same block: the tooltip stays where the block was entered.
-    session->sendGutterHoverEvent(gutterHit(1, GutterSegmentKind::BlockColumn));
-    CHECK(spy.count() == 1);
+        // The line numbers beside it are not the block column.
+        session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::LineNumber));
+        CHECK(spy.count() == 2);
+        CHECK(session->blockActionsAnchor().isEmpty());
 
-    // The line numbers beside it are not the block column.
-    session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::LineNumber));
-    CHECK(spy.count() == 2);
-    CHECK(session->commandBlockTooltip().isEmpty());
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+        // Back on the block, then off the gutter altogether.
+        session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn));
+        CHECK(spy.count() == 3);
+        session->sendGutterHoverEvent(std::nullopt);
+        CHECK(spy.count() == 4);
+        CHECK(session->blockActionsAnchor().isEmpty());
+    }
 
-    // Back on the block, then off the gutter altogether.
-    session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn));
-    CHECK(spy.count() == 3);
-    session->sendGutterHoverEvent(std::nullopt);
-    CHECK(spy.count() == 4);
-    CHECK(session->commandBlockTooltip().isEmpty());
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+    SECTION("over its output")
+    {
+        auto const pointAt = [&](int line) {
+            session->sendMouseMoveEvent(Modifiers {},
+                                        vtbackend::CellLocation { .line = vtbackend::LineOffset(line),
+                                                                  .column = vtbackend::ColumnOffset(2) },
+                                        vtbackend::PixelCoordinate {});
+        };
+        pointAt(1);
+        CHECK(spy.count() == 1);
+        auto const anchor = session->blockActionsAnchor();
+        REQUIRE_FALSE(anchor.isEmpty());
+
+        // The same anchor from the strip beside the block's first row: the button sits where the row is.
+        session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn));
+        CHECK(session->blockActionsAnchor().top() == anchor.top());
+
+        // Another row of the block leaves it where it was.
+        pointAt(2);
+        CHECK(session->blockActionsAnchor().top() == anchor.top());
+
+        // The button opens the menu of that block, and nothing opens without one.
+        auto asked = std::vector<vtbackend::CommandBlockId> {};
+        QObject::connect(&testApp.app().sessionsManager(),
+                         &contour::session::TerminalSessionManager::blockMenuRequested,
+                         [&](contour::session::TerminalSession* /*acting*/, vtbackend::CommandBlockId block) {
+                             asked.push_back(block);
+                         });
+        session->openBlockActions();
+        auto const* const hovered = session->terminal().commandBlockAt(vtbackend::LineOffset(1));
+        REQUIRE(hovered != nullptr);
+        CHECK(asked == std::vector { hovered->id });
+
+        // A row below every block hovers none; leaving the terminal hovers none either.
+        pointAt(20);
+        CHECK(session->blockActionsAnchor().isEmpty());
+        pointAt(1);
+        REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
+        session->onPointerLeft();
+        CHECK(session->blockActionsAnchor().isEmpty());
+        session->openBlockActions();
+        CHECK(asked.size() == 1);
+    }
 }
 
 TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[contour][session][gutter]")
@@ -8345,20 +8389,23 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     surface.gridMetricsValue.pageMargin.left = extent.leadIn + extent.columns + extent.rail;
 
     runFailingCommand(*session);
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
     auto const overTheStrip =
         QPointF { surface.gridMetricsValue.pageMargin.left - (extent.rail / 2.0), 4.0 }; // beside row 0
     auto event = QHoverEvent(QEvent::HoverMove, overTheStrip, overTheStrip, overTheStrip);
     contour::session::sendMouseMoveEvent(&event, *session);
     CHECK(spy.count() == 1);
-    CHECK(session->commandBlockTooltip().toStdString().starts_with("Exit code 2\n"));
+    // The button sits in the strip the pointer is over, beside the block's first row.
+    CHECK(session->blockActionsAnchor().width()
+          == Catch::Approx(extent.rail / surface.devicePixelRatioValue));
+    CHECK(session->blockActionsAnchor().contains(overTheStrip));
 
     // Over the line numbers, left of the strip, the block is not hovered.
     auto const overTheNumbers = QPointF { extent.leadIn + (extent.columns / 2.0), 4.0 };
     auto numbers = QHoverEvent(QEvent::HoverMove, overTheNumbers, overTheNumbers, overTheNumbers);
     contour::session::sendMouseMoveEvent(&numbers, *session);
     CHECK(spy.count() == 2);
-    CHECK(session->commandBlockTooltip().isEmpty());
+    CHECK(session->blockActionsAnchor().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, and only then",
@@ -8431,27 +8478,34 @@ TEST_CASE("TerminalSession: a click beside the fold chip still opens it", "[cont
     CHECK_FALSE(pressAt(2)); // the command's own text
 }
 
-TEST_CASE("TerminalSession: a scroll withdraws the block tooltip", "[contour][session][gutter]")
+TEST_CASE("TerminalSession: a scroll names the block that slid under the pointer",
+          "[contour][session][gutter]")
 {
     // The hovered block is found on pointer MOVEMENT, so a scroll slides another block under a stationary
-    // pointer with nothing noticing; the tooltip goes, as the hyperlink's does.
+    // pointer with nothing noticing; the block is decided again at the row the pointer stands on.
     using contour::session::TerminalSession;
 
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
     runFailingCommand(*session);
     session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-    REQUIRE_FALSE(session->commandBlockTooltip().isEmpty());
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
-    session->onScrollOffsetChanged(vtbackend::ScrollOffset(1));
+    // Nothing is scrollable here, so the page moves under the pointer by output: a command's block is pushed
+    // up and the row at the pointer now belongs to no block.
+    session->terminal().writeToScreen(std::string(40, '\n'));
+    session->onScrollOffsetChanged(vtbackend::ScrollOffset(0));
     QCoreApplication::processEvents();
-    CHECK(spy.count() == 1);
-    CHECK(session->commandBlockTooltip().isEmpty());
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+    CHECK(spy.count() >= 1);
+    auto const* const under = core::locked(session->terminal(), [&] {
+        return session->terminal().commandBlockAt(
+            session->terminal().viewport().translateScreenToGridLine(vtbackend::LineOffset(0)));
+    });
+    CHECK(session->blockActionsAnchor().isEmpty() == (under == nullptr));
 }
 
-TEST_CASE("TerminalSession: without shell integration the block column shows no tooltip",
+TEST_CASE("TerminalSession: without shell integration there is no block to anchor actions to",
           "[contour][session][gutter]")
 {
     // A row no OSC 133 mark claimed belongs to no block, so there is nothing to describe.
@@ -8460,15 +8514,14 @@ TEST_CASE("TerminalSession: without shell integration the block column shows no 
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
     session->terminal().writeToScreen("plain output\r\n");
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
     session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
     CHECK(spy.count() == 0);
-    CHECK(session->commandBlockTooltip().isEmpty());
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+    CHECK(session->blockActionsAnchor().isEmpty());
 }
 
-TEST_CASE("TerminalSession: over the alternate screen the block column shows no tooltip",
+TEST_CASE("TerminalSession: over the alternate screen there is no block to anchor actions to",
           "[contour][session][gutter]")
 {
     // A full-screen application's page has no command blocks, and the gutter beside it stays empty; the
@@ -8480,12 +8533,11 @@ TEST_CASE("TerminalSession: over the alternate screen the block column shows no 
     runFailingCommand(*session);
     session->terminal().writeToScreen("\033[?1049h");
     REQUIRE(session->terminal().isAlternateScreen());
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
     session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
     CHECK(spy.count() == 0);
-    CHECK(session->commandBlockTooltip().isEmpty());
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+    CHECK(session->blockActionsAnchor().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a scroll on the parser thread leaves the block tooltip to the GUI thread",
@@ -8504,17 +8556,21 @@ TEST_CASE("TerminalSession: a scroll on the parser thread leaves the block toolt
     REQUIRE(session->terminal().viewport().scrollUp(vtbackend::LineCount(1)));
     QCoreApplication::processEvents();
     session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-    REQUIRE_FALSE(session->commandBlockTooltipAnchor().isEmpty());
-    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
+    QSignalSpy const spy(session.session.get(), &TerminalSession::blockActionsAnchorChanged);
 
     // One more line at the bottom of the page scrolls it, and the scrolled-back viewport follows.
     std::thread { [&] { session->terminal().writeToScreen("\033[24;1H\n"); } }.join();
     CHECK(spy.count() == 0);
-    CHECK_FALSE(session->commandBlockTooltipAnchor().isEmpty());
+    CHECK_FALSE(session->blockActionsAnchor().isEmpty());
 
+    // The GUI thread then decides the block at the row the pointer stands on afresh.
     QCoreApplication::processEvents();
-    CHECK(spy.count() == 1);
-    CHECK(session->commandBlockTooltipAnchor().isEmpty());
+    auto const* const under = core::locked(session->terminal(), [&] {
+        return session->terminal().commandBlockAt(
+            session->terminal().viewport().translateScreenToGridLine(vtbackend::LineOffset(0)));
+    });
+    CHECK(session->blockActionsAnchor().isEmpty() == (under == nullptr));
 }
 
 TEST_CASE("TerminalSession: a scroll withdraws the link target, on the GUI thread",
@@ -9408,11 +9464,10 @@ TEST_CASE("TerminalSession: a display that goes away takes the tooltips with it"
     {
         runFailingCommand(*session);
         session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-        REQUIRE_FALSE(session->commandBlockTooltipAnchor().isEmpty());
+        REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
 
         session->detachDisplay(*session.surface);
-        CHECK(session->commandBlockTooltipAnchor().isEmpty());
-        CHECK(session->commandBlockTooltip().isEmpty());
+        CHECK(session->blockActionsAnchor().isEmpty());
     }
 
     SECTION("the hyperlink's")
@@ -9429,75 +9484,29 @@ TEST_CASE("TerminalSession: a display that goes away takes the tooltips with it"
     }
 }
 
-TEST_CASE("TerminalSession: the block tooltip follows the hovered block to its finish",
-          "[contour][session][gutter]")
+TEST_CASE("TerminalSession: the block menu's header says how the block ended, as of when it opens",
+          "[contour][session][gutter][blockheader]")
 {
-    // The text is read as a block is entered, so a command that finished under a stationary pointer kept
-    // saying "Running" until the pointer left its block.
-    using contour::session::TerminalSession;
-
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(vtbackend::test::commandStarted("make"));
+    auto const id = core::locked(session->terminal(), [&] {
+        return session->terminal().commandBlockAt(vtbackend::LineOffset(0))->id;
+    });
 
-    SECTION("the hovered block finishes")
-    {
-        // The start is a change too: let the GUI thread take what it posted before the pointer arrives.
-        session->terminal().writeToScreen(vtbackend::test::commandStarted("make"));
-        QCoreApplication::processEvents();
-        session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-        REQUIRE(session->commandBlockTooltip().startsWith("Running"));
-        QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    auto const running = session->blockMenuState(id);
+    REQUIRE(running.has_value());
+    REQUIRE(running->header.size() >= 2);
+    CHECK(running->header.front() == "make");
+    CHECK(running->header[1].starts_with("Running"));
 
-        session->terminal().writeToScreen(vtbackend::test::commandEnd(2));
-        QCoreApplication::processEvents();
-        CHECK(spy.count() == 1);
-        CHECK(session->commandBlockTooltip().startsWith("Exit code 2"));
-    }
+    session->terminal().writeToScreen(vtbackend::test::commandEnd(2));
+    auto const failed = session->blockMenuState(id);
+    REQUIRE(failed.has_value());
+    CHECK(failed->header[1].starts_with("Failed · exit 2"));
 
-    SECTION("another block finishes")
-    {
-        runFailingCommand(*session);
-        session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-        REQUIRE_FALSE(session->commandBlockTooltip().isEmpty());
-        QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
-
-        session->terminal().writeToScreen(vtbackend::test::commandRun("ls", { "out" }));
-        QCoreApplication::processEvents();
-        CHECK(spy.count() == 0);
-    }
-
-    SECTION("a newer prompt closes the hovered block without reporting its end")
-    {
-        // An `ssh` the user is still inside, or a shell that sends no ;D: the block is finished all the same.
-        session->terminal().writeToScreen(vtbackend::test::commandStarted("ssh host"));
-        QCoreApplication::processEvents();
-        session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-        REQUIRE(session->commandBlockTooltip().startsWith("Running"));
-        QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
-
-        session->terminal().writeToScreen("\033]133;A\033\\");
-        QCoreApplication::processEvents();
-        CHECK(spy.count() == 1);
-        CHECK(session->commandBlockTooltip().startsWith("Finished, exit code unknown"));
-    }
-
-    SECTION("how the hovered block's command died arrives after its end")
-    {
-        // OSC 133 owns the blocks, so an OSC 3008 end= only says how the command ended -- and may follow ;D.
-        auto& terminal = session->terminal();
-        terminal.writeToScreen(vtbackend::test::typedAtPrompt("serve"));
-        terminal.writeToScreen("\033]3008;start=cmd-1;type=command\033\\");
-        terminal.writeToScreen("\033]133;C\033\\stopping\r\n" + vtbackend::test::commandEnd(1));
-        QCoreApplication::processEvents();
-        session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
-        REQUIRE(session->commandBlockTooltip().startsWith("Exit code 1\n"));
-        QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
-
-        terminal.writeToScreen("\033]3008;end=cmd-1;exit=interrupt;signal=SIGTERM\033\\");
-        QCoreApplication::processEvents();
-        CHECK(spy.count() == 1);
-        CHECK(session->commandBlockTooltip().startsWith("Exit code 1 (SIGTERM)"));
-    }
+    // A block the store does not hold has no menu.
+    CHECK_FALSE(session->blockMenuState(vtbackend::CommandBlockId(id.value + 1000)).has_value());
 }
 
 namespace

@@ -106,6 +106,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     void closeDisplay() override { ++closeCount; }
     void releaseSession() override { ++releaseSessionCount; }
     [[nodiscard]] QQuickWindow* window() const override { return nullptr; }
+    [[nodiscard]] QPointF mapToWindow(QPointF local) const override { return local; }
 
     [[nodiscard]] vtbackend::RefreshRate refreshRate() const override { return refreshRateValue; }
     [[nodiscard]] vtbackend::ImageSize cellSize() const override { return cellSizeValue; }

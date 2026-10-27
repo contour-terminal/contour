@@ -240,10 +240,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
     // Bumped while the pill shows and the page changes under it, so QML asks overlayClearance() again.
     Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
-    // The command block under the pointer in the gutter's block column; an empty anchor means no tooltip.
-    // The text is read through commandBlockTooltip() whenever the anchor's signal fires.
-    Q_PROPERTY(
-        QRectF commandBlockTooltipAnchor READ commandBlockTooltipAnchor NOTIFY commandBlockHoverChanged)
+    // Where the attended block's ⋯ button sits: the rail's strip beside the block's first visible row, in the
+    // display's item-local logical pixels. Empty with no block under the pointer, on the alternate screen,
+    // and with nothing to anchor to.
+    Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
 
     // The scrollbar's tick marks, top first: { position: 0..1 down the track, kind: a ScrollbarMarkKind as
     // an int, targetLine: what scrollToScrollbarMark() takes }. Empty with nothing to mark, on the
@@ -492,14 +492,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
   public:
     // }}}
 
-    /// The gutter cell the hovered command block was entered at, in the display's item-local logical
-    /// coordinates; empty while no block is hovered. The ENTRY cell, so the tooltip stays put while the
-    /// pointer traces the block's rows.
-    [[nodiscard]] QRectF commandBlockTooltipAnchor() const noexcept { return _commandBlockTooltipAnchor; }
+    /// The strip beside the first visible row of the block under the pointer, in the display's item-local
+    /// logical coordinates; empty while none is (@see blockActionsAnchor above). Under the glyph column of
+    /// the Terminal row it is the one cell at the block column's head.
+    [[nodiscard]] QRectF blockActionsAnchor() const noexcept { return _blockActionsAnchor; }
 
-    /// What the block-column tooltip says about the hovered command block, or empty for "show nothing"
-    /// (@see commandBlockTooltipText). Reads the record under the terminal lock, at the moment it is asked.
-    Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const;
+    /// Opens the menu of the block under the pointer, below its ⋯ button: what the button does.
+    /// Nothing without a block under the pointer.
+    Q_INVOKABLE void openBlockActions();
 
     /// Withdraws the hyperlink tooltip, whatever the pointer is over.
     ///
@@ -1681,6 +1681,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///         whether its tab holds siblings).
     [[nodiscard]] command::ContextMenuState contextMenuState();
 
+    /// The menu state of @p block: its header lines, and what its rows may act on. Takes the terminal lock.
+    /// @param block The block, resolved from the store: it needs no rows on the grid.
+    /// @return The state; nullopt where the store holds no such block (evicted, or never there).
+    [[nodiscard]] std::optional<command::BlockMenuState> blockMenuState(vtbackend::CommandBlockId block);
+
     /// Runs @p action against this session — the same dispatch a key binding takes.
     ///
     /// Public because a key chord is no longer the only way an action is asked for: the command
@@ -1789,8 +1794,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void linkTargetChanged();
     /// The page under a shown link pill changed: re-read overlayClearance().
     void overlayClearanceChanged();
-    /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
-    void commandBlockHoverChanged();
+    /// The block under the pointer changed, or the row its button sits beside moved: re-read
+    /// blockActionsAnchor().
+    void blockActionsAnchorChanged();
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
     /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
     void searchBarRequested();
@@ -1967,12 +1973,27 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// too. The one place that says so, for every way off the grid.
     void leaveGrid();
 
-    /// Points the block-column tooltip at @p block, entered at screen row @p screenRow, or withdraws it.
-    /// Announces only a change of BLOCK: tracing one block's rows keeps the tooltip where it was entered.
-    /// @param block The block under the pointer, or nullopt when there is none to describe.
-    /// @param screenRow The screen row the pointer entered @p block at, a top status line counted.
+    /// Points the block actions anchor at @p block, which the pointer is over at screen row @p screenRow, or
+    /// withdraws it. Announces only a change of the block or of its first visible row: tracing one block's
+    /// rows keeps the button where it is.
+    /// @param block The block under the pointer, or nullopt when there is none.
+    /// @param screenRow The screen row the pointer is at, a top status line counted.
     void updateCommandBlockHover(std::optional<vtbackend::CommandBlockId> block,
                                  vtbackend::LineOffset screenRow);
+
+    /// Withdraws the block hover, the terminal's as well as the anchor.
+    void clearBlockHover();
+
+    /// Decides the block under @p screenRow afresh, as after a scroll slid another one under a stationary
+    /// pointer, and points the anchor at it.
+    /// @param screenRow The screen row the pointer stands at.
+    void refreshBlockHoverAt(vtbackend::LineOffset screenRow);
+
+    /// The anchor of @p block's button, with the terminal locked: the rail's strip beside its first visible
+    /// row.
+    /// @param block The block.
+    /// @return The rectangle in the display's item-local logical coordinates; empty where nothing shows.
+    [[nodiscard]] QRectF blockActionsAnchorLocked(vtbackend::CommandBlockId block) const;
 
     /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved. GUI thread only.
     ///
@@ -2380,9 +2401,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// What overlayClearanceRevision reports. GUI thread.
     int _overlayClearanceRevision = 0;
 
-    /// The command block whose tooltip is showing, if any (@see commandBlockTooltip).
+    /// The command block under the pointer, if any (@see blockActionsAnchor). GUI thread.
     std::optional<vtbackend::CommandBlockId> _hoveredBlock {};
-    QRectF _commandBlockTooltipAnchor {};
+
+    /// The screen row the block hover was decided at; nullopt while the pointer is over no block. GUI thread.
+    std::optional<vtbackend::LineOffset> _blockHoverRow {};
+
+    QRectF _blockActionsAnchor {}; ///< @see blockActionsAnchor
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
@@ -2526,9 +2551,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                             vtbackend::Modifiers modifiers,
                             vtbackend::CommandBlockId block);
 
-    /// Opens the context menu of @p block: what a click on its status mark in the gutter does.
+    /// Opens the menu of @p block at the pointer: what a click on its status mark in the gutter does.
     /// @param block The block.
     void openBlockMenu(vtbackend::CommandBlockId block);
+
+    /// blockMenuState() for a record already found, with the terminal locked.
+    /// @param block The block's record.
+    /// @return The state.
+    [[nodiscard]] command::BlockMenuState blockMenuStateLocked(vtbackend::CommandBlockRecord const& block);
+
+    /// Opens the menu of @p block at @p anchor, given in this session's display's coordinates.
+    /// @param block The block.
+    /// @param anchor Where the menu opens; the pointer when absent.
+    void openBlockMenuAt(vtbackend::CommandBlockId block, std::optional<QPointF> anchor);
 
     /// Runs @p action with @p block as the block a context menu it opens describes (_contextMenuBlock), and
     /// forgets it afterwards.
