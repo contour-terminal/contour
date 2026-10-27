@@ -14,6 +14,7 @@
 #include <contour/config/HostUrl.hpp>
 #include <contour/config/PreeditStyle.hpp>
 #include <contour/config/ScrollBarMode.hpp>
+#include <contour/config/SecureInputMode.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
@@ -1075,6 +1076,7 @@ struct EditionDefaults
     bool hyperlinkHoverTooltip;
     ScrollBarModePreference scrollBarMode; ///< The profile's `scrollbar.mode`.
     vtbackend::PreeditStyle preeditStyle;  ///< How an input method's preedit is drawn.
+    SecureInputMode secureInput;           ///< `secure_input`: the lock and Secure Keyboard Entry.
 };
 
 namespace detail
@@ -1127,6 +1129,7 @@ namespace detail
             .hyperlinkHoverTooltip = true,
             .scrollBarMode = ScrollBarModePreference::Always,
             .preeditStyle = vtbackend::PreeditStyle::Highlighted,
+            .secureInput = SecureInputMode::Off,
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1150,6 +1153,7 @@ namespace detail
             .hyperlinkHoverTooltip = false,
             .scrollBarMode = ScrollBarModePreference::System,
             .preeditStyle = vtbackend::PreeditStyle::Inline,
+            .secureInput = SecureInputMode::Auto,
         },
     };
 
@@ -1854,6 +1858,11 @@ struct Config
     // per-profile answer. Comfortable in both editions, so a column keeps a third edition a row.
     ConfigEntry<ChromeDensity, documentation::ChromeDensity> chromeDensity {
         editionDefaults(defaultsEdition).chromeDensity
+    };
+    // Application-wide, not a profile's: Secure Keyboard Entry is one switch for the whole process, so
+    // which profile asks for it cannot be the answer. Off in Classic, which never showed the lock.
+    ConfigEntry<SecureInputMode, documentation::SecureInput> secureInput {
+        editionDefaults(defaultsEdition).secureInput
     };
     // Empty / 0 mean "inherit the default profile's regular font", which is what makes the
     // terminal-style chrome match the grid below it. Resolved in UiStyleProvider, not here, because

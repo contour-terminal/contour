@@ -3909,6 +3909,57 @@ TEST_CASE("Config: the generated config states chrome_density", "[config]")
     CHECK(generated.find(needle, first + needle.size()) == std::string::npos);
 }
 
+TEST_CASE("Config: a Classic file keeps secure input off", "[config][secureinput]")
+{
+    // Existing users never saw a lock, and secure input stops other apps' global hotkeys while it is on.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(contour::config::loadConfigFromFile(path).secureInput.value()
+          == contour::config::SecureInputMode::Off);
+}
+
+TEST_CASE("Config: the generated config turns secure input on", "[config][secureinput]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, contour::config::defaultConfigString());
+    CHECK(contour::config::loadConfigFromFile(path).secureInput.value()
+          == contour::config::SecureInputMode::Auto);
+}
+
+TEST_CASE("Config: secure_input: off parses and round-trips", "[config][secureinput]")
+{
+    using contour::config::SecureInputMode;
+
+    QTemporaryDir dir;
+    auto const off = loadFromYaml(dir,
+                                  "defaults_edition: native2026\n"
+                                  "default_profile: main\n"
+                                  "secure_input: off\n"
+                                  "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    REQUIRE(off.secureInput.value() == SecureInputMode::Off);
+
+    auto const rendered = contour::config::createString<contour::config::YAMLConfigWriter>(off);
+    CHECK(rendered.contains("\nsecure_input: off\n"));
+    CHECK(loadFromYaml(dir, rendered).secureInput.value() == SecureInputMode::Off);
+}
+
+TEST_CASE("Config: an unknown secure_input spelling warns and keeps the edition's default",
+          "[config][secureinput]")
+{
+    using contour::config::SecureInputMode;
+
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "defaults_edition: native2026\n"
+                                     "default_profile: main\n"
+                                     "secure_input: maybe\n"
+                                     "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(config.secureInput.value() == SecureInputMode::Auto);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.count("maybe") == 1);
+}
+
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")
 {
     QTemporaryDir dir;
@@ -4157,6 +4208,7 @@ struct ExpectedEditionDefaults
     bool hyperlinkHoverTooltip; ///< `hyperlink_hover_tooltip`, a YAML boolean.
     contour::config::ScrollBarModePreference scrollBarMode;
     vtbackend::PreeditStyle preeditStyle;
+    contour::config::SecureInputMode secureInput;
 };
 
 /// Every value the releases before the 2026 redesign shipped.
@@ -4193,6 +4245,7 @@ constexpr auto ClassicExpectation = ExpectedEditionDefaults {
     .hyperlinkHoverTooltip = true,
     .scrollBarMode = contour::config::ScrollBarModePreference::Always,
     .preeditStyle = vtbackend::PreeditStyle::Highlighted,
+    .secureInput = contour::config::SecureInputMode::Off,
 };
 
 /// Every first-launch value of the 2026 redesign.
@@ -4235,6 +4288,7 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .hyperlinkHoverTooltip = false,
     .scrollBarMode = contour::config::ScrollBarModePreference::System,
     .preeditStyle = vtbackend::PreeditStyle::Inline,
+    .secureInput = contour::config::SecureInputMode::Auto,
 };
 
 /// The palette a built-in scheme name resolves to.
@@ -4310,6 +4364,7 @@ void checkEditionDefaults(contour::config::Config const& config, ExpectedEdition
     CHECK(config.tabBarVisibility.value() == expected.tabBarVisibility);
     CHECK(config.theme.value() == expected.theme);
     CHECK(config.hyperlinkHoverTooltip.value() == expected.hyperlinkHoverTooltip);
+    CHECK(config.secureInput.value() == expected.secureInput);
 
     auto const& mice = config.inputMappings.value().mouseMappings;
     auto const follow = std::ranges::find_if(mice, [](auto const& mapping) {

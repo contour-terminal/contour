@@ -314,6 +314,13 @@ constexpr StringLiteral ChromeDensityConfig {
     "\n"
 };
 
+constexpr StringLiteral SecureInputConfig {
+    "{comment} Shows a lock while the program in a pane hides what you type (a password prompt) and, on\n"
+    "{comment} macOS, turns on Secure Keyboard Entry while that pane has focus. `auto` or `off`.\n"
+    "secure_input: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleConfig {
     "{comment} How the window's own minimize/maximize/close controls are drawn, and which side of\n"
     "{comment} the tab bar they sit on (ignore-case). Only applies while the native title bar is\n"
@@ -2545,6 +2552,13 @@ constexpr StringLiteral ChromeDensityWeb {
     "\n"
 };
 
+constexpr StringLiteral SecureInputWeb {
+    "\n"
+    "Shows a lock while the program in a pane hides what you type (a password prompt) and, on macOS, "
+    "turns on Secure Keyboard Entry while that pane has focus. `auto` or `off`.\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleWeb {
     "\n"
     "Selects how the window's own minimize/maximize/close controls are drawn, and which side of the tab "
@@ -3479,6 +3493,7 @@ using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWe
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;
 using ChromeDensity = DocumentationEntry<ChromeDensityConfig, ChromeDensityWeb>;
+using SecureInput = DocumentationEntry<SecureInputConfig, SecureInputWeb>;
 using WindowControlStyle = DocumentationEntry<WindowControlStyleConfig, WindowControlStyleWeb>;
 using UiFontFamily = DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>;
 using UiFontSize = DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>;
