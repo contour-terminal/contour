@@ -152,8 +152,9 @@ namespace detail
 {
     if (in.pillWidth <= 0 || in.pillHeight <= 0)
         return {};
+    // A short pill needs no more room than its whole width, however wide its minimum would be.
     if (in.host == LinkPillHost::PaneHeader && in.findBar != FindBarPresence::Top
-        && in.headerSlotWidth >= in.pillMinimumWidth)
+        && in.headerSlotWidth >= std::min(in.pillMinimumWidth, in.pillWidth))
     {
         auto const width = std::min(in.pillWidth, in.headerSlotWidth);
         return {

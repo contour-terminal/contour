@@ -68,8 +68,9 @@ Item {
     property Item overlayHost: null
     /// The pane header's link pill slot, where the pane shows an inline header; null where it shows none.
     property Item headerLinkSlot: null
-    /// Whether the link pill sits in the pane header (QML-facing): the header hides what it would cover.
-    readonly property bool linkPillInHeader: linkPill.inHeader && linkPill.shown
+    /// Whether the link pill sits in the pane header (QML-facing): the header hides what it would cover --
+    /// until the pill has faded out, not from when it starts to, so nothing comes back under it.
+    readonly property bool linkPillInHeader: linkPill.inHeader && linkPill.visible
 
     // The link under the pointer: its target and how to open it, over blank cells or in the pane header. It
     // replaces the hover tooltip.

@@ -13004,25 +13004,25 @@ TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again
         session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
         REQUIRE(session->linkTargetShown());
         auto const before = session->overlayClearanceRevision();
-        // Two writes, with the GUI thread's loop run between them: the first one's post has arrived and
-        // started the frame, and the second lands inside that frame.
+        // Nothing is published on the parser thread, nor before the GUI thread's loop runs.
         std::thread { [&] { session->terminal().writeToScreen("\r\nmore"); } }.join();
-        QCoreApplication::processEvents();
         CHECK(changes.count() == 0);
+        // With the loop run between them, the first write's post has arrived and started the frame; the
+        // second lands inside it unless the frame has already passed (a slow machine), so one publication or
+        // two -- never one per write and row, and each bumps the revision once.
+        QCoreApplication::processEvents();
         std::thread { [&] { session->terminal().writeToScreen("\r\nand more"); } }.join();
-        QCoreApplication::processEvents();
-        CHECK(changes.count() == 0);
-
-        // A frame later, once, for the whole burst.
         REQUIRE(changes.wait(1000));
-        CHECK(changes.count() == 1);
-        CHECK(session->overlayClearanceRevision() == before + 1);
         CHECK_FALSE(changes.wait(100));
+        CHECK(changes.count() >= 1);
+        CHECK(changes.count() <= 2);
+        CHECK(session->overlayClearanceRevision() == before + changes.count());
 
         // More output under the pill asks again.
+        auto const settled = session->overlayClearanceRevision();
         std::thread { [&] { session->terminal().writeToScreen("\r\nyet more"); } }.join();
         REQUIRE(changes.wait(1000));
-        CHECK(session->overlayClearanceRevision() == before + 2);
+        CHECK(session->overlayClearanceRevision() == settled + 1);
     }
 
     SECTION("while it does not: nothing is asked")

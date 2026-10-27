@@ -2011,6 +2011,17 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     CHECK(placed.value(QStringLiteral("y")).toReal() == 8.0);
     CHECK(placed.value(QStringLiteral("width")).toReal() == 300.0);
 
+    // In a header: cut to a slot that holds its minimum, flush with its trailing edge; to the grid from one
+    // that does not.
+    auto const header = static_cast<int>(contour::window::LinkPillHost::PaneHeader);
+    auto const inHeader = mac.linkPillPlacement(header, closed, 200, 800, 400, 300, 120, 22, clearance);
+    CHECK(inHeader.value(QStringLiteral("anchor")).toString() == QStringLiteral("headerTrailing"));
+    CHECK(inHeader.value(QStringLiteral("x")).toReal() == 0.0);
+    CHECK(inHeader.value(QStringLiteral("width")).toReal() == 200.0);
+    CHECK(mac.linkPillPlacement(header, closed, 100, 800, 400, 300, 120, 22, clearance)
+              .value(QStringLiteral("anchor"))
+          == QStringLiteral("topRight"));
+
     // The insets are the row's s4 and s5, and a host or find bar out of range answers nothing.
     CHECK(mac.linkPillPlacement(-1, closed, 0, 800, 400, 300, 300, 22, clearance).isEmpty());
     CHECK(mac.linkPillPlacement(grid, 99, 0, 800, 400, 300, 300, 22, clearance).isEmpty());

@@ -390,8 +390,8 @@ TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hy
     {
         CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
         CHECK(tracker.clear().change == HoverChange::Changed);
-        // The tooltip was hidden, so the same URL is a real transition once more -- a tracker that
-        // remembered it would leave the user with no tooltip on the way back.
+        // The target was cleared, so the same URL is a real transition once more -- a tracker that
+        // remembered it would leave the user with no pill on the way back.
         CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
     }
 

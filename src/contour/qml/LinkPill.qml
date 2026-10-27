@@ -36,6 +36,9 @@ Toast {
                                       && session.linkTargetText !== undefined
     readonly property bool wanted: hasTarget && session.linkTargetShown
     readonly property bool inHeader: placement.anchor === "headerTrailing" && headerSlot !== null
+    // Kept in a header that has since gone (a pane rebinding mid-fade): the slot's coordinates mean nothing
+    // over the grid, so the pill shows nowhere rather than jump there.
+    readonly property bool slotGone: placement.anchor === "headerTrailing" && headerSlot === null
     /// The narrowest the pill is cut to: its hint, its insets, and one pill-height of the target, the rest of
     /// which is elided in its middle. A header slot narrower than this sends the pill to the grid.
     readonly property real minimumWidth: restImplicitWidth + extent
@@ -85,7 +88,7 @@ Toast {
     shown: pill.wanted && pill.livePlacement.anchor !== "hidden"
     // Present only while it is (or is fading) on screen, so a hidden pill takes no press and is no
     // accessible object.
-    visible: opacity > 0
+    visible: opacity > 0 && !slotGone
 
     Accessible.role: Accessible.ToolTip
     Accessible.name: pill.detail.length > 0 ? pill.text + qsTr(", ") + pill.detail : pill.text

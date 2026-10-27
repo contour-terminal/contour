@@ -124,6 +124,12 @@ TEST_CASE("linkPill.aNarrowHeaderSlotCutsThePillOrSendsItToTheGrid", "[linkpill]
     CHECK(placeLinkPill(inputs).anchor == LinkPillAnchor::HeaderTrailing);
     inputs.headerSlotWidth = 119;
     CHECK(placeLinkPill(inputs) == TopRight);
+
+    // A short pill whose whole width is below its minimum stays in a slot that holds it whole.
+    inputs.pillWidth = 100;
+    inputs.headerSlotWidth = 110;
+    CHECK(placeLinkPill(inputs)
+          == LinkPillPlacement { .anchor = LinkPillAnchor::HeaderTrailing, .x = 10, .y = 0, .width = 100 });
 }
 
 TEST_CASE("linkPill.theFindBarOwnsTheHeaderAndTheTopRight", "[linkpill]")

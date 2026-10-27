@@ -7047,14 +7047,57 @@ TEST_CASE("link pill: a split's pill sits in the pane header (offscreen)",
     CHECK(pill->x() + pill->width() == Catch::Approx(slot->width()));
     CHECK(QTest::qWaitFor([&] { return !actions.isVisible(); }));
     CHECK(QRectF(terminal.x(), terminal.y(), terminal.width(), terminal.height()) == geometry);
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() == 1.0; }));
+    auto const shownX = pill->x();
+    auto const* header = card.findChild<QQuickItem*>(QStringLiteral("paneHeader"));
+    REQUIRE(header != nullptr);
+    auto const occupant = [&] {
+        return header->property("trailingOccupant").toInt();
+    };
 
     panes.leftSession.setLinkTarget(
         QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), false);
-    CHECK(QTest::qWaitFor([&] { return !pill->property("shown").toBool(); }));
-    CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toInt()
-          == static_cast<int>(contour::window::HeaderTrailingOccupant::None));
+    // Mid-fade, it stays in the slot where it stood, and still holds the header: the actions under it come
+    // back only once it is gone, so a click there cannot land on a pill fading over them.
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() > 0.0 && pill->opacity() < 1.0; }));
+    CHECK(pill->parentItem() == slot);
+    CHECK(pill->x() == shownX);
+    CHECK(occupant() == static_cast<int>(contour::window::HeaderTrailingOccupant::LinkPill));
+    CHECK_FALSE(actions.isVisible());
+    CHECK(QTest::qWaitFor([&] { return !pill->isVisible(); }));
+    CHECK(occupant() == static_cast<int>(contour::window::HeaderTrailingOccupant::None));
     // The header's actions come back once the pill has left.
     CHECK(QTest::qWaitFor([&] { return actions.isVisible(); }));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: a header pill whose slot goes shows nowhere rather than over the grid (offscreen)",
+          "[contour][gui][qml][linkpill][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOverlayClearance(linkClearance(40, 18, 40));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto* slot = card.findChild<QQuickItem*>(QStringLiteral("paneHeaderLinkSlot"));
+    auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
+    REQUIRE(slot != nullptr);
+    REQUIRE(pill != nullptr);
+    panes.leftSession.setLinkTarget(
+        QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), true);
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() == 1.0 && pill->parentItem() == slot; }));
+
+    // The pill starts to fade, and the pane loses its header slot while it does.
+    panes.leftSession.setLinkTarget(
+        QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), false);
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() < 1.0; }));
+    REQUIRE(pill->isVisible()); // still fading
+    PaneTreeHost::terminalOf(card).setProperty("headerLinkSlot", QVariant::fromValue<QQuickItem*>(nullptr));
+    CHECK_FALSE(pill->isVisible());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
