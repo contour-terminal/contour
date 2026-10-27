@@ -487,6 +487,18 @@ vtworkspace::Tab* WindowController::tabAtRow(int index) const noexcept
     return win != nullptr ? win->tabAt(index) : nullptr;
 }
 
+std::optional<vtworkspace::TabId> WindowController::tabIdAtRow(int row) const noexcept
+{
+    if (auto const* tab = tabAtRow(row); tab != nullptr)
+        return tab->id();
+    return std::nullopt;
+}
+
+int WindowController::focusedTabIndex() const noexcept
+{
+    return _focusedTab ? rowOfTab(*_focusedTab) : -1;
+}
+
 int WindowController::rowOfTab(vtworkspace::TabId tab) const noexcept
 {
     auto* win = window();
@@ -1028,7 +1040,7 @@ void WindowController::enterChromeArea(window::ChromeArea area)
         return;
     }
     _chromeArea = area;
-    _focusedTabIndex = area == window::ChromeArea::Tabs ? std::max(activeTabIndex(), 0) : -1;
+    _focusedTab = area == window::ChromeArea::Tabs ? tabIdAtRow(std::max(activeTabIndex(), 0)) : std::nullopt;
     _focusedToolbarIndex = area == window::ChromeArea::Toolbar ? 0 : -1;
     emit chromeFocusChanged();
 }
@@ -1047,7 +1059,7 @@ bool WindowController::dropChromeFocus()
     if (_chromeArea == window::ChromeArea::Terminal)
         return false;
     _chromeArea = window::ChromeArea::Terminal;
-    _focusedTabIndex = -1;
+    _focusedTab.reset();
     _focusedToolbarIndex = -1;
     emit chromeFocusChanged();
     return true;
@@ -1084,11 +1096,19 @@ void WindowController::clampChromeFocus()
         leaveChrome();
         return;
     }
-    auto& focused = tabs ? _focusedTabIndex : _focusedToolbarIndex;
-    auto const clamped = std::clamp(focused, 0, items - 1);
-    if (clamped == focused)
+    if (tabs)
+    {
+        // The focused tab is still there, or the keyboard goes to the active one.
+        if (_focusedTab && rowOfTab(*_focusedTab) >= 0)
+            return;
+        _focusedTab = tabIdAtRow(std::max(activeTabIndex(), 0));
+        emit chromeFocusChanged();
         return;
-    focused = clamped;
+    }
+    auto const clamped = std::clamp(_focusedToolbarIndex, 0, items - 1);
+    if (clamped == _focusedToolbarIndex)
+        return;
+    _focusedToolbarIndex = clamped;
     emit chromeFocusChanged();
 }
 
@@ -1160,14 +1180,16 @@ bool WindowController::runChromeCommand(window::ChromeCommand command)
         case ChromeCommand::FocusNext:
         case ChromeCommand::FocusFirst:
         case ChromeCommand::FocusLast: {
-            auto& focused = inTabs ? _focusedTabIndex : _focusedToolbarIndex;
+            auto const focused = inTabs ? focusedTabIndex() : _focusedToolbarIndex;
             auto const moved =
                 window::focusedIndexAfter(command, focused, inTabs ? count() : _toolbarItemCount);
-            if (moved != focused)
-            {
-                focused = moved;
-                emit chromeFocusChanged();
-            }
+            if (moved == focused)
+                return true;
+            if (inTabs)
+                _focusedTab = tabIdAtRow(moved);
+            else
+                _focusedToolbarIndex = moved;
+            emit chromeFocusChanged();
             return true;
         }
         case ChromeCommand::Activate:
@@ -1176,18 +1198,19 @@ bool WindowController::runChromeCommand(window::ChromeCommand command)
             // Leave first: the window gives the terminal the keyboard when the active tab changes, and only
             // while the chrome no longer holds it (a reorder or a background close keeps it).
             {
-                auto const tab = _focusedTabIndex;
+                auto const tab = focusedTabIndex();
                 leaveChrome();
                 activateTab(tab);
             }
             return true;
-        case ChromeCommand::Close: closeTabAskingIfBusy(_focusedTabIndex); return true;
+        case ChromeCommand::Close: closeTabAskingIfBusy(focusedTabIndex()); return true;
         case ChromeCommand::MoveLeft:
         case ChromeCommand::MoveRight: {
-            auto const target = _focusedTabIndex + (command == ChromeCommand::MoveLeft ? -1 : 1);
-            // The focus follows the moved tab in onTabAboutToBeMoved(), where every move is seen.
-            if (target >= 0 && target < count())
-                moveTab(_focusedTabIndex, target);
+            auto const row = focusedTabIndex();
+            auto const target = row + (command == ChromeCommand::MoveLeft ? -1 : 1);
+            // The focus is on the tab, so it goes with it.
+            if (row >= 0 && target >= 0 && target < count())
+                moveTab(row, target);
             return true;
         }
         case ChromeCommand::Leave: leaveChrome(); return true;
@@ -2652,6 +2675,8 @@ void WindowController::onTabAboutToBeAdded(int index)
 void WindowController::onTabAdded(int)
 {
     endInsertRows();
+    if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged(); // the focused tab may have moved down a row
     emit countChanged();
     // The resolved tab-strip gate depends on the live tab count (Multiple mode): re-notify QML so the
     // strip re-shows when the count crosses 1.
@@ -2663,15 +2688,9 @@ void WindowController::onTabAboutToBeRemoved(int index)
 {
     if (auto const* tab = tabAtRow(index); tab != nullptr)
         emit closeTabConfirmationWithdrawn(tab->id().value);
-    // The tab well's focus belongs to a tab, not to a row: a tab before it going shifts it, and the tab
-    // itself going ends it.
-    if (_chromeArea == window::ChromeArea::Tabs)
-    {
-        if (index == _focusedTabIndex)
-            _focusedTabRemoval = FocusedTabRemoval::Pending;
-        else if (index < _focusedTabIndex)
-            --_focusedTabIndex;
-    }
+    // The tab well's focus belongs to a tab, not to a row: the tab itself going ends it.
+    if (_chromeArea == window::ChromeArea::Tabs && _focusedTab && tabIdAtRow(index) == _focusedTab)
+        _focusedTabRemoval = FocusedTabRemoval::Pending;
     beginRemoveRows(QModelIndex(), index, index);
 }
 
@@ -2692,16 +2711,6 @@ void WindowController::onTabClosed()
 
 void WindowController::onTabAboutToBeMoved(int fromIndex, int toIndex)
 {
-    // The focus follows its tab: the moved one lands on toIndex, and those between shift by one.
-    if (_chromeArea == window::ChromeArea::Tabs)
-    {
-        if (_focusedTabIndex == fromIndex)
-            _focusedTabIndex = toIndex;
-        else if (fromIndex < _focusedTabIndex && _focusedTabIndex <= toIndex)
-            --_focusedTabIndex;
-        else if (toIndex <= _focusedTabIndex && _focusedTabIndex < fromIndex)
-            ++_focusedTabIndex;
-    }
     auto const destination = toIndex > fromIndex ? toIndex + 1 : toIndex;
     _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destination);
 }

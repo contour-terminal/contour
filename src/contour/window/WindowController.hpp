@@ -315,7 +315,10 @@ class WindowController:
     /// @return The focused window::ChromeArea as its underlying value.
     [[nodiscard]] int chromeFocusArea() const noexcept { return static_cast<int>(_chromeArea); }
     /// @return The row of the focused tab while the tab well has focus, else -1.
-    [[nodiscard]] int focusedTabIndex() const noexcept { return _focusedTabIndex; }
+    [[nodiscard]] int focusedTabIndex() const noexcept;
+    /// @return The focused tab while the tab well has focus, else nothing. The focus belongs to this tab, so
+    /// an insert, a move or a close elsewhere in the strip never makes it name another one.
+    [[nodiscard]] std::optional<vtworkspace::TabId> focusedTab() const noexcept { return _focusedTab; }
     /// @return The index of the focused toolbar item while the toolbar has focus, else -1.
     [[nodiscard]] int focusedToolbarIndex() const noexcept { return _focusedToolbarIndex; }
     /// Moves focus between the terminal, the tab well and the toolbar (the three focus actions), skipping
@@ -1031,6 +1034,8 @@ class WindowController:
     [[nodiscard]] vtworkspace::Tab* tabAtRow(int index) const noexcept;
     /// The row index of @p tab in this window, or -1.
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
+    /// @return The id of the tab on row @p row; nothing when there is none.
+    [[nodiscard]] std::optional<vtworkspace::TabId> tabIdAtRow(int row) const noexcept;
     /// The strip's label for list-model row @p row, through the model's own TitleRole.
     [[nodiscard]] std::string titleAtRow(int row) const;
     /// The program-status badge @p row's tab shows, from the records of all its panes, each read under its
@@ -1223,7 +1228,9 @@ class WindowController:
 
     window::ChromeArea _chromeArea = window::ChromeArea::Terminal;
     window::ChromeAreaPresence _chromePresence {};
-    int _focusedTabIndex = -1;
+    /// The tab the tab well's keyboard focus is on, by identity rather than by row: the model changes rows
+    /// under it (an insert, a move in from another window, a reorder), but never which tab it is.
+    std::optional<vtworkspace::TabId> _focusedTab;
     int _focusedToolbarIndex = -1;
     int _toolbarItemCount = 0;
     /// Whether the tab holding the chrome focus is being removed.

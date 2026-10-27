@@ -30,6 +30,7 @@ namespace
 using contour::window::ChromeArea;
 
 constexpr auto ToolbarItems = 2;
+constexpr auto DefaultTabCount = 3;
 
 /// A window with three tabs over mock PTYs, the Native2026 bindings loaded, and the chrome shown.
 struct ChromeFixture
@@ -37,16 +38,18 @@ struct ChromeFixture
     contour::test::MockPtySessionFactory* factory = nullptr;
     std::unique_ptr<contour::test::TestApp> app;
     std::unique_ptr<contour::test::ScopedController> window;
+    contour::test::SessionTabs tabs; ///< The tabs the window was opened with, in row order.
 
     /// @param extraBindings Adds bindings to the Native2026 defaults before the sessions copy the config.
-    explicit ChromeFixture(void (*extraBindings)(contour::config::InputMappings&) = nullptr):
+    explicit ChromeFixture(void (*extraBindings)(contour::config::InputMappings&) = nullptr,
+                           int tabCount = DefaultTabCount):
         app(makeApp(factory)), window(std::make_unique<contour::test::ScopedController>(app->manager()))
     {
         app->app().config().inputMappings.value() =
             contour::config::defaultInputMappings(contour::config::DefaultsEdition::Native2026);
         if (extraBindings != nullptr)
             extraBindings(app->app().config().inputMappings.value());
-        [[maybe_unused]] auto const tabs = contour::test::createSessionTabs(app->manager(), **window, 3);
+        tabs = contour::test::createSessionTabs(app->manager(), **window, tabCount);
         (*window)->setChromePresence(true, ToolbarItems);
     }
 
@@ -156,6 +159,39 @@ TEST_CASE("the focus stays on its tab when another tab is reordered or closed",
         CHECK(f.area() == ChromeArea::Tabs);
         CHECK(controller.focusedTabIndex() == 0);
     }
+}
+
+TEST_CASE("a tab inserted before the focused one leaves the focus on its tab",
+          "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    auto other = contour::test::ScopedController { f.app->manager() };
+    other->createNewTab();
+    auto const incoming = other->activeTabIndex();
+    REQUIRE(other->count() == 1);
+
+    controller.activateTab(2);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == 2);
+
+    // From another window, at row 0: the tab under the focus is now on row 3.
+    controller.moveTabIntoThisWindow(other.id.value, incoming, 0);
+    REQUIRE(controller.count() == 4);
+
+    CHECK(f.area() == ChromeArea::Tabs);
+    CHECK(controller.focusedTabIndex() == 3);
+
+    // Backspace acts on the tab the keyboard is on, the one it was on before the insert; the shell in front
+    // makes it idle, so it closes at once.
+    REQUIRE(f.factory->createdPtys.size() == 4);
+    f.factory->createdPtys[2]->setForegroundProcessName(
+        controller.activeSession()->profile().shell.value().program);
+    f.factory->createdPtys[1]->setForegroundProcessName(
+        controller.activeSession()->profile().shell.value().program);
+    CHECK(f.chromeKey(Qt::Key_Backspace));
+    CHECK(f.factory->createdPtys[2]->isClosed());
+    CHECK_FALSE(f.factory->createdPtys[1]->isClosed());
 }
 
 TEST_CASE("closing the focused tab ends the chrome focus", "[windowcontroller][chromefocus]")
