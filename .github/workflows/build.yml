@@ -545,7 +545,9 @@ jobs:
       - name: Test in FreeBSD
         id: test
         uses: vmactions/freebsd-vm@v1
-        timeout-minutes: 60
+        # The VM builds every target from scratch with no compiler cache; master's run of
+        # 2026-10-25 hit 60 minutes while still compiling, so the limit only bounds a hang.
+        timeout-minutes: 120
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
@@ -1001,13 +1003,24 @@ jobs:
           # A downloaded image carries this; the copy must clear Gatekeeper with it set.
           xattr -w com.apple.quarantine "0081;00000000;Safari;" "$INSTALLED"
 
+          # stapler asks Apple's CloudKit for the ticket record, and a dropped connection there
+          # fails the step with error 68 although nothing is wrong with the ticket; retry that
+          # (and only that) before failing.
+          staple_check() {
+            for attempt in 1 2 3; do
+              xcrun stapler validate "$1" && return 0
+              sleep $((attempt * 10))
+            done
+            return 1
+          }
+
           # The ticket is embedded in the copy, so first launch needs no network at all.
-          xcrun stapler validate "$INSTALLED"
+          staple_check "$INSTALLED"
           # The exact decision Gatekeeper makes when that copy is first launched.
           spctl --assess --verbose=4 --type exec "$INSTALLED"
 
           # And the same for the image a browser just downloaded.
-          xcrun stapler validate "$DMG"
+          staple_check "$DMG"
           spctl --assess --verbose=4 --type install "$DMG"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v4
