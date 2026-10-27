@@ -436,7 +436,7 @@ git commit -m "config: secure_input, off in the classic defaults and auto in the
       `enables == 1, disables == 0`; B's echo returns (`Echoed`, output) → `disables == 1`.
     - "a background prompt locks its tab, not the OS" (Review Focus 4): tab 2 `Hidden` while tab 1 is focused →
       tab 2's `SecureRole == 1`, `enables == 0`; activate tab 2 → `enables == 1`.
-    - "a remote-hosted session is never locked" (Review Focus 5): a remote-hosted test factory's session →
+    - "a remote-hosted session is locked through Task 4a's echo state" (Review Focus 5): a remote-hosted test factory's session →
       `inputEcho() == Unknown`, `secureIndicator == None`.
     - "echo restored without output is noticed on the next key": `Hidden` then `setInputEcho(Echoed)` with no output;
       a key event → `secureIndicator == None`, `disables == 1`.
@@ -457,6 +457,38 @@ git commit -m "config: secure_input, off in the classic defaults and auto in the
 git add src/contour/window/SecureInputPolicy.hpp src/contour/window/SecureInputPolicy_test.cpp src/contour/session/TerminalSession.hpp src/contour/session/TerminalSession.cpp src/contour/session/TerminalSessionManager.hpp src/contour/session/TerminalSessionManager.cpp src/contour/session/TerminalSessionManager_test.cpp src/contour/window/WindowController.hpp src/contour/window/WindowController.cpp src/contour/window/UiStyleProvider.hpp src/contour/window/UiStyleProvider.cpp src/contour/ContourGuiApp.hpp src/contour/ContourGuiApp.cpp src/contour/CMakeLists.txt
 git commit -m "contour: a pane at a password prompt is locked, and the focused one turns secure input on" -m "Signed-off-by: Christian Parpart <christian@parpart.family>"
 ```
+
+---
+
+### Task 4a: The echo state reaches a daemon-hosted pane (ruling P1, F1)
+
+Under `daemon.mode: auto` (the default) a pane's PTY lives in the daemon, and the GUI's mirror device answers
+`InputEcho::Unknown`, so without this task the lock and Secure Keyboard Entry never fire for the default hosting mode.
+Pre-flight F1 and owner question 1 ruled that the echo state travels over the native protocol.
+
+**Files:**
+- Modify: the native protocol's session messages in `src/vthost/` (beside the existing per-session state PDUs, e.g. the
+  wire for the cursor style or the working directory): an `InputEchoChanged { sessionId, InputEcho }` message, version-
+  gated so an older peer neither sends nor expects it (an old daemon keeps the client at `Unknown`).
+- Modify: the daemon side — `SessionHost` reads its `UnixPty::inputEcho()` where the session already notices state
+  changes (after each PTY write of user input, and on a coarse idle check while the session has a client), and sends the
+  message only on a change.
+- Modify: the client side — `vthost::client` stores the last value per session; the GUI's mirror device's
+  `inputEcho()` returns it (no termios on the client).
+- Modify: `src/vtpty/Pty.hpp:1401` — the `InputEcho::Unknown` comment no longer names mirrored panes.
+- Test: a `vthost_test` case (`[daemon]` label) — a hosted session over the in-process transport: the client sees
+  `Hidden` after the hosted PTY's ECHO and ICANON are cleared, `Echoed` after they are restored, and nothing is sent
+  while unchanged; an old-version peer gets no message; plus the mirror device returning the stored value. Real PTYs
+  only through the existing hosted-shell test seams; fakes where the suite uses them.
+
+- [ ] **Step 1: Write the failing tests.**
+- [ ] **Step 2: Run them and see them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run them and see them pass** (`ctest --test-dir out/appleclang-debug -L daemon`).
+- [ ] **Step 5: Tidy, format, commit**, message `vthost: a hosted pane's echo state reaches its clients, so the lock works under the daemon`.
+
+Task 4's "a remote-hosted session is locked through Task 4a's echo state" and Task 6's "no lock for mirrored panes, no protocol field" are
+withdrawn by this task: a hosted pane is locked like a local one.
 
 ---
 
