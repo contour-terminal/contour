@@ -16,8 +16,10 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/LauncherFixtures.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/RecordingShellRcEditor.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -605,16 +607,21 @@ class TestApp
     /// @param taskbarProgress Optional native taskbar sink override.
     /// @param appearance The OS accessibility and appearance sources. The null ones by default, so a test
     ///                never reads the host's settings; pass test::appearanceServicesWith() to drive them.
-    explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
-                     std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
-                     std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
-                     std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
-                     vtbackend::HostIdentity identity = testHostIdentity(),
-                     core::platform::FileSystem const* fileSystem = nullptr,
-                     TestEnvironment::Overrides environment = {},
-                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
-                     contour::platform::AppearanceServices const& appearance =
-                         contour::platform::nullAppearanceServices()):
+    /// @param shellRcEditor The editor of the shells' startup files. A RecordingShellRcEditor by default,
+    ///                so no test run reaches a real rc file; @see shellRcEditor().
+    /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
+    explicit TestApp(
+        std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
+        std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
+        std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
+        std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
+        vtbackend::HostIdentity identity = testHostIdentity(),
+        core::platform::FileSystem const* fileSystem = nullptr,
+        TestEnvironment::Overrides environment = {},
+        std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
+        contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
+        std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
+        std::string attachedHostLabel = {}):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
@@ -633,7 +640,8 @@ class TestApp
              std::make_unique<InMemoryWindowPositionStore>(),
              appearance,
              core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory())
+             settingsWindowFactory(),
+             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel)))
     {
         parseTerminalVerb();
     }
@@ -666,7 +674,8 @@ class TestApp
              std::make_unique<InMemoryWindowPositionStore>(),
              contour::platform::nullAppearanceServices(),
              core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory())
+             settingsWindowFactory(),
+             shellIntegrationServices())
     {
         parseTerminalVerb();
     }
@@ -716,7 +725,8 @@ class TestApp
              std::make_unique<InMemoryWindowPositionStore>(),
              contour::platform::nullAppearanceServices(),
              core::platform::defaultSteadyClock().now(),
-             settingsWindowFactory())
+             settingsWindowFactory(),
+             shellIntegrationServices())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -742,6 +752,19 @@ class TestApp
         REQUIRE(_launcher != nullptr); // not on an app built with the default launcher
         return *_launcher;
     }
+
+    /// The recording editor of the shells' startup files wired into this app.
+    [[nodiscard]] RecordingShellRcEditor& shellRcEditor() noexcept
+    {
+        REQUIRE(_shellRcEditor != nullptr); // not on an app handed another editor
+        return *_shellRcEditor;
+    }
+
+    /// What the app's GUI state remembers, in memory.
+    [[nodiscard]] InMemoryGuiStateStore& guiState() noexcept { return *_guiState; }
+
+    /// The binary a test app's rc line names.
+    static constexpr std::string_view ContourBinary = "/opt/contour/bin/contour";
 
     /// Where OpenCommandOutput's files go in a test app: a directory on the in-memory filesystem.
     static constexpr std::string_view OutputDirectory = "/run/contour-test-output";
@@ -863,6 +886,20 @@ class TestApp
         return launcher;
     }
 
+    /// What the offer to install shell integration reads and writes in a test app: a recording editor (or the
+    /// one a test handed), the in-memory GUI state, a fixed binary and, optionally, a remote host.
+    /// Runs in the member-initializer list, so the raw pointers are set before _app is constructed.
+    [[nodiscard]] contour::ShellIntegrationServices shellIntegrationServices(
+        std::unique_ptr<contour::platform::IShellRcEditor> own = nullptr, std::string attachedHostLabel = {})
+    {
+        auto editor = own ? std::move(own) : std::make_unique<RecordingShellRcEditor>();
+        _shellRcEditor = dynamic_cast<RecordingShellRcEditor*>(editor.get());
+        return contour::ShellIntegrationServices { .editor = std::move(editor),
+                                                   .state = _guiState,
+                                                   .contourBinary = std::filesystem::path { ContourBinary },
+                                                   .attachedHostLabel = std::move(attachedHostLabel) };
+    }
+
     /// Builds the app's Settings window offscreen, on an engine of the fixture's own: the app never builds
     /// its own engine in a test. The engine is made on the first show, with the chrome tokens installed.
     /// Runs in the member-initializer list; what it returns is called only once _app exists.
@@ -879,6 +916,8 @@ class TestApp
     }
 
     RecordingExternalLauncher* _launcher = nullptr;
+    RecordingShellRcEditor* _shellRcEditor = nullptr;
+    std::shared_ptr<InMemoryGuiStateStore> _guiState = std::make_shared<InMemoryGuiStateStore>();
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,
     /// TestEnvironment::Overrides)).

@@ -4,16 +4,19 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/ScrollBarMode.hpp>
+#include <contour/config/ShellKind.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/platform/SecureInputGate.hpp>
 #include <contour/platform/SessionVisibility.hpp>
+#include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -321,6 +324,28 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param notice What to tell.
     /// @param acting The session the notice is about.
     void postNotice(window::Notice notice, TerminalSession const* acting);
+
+    /// Offers to install shell integration in @p session's pane, when the facts allow it (window::offerFor():
+    /// a known shell on this machine, not dismissed, its startup file not integrated yet, and no card shown
+    /// in this run). Called by a session whose user entered ShellIntegrationProbeCommands commands with no
+    /// OSC 133 mark seen. GUI thread.
+    /// @param session The session whose pane shows the card.
+    /// @param shell The shell running in it.
+    void offerShellIntegration(TerminalSession& session, config::ShellKind shell);
+
+    /// Adds @p line to @p shell's startup file, once, and tells the user in @p session's window: that it
+    /// was added (also when the file already had it), or why it was not. GUI thread.
+    /// @param session The session the user answered the card in.
+    /// @param shell The shell to integrate.
+    /// @param line The line the card showed, which is exactly what is written.
+    /// @return What the editor did, or why it did nothing.
+    [[nodiscard]] std::expected<platform::RcInstall, platform::ShellRcError> installShellIntegration(
+        TerminalSession& session, config::ShellKind shell, std::string_view line);
+
+    /// Remembers that the user said "Not Now" for @p shell, so no card offers it again. A state that cannot
+    /// be written is logged: the card still hides. GUI thread.
+    /// @param shell The shell declined.
+    void dismissShellIntegration(config::ShellKind shell);
 
     /// Tells the user of @p notice in every window: what is about the application, not one session.
     void postNoticeToEveryWindow(window::Notice const& notice);
@@ -1430,6 +1455,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// GUI thread. @see refreshSecureInput
     std::optional<vtworkspace::SessionId> _securedSession;
     std::string _homeDirectory; ///< The user's home, read once by the composition root.
+    /// Whether this run showed the shell-integration card already: at most one card per run of the app.
+    window::CardSlot _shellCardSlot = window::CardSlot::Free;
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it
     /// back through the store.

@@ -843,6 +843,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/InGridVisualsRendering_test.cpp
             display/SettingsPreviewRendering_test.cpp
             session/ExitCode_test.cpp
+            session/ShellIntegrationCard_test.cpp
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp

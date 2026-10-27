@@ -414,9 +414,11 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<window::WindowPositionStore> windowPositionStore,
                              platform::AppearanceServices const& appearanceServices,
                              core::platform::SteadyTimePoint processStart,
-                             window::SettingsWindowFactory settingsWindowFactory):
+                             window::SettingsWindowFactory settingsWindowFactory,
+                             ShellIntegrationServices shellIntegration):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
+    _attachedHostLabel(std::move(shellIntegration.attachedHostLabel)),
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
@@ -457,6 +459,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _gpuInventory { display::makePlatformGpuInventory() },
     _hostPlatform(config::detectHostPlatform(env)),
     _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
+    _guiState(std::move(shellIntegration.state)),
     _settingsWindowFactory { settingsWindowFactory ? std::move(settingsWindowFactory)
                                                    : engineSettingsWindowFactory() },
     _accessibilitySource(
@@ -467,7 +470,11 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
         [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
     _nativeMenus(appearanceServices.menus()),
     _menuBarPlacement(command::menuBarPlacementFor(_hostPlatform)),
-    _menuBarIntegration(appearanceServices.menuBar())
+    _menuBarIntegration(appearanceServices.menuBar()),
+    _shellRcEditor(shellIntegration.editor
+                       ? std::move(shellIntegration.editor)
+                       : std::make_unique<platform::FileShellRcEditor>(_fileSystem, env, _hostPlatform)),
+    _contourBinary(std::move(shellIntegration.contourBinary))
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
@@ -487,6 +494,13 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
              .fileSystem = fileSystem(),
              .clock = _terminalClocks.steady.get(),
              .tuning = {} };
+}
+
+std::filesystem::path ContourGuiApp::contourBinaryPath() const
+{
+    if (!_contourBinary.empty())
+        return _contourBinary;
+    return std::filesystem::path { QCoreApplication::applicationFilePath().toStdU16String() };
 }
 
 std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexcept

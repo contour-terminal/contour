@@ -6,6 +6,7 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GuiStateStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/display/GpuSelection.hpp>
@@ -17,6 +18,7 @@
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
+#include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
@@ -128,6 +130,28 @@ namespace window
     class SettingsController;
     class WindowController;
 } // namespace window
+
+/// What the shell-integration offer reads from outside the app. Every member defaults to what production
+/// uses, so a test names only what it replaces.
+struct ShellIntegrationServices
+{
+    /// Reads and appends to the shells' startup files. Null (the default) wires a
+    /// platform::FileShellRcEditor over the app's file system, environment and host.
+    std::unique_ptr<platform::IShellRcEditor> editor {};
+
+    /// What the GUI remembers, shared with the new-defaults banner and the Settings window. Null (the
+    /// default) is a config::FileGuiStateStore in the configuration directory, made by guiState() on first
+    /// use.
+    std::shared_ptr<config::GuiStateStore> state {};
+
+    /// The running binary, which the line added to an rc file runs. Empty (the default) is
+    /// `QCoreApplication::applicationFilePath()`.
+    std::filesystem::path contourBinary {};
+
+    /// The remote host the app is attached to, for a test of a remote-hosted window. Empty (the default and
+    /// production) until awaitNativeAttach() fills in attachedHostLabel().
+    std::string attachedHostLabel {};
+};
 
 /// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
 /// a fresh tab. In attach mode the boot window mirrors the daemon's primary (lowest-id) window; a
@@ -259,6 +283,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param settingsWindowFactory Builds the Settings window on its first show. Null (the default) loads
     ///                     SettingsWindow on the app's own QML engine, and gives Unavailable while there
     ///                     is none; tests pass one over an offscreen engine of their own.
+    /// @param shellIntegration What the offer to install shell integration reads and writes; see
+    ///                     ShellIntegrationServices. Tests pass a recording editor and an in-memory state.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -276,7 +302,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr,
         platform::AppearanceServices const& appearanceServices = {},
         core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now(),
-        window::SettingsWindowFactory settingsWindowFactory = nullptr);
+        window::SettingsWindowFactory settingsWindowFactory = nullptr,
+        ShellIntegrationServices shellIntegration = {});
     ~ContourGuiApp() override;
 
     /// The shared persistence service for normal-window locations.
@@ -508,6 +535,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return Empty unless `contour client --host` attached; fixed once its connect succeeded, as a
     ///         process attaches to one daemon for its life.
     [[nodiscard]] std::string const& attachedHostLabel() const noexcept { return _attachedHostLabel; }
+
+    /// The editor of the shells' startup files, behind the shell-integration card and Settings.
+    [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }
+
+    /// The running binary, as the line in a shell's startup file names it.
+    /// @return The injected path, else `QCoreApplication::applicationFilePath()`.
+    [[nodiscard]] std::filesystem::path contourBinaryPath() const;
+
+    /// The host this process runs on, which decides where bash keeps its startup file.
+    [[nodiscard]] config::HostPlatform hostPlatform() const noexcept { return _hostPlatform; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -1143,6 +1180,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Hands the menu bar's Window and Help menus to the OS, built from the same services. Declared before
     // the bar, which borrows it.
     std::unique_ptr<platform::IMenuBarIntegration> _menuBarIntegration;
+
+    /// The shells' startup files. Declared after _hostPlatform and _fileSystem, which the default editor
+    /// reads.
+    std::unique_ptr<platform::IShellRcEditor> _shellRcEditor;
+
+    /// @see ShellIntegrationServices::contourBinary
+    std::filesystem::path _contourBinary;
+
     // The application's menu bar, under a global placement alone. Built with the QML engine, once a
     // QApplication exists, and released with it.
     std::unique_ptr<window::AppMenuBar> _appMenuBar;

@@ -2247,6 +2247,8 @@ void TerminalSession::announceSessionEnd()
     stopFollowingForegroundProcess(ProcessNameFollower::Header);
     // The program is gone: its pane is locked no longer, and secure input follows.
     refreshInputEcho();
+    // And it owns the pane's bottom rows, where the shell-integration card would be.
+    hideShellIntegrationCard();
     emit sessionEndChanged();
     emit paneFooterChanged();
     emit paneStateChanged();
@@ -4025,10 +4027,130 @@ void TerminalSession::sendKeyEvent(Key key,
     // down before the Ctrl+Enter that needs the focus, and a release ends nothing.
     if (eventType != KeyboardEventType::Release && !modifierOnly)
         dropBlockFocusOnInput();
+    if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
+        && modifiers.chord.none())
+        noteCommandEntered();
     terminal().sendKeyEvent(key, modifiers, eventType, now);
     // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
     // noticed at the next key, once the key's bytes have reached the PTY.
     refreshInputEcho();
+}
+
+void TerminalSession::noteCommandEntered()
+{
+    // Read as the Return is pressed, under the lock the parser thread writes the screen and the command
+    // blocks under: an integrated shell has marked its prompt (OSC 133 A) by now.
+    auto const [screen, marks] = core::locked(_terminal, [this] {
+        return std::pair { _terminal.screenType(),
+                           _terminal.commandBlocks().size() > 0 ? window::PromptMarks::Seen
+                                                                : window::PromptMarks::Absent };
+    });
+    if (_shellProbe.noteCommandEntered(screen, marks) != window::ProbeVerdict::Offer || _manager == nullptr)
+        return;
+    // Outside the lock: the manager reads the file system and may show the card.
+    if (auto const shell = runningShell(); shell != config::ShellKind::Unknown)
+        _manager->offerShellIntegration(*this, shell);
+}
+
+config::ShellKind TerminalSession::runningShell() const
+{
+    auto name = foregroundProcessName();
+    // A pane a local daemon hosts has no process group here to ask; its shell is the profile's.
+    if (name.empty() && _hosting == SessionHosting::Remote && _manager != nullptr
+        && _manager->app().attachedHostLabel().empty())
+        name = _profile.shell.value().program;
+    return config::shellKindOf(name);
+}
+
+QString TerminalSession::shellCardText(std::string_view pattern) const
+{
+    auto const* const row = config::shellRow(_shellCard.shell);
+    return QString::fromStdString(window::cardText(
+        pattern, row != nullptr ? row->name : std::string_view {}, _shellCard.rcDisplay, _shellCard.line));
+}
+
+QString TerminalSession::shellIntegrationTitle() const
+{
+    return shellCardText(window::CardStageRows[std::to_underlying(_shellCard.stage)].title);
+}
+
+QString TerminalSession::shellIntegrationBody() const
+{
+    return shellCardText(window::CardStageRows[std::to_underlying(_shellCard.stage)].body);
+}
+
+QString TerminalSession::shellIntegrationPrimary() const
+{
+    return QString::fromUtf8(window::CardStageRows[std::to_underlying(_shellCard.stage)].primary);
+}
+
+QString TerminalSession::shellIntegrationSecondary() const
+{
+    return QString::fromUtf8(window::CardStageRows[std::to_underlying(_shellCard.stage)].secondary);
+}
+
+void TerminalSession::showShellIntegrationCard(config::ShellKind shell,
+                                               std::filesystem::path const& rcFile,
+                                               std::string line)
+{
+    // An ended pane's footer owns its bottom rows.
+    if (_end != EndReason::None)
+        return;
+    _shellCard = ShellIntegrationCardState {
+        .stage = window::CardStage::Offer,
+        .shell = shell,
+        .rcDisplay = window::displayRcPath(rcFile, _manager != nullptr ? _manager->homeDirectory() : ""),
+        .line = std::move(line),
+        .error = {},
+    };
+    emit shellIntegrationCardChanged();
+}
+
+void TerminalSession::hideShellIntegrationCard()
+{
+    if (_shellCard.stage == window::CardStage::Hidden)
+        return;
+    _shellCard = ShellIntegrationCardState {};
+    emit shellIntegrationCardChanged();
+}
+
+void TerminalSession::acceptShellIntegrationCard()
+{
+    switch (_shellCard.stage)
+    {
+        case window::CardStage::Hidden: return;
+        case window::CardStage::Offer:
+            _shellCard.stage = window::CardStage::Confirm;
+            _shellCard.error.clear();
+            emit shellIntegrationCardChanged();
+            return;
+        case window::CardStage::Confirm: break;
+    }
+    if (_manager == nullptr)
+        return;
+    // The manager says so in a toast, either way; this card hides on success and says why on failure.
+    auto const installed = _manager->installShellIntegration(*this, _shellCard.shell, _shellCard.line);
+    if (installed)
+    {
+        hideShellIntegrationCard();
+        return;
+    }
+    _shellCard.error = window::shellIntegrationFailedText(_shellCard.rcDisplay, installed.error());
+    emit shellIntegrationCardChanged();
+}
+
+void TerminalSession::declineShellIntegrationCard()
+{
+    switch (_shellCard.stage)
+    {
+        case window::CardStage::Hidden: return;
+        case window::CardStage::Offer:
+            if (_manager != nullptr)
+                _manager->dismissShellIntegration(_shellCard.shell);
+            break;
+        case window::CardStage::Confirm: break;
+    }
+    hideShellIntegrationCard();
 }
 
 void TerminalSession::sendCharEvent(char32_t value,

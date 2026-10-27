@@ -62,6 +62,20 @@ TEST_CASE("NoticeQueue: a refused drop is a short toast with a mark", "[notices]
         }
 }
 
+TEST_CASE("NoticeRows: the shell-integration toasts", "[notices]")
+{
+    auto const& added = noticeRow(NoticeKind::ShellIntegrationAdded);
+    CHECK(added.surface == NoticeSurface::Toast);
+    CHECK(added.glyph.empty());
+    CHECK(added.duration == 4000ms);
+    CHECK(added.action == contour::window::NoticeAction::None);
+    auto const& failed = noticeRow(NoticeKind::ShellIntegrationFailed);
+    CHECK(failed.surface == NoticeSurface::Toast);
+    CHECK(failed.glyph == "!");
+    CHECK(failed.duration == 6000ms);
+    CHECK(failed.action == contour::window::NoticeAction::None);
+}
+
 TEST_CASE("Notice texts", "[notices]")
 {
     using namespace contour::window;
@@ -80,6 +94,10 @@ TEST_CASE("Notice texts", "[notices]")
     CHECK(dropRefusedText(DropTextError::UnknownShell, DropSubject::NameOrLink)
               .starts_with("Not inserted: a name holds"));
     CHECK(dropRefusedText(DropTextError::NoPaths, DropSubject::FileName).empty());
+    CHECK(shellIntegrationAddedText("~/.zshrc", "zsh")
+          == "Added shell integration to ~/.zshrc. New zsh sessions show command blocks.");
+    CHECK(shellIntegrationFailedText("~/.zshrc", contour::platform::ShellRcError::Unwritable)
+          == "~/.zshrc was not changed: the file could not be written.");
     CHECK(restoreSummaryText(2, 7) == "Restored 2 windows, 7 tabs");
     CHECK(restoreSummaryText(1, 1) == "Restored 1 window, 1 tab");
     CHECK(configReloadFailedNoticeText("bad key") == "Contour could not reload its configuration: bad key");

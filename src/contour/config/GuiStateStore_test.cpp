@@ -253,3 +253,19 @@ TEST_CASE("GuiStateStore: saving one list keeps the other and what this release 
     CHECK(FileGuiStateStore { fileSystem, configDir() }.load().value().dismissedShellIntegrations
           == std::vector<ShellKind> { ShellKind::Bash });
 }
+
+TEST_CASE("GuiStateStore: update changes one list and keeps the other", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    REQUIRE(store.update([](GuiState& state) { state.dismissedShellIntegrations.push_back(ShellKind::Fish); })
+                .has_value());
+    REQUIRE(store
+                .update([](GuiState& state) {
+                    state.dismissedOffers.push_back(NewDefaultsOffer::ExistingConfig);
+                })
+                .has_value());
+    CHECK(store.load().value()
+          == GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig },
+                        .dismissedShellIntegrations = { ShellKind::Fish } });
+}

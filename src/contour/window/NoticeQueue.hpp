@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/LayoutStore.hpp>
+#include <contour/platform/ShellRcEditor.hpp>
 #include <contour/session/PastePreview.hpp>
 #include <contour/window/DroppedText.hpp>
 
@@ -26,13 +27,15 @@ namespace contour::window
 /// What a window tells its user without asking anything back.
 enum class NoticeKind : uint8_t
 {
-    Copied = 0,         ///< An explicit copy put text on the clipboard.
-    PasteTooLarge,      ///< A paste was refused for its size.
-    LayoutSaved,        ///< Save Layout wrote the layout.
-    LayoutSaveFailed,   ///< Save Layout could not.
-    RestoreSummary,     ///< What a restore brought back.
-    ConfigReloadFailed, ///< The configuration file could not be loaded.
-    DropRefused,        ///< A drop onto a pane was refused, and nothing was typed.
+    Copied = 0,             ///< An explicit copy put text on the clipboard.
+    PasteTooLarge,          ///< A paste was refused for its size.
+    LayoutSaved,            ///< Save Layout wrote the layout.
+    LayoutSaveFailed,       ///< Save Layout could not.
+    RestoreSummary,         ///< What a restore brought back.
+    ConfigReloadFailed,     ///< The configuration file could not be loaded.
+    DropRefused,            ///< A drop onto a pane was refused, and nothing was typed.
+    ShellIntegrationAdded,  ///< Install Shell Integration added its line to the shell's startup file.
+    ShellIntegrationFailed, ///< It could not.
 };
 
 /// Where a notice is shown.
@@ -104,6 +107,18 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 4000 },
                 .action = NoticeAction::None,
                 .actionText = "" },
+    NoticeRow { .kind = NoticeKind::ShellIntegrationAdded,
+                .surface = NoticeSurface::Toast,
+                .glyph = "",
+                .duration = std::chrono::milliseconds { 4000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
+    NoticeRow { .kind = NoticeKind::ShellIntegrationFailed,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 6000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -114,7 +129,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::DropRefused) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::ShellIntegrationFailed) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -260,6 +275,24 @@ inline constexpr std::string_view TabMergeRefusedText =
     return std::vformat(text, std::make_format_args(DropSubjectNouns[std::to_underlying(subject)]));
 }
 
+/// "Added shell integration to ~/.zshrc. New zsh sessions show command blocks."
+/// @param rc The startup file as the user would say it.
+/// @param shell The shell's name.
+[[nodiscard]] inline std::string shellIntegrationAddedText(std::string_view rc, std::string_view shell)
+{
+    return std::format("Added shell integration to {}. New {} sessions show command blocks.",
+                       detail::shownText(rc),
+                       detail::shownText(shell));
+}
+
+/// "~/.zshrc was not changed: the file could not be written."
+/// @param rc The startup file as the user would say it.
+/// @param error Why not.
+[[nodiscard]] inline std::string shellIntegrationFailedText(std::string_view rc, platform::ShellRcError error)
+{
+    return std::format("{} was not changed: {}.", detail::shownText(rc), platform::describe(error));
+}
+
 /// Whether the pointer rests on the toast.
 enum class ToastHover : uint8_t
 {
@@ -274,19 +307,14 @@ enum class NoticeChange : uint8_t
     Changed,  ///< The toast or the banner changed.
 };
 
-/// The most toasts that wait behind the one shown. No drop is needed to keep to it: a waiting toast of a kind
-/// already waiting replaces it, and one of the shown kind replaces the shown one, so at most one per other
-/// toast kind waits -- which the assertion below holds the table to.
-inline constexpr std::size_t NoticeWaitingLimit = 5;
-
 /// How many notice kinds show as a toast.
 inline constexpr auto ToastKindCount =
     static_cast<std::size_t>(std::ranges::count(NoticeRows, NoticeSurface::Toast, &NoticeRow::surface));
 
-static_assert(
-    NoticeWaitingLimit >= ToastKindCount - 1,
-    "every toast kind but the shown one must be able to wait: raise NoticeWaitingLimit, or drop the "
-    "oldest when it is exceeded");
+/// The most toasts that wait behind the one shown. No drop is needed to keep to it: a waiting toast of a kind
+/// already waiting replaces it, and one of the shown kind replaces the shown one, so at most one per other
+/// toast kind waits. Derived from the table, so a new toast kind raises it rather than breaking the build.
+inline constexpr std::size_t NoticeWaitingLimit = ToastKindCount - 1;
 
 /// A window's notices: one toast shown at a time, others waiting, and one banner.
 ///

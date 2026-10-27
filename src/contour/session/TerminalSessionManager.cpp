@@ -822,6 +822,79 @@ void TerminalSessionManager::postNotice(window::Notice notice, TerminalSession c
         managerLog()("No window to tell: {}", notice.text);
 }
 
+void TerminalSessionManager::offerShellIntegration(TerminalSession& session, config::ShellKind shell)
+{
+    // An ended pane's footer owns its bottom rows, so such a pane takes no card (and so no slot).
+    if (session.endReason() != EndReason::None)
+        return;
+
+    auto const inspection = _app.shellRcEditor().inspect(shell);
+    if (!inspection)
+    {
+        managerLog()("Not offering shell integration: {}.", platform::describe(inspection.error()));
+        return;
+    }
+
+    auto dismissal = window::OfferDismissal::Open;
+    if (auto const state = _app.guiState()->load())
+        if (std::ranges::contains(state->dismissedShellIntegrations, shell))
+            dismissal = window::OfferDismissal::Dismissed;
+
+    auto const offer =
+        window::offerFor({ .shell = shell,
+                           .locality = _app.attachedHostLabel().empty() ? window::RcLocality::ThisMachine
+                                                                        : window::RcLocality::Remote,
+                           .host = _app.hostPlatform(),
+                           .dismissal = dismissal,
+                           .rc = inspection->state,
+                           .slot = _shellCardSlot });
+    if (offer != window::ShellIntegrationOffer::Card)
+        return;
+
+    auto line = window::shellRcLine(shell, _app.contourBinaryPath());
+    if (!line)
+    {
+        managerLog()("Not offering shell integration: no safe line for {}.",
+                     _app.contourBinaryPath().string());
+        return;
+    }
+    _shellCardSlot = window::CardSlot::Taken;
+    session.showShellIntegrationCard(shell, inspection->file, *std::move(line));
+}
+
+std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManager::installShellIntegration(
+    TerminalSession& session, config::ShellKind shell, std::string_view line)
+{
+    auto const installed = _app.shellRcEditor().install(shell, line);
+
+    // The file as the user would say it: asked of the editor again, so the toast names the very file written.
+    auto const* const row = config::shellRow(shell);
+    auto const shellName = row != nullptr ? row->name : std::string_view {};
+    auto rc = std::string { shellName };
+    if (auto const inspection = _app.shellRcEditor().inspect(shell))
+        rc = window::displayRcPath(inspection->file, _homeDirectory);
+
+    if (installed)
+        postNotice(window::Notice { .kind = window::NoticeKind::ShellIntegrationAdded,
+                                    .text = window::shellIntegrationAddedText(rc, shellName) },
+                   &session);
+    else
+        postNotice(window::Notice { .kind = window::NoticeKind::ShellIntegrationFailed,
+                                    .text = window::shellIntegrationFailedText(rc, installed.error()) },
+                   &session);
+    return installed;
+}
+
+void TerminalSessionManager::dismissShellIntegration(config::ShellKind shell)
+{
+    auto const saved = _app.guiState()->update([shell](config::GuiState& state) {
+        if (!std::ranges::contains(state.dismissedShellIntegrations, shell))
+            state.dismissedShellIntegrations.push_back(shell);
+    });
+    if (!saved)
+        errorLog()("Could not remember declining shell integration: {}", config::describe(saved.error()));
+}
+
 void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notice)
 {
     for (auto* const controller: _controllersByWindow | std::views::values)

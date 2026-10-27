@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -114,6 +115,19 @@ class GuiStateStore
     /// @param state The state to store.
     /// @return Nothing on success, or why the write failed.
     [[nodiscard]] virtual std::expected<void, GuiStateError> save(GuiState const& state) = 0;
+
+    /// Changes the stored state: loads it, lets @p change edit it, and saves it. Every writer goes through
+    /// here, so what one remembers (a declined offer) is never wiped by another saving its own list. A
+    /// state that cannot be loaded is changed from GuiState {}; FileGuiStateStore keeps a copy of such a
+    /// file before replacing it.
+    /// @param change Edits the loaded state.
+    /// @return Nothing on success, or why the write failed.
+    [[nodiscard]] std::expected<void, GuiStateError> update(std::function<void(GuiState&)> const& change)
+    {
+        auto state = load().value_or(GuiState {});
+        change(state);
+        return save(state);
+    }
 };
 
 /// The GUI state file's name, beside `contour.yml`.

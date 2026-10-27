@@ -31,6 +31,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -328,6 +329,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(
         QString foregroundProcessName READ getForegroundProcessName NOTIFY foregroundProcessNameChanged)
     // }}}
+    // The card that offers to install shell integration, in the pane's bottom chrome (window::CardStage as an
+    // int; Hidden while there is no offer) and the words of its stage.
+    Q_PROPERTY(int shellIntegrationCard READ shellIntegrationCard NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationTitle READ shellIntegrationTitle NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationBody READ shellIntegrationBody NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationPrimary READ shellIntegrationPrimary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
     // The question this session asks its user now, as the permission dialog shows it; empty while nothing is
     // asked. See pendingPermission().
     Q_PROPERTY(QVariantMap pendingPermission READ pendingPermission NOTIFY pendingPermissionChanged)
@@ -1039,6 +1050,43 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Starts this ended session again in the same pane (the footer's Restart, or Return), through the
     /// manager. A no-op unless endAction() is Restart and a manager hosts the session.
     Q_INVOKABLE void restart();
+
+    /// @return The stage of the shell-integration card as a window::CardStage; Hidden (zero) without an
+    /// offer.
+    [[nodiscard]] int shellIntegrationCard() const noexcept { return std::to_underlying(_shellCard.stage); }
+
+    /// @return The card's title in its current stage; empty while hidden.
+    [[nodiscard]] QString shellIntegrationTitle() const;
+
+    /// @return The card's body: the offer's sentence, or on Confirm the exact line to be added.
+    [[nodiscard]] QString shellIntegrationBody() const;
+
+    /// @return The label of the card's accent button.
+    [[nodiscard]] QString shellIntegrationPrimary() const;
+
+    /// @return The label of the card's other button.
+    [[nodiscard]] QString shellIntegrationSecondary() const;
+
+    /// @return Why the last install failed, shown under the line on Confirm; empty otherwise.
+    [[nodiscard]] QString shellIntegrationError() const { return QString::fromStdString(_shellCard.error); }
+
+    /// The card's accent button: on Offer it shows the line (Confirm); on Confirm it adds the line to the
+    /// shell's startup file through the manager, which hides the card on success and keeps it, with the
+    /// reason, on failure. GUI thread.
+    Q_INVOKABLE void acceptShellIntegrationCard();
+
+    /// The card's other button: on Offer it remembers "Not Now" for this shell and hides the card; on
+    /// Confirm it hides the card for this run, remembering nothing. GUI thread.
+    Q_INVOKABLE void declineShellIntegrationCard();
+
+    /// Shows the card on its Offer stage. Called by the manager once it decided to offer; a no-op once the
+    /// session has ended, as the footer owns the pane's bottom then. GUI thread.
+    /// @param shell The shell the card names.
+    /// @param rcFile The startup file the line would go into.
+    /// @param line The line that would be added.
+    void showShellIntegrationCard(config::ShellKind shell,
+                                  std::filesystem::path const& rcFile,
+                                  std::string line);
 
     /// Closes this ended pane (the footer's Close): prunes it from the model, then lets the display go. A
     /// no-op while the session runs; idempotent once it has ended.
@@ -1894,6 +1942,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void paneProgramStatusChanged();
     /// @see getForegroundProcessName
     void foregroundProcessNameChanged();
+    /// The shell-integration card's stage, words or error changed.
+    void shellIntegrationCardChanged();
     /// The link target's text, hint or visibility changed.
     void linkTargetChanged();
     /// The page under a shown link pill changed: re-read overlayClearance().
@@ -2910,6 +2960,35 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     core::Flags<ProcessNameFollower> _processNameFollowers;
     /// The program in front, as the poll last read it. GUI thread.
     std::string _polledForegroundProcessName;
+
+    /// What the shell-integration card shows. GUI thread.
+    struct ShellIntegrationCardState
+    {
+        window::CardStage stage = window::CardStage::Hidden;
+        config::ShellKind shell = config::ShellKind::Unknown;
+        std::string rcDisplay {}; ///< The startup file as the user would say it, `~/.zshrc`.
+        std::string line {};      ///< The line that would be added.
+        std::string error {};     ///< Why the last install failed.
+    };
+
+    /// Decides when the lack of OSC 133 marks is worth an offer. GUI thread.
+    window::ShellIntegrationProbe _shellProbe;
+    ShellIntegrationCardState _shellCard;
+
+    /// Counts an unmodified Return the session is about to write to the PTY, and asks the manager to offer
+    /// shell integration when the probe says so. GUI thread; takes the terminal lock briefly.
+    void noteCommandEntered();
+
+    /// Which shell this session runs, from the program in front of it; for a pane hosted by a local daemon,
+    /// which has no process group of its own, from the profile's shell program.
+    [[nodiscard]] config::ShellKind runningShell() const;
+
+    /// @param pattern A window::CardStageRow text.
+    /// @return It, filled in with the card's shell, startup file and line.
+    [[nodiscard]] QString shellCardText(std::string_view pattern) const;
+
+    /// Hides the card; emits shellIntegrationCardChanged() when it was showing. GUI thread.
+    void hideShellIntegrationCard();
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;

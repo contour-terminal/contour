@@ -85,6 +85,18 @@ TEST_CASE("NewDefaultsNotice: Keep Mine is remembered", "[contour][newdefaults]"
     CHECK(fixture.recorded.empty());
 }
 
+TEST_CASE("NewDefaultsNotice: Keep Mine keeps the shells whose install offer was declined",
+          "[contour][newdefaults]")
+{
+    auto fixture = NoticeFixture {};
+    fixture.state->state.dismissedShellIntegrations = { contour::config::ShellKind::Zsh };
+    auto notice = fixture.makeNotice();
+    REQUIRE(notice->offered());
+    notice->keepMine();
+    CHECK(fixture.state->state.dismissedOffers.size() == 1);
+    CHECK(fixture.state->state.dismissedShellIntegrations == std::vector { contour::config::ShellKind::Zsh });
+}
+
 TEST_CASE("NewDefaultsNotice: a Reset Config is offered again after Keep Mine", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
