@@ -8735,11 +8735,13 @@ TEST_CASE("TerminalSession: a scroll on the parser thread leaves the block toolt
 
     // The GUI thread then decides the block at the row the pointer stands on afresh.
     QCoreApplication::processEvents();
-    auto const* const under = core::locked(session->terminal(), [&] {
-        return session->terminal().commandBlockAt(
+    auto const under = core::locked(session->terminal(), [&] {
+        auto const* const block = session->terminal().commandBlockAt(
             session->terminal().viewport().translateScreenToGridLine(vtbackend::LineOffset(0)));
+        return block != nullptr ? std::optional { block->id } : std::nullopt;
     });
-    CHECK(session->blockActionsAnchor().isEmpty() == (under == nullptr));
+    CHECK(session->terminal().hoveredBlock() == under);
+    CHECK(session->blockActionsAnchor().isEmpty() == !under.has_value());
 }
 
 TEST_CASE("TerminalSession: a scroll withdraws the link target, on the GUI thread",
