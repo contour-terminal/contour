@@ -10,6 +10,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/session/SearchStatus.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/ChromeSnapshotScene.hpp>
 #include <contour/test/ChromeSnapshotWriter.hpp>
@@ -436,6 +437,16 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(counts.front()->property("text").toString()
                       == (row.find == SnapshotFind::Invalid ? QStringLiteral("Invalid pattern")
                                                             : QStringLiteral("2 of 5")));
+                // Both searches run as a regex (ChromeSnapshotScene::searchIn): its toggle alone is lit.
+                for (auto const& toggleRow: contour::session::SearchToggleRows)
+                {
+                    CAPTURE(toggleRow.objectName);
+                    auto const toggles =
+                        contour::test::itemsNamed(*content, QString::fromUtf8(toggleRow.objectName));
+                    REQUIRE(toggles.size() == 1);
+                    CHECK(toggles.front()->property("checked").toBool()
+                          == (toggleRow.toggle == contour::session::SearchToggle::Regex));
+                }
                 auto const* parent = bar->property("parent").value<QQuickItem*>();
                 REQUIRE(parent != nullptr);
                 auto const inHeaderRow = variant.row == contour::config::ChromeStyle::Terminal

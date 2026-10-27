@@ -293,15 +293,21 @@ TEST_CASE("snapshot.scriptTable.findBar", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::FindBarInvalid).name == "find-bar-invalid");
     CHECK(scriptRow(SnapshotScript::FindBarInvalid).panes == PaneShape::SingleLeaf);
     CHECK(scriptRow(SnapshotScript::FindBarInvalid).find == SnapshotFind::Invalid);
+    auto matches = std::size_t { 0 };
+    auto invalid = std::size_t { 0 };
     for (auto const& row: SnapshotScripts)
     {
         CAPTURE(row.name);
         auto const isFindRow = row.script == SnapshotScript::FindBar
                                || row.script == SnapshotScript::FindBarSplit
                                || row.script == SnapshotScript::FindBarInvalid;
-        // Every row names a find, and only the find rows search and open the bar.
-        CHECK(static_cast<std::size_t>(row.find) <= static_cast<std::size_t>(SnapshotFind::Invalid));
+        // Only the find rows search and open the bar.
         CHECK((row.find != SnapshotFind::None) == isFindRow);
         CHECK((row.action == ScriptAction::OpenFindBar) == isFindRow);
+        matches += row.find == SnapshotFind::Matches ? 1 : 0;
+        invalid += row.find == SnapshotFind::Invalid ? 1 : 0;
     }
+    // Each search the scene can give is pictured: matched on a pane and under a split's header, and refused.
+    CHECK(matches == 2);
+    CHECK(invalid == 1);
 }
