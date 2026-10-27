@@ -273,7 +273,7 @@ Those marked **(owner)** are repeated under *Owner decisions*; the run proceeds 
 
 ### Non-goals
 
-- The canvas's hovered-block background tint and its 1-px ring (not in §3.12; they would tint non-blank cells).
+- (Withdrawn 2026-10-27 by the owner: the hovered-block tint and ring are built — Task 6b.)
 - Chords in the block menu (⌥⌘C, ⌘R, ⌃⇧G, ⌥⌘[ on the canvas): 1b R-i keeps context menus chord-free, and the ⌘ chords
   are issue #2175's.
 - The macOS `UNUserNotificationCenter` backend (Step 6.5), the shell-integration card (6.1).
@@ -659,6 +659,80 @@ commits; the merge order is the board's.
   Run: `out/appleclang-debug/src/vtbackend/vtbackend_test "[gutter],[folding]" && out/appleclang-debug/src/contour/contour_gui_test "[contour][session][gutter]"`
   Expected: PASS.
 - [ ] **Step 5: Tidy, format, commit**, message `vtbackend: a fold chip, "80 lines hidden ⌄", with a wider hit`.
+
+---
+
+### Task 6a: The chips are the canvas's pills (owner, 2026-10-27)
+
+The owner overruled default 2 (R-e, R-k): on the native rows the status and fold chips are drawn exactly as the canvas's
+`blocks` board draws them — pills in the system UI font — by the renderer, so they scroll with the cells in the same
+frame. Tasks 5–6's decisions stay: `placeBlockChip` (over blank cells only, else a mark on the rail), `blockStatusText`,
+`collapsedFoldLabel`, the widened fold hit. Only how a chip is drawn changes. The Terminal row keeps Tasks 5–6's cell
+chips (terminal text over a band) — a TUI draws nothing in a second font.
+
+**Files:**
+- Modify: `src/vtbackend/render/RenderBuffer.hpp` — `RenderChipBand` becomes `RenderChip`, carrying its text and style;
+  the chip's annotation cells are no longer emitted on the native rows.
+- Modify: `src/vtbackend/screen/Terminal.cpp` — `fillBlockChips`, `fillFoldLabels` fill `RenderChip`s.
+- Create: `src/vtrasterizer/ChipRenderer.{hpp,cpp}` — draws a pill: rounded rect (fill + optional 0.5-pt inner ring) and
+  its label shaped in the UI font through `text_shaper` (the same shaper and atlas as the grid, a second font key).
+- Modify: `src/text_shaper/` — locate the platform UI font through the injected `FontLocator`: CoreText's system font
+  on macOS, fontconfig's `sans-serif` on Linux, Segoe UI through DirectWrite on Windows; `BundledFonts` falls back to a
+  bundled sans when none is found (no new dependency; Inter only if it is already bundled, else the first bundled sans).
+- Modify: `src/contour/config/ChromeTokenGroups.hpp`, `UiStyle.hpp` — the pill tokens per row (below).
+- Test: `src/vtrasterizer/ChipRenderer_test.cpp` (offscreen, a fake atlas: geometry and colours of the emitted quads),
+  `Terminal_gutter_test.cpp` (the native rows emit `RenderChip`s and no chip cells; the Terminal row emits cells),
+  a contrast test that loops every bundled scheme × native row × appearance.
+
+**Canvas values, exact** (`blocks` board; points, scaled by the device pixel ratio):
+
+| Chip | Font | Text | Fill | Ring | Padding | Height / radius |
+|---|---|---|---|---|---|---|
+| Failed ("Failed · exit 8 · 12.4 s") | UI 11 pt, weight 600 | status.danger | status.danger at 16 % | — | 1 × 8 | row-fitted / 9 |
+| Running ("Running · 8 s") | UI 11 pt, weight 600 | accent | none | — | 1 × 8 | — |
+| Success (quiet duration, "4 ms") | UI 11 pt, weight 400 | label at 62 % | none | — | 0 | — |
+| Fold ("80 lines hidden ⌄") | UI 11 pt, weight 400 | label at 70 % | label at 8 % | label at 12 %, 0.5 pt | 0 × 10 | 20 / 10 |
+
+"label" is the scheme's foreground on dark appearances and the matching dark ink on light ones (the canvas is
+drawn dark; the light row mirrors it as the other chrome inks do). Every text ink keeps ≥ 4.5:1 against the pill (or
+the pane where there is no fill) on every bundled scheme × native row × appearance: where a canvas value falls short,
+the ink takes the nearest legible value through `legibleInkOn`/`markOn` (3e), and the test names the scheme.
+
+- **Width and placement.** The pill's width is measured from the shaped label plus padding, converted to whole columns
+  for `placeBlockChip` (ceil), so it never covers a non-blank cell; it is drawn right-aligned in its placed columns,
+  vertically centred on the row.
+- **Thread.** Shaping happens on the render thread inside the renderer, like the grid's text; `Terminal` only fills the
+  text and style under its lock. The UI font's metrics are read once per font change, not per frame.
+
+- [ ] **Step 1: Write the failing tests** (the table's values, the no-cells rule, the contrast loop, the column width).
+- [ ] **Step 2: Run them and see them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run them and see them pass** (`vtrasterizer_test`, `vtbackend_test "[blockchip],[gutter]"`, `contour_test "[chrometokens]"`).
+- [ ] **Step 5: Tidy, format, commit**, message `vtrasterizer: block chips are pills in the system font, as the canvas draws them`.
+
+### Task 6b: The hovered block's tint and ring (owner, 2026-10-27)
+
+The owner overruled the Non-goal: hovering a block on a native row tints the block's rows and draws a 1-px inner ring
+around it, as the canvas's `blocks` board does. The Terminal row draws neither (cells only).
+
+**Files:**
+- Modify: `src/vtbackend/render/RenderBuffer.hpp` — `RenderBlockHighlight { LineOffset top; LineCount height; RGBAColor tint; RGBAColor ring; }`.
+- Modify: `src/vtbackend/screen/Terminal.cpp` — filled from `_hoveredCommandBlock` (Task 2's hover state), clipped to
+  the visible rows; nothing while no block is hovered.
+- Modify: `src/vtrasterizer/Renderer.cpp` — drawn after cell backgrounds and before glyphs, so text stays on top; the
+  ring is drawn over the block's outline (left edge at the grid's first column, right edge at the page's last).
+- Modify: `src/contour/config/ChromeTokenGroups.hpp`, `UiStyle.hpp` — `blockHoverTint` (label at 5 %), `blockHoverRing`
+  (label at 6 %, 1 px) per native row; none on the Terminal row.
+- Test: `Terminal_gutter_test.cpp` (the highlight follows the hovered block, spans its head to its tail, clips at the
+  page, disappears on leave, collapses with a fold), `vtrasterizer` (draw order: tint above backgrounds, below glyphs),
+  and a contrast loop: every scheme's foreground and its 16 ANSI colours over the tinted background stay within 0.25 of
+  their untinted contrast ratio, and any pair that passed 4.5:1 still does.
+
+- [ ] **Step 1: Write the failing tests.**
+- [ ] **Step 2: Run them and see them fail.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run them and see them pass.**
+- [ ] **Step 5: Tidy, format, commit**, message `vtbackend: a hovered block is tinted and ringed, as the canvas draws it`.
 
 ---
 
