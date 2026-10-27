@@ -5278,9 +5278,55 @@ TEST_CASE("TerminalSession: a question asked again with more to it is another qu
     held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
     CHECK(shownQuestionId(*held) == grown);
 
-    // Answered with what is shown now, it is.
+    // Answered with what is shown now -- once Allow is given back after the re-presentation -- it is.
+    testApp.steadyClock().advance(contour::session::RepresentedAllowHold);
+    REQUIRE(QTest::qWaitFor(
+        [&] { return !held->pendingPermission().value(QStringLiteral("allowHeld")).toBool(); }, 2000));
     answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(capturedSeededScreen(*held));
+}
+
+TEST_CASE("TerminalSession: Allow waits a moment after a question is re-presented",
+          "[contour][session][permission][queue]")
+{
+    // A program can grow its question just before the user's click lands on Allow. For a moment after a
+    // re-presentation Allow is withheld -- in what the dialog shows, and in what the session takes -- while
+    // Deny and Escape stay live. The first presentation is not held.
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+    using contour::session::RepresentedAllowHold;
+    auto const allowHeld = [](contour::session::TerminalSession const& session) {
+        return session.pendingPermission().value(QStringLiteral("allowHeld")).toBool();
+    };
+
+    TestApp testApp;
+    auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    REQUIRE(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    CHECK_FALSE(allowHeld(*held));
+
+    held->requestCaptureBuffer(held->terminal().pageSize().lines, vtbackend::CaptureLineMode::Physical);
+    CHECK(allowHeld(*held));
+    auto const regrown = shownQuestionId(*held);
+
+    SECTION("Allow is not taken while held, and is once the moment has passed")
+    {
+        answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+        CHECK(mockPtyOf(*held).stdinBuffer().empty());
+
+        testApp.steadyClock().advance(RepresentedAllowHold);
+        REQUIRE(QTest::qWaitFor([&] { return !allowHeld(*held); }, 2000));
+        CHECK(shownQuestionId(*held) == regrown); // the same question, Allow given back
+        answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("Deny is taken at once")
+    {
+        answerShown(*held, PermissionDecision::Deny, PermissionMemory::Once);
+        CHECK_FALSE(held->pendingPermissionAsk().has_value());
+    }
 }
 
 TEST_CASE("TerminalSession: a click before a larger capture's request is in serves only what was shown",

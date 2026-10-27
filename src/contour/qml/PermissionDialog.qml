@@ -53,7 +53,10 @@ KitDialog {
     description: root._lines.map(line => line.text).join("\n")
     acceptText: root.prompt.allowText !== undefined ? root.prompt.allowText : ""
     rejectText: root.prompt.denyText !== undefined ? root.prompt.denyText : ""
-    acceptEnabled: !(root.prompt.allowOnce === Permission.Withheld && !permissionRemember.checked)
+    // Off while the session holds Allow for a moment after a re-presentation, and for a consent that can only
+    // be remembered while the box is unticked.
+    acceptEnabled: root.prompt.allowHeld !== true
+                   && !(root.prompt.allowOnce === Permission.Withheld && !permissionRemember.checked)
     defaultButton: root.prompt.defaultDecision === Permission.Allow ? KitDialog.Accept : KitDialog.Reject
     // Escape is no answer to keep: it is answered below, as Deny for this once (never the box's scope).
     closePolicy: Popup.NoAutoClose

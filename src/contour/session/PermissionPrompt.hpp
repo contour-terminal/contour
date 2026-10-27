@@ -10,6 +10,7 @@
 #include <QtCore/QVariant>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -186,6 +187,15 @@ enum class ConsentAnswerError : uint8_t
 /// @return The verdict, or why the pair is not one.
 [[nodiscard]] std::expected<ConsentVerdict, ConsentAnswerError> consentVerdictFor(
     PermissionDecision decision, PermissionMemory memory) noexcept;
+
+/// How long Allow is withheld after a question is re-presented -- asked again with more to it while shown --
+/// so a click aimed at what was shown cannot land on Allow for what replaced it. Deny and Escape stay live;
+/// a first presentation is not held.
+inline constexpr auto RepresentedAllowHold = std::chrono::milliseconds { 500 };
+
+/// The key TerminalSession::pendingPermission() sets, to true, while Allow is withheld
+/// (RepresentedAllowHold).
+inline constexpr auto AllowHeldKey = std::string_view { "allowHeld" };
 
 /// @p prompt as QML reads it (TerminalSession::pendingPermission()): `id`, `title`, `lines` (`{text, weight,
 /// style}`), `denyText`, `allowText`, `rememberText`, `rememberScope`, `initialMemory`, `defaultDecision` and

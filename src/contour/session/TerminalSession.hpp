@@ -1567,6 +1567,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Republishes pendingPermission() from the question shown, notifying if it changed.
     void publishPendingPermission();
 
+    /// @return Whether Allow is withheld for the question shown now (RepresentedAllowHold).
+    [[nodiscard]] bool isAllowHeld() const;
+
+    /// Withholds Allow for the question just re-presented, and schedules its giving back.
+    void holdAllow();
+
+    /// Gives Allow back once its hold has run out on the clock, or checks again when it will have.
+    void releaseAllowHoldWhenDue();
+
     /// Shows the question now at the front: publishes it and announces its title politely.
     void showNextPermission();
 
@@ -2388,6 +2397,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     int _shownQuestionId = 0;
     /// The last question announced, so each is said once. GUI thread.
     int _announcedQuestionId = 0;
+    /// Allow withheld after a re-presentation (RepresentedAllowHold): for which question, and until when.
+    struct AllowHold
+    {
+        int questionId = 0;                    ///< The re-presented question's id.
+        core::platform::SteadyTimePoint until; ///< When Allow is given back, on the terminal's steady clock.
+    };
+    /// @see AllowHold. Empty once given back. GUI thread.
+    std::optional<AllowHold> _allowHold;
     std::unique_ptr<QThread> _exitWatcherThread;
 
     std::atomic<bool> _onClosedHandled = false;

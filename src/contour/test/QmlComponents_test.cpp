@@ -10433,6 +10433,34 @@ TEST_CASE("PermissionDialog: its lines and checkbox read on its surface everywhe
     });
 }
 
+TEST_CASE(
+    "PermissionDialog: Allow is disabled while the session holds it after a re-presentation (offscreen)",
+    "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    auto question = pasteQuestion(1);
+    session.setPendingPermission(question);
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.part("kitDialogAccept")->property("enabled").toBool());
+
+    // Re-presented: another id, Allow held; Deny stays live.
+    question.insert(QStringLiteral("id"), 2);
+    question.insert(QStringLiteral("allowHeld"), true);
+    session.setPendingPermission(question);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened() && host.dialog->property("questionId").toInt() == 2; },
+                            2000));
+    CHECK_FALSE(host.part("kitDialogAccept")->property("enabled").toBool());
+    CHECK(host.part("kitDialogReject")->property("enabled").toBool());
+
+    // Given back: the same question, Allow live again.
+    question.remove(QStringLiteral("allowHeld"));
+    session.setPendingPermission(question);
+    QCoreApplication::processEvents();
+    CHECK(host.part("kitDialogAccept")->property("enabled").toBool());
+    CHECK(host.dialog->property("questionId").toInt() == 2);
+}
+
 TEST_CASE("PermissionDialog: a question put up from inside the answer to the last is shown and answered",
           "[contour][gui][qml][permission]")
 {

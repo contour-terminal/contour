@@ -1102,6 +1102,12 @@ void TerminalSession::answerPermission(int questionId, PermissionDecision decisi
             "Ignoring an answer to question {}: question {} is the one asked.", questionId, _shownQuestionId);
         return;
     }
+    if (decision == PermissionDecision::Allow && isAllowHeld())
+    {
+        // A click that may have been aimed at what was shown before the question grew: not taken.
+        sessionLog()("Ignoring Allow for question {}: it was re-presented a moment ago.", questionId);
+        return;
+    }
     if (auto const* const role = std::get_if<GuardedRole>(&*ask))
     {
         sessionLog()("Permission for {} answered {}, {} by user.", *role, decision, memory);
@@ -1160,18 +1166,60 @@ void TerminalSession::publishPendingPermission()
         if (_permissionQueue.withdraw(ExtensionConsentAsk {}) == PromptChange::Due)
             ++_shownQuestionId;
 
+    auto const allowHeldKey = QString::fromUtf8(AllowHeldKey);
     auto const prompt = currentPermissionPrompt();
     auto next = prompt ? permissionPromptMap(*prompt, _shownQuestionId) : QVariantMap {};
+    // What is asked, apart from whether Allow is held: giving Allow back is not asking anew.
+    auto shown = _pendingPermission;
+    shown.remove(allowHeldKey);
+    // The question shown, asked again with more to it (a larger capture, another paste, another font), is
+    // another question: a click on what was shown must never grant what was not. So it takes a new id, an
+    // answer to the old one is ignored, and Allow is held for a moment.
+    if (next != shown && prompt && !_pendingPermission.isEmpty()
+        && _pendingPermission.value(QStringLiteral("id")).toInt() == _shownQuestionId)
+    {
+        next.insert(QStringLiteral("id"), ++_shownQuestionId);
+        holdAllow();
+    }
+    if (prompt && isAllowHeld())
+        next.insert(allowHeldKey, true);
     if (next == _pendingPermission)
         return;
-    // The question shown, asked again with more to it (a larger capture, another paste, another font), is
-    // another question: a click on what was shown must never grant what was not. So it takes a new id, and an
-    // answer to the old one is ignored.
-    if (prompt && !_pendingPermission.isEmpty()
-        && _pendingPermission.value(QStringLiteral("id")).toInt() == _shownQuestionId)
-        next.insert(QStringLiteral("id"), ++_shownQuestionId);
     _pendingPermission = std::move(next);
     emit pendingPermissionChanged();
+}
+
+bool TerminalSession::isAllowHeld() const
+{
+    return _allowHold && _allowHold->questionId == _shownQuestionId
+           && _app.terminalClocks().steady.now() < _allowHold->until;
+}
+
+void TerminalSession::holdAllow()
+{
+    _allowHold = AllowHold { .questionId = _shownQuestionId,
+                             .until = _app.terminalClocks().steady.now() + RepresentedAllowHold };
+    QTimer::singleShot(RepresentedAllowHold, this, [this]() { releaseAllowHoldWhenDue(); });
+}
+
+void TerminalSession::releaseAllowHoldWhenDue()
+{
+    if (!_allowHold)
+        return;
+    if (_allowHold->questionId == _shownQuestionId)
+    {
+        auto const now = _app.terminalClocks().steady.now();
+        // A timer may fire early; Allow is given back when the clock says so, not before.
+        if (now < _allowHold->until)
+        {
+            QTimer::singleShot(std::chrono::ceil<std::chrono::milliseconds>(_allowHold->until - now),
+                               this,
+                               [this]() { releaseAllowHoldWhenDue(); });
+            return;
+        }
+    }
+    _allowHold.reset();
+    publishPendingPermission();
 }
 
 void TerminalSession::showNextPermission()
