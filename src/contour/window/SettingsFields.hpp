@@ -122,6 +122,18 @@ struct GlobalFieldDescriptor
 /// @return The groups, in page order; built once.
 [[nodiscard]] std::vector<ProfileFieldGroup> const& profileFieldGroups();
 
+/// The group of one global key, or of every key beneath a section.
+struct GlobalFieldGroupRow
+{
+    std::string_view key {};                             ///< A key, or a section followed by a dot.
+    SettingsGroup group = SettingsGroup::GeneralWindows; ///< The group its rows are shown in.
+};
+
+/// Every global key's group (R-h): a key with its own row, or a section (ending in a dot) for all its leaves.
+/// globalFieldDescriptors() reads each row's group from here, so a row naming no descriptor is dead.
+/// @return The rows, in page order.
+[[nodiscard]] std::span<GlobalFieldGroupRow const> globalFieldGroupRows();
+
 /// The editable global settings, each with its group.
 /// @return The rows, in page order; built once.
 [[nodiscard]] std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors();

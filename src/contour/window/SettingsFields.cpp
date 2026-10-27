@@ -1434,14 +1434,7 @@ namespace
 
 namespace
 {
-    /// The group of each global field; a dotted key's section decides it for every leaf.
-    struct GlobalFieldGroupRow
-    {
-        std::string_view key {};                             ///< A key, or a section followed by a dot.
-        SettingsGroup group = SettingsGroup::GeneralWindows; ///< The group its rows are shown in.
-    };
-
-    /// Every global key's group (R-h). A key that has no row here fails globalFieldDescriptors().
+    /// A key that has no row here fails globalFieldDescriptors().
     constexpr auto GlobalFieldGroups = std::array {
         GlobalFieldGroupRow { .key = "reflow_on_resize", .group = SettingsGroup::GeneralWindows },
         GlobalFieldGroupRow { .key = "snap_to_rows", .group = SettingsGroup::GeneralWindows },
@@ -1481,6 +1474,11 @@ namespace
         return section->group;
     }
 } // namespace
+
+std::span<GlobalFieldGroupRow const> globalFieldGroupRows()
+{
+    return GlobalFieldGroups;
+}
 
 /// The editable global settings. A key is a contour.yml key path -- top-level ("reflow_on_resize")
 /// or one level into a section ("renderer.gpu"), which settings.yml stores nested -- and needs a row

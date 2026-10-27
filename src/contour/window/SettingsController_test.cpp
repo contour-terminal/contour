@@ -15,6 +15,7 @@
 #include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsControls.hpp>
+#include <contour/window/SettingsFields.hpp>
 #include <contour/window/SettingsSections.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -420,6 +421,22 @@ TEST_CASE("SettingsController: the app's own override goes through the one save 
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().kind == config::SettingsErrorKind::Locked);
         CHECK_FALSE(locked.fileContent("settings.yml").has_value());
+    }
+}
+
+TEST_CASE("SettingsFields: every global group row names a real key", "[settings]")
+{
+    // m5: the group table is separate from the descriptors, so a row for a key no descriptor has would sit
+    // there unnoticed. A section row (ending in a dot) must cover at least one dotted key.
+    auto const& descriptors = window::fields::globalFieldDescriptors();
+    for (auto const& row: window::fields::globalFieldGroupRows())
+    {
+        auto const named = std::ranges::any_of(descriptors, [&](auto const& descriptor) {
+            auto const key = descriptor.key.toStdString();
+            return row.key.ends_with('.') ? key.starts_with(row.key) : key == row.key;
+        });
+        INFO("group row " << row.key);
+        CHECK(named);
     }
 }
 
