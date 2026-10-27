@@ -53,13 +53,13 @@ Item {
                                                                session ? session.title : "")
     readonly property string workingDirectory: session ? session.displayWorkingDirectory : ""
     /// Whether the pane is at a password prompt, and the rule puts the lock in a shown header.
-    readonly property bool locked: !!session && session.secureIndicator === chromeStyle.secureInputs.locked
+    readonly property bool locked: !!session && (session.secureIndicator ?? 0) >= chromeStyle.secureInputs.locked
         && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotShown,
                                             chromeStyle.secureInputs.spotHidden,
                                             chromeStyle.secureInputs.spotHidden).header === true
     /// What the name slot reads: the name, or while locked the name and the lock's state.
     // Concatenated, not formatted: a title the application set may itself contain "%2".
-    readonly property string shownName: locked ? name + qsTr(" · ") + chromeStyle.secureInputText : name
+    readonly property string shownName: locked ? name + qsTr(" · ") + chromeStyle.secureInputText(session.secureIndicator) : name
     readonly property int programStatus: session ? session.programStatus : chromeStyle.badgeKinds.none
     // colorOn() and badgeLook() read the palette, hence the paletteRevision read in each binding.
     readonly property var statusLook: chromeStyle.paletteRevision < 0 ? ({})
@@ -161,6 +161,7 @@ Item {
         id: lock
         objectName: "paneHeaderLock"
         visible: header.locked
+        indicator: header.session ? (header.session.secureIndicator ?? chromeStyle.secureInputs.locked) : chromeStyle.secureInputs.locked
         x: status.visible ? status.x + status.width + header.gap : header.leading
         anchors.verticalCenter: parent.verticalCenter
         // The header's secondary label, whatever the focus: the canvas's label.secondary.

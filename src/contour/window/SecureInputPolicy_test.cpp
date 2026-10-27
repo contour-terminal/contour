@@ -151,10 +151,34 @@ TEST_CASE("SecureIndicatorRules places the lock as R-f says", "[secureinputpolic
     }
 }
 
-TEST_CASE("secureInputStateText names what the OS does", "[secureinputpolicy]")
+TEST_CASE("secureInputStateText says 'on' only for a pane the OS secures", "[secureinputpolicy]")
 {
-    CHECK(contour::window::secureInputStateText(SecureInputSupport::Native) == "Secure input on");
-    CHECK(contour::window::secureInputStateText(SecureInputSupport::None) == "Input hidden");
+    // Review I3: the words are a claim about one pane. Every combination, so a new indicator is checked.
+    for (auto const support: { SecureInputSupport::Native, SecureInputSupport::None })
+        for (auto const indicator:
+             { SecureIndicator::None, SecureIndicator::Locked, SecureIndicator::LockedSecured })
+        {
+            auto const claimsOn =
+                support == SecureInputSupport::Native && indicator == SecureIndicator::LockedSecured;
+            CHECK((contour::window::secureInputStateText(support, indicator) == "Secure input on")
+                  == claimsOn);
+            CHECK((contour::window::secureInputStateText(support, indicator) == "Input hidden") == !claimsOn);
+        }
+}
+
+TEST_CASE("secureIndicatorUnder secures only the focused locked pane while the OS is on",
+          "[secureinputpolicy]")
+{
+    using contour::window::KeyOwnership;
+    for (auto const base: { SecureIndicator::None, SecureIndicator::Locked })
+        for (auto const gate: { SecureInputState::Off, SecureInputState::On })
+            for (auto const focus: { KeyOwnership::Elsewhere, KeyOwnership::Holder })
+            {
+                auto const secured = base == SecureIndicator::Locked && gate == SecureInputState::On
+                                     && focus == KeyOwnership::Holder;
+                CHECK(contour::window::secureIndicatorUnder(base, gate, focus)
+                      == (secured ? SecureIndicator::LockedSecured : base));
+            }
 }
 
 TEST_CASE("inputEchoPollFor polls only inside the window after the last activity", "[secureinputpolicy]")

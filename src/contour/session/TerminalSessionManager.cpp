@@ -1654,10 +1654,15 @@ void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session
     // and the gate was refreshed when it went.
     if (sessionForId(session.modelSessionId()) != &session)
         return;
+    notifySecureTab(session);
+    refreshSecureInput();
+}
+
+void TerminalSessionManager::notifySecureTab(TerminalSession const& session)
+{
     if (auto* tab = findTabHostingSession(session.modelSessionId()))
         if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
             c->notifyTabRowChanged(tab->id(), { window::WindowController::Roles::SecureRole });
-    refreshSecureInput();
 }
 
 void TerminalSessionManager::refreshSecureInput()
@@ -1667,6 +1672,23 @@ void TerminalSessionManager::refreshSecureInput()
     auto const focusedEcho =
         _focusedSession != nullptr ? _focusedSession->inputEcho() : vtpty::InputEcho::Unknown;
     _secureInputGate.apply(window::desiredSecureInput(_app.config().secureInput.value(), app, focusedEcho));
+
+    // The one pane the OS secures now. The words of every lock claim it only for that pane, so the pane that
+    // had it and the pane that has it are re-announced, with their tabs.
+    auto const secured =
+        _secureInputGate.state() == platform::SecureInputState::On && _focusedSession != nullptr
+            ? std::optional { _focusedSession->modelSessionId() }
+            : std::nullopt;
+    if (secured == _securedSession)
+        return;
+    for (auto const id: { _securedSession, secured })
+        if (id.has_value())
+            if (auto* session = sessionForId(*id); session != nullptr)
+            {
+                emit session->secureIndicatorChanged();
+                notifySecureTab(*session);
+            }
+    _securedSession = secured;
 }
 
 void TerminalSessionManager::secureInputModeChanged()

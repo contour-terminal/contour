@@ -192,6 +192,7 @@ Row {
                 tabBadgeText: badgeText
                 tabBadgeProgress: badgeProgress
                 locked: (model.tabSecure ?? 0) !== 0
+                secureState: model.tabSecure ?? 0
                 onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                 Component.onDestruction: if (engaged) root.engagedTabs -= 1
             }

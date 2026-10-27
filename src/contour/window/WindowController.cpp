@@ -563,7 +563,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         }
         case Roles::BadgeProgressRole:
             return tab != nullptr ? tabBadge(*tab, row).progressPercent.value_or(-1) : -1;
-        case Roles::SecureRole: return tab != nullptr && isTabLocked(*tab) ? 1 : 0;
+        case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
         default: return {};
     }
 }
@@ -621,18 +621,19 @@ TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab, int row) const
     });
 }
 
-bool WindowController::isTabLocked(vtworkspace::Tab const& tab) const
+SecureIndicator WindowController::tabSecureIndicator(vtworkspace::Tab const& tab) const
 {
-    // Every pane, not only the active one: a background pane waiting for a password locks its tab.
-    auto locked = false;
+    // Every pane, not only the active one: a background pane waiting for a password locks its tab. The
+    // strongest wins, so the tab says "on" only if one of its panes is the one the OS secures.
+    auto strongest = SecureIndicator::None;
     if (auto* root = tab.rootPane())
         root->walkTree([&](vtworkspace::Pane& pane) {
-            if (!pane.isLeaf() || locked)
+            if (!pane.isLeaf())
                 return;
             if (auto const* session = _manager.sessionForId(pane.session()))
-                locked = static_cast<SecureIndicator>(session->secureIndicator()) == SecureIndicator::Locked;
+                strongest = std::max(strongest, static_cast<SecureIndicator>(session->secureIndicator()));
         });
-    return locked;
+    return strongest;
 }
 
 std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const

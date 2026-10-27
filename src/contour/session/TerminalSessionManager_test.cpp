@@ -2901,8 +2901,8 @@ TEST_CASE("TerminalSessionManager: a focused password prompt turns secure input 
     REQUIRE(session != nullptr);
 
     promptWith(*session, vtpty::InputEcho::Hidden);
-    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
-    CHECK(secureRoleAt(*window, 0) == 1);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::LockedSecured);
+    CHECK(secureRoleAt(*window, 0) == static_cast<int>(contour::window::SecureIndicator::LockedSecured));
     CHECK(doubles.record.enables == 1);
 
     promptWith(*session, vtpty::InputEcho::Hidden);
@@ -2948,8 +2948,8 @@ TEST_CASE("TerminalSessionManager: a daemon's echo report locks the pane with no
 
     channels[0]->setInputEcho(vtpty::InputEcho::Hidden);
     drainPosted();
-    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
-    CHECK(secureRoleAt(*window, 0) == 1);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::LockedSecured);
+    CHECK(secureRoleAt(*window, 0) == static_cast<int>(contour::window::SecureIndicator::LockedSecured));
     CHECK(doubles.record.enables == 1);
 
     // Told again: no new lock, no new call.
@@ -3049,6 +3049,45 @@ TEST_CASE("TerminalSessionManager: another application in front turns secure inp
 
     manager.setFocusedWindow(window.id);
     CHECK(doubles.record.enables == 2);
+}
+
+TEST_CASE("TerminalSessionManager: only the pane the OS secures claims secure input",
+          "[manager][secureinput]")
+{
+    // Review I3: secure input is process-wide and follows the one focused pane of the front application. A
+    // pane at a prompt elsewhere, or in a background application, hides what is typed but is not secured.
+    using contour::window::SecureIndicator;
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 1);
+    REQUIRE(background != nullptr);
+    window->activateTab(0);
+    auto* const focused = window->activeSession();
+    REQUIRE(focused != nullptr);
+    manager.setFocusedWindow(window.id);
+    promptWith(*background, vtpty::InputEcho::Hidden);
+    promptWith(*focused, vtpty::InputEcho::Hidden);
+
+    CHECK(indicatorOf(*focused) == SecureIndicator::LockedSecured);
+    CHECK(indicatorOf(*background) == SecureIndicator::Locked);
+    CHECK(secureRoleAt(*window, 0) == static_cast<int>(SecureIndicator::LockedSecured));
+    CHECK(secureRoleAt(*window, 1) == static_cast<int>(SecureIndicator::Locked));
+
+    // Focus moves to the other prompt: the claim moves with the OS's secure input.
+    window->activateTab(1);
+    CHECK(indicatorOf(*background) == SecureIndicator::LockedSecured);
+    CHECK(indicatorOf(*focused) == SecureIndicator::Locked);
+    CHECK(secureRoleAt(*window, 0) == static_cast<int>(SecureIndicator::Locked));
+    CHECK(secureRoleAt(*window, 1) == static_cast<int>(SecureIndicator::LockedSecured));
+
+    // Another application in front: no pane is secured.
+    manager.clearFocusedWindow(window.id);
+    CHECK(indicatorOf(*background) == SecureIndicator::Locked);
+    CHECK(indicatorOf(*focused) == SecureIndicator::Locked);
 }
 
 TEST_CASE("TerminalSessionManager: focus between two prompts calls nothing", "[manager][secureinput]")
@@ -3166,7 +3205,7 @@ TEST_CASE("TerminalSessionManager: a local pane polls its echo only within the w
     contour::test::mockPtyOf(*session).setInputEcho(vtpty::InputEcho::Hidden);
     app->steadyClock().advance(contour::window::InputEchoPollInterval);
     session->pollInputEcho();
-    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::LockedSecured);
     CHECK(doubles.record.enables == 1);
     CHECK(session->inputEchoPollArmed());
 

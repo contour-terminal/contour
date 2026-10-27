@@ -696,9 +696,12 @@ int UiStyleProvider::findBarPresence(QString const& anchor) const
     return named != anchors.end() ? static_cast<int>(findBarPresenceAt(*named)) : -1;
 }
 
-QString UiStyleProvider::secureInputText() const
+QString UiStyleProvider::secureInputText(int indicator) const
 {
-    return nameOf(secureInputStateText(_inputs.secureInput));
+    return nameOf(secureInputStateText(_inputs.secureInput,
+                                       inRange(indicator, SecureIndicatorCount)
+                                           ? static_cast<SecureIndicator>(indicator)
+                                           : SecureIndicator::None));
 }
 
 QVariantMap UiStyleProvider::secureIndicatorSpots(int header, int tabWell, int band) const

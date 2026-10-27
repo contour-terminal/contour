@@ -16,6 +16,9 @@ Item {
     /// The face the Terminal row's cell text is set in.
     property font font: chromeStyle.type.footnote
 
+    /// What the lock says about its pane (a window::SecureIndicator's value): "Secure input on" only for
+    /// LockedSecured, the pane the OS secures.
+    property int indicator: chromeStyle.secureInputs.locked
     /// Whether this row draws the lock as cell text rather than as the icon.
     readonly property bool drawsText: chromeStyle.secureInputCellText !== ""
     /// The icon's edge.
@@ -25,7 +28,7 @@ Item {
     implicitHeight: drawsText ? cellText.implicitHeight : edge
 
     Accessible.role: Accessible.Indicator
-    Accessible.name: chromeStyle.secureInputText
+    Accessible.name: chromeStyle.secureInputText(root.indicator)
 
     IconLabel {
         id: icon

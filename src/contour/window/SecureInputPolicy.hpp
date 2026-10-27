@@ -23,8 +23,20 @@ namespace contour::window
 /// Whether a pane shows the lock.
 enum class SecureIndicator : uint8_t
 {
-    None = 0, ///< No lock.
-    Locked,   ///< The program in the pane hides what is typed.
+    None = 0,      ///< No lock.
+    Locked,        ///< The program in the pane hides what is typed.
+    LockedSecured, ///< As Locked, and the OS's secure keyboard entry is on for this pane (it is the focused
+                   ///< one of the front application): the only state that may say so.
+};
+
+/// The number of SecureIndicator enumerators, derived from the last one.
+inline constexpr size_t SecureIndicatorCount = static_cast<size_t>(SecureIndicator::LockedSecured) + 1;
+
+/// Whether a pane is the one that has the keys.
+enum class KeyOwnership : uint8_t
+{
+    Elsewhere = 0, ///< Another pane, or none, has the keys.
+    Holder,        ///< This is the focused pane of the application's focused window.
 };
 
 /// Whether a window of this application is the one the OS sends keys to.
@@ -53,6 +65,22 @@ inline constexpr size_t SpotShownCount = static_cast<size_t>(SpotShown::Yes) + 1
 {
     return mode == config::SecureInputMode::Auto && echo == vtpty::InputEcho::Hidden ? SecureIndicator::Locked
                                                                                      : SecureIndicator::None;
+}
+
+/// What a pane shows, given what the OS was last told. Secure keyboard entry is process-wide and follows the
+/// one focused pane, so only that pane may claim it.
+/// @param base  secureIndicatorFor()'s answer for the pane.
+/// @param gate  What the OS's secure input was last moved to.
+/// @param focus Whether the pane has the keys.
+/// @return LockedSecured for a locked, focused pane while @p gate is On; else @p base.
+[[nodiscard]] constexpr SecureIndicator secureIndicatorUnder(SecureIndicator base,
+                                                             platform::SecureInputState gate,
+                                                             KeyOwnership focus) noexcept
+{
+    return base == SecureIndicator::Locked && gate == platform::SecureInputState::On
+                   && focus == KeyOwnership::Holder
+               ? SecureIndicator::LockedSecured
+               : base;
 }
 
 /// Whether the OS's secure keyboard entry should be on. It is process-wide, so it follows the one focused
@@ -163,14 +191,21 @@ inline constexpr auto SecureIndicatorRules = std::array {
     return SecureIndicatorRules.back(); // unreachable: the table holds every combination
 }
 
-/// The words beside the lock and its accessible name.
-/// @param support Whether the OS turns secure keyboard entry on here.
-/// @return "Secure input on" where it does, "Input hidden" where only the terminal hides the text.
-[[nodiscard]] constexpr std::string_view secureInputStateText(platform::SecureInputSupport support) noexcept
+/// The words beside the lock and its accessible name: a claim about this one pane, so "on" only where the OS
+/// really has secure keyboard entry on for it.
+/// @param support   Whether the OS turns secure keyboard entry on here.
+/// @param indicator What the pane (or tab) shows.
+/// @return "Secure input on" for LockedSecured where @p support is Native; else "Input hidden", which says
+///         only that the terminal hides the text.
+[[nodiscard]] constexpr std::string_view secureInputStateText(platform::SecureInputSupport support,
+                                                              SecureIndicator indicator) noexcept
 {
     switch (support)
     {
-        case platform::SecureInputSupport::Native: return "Secure input on";
+        case platform::SecureInputSupport::Native:
+            if (indicator == SecureIndicator::LockedSecured)
+                return "Secure input on";
+            break;
         case platform::SecureInputSupport::None: break;
     }
     return "Input hidden";

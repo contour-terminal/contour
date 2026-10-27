@@ -31,7 +31,9 @@ Control {
     // Guarded against `undefined`: a mock session may carry no indicator at all.
     readonly property bool locked: session !== null && session !== undefined
                                    && session.secureIndicator !== undefined
-                                   && session.secureIndicator === chromeStyle.secureInputs.locked
+                                   && session.secureIndicator >= chromeStyle.secureInputs.locked
+    /// What the pane shows (a window::SecureIndicator's value): its words claim secure input only if secured.
+    readonly property int indicator: locked ? session.secureIndicator : chromeStyle.secureInputs.none
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
 
     // Where the pill goes now; re-read as the clearance's revision moves: the page under it changed.
@@ -60,7 +62,7 @@ Control {
     implicitHeight: chromeStyle.size.linkPill
 
     Accessible.role: Accessible.Indicator
-    Accessible.name: chromeStyle.secureInputText
+    Accessible.name: chromeStyle.secureInputText(pill.indicator)
 
     background: Rectangle {
         color: chromeStyle.colors.toastFill
@@ -83,7 +85,7 @@ Control {
             objectName: "secureInputPillText"
             visible: !lock.drawsText
             anchors.verticalCenter: parent.verticalCenter
-            text: chromeStyle.secureInputText
+            text: chromeStyle.secureInputText(pill.indicator)
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.toastText
             Accessible.ignored: true

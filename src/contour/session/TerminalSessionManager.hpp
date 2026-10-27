@@ -1011,6 +1011,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void contextMenuRequested(TerminalSession* acting);
 
   private:
+    /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
+    void notifySecureTab(TerminalSession const& session);
+
     /// Splits the acting session's tab's active pane, running @p command in the new leaf (a shell when
     /// none). The local half of splitActivePane(), shared with openCommandPane().
     /// @param acting The session whose tab to split (its pane, when it is a leaf of that tab).
@@ -1282,6 +1285,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// The only caller of the OS's secure keyboard entry. Declared early, so it is destroyed late -- after
     /// everything that may still ask it to move -- and its destruction turns secure input off. GUI thread.
     platform::SecureInputGate _secureInputGate;
+    /// The session whose pane the OS's secure input protects now: the focused one while the gate is On.
+    /// GUI thread. @see refreshSecureInput
+    std::optional<vtworkspace::SessionId> _securedSession;
     std::string _homeDirectory; ///< The user's home, read once by the composition root.
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it

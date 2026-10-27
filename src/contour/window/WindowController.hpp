@@ -20,6 +20,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -198,7 +199,7 @@ class WindowController:
         BadgeTextRole = Qt::UserRole + 11,
         //!< The progress of a Working badge, 0..100, or -1 when the program gave none (a plain spinner).
         BadgeProgressRole = Qt::UserRole + 12,
-        //!< 1 when any pane of the tab shows the lock (window::SecureIndicator::Locked), else 0.
+        //!< The strongest window::SecureIndicator of the tab's panes, as its value (0 for no lock).
         SecureRole = Qt::UserRole + 13,
     };
 
@@ -983,7 +984,7 @@ class WindowController:
     /// @return The badge, with a Working one's progress.
     [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab, int row) const;
     /// @return Whether any pane of @p tab shows the lock.
-    [[nodiscard]] bool isTabLocked(vtworkspace::Tab const& tab) const;
+    [[nodiscard]] SecureIndicator tabSecureIndicator(vtworkspace::Tab const& tab) const;
     /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref
     /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
     /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.

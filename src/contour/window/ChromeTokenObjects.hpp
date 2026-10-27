@@ -1197,6 +1197,7 @@ class ChromeSecureInputNames: public QObject
     Q_OBJECT
     Q_PROPERTY(int none READ none CONSTANT)
     Q_PROPERTY(int locked READ locked CONSTANT)
+    Q_PROPERTY(int lockedSecured READ lockedSecured CONSTANT)
     Q_PROPERTY(int spotHidden READ spotHidden CONSTANT)
     Q_PROPERTY(int spotShown READ spotShown CONSTANT)
 
@@ -1207,6 +1208,10 @@ class ChromeSecureInputNames: public QObject
     /// @return Each window::SecureIndicator as its underlying value.
     [[nodiscard]] static constexpr int none() noexcept { return static_cast<int>(SecureIndicator::None); }
     [[nodiscard]] static constexpr int locked() noexcept { return static_cast<int>(SecureIndicator::Locked); }
+    [[nodiscard]] static constexpr int lockedSecured() noexcept
+    {
+        return static_cast<int>(SecureIndicator::LockedSecured);
+    }
     /// @return Each window::SpotShown as its underlying value.
     [[nodiscard]] static constexpr int spotHidden() noexcept { return static_cast<int>(SpotShown::No); }
     [[nodiscard]] static constexpr int spotShown() noexcept { return static_cast<int>(SpotShown::Yes); }

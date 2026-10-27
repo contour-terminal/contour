@@ -11870,7 +11870,11 @@ TEST_CASE("SecureInputLock: the icon on the native rows, `[secure]` on the Termi
         REQUIRE(lock != nullptr);
         QCoreApplication::processEvents();
 
-        // Named for what it means, on every row: the OS turns secure keyboard entry on here.
+        // A lock whose pane is not the one the OS secures does not claim it, on any row (review I3) ...
+        CHECK(accessibleNameOf(*lock) == QStringLiteral("Input hidden"));
+        // ... and one whose pane is, named for what it means: the OS turns secure keyboard entry on here.
+        lock->setProperty("indicator", static_cast<int>(contour::window::SecureIndicator::LockedSecured));
+        QCoreApplication::processEvents();
         CHECK(accessibleNameOf(*lock) == QStringLiteral("Secure input on"));
         auto* icon = lock->findChild<QQuickItem*>(QStringLiteral("secureInputIcon"));
         auto* text = lock->findChild<QQuickItem*>(QStringLiteral("secureInputText"));
@@ -12103,10 +12107,18 @@ TEST_CASE("pane card: a pane at a password prompt shows the lock and says so in 
     CHECK_FALSE(lock.isVisible());
     CHECK(name.property("text").toString() == QStringLiteral("sudo"));
 
+    // Locked but not the pane the OS secures (an unfocused split): it hides the typing, and says no more.
     panes.leftSession.setSecureIndicator(static_cast<int>(contour::window::SecureIndicator::Locked));
     QCoreApplication::processEvents();
     CHECK(lock.isVisible());
+    CHECK(name.property("text").toString() == QStringLiteral("sudo · Input hidden"));
+    CHECK(accessibleNameOf(lock) == QStringLiteral("Input hidden"));
+
+    panes.leftSession.setSecureIndicator(static_cast<int>(contour::window::SecureIndicator::LockedSecured));
+    QCoreApplication::processEvents();
+    CHECK(lock.isVisible());
     CHECK(name.property("text").toString() == QStringLiteral("sudo · Secure input on"));
+    CHECK(accessibleNameOf(lock) == QStringLiteral("Secure input on"));
     // After the lock, by the header's gap: the lock never covers the name.
     CHECK(name.x() >= lock.x() + lock.width());
     // The other pane is not locked.

@@ -49,6 +49,9 @@ Item {
     // QML-facing carve-out: the role says only yes or no. Not required, so a TabItem built on its own shows no
     // lock.
     property bool locked: false
+    // What the lock says (a window::SecureIndicator's value); the model's SecureRole, the strongest of the
+    // tab's panes.
+    property int secureState: locked ? chromeStyle.secureInputs.locked : chromeStyle.secureInputs.none
     // The lock goes on the tab whenever the tab well shows it -- this tab is in it -- whatever the pane's
     // header shows (window::SecureIndicatorRules).
     readonly property bool lockShown: root.locked && !root.iconOnly
@@ -450,6 +453,7 @@ Item {
     SecureInputLock {
         id: lock
         objectName: "tabLock"   // findChild() handle for the GUI test
+        indicator: root.secureState
         anchors.left: root.pill ? icon.right : colorCell.right
         anchors.leftMargin: root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
         anchors.verticalCenter: parent.verticalCenter

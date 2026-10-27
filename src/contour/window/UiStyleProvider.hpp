@@ -281,8 +281,6 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString secureInputCellText READ secureInputCellText CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
-    /// The words beside a pane's lock, and every lock's accessible name (window::secureInputStateText).
-    Q_PROPERTY(QString secureInputText READ secureInputText CONSTANT)
     // }}}
 
   public:
@@ -409,8 +407,15 @@ class UiStyleProvider: public QObject
     /// @return @p processName unless empty, else @p title.
     [[nodiscard]] Q_INVOKABLE QString paneHeaderName(QString const& processName, QString const& title) const;
 
-    /// @return "Secure input on" where the OS has secure keyboard entry, "Input hidden" elsewhere.
-    [[nodiscard]] QString secureInputText() const;
+    /// The words beside a lock, and its accessible name (window::secureInputStateText): a claim about the one
+    /// pane or tab, so it says "on" only where the OS has secure keyboard entry on for it.
+    ///
+    /// An int, the QML-facing carve-out, as the other decisions take their enums. A value out of range reads
+    /// as None.
+    /// @param indicator What the pane shows (a window::SecureIndicator's value).
+    /// @return "Secure input on" for a LockedSecured pane where the OS has secure keyboard entry; else
+    ///         "Input hidden".
+    [[nodiscard]] Q_INVOKABLE QString secureInputText(int indicator) const;
 
     /// Where a locked pane's lock is drawn (window::secureIndicatorSpots).
     ///

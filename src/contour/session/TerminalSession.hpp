@@ -967,7 +967,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] vtpty::InputEcho inputEcho() const noexcept { return _inputEcho; }
 
     /// Whether the pane shows the lock, from the configured `secure_input` and inputEcho(). GUI thread.
-    /// @return A window::SecureIndicator's value.
+    /// @return A window::SecureIndicator's value: LockedSecured only for the focused pane while the OS's
+    ///         secure input is on (window::secureIndicatorUnder).
     [[nodiscard]] int secureIndicator() const noexcept;
 
     /// Notes that output reached the pane or a key went in, and starts the echo poll if it is not running:

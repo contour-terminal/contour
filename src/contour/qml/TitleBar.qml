@@ -306,7 +306,7 @@ Item {
                 width: implicitWidth
                 height: implicitHeight
                 Accessible.role: Accessible.Indicator
-                Accessible.name: chromeStyle.secureInputText
+                Accessible.name: chromeStyle.secureInputText(titleRows.activeIndicator)
 
                 Rectangle {
                     anchors.fill: parent
@@ -321,6 +321,7 @@ Item {
 
                     SecureInputLock {
                         id: chipLock
+                        indicator: titleRows.activeIndicator
                         anchors.verticalCenter: parent.verticalCenter
                         color: chromeStyle.colors.chipText
                         Accessible.ignored: true
@@ -331,7 +332,7 @@ Item {
                         objectName: "secureInputChipText"
                         visible: !chipLock.drawsText
                         anchors.verticalCenter: parent.verticalCenter
-                        text: chromeStyle.secureInputText
+                        text: chromeStyle.secureInputText(titleRows.activeIndicator)
                         font: chromeStyle.type.footnote
                         color: chromeStyle.colors.chipText
                         Accessible.ignored: true
@@ -412,7 +413,18 @@ Item {
             required property bool isActive
             // Through the model object, as TabStrip reads it: a model without the role locks nothing.
             required property var model
-            readonly property bool locked: (model.tabSecure ?? 0) !== 0
+            readonly property int secureState: model.tabSecure ?? 0
+            readonly property bool locked: secureState !== 0
+        }
+
+        // What the active tab's lock says (a window::SecureIndicator's value), none without one.
+        readonly property int activeIndicator: {
+            for (let index = 0; index < titleRows.count; ++index) {
+                const row = titleRows.objectAt(index);
+                if (row && row.isActive)
+                    return row.secureState;
+            }
+            return chromeStyle.secureInputs.none;
         }
 
         // Whether the active tab has a pane at a password prompt.

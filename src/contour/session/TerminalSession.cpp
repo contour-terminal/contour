@@ -1005,7 +1005,13 @@ void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
 
 int TerminalSession::secureIndicator() const noexcept
 {
-    return static_cast<int>(window::secureIndicatorFor(_app.config().secureInput.value(), _inputEcho));
+    auto const locked = window::secureIndicatorFor(_app.config().secureInput.value(), _inputEcho);
+    if (_manager == nullptr)
+        return static_cast<int>(locked);
+    // Only the focused pane may claim the OS's secure input: it is process-wide and follows that pane alone.
+    auto const focus =
+        _manager->isFocusedSession(*this) ? window::KeyOwnership::Holder : window::KeyOwnership::Elsewhere;
+    return static_cast<int>(window::secureIndicatorUnder(locked, _manager->secureInputState(), focus));
 }
 
 void TerminalSession::noteInputActivity()
