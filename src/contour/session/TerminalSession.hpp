@@ -813,6 +813,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// 0 (None) while it runs. GUI thread only (see _end).
     [[nodiscard]] int getSessionEnd() const noexcept { return static_cast<int>(_end); }
 
+    /// How the session ended; EndReason::None while it runs. GUI thread only (see _end).
+    [[nodiscard]] EndReason endReason() const noexcept { return _end; }
+
     // {{{ Panes
     /// @return The working directory the pane header shows, as refreshDisplayWorkingDirectory() last
     ///         computed it. GUI thread.

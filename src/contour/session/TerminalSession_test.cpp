@@ -12215,3 +12215,40 @@ TEST_CASE("TerminalSession: a program's clipboard write tells no one",
 
     contour::test::closeAllTabs(*controller);
 }
+
+TEST_CASE("TerminalSession: a hint's copy tells its window", "[contour][session][clipboard][notices]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+    windowed.session.terminal().writeToScreen("see https://contour-terminal.org/ for more\r\n");
+
+    REQUIRE(windowed.session(contour::actions::HintMode { .patterns = "url",
+                                                          .hintAction = vtbackend::HintAction::Copy,
+                                                          .scope = vtbackend::HintScope::Visible }));
+    auto const matches = windowed.session.terminal().hintMatches();
+    REQUIRE(matches.size() == 1);
+    // The label is typed through the key path, which holds the terminal lock: the copy is told once it is
+    // released, as a vi yank's is.
+    vtbackend::test::failOnDeadlock(std::chrono::seconds(10),
+                                    [&] { typeKeys(windowed.session, matches[0].label); });
+    CHECK(clipboard.text() == "https://contour-terminal.org/");
+    CHECK(controller->notices().toastText() == "Copied 1 line");
+
+    contour::test::closeAllTabs(*controller);
+}
+
+TEST_CASE("TerminalSession: CopyHyperlink tells its window", "[contour][session][clipboard][notices]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+
+    REQUIRE(windowed.session(contour::actions::CopyHyperlink { .uri = "https://contour-terminal.org/" }));
+    CHECK(clipboard.text() == "https://contour-terminal.org/");
+    CHECK(controller->notices().toastText() == "Copied 1 line");
+
+    contour::test::closeAllTabs(*controller);
+}

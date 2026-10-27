@@ -1013,6 +1013,15 @@ TEST_CASE("Save Layout checks the name, refuses a taken one, and replaces only w
         CHECK(window->checkLayoutName(QStringLiteral("web"), false).value("button").toString() == "save");
     }
 
+    SECTION("a name the layouts file holds is taken too, once the dialog opens")
+    {
+        store->layouts["filed"] = contour::config::Layout {};
+        window->beginSaveLayoutPrompt();
+        CHECK(window->checkLayoutName(QStringLiteral("filed"), false).value("nameState").toString()
+              == "taken");
+        CHECK(window->checkLayoutName(QStringLiteral("filed"), true).value("button").toString() == "replace");
+    }
+
     SECTION("a name taken in the store since the check is not overwritten")
     {
         store->layouts["dev"] = contour::config::Layout {};

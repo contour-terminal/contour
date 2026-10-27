@@ -299,7 +299,8 @@ class WindowController:
     /// Replace, once the user confirmed it). The window says how it went.
     /// @param name The layout name the user typed.
     Q_INVOKABLE void replaceLayout(QString const& name);
-    /// What Save Layout makes of @p name against the layouts the configuration holds (checkLayoutName()).
+    /// What Save Layout makes of @p name against the layouts saved (checkLayoutName()): the configuration's,
+    /// and the layouts file's as beginSaveLayoutPrompt() last read it.
     /// @param name The typed name, untrimmed.
     /// @param replace Whether the user confirmed replacing a taken name -- a bool for QML, the documented
     ///        carve-out (a LayoutReplace inside).
@@ -1205,6 +1206,10 @@ class WindowController:
 
     // Says this window's notices to a screen reader, against the window while it is shown. Declared before
     // _notices, which speaks through it.
+    // The names of the layouts saved, as beginSaveLayoutPrompt() last read them (the layouts file's
+    // included), for checkLayoutName(), which runs on every key typed.
+    std::vector<std::string> _savedLayoutNames;
+
     platform::QtAnnouncer _noticeAnnouncer;
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;

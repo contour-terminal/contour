@@ -703,6 +703,18 @@ std::filesystem::path TerminalSessionManager::configSiblingPath(std::string_view
     return (configFile.empty() ? config::configHome() : configFile.parent_path()) / fileName;
 }
 
+std::vector<std::string> TerminalSessionManager::savedLayoutNames() const
+{
+    auto names = std::vector<std::string> {};
+    for (auto const& name: _app.config().layouts.value() | std::views::keys)
+        names.push_back(name);
+    if (auto const stored = _layoutStore.load(layoutsFilePath()); stored)
+        for (auto const& name: *stored | std::views::keys)
+            if (std::ranges::find(names, name) == names.end())
+                names.push_back(name);
+    return names;
+}
+
 std::filesystem::path TerminalSessionManager::layoutsFilePath() const
 {
     return configSiblingPath("layouts.yml");

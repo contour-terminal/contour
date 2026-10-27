@@ -26,6 +26,8 @@ KitDialog {
     property bool _answered: false
 
     readonly property var _lines: root.prompt.lines !== undefined ? root.prompt.lines : []
+    // The most the lines may take: half of what the dialog hangs in.
+    readonly property real _linesRoom: root.parent ? root.parent.height / 2 : linesColumn.implicitHeight
 
     function _answer(decision, memory) {
         if (root._answered)
@@ -71,20 +73,39 @@ KitDialog {
     onClosed: if (root.focusTarget !== null && root.focusTarget !== undefined) root.focusTarget.forceActiveFocus()
 
     bodyData: [
-        Repeater {
-            model: root._lines
+        // The detail scrolls once it is taller than half the window -- an extension may declare many
+        // commands -- so the checkbox and the two buttons always stay in view.
+        ScrollView {
+            id: permissionLines
+            objectName: "permissionLines"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(linesColumn.implicitHeight, root._linesRoom)
+            clip: true
+            contentWidth: availableWidth
+            contentHeight: linesColumn.implicitHeight
 
-            Label {
-                required property var modelData
-                objectName: "permissionLine"
-                Layout.fillWidth: true
-                text: modelData.text
-                // Program-supplied, made safe by the session: text, never markup.
-                textFormat: Text.PlainText
-                font: modelData.weight === Permission.Strong ? chromeStyle.type.footnoteStrong : chromeStyle.type.footnote
-                color: sys.windowText
-                wrapMode: modelData.style === Permission.Verbatim ? Text.NoWrap : Text.Wrap
-                elide: modelData.style === Permission.Verbatim ? Text.ElideRight : Text.ElideNone
+            ColumnLayout {
+                id: linesColumn
+                width: permissionLines.availableWidth
+                spacing: chromeStyle.space.s3
+
+                Repeater {
+                    model: root._lines
+
+                    Label {
+                        required property var modelData
+                        objectName: "permissionLine"
+                        Layout.fillWidth: true
+                        text: modelData.text
+                        // Program-supplied, made safe by the session: text, never markup.
+                        textFormat: Text.PlainText
+                        font: modelData.weight === Permission.Strong ? chromeStyle.type.footnoteStrong
+                                                                     : chromeStyle.type.footnote
+                        color: sys.windowText
+                        wrapMode: modelData.style === Permission.Verbatim ? Text.NoWrap : Text.Wrap
+                        elide: modelData.style === Permission.Verbatim ? Text.ElideRight : Text.ElideNone
+                    }
+                }
             }
         },
         CheckBox {

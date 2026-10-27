@@ -265,6 +265,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The layout store's path for this run's configuration.
     [[nodiscard]] std::filesystem::path layoutsFilePath() const;
 
+    /// The names of the layouts saved: the configuration's and the layouts file's, as it reads now. A file
+    /// that cannot be read adds none (saving refuses then anyway).
+    /// @return The names, each once.
+    [[nodiscard]] std::vector<std::string> savedLayoutNames() const;
+
     /// Opens the command palette over the window hosting @p acting (the OpenCommandPalette action).
     /// No-ops if @p acting has no hosting window.
     /// @param acting The session that triggered the action; its hosting window shows the palette.

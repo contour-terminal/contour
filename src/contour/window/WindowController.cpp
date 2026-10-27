@@ -804,7 +804,9 @@ void WindowController::beginActiveTabColorPick()
 void WindowController::beginSaveLayoutPrompt()
 {
     // Window-scoped, not tab-scoped: the layout is the whole window's tab set, so unlike the tab-title /
-    // tab-color prompts there is no row to name — the dialog just opens over this window.
+    // tab-color prompts there is no row to name — the dialog just opens over this window. The names
+    // already saved are read once here -- the layouts file included -- rather than on every key typed.
+    _savedLayoutNames = _manager.savedLayoutNames();
     emit saveLayoutRequested();
 }
 
@@ -852,9 +854,10 @@ QVariantMap WindowController::layoutCheckMap(SaveLayoutCheck const& check, QStri
 QVariantMap WindowController::checkLayoutName(QString const& name, bool replace) const
 {
     auto const trimmed = name.trimmed();
-    auto existing = std::vector<std::string> {};
-    for (auto const& [layoutName, layout]: _manager.app().config().layouts.value())
-        existing.push_back(layoutName);
+    auto existing = _savedLayoutNames;
+    for (auto const& layoutName: _manager.app().config().layouts.value() | std::views::keys)
+        if (std::ranges::find(existing, layoutName) == existing.end())
+            existing.push_back(layoutName);
     auto const check = window::checkLayoutName(
         trimmed.toStdString(), existing, replace ? LayoutReplace::Replace : LayoutReplace::Keep);
     return layoutCheckMap(check, trimmed);
@@ -1421,8 +1424,8 @@ QString WindowController::toastHost(QString const& band,
         .bandHeight = bandHeight,
         .toastHeight = toastHeight,
         .cursorRow = session != nullptr ? session->cursorLine() : 0,
-        .footer =
-            session != nullptr && session->getSessionEnd() != 0 ? PaneFooter::Shown : PaneFooter::Hidden,
+        .footer = session != nullptr && session->endReason() != session::EndReason::None ? PaneFooter::Shown
+                                                                                         : PaneFooter::Hidden,
         .coveredRows = ToastCoveredRows,
     });
     return QString::fromUtf8(toastHostName(host));

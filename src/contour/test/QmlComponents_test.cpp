@@ -5502,11 +5502,13 @@ class MockSaveLayoutController: public QObject
     }
     std::vector<std::string> existing; ///< The layouts already saved.
 
-    /// Mirrors WindowController::layoutSummary().
+    /// Mirrors WindowController::layoutSummary(), over @c tabs and @c panes.
     [[nodiscard]] Q_INVOKABLE QString layoutSummary() const
     {
-        return QString::fromStdString(contour::window::layoutSummaryText(3, 5));
+        return QString::fromStdString(contour::window::layoutSummaryText(tabs, panes));
     }
+    int tabs = 3;  ///< The window's tabs, as layoutSummary() counts them.
+    int panes = 5; ///< Their panes.
 
   signals:
     /// What WindowController raises to ask its window to open the prompt; Main.qml answers with open().
@@ -10327,21 +10329,86 @@ TEST_CASE("PermissionDialog: an extension's consent sets apart what can run comm
     CHECK(session.permissionAnswers == 1);
 }
 
-TEST_CASE("PermissionDialog: the Terminal row's lines read on its surface (offscreen)",
+namespace
+{
+/// Runs @p check under every bundled scheme, chrome row (on its own host) and Qt appearance.
+template <typename Check>
+void forEverySchemeRowAndAppearance(Check const& check)
+{
+    for (auto const appearance: { vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark })
+    {
+        contour::test::ScopedChromeAppearance const forced { appearance };
+        for (auto const& rowHost: contour::test::snapshot::SnapshotRowHosts)
+            for (auto const schemeName: vtbackend::defaultColorPaletteNames())
+            {
+                INFO("Qt palette: " << appearanceName(appearance));
+                INFO("row: " << contour::config::chromeStyleName(rowHost.row));
+                INFO("scheme: " << schemeName);
+                auto palette = vtbackend::ColorPalette {};
+                REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+                auto setup = contour::test::defaultChromeSetup();
+                setup.row = rowHost.row;
+                setup.windowControls = contour::config::resolveWindowControlStyle(
+                    contour::config::WindowControlStyle::Auto, rowHost.host);
+                setup.scheme = contour::config::chromeSchemeColorsOf(palette);
+                check(setup);
+            }
+    }
+}
+} // namespace
+
+TEST_CASE("PermissionDialog: its lines and checkbox read on its surface everywhere (offscreen)",
           "[contour][gui][qml][permission]")
 {
-    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-dark", "contour-light");
-    INFO("scheme: " << schemeName);
+    forEverySchemeRowAndAppearance([](contour::test::ChromeSetup const& setup) {
+        MockSession session;
+        auto host = PermissionChrome { session, setup };
+        session.setPendingPermission(pasteQuestion(1));
+        REQUIRE(host.waitOpened(true));
+        auto const* surface = host.dialog->property("background").value<QQuickItem*>();
+        REQUIRE(surface != nullptr);
+        auto const fill = fillOf(surface);
+        auto const lines = permissionLines(*host.dialog);
+        REQUIRE_FALSE(lines.isEmpty());
+        for (auto const* line: lines)
+            CHECK(contrastOn(line, fill) >= 4.5);
+        auto const* remember = host.part("permissionRemember")->property("contentItem").value<QQuickItem*>();
+        REQUIRE(remember != nullptr);
+        CHECK(contrastOn(remember, fill) >= 4.5);
+    });
+}
+
+TEST_CASE("PermissionDialog: long consent text scrolls, and the buttons stay in view (offscreen)",
+          "[contour][gui][qml][permission][extensions]")
+{
     MockSession session;
-    auto host = PermissionChrome { session, terminalRowSetup(schemeName) };
-    session.setPendingPermission(pasteQuestion(1));
+    auto host = PermissionChrome { session };
+    auto lines = std::vector<contour::session::PromptLine> {};
+    constexpr auto ManyCommands = 80;
+    for (auto const index: std::views::iota(0, ManyCommands))
+        lines.push_back(contour::session::consentLine(
+            std::format("command{}: run something {}", index, index), vtcontrol::ConsentWeight::Observes));
+    session.setPendingPermission(contour::session::permissionPromptMap(
+        contour::session::consentPrompt("“many” wants to run commands", std::move(lines)), 1));
     REQUIRE(host.waitOpened(true));
-    auto const* surface = host.dialog->property("background").value<QQuickItem*>();
-    REQUIRE(surface != nullptr);
-    auto const lines = permissionLines(*host.dialog);
-    REQUIRE_FALSE(lines.isEmpty());
-    for (auto const* line: lines)
-        CHECK(contrastOn(line, fillOf(surface)) >= 4.5);
+
+    auto const windowHeight = host.window.height();
+    for (auto const* name: { "kitDialogAccept", "kitDialogReject", "permissionRemember" })
+    {
+        INFO(name);
+        auto const* part = host.part(QString::fromLatin1(name));
+        auto const bottom = part->mapToScene(QPointF { 0, part->height() }).y();
+        CHECK(bottom <= windowHeight);
+    }
+    // The lines scroll, inside half the window, rather than spill past the dialog's edge.
+    auto const* scroller = host.part("permissionLines");
+    REQUIRE(QTest::qWaitFor([&] { return scroller->height() > 0; }, 2000));
+    CHECK(scroller->height() <= (windowHeight / 2.0) + 1);
+    CHECK(scroller->property("contentHeight").toReal() > scroller->height());
+    auto const* dialogItem = host.dialog->property("contentItem").value<QQuickItem*>();
+    REQUIRE(dialogItem != nullptr);
+    CHECK(scroller->mapToScene(QPointF { 0, scroller->height() }).y()
+          <= dialogItem->mapToScene(QPointF { 0, dialogItem->height() }).y());
 }
 // }}}
 
@@ -10363,6 +10430,8 @@ TEST_CASE("notices: toast and banner text read on every scheme, row and appearan
                 REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
                 auto setup = contour::test::defaultChromeSetup();
                 setup.row = rowHost.row;
+                setup.windowControls = contour::config::resolveWindowControlStyle(
+                    contour::config::WindowControlStyle::Auto, rowHost.host);
                 setup.scheme = contour::config::chromeSchemeColorsOf(palette);
                 QQmlEngine engine;
                 contour::test::installChromeStyle(engine, setup);
@@ -10467,6 +10536,55 @@ TEST_CASE("Save Layout: Save is offered for a new name, and Replace only once co
     CHECK(controller.replaced == QStringList { QStringLiteral("dev") });
     CHECK(controller.saved.isEmpty());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Save Layout: what it saves is read as it opens (offscreen)", "[contour][gui][qml][layout]")
+{
+    QQmlEngine engine;
+    MockSaveLayoutController controller;
+    auto host = makeSaveLayoutHost(engine, controller);
+    REQUIRE(host.dialog != nullptr);
+    controller.tabs = 1;
+    controller.panes = 1;
+    openSaveLayoutPrompt(controller);
+    REQUIRE(host.opened());
+    CHECK(host.part(QStringLiteral("saveLayoutSummary"))->property("text").toString()
+          == "1 tab · 1 pane · working directories and commands");
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "close"));
+    REQUIRE(QTest::qWaitFor([&] { return !host.opened(); }, 2000));
+
+    // Tabs added between two openings: the second says so.
+    controller.tabs = 3;
+    controller.panes = 4;
+    openSaveLayoutPrompt(controller);
+    REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+    CHECK(host.part(QStringLiteral("saveLayoutSummary"))->property("text").toString()
+          == "3 tabs · 4 panes · working directories and commands");
+}
+
+TEST_CASE("Save Layout: its labels read on its surface everywhere (offscreen)", "[contour][gui][qml][layout]")
+{
+    forEverySchemeRowAndAppearance([](contour::test::ChromeSetup const& setup) {
+        QQmlEngine engine;
+        MockSaveLayoutController controller;
+        controller.existing = { "dev" };
+        auto host = makeSaveLayoutHost(engine, controller, setup);
+        REQUIRE(host.dialog != nullptr);
+        openSaveLayoutPrompt(controller);
+        REQUIRE(QTest::qWaitFor([&] { return host.opened(); }, 2000));
+        host.nameField()->setProperty("text", QStringLiteral("dev"));
+        QCoreApplication::processEvents();
+        auto const* surface = host.dialog->property("background").value<QQuickItem*>();
+        REQUIRE(surface != nullptr);
+        auto const fill = fillOf(surface);
+        CHECK(contrastOn(host.part(QStringLiteral("saveLayoutNameLabel")), fill) >= 4.5);
+        CHECK(contrastOn(host.part(QStringLiteral("saveLayoutSummary")), fill) >= 4.5);
+        auto const* replace = host.part(QStringLiteral("saveLayoutReplace"));
+        REQUIRE(replace != nullptr);
+        auto const* replaceLabel = replace->property("contentItem").value<QQuickItem*>();
+        REQUIRE(replaceLabel != nullptr);
+        CHECK(contrastOn(replaceLabel, fill) >= 4.5);
+    });
 }
 
 TEST_CASE("Save Layout: a sheet on the macOS row (offscreen)", "[contour][gui][qml][layout]")

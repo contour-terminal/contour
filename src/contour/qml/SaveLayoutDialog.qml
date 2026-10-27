@@ -24,6 +24,9 @@ KitDialog {
 
     // Whether the user confirmed replacing the layout the typed name already names.
     property bool confirmedReplace: false
+    // What it saves, read as it opens: the window's tabs and panes change between openings, and the
+    // controller's summary notifies nothing.
+    property string summary: ""
 
     // What the controller makes of the typed name. `typeof` for the reason the hosting notice guards with
     // `||`: a lightweight mock `win` (the routing tests') lacks the save-layout surface.
@@ -44,6 +47,7 @@ KitDialog {
     onOpened: {
         nameField.clear();
         root.confirmedReplace = false;
+        root.summary = root._canCheck ? root.controller.layoutSummary() : "";
         nameField.forceActiveFocus();
     }
 
@@ -65,6 +69,7 @@ KitDialog {
 
     bodyData: [
         Label {
+            objectName: "saveLayoutNameLabel"
             Layout.fillWidth: true
             text: qsTr("Name")
             font: chromeStyle.type.footnote
@@ -85,7 +90,7 @@ KitDialog {
         Label {
             objectName: "saveLayoutSummary"
             Layout.fillWidth: true
-            text: root._canCheck ? root.controller.layoutSummary() : ""
+            text: root.summary
             textFormat: Text.PlainText
             font: chromeStyle.type.footnote
             color: sys.windowText
