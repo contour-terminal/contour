@@ -107,12 +107,13 @@ static_assert(BlockRailMarkRows.size() == CommandBlockOutcomeCount);
     return facts.mark == UserMarkPresence::Present ? RailMark::UserMark : RailMark::None;
 }
 
-/// The colour a block's rail is drawn in: its outcome's status colour at rest, the hover colour while hovered
-/// or focused.
+/// The colour a block's rail and its mark are drawn in: its outcome's status colour at rest, the hover colour
+/// while hovered or focused -- each lifted toward the page's ink where the scheme's own would not reach
+/// MinimumMarkContrast against the page.
 /// @param palette The colour scheme.
 /// @param outcome How the block reads.
 /// @param attention Whether it is hovered or focused.
-/// @return The rail's colour.
+/// @return The rail's colour; at least 3:1 against the page, and lit unlike at rest.
 [[nodiscard]] RGBColor railColor(ColorPalette const& palette,
                                  CommandBlockOutcome outcome,
                                  BlockAttention attention) noexcept;

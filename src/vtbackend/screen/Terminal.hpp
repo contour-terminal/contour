@@ -5685,6 +5685,10 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
     std::optional<CommandBlockId> _hoveredCommandBlock;
+
+    /// fillGutter()'s per-frame scratch: the block of each drawn row and of the rows beyond the page's two
+    /// edges. A member so a frame reuses its storage; written only while a frame is built, under the lock.
+    mutable std::vector<CommandBlockRecord const*> _railBlocks;
     // }}}
 
     // {{{ Sticky command header

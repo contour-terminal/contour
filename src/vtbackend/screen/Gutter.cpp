@@ -281,9 +281,15 @@ GutterLayout gutterLayoutFor(GutterSettings const& settings)
             layout.append(rule.kind, columns);
     if (inputs.timestamp)
         layout.timestampFormat = std::string { inputs.timestamp->format };
-    if (settings.blockColumnForm == BlockColumnForm::Rail && blockColumnWanted(settings))
-        layout.rail = BlockRailPresence::Present;
+    layout.rail = railPresenceFor(settings);
     return layout;
+}
+
+BlockRailPresence railPresenceFor(GutterSettings const& settings) noexcept
+{
+    return settings.blockColumnForm == BlockColumnForm::Rail && blockColumnWanted(settings)
+               ? BlockRailPresence::Present
+               : BlockRailPresence::Absent;
 }
 
 std::optional<GutterSegmentKind> gutterSegmentAt(GutterLayout const& layout, int column) noexcept
@@ -583,16 +589,18 @@ void appendGutterCells(GutterLayout const& layout,
     {
         if (row.rail == RailSegment::None && row.railMark == RailMark::None)
             return;
-        output.push_back(
-            RenderGutterCell { .lineOffset = row.screenLine,
-                               .codepoint = 0,
-                               .attributes = gutterCellAttributes(RGBColorPair {
-                                   .foreground = row.railColor, .background = textColors.background }),
-                               .column = ColumnOffset(0),
-                               .rail = row.rail,
-                               .mark = row.railMark,
-                               .outcome = row.outcome,
-                               .railColor = row.railColor });
+        // The mark is drawn two cells wide, sized to the row (LineFlag::DoubleWidth), centred on the bar.
+        auto attributes = gutterCellAttributes(
+            RGBColorPair { .foreground = row.railMarkColor, .background = textColors.background });
+        attributes.lineFlags = LineFlag::DoubleWidth;
+        output.push_back(RenderGutterCell { .lineOffset = row.screenLine,
+                                            .codepoint = 0,
+                                            .attributes = attributes,
+                                            .column = ColumnOffset(0),
+                                            .rail = row.rail,
+                                            .mark = row.railMark,
+                                            .outcome = row.outcome,
+                                            .railColor = row.railColor });
         return;
     }
 

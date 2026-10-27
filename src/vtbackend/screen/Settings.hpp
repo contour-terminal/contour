@@ -255,8 +255,9 @@ struct Settings
     bool autoScrollOnUpdate = false;
 
     /// What the strip left of the grid shows. The window geometry must agree: the gutter's width --
-    /// gutterLayoutFor(gutter).totalColumns cells -- is taken out of the space available to cells, so a
-    /// page fitted for one layout and a renderer drawing another put the grid in two different places.
+    /// gutterLayoutFor(gutter).totalColumns cells, and under BlockColumnForm::Rail the rail's strip of the
+    /// chrome's pixels after them -- is taken out of the space available to cells, so a page fitted for one
+    /// layout and a renderer drawing another put the grid in two different places.
     /// @see GutterSettings
     GutterSettings gutter {};
 

@@ -35,8 +35,8 @@ namespace
                           .attention = BlockAttention::Rest };
 }
 
-/// @return The HSL hue of @p color in degrees, [0, 360).
-[[nodiscard]] double hueOf(RGBColor color)
+/// @return The HSL hue of @p color in degrees, [0, 360); nullopt for a grey, which has none.
+[[nodiscard]] std::optional<double> hueOf(RGBColor color)
 {
     auto const r = color.red / 255.0;
     auto const g = color.green / 255.0;
@@ -44,7 +44,7 @@ namespace
     auto const high = std::max({ r, g, b });
     auto const chroma = high - std::min({ r, g, b });
     if (chroma == 0.0)
-        return 0.0;
+        return std::nullopt;
     auto sector = ((r - g) / chroma) + 4.0; // blue is the largest
     if (high == r)
         sector = std::fmod((g - b) / chroma, 6.0);
@@ -142,10 +142,40 @@ TEST_CASE("blockRail.runningIsNeverYellow", "[blockrail]")
         INFO("scheme: " << name);
         auto palette = ColorPalette {};
         REQUIRE(defaultColorPalettes(name, palette));
+        // The shipped schemes' own running colour reads, so it is drawn as it is.
         auto const running = railColor(palette, CommandBlockOutcome::Running, BlockAttention::Rest);
         CHECK(running == palette.blockStatusColor(CommandBlockOutcome::Running));
         CHECK(railColor(palette, CommandBlockOutcome::Running, BlockAttention::Hovered)
               == palette.blockStatusHoverColor(CommandBlockOutcome::Running));
-        CHECK(std::abs(hueOf(running) - Yellow) > Distance);
+        auto const litHue = hueOf(railColor(palette, CommandBlockOutcome::Running, BlockAttention::Hovered));
+        REQUIRE(litHue.has_value());
+        CHECK(std::abs(*litHue - Yellow) > Distance);
+        // An accent, not a grey -- and not yellow, at rest or lit.
+        auto const restHue = hueOf(running);
+        REQUIRE(restHue.has_value());
+        CHECK(std::abs(*restHue - Yellow) > Distance);
+    }
+}
+
+TEST_CASE("blockRail.theRailMarksOnEveryScheme", "[blockrail]")
+{
+    // The bar and its marks are marks: 3:1 against the pane they stand on, at rest and lit, on every bundled
+    // scheme -- each one appearance's palette. Where the scheme's own status colour is too faint, it is
+    // lifted toward the page's ink; lit still differs from at rest.
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        for (auto const i: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
+        {
+            auto const outcome = static_cast<CommandBlockOutcome>(i);
+            CAPTURE(i);
+            auto const atRest = railColor(palette, outcome, BlockAttention::Rest);
+            auto const lit = railColor(palette, outcome, BlockAttention::Hovered);
+            CHECK(contrastRatio(atRest, palette.defaultBackground) >= MinimumMarkContrast);
+            CHECK(contrastRatio(lit, palette.defaultBackground) >= MinimumMarkContrast);
+            CHECK(lit != atRest);
+        }
     }
 }

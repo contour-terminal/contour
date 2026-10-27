@@ -1583,6 +1583,9 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 
 PageSize Terminal::indicatorStatusLinePageSize() const
 {
+    // The gutter's cells, not the rail's strip: the strip's width is the chrome's pixels, which the status
+    // line's cells cannot divide. Its text ends with the page's last column, its bar spans the window, and
+    // left of the page it reaches as far as the gutter's cells would without the strip.
     auto const gutterColumns = ColumnCount::cast_from(gutterLayoutFor(_settings.gutter).totalColumns);
     return PageSize { StatusLineHeight, _settings.pageSize.columns + gutterColumns };
 }
@@ -4020,10 +4023,11 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     // per row -- never by walking a block's rows, so a frame costs the drawn rows times a block lookup
     // however tall the blocks are. Index 0 is the row above the page, index rows + 1 the row below it.
     auto const rows = unbox<int>(drawnRowLimit());
-    auto railBlocks = std::vector<CommandBlockRecord const*> {};
+    // Kept across frames, so drawing allocates only when the page grows.
+    auto& railBlocks = _railBlocks;
+    railBlocks.clear();
     if (layout.rail == BlockRailPresence::Present)
     {
-        railBlocks.reserve(static_cast<size_t>(rows) + 2);
         for (auto const y: std::views::iota(-1, rows + 1))
             railBlocks.push_back(commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y))));
         // A row beyond an edge exists only where the translation moved past the edge row: at the top of the
@@ -4074,6 +4078,13 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
             row.outcome = facts.outcome;
             row.railColor = railColor(_colorPalette, facts.outcome, facts.attention);
         }
+        // A status mark is the rail's own ink; a user mark keeps the colour the glyph column gives it.
+        row.railMarkColor =
+            row.railMark == RailMark::UserMark
+                ? blockColumnColors(
+                      _colorPalette, BlockColumnGlyph::UserMark, std::nullopt, GutterHover::Rest)
+                      .foreground
+                : row.railColor;
         return row;
     };
 
@@ -4531,9 +4542,11 @@ void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
         return range ? std::optional { range->headStableId } : std::nullopt;
     };
 
-    // The rail lights the block beside the pointer, which a row with no fold has too.
-    auto const blockOf = [this](std::optional<LineOffset> line) -> std::optional<CommandBlockId> {
-        auto const* const record = line ? commandBlockAt(*line) : nullptr;
+    // The rail lights the block beside the pointer, which a row with no fold has too. Asked only where the
+    // gutter draws the rail: the glyph column lights folds alone.
+    auto const railDrawn = railPresenceFor(_settings.gutter) == BlockRailPresence::Present;
+    auto const blockOf = [this, railDrawn](std::optional<LineOffset> line) -> std::optional<CommandBlockId> {
+        auto const* const record = railDrawn && line ? commandBlockAt(*line) : nullptr;
         return record ? std::optional { record->id } : std::nullopt;
     };
 

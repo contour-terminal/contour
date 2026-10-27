@@ -310,6 +310,7 @@ struct GutterRow
     RailMark railMark = RailMark::None;            ///< The mark on it (railMarkOf()).
     std::optional<CommandBlockOutcome> outcome {}; ///< How the row's block reads; nullopt for none.
     RGBColor railColor {};                         ///< The rail's colour (railColor()).
+    RGBColor railMarkColor {}; ///< The mark's ink: the rail's, or the user mark's own colour.
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,

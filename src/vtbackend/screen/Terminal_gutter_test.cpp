@@ -5,6 +5,7 @@
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
+#include <vtbackend/shell/BlockRail.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
@@ -810,6 +811,9 @@ TEST_CASE("Gutter.terminal.aHundredThousandLineBlockDrawsItsRail", "[gutter]")
     auto const mc = tallBlock(100'000);
     auto& terminal = mc->terminal;
 
+    // Beyond the fold scan's reach (ruling C1): it does not fold, and the rail is drawn all the same.
+    CHECK_FALSE(terminal.collapseLastFold());
+
     SECTION("scrolled into its middle, every drawn row is its body")
     {
         REQUIRE(terminal.viewport().scrollToTop());
@@ -845,13 +849,17 @@ TEST_CASE("Gutter.terminal.aHundredThousandLineBlockDrawsItsRail", "[gutter]")
 TEST_CASE("Gutter.terminal.aCollapsedBlockIsASingleRow", "[gutter]")
 {
     // Collapsed, a block's projection is its head alone. A fold is found within MaxFoldScanLines of the page
-    // (the scan's bound, Folding.hpp), so the tallest block that folds is a little under that: a hundred
-    // thousand lines do not fold at all.
-    auto const mc = tallBlock(static_cast<int>(MaxFoldScanLines) / 2);
+    // (the scan's bound, Folding.hpp): the largest block it finds prints MaxFoldScanLines - 2 lines, its
+    // command row and the live prompt below it taking the scan's other two (ruling C1).
+    auto const largest = static_cast<int>(MaxFoldScanLines) - 2;
+    auto const mc = tallBlock(largest);
     REQUIRE(mc->terminal.collapseLastFold());
     auto const cells = railCellsOf(renderOf(mc->terminal));
     REQUIRE(cells.size() == 1);
     CHECK(cells.begin()->second.rail == RailSegment::Single);
+
+    // One line more, and the scan no longer reaches its head.
+    CHECK_FALSE(tallBlock(largest + 1)->terminal.collapseLastFold());
 }
 
 TEST_CASE("Gutter.terminal.aBlockEndingOnThePagesLastRowEndsThere", "[gutter]")
@@ -912,4 +920,94 @@ TEST_CASE("Gutter.terminal.theGlyphFormDrawsTodaysCells", "[gutter]")
               { 0, withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::Finished, FoldWeight::Light)) },
               { 3, withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::Failed, FoldWeight::Light)) },
           });
+}
+
+TEST_CASE("Gutter.terminal.aUserMarkKeepsItsOwnInk", "[gutter]")
+{
+    // The ◆ is the user's, as in the glyph column: the full-strength fold colour, whether the row lies in no
+    // block or in a block's body -- never black, and never the bar's colour.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter =
+        GutterSettings { .exitStatus = true, .userMarks = true, .blockColumnForm = BlockColumnForm::Rail };
+    mc.writeToScreen("loose\r\n");                 // row 0: no block
+    runCommand(mc, "false", { "a", "b", "c" }, 1); // rows 1-4
+    mc.writeToScreen(PromptStart);
+    mc.terminal.primaryScreen().setLogicalLineFlags(LineOffset(0), LineFlag::UserMark, true);
+    mc.terminal.primaryScreen().setLogicalLineFlags(LineOffset(3), LineFlag::UserMark, true);
+
+    auto const cells = railCellsOf(renderOf(mc.terminal));
+    auto const userMarkInk = mc.terminal.colorPalette().foldMarkerHoverColors().foreground;
+    for (auto const row: { 0, 3 })
+    {
+        CAPTURE(row);
+        REQUIRE(cells.contains(row));
+        CHECK(cells.at(row).mark == RailMark::UserMark);
+        CHECK(cells.at(row).attributes.foregroundColor == userMarkInk);
+    }
+    CHECK(cells.at(0).rail == RailSegment::None);
+    CHECK(cells.at(3).rail == RailSegment::Body);
+    CHECK(cells.at(3).attributes.foregroundColor != cells.at(3).railColor);
+    // A status mark is drawn in the rail's own ink.
+    CHECK(cells.at(1).mark == RailMark::Cross);
+    CHECK(cells.at(1).attributes.foregroundColor == cells.at(1).railColor);
+}
+
+namespace
+{
+/// A MockTerm that counts the redraws it is asked for.
+struct RedrawCountingTerm final: MockTerm<>
+{
+    using MockTerm<>::MockTerm;
+
+    int redraws = 0; ///< How often the terminal asked for a frame to be drawn.
+
+    void renderBufferUpdated() override { ++redraws; }
+};
+} // namespace
+
+TEST_CASE("Gutter.terminal.theRailRedrawsWhenItsHoverChanges", "[gutter]")
+{
+    auto mc = RedrawCountingTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = RailGutter;
+    runCommand(mc, "true", {}, 0);       // row 0, a block with no output: nothing to fold
+    runCommand(mc, "false", { "x" }, 1); // rows 1-2
+    mc.writeToScreen(PromptStart);
+    auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
+    REQUIRE(first != nullptr);
+
+    SECTION("setHoveredCommandBlock redraws on a change, and only then")
+    {
+        auto const before = mc.redraws;
+        mc.terminal.setHoveredCommandBlock(first->id);
+        CHECK(mc.redraws == before + 1);
+        mc.terminal.setHoveredCommandBlock(first->id);
+        CHECK(mc.redraws == before + 1);
+        mc.terminal.setHoveredCommandBlock(std::nullopt);
+        CHECK(mc.redraws == before + 2);
+    }
+
+    SECTION("the pointer on the strip beside a block with nothing to fold lights it, and redraws")
+    {
+        auto const before = mc.redraws;
+        mc.terminal.setGutterHoverLine(LineOffset(0));
+        CHECK(mc.redraws == before + 1);
+        auto const cells = railCellsOf(renderOf(mc.terminal));
+        CHECK(cells.at(0).mark == RailMark::Check); // a success shows its check while hovered
+        CHECK(
+            cells.at(0).railColor
+            == railColor(mc.terminal.colorPalette(), CommandBlockOutcome::Success, BlockAttention::Hovered));
+
+        // To the other block: the fold changes nothing here, the block does.
+        mc.terminal.setGutterHoverLine(LineOffset(1));
+        CHECK(mc.redraws == before + 2);
+        CHECK(markAt(railCellsOf(renderOf(mc.terminal)), 0) == RailMark::None);
+    }
+
+    SECTION("under the glyph form the block alone redraws nothing")
+    {
+        mc.terminal.settings().gutter.blockColumnForm = BlockColumnForm::Glyphs;
+        auto const before = mc.redraws;
+        mc.terminal.setGutterHoverLine(LineOffset(0)); // no fold on row 0
+        CHECK(mc.redraws == before);
+    }
 }

@@ -242,6 +242,13 @@ struct GutterLayout
     std::size_t _segmentCount = 0; ///< How many of _segments are present.
 };
 
+/// Whether @p settings draw the block rail's strip: under BlockColumnForm::Rail, exactly when any of the
+/// block column's three jobs is on. What gutterLayoutFor() reports as GutterLayout::rail, without building
+/// a layout.
+/// @param settings What the gutter shows.
+/// @return Present or Absent.
+[[nodiscard]] BlockRailPresence railPresenceFor(GutterSettings const& settings) noexcept;
+
 /// The layout @p settings ask for.
 ///
 /// Constant for a given configuration, never a function of content: a gutter that widened with its line
