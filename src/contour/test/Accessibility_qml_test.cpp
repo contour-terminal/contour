@@ -20,6 +20,8 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 
+#include <vtbackend/core/Search.hpp>
+
 #include <QtCore/QCoreApplication>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
@@ -391,6 +393,8 @@ TEST_CASE("accessibility: the find bar names its field, its count, its toggles a
     contour::test::QmlMessageCapture const warnings;
     contour::test::MockSession session;
     session.setSearchPattern(QStringLiteral("needle"));
+    // Regex on, the others off: a toggle that reported a fixed state would miss one of the two.
+    session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
     engine.rootContext()->setContextProperty("mockSession", &session);
 
     QQmlComponent component(&engine);
@@ -440,6 +444,8 @@ TEST_CASE("accessibility: the find bar names its field, its count, its toggles a
                                           QStringLiteral("Regular expression"),
                                           QStringLiteral("Whole word") };
     static_assert(toggleNames.size() == contour::session::SearchToggleRows.size());
+    auto const toggleChecked = std::array { false, true, false };
+    static_assert(toggleChecked.size() == toggleNames.size());
     for (auto const index: std::views::iota(std::size_t { 0 }, toggleNames.size()))
     {
         auto const* toggle =
@@ -448,6 +454,7 @@ TEST_CASE("accessibility: the find bar names its field, its count, its toggles a
         CHECK(toggle->property("role").toInt() == QAccessible::Button);
         CHECK(toggle->property("name").toString() == toggleNames[index]);
         CHECK(toggle->property("checkable").toBool());
+        CHECK(toggle->property("checked").toBool() == toggleChecked[index]);
     }
 
     for (auto const& [name, label]:
