@@ -59,7 +59,12 @@ struct Rig
     ScopedController window;
     TerminalSession* session = nullptr;
 
-    explicit Rig(std::string attachedHostLabel = {}):
+    /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
+    /// @param hosting Where the sessions the factory makes run: in this process, or in a daemon.
+    /// @param profileShell The program the default profile starts as its shell.
+    explicit Rig(std::string attachedHostLabel = {},
+                 contour::session::SessionHosting hosting = contour::session::SessionHosting::Local,
+                 std::string profileShell = {}):
         app { [this] {
                  auto made = std::make_unique<MockPtySessionFactory>();
                  factory = made.get();
@@ -77,6 +82,9 @@ struct Rig
               std::move(attachedHostLabel) },
         window { app.manager() }
     {
+        factory->reportedHosting = hosting;
+        if (!profileShell.empty())
+            app.app().config().profile().shell.value().program = std::move(profileShell);
         scriptZshRc(contour::config::RcState::Absent);
         session = openTab();
     }
@@ -184,6 +192,31 @@ TEST_CASE("shell integration card: a remote-hosted window offers nothing",
     auto rig = Rig { "starfive" };
     rig.pressReturn(ShellIntegrationProbeCommands);
     CHECK(rig.session->shellIntegrationCard() == HiddenStage);
+}
+
+TEST_CASE("shell integration card: a daemon-hosted pane takes its shell from the profile's shell program",
+          "[contour][session][shellintegration]")
+{
+    // A pane a local daemon hosts has no process group to ask: nothing is in its foreground here.
+    constexpr auto Daemon = contour::session::SessionHosting::Remote;
+
+    auto zsh = Rig { {}, Daemon, "/usr/bin/zsh" };
+    zsh.session = zsh.openTab(/*foreground=*/"");
+    zsh.pressReturn(ShellIntegrationProbeCommands);
+    CHECK(zsh.session->shellIntegrationCard() == OfferStage);
+    CHECK(zsh.session->shellIntegrationBody().contains(QStringLiteral("zsh")));
+
+    // A profile shell Contour does not integrate offers nothing, as an unknown foreground program does.
+    auto other = Rig { {}, Daemon, "/usr/bin/tcsh" };
+    other.session = other.openTab(/*foreground=*/"");
+    other.pressReturn(ShellIntegrationProbeCommands);
+    CHECK(other.session->shellIntegrationCard() == HiddenStage);
+
+    // Only a daemon-hosted pane falls back to the profile: a local pane with nothing in front stays silent.
+    auto local = Rig { {}, contour::session::SessionHosting::Local, "/usr/bin/zsh" };
+    local.session = local.openTab(/*foreground=*/"");
+    local.pressReturn(ShellIntegrationProbeCommands);
+    CHECK(local.session->shellIntegrationCard() == HiddenStage);
 }
 
 TEST_CASE("shell integration card: a shell whose rc file loads the script, or cannot be read, offers nothing",
