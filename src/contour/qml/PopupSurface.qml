@@ -68,8 +68,10 @@ Rectangle {
 
     // An elevation level (one of chromeStyle.elevation's e0..e3) to lift the surface by instead of the
     // style's popup shadow: ElevationShadow draws it, soft where the level blurs and a hard offset copy
-    // where it does not (the Terminal row). Null keeps the popup shadow below.
-    property var elevation: null
+    // where it does not (the Terminal row). Null keeps the popup shadow below. By default e2 on a row
+    // whose e2 has no blur -- the popup shadow's nine-patch has nothing to soften there, and drew a slab
+    // wider than the box -- and the popup shadow everywhere else.
+    property var elevation: chromeStyle.elevation.e2.blur > 0 ? null : chromeStyle.elevation.e2
 
     // Built only where a surface asks for it: the popups that take the style's shadow below carry no part of
     // this path at all.

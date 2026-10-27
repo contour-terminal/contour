@@ -10752,6 +10752,43 @@ void collectItemsBeneath(QQuickItem* root, QList<QQuickItem*>& items)
 }
 } // namespace
 
+TEST_CASE("PopupSurface: on the Terminal row it casts the e2 hard copy the width of the box (offscreen)",
+          "[contour][gui][qml][kit]")
+{
+    // A menu, a flyout or a dialog: none names an elevation, and on a row without blur the popup shadow's
+    // nine-patch drew a slab wider than the box.
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, terminalRowSetup("contour-dark"));
+    contour::test::QmlMessageCapture const warnings;
+
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\n"
+                      "import Contour.Ui\n"
+                      "PopupSurface { width: 200; height: 100 }\n",
+                      QUrl());
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto surface = std::unique_ptr<QObject>(component.create());
+    auto* item = qobject_cast<QQuickItem*>(surface.get());
+    REQUIRE(item != nullptr);
+    QCoreApplication::processEvents();
+
+    auto under = QList<QQuickItem*> {};
+    collectItemsBeneath(item, under);
+    auto const hard = std::ranges::find_if(
+        under, [](QQuickItem const* part) { return part->objectName() == "elevationHardShadow"; });
+    REQUIRE(hard != under.end());
+    CHECK((*hard)->isVisible());
+    CHECK((*hard)->width() == Catch::Approx(item->width()));
+    auto const* style =
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const offset =
+        style->property("elevation").value<QObject*>()->property("e2").value<QObject*>()->property("offsetX");
+    CHECK((*hard)->x() == Catch::Approx(offset.toReal()));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("PermissionDialog: on the Terminal row nothing runs past its border (offscreen)",
           "[contour][gui][qml][permission]")
 {

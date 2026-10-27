@@ -90,11 +90,7 @@ Dialog {
         colorGroup: SystemPalette.Active
     }
 
-    // Lifted by e2. Where e2 has no blur (the Terminal row) that is a hard copy of the box one cell over and
-    // one down; elsewhere the style's own popup shadow, as every popup's.
-    background: PopupSurface {
-        elevation: chromeStyle.elevation.e2.blur > 0 ? null : chromeStyle.elevation.e2
-    }
+    background: PopupSurface {}
 
     // A Popup is not an Item and cannot carry the Accessible or Keys attached properties, so the content does.
     contentItem: ColumnLayout {
