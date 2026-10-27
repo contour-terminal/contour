@@ -170,7 +170,8 @@ class ReactorThread
     /// in connect/read unwinds and the thread becomes joinable.
     void requestStop()
     {
-        auto* const loop = currentLoop();
+        auto const lock = std::lock_guard { _loopMutex };
+        auto* const loop = _loop.get();
         loop->post([loop] { loop->requestStop(); });
     }
 
