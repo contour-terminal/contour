@@ -328,8 +328,9 @@ TEST_CASE("snapshot.scriptTable.permissionAndSaveLayout", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::SaveLayoutTaken).layoutName == SnapshotLayoutName::Taken);
     CHECK(scriptRow(SnapshotScript::ConfigReloadBanner).banner == SnapshotBanner::ConfigReload);
     CHECK(scriptRow(SnapshotScript::ConfigReloadBanner).name == "config-reload-banner");
-    // The new last script closes the table: one row per script, in order (the static_asserts beside it).
-    CHECK(SnapshotScripts.back().script == SnapshotScript::ConfigReloadBanner);
+    // Step 3c's rows run together, the banner last of them; Step 3e's overlays follow (scriptTable.overlays).
+    CHECK(static_cast<int>(SnapshotScript::ConfigReloadBanner)
+          == static_cast<int>(SnapshotScript::SaveLayoutTaken) + 1);
     // Every other row asks for neither.
     auto const asking = std::ranges::count_if(SnapshotScripts, [](SnapshotScriptRow const& row) {
         return row.permission != SnapshotPermission::None || row.layoutName != SnapshotLayoutName::None;

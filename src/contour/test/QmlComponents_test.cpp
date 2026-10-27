@@ -9409,9 +9409,12 @@ TEST_CASE("Toast: a host sets its extent, radius and detail (offscreen)", "[cont
                              QVariantMap { { "text", QStringLiteral("<b>x</b>") },
                                            { "detail", QStringLiteral("<i>open</i>") },
                                            { "extent", 22.0 },
-                                           { "cornerRadius", 11.0 } });
+                                           { "cornerRadius", 11.0 },
+                                           { "shown", true } });
     auto* item = qobject_cast<QQuickItem*>(toast.get());
     REQUIRE(item != nullptr);
+    // A toast is visible only while it shows (or fades): Step 3c's hover fix.
+    REQUIRE(QTest::qWaitFor([item] { return item->isVisible(); }));
     auto* background = item->property("background").value<QQuickItem*>();
     auto* text = item->findChild<QQuickItem*>(QStringLiteral("toastText"));
     auto* detail = item->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
