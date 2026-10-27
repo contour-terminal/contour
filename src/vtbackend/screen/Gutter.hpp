@@ -343,22 +343,25 @@ void appendGutterCells(GutterLayout const& layout,
 
 // {{{ collapsed-fold label
 
-/// The label a collapsed fold's head row carries: `⋯ 1,234 lines`.
+/// The label a collapsed fold's head row carries, the fold chip's: `1,234 lines hidden ⌄`.
 /// @param hiddenLines How many rows the fold hides.
 /// @return The label, one column per codepoint.
 [[nodiscard]] std::u32string collapsedFoldLabel(uint64_t hiddenLines);
 
-/// The cells a collapsed fold's label covers on its row: one blank column after the row's text, clipped at
-/// the page's edge -- where layoutFoldLabel() draws it, and so where a click on it lands.
+/// The cells a click on a collapsed fold's chip lands in: the label, one blank column after the row's text
+/// -- where layoutFoldLabel() draws it -- widened evenly to @p minimumHitColumns, kept off the row's text
+/// and clipped at the page's edge (R-k: the chip's hit area is at least @c size.foldChipHit).
 /// @param screenLine The screen row the label is drawn on.
 /// @param textColumns How many columns of that row hold text (Line::trimmedColumns()).
 /// @param pageColumns The page's width.
 /// @param labelColumns How many columns the label takes (collapsedFoldLabel()'s, one per codepoint).
-/// @return The cells, or nullopt when not one of them fits on the page.
+/// @param minimumHitColumns The fewest columns the hit spans; 1 is the label's own cells.
+/// @return The cells, or nullopt when not one of the label's fits on the page.
 [[nodiscard]] std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
                                                          ColumnCount textColumns,
                                                          ColumnCount pageColumns,
-                                                         std::size_t labelColumns) noexcept;
+                                                         std::size_t labelColumns,
+                                                         ColumnCount minimumHitColumns) noexcept;
 
 /// Lays @p label out one blank column after a row's text, clipped by width at the page edge, appending
 /// its cells to @p output -- nothing when not one glyph of it fits.

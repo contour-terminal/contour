@@ -3989,11 +3989,14 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     // iTerm2: the label is no text of the page, so neither a selection nor the application sees the press,
     // nor its release. Looked up first, which costs one comparison while nothing is collapsed; expanded
     // through the path that republishes the scrollable count.
-    if (button == MouseButton::Left && modifiers.none()
-        && core::locked(_terminal, [&]() { return _terminal.collapsedFoldLabelAt(pos).has_value(); }))
+    // Read from the display before the lock is taken: the display's metrics are not the terminal's to guard.
+    auto const foldChipHit = foldChipHitColumns();
+    if (button == MouseButton::Left && modifiers.none() && core::locked(_terminal, [&]() {
+            return _terminal.collapsedFoldLabelAt(pos, foldChipHit).has_value();
+        }))
     {
         withScrollableChange([&](vtbackend::Terminal& terminal) {
-            auto const head = terminal.collapsedFoldLabelAt(pos);
+            auto const head = terminal.collapsedFoldLabelAt(pos, foldChipHit);
             return head && terminal.expandFoldContaining(*head);
         });
         _owedRelease = { .owner = PressOwner::FoldLabel, .button = button };
@@ -4214,6 +4217,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         /// too, re-decided below even without a new cell.
         vtbackend::LinkRevealChange chord = vtbackend::LinkRevealChange::Unchanged;
     };
+    // Read from the display before the lock is taken, as for a press.
+    auto const foldChipHit = foldChipHitColumns();
     // Through runUnderStateLock(): a move the application tracks is reported, as a press is.
     auto const hover = _terminal.runUnderStateLock([&]() -> Hover {
         // The chord first, so that the shape below is read for the chord this move carries; the terminal's
@@ -4235,7 +4240,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         };
         auto const pointsAtTarget = decidesPointerShape
                                     && (_terminal.linkPointerShape() == vtbackend::LinkPointerShape::Hand
-                                        || _terminal.collapsedFoldLabelAt(pos).has_value());
+                                        || _terminal.collapsedFoldLabelAt(pos, foldChipHit).has_value());
         return Hover { .link = hoveredLink(),
                        .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
                                                      : std::nullopt,
@@ -4547,6 +4552,14 @@ void TerminalSession::refreshLinkTarget(QString text)
     _linkTarget = std::move(next);
     _linkTargetVisibility.store(_linkTarget.visibility, std::memory_order_relaxed);
     emit linkTargetChanged();
+}
+
+vtbackend::ColumnCount TerminalSession::foldChipHitColumns() const
+{
+    if (_display == nullptr)
+        return vtbackend::ColumnCount(1);
+    return session::foldChipHitColumns(
+        _gutterChrome, _display->devicePixelRatio(), unbox<int>(_display->gridMetrics().cellSize.width));
 }
 
 void TerminalSession::runningStatusChanged()

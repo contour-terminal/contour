@@ -4141,24 +4141,40 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
 
 void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 {
-    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
+    auto const colors = foldChipColors(_colorPalette);
+    auto const attributes = gutterCellAttributes(
+        RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground });
+    auto const fill = RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F)));
     for (auto const& placement: foldLabelPlacements())
+    {
+        auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
         layoutFoldLabel(output.annotations,
-                        baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine),
+                        screenLine,
                         placement.textColumns,
                         pageSize().columns,
                         placement.label,
                         attributes);
+        // The band behind exactly the cells drawn: the extent of a hit no wider than the label.
+        if (auto const drawn = foldLabelExtent(screenLine,
+                                               placement.textColumns,
+                                               pageSize().columns,
+                                               placement.label.size(),
+                                               ColumnCount(1)))
+            output.chipBands.push_back(
+                RenderChipBand { .lineOffset = screenLine, .columns = *drawn, .fill = fill });
+    }
 }
 
-std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position) const
+std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position,
+                                                         ColumnCount minimumHitColumns) const
 {
     for (auto const& placement: foldLabelPlacements())
     {
         auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
                                             placement.textColumns,
                                             pageSize().columns,
-                                            placement.label.size());
+                                            placement.label.size(),
+                                            minimumHitColumns);
         if (extent && extent->contains(position))
             return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
     }
@@ -4325,6 +4341,7 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
     auto const pageColumns = pageSize().columns;
     auto status = RunningStatus::Hidden;
     auto lastBlock = std::optional<CommandBlockId> {};
+    auto const foldLabels = foldLabelPlacements();
 
     // Each block once, at its first drawn row: the chip goes on its command row, wherever that is drawn.
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
@@ -4346,7 +4363,16 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
 
         auto const screenRow = _viewport.translateGridToScreenCoordinate(*input);
         auto const& line = grid.lineAt(*input);
-        auto const runs = blankRunsOf(line, baseLine + screenRow, pageColumns);
+        auto runs = blankRunsOf(line, baseLine + screenRow, pageColumns);
+        // A collapsed fold's chip on the row is drawn over blanks too: those are taken.
+        for (auto const& label: foldLabels)
+            if (label.gridLine == *input)
+                if (auto const taken = foldLabelExtent(baseLine + screenRow,
+                                                       label.textColumns,
+                                                       pageColumns,
+                                                       label.label.size(),
+                                                       ColumnCount(1)))
+                    runs = withoutColumns(runs, *taken);
         auto const placement =
             placeBlockChip(BlockChipRowFacts { .pageColumns = pageColumns,
                                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
@@ -4369,8 +4395,8 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
             output.chipBands.push_back(RenderChipBand {
                 .lineOffset = placement.columns.line,
                 .columns = placement.columns,
-                .fill = RGBAColor(*colors.band,
-                                  static_cast<uint8_t>(std::lround(BlockChipBandAlpha * 255.0F))) });
+                .fill =
+                    RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F))) });
         if (record->state == CommandBlockState::Running)
             status = RunningStatus::Shown;
     }

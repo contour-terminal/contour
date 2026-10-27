@@ -242,8 +242,8 @@ struct RenderBuffer
     /// background.
     std::optional<RenderStatusBar> statusBar {};
 
-    /// Render-only text the terminal lays over the page -- a collapsed fold's `⋯ 1,234 lines` -- already
-    /// laid out (@see layoutRenderText), one shaping group per annotation.
+    /// Render-only text the terminal lays over the page -- a collapsed fold's `1,234 lines hidden ⌄` --
+    /// already laid out (@see layoutRenderText), one shaping group per annotation.
     ///
     /// Not in @ref cells, for the gutter's reason: selection, copying and the accessibility bridge walk
     /// those, and an annotation is something to read, never something to select.

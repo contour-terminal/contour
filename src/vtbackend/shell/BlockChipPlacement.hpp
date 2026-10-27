@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <ranges>
 #include <span>
+#include <vector>
 
 namespace vtbackend
 {
@@ -44,6 +45,33 @@ struct BlockChipPlacement
 
     bool operator==(BlockChipPlacement const&) const = default;
 };
+
+/// @p runs less the columns of @p taken: what is left blank once something else -- a fold chip -- is drawn
+/// over part of them.
+/// @param runs Blank runs, ascending.
+/// @param taken The columns drawn over.
+/// @return The runs that remain, ascending.
+[[nodiscard]] inline std::vector<ColumnRange> withoutColumns(std::span<ColumnRange const> runs,
+                                                             ColumnRange taken)
+{
+    auto remaining = std::vector<ColumnRange> {};
+    for (auto const& run: runs)
+    {
+        if (run.toColumn < taken.fromColumn || taken.toColumn < run.fromColumn)
+        {
+            remaining.push_back(run);
+            continue;
+        }
+        if (run.fromColumn < taken.fromColumn)
+            remaining.push_back(ColumnRange { .line = run.line,
+                                              .fromColumn = run.fromColumn,
+                                              .toColumn = taken.fromColumn - ColumnOffset(1) });
+        if (taken.toColumn < run.toColumn)
+            remaining.push_back(ColumnRange {
+                .line = run.line, .fromColumn = taken.toColumn + ColumnOffset(1), .toColumn = run.toColumn });
+    }
+    return remaining;
+}
 
 /// Where a chip @p chipColumns wide goes on the row @p facts describe (R-e).
 ///

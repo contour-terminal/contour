@@ -5,7 +5,9 @@
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
+#include <vtbackend/shell/BlockChipPlacement.hpp>
 #include <vtbackend/shell/BlockRail.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
@@ -376,7 +378,7 @@ TEST_CASE("Gutter.terminal.withoutShellIntegrationTheBlockColumnStaysEmpty", "[g
 
 TEST_CASE("Gutter.terminal.aCollapsedFoldIsLabelledWithWhatItHides", "[gutter]")
 {
-    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(30) } }; // room for the whole chip
     mc.terminal.settings().gutter =
         GutterSettings { .foldMarkers = true, .exitStatus = false, .userMarks = false };
     runCommand(mc, "ls", { "file1", "file2", "file3" });
@@ -392,8 +394,12 @@ TEST_CASE("Gutter.terminal.aCollapsedFoldIsLabelledWithWhatItHides", "[gutter]")
     REQUIRE(head != buffer.gutter.end());
     CHECK(annotations[0].position.line == head->lineOffset);
     CHECK(annotations[0].position.column == ColumnOffset(5)); // after "$ ls" and one blank
-    CHECK(annotations[0].text == U"⋯ 3 lines");
-    CHECK(annotations[0].attributes.foregroundColor == mc.terminal.colorPalette().gutterTextColor());
+    CHECK(annotations[0].text == U"3 lines hidden ⌄");
+    CHECK(annotations[0].attributes.foregroundColor == foldChipColors(mc.terminal.colorPalette()).text);
+    // Over its band, the text colour at 8 %, across the label's columns.
+    REQUIRE(buffer.chipBands.size() == 1);
+    CHECK(buffer.chipBands.front().lineOffset == head->lineOffset);
+    CHECK(buffer.chipBands.front().columns.fromColumn == ColumnOffset(5));
     // Never a cell: selection, copying and the accessibility bridge walk the cells and never meet it.
     CHECK(std::ranges::none_of(buffer.cells, [](RenderCell const& cell) { return cell.codepoints == U"⋯"; }));
 
@@ -419,7 +425,7 @@ TEST_CASE("Gutter.terminal.aWrappedCommandLineIsLabelledWhereItEnds", "[gutter]"
     REQUIRE(annotations.size() == 1);
     CHECK(annotations[0].position.line == LineOffset(1));
     CHECK(annotations[0].position.column == ColumnOffset(8)); // after "ghij" and one blank
-    CHECK(annotations[0].text == U"⋯ 2 lines");
+    CHECK(annotations[0].text == U"2 lines hidd");            // cut at the page's edge
 }
 
 TEST_CASE("Gutter.terminal.aWrappedCommandLineIsLabelledOnce", "[gutter]")
@@ -471,7 +477,7 @@ TEST_CASE("Gutter.terminal.aWrappedCommandLineCutByTheViewportIsLabelledOnItsLas
     REQUIRE(annotations.size() == 1);
     CHECK(annotations[0].position.line == bottom);
     CHECK(annotations[0].position.column == ColumnOffset(18)); // after "0123456789" and one blank
-    CHECK(annotations[0].text == U"⋯ ");                       // cut at the page's edge
+    CHECK(annotations[0].text == U"1 ");                       // cut at the page's edge
 }
 
 TEST_CASE("Gutter.terminal.withExitStatusOffAFailedBlockIsDrawnAsAFold", "[gutter]")
@@ -564,24 +570,24 @@ TEST_CASE("Gutter.terminal.aPressDoesWhatTheRowShows", "[gutter]")
 
 TEST_CASE("Gutter.terminal.aCollapsedFoldsLabelNamesItsFold", "[gutter]")
 {
-    // What a click on `⋯ N lines` expands: the label is found where it is drawn.
+    // What a click on "N lines hidden ⌄" expands: the label is found where it is drawn.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(30) } };
     mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true };
     runCommand(mc, "make", { "a", "b" }); // "$ make" on row 0, its label from column 7
-    CHECK_FALSE(
-        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) }));
+    CHECK_FALSE(mc.terminal.collapsedFoldLabelAt(
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) }, ColumnCount(1)));
 
     REQUIRE(mc.terminal.toggleFoldContaining(LineOffset(0)));
     auto const at = [&](int column) {
         return mc.terminal.collapsedFoldLabelAt(
-            CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) });
+            CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) }, ColumnCount(1));
     };
     CHECK(at(7) == LineOffset(0));
     CHECK(at(12) == LineOffset(0));
     CHECK_FALSE(at(3).has_value()); // the command's own text
     CHECK_FALSE(at(6).has_value()); // the blank column before the label
-    CHECK_FALSE(
-        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(8) }));
+    CHECK_FALSE(mc.terminal.collapsedFoldLabelAt(
+        CellLocation { .line = LineOffset(1), .column = ColumnOffset(8) }, ColumnCount(1)));
 }
 
 TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
@@ -790,12 +796,12 @@ TEST_CASE("Gutter.terminal.aRunningBlockShowsItsTriangle", "[gutter]")
 
 namespace
 {
-/// A terminal of 10 rows keeping 120 000 rows of history, the rail on, in which `seq` printed @p lines lines
-/// and finished, with a live prompt below.
+/// A terminal of 10 rows and 80 columns keeping 120 000 rows of history, the rail on, in which `seq` printed
+/// @p lines lines and finished, with a live prompt below.
 [[nodiscard]] std::unique_ptr<MockTerm<>> tallBlock(int lines)
 {
     auto mc = std::make_unique<MockTerm<>>(
-        PageSize { LineCount(10), ColumnCount(20) },
+        PageSize { LineCount(10), ColumnCount(80) },
         HistoryLimits { .guaranteed = LineCount(120'000), .capacity = LineCount(120'000) });
     mc->terminal.settings().gutter = RailGutter;
     startCommand(*mc, "seq");
@@ -1103,4 +1109,50 @@ TEST_CASE("Gutter.terminal.aRunningChipTicks", "[gutter][blockchip]")
     mc.writeToScreen(PromptStart);
     (void) renderOf(mc.terminal);
     CHECK_FALSE(mc.terminal.hasVisibleRunningStatus());
+}
+
+TEST_CASE("Gutter.terminal.theLargestFoldIsOneChip", "[gutter]")
+{
+    // Review Focus 2, under ruling C1: the largest block the fold scan finds, collapsed, is one chip on its
+    // head row over blank cells, its count grouped; a far longer block does not fold, and draws no chip.
+    auto const largest = static_cast<int>(MaxFoldScanLines) - 2;
+    auto const mc = tallBlock(largest);
+    REQUIRE(mc->terminal.collapseLastFold());
+
+    auto const buffer = renderOf(mc->terminal);
+    auto const annotations = annotationsOf(buffer);
+    // The fold chip after the command, and the block's status chip right of it on the same row: apart.
+    REQUIRE(annotations.size() == 2);
+    CHECK(annotations[0].text == U"4,094 lines hidden ⌄");
+    CHECK(annotations[1].position.line == annotations[0].position.line);
+    CHECK(annotations[1].position.column >= annotations[0].position.column
+                                                + ColumnOffset::cast_from(annotations[0].text.size())
+                                                + boxed_cast<ColumnOffset>(BlockChipGap));
+    REQUIRE(buffer.chipBands.size() == 1); // a success's status chip has no band
+    auto const& band = buffer.chipBands.front();
+    CHECK(band.lineOffset == annotations[0].position.line);
+    auto const& line = mc->terminal.primaryScreen().grid().lineAt(
+        mc->terminal.viewport().translateScreenToGridLine(band.lineOffset));
+    for (auto const column:
+         std::views::iota(unbox<int>(band.columns.fromColumn), unbox<int>(band.columns.toColumn) + 1))
+        CHECK(line.cellEmptyAt(ColumnOffset(column)));
+
+    auto const longer = tallBlock(100'000);
+    CHECK_FALSE(longer->terminal.collapseLastFold());
+    CHECK(annotationsOf(renderOf(longer->terminal)).empty());
+}
+
+TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchip]")
+{
+    // The fold chip is drawn over blanks after the command: the status chip treats those as taken, and on a
+    // page with no room left beside it, collapses rather than crowding it.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(26) } };
+    mc.terminal.settings().gutter = RailGutter;
+    runCommand(mc, "ls", { "a", "b", "c" });
+    mc.writeToScreen(PromptStart);
+    REQUIRE(mc.terminal.collapseLastFold());
+
+    auto const annotations = annotationsOf(renderOf(mc.terminal));
+    REQUIRE(annotations.size() == 1);
+    CHECK(annotations[0].text == U"3 lines hidden ⌄");
 }

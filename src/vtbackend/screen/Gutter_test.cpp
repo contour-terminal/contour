@@ -857,24 +857,45 @@ TEST_CASE("Gutter.foldLabel.extentIsWhereItIsDrawn", "[gutter]")
 {
     // One blank column after the text, then the label, clipped at the page's edge.
     auto const extent = [](int textColumns, std::size_t labelColumns) {
-        return foldLabelExtent(LineOffset(4), ColumnCount(textColumns), ColumnCount(40), labelColumns)
+        return foldLabelExtent(
+                   LineOffset(4), ColumnCount(textColumns), ColumnCount(40), labelColumns, ColumnCount(1))
             .transform(
                 [](ColumnRange const& range) { return std::pair { range.fromColumn, range.toColumn }; });
     };
     CHECK(extent(6, 9) == std::pair { ColumnOffset(7), ColumnOffset(15) });
     CHECK(extent(30, 15) == std::pair { ColumnOffset(31), ColumnOffset(39) });
-    CHECK(foldLabelExtent(LineOffset(4), ColumnCount(6), ColumnCount(40), 9)->line == LineOffset(4));
+    CHECK(foldLabelExtent(LineOffset(4), ColumnCount(6), ColumnCount(40), 9, ColumnCount(1))->line
+          == LineOffset(4));
     // Nothing of it fits: no extent to click.
     CHECK_FALSE(extent(39, 9).has_value());
     CHECK_FALSE(extent(40, 9).has_value());
 }
 
-TEST_CASE("Gutter.foldLabel.countsTheHiddenLines", "[gutter]")
+TEST_CASE("Gutter.foldLabel.words", "[gutter]")
 {
-    CHECK(collapsedFoldLabel(1) == U"⋯ 1 line");
-    CHECK(collapsedFoldLabel(12) == U"⋯ 12 lines");
-    CHECK(collapsedFoldLabel(1234) == U"⋯ 1,234 lines");
-    CHECK(collapsedFoldLabel(1234567) == U"⋯ 1,234,567 lines");
+    // The canvas's fold chip: the count, thousands grouped, then what it is and the chevron that opens it.
+    CHECK(collapsedFoldLabel(80) == U"80 lines hidden ⌄");
+    CHECK(collapsedFoldLabel(1) == U"1 line hidden ⌄");
+    CHECK(collapsedFoldLabel(100'000) == U"100,000 lines hidden ⌄");
+    CHECK(collapsedFoldLabel(1234567) == U"1,234,567 lines hidden ⌄");
+}
+
+TEST_CASE("Gutter.foldLabel.hitIsWidened", "[gutter]")
+{
+    // A 10-column label drawn at 9..18 after 8 columns of text: widened evenly to 14 columns, 7..20, then
+    // kept off the text, 8..20. A label already as wide as the minimum is its own extent.
+    auto const extent = [](int minimumHitColumns) {
+        return foldLabelExtent(
+                   LineOffset(4), ColumnCount(8), ColumnCount(80), 10, ColumnCount(minimumHitColumns))
+            .transform(
+                [](ColumnRange const& range) { return std::pair { range.fromColumn, range.toColumn }; });
+    };
+    CHECK(extent(14) == std::pair { ColumnOffset(8), ColumnOffset(20) });
+    CHECK(extent(4) == std::pair { ColumnOffset(9), ColumnOffset(18) });
+
+    // At the page's edge it stops there.
+    CHECK(foldLabelExtent(LineOffset(4), ColumnCount(66), ColumnCount(80), 10, ColumnCount(20))->toColumn
+          == ColumnOffset(79));
 }
 
 TEST_CASE("Gutter.foldLabel.sitsAfterTheTextAndIsClippedAtThePageEdge", "[gutter]")
@@ -889,21 +910,22 @@ TEST_CASE("Gutter.foldLabel.sitsAfterTheTextAndIsClippedAtThePageEdge", "[gutter
     };
 
     auto label = std::vector<RenderCell> {};
-    layoutFoldLabel(label, LineOffset(4), ColumnCount(5), ColumnCount(40), U"⋯ 3 lines", attributes);
+    layoutFoldLabel(label, LineOffset(4), ColumnCount(5), ColumnCount(40), U"3 lines hidden ⌄", attributes);
     REQUIRE_FALSE(label.empty());
     // One blank column after the row's text.
     CHECK(label.front().position == CellLocation { .line = LineOffset(4), .column = ColumnOffset(6) });
-    CHECK(textOf(label) == U"⋯ 3 lines");
+    CHECK(textOf(label) == U"3 lines hidden ⌄");
     CHECK(label.front().attributes.foregroundColor == RGBColor(1, 2, 3));
 
     // Nine columns left on the page: cut to fit, never wrapped onto the next row.
     auto clipped = std::vector<RenderCell> {};
-    layoutFoldLabel(clipped, LineOffset(0), ColumnCount(30), ColumnCount(40), U"⋯ 1,234 lines", attributes);
-    CHECK(textOf(clipped) == U"⋯ 1,234 l");
+    layoutFoldLabel(
+        clipped, LineOffset(0), ColumnCount(30), ColumnCount(40), U"1,234 lines hidden ⌄", attributes);
+    CHECK(textOf(clipped) == U"1,234 lin");
 
     // No room at all: no label.
     auto none = std::vector<RenderCell> {};
-    layoutFoldLabel(none, LineOffset(0), ColumnCount(39), ColumnCount(40), U"⋯ 1 line", attributes);
+    layoutFoldLabel(none, LineOffset(0), ColumnCount(39), ColumnCount(40), U"1 line hidden ⌄", attributes);
     CHECK(none.empty());
 }
 

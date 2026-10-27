@@ -1962,11 +1962,14 @@ class Terminal: public IStatusLinePublishTarget
     /// @return What the press does; Swallow beside any page but the primary screen's.
     [[nodiscard]] BlockColumnPress blockColumnPressAt(LineOffset gridLine) const;
 
-    /// The head of the collapsed fold whose `⋯ N lines` label is drawn over @p position: what a click on the
-    /// label expands. The label is laid out where fillFoldLabels() draws it, by the same placement.
+    /// The head of the collapsed fold whose "N lines hidden ⌄" chip is over @p position: what a click on it
+    /// expands. The chip is laid out where fillFoldLabels() draws it, by the same placement, and its hit
+    /// widened to @p minimumHitColumns over the blanks beside it (foldLabelExtent()).
     /// @param position A cell of the main page, as the pointer names it (main-page rows).
-    /// @return The fold head's grid line, or nullopt where no label is drawn.
-    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position) const;
+    /// @param minimumHitColumns The fewest columns the hit spans: the chrome's @c size.foldChipHit in cells.
+    /// @return The fold head's grid line, or nullopt where no chip is.
+    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position,
+                                                                 ColumnCount minimumHitColumns) const;
 
     /// Whether the primary screen's shell shows a prompt that a command typed now would run at: the newest
     /// command block is at its prompt, and the primary screen is the one on display.
@@ -5676,8 +5679,9 @@ class Terminal: public IStatusLinePublishTarget
     ///                 the same shift RenderBufferBuilder applies to every cell it emits.
     void fillGutter(RenderBuffer& output, LineOffset baseLine) const;
 
-    /// Fills @p output's annotations with the `⋯ N lines` label of every collapsed fold on display, after
-    /// the text of the fold's prompt line -- on the last row of that line where a long command wrapped it.
+    /// Fills @p output's annotations and chip bands with the `N lines hidden ⌄` chip of every collapsed fold
+    /// on display, after the text of the fold's prompt line -- on the last row of that line where a long
+    /// command wrapped it.
     /// @param output The buffer being built.
     /// @param baseLine As for fillGutter().
     void fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const;

@@ -90,11 +90,15 @@ static_assert(BlockStatusDetailPrefixes.size() == static_cast<std::size_t>(Finis
 /// The opacity of the chip's band over the page: the outcome's colour at 16 %.
 inline constexpr auto BlockChipBandAlpha = 0.16F;
 
-/// The chip's inks.
+/// The opacity of the fold chip's band over the page: the text colour at 8 %.
+inline constexpr auto FoldChipBandAlpha = 0.08F;
+
+/// A chip's inks.
 struct BlockChipColors
 {
     RGBColor text {};                ///< The text, at least 4.5:1 over the band over the page.
-    std::optional<RGBColor> band {}; ///< The band's colour, drawn at BlockChipBandAlpha; none for success.
+    std::optional<RGBColor> band {}; ///< The band's colour; none for a success's status chip.
+    float bandAlpha = 0.0F;          ///< The band's opacity over the page.
 
     bool operator==(BlockChipColors const&) const = default;
 };
@@ -106,6 +110,12 @@ struct BlockChipColors
 /// @return The inks.
 [[nodiscard]] BlockChipColors blockChipColors(ColorPalette const& palette,
                                               CommandBlockOutcome outcome) noexcept;
+
+/// The fold chip's inks: the gutter's text colour on a band of itself, lifted toward the page's ink where it
+/// would not read at MinimumTextContrast over the band.
+/// @param palette The colour scheme.
+/// @return The inks.
+[[nodiscard]] BlockChipColors foldChipColors(ColorPalette const& palette) noexcept;
 
 /// What the chip's text stands on: the page, with its band over it.
 /// @param palette The colour scheme.

@@ -90,8 +90,8 @@ output does not repeat the same second all the way down. Recording the time cost
 A finished command's output can be collapsed to its prompt line (see
 [`folding`](../configuration/index.md#folding)): click its fold control in the block column, or use the
 `ToggleFold`, `ToggleLastFold`, `CollapseLastFold`, `CollapseAllFolds` and `ExpandAllFolds` actions. A
-collapsed block says how much it hides — `⋯ 1,234 lines` — after its prompt; that label is drawn over the
-page and is never selected or copied. In Vi normal mode, vim's fold keys work:
+collapsed block says how much it hides — `1,234 lines hidden ⌄` — after its prompt; that chip is drawn over
+the page and is never selected or copied. In Vi normal mode, vim's fold keys work:
 
 | Key | Action |
 |-----|--------|

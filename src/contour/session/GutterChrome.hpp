@@ -4,8 +4,10 @@
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 
+#include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
@@ -26,7 +28,8 @@ struct GutterChrome
     int barInsetPoints = 0;                 ///< The bar's left edge within the strip (@c space.railInset).
     int barRadiusPoints = 0;                ///< The bar's end radius (@c radius.rail).
     int markPoints = 0;                     ///< The rail mark's edge (@c size.railMark).
-    int barEndPoints = 0; ///< What the bar keeps clear of a block's ends (@c space.railEnd).
+    int barEndPoints = 0;      ///< What the bar keeps clear of a block's ends (@c space.railEnd).
+    int foldChipHitPoints = 0; ///< The fold chip's least hit width (@c size.foldChipHit).
 
     bool operator==(GutterChrome const&) const = default;
 };
@@ -43,7 +46,8 @@ struct GutterChrome
                           .barInsetPoints = row.space.railInset,
                           .barRadiusPoints = row.radii.rail,
                           .markPoints = row.size.railMark,
-                          .barEndPoints = row.space.railEnd };
+                          .barEndPoints = row.space.railEnd,
+                          .foldChipHitPoints = row.size.foldChipHit };
 }
 
 /// @p points of the chrome at @p scale, in whole device pixels: rounded (R-b), so the strip the page fit
@@ -54,6 +58,22 @@ struct GutterChrome
 [[nodiscard]] inline int chromeDevicePixels(int points, double scale) noexcept
 {
     return static_cast<int>(std::lround(points * scale));
+}
+
+/// The fewest columns a click on a fold chip spans: @p chrome's @c size.foldChipHit in cells @p cellWidthPx
+/// device pixels wide at @p scale, rounded up. At least one, the chip's own cells.
+/// @param chrome The session's gutter chrome.
+/// @param scale The device-pixel ratio.
+/// @param cellWidthPx The cell width in device pixels.
+/// @return The columns.
+[[nodiscard]] inline vtbackend::ColumnCount foldChipHitColumns(GutterChrome const& chrome,
+                                                               double scale,
+                                                               int cellWidthPx) noexcept
+{
+    if (cellWidthPx <= 0)
+        return vtbackend::ColumnCount(1);
+    auto const columns = static_cast<int>(std::ceil(chrome.foldChipHitPoints * scale / cellWidthPx));
+    return vtbackend::ColumnCount(std::max(1, columns));
 }
 
 } // namespace contour::session

@@ -142,7 +142,8 @@ TEST_CASE("FontControl.gutterChromeFor.followsTheChromeRow", "[contour][geometry
                             .barInsetPoints = 8,
                             .barRadiusPoints = 2,
                             .markPoints = 13,
-                            .barEndPoints = 2 });
+                            .barEndPoints = 2,
+                            .foldChipHitPoints = 24 });
     CHECK(gutterChromeFor(ChromeStyle::Terminal).form == BlockColumnForm::Glyphs);
 }
 

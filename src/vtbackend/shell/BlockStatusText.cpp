@@ -128,7 +128,18 @@ BlockChipColors blockChipColors(ColorPalette const& palette, CommandBlockOutcome
     auto colors = BlockChipColors {
         .text = success ? palette.gutterTextColor() : palette.blockStatusColor(outcome),
         .band = success ? std::nullopt : std::optional { palette.blockStatusColor(outcome) },
+        .bandAlpha = BlockChipBandAlpha,
     };
+    auto const ground = chipGround(palette, colors);
+    colors.text = liftToContrast(colors.text, legibleInkOn(palette, ground), ground, MinimumTextContrast);
+    return colors;
+}
+
+BlockChipColors foldChipColors(ColorPalette const& palette) noexcept
+{
+    auto colors = BlockChipColors { .text = palette.gutterTextColor(),
+                                    .band = palette.gutterTextColor(),
+                                    .bandAlpha = FoldChipBandAlpha };
     auto const ground = chipGround(palette, colors);
     colors.text = liftToContrast(colors.text, legibleInkOn(palette, ground), ground, MinimumTextContrast);
     return colors;
@@ -136,7 +147,7 @@ BlockChipColors blockChipColors(ColorPalette const& palette, CommandBlockOutcome
 
 RGBColor chipGround(ColorPalette const& palette, BlockChipColors const& colors) noexcept
 {
-    return colors.band ? mixColor(palette.defaultBackground, *colors.band, BlockChipBandAlpha)
+    return colors.band ? mixColor(palette.defaultBackground, *colors.band, colors.bandAlpha)
                        : palette.defaultBackground;
 }
 

@@ -429,9 +429,9 @@ class Renderer
     /// @param smoothScrollOffset  The rows' sub-cell scroll offset, in device pixels.
     void renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset);
 
-    /// Draws the annotations -- render-only text such as a collapsed fold's `⋯ N lines` -- over the cells
-    /// already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which selection,
-    /// copying and the accessibility bridge walk.
+    /// Draws the annotations -- render-only text such as a collapsed fold's `N lines hidden ⌄` -- over the
+    /// cells already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which
+    /// selection, copying and the accessibility bridge walk.
     ///
     /// @param annotations  The annotation cells of the frame (RenderBuffer::annotations).
     void renderAnnotations(std::span<vtbackend::RenderCell const> annotations);

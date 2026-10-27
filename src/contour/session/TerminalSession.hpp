@@ -138,7 +138,7 @@ enum class PressOwner : uint8_t
     None = 0,     ///< Nobody: the grid's presses and releases go the normal way.
     Gutter,       ///< The gutter took the press.
     StickyHeader, ///< The sticky command header took the press.
-    FoldLabel,    ///< A collapsed fold's `⋯ N lines` label took the press, and expanded its fold.
+    FoldLabel,    ///< A collapsed fold's `N lines hidden ⌄` chip took the press, and expanded its fold.
 };
 
 /// Whether a request to run a command line again put its question to the user.
@@ -557,6 +557,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Arms the once-a-second redraw while the terminal shows a running block's time, and stops it once it
     /// does not. GUI thread.
     void updateRunningStatusRefresh();
+
+    /// The fewest columns a click on a fold chip spans, for the display's cell: @c size.foldChipHit of the
+    /// session's chrome row in cells (R-k). One without a display. GUI thread.
+    [[nodiscard]] vtbackend::ColumnCount foldChipHitColumns() const;
 
   public:
     QString getBellSource() const noexcept

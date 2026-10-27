@@ -655,15 +655,14 @@ std::vector<ColumnRange> blankRunsOf(Line const& line, LineOffset screenLine, Co
 
 std::u32string collapsedFoldLabel(uint64_t hiddenLines)
 {
-    constexpr auto Lead = std::u32string_view { U"⋯ " };
-    auto const unit = hiddenLines == 1 ? std::u32string_view { U" line" } : std::u32string_view { U" lines" };
+    auto const unit = hiddenLines == 1 ? std::u32string_view { U" line hidden ⌄" }
+                                       : std::u32string_view { U" lines hidden ⌄" };
     auto const digits = std::format("{}", hiddenLines);
     auto const separators = (digits.size() - 1) / DigitsPerGroup;
 
     // Sized up front: the label is built for every collapsed fold on screen, every frame.
     auto label = std::u32string {};
-    label.reserve(Lead.size() + digits.size() + separators + unit.size());
-    label += Lead;
+    label.reserve(digits.size() + separators + unit.size());
     for (auto const index: std::views::iota(std::size_t { 0 }, digits.size()))
     {
         if (index != 0 && (digits.size() - index) % DigitsPerGroup == 0)
@@ -677,14 +676,20 @@ std::u32string collapsedFoldLabel(uint64_t hiddenLines)
 std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
                                            ColumnCount textColumns,
                                            ColumnCount pageColumns,
-                                           std::size_t labelColumns) noexcept
+                                           std::size_t labelColumns,
+                                           ColumnCount minimumHitColumns) noexcept
 {
     auto const begin = foldLabelStart(textColumns);
-    auto const end =
-        std::min(begin + ColumnOffset::cast_from(labelColumns), boxed_cast<ColumnOffset>(pageColumns));
+    auto const pageEnd = boxed_cast<ColumnOffset>(pageColumns);
+    auto const end = std::min(begin + ColumnOffset::cast_from(labelColumns), pageEnd);
     if (begin >= end)
         return std::nullopt;
-    return ColumnRange { .line = screenLine, .fromColumn = begin, .toColumn = end - ColumnOffset(1) };
+
+    // Widened evenly to the minimum, then kept off the row's text and on the page.
+    auto const missing = std::max(0, unbox<int>(minimumHitColumns) - unbox<int>(end - begin));
+    auto const from = std::max(begin - ColumnOffset(missing / 2), boxed_cast<ColumnOffset>(textColumns));
+    auto const to = std::min(end + ColumnOffset(missing - (missing / 2)), pageEnd);
+    return ColumnRange { .line = screenLine, .fromColumn = from, .toColumn = to - ColumnOffset(1) };
 }
 
 void layoutFoldLabel(std::vector<RenderCell>& output,

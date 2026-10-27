@@ -8292,6 +8292,41 @@ TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, an
     CHECK_FALSE(session->refreshesRunningStatus());
 }
 
+TEST_CASE("TerminalSession: a click beside the fold chip still opens it", "[contour][session][gutter]")
+{
+    // The chip's hit is at least size.foldChipHit wide (R-k), in the display's cells: at 8x device pixels a
+    // cell 8 pixels wide is one point, so the 15-column "1 line hidden ⌄" is widened to 24 columns, kept off
+    // the command's text -- columns 4..24 after "$ ls" -- and a click there opens it.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto& surface = *session.surface;
+    surface.devicePixelRatioValue = 8.0;
+    surface.gridMetricsValue.cellSize = surface.cellSizeValue;
+    auto& terminal = session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("ls", { "a" }));
+    terminal.writeToScreen(std::string { vtbackend::test::PromptStart });
+
+    auto const pressAt = [&](int column) {
+        REQUIRE(core::locked(terminal, [&] { return terminal.collapseLastFold(); }));
+        session->sendMousePressEvent(Modifiers {},
+                                     vtbackend::MouseButton::Left,
+                                     vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                                               .column = vtbackend::ColumnOffset(column) },
+                                     vtbackend::PixelCoordinate {});
+        session->sendMouseReleaseEvent(
+            Modifiers {}, vtbackend::MouseButton::Left, vtbackend::PixelCoordinate {});
+        auto const expanded = core::locked(terminal, [&] { return terminal.foldState().empty(); });
+        if (!expanded)
+            core::locked(terminal, [&] { terminal.expandAllFolds(); });
+        return expanded;
+    };
+    CHECK(pressAt(5));  // on the chip
+    CHECK(pressAt(20)); // one column right of its last cell
+    CHECK(pressAt(24)); // the widened hit's last column
+    CHECK_FALSE(pressAt(25));
+    CHECK_FALSE(pressAt(2)); // the command's own text
+}
+
 TEST_CASE("TerminalSession: a scroll withdraws the block tooltip", "[contour][session][gutter]")
 {
     // The hovered block is found on pointer MOVEMENT, so a scroll slides another block under a stationary

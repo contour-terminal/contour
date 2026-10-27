@@ -81,3 +81,13 @@ TEST_CASE("blockChip.exactlyWideEnough", "[blockchip]")
     CHECK(place({ run(40, 40 + unbox<int>(fits) - 1) }).kind == BlockChipPlacementKind::InRow);
     CHECK(place({ run(40, 40 + unbox<int>(fits) - 2) }).kind == BlockChipPlacementKind::CollapsedToRail);
 }
+
+TEST_CASE("blockChip.aFoldChipTakesItsColumns", "[blockchip]")
+{
+    // A fold chip drawn at 10..25 leaves the blanks around it, and the status chip keeps its gap from it.
+    auto const runs = withoutColumns(std::vector { run(9, 79) }, run(10, 25));
+    CHECK(runs == std::vector { run(9, 9), run(26, 79) });
+    CHECK(withoutColumns(std::vector { run(30, 40) }, run(10, 25)) == std::vector { run(30, 40) });
+    CHECK(withoutColumns(std::vector { run(10, 25) }, run(10, 25)).empty());
+    CHECK(place(runs) == inRow(58, 77));
+}

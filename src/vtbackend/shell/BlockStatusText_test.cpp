@@ -103,3 +103,18 @@ TEST_CASE("blockChip.textReadsAtFourAndAHalf", "[blockstatus]")
         }
     }
 }
+
+TEST_CASE("foldChip.textReadsAtFourAndAHalf", "[blockstatus]")
+{
+    // F29: the fold chip's text over its 8 % band over the page reads at 4.5:1 on every bundled scheme.
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = foldChipColors(palette);
+        REQUIRE(colors.band.has_value());
+        CHECK(colors.bandAlpha == FoldChipBandAlpha);
+        CHECK(contrastRatio(colors.text, chipGround(palette, colors)) >= MinimumTextContrast);
+    }
+}
