@@ -173,6 +173,11 @@
           <li>Paints search matches yellow in contour-dark and contour-light, the current one stronger</li>
           <li>Places the find bar at the active pane's top right under its header, moving it out of the way of the current match; under <code>ui_style: terminal</code> it takes the pane header row</li>
           <li>Adds ⌘F, ⌘G, ⇧⌘G and ⌘E (Use Selection for Find) on macOS; Find Next and Find Previous wrap and open the bar when nothing is being searched for. Adds the <code>SearchSelection</code> action</li>
+          <li>Asks every permission (font change, large paste, buffer capture, host status line, rerun) in one dialog that names the action, with a preview of a large paste and a checkbox to stop asking for the session; questions are asked one at a time.</li>
+          <li>Shows configuration reload errors in the window, with a button that opens the file, and confirms copies, refused pastes and saved layouts with a short notice that screen readers announce.</li>
+          <li>Asks extension and control consent in the same dialog, with the permissions that can type shown in bold.</li>
+          <li>Save Layout says what it saves, stays disabled for an empty name, and asks before replacing an existing layout.</li>
+          <li>Refuses a buffer capture in a daemon-hosted pane instead of leaving the program waiting for the reply.</li>
         </ul>
       </description>
     </release>
