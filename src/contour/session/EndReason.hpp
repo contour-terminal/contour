@@ -25,15 +25,23 @@ enum class EndReason : uint8_t
     Disconnected, ///< The daemon connection it was mirrored over went away; the shell still runs there.
 };
 
-/// Whether an ended pane offers to start its session again.
-enum class FooterRestart : uint8_t
+/// What a pane footer's primary button does.
+enum class FooterAction : uint8_t
 {
-    Unavailable = 0, ///< No Restart: only Close.
-    Offered,         ///< Restart and Close.
+    None = 0, ///< No primary button: only the dismissal.
+    Restart,  ///< Start the ended session again in the same pane.
+    RunAgain, ///< Ask to type the command a restart stopped at the shell's prompt, and run it.
 };
 
-/// Number of @c FooterRestart enumerators, derived from the last one.
-inline constexpr std::size_t FooterRestartCount = static_cast<std::size_t>(FooterRestart::Offered) + 1;
+/// Number of @c FooterAction enumerators, derived from the last one.
+inline constexpr std::size_t FooterActionCount = static_cast<std::size_t>(FooterAction::RunAgain) + 1;
+
+/// What a pane footer's dismissing button does.
+enum class FooterDismiss : uint8_t
+{
+    Close = 0, ///< Close the pane: its session is over.
+    Dismiss,   ///< Take the footer away; the pane and its live shell stay.
+};
 
 /// Whether the hosting a session runs under can start a session again in the same pane.
 ///
@@ -45,11 +53,13 @@ enum class RestartSupport : uint8_t
     Supported,       ///< Local: a new session can be spawned in the same pane.
 };
 
-/// One row of the ended-pane footer table: what the footer says and whether it offers a Restart.
+/// One row of the ended-pane footer table: what the footer says and what its buttons do.
 struct PaneFooterRow
 {
     EndReason end;                      ///< The end the row describes.
-    FooterRestart restart;              ///< Whether the end can be restarted, where the hosting allows it.
+    FooterAction action;                ///< The primary button, where the hosting allows it.
+    std::string_view actionLabel;       ///< What it says: empty exactly when @ref action is None.
+    FooterDismiss dismiss;              ///< What the dismissing button does.
     std::string_view message;           ///< The footer text when there is no detail to name.
     std::string_view messageWithDetail; ///< The footer text naming the detail, at its one `{}`.
 };
@@ -57,23 +67,33 @@ struct PaneFooterRow
 /// The footer table, one row per EndReason in enumerator order.
 inline constexpr auto PaneFooterRows = std::array {
     PaneFooterRow { .end = EndReason::None,
-                    .restart = FooterRestart::Unavailable,
+                    .action = FooterAction::None,
+                    .actionLabel = "",
+                    .dismiss = FooterDismiss::Close,
                     .message = "",
                     .messageWithDetail = "" },
     PaneFooterRow { .end = EndReason::Exited,
-                    .restart = FooterRestart::Offered,
+                    .action = FooterAction::Restart,
+                    .actionLabel = "Restart",
+                    .dismiss = FooterDismiss::Close,
                     .message = "Process exited.",
                     .messageWithDetail = "Process exited with code {}." },
     PaneFooterRow { .end = EndReason::Signalled,
-                    .restart = FooterRestart::Offered,
+                    .action = FooterAction::Restart,
+                    .actionLabel = "Restart",
+                    .dismiss = FooterDismiss::Close,
                     .message = "Process ended.",
                     .messageWithDetail = "Process ended by signal {}." },
     PaneFooterRow { .end = EndReason::StartFailed,
-                    .restart = FooterRestart::Offered,
+                    .action = FooterAction::Restart,
+                    .actionLabel = "Restart",
+                    .dismiss = FooterDismiss::Close,
                     .message = "The terminal could not be started.",
                     .messageWithDetail = "The terminal could not be started: {}." },
     PaneFooterRow { .end = EndReason::Disconnected,
-                    .restart = FooterRestart::Unavailable,
+                    .action = FooterAction::None,
+                    .actionLabel = "",
+                    .dismiss = FooterDismiss::Close,
                     .message = "Disconnected from the Contour daemon. Its sessions are still running; "
                                "reattach with: contour client",
                     .messageWithDetail = "Disconnected from the Contour daemon. Its sessions are still "
@@ -101,15 +121,46 @@ inline constexpr auto PaneFooterRows = std::array {
     return std::vformat(row.messageWithDetail, std::make_format_args(detail));
 }
 
-/// Whether an ended pane offers Restart.
+/// The primary button an ended pane offers.
 /// @param end  How the session ended.
 /// @param host Whether its hosting can start it again here.
-/// @return The row's offer, or Unavailable when the hosting cannot restart.
-[[nodiscard]] constexpr FooterRestart restartOf(EndReason end, RestartSupport host) noexcept
+/// @return The row's action, or None when the hosting cannot restart.
+[[nodiscard]] constexpr FooterAction offeredAction(EndReason end, RestartSupport host) noexcept
 {
-    if (host == RestartSupport::Unsupported)
-        return FooterRestart::Unavailable;
-    return paneFooterRowOf(end).restart;
+    auto const& row = paneFooterRowOf(end);
+    if (row.action == FooterAction::Restart && host == RestartSupport::Unsupported)
+        return FooterAction::None;
+    return row.action;
+}
+
+/// What the footer over a restored shell says and does. Not an EndReason's row: nothing ended, the pane's
+/// shell runs, and what the footer names is the command the restart stopped.
+struct InterruptionFooterRow
+{
+    std::string_view message;     ///< The footer text, at its one `{}` for the command.
+    FooterAction action;          ///< The primary button, once the shell is at a prompt.
+    std::string_view actionLabel; ///< What it says.
+    FooterDismiss dismiss;        ///< What the dismissing button does.
+};
+
+/// The footer of a pane whose command a restart stopped.
+inline constexpr auto InterruptedFooterRow =
+    InterruptionFooterRow { .message = "“{}” was stopped when the session ended.",
+                            .action = FooterAction::RunAgain,
+                            .actionLabel = "Run Again",
+                            .dismiss = FooterDismiss::Dismiss };
+
+/// The label of a dismissing button.
+/// @param dismiss What it does.
+/// @return "Close" or "Dismiss".
+[[nodiscard]] constexpr std::string_view dismissLabelOf(FooterDismiss dismiss) noexcept
+{
+    switch (dismiss)
+    {
+        case FooterDismiss::Close: return "Close";
+        case FooterDismiss::Dismiss: return "Dismiss";
+    }
+    return "";
 }
 
 } // namespace contour::session

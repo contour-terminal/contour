@@ -341,7 +341,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// SessionFactory: the terminal built around one of our ptys arrived, so the session's mirror
     /// can be created and primed with whatever the daemon has already told us about it.
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override;
+    /// The mirror also reports the command a restart stopped in the daemon's session to @p interruptions,
+    /// posted to its context's (the session's, the GUI) thread.
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override;
 
   signals:
     /// A remote session appeared that has no local tab yet (fires on the
@@ -395,6 +399,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         vtpty::ChannelPty* pty = nullptr;
         vtbackend::Terminal* terminal = nullptr;
         std::unique_ptr<vthost::client::ScreenMirror> mirror;
+        /// Where the session is told what a restart stopped in it; empty until bindTerminal().
+        contour::session::InterruptionSink interruptions {};
+        /// What @ref interruptions was last told, so only a change is posted. Reactor thread, under _mutex.
+        std::string interruptionTold {};
     };
 
   protected:
@@ -421,6 +429,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     }
 
   private:
+    /// Reactor-side, _mutex held: posts what @p binding's mirror knows of a restart's stopped command to its
+    /// session, when that differs from what the session was last told.
+    /// @param binding The binding whose mirror was just applied.
+    static void tellInterruption(Binding& binding);
+
     /// Reactor-side: builds the client of one connection.
     /// @param loop The reactor's loop.
     /// @param connection The connection it runs over.

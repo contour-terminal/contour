@@ -92,9 +92,11 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().requestHostedOperation(pty, request);
     }
 
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override
     {
-        active().bindTerminal(pty, terminal);
+        active().bindTerminal(pty, terminal, interruptions);
     }
 
   private:

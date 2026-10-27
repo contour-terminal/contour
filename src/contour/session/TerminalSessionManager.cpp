@@ -336,7 +336,12 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                  _sessionsById.size());
     // Close the cycle the constructor could not: the factory handed out a pty, and a
     // daemon-backed one needs the terminal built around it to populate its grid.
-    _sessionFactory.bindTerminal(&session->terminal().device(), session->terminal());
+    _sessionFactory.bindTerminal(
+        &session->terminal().device(),
+        session->terminal(),
+        InterruptionSink { .context = session, .deliver = [session](auto commandLine) {
+                              session->noteInterruption(std::move(commandLine));
+                          } });
 
     _pendingSessionId = sessionId;
     _sessionsById[sessionId.value] = session;
@@ -2119,7 +2124,7 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
 
 std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSession(TerminalSession& ended)
 {
-    if (ended.restartOffer() != FooterRestart::Offered)
+    if (ended.endAction() != FooterAction::Restart)
         return std::unexpected(RestartError::NotOffered);
 
     auto const endedId = ended.modelSessionId();

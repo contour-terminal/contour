@@ -423,7 +423,7 @@ TEST_CASE("TerminalSession::start surfaces a reported start failure", "[contour]
     CHECK(session->terminal().device().isClosed());
 
     // A local session that failed to start may be tried again.
-    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    CHECK(session->endAction() == contour::session::FooterAction::Restart);
 
     // And the second report of the same end (onClosed() after the failure) does not repeat it.
     session->onClosed();
@@ -3787,7 +3787,7 @@ TEST_CASE("TerminalSession: a spontaneous early exit ends the session; typing do
     CHECK(closed == 0);
     CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
     CHECK(session->getEndMessage() == QStringLiteral("Process exited."));
-    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    CHECK(session->endAction() == contour::session::FooterAction::Restart);
     CHECK(countOnScreen(*session, "Shell terminated too quickly.") == 0);
 
     // A typed character is neither an acknowledgement nor input for a shell that is gone.
@@ -3853,7 +3853,7 @@ TEST_CASE("TerminalSession: a lost daemon connection ends as Disconnected, with 
 
     CHECK(closed == 0);
     CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Disconnected));
-    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Unavailable));
+    CHECK(session->endAction() == contour::session::FooterAction::None);
     CHECK(session->getEndMessage().startsWith(QStringLiteral("Disconnected from the Contour daemon.")));
     CHECK(countOnScreen(*session, "Disconnected from the Contour daemon.") == 0);
 
@@ -7643,6 +7643,237 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
         CHECK_FALSE((*session)(RerunCommand {}));
         CHECK(asked == 0);
     }
+}
+
+namespace
+{
+/// The footer an interruption raises: the session has been told a restart stopped @p commandLine.
+/// @param session The session, which stands for a daemon-hosted pane whose mirror reported it.
+/// @param commandLine The stopped command line.
+void interrupt(contour::session::TerminalSession& session, std::string commandLine)
+{
+    session.noteInterruption(vtbackend::CommandLineText { std::move(commandLine) });
+}
+} // namespace
+
+TEST_CASE("TerminalSession: a restored shell's footer names the stopped command and waits for a prompt "
+          "to offer Run Again",
+          "[contour][session][paneend][interrupted]")
+{
+    using contour::session::FooterAction;
+    using contour::window::PaneFooterKind;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto changes = QSignalSpy(&*session, &contour::session::TerminalSession::paneFooterChanged);
+    CHECK(session->getPaneFooter() == static_cast<int>(PaneFooterKind::None));
+    CHECK(session->getFooterMessage().isEmpty());
+
+    interrupt(*session, "make test");
+    CHECK(changes.count() == 1);
+    CHECK(session->getPaneFooter() == static_cast<int>(PaneFooterKind::Interrupted));
+    CHECK(session->getFooterMessage()
+          == QString::fromUtf8("\u201cmake test\u201d was stopped when the session ended."));
+    CHECK(session->getFooterDismissLabel() == "Dismiss");
+    CHECK(session->getFooterTakesReturn() == 0);
+    // The fresh shell has shown no prompt: there is nothing to type the command at, so no Run Again.
+    CHECK(session->footerAction() == FooterAction::None);
+    CHECK(session->getFooterActionLabel().isEmpty());
+
+    // The prompt arrives, and the parser's screen update has the offer re-decided on the GUI thread.
+    session->terminal().writeToScreen(vtbackend::test::PromptStart);
+    session->screenUpdated();
+    QCoreApplication::processEvents();
+    CHECK(changes.count() == 2);
+    CHECK(session->footerAction() == FooterAction::RunAgain);
+    CHECK(session->getFooterActionLabel() == "Run Again");
+
+    SECTION("the same news twice changes nothing")
+    {
+        interrupt(*session, "make test");
+        CHECK(changes.count() == 2);
+    }
+
+    SECTION("an empty line is none")
+    {
+        session->noteInterruption(vtbackend::CommandLineText {});
+        CHECK(session->getPaneFooter() == static_cast<int>(PaneFooterKind::None));
+    }
+}
+
+TEST_CASE("TerminalSession: Return at a restored shell goes to the shell",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(vtbackend::test::PromptStart);
+    interrupt(*session, "make test");
+    session->screenUpdated();
+    QCoreApplication::processEvents();
+    REQUIRE(session->getFooterActionLabel() == "Run Again");
+    auto& written = mockPtyOf(*session).stdinBuffer();
+    written.clear();
+    auto asked = 0;
+    contour::test::countAsks(
+        *session, contour::session::PermissionAsk { contour::session::GuardedRole::RerunCommand }, asked);
+
+    session->sendKeyEvent(vtbackend::Key::Enter,
+                          vtbackend::Modifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+
+    CHECK(written == "\r");
+    CHECK(asked == 0);
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+}
+
+TEST_CASE("TerminalSession: Run Again asks first, and types the command once allowed",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(vtbackend::test::PromptStart);
+    interrupt(*session, "make test");
+    session->screenUpdated();
+    QCoreApplication::processEvents();
+    auto& written = mockPtyOf(*session).stdinBuffer();
+    written.clear();
+    auto asked = 0;
+    contour::test::countAsks(
+        *session, contour::session::PermissionAsk { contour::session::GuardedRole::RerunCommand }, asked);
+
+    session->runFooterAction();
+    CHECK(asked == 1);
+    auto const lines = session->pendingPermission().value(QStringLiteral("lines")).toList();
+    REQUIRE_FALSE(lines.isEmpty());
+    CHECK(lines.front().toMap().value(QStringLiteral("text")).toString() == "make test");
+    CHECK(written.empty());
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+
+    SECTION("allowed: typed and entered, and the footer goes")
+    {
+        session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(written == "make test\r");
+        CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+    }
+
+    SECTION("denied: nothing is typed, and the footer stays for another try")
+    {
+        session->applyPendingRerun(PermissionDecision::Deny, PermissionMemory::Once);
+        CHECK(written.empty());
+        CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+    }
+}
+
+TEST_CASE("TerminalSession: a hostile stopped command is shown sanitized and asked about",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(vtbackend::test::PromptStart);
+    auto& written = mockPtyOf(*session).stdinBuffer();
+    written.clear();
+    auto asked = 0;
+    contour::test::countAsks(
+        *session, contour::session::PermissionAsk { contour::session::GuardedRole::RerunCommand }, asked);
+
+    SECTION("a line with a bidi override is shown sanitized and never typed")
+    {
+        // U+202E, RIGHT-TO-LEFT OVERRIDE, built byte by byte so no source literal holds a misleading
+        // character.
+        auto const bidiOverride = std::string { '\xE2', '\x80', '\xAE' };
+        interrupt(*session, "echo " + bidiOverride + "evil; rm -rf ~");
+        session->screenUpdated();
+        QCoreApplication::processEvents();
+        auto const message = session->getFooterMessage();
+        CHECK_FALSE(message.contains(QChar(0x202e)));
+        CHECK(message.contains(QStringLiteral("rm -rf ~")));
+
+        // Typed through the paste path it would lose the override, and be another command: refused.
+        session->runFooterAction();
+        CHECK(asked == 0);
+        CHECK(written.empty());
+    }
+
+    SECTION("a line that can be typed is shown to the user before it runs, defaulting to Deny")
+    {
+        interrupt(*session, "make; rm -rf ~");
+        session->screenUpdated();
+        QCoreApplication::processEvents();
+        CHECK(session->getFooterMessage().contains(QStringLiteral("rm -rf ~")));
+
+        session->runFooterAction();
+        REQUIRE(asked == 1);
+        CHECK(written.empty());
+        auto const lines = session->pendingPermission().value(QStringLiteral("lines")).toList();
+        REQUIRE_FALSE(lines.isEmpty());
+        CHECK(lines.front().toMap().value(QStringLiteral("text")).toString() == "make; rm -rf ~");
+        CHECK(session->pendingPermission().value(QStringLiteral("defaultDecision")).toInt()
+              == static_cast<int>(PermissionDecision::Deny));
+
+        session->applyPendingRerun(PermissionDecision::Deny, PermissionMemory::Once);
+        CHECK(written.empty());
+    }
+
+    SECTION("a line feed in the line is never typed")
+    {
+        interrupt(*session, "echo a\necho b");
+        session->screenUpdated();
+        QCoreApplication::processEvents();
+        CHECK_FALSE(session->getFooterMessage().contains(QChar('\n')));
+        session->runFooterAction();
+        CHECK(asked == 0);
+        CHECK(written.empty());
+    }
+}
+
+TEST_CASE("TerminalSession: Dismiss takes the restored shell's footer away in this client",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    interrupt(*session, "make test");
+    REQUIRE(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+    auto closed = 0;
+    QObject::connect(&*session,
+                     &contour::session::TerminalSession::sessionClosed,
+                     [&closed](contour::session::TerminalSession&) { ++closed; });
+
+    session->dismissFooter();
+
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+    CHECK(closed == 0); // the pane and its shell stay
+}
+
+TEST_CASE("TerminalSession: the daemon saying the next command started clears the footer",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    interrupt(*session, "make test");
+    session->noteInterruption(std::nullopt);
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+    // And it is not offered again for a line already told: a later identical report is news.
+    interrupt(*session, "make test");
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+}
+
+TEST_CASE("TerminalSession: an ended pane's footer wins over an interruption",
+          "[contour][session][paneend][interrupted]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    interrupt(*session, "make test");
+    REQUIRE(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+
+    mockPtyOf(*session).close();
+    session->onClosed();
+
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Ended));
+    CHECK(session->getFooterMessage() == QStringLiteral("Process exited."));
+    CHECK(session->getFooterActionLabel() == "Restart");
+    CHECK(session->getFooterDismissLabel() == "Close");
+    CHECK(session->getFooterTakesReturn() == 1);
 }
 
 TEST_CASE("TerminalSession: with a status line on top the sticky header is pressed a row lower",

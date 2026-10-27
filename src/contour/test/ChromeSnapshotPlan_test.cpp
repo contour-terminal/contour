@@ -119,6 +119,9 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
               contour::session::PaneFooterRows[static_cast<size_t>(contour::session::EndReason::Exited)]
                   .messageWithDetail,
               1));
+    CHECK(scriptRow(SnapshotScript::PaneInterrupted).name == "pane-interrupted");
+    CHECK(scriptRow(SnapshotScript::PaneInterrupted).panes == PaneShape::SplitThree);
+    CHECK(scriptRow(SnapshotScript::PaneInterrupted).paneEnd == SnapshotPaneEnd::Interrupted);
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).name == "single-tab-minimal");
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).tabCount == 1);
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).panes == PaneShape::SingleLeaf);
@@ -148,8 +151,11 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
         CHECK((row.density == ChromeDensity::Minimal)
               == (row.script == SnapshotScript::SplitMinimal
                   || row.script == SnapshotScript::SingleTabMinimal));
-        // Only pane-exited ends a pane, and an ended pane is one of several.
+        // Only pane-exited ends a pane and only pane-interrupted restores one over a stopped command; either
+        // is one of several.
         CHECK((row.paneEnd == SnapshotPaneEnd::Exited) == (row.script == SnapshotScript::PaneExited));
+        CHECK((row.paneEnd == SnapshotPaneEnd::Interrupted)
+              == (row.script == SnapshotScript::PaneInterrupted));
         if (row.paneEnd != SnapshotPaneEnd::None)
             CHECK(row.panes != PaneShape::SingleLeaf);
     }
@@ -347,6 +353,10 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
           == static_cast<int>(SnapshotScript::ConfigReloadBanner) + 1);
     CHECK(static_cast<int>(SnapshotScript::ScrollbarOverlay)
           == static_cast<int>(SnapshotScript::LinkPillSplit) + 1);
+    // Step 6.3's pane-interrupted follows the keyboard-focus row.
+    CHECK(static_cast<int>(SnapshotScript::PaneInterrupted)
+          == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::PaneInterrupted);
     struct Expected
     {
         SnapshotScript script;
@@ -407,6 +417,8 @@ TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
     // Step 6.6's two rows, after Step 3e's: the lock in a split's header and on two tabs, and in the band.
     CHECK(static_cast<int>(SnapshotScript::SecureInput)
           == static_cast<int>(SnapshotScript::ScrollbarOverlay) + 1);
+    CHECK(static_cast<int>(SnapshotScript::KeyboardFocus) + 1
+          == static_cast<int>(SnapshotScript::PaneInterrupted)); // 6.3's row follows
 
     auto const& split = scriptRow(SnapshotScript::SecureInput);
     CHECK(split.name == "secure-input");
@@ -440,11 +452,9 @@ TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
 TEST_CASE("snapshot.scriptTable.keyboardFocus", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    // The last row: three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still
-    // active.
+    // Three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still active.
     CHECK(static_cast<int>(SnapshotScript::KeyboardFocus)
           == static_cast<int>(SnapshotScript::SecureInputBand) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::KeyboardFocus);
     auto const& row = scriptRow(SnapshotScript::KeyboardFocus);
     CHECK(row.name == "keyboard-focus");
     CHECK(row.tabCount == 3);

@@ -1774,8 +1774,8 @@ QString WindowController::toastHost(QString const& band,
         bandHeight,
         toastHeight,
         session != nullptr ? session->cursorLine() : 0,
-        session != nullptr && session->endReason() != session::EndReason::None ? PaneFooter::Shown
-                                                                               : PaneFooter::Hidden));
+        session != nullptr && session->paneFooter() != PaneFooterKind::None ? PaneFooter::Shown
+                                                                            : PaneFooter::Hidden));
 }
 
 TitleBand WindowController::titleBand() const

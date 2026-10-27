@@ -59,6 +59,7 @@
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshot.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/StdioChild.hpp>
@@ -215,6 +216,8 @@ struct DaemonFixture
     uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
     /// The host's profiles, by name; none resolves every spawn to the host's own settings.
     std::shared_ptr<vthost::ProfileCatalog const> profiles;
+    /// The workspace the host restores at construction; none starts it empty.
+    std::optional<vthost::WorkspaceRestore> restore;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -229,21 +232,25 @@ struct DaemonFixture
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                         .extensions = extensions,
                                         .profiles = profiles,
-                                        .instance = instance });
+                                        .instance = instance,
+                                        .restore = restore });
     }
 
     /// @param extensions The status-line extensions the hosted sessions run; none by default.
     /// @param services What each native connection is served with: what its handshake admits.
     /// @param instance Which run of the daemon the first host is; 0 for one that states none.
     /// @param profiles The host's profiles; none by default.
+    /// @param restore The workspace the host restores; none by default.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
-                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {}):
+                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
+                           std::optional<vthost::WorkspaceRestore> restore = {}):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
-        profiles(std::move(profiles))
+        profiles(std::move(profiles)),
+        restore(std::move(restore))
     {
         host = makeHost();
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
@@ -484,7 +491,10 @@ struct MirrorPane
 
     /// @param factory The ROUTER, not the controller — @see AttachRoute.
     /// @param pty The pty that factory handed out.
-    MirrorPane(contour::session::SessionFactory& factory, std::unique_ptr<vtpty::Pty> pty)
+    /// @param interruptions Where the session is told what a restart stopped; none by default.
+    MirrorPane(contour::session::SessionFactory& factory,
+               std::unique_ptr<vtpty::Pty> pty,
+               contour::session::InterruptionSink const& interruptions = {})
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pty->pageSize();
@@ -497,7 +507,7 @@ struct MirrorPane
                                                          std::nullopt,
                                                          vtbackend::TerminalClocks::system(),
                                                          vtbackend::randomSemanticBlockTokens());
-        factory.bindTerminal(device, *terminal);
+        factory.bindTerminal(device, *terminal, interruptions);
     }
 
     [[nodiscard]] vtpty::Pty& pty() const noexcept { return terminal->device(); }
@@ -610,6 +620,67 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pane.pty().isClosed());
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+TEST_CASE("NativeController.interruption.postedToTheSessionsThread", "[attach][controller][interrupted]")
+{
+    // The daemon restored a pane over the command its restart stopped. The mirror learns it on the reactor
+    // thread; the session it belongs to is told on the GUI thread (this one), by a posted call.
+    auto const snapshot = vthost::WorkspaceSnapshot {
+        .takenAt = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } },
+        .windows = { vthost::WindowSnapshot {
+            .tabs = { vthost::TabSnapshot {
+                .root = vthost::PaneNode { .pane = vthost::PaneSnapshot { .runningCommandLine =
+                                                                              "make test" } } } } } }
+    };
+    auto daemon =
+        DaemonFixture { {}, {}, 1, {}, vthost::WorkspaceRestore { .snapshot = snapshot, .marker = {} } };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(controller.pendingCount() == 1);
+    auto route = AttachRoute { controller };
+    auto pty = route.router.createPty(std::nullopt);
+    REQUIRE(pty != nullptr);
+
+    auto context = QObject {}; // the session's stand-in: it lives on this thread, the GUI's
+    auto told = std::vector<std::optional<vtbackend::CommandLineText>> {};
+    auto threads = std::vector<std::thread::id> {};
+    auto pane = MirrorPane { route.router,
+                             std::move(pty),
+                             contour::session::InterruptionSink {
+                                 .context = &context,
+                                 .deliver = [&](std::optional<vtbackend::CommandLineText> commandLine) {
+                                     told.push_back(std::move(commandLine));
+                                     threads.push_back(std::this_thread::get_id());
+                                 } } };
+
+    REQUIRE(waitUntil([&] { return !told.empty(); }));
+    REQUIRE(told.size() == 1);
+    CHECK(told.front() == vtbackend::CommandLineText { "make test" });
+    // Posted, not called from the reactor.
+    CHECK(threads.front() == std::this_thread::get_id());
+
+    // The shell's next command starts on the daemon: the daemon forgets it, the mirror follows, and the
+    // session is told it is gone -- once.
+    auto const session = vtworkspace::SessionId { 1 };
+    std::ignore = daemon.onDaemon([&] {
+        auto& terminal = *daemon.host->terminal(session);
+        auto& device = dynamic_cast<vthost::TappingPty&>(terminal.device());
+        dynamic_cast<vtpty::MockPty&>(device.inner())
+            .appendStdOutBuffer("\033]133;A\033\\$ \033]133;B\033\\\033]133;C\033\\");
+        std::ignore = terminal.processInputOnce();
+        return 0;
+    });
+    CHECK(waitUntil([&] { return told.size() == 2; }));
+    REQUIRE(told.size() == 2);
+    CHECK_FALSE(told.back().has_value());
+    CHECK_FALSE(waitUntil([&] { return told.size() > 2; }, /*attempts*/ 20));
+
+    controller.stop();
+    pane.terminal.reset();
 }
 
 TEST_CASE("NativeController.extension.permission", "[attach][controller][extensions]")
@@ -2681,7 +2752,9 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
             return true;
         }
         void requestRemoteClose(vtpty::Pty const*) override { ++closes; }
-        void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+        void bindTerminal(vtpty::Pty const* pty,
+                          vtbackend::Terminal& terminal,
+                          contour::session::InterruptionSink const& /*interruptions*/) override
         {
             ++binds;
             boundPty = pty;
@@ -2714,7 +2787,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(router.requestRemoteWindow({}));
     router.requestRemoteClose(device);
     router.reportSplitRatio(device, device, 0.7);
-    router.bindTerminal(device, terminal);
+    router.bindTerminal(device, terminal, {});
 
     CHECK(delegate.ptys == 1);
     CHECK(delegate.tabs == 1);

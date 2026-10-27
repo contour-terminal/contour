@@ -1,13 +1,17 @@
 // vim:syntax=qml
-// The kit's ExitedFooter: what an ended pane says at its bottom edge instead of a notice in the grid -- how
-// the session ended ("Process exited with code 1."), a Restart when the end allows one, and Close.
+// The kit's ExitedFooter: what a pane says at its bottom edge instead of a notice in the grid. Over an ended
+// pane it says how the session ended ("Process exited with code 1."), with a Restart when the end allows one,
+// and Close; over a restored shell it names the command the restart stopped, with Run Again and Dismiss.
+// Everything it shows -- message, button words, which keys answer it -- is the session's (paneFooter,
+// footerMessage, footerActionLabel, footerDismissLabel, footerTakesReturn).
 //
 // PaneCard.qml places it below the cells, never over them: the terminal's bottom meets the footer's top, so
-// the ended program's last output stays readable above it. Return restarts the pane and the ClosePane
-// binding closes it (TerminalSession's ended-pane keys), so the buttons are the pointer's way to the same
-// two answers, and take no Tab focus; assistive technology presses them through their actions, and hears
-// the keys in the footer's description. A click elsewhere on the footer makes the pane the active one, as
-// a click on its cells does, so that Return then reaches it.
+// the ended program's last output stays readable above it. Over an ended pane Return restarts it and the
+// ClosePane binding closes it (TerminalSession's ended-pane keys), so the buttons are the pointer's way to
+// the same two answers, and take no Tab focus; assistive technology presses them through their actions, and
+// hears the keys in the footer's description. A click elsewhere on the footer makes the pane the active
+// one, as a click on its cells does, so that Return then reaches it. Over a live shell every key reaches
+// the shell, Return included: the buttons are clicked.
 //
 // On the native rows it is a bar in the pane's own tone with a hairline above it; on the Terminal row it is
 // one cell row of the bar, its buttons bracketed by the chip glyphs: `[Restart ↩] [Close Ctrl+Shift+X]`.
@@ -27,12 +31,16 @@ Item {
     readonly property color background: session ? session.backgroundColor : "black"
     /// Whether the buttons are runs of bracketed cells (the Terminal row) rather than rounded shapes.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
-    /// Whether the session has ended, so the footer shows.
-    readonly property bool ended: session ? session.paneState === chromeStyle.paneStates.ended : false
-    /// Whether the end offers Restart.
-    readonly property bool restartOffered: session ? session.restartOffer === chromeStyle.paneEnds.restartOffered
-                                                   : false
-    readonly property string message: session ? session.endMessage : ""
+    /// Whether a footer shows: the session ended, or a restart stopped a command in its shell.
+    readonly property bool shown: session ? session.paneFooter !== chromeStyle.paneEnds.footerNone : false
+    /// Whether the session ended: the footer's close button closes the pane, and its chord is named.
+    readonly property bool ended: session ? session.paneFooter === chromeStyle.paneEnds.footerEnded : false
+    /// Whether the footer offers a primary button.
+    readonly property bool actionOffered: session ? session.footerActionLabel !== "" : false
+    /// Whether Return answers the footer (an ended pane), rather than reaching the shell.
+    readonly property bool takesReturn: session ? session.footerTakesReturn !== 0 : false
+    readonly property string message: session ? session.footerMessage : ""
+    readonly property string dismissLabel: session ? session.footerDismissLabel : ""
     // The window's controller (Main.qml's `win`), which spells the configured chords.
     readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
     // ClosePane's chord, asked for only while the footer shows: read when it appears, so a binding
@@ -60,7 +68,7 @@ Item {
         const floorWidth = messageFloor.advanceWidth > 0 ? Math.ceil(messageFloor.advanceWidth) + chromeStyle.space.s4
                                                          : 0
         const closeWidth = chordedClose.advanceWidth + (footer.bracketed ? 0 : 2 * chromeStyle.space.s5)
-        const restartWidth = footer.restartOffered ? restartButton.width + chromeStyle.space.s4 : 0
+        const restartWidth = footer.actionOffered ? restartButton.width + chromeStyle.space.s4 : 0
         return floorWidth + closeWidth + restartWidth
                <= footer.width - chromeStyle.space.footerLeading - chromeStyle.space.s5
     }
@@ -68,7 +76,7 @@ Item {
     /// A click on the footer outside its buttons.
     signal activated()
 
-    visible: footer.ended
+    visible: footer.shown
     height: chromeStyle.size.paneFooter
     // Nothing reaches past the pane's own edge, however narrow the pane: not into the gap, not into the
     // neighbour.
@@ -76,7 +84,7 @@ Item {
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: footer.message
-    Accessible.description: [footer.restartOffered ? qsTr("Return restarts it.") : "",
+    Accessible.description: [footer.actionOffered && footer.takesReturn ? qsTr("Return restarts it.") : "",
                              footer.closeChord !== "" ? qsTr("%1 closes it.").arg(footer.closeChord) : ""]
                             .filter(sentence => sentence !== "").join(" ")
 
@@ -141,26 +149,29 @@ Item {
         FooterButton {
             id: restartButton
             objectName: "exitedFooterRestart"
-            visible: footer.restartOffered
-            label: qsTr("Restart %1").arg(chromeStyle.restartGlyph)
-            accessibleName: qsTr("Restart")
+            visible: footer.actionOffered
+            // The key's glyph only where the key answers the footer.
+            label: footer.takesReturn ? qsTr("%1 %2").arg(footer.session.footerActionLabel).arg(chromeStyle.restartGlyph)
+                                      : (footer.session ? footer.session.footerActionLabel : "")
+            accessibleName: footer.session ? footer.session.footerActionLabel : ""
             fill: chromeStyle.accentColor
             ink: chromeStyle.paletteRevision < 0 ? "transparent"
                  : chromeStyle.onStatusColor(chromeStyle.statusRunning)
-            onClicked: if (footer.session) footer.session.restart()
+            onClicked: if (footer.session) footer.session.runFooterAction()
         }
 
         FooterButton {
             objectName: "exitedFooterClose"
-            label: footer.chordFits ? qsTr("Close %1").arg(footer.closeChord) : qsTr("Close")
-            accessibleName: qsTr("Close")
+            label: footer.chordFits ? qsTr("%1 %2").arg(footer.dismissLabel).arg(footer.closeChord)
+                                    : footer.dismissLabel
+            accessibleName: footer.dismissLabel
             // The footer's own wash once more: a step above the footer, as the kit's fill.3 is.
             fill: footer.washColor
             // Pressed, the kit's strongest fill on the footer in place of the wash.
             pressedFill: chromeStyle.paletteRevision < 0 ? "transparent"
                        : chromeStyle.colorOn(chromeStyle.roles.paneHeaderActionHover, footer.background)
             ink: footer.textColor
-            onClicked: if (footer.session) footer.session.dismiss()
+            onClicked: if (footer.session) footer.session.dismissFooter()
         }
     }
 
@@ -168,8 +179,8 @@ Item {
     TextMetrics {
         id: chordedClose
         font: chromeStyle.type.tab
-        text: footer.bracketed ? chromeStyle.chipOpenGlyph + qsTr("Close %1").arg(footer.closeChord) + chromeStyle.chipCloseGlyph
-                               : qsTr("Close %1").arg(footer.closeChord)
+        text: footer.bracketed ? chromeStyle.chipOpenGlyph + qsTr("%1 %2").arg(footer.dismissLabel).arg(footer.closeChord) + chromeStyle.chipCloseGlyph
+                               : qsTr("%1 %2").arg(footer.dismissLabel).arg(footer.closeChord)
     }
 
     // The message's floor as it reads, measured for chordFits.

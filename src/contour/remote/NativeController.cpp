@@ -383,7 +383,10 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
         // The mirror is absent only in the window between createPty() and the priming bindTerminal()
         // posts; that replay picks the session up from whatever arrived meanwhile.
         if (binding->second.mirror)
+        {
             binding->second.mirror->apply(screen, delta);
+            tellInterruption(binding->second);
+        }
         return;
     }
     if (_closedSessions.contains(screen.session))
@@ -809,9 +812,29 @@ void NativeController::primeBinding(uint64_t session)
     // Discard: this pane's mirror terminal is brand new, so there is no local
     // scrollback of its own to preserve.
     binding->second.mirror->fullReplay(screen->second, vthost::client::LocalHistory::Discard);
+    tellInterruption(binding->second);
 }
 
-void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal)
+void NativeController::tellInterruption(Binding& binding)
+{
+    if (!binding.mirror || binding.interruptions.context == nullptr)
+        return;
+    auto const& commandLine = binding.mirror->interruptedCommand();
+    if (commandLine == binding.interruptionTold)
+        return;
+    binding.interruptionTold = commandLine;
+    auto told = commandLine.empty() ? std::optional<vtbackend::CommandLineText> {}
+                                    : std::optional { vtbackend::CommandLineText { commandLine } };
+    // The reactor thread: the session's state is the GUI thread's, so the news is posted there.
+    platform::postToObject(binding.interruptions.context,
+                           [deliver = binding.interruptions.deliver, told = std::move(told)]() mutable {
+                               deliver(std::move(told));
+                           });
+}
+
+void NativeController::bindTerminal(vtpty::Pty const* pty,
+                                    vtbackend::Terminal& terminal,
+                                    contour::session::InterruptionSink const& interruptions)
 {
     auto const session = sessionForPty(pty);
     if (!session)
@@ -824,6 +847,7 @@ void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& 
         if (binding == _bindings.end())
             return;
         binding->second.terminal = &terminal;
+        binding->second.interruptions = interruptions;
         asked = std::ranges::any_of(_permissionRequests,
                                     [&](auto const& request) { return request.session == *session; });
     }

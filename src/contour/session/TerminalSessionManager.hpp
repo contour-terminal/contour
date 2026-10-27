@@ -511,7 +511,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// launched command and page size, in the ended one's spawn directory, takes the leaf's place (its
     /// PaneId, the active pane and a zoom unchanged), takes the focus if the ended one had it, and the
     /// ended session is retired (freed later, since the call that asked is still running on it).
-    /// @param ended The session whose pane is restarted; its restartOffer() must be Offered.
+    /// @param ended The session whose pane is restarted; its endAction() must be Restart.
     /// @return The new session; or why there is none, in which case nothing changed.
     [[nodiscard]] std::expected<TerminalSession*, RestartError> restartSession(TerminalSession& ended);
     // }}}

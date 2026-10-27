@@ -2498,7 +2498,7 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
 
     endEarly(*ended);
     REQUIRE(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
-    REQUIRE(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    REQUIRE(ended->endAction() == contour::session::FooterAction::Restart);
     auto const ptysBefore = factory->createdPtys.size();
 
     // The view half: the leaf's proxy is what QML's pane reads its `session` from, so it must re-announce.
@@ -2618,7 +2618,7 @@ TEST_CASE("TerminalSessionManager: a modified Return in an ended pane is left to
     REQUIRE(ended != nullptr);
     auto const endedId = ended->modelSessionId();
     endEarly(*ended);
-    REQUIRE(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    REQUIRE(ended->endAction() == contour::session::FooterAction::Restart);
     auto const ptysBefore = factory->createdPtys.size();
 
     // Alt+Enter is the default ToggleFullscreen binding (a no-op here, with no display), and Shift+Enter
@@ -2690,7 +2690,7 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
 
     // The daemon owns the session: only it may start one again.
     CHECK(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
-    CHECK(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Unavailable));
+    CHECK(ended->endAction() == contour::session::FooterAction::None);
 
     auto const ptysBefore = factory->createdPtys.size();
     pressReturn(*ended);

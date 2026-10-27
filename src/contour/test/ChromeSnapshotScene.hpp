@@ -630,7 +630,14 @@ class ChromeSnapshotScene
                     if (leaf == endedLeaf(script.panes))
                         session->setEnd(static_cast<int>(session::EndReason::Exited),
                                         QString::fromUtf8(SnapshotExitMessage),
-                                        static_cast<int>(session::FooterRestart::Offered));
+                                        static_cast<int>(session::FooterAction::Restart));
+                    break;
+                case SnapshotPaneEnd::Interrupted:
+                    if (leaf == endedLeaf(script.panes))
+                        session->setInterrupted(
+                            QString::fromStdString(window::interruptedFooterMessage(
+                                vtbackend::CommandLineText { std::string { SnapshotInterruptedCommand } })),
+                            QString::fromUtf8(session::InterruptedFooterRow.actionLabel));
                     break;
             }
             sessions.push_back(std::move(session));

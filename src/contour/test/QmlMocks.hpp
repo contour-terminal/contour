@@ -82,7 +82,11 @@ class MockSession: public QObject
     // {{{ The ended pane: what its footer reads, mirroring TerminalSession's properties and their signal.
     Q_PROPERTY(int sessionEnd READ sessionEnd NOTIFY sessionEndChanged)
     Q_PROPERTY(QString endMessage READ endMessage NOTIFY sessionEndChanged)
-    Q_PROPERTY(int restartOffer READ restartOffer NOTIFY sessionEndChanged)
+    Q_PROPERTY(int paneFooter READ paneFooter NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerMessage READ footerMessage NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerActionLabel READ footerActionLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerDismissLabel READ footerDismissLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(int footerTakesReturn READ footerTakesReturn NOTIFY paneFooterChanged)
     // Mirrors TerminalSession's find bar surface (SearchBar.qml): the pattern, the summary and its flags,
     // the toggles as maps, and the current match's viewport rows.
     Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
@@ -285,28 +289,61 @@ class MockSession: public QObject
     // {{{ The ended pane
     [[nodiscard]] int sessionEnd() const noexcept { return _sessionEnd; }
     [[nodiscard]] QString const& endMessage() const noexcept { return _endMessage; }
-    [[nodiscard]] int restartOffer() const noexcept { return _restartOffer; }
+    [[nodiscard]] int paneFooter() const noexcept { return _paneFooter; }
+    [[nodiscard]] QString const& footerMessage() const noexcept { return _footerMessage; }
+    [[nodiscard]] QString const& footerActionLabel() const noexcept { return _footerActionLabel; }
+    [[nodiscard]] QString const& footerDismissLabel() const noexcept { return _footerDismissLabel; }
+    [[nodiscard]] int footerTakesReturn() const noexcept { return _footerTakesReturn; }
 
-    /// The session ended and its pane waits, as TerminalSession::recordEndLocked() tells.
-    /// @param end     A session::EndReason's value; 0 for a running session.
+    /// The session ended and its pane waits, as TerminalSession::recordEndLocked() tells: the Ended footer.
+    /// @param end    A session::EndReason's value; 0 for a running session (no footer).
     /// @param message What the footer says.
-    /// @param restart A session::FooterRestart's value.
-    void setEnd(int end, QString message, int restart)
+    /// @param action A session::FooterAction's value: the primary button, None for only the dismissal.
+    void setEnd(int end, QString message, int action)
     {
         _sessionEnd = end;
-        _endMessage = std::move(message);
-        _restartOffer = restart;
+        _endMessage = message;
+        auto const ended = end != static_cast<int>(contour::session::EndReason::None);
+        auto const offered = ended && action != static_cast<int>(contour::session::FooterAction::None);
+        _paneFooter = static_cast<int>(ended ? contour::window::PaneFooterKind::Ended
+                                             : contour::window::PaneFooterKind::None);
+        _footerMessage = ended ? std::move(message) : QString {};
+        _footerActionLabel = offered ? QString::fromUtf8(contour::session::paneFooterRowOf(
+                                                             static_cast<contour::session::EndReason>(end))
+                                                             .actionLabel)
+                                     : QString {};
+        _footerDismissLabel =
+            ended
+                ? QString::fromUtf8(contour::session::dismissLabelOf(contour::session::FooterDismiss::Close))
+                : QString {};
+        _footerTakesReturn = ended ? 1 : 0;
         emit sessionEndChanged();
+        emit paneFooterChanged();
         emit paneStateChanged();
     }
 
-    /// Counts the footer's Restart, as TerminalSession::restart() would start the session again.
-    Q_INVOKABLE void restart() { ++restarts; }
-    /// Counts the footer's Close, as TerminalSession::dismiss() would close the pane.
-    Q_INVOKABLE void dismiss() { ++dismissals; }
+    /// A restart stopped a command in the shell, as TerminalSession::noteInterruption() tells: the
+    /// Interrupted footer.
+    /// @param message     What the footer says.
+    /// @param actionLabel The primary button's word; empty before the shell shows a prompt.
+    void setInterrupted(QString message, QString actionLabel)
+    {
+        _paneFooter = static_cast<int>(contour::window::PaneFooterKind::Interrupted);
+        _footerMessage = std::move(message);
+        _footerActionLabel = std::move(actionLabel);
+        _footerDismissLabel = QString::fromUtf8(
+            contour::session::dismissLabelOf(contour::session::InterruptedFooterRow.dismiss));
+        _footerTakesReturn = 0;
+        emit paneFooterChanged();
+    }
 
-    int restarts = 0;   ///< How often restart() ran.
-    int dismissals = 0; ///< How often dismiss() ran.
+    /// Counts the footer's primary button, as TerminalSession::runFooterAction() would run it.
+    Q_INVOKABLE void runFooterAction() { ++footerActions; }
+    /// Counts the footer's dismissing button, as TerminalSession::dismissFooter() would answer it.
+    Q_INVOKABLE void dismissFooter() { ++footerDismissals; }
+
+    int footerActions = 0;    ///< How often runFooterAction() ran.
+    int footerDismissals = 0; ///< How often dismissFooter() ran.
     // }}}
 
     // {{{ The find bar
@@ -472,6 +509,7 @@ class MockSession: public QObject
     void titleChanged();
     void paneProgramStatusChanged();
     void sessionEndChanged();
+    void paneFooterChanged();
     void searchStateChanged();
     void searchFocusedRowsChanged();
     void searchBarRequested(); //!< SessionChrome opens and focuses the find bar on it.
@@ -515,7 +553,11 @@ class MockSession: public QObject
     QString _programStatusText;
     int _sessionEnd = 0; ///< session::EndReason::None.
     QString _endMessage;
-    int _restartOffer = 0; ///< session::FooterRestart::Unavailable.
+    int _paneFooter = 0; ///< window::PaneFooterKind::None.
+    QString _footerMessage;
+    QString _footerActionLabel;
+    QString _footerDismissLabel;
+    int _footerTakesReturn = 0;
 };
 
 /// A MockSession whose viewport scrolls, as TerminalSession's does: the chrome writes the offset when the bar

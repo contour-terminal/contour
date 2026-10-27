@@ -9,7 +9,8 @@
 // row also lowers an inactive card's content (tui.inactivePaneOpacity; a lone pane is always active, so
 // only a card can be inactive), not its header.
 //
-// An ended pane shows its ExitedFooter below the cells, which end where it starts; a pane whose host
+// An ended pane, or a restored shell over the command a restart stopped, shows its ExitedFooter below the
+// cells, which end where it starts; a pane whose host
 // connection is being sought again dims below its header and shows a pill naming the host.
 //
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
@@ -186,7 +187,8 @@ Item {
         onFocusReleased: terminal.forceActiveFocus()
     }
 
-    // An ended pane's footer: how it ended, Restart where it may, and Close.
+    // The pane's footer: how it ended with Restart where it may and Close, or the command a restart stopped
+    // with Run Again and Dismiss.
     ExitedFooter {
         id: footer
         x: 0

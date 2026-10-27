@@ -140,6 +140,13 @@ enum class PressOwner : uint8_t
     FoldLabel,    ///< A collapsed fold's `⋯ N lines` label took the press, and expanded its fold.
 };
 
+/// Whether a request to run a command line again put its question to the user.
+enum class RerunAsk : uint8_t
+{
+    Refused = 0, ///< Nothing was asked: the shell is not at a prompt, or the line cannot be typed as it is.
+    Asked,       ///< The dialog is up.
+};
+
 /// What a session's program is to the user. Fixed at construction: it decides how the session's end is
 /// reported and whether a saved layout keeps the session's command.
 enum class SessionRole : uint8_t
@@ -267,12 +274,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // Whether the pane shows the lock (a window::SecureIndicator's value): the program in it hides what is
     // typed. An int, not the enum, for the QML-facing exception paneState takes.
     Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
-    // How the session ended while its pane waits (an EndReason's value; 0 while it runs), what the pane's
-    // footer says about it, and whether the footer offers Restart (a FooterRestart's value). Ints, not
-    // the enums, until they are registered with the meta-object system (AGENT.md, QML-facing exception).
+    // How the session ended while its pane waits (an EndReason's value; 0 while it runs) and what the pane's
+    // footer says about it. Ints, not the enums, until they are registered with the meta-object system
+    // (AGENT.md, QML-facing exception).
     Q_PROPERTY(int sessionEnd READ getSessionEnd NOTIFY sessionEndChanged)
     Q_PROPERTY(QString endMessage READ getEndMessage NOTIFY sessionEndChanged)
-    Q_PROPERTY(int restartOffer READ getRestartOffer NOTIFY sessionEndChanged)
+    // The footer the pane shows (a window::PaneFooterKind's value, chromeStyle.paneEnds.footer* name them)
+    // and what it says and offers: window::paneFooterOf over the session's end and the interruption a restart
+    // left. The action label is empty while the footer offers no primary button; the dismiss label is the
+    // dismissing button's word ("Close" or "Dismiss"), without its chord; footerTakesReturn is 1 where Return
+    // answers the footer (an ended pane) and 0 where it belongs to the shell.
+    Q_PROPERTY(int paneFooter READ getPaneFooter NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerMessage READ getFooterMessage NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerActionLabel READ getFooterActionLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerDismissLabel READ getFooterDismissLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(int footerTakesReturn READ getFooterTakesReturn NOTIFY paneFooterChanged)
     // {{{ Panes
     // What the pane header shows: the directory the shell reported (OSC 7 / OSC 3008), home-abbreviated and
     // made safe to show, and this pane's own program status (a window::TabBadgeKind's value, as the tab
@@ -925,24 +941,69 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The ended pane's footer text; empty while the session runs.
     [[nodiscard]] QString getEndMessage() const;
 
-    /// Whether the ended pane offers Restart: its end allows one and this session is hosted locally.
-    [[nodiscard]] FooterRestart restartOffer() const noexcept;
+    /// The primary button an ended pane offers: its end allows one and this session's hosting can do it.
+    /// @return The row's action; None while the session runs.
+    [[nodiscard]] FooterAction endAction() const noexcept;
 
     /// The page size a restart starts its session at: the pane's size once the ended pane's footer hides,
     /// which is the page now with the rows the footer took given back. GUI thread.
     /// @return The current page size, its lines grown by the footer's rows.
     [[nodiscard]] vtbackend::PageSize restartPageSize() const;
 
-    /// @return restartOffer() as its enumerator value, for QML.
-    [[nodiscard]] int getRestartOffer() const noexcept { return static_cast<int>(restartOffer()); }
-
     /// Starts this ended session again in the same pane (the footer's Restart, or Return), through the
-    /// manager. A no-op unless restartOffer() is Offered and a manager hosts the session.
+    /// manager. A no-op unless endAction() is Restart and a manager hosts the session.
     Q_INVOKABLE void restart();
 
     /// Closes this ended pane (the footer's Close): prunes it from the model, then lets the display go. A
     /// no-op while the session runs; idempotent once it has ended.
     Q_INVOKABLE void dismiss();
+
+    /// Which footer the pane shows. GUI thread only (see _end).
+    /// @return window::paneFooterOf over the end and the interruption.
+    [[nodiscard]] window::PaneFooterKind paneFooter() const noexcept;
+
+    /// @return paneFooter() as its enumerator value, for QML.
+    [[nodiscard]] int getPaneFooter() const noexcept { return static_cast<int>(paneFooter()); }
+
+    /// @return What the footer says: the end's message while ended, the interruption's while it stands;
+    ///         empty with no footer. The command line is shown through its display form.
+    [[nodiscard]] QString getFooterMessage() const;
+
+    /// The primary button the footer offers now.
+    /// @return None while no footer shows, and for an interruption until the shell has shown a prompt.
+    [[nodiscard]] FooterAction footerAction() const noexcept;
+
+    /// @return The primary button's word, glyph-free; empty while footerAction() is None.
+    [[nodiscard]] QString getFooterActionLabel() const;
+
+    /// @return The dismissing button's word, without its chord: "Close" for an ended pane, "Dismiss" over a
+    ///         live shell.
+    [[nodiscard]] QString getFooterDismissLabel() const;
+
+    /// @return 1 where Return answers the footer (an ended pane), 0 where it reaches the shell.
+    [[nodiscard]] int getFooterTakesReturn() const noexcept;
+
+    /// Runs the footer's primary button: Restart restarts the pane, Run Again asks whether to type the
+    /// command a restart stopped. Nothing while footerAction() is None.
+    Q_INVOKABLE void runFooterAction();
+
+    /// The footer's dismissing button: Close closes the ended pane, Dismiss takes the interruption's footer
+    /// away in this client alone.
+    Q_INVOKABLE void dismissFooter();
+
+    /// Tells the session what a restart stopped in its shell, or that it stands no more: the command line a
+    /// daemon's snapshot recorded, empty or nullopt for none. Posted to the GUI thread by whoever mirrors
+    /// the daemon's session (NativeController, from the reactor); this is the thread's seam, so the
+    /// interruption stays GUI-only state like _end.
+    /// @param commandLine The stopped command line, untrusted; nullopt or empty for none.
+    void noteInterruption(std::optional<vtbackend::CommandLineText> commandLine);
+
+    /// Asks whether to type @p commandLine at the shell's prompt and run it, through the same dialog as
+    /// RerunCommand: it shows the line, defaults to Deny, and types nothing before the answer. Not asked
+    /// when the line cannot be typed as it is or the shell is not at a prompt.
+    /// @param commandLine What to run; untrusted, as the shell or a snapshot reported it.
+    /// @return Whether the question was asked.
+    [[nodiscard]] RerunAsk requestRerun(vtbackend::CommandLineText commandLine);
 
     /// Whether this pane's connection to its host is being sought, folded as the window's host chip folds
     /// it (window::hostChipStateOf), so the pane's pill and the chip never disagree.
@@ -1715,11 +1776,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void reconnectingChanged();
     /// paneState() changed: the host connection was lost or regained, or the session ended.
     void paneStateChanged();
-    /// The session ended and its pane now waits (sessionEnd, endMessage and restartOffer changed). Raised
-    /// once per end, on the GUI thread, after _onClosedMutex is released.
+    /// The session ended and its pane now waits (sessionEnd and endMessage changed). Raised once per end, on
+    /// the GUI thread, after _onClosedMutex is released.
     void sessionEndChanged();
     /// secureIndicator() may have changed: the echo, or the configured `secure_input`. GUI thread.
     void secureIndicatorChanged();
+    /// What paneFooter() and the footer's message and buttons say changed: the session ended, a restart's
+    /// stopped command was noted or went, or its Run Again became possible. GUI thread.
+    void paneFooterChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -1843,6 +1907,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param reason How it ended (not None).
     /// @param detail What the footer names: an exit code, a signal, a failure; empty for none.
     void recordEndLocked(EndReason reason, std::string detail);
+
+    /// Re-decides whether the Interrupted footer can offer Run Again -- the shell has shown a prompt since
+    /// it was last decided -- and notifies paneFooterChanged() when that changed. GUI thread.
+    void refreshInterruptionOffer();
+
+    /// Has refreshInterruptionOffer() run on the GUI thread, once however many updates arrive first, while an
+    /// interruption stands. Called from screenUpdated() and screenReplayed(): the parser thread, maybe under
+    /// the state lock, so it reads and takes nothing.
+    void askAboutInterruptionOffer();
+
+    /// @return Whether the shell has shown a prompt. Takes the terminal lock.
+    [[nodiscard]] window::ShellPromptPresence shellPromptPresence() const;
 
     /// Announces the end recorded (sessionEndChanged()), and has the pane's header stop following the
     /// program in front, which has gone. GUI thread, outside _onClosedMutex.
@@ -2566,6 +2642,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The command line RerunCommand asked to run, while its dialog is up. Kept, not read again when the
     /// answer comes: the block's record may have gone by then, and what runs is what was shown.
     std::optional<vtbackend::CommandLineText> _pendingRerun;
+    /// The command a restart stopped in this shell, while its footer stands (noteInterruption()). GUI
+    /// thread only.
+    std::optional<vtbackend::CommandLineText> _interruption;
+    /// Whether the shell had shown a prompt when the footer's buttons were last decided. GUI thread.
+    window::ShellPromptPresence _interruptionPrompt = window::ShellPromptPresence::Absent;
+    /// Whether an interruption stands, readable from the parser thread, which re-asks about the prompt on
+    /// each screen update until it has appeared.
+    std::atomic<bool> _isInterruptionStanding = false;
+    /// Set while a re-ask is queued on the GUI thread, so one update's worth is one call, not one per read.
+    std::atomic_flag _interruptionRefreshPosted;
     PermissionCache _rememberedPermissions;
     /// The questions asked, one shown at a time. GUI thread.
     PermissionQueue _permissionQueue;

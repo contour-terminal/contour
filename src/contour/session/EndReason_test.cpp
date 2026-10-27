@@ -33,11 +33,32 @@ TEST_CASE("paneFooter.messageNamesTheDetailWhenThereIsOne", "[panestate]")
 
 TEST_CASE("paneFooter.restartIsOfferedOnlyWhereTheRowAndTheHostingAllowIt", "[panestate]")
 {
-    CHECK(restartOf(EndReason::Exited, RestartSupport::Supported) == FooterRestart::Offered);
-    CHECK(restartOf(EndReason::Signalled, RestartSupport::Supported) == FooterRestart::Offered);
-    CHECK(restartOf(EndReason::StartFailed, RestartSupport::Supported) == FooterRestart::Offered);
-    CHECK(restartOf(EndReason::Exited, RestartSupport::Unsupported) == FooterRestart::Unavailable);
+    CHECK(offeredAction(EndReason::Exited, RestartSupport::Supported) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::Signalled, RestartSupport::Supported) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::StartFailed, RestartSupport::Supported) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::Exited, RestartSupport::Unsupported) == FooterAction::None);
     // Disconnected offers Close only: no reconnect exists to put behind the button.
-    CHECK(restartOf(EndReason::Disconnected, RestartSupport::Supported) == FooterRestart::Unavailable);
-    CHECK(restartOf(EndReason::None, RestartSupport::Supported) == FooterRestart::Unavailable);
+    CHECK(offeredAction(EndReason::Disconnected, RestartSupport::Supported) == FooterAction::None);
+    CHECK(offeredAction(EndReason::None, RestartSupport::Supported) == FooterAction::None);
+}
+
+TEST_CASE("paneFooter.everyRowNamesAnActionLabelExactlyWhenItHasAnAction", "[panestate]")
+{
+    for (auto const& row: PaneFooterRows)
+    {
+        INFO("end " << static_cast<int>(row.end));
+        CHECK(row.actionLabel.empty() == (row.action == FooterAction::None));
+        // Only the interruption's footer runs a command again, and only an ended pane restarts.
+        CHECK(row.action != FooterAction::RunAgain);
+        CHECK(row.dismiss == FooterDismiss::Close);
+    }
+    CHECK(InterruptedFooterRow.action == FooterAction::RunAgain);
+    CHECK_FALSE(InterruptedFooterRow.actionLabel.empty());
+    CHECK(InterruptedFooterRow.dismiss == FooterDismiss::Dismiss);
+}
+
+TEST_CASE("paneFooter.dismissLabelsAreWordsWithoutTheirChord", "[panestate]")
+{
+    CHECK(dismissLabelOf(FooterDismiss::Close) == "Close");
+    CHECK(dismissLabelOf(FooterDismiss::Dismiss) == "Dismiss");
 }

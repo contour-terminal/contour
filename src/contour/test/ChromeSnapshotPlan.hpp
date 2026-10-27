@@ -82,7 +82,8 @@ enum class SnapshotScript : uint8_t
                         //!< and on both tabs (the active one's pane, and the second tab's).
     SecureInputBand,    //!< One tab, one pane, at a password prompt: the lock as a band chip where the tab
                         //!< well is hidden, on the tab where it shows.
-    KeyboardFocus, //!< Three tabs with keyboard focus on the second: its focus ring, or its selected cells.
+    KeyboardFocus,   //!< Three tabs with keyboard focus on the second: its focus ring, or its selected cells.
+    PaneInterrupted, //!< split-three with a restored shell over the command a restart stopped: its footer.
 };
 
 /// How a script's active tab is divided into panes.
@@ -215,13 +216,17 @@ inline constexpr std::string_view SnapshotConfigReloadError =
 /// Whether one of a script's panes has ended.
 enum class SnapshotPaneEnd : uint8_t
 {
-    None = 0, //!< Every pane runs.
-    Exited,   //!< The last pane's program exited: its footer offers Restart and Close.
+    None = 0,    //!< Every pane runs.
+    Exited,      //!< The last pane's program exited: its footer offers Restart and Close.
+    Interrupted, //!< The last pane's shell runs over the command a restart stopped: Run Again and Dismiss.
 };
 
 /// What the footer of a script's ended pane says (SnapshotPaneEnd::Exited): session::PaneFooterRows' Exited
 /// row with exit code 1, which ChromeSnapshotPlan_test checks it against.
 inline constexpr std::string_view SnapshotExitMessage = "Process exited with code 1.";
+
+/// The command line the footer of a script's restored pane (SnapshotPaneEnd::Interrupted) names.
+inline constexpr std::string_view SnapshotInterruptedCommand = "make test";
 
 /// What one pane of a script's tab runs, as its header names it.
 struct SnapshotPaneLabel
@@ -1244,6 +1249,28 @@ inline constexpr auto SnapshotScripts = std::array {
                         .host = SnapshotHost::RowDefault,
                         .density = config::ChromeDensity::Comfortable,
                         .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None,
+                        .secure = SecureDecor::None },
+    SnapshotScriptRow { .script = SnapshotScript::PaneInterrupted,
+                        .name = "pane-interrupted",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::Interrupted,
                         .find = SnapshotFind::None,
                         .permission = SnapshotPermission::None,
                         .layoutName = SnapshotLayoutName::None,

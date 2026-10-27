@@ -5025,7 +5025,7 @@ TEST_CASE("pane card: a translucent profile's card is composited once (offscreen
     {
         panes.leftSession.setEnd(static_cast<int>(contour::session::EndReason::Exited),
                                  QStringLiteral("Process exited with code 1."),
-                                 static_cast<int>(contour::session::FooterRestart::Offered));
+                                 static_cast<int>(contour::session::FooterAction::Restart));
         host.settle();
         auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
         REQUIRE(footer.isVisible());
@@ -9951,7 +9951,7 @@ void endWithExitCode(contour::test::MockSession& session)
 {
     session.setEnd(static_cast<int>(contour::session::EndReason::Exited),
                    QStringLiteral("Process exited with code 1."),
-                   static_cast<int>(contour::session::FooterRestart::Offered));
+                   static_cast<int>(contour::session::FooterAction::Restart));
 }
 
 /// Clicks the middle of @p item in @p host's window.
@@ -9989,13 +9989,13 @@ TEST_CASE("pane end: an ended pane shows the footer below its cells (offscreen)"
     auto const& restart = PaneTreeHost::partOf(card, "exitedFooterRestart");
     CHECK(restart.isVisible());
     clickOn(host, restart);
-    CHECK(panes.leftSession.restarts == 1);
+    CHECK(panes.leftSession.footerActions == 1);
 
     auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
     CHECK(close.property("text").toString() == QStringLiteral("Close Ctrl+Shift+X"));
     clickOn(host, close);
-    CHECK(panes.leftSession.dismissals == 1);
-    CHECK(panes.leftSession.restarts == 1);
+    CHECK(panes.leftSession.footerDismissals == 1);
+    CHECK(panes.leftSession.footerActions == 1);
 
     // The other pane runs on, footless.
     CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "exitedFooter").isVisible());
@@ -10012,12 +10012,78 @@ TEST_CASE("pane end: a Disconnected pane offers no Restart (offscreen)", "[conto
 
     session.setEnd(static_cast<int>(contour::session::EndReason::Disconnected),
                    QStringLiteral("Disconnected from the Contour daemon."),
-                   static_cast<int>(contour::session::FooterRestart::Unavailable));
+                   static_cast<int>(contour::session::FooterAction::None));
     host.settle();
     auto const& card = host.cardOf(leaf);
     CHECK(PaneTreeHost::partOf(card, "exitedFooter").isVisible());
     CHECK_FALSE(PaneTreeHost::partOf(card, "exitedFooterRestart").isVisible());
     CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").isVisible());
+}
+
+TEST_CASE(
+    "pane end: a restored shell's footer names the stopped command with Run Again and Dismiss (offscreen)",
+    "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    auto const& card = host.cardOf(panes.left());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    CHECK_FALSE(footer.isVisible());
+
+    auto const message = QStringLiteral("\u201cmake test\u201d was stopped when the session ended.");
+    panes.leftSession.setInterrupted(message, QStringLiteral("Run Again"));
+    host.settle();
+    REQUIRE(footer.isVisible());
+    // Below the cells, as an ended pane's is.
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    CHECK(terminal.mapToItem(&card, QPointF { 0, terminal.height() }).y() == footer.y());
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterMessage").property("text").toString() == message);
+
+    // Return belongs to the shell: no key is promised, so the button shows no glyph.
+    auto const& primary = PaneTreeHost::partOf(card, "exitedFooterRestart");
+    REQUIRE(primary.isVisible());
+    CHECK(primary.property("text").toString() == QStringLiteral("Run Again"));
+    clickOn(host, primary);
+    CHECK(panes.leftSession.footerActions == 1);
+
+    auto const& dismiss = PaneTreeHost::partOf(card, "exitedFooterClose");
+    CHECK(dismiss.property("text").toString() == QStringLiteral("Dismiss"));
+    clickOn(host, dismiss);
+    CHECK(panes.leftSession.footerDismissals == 1);
+
+    // Return is not mentioned to assistive technology either, nor a chord Dismiss does not have.
+    auto const description = footer.property("description").toString();
+    CHECK_FALSE(description.contains(QStringLiteral("Return")));
+    CHECK_FALSE(description.contains(QStringLiteral("Ctrl+Shift+X")));
+
+    // Before the shell shows a prompt there is nothing to run: Dismiss alone, no dead button.
+    panes.leftSession.setInterrupted(message, QString {});
+    host.settle();
+    CHECK_FALSE(primary.isVisible());
+    CHECK(dismiss.isVisible());
+}
+
+TEST_CASE("pane end: the Terminal row's restored-shell footer brackets its buttons (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    panes.leftSession.setInterrupted(QStringLiteral("\u201cmake test\u201d was stopped."),
+                                     QStringLiteral("Run Again"));
+    host.settle();
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    REQUIRE(footer.isVisible());
+    CHECK(footer.height() == host.style().cellHeight());
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterRestart").property("text").toString()
+          == QStringLiteral("[Run Again]"));
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").property("text").toString()
+          == QStringLiteral("[Dismiss]"));
 }
 
 TEST_CASE("pane end: the footer reads at 4.5:1 (offscreen)", "[contour][gui][qml][paneend]")
@@ -10371,7 +10437,7 @@ TEST_CASE("pane end: the footer tells assistive technology its keys, and a click
     auto const before = panes.right().activateCalls;
     clickOn(host, PaneTreeHost::partOf(card, "exitedFooterMessage"));
     CHECK(panes.right().activateCalls == before + 1);
-    CHECK(panes.rightSession.restarts == 0);
+    CHECK(panes.rightSession.footerActions == 0);
 }
 
 TEST_CASE("pane end: the pill's mark reads on its own fill (offscreen)", "[contour][gui][qml][paneend]")

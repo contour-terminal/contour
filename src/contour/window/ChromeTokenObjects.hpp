@@ -1109,8 +1109,8 @@ class ChromeBadgeKindNames: public QObject
     [[nodiscard]] static constexpr int of(TabBadgeKind kind) noexcept { return static_cast<int>(kind); }
 };
 
-/// The QML names of an ended pane's ends and restart offers, `chromeStyle.paneEnds`, for what a
-/// TerminalSession's `sessionEnd` and `restartOffer` answer.
+/// The QML names of an ended pane's ends and of the footers a pane shows, `chromeStyle.paneEnds`, for what
+/// a TerminalSession's `sessionEnd` and `paneFooter` answer.
 class ChromePaneEndNames: public QObject
 {
     Q_OBJECT
@@ -1119,8 +1119,9 @@ class ChromePaneEndNames: public QObject
     Q_PROPERTY(int signalled READ signalled CONSTANT)
     Q_PROPERTY(int startFailed READ startFailed CONSTANT)
     Q_PROPERTY(int disconnected READ disconnected CONSTANT)
-    Q_PROPERTY(int restartUnavailable READ restartUnavailable CONSTANT)
-    Q_PROPERTY(int restartOffered READ restartOffered CONSTANT)
+    Q_PROPERTY(int footerNone READ footerNone CONSTANT)
+    Q_PROPERTY(int footerEnded READ footerEnded CONSTANT)
+    Q_PROPERTY(int footerInterrupted READ footerInterrupted CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -1136,18 +1137,17 @@ class ChromePaneEndNames: public QObject
         return of(session::EndReason::Disconnected);
     }
 
-    /// @return Each session::FooterRestart as its underlying value.
-    [[nodiscard]] static constexpr int restartUnavailable() noexcept
+    /// @return Each window::PaneFooterKind as its underlying value.
+    [[nodiscard]] static constexpr int footerNone() noexcept { return of(PaneFooterKind::None); }
+    [[nodiscard]] static constexpr int footerEnded() noexcept { return of(PaneFooterKind::Ended); }
+    [[nodiscard]] static constexpr int footerInterrupted() noexcept
     {
-        return static_cast<int>(session::FooterRestart::Unavailable);
-    }
-    [[nodiscard]] static constexpr int restartOffered() noexcept
-    {
-        return static_cast<int>(session::FooterRestart::Offered);
+        return of(PaneFooterKind::Interrupted);
     }
 
   private:
     [[nodiscard]] static constexpr int of(session::EndReason end) noexcept { return static_cast<int>(end); }
+    [[nodiscard]] static constexpr int of(PaneFooterKind footer) noexcept { return static_cast<int>(footer); }
 };
 
 /// The QML names of a pane's states, `chromeStyle.paneStates`, for what a TerminalSession's `paneState`

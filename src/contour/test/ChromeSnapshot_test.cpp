@@ -468,6 +468,22 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                       == 1);
                 break;
             }
+            case SnapshotScript::PaneInterrupted: {
+                // The last pane's shell was restored over a stopped command: its footer names it, with Run
+                // Again and Dismiss; no other pane has one.
+                CHECK(visibleItemsNamed(content, QStringLiteral("exitedFooter")) == 1);
+                auto const messages =
+                    contour::test::itemsNamed(content, QStringLiteral("exitedFooterMessage"));
+                auto const expected = QString::fromStdString(contour::window::interruptedFooterMessage(
+                    vtbackend::CommandLineText { std::string { SnapshotInterruptedCommand } }));
+                CHECK(std::ranges::count_if(messages,
+                                            [&](QQuickItem const* message) {
+                                                return message->isVisible()
+                                                       && message->property("text").toString() == expected;
+                                            })
+                      == 1);
+                break;
+            }
             case SnapshotScript::SingleTabMinimal:
                 // One tab under Minimal: macOS keeps a bare band over the bare 32-pt title bar, in the
                 // terminal's background, wherever the strip is not asked for. Under Classic's

@@ -254,9 +254,11 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->requestHostedOperation(pty, request);
     }
 
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override
     {
-        _factory->bindTerminal(pty, terminal);
+        _factory->bindTerminal(pty, terminal, interruptions);
     }
 
   private:

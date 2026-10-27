@@ -911,6 +911,7 @@ void TerminalSession::screenUpdated()
     noteOutputForTab(_terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay
                          ? window::OutputOrigin::Resync
                          : window::OutputOrigin::Live);
+    askAboutInterruptionOffer();
     repaintChangedScreen();
 }
 
@@ -920,7 +921,39 @@ void TerminalSession::screenReplayed()
     // A daemon mirror's full replay -- the attach, a resync, a resize -- repaints what the host showed
     // already.
     noteOutputForTab(window::OutputOrigin::Resync);
+    askAboutInterruptionOffer();
     repaintChangedScreen();
+}
+
+void TerminalSession::askAboutInterruptionOffer()
+{
+    if (!_isInterruptionStanding.load(std::memory_order_relaxed)
+        || _interruptionRefreshPosted.test_and_set(std::memory_order_acq_rel))
+        return;
+    platform::postToObject(this, [this]() {
+        // Cleared first: an update arriving while this runs queues the next look rather than losing it.
+        _interruptionRefreshPosted.clear(std::memory_order_release);
+        refreshInterruptionOffer();
+    });
+}
+
+window::ShellPromptPresence TerminalSession::shellPromptPresence() const
+{
+    return core::locked(_terminal, [this] {
+        return _terminal.shellIsPrompting() ? window::ShellPromptPresence::Present
+                                            : window::ShellPromptPresence::Absent;
+    });
+}
+
+void TerminalSession::refreshInterruptionOffer()
+{
+    if (!_interruption)
+        return;
+    auto const prompt = shellPromptPresence();
+    if (prompt == _interruptionPrompt)
+        return;
+    _interruptionPrompt = prompt;
+    emit paneFooterChanged();
 }
 
 void TerminalSession::repaintChangedScreen()
@@ -2188,6 +2221,7 @@ void TerminalSession::announceSessionEnd()
     // The program is gone: its pane is locked no longer, and secure input follows.
     refreshInputEcho();
     emit sessionEndChanged();
+    emit paneFooterChanged();
     emit paneStateChanged();
 }
 
@@ -2203,10 +2237,103 @@ QString TerminalSession::getEndMessage() const
     return QString::fromStdString(paneFooterMessage(_end, _endDetail));
 }
 
-FooterRestart TerminalSession::restartOffer() const noexcept
+FooterAction TerminalSession::endAction() const noexcept
 {
-    return restartOf(
+    return offeredAction(
         _end, _hosting == SessionHosting::Local ? RestartSupport::Supported : RestartSupport::Unsupported);
+}
+
+window::PaneFooterKind TerminalSession::paneFooter() const noexcept
+{
+    return window::paneFooterOf(
+        _end, _interruption ? window::InterruptionPresence::Present : window::InterruptionPresence::Absent);
+}
+
+QString TerminalSession::getFooterMessage() const
+{
+    switch (paneFooter())
+    {
+        case window::PaneFooterKind::None: return {};
+        case window::PaneFooterKind::Ended: return getEndMessage();
+        case window::PaneFooterKind::Interrupted:
+            return QString::fromStdString(window::interruptedFooterMessage(*_interruption));
+    }
+    return {};
+}
+
+FooterAction TerminalSession::footerAction() const noexcept
+{
+    switch (paneFooter())
+    {
+        case window::PaneFooterKind::None: return FooterAction::None;
+        case window::PaneFooterKind::Ended: return endAction();
+        case window::PaneFooterKind::Interrupted: return window::interruptionActionOf(_interruptionPrompt);
+    }
+    return FooterAction::None;
+}
+
+QString TerminalSession::getFooterActionLabel() const
+{
+    switch (footerAction())
+    {
+        case FooterAction::None: return {};
+        case FooterAction::Restart: return QString::fromUtf8(paneFooterRowOf(_end).actionLabel);
+        case FooterAction::RunAgain: return QString::fromUtf8(InterruptedFooterRow.actionLabel);
+    }
+    return {};
+}
+
+QString TerminalSession::getFooterDismissLabel() const
+{
+    switch (paneFooter())
+    {
+        case window::PaneFooterKind::None: return {};
+        case window::PaneFooterKind::Ended:
+            return QString::fromUtf8(dismissLabelOf(paneFooterRowOf(_end).dismiss));
+        case window::PaneFooterKind::Interrupted:
+            return QString::fromUtf8(dismissLabelOf(InterruptedFooterRow.dismiss));
+    }
+    return {};
+}
+
+int TerminalSession::getFooterTakesReturn() const noexcept
+{
+    return paneFooter() == window::PaneFooterKind::Ended ? 1 : 0;
+}
+
+void TerminalSession::runFooterAction()
+{
+    switch (footerAction())
+    {
+        case FooterAction::None: return;
+        case FooterAction::Restart: restart(); return;
+        case FooterAction::RunAgain:
+            if (_interruption)
+                std::ignore = requestRerun(*_interruption);
+            return;
+    }
+}
+
+void TerminalSession::dismissFooter()
+{
+    switch (paneFooter())
+    {
+        case window::PaneFooterKind::None: return;
+        case window::PaneFooterKind::Ended: dismiss(); return;
+        case window::PaneFooterKind::Interrupted: noteInterruption(std::nullopt); return;
+    }
+}
+
+void TerminalSession::noteInterruption(std::optional<vtbackend::CommandLineText> commandLine)
+{
+    if (commandLine && commandLine->empty())
+        commandLine.reset();
+    if (_interruption == commandLine)
+        return;
+    _interruption = std::move(commandLine);
+    _isInterruptionStanding.store(_interruption.has_value(), std::memory_order_relaxed);
+    _interruptionPrompt = _interruption ? shellPromptPresence() : window::ShellPromptPresence::Absent;
+    emit paneFooterChanged();
 }
 
 vtbackend::PageSize TerminalSession::restartPageSize() const
@@ -2218,7 +2345,7 @@ vtbackend::PageSize TerminalSession::restartPageSize() const
 
 void TerminalSession::restart()
 {
-    if (restartOffer() != FooterRestart::Offered || _manager == nullptr)
+    if (endAction() != FooterAction::Restart || _manager == nullptr)
         return;
     // The manager puts a new session into this pane and lets this one go, freed later (deleteLater): the
     // key press or click that asked for it is still running on it.
@@ -2502,17 +2629,23 @@ void TerminalSession::applyPendingRerun(PermissionDecision decision, PermissionM
     if (decision != PermissionDecision::Allow)
         return;
 
-    // Locked: the prompt is asked about again -- it may have gone while the dialog was up -- and
-    // sendPaste() appends to the input generator the parser thread appends to as well. Flushed once the
-    // lock is released. See ViNormalMode.
-    auto const _ = std::scoped_lock { _terminal };
-    if (auto const checked = checkRerun(terminal(), commandLine.raw()); !checked)
     {
-        sessionLog()("Not running the command again: {}.", rerunRefusalText(checked.error()));
-        return;
+        // Locked: the prompt is asked about again -- it may have gone while the dialog was up -- and
+        // sendPaste() appends to the input generator the parser thread appends to as well. Flushed once the
+        // lock is released. See ViNormalMode.
+        auto const _ = std::scoped_lock { _terminal };
+        if (auto const checked = checkRerun(terminal(), commandLine.raw()); !checked)
+        {
+            sessionLog()("Not running the command again: {}.", rerunRefusalText(checked.error()));
+            return;
+        }
+        terminal().sendPaste(commandLine.raw());
+        terminal().sendRawInput("\r");
     }
-    terminal().sendPaste(commandLine.raw());
-    terminal().sendRawInput("\r");
+    // The footer's Run Again has been answered: what ran is the command it named. Outside the lock, as the
+    // footer's notification is.
+    if (_interruption == commandLine)
+        noteInterruption(std::nullopt);
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -5183,21 +5316,30 @@ bool TerminalSession::operator()(actions::RerunCommand const& action)
             auto const* const record = terminal().targetedCommandBlock(action.target, action.block);
             if (record == nullptr || record->commandLine.empty())
                 return std::unexpected(RerunRefusal::NoCommandLine);
-            return checkRerun(terminal(), record->commandLine.raw()).transform([&] {
-                return record->commandLine;
-            });
+            return record->commandLine;
         });
     if (!commandLine)
     {
         sessionLog()("Not running the command again: {}.", rerunRefusalText(commandLine.error()));
         return false;
     }
+    return requestRerun(*commandLine) == RerunAsk::Asked;
+}
 
-    // Shown before it runs: the line is what the shell reported, or what the screen showed, and either can
-    // be written by any program that writes to the terminal.
-    _pendingRerun = *commandLine;
+RerunAsk TerminalSession::requestRerun(vtbackend::CommandLineText commandLine)
+{
+    auto const checked = core::locked(_terminal, [&] { return checkRerun(terminal(), commandLine.raw()); });
+    if (!checked)
+    {
+        sessionLog()("Not running the command again: {}.", rerunRefusalText(checked.error()));
+        return RerunAsk::Refused;
+    }
+
+    // Shown before it runs: the line is what the shell reported, what the screen showed or what a snapshot
+    // recorded, and any of them can be written by any program that writes to the terminal.
+    _pendingRerun = std::move(commandLine);
     requestPermission(configuredPermissionFor(GuardedRole::RerunCommand), GuardedRole::RerunCommand);
-    return true;
+    return RerunAsk::Asked;
 }
 
 namespace

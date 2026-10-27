@@ -380,7 +380,7 @@ TEST_CASE("accessibility: an ended pane's footer is an alert named by its messag
     contour::test::MockSession session;
     session.setEnd(static_cast<int>(contour::session::EndReason::Exited),
                    QStringLiteral("Process exited with code 1."),
-                   static_cast<int>(contour::session::FooterRestart::Offered));
+                   static_cast<int>(contour::session::FooterAction::Restart));
     auto footer =
         loadComponent(engine,
                       QStringLiteral("qrc:/qt/qml/Contour/Ui/ExitedFooter.qml"),
@@ -392,6 +392,41 @@ TEST_CASE("accessibility: an ended pane's footer is an alert named by its messag
 
     for (auto const& [part, name]: std::array { std::pair { "exitedFooterRestart", "Restart" },
                                                 std::pair { "exitedFooterClose", "Close" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*footer, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE(
+    "accessibility: a restored shell's footer is an alert named by the stopped command, with two buttons",
+    "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    auto const message = QStringLiteral("\u201cmake test\u201d was stopped when the session ended.");
+    session.setInterrupted(message, QStringLiteral("Run Again"));
+    auto footer =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ExitedFooter.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(footer.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == message);
+
+    for (auto const& [part, name]: std::array { std::pair { "exitedFooterRestart", "Run Again" },
+                                                std::pair { "exitedFooterClose", "Dismiss" } })
     {
         INFO("button " << part);
         auto const buttons = partsNamed(*footer, QString::fromLatin1(part));

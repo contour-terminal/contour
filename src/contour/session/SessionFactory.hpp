@@ -6,6 +6,7 @@
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandLineText.hpp>
 
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
@@ -14,11 +15,14 @@
 #endif
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include <vthost/client/TabPresentation.hpp>
+
+class QObject;
 
 namespace contour
 {
@@ -88,6 +92,17 @@ struct LocalTabPresentation
     /// the effective colour: a profile's or an application's is this client's own, not the user's choice.
     std::optional<uint32_t> color {};
     vthost::client::TabActivity activity = vthost::client::TabActivity::Inactive;
+};
+
+/// Where a factory that mirrors a daemon's sessions tells one what a restart stopped in its shell: the
+/// command line, or nullopt once it stands no more.
+///
+/// The factory learns it on its own reactor thread; @ref deliver runs on @ref context's thread (the GUI
+/// thread, the session's), posted there, and is dropped if @ref context is gone first.
+struct InterruptionSink
+{
+    QObject* context = nullptr; ///< The object whose thread @ref deliver runs on; null drops everything.
+    std::function<void(std::optional<vtbackend::CommandLineText>)> deliver {}; ///< What to run there.
 };
 
 class SessionFactory
@@ -240,7 +255,12 @@ class SessionFactory
     /// parser puts it on the screen, so nothing outside needs a handle on the grid.
     /// @param pty The pty this factory produced.
     /// @param terminal The terminal now driving it.
-    virtual void bindTerminal(vtpty::Pty const* /*pty*/, vtbackend::Terminal& /*terminal*/) {}
+    /// @param interruptions Where the session is told what a restart stopped in its shell.
+    virtual void bindTerminal(vtpty::Pty const* /*pty*/,
+                              vtbackend::Terminal& /*terminal*/,
+                              InterruptionSink const& /*interruptions*/)
+    {
+    }
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

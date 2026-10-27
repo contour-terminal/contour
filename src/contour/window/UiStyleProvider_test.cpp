@@ -1279,10 +1279,10 @@ TEST_CASE("UiStyleProvider: statusMarkOn inks a mark for the ground it sits on",
     CHECK(style.statusMarkOn(-1, black) == QColor(Qt::transparent));
 }
 
-TEST_CASE("chromeStyle names an ended pane's ends and restart offers in QML", "[contour][uistyle][qml]")
+TEST_CASE("chromeStyle names an ended pane's ends and the footers in QML", "[contour][uistyle][qml]")
 {
     using contour::session::EndReason;
-    using contour::session::FooterRestart;
+    using contour::window::PaneFooterKind;
     auto engine = QQmlEngine();
     contour::test::installChromeStyle(engine);
     auto const evaluate = [&engine](char const* expression) {
@@ -1297,15 +1297,15 @@ TEST_CASE("chromeStyle names an ended pane's ends and restart offers in QML", "[
     CHECK(evaluate("chromeStyle.paneEnds.signalled").toInt() == static_cast<int>(EndReason::Signalled));
     CHECK(evaluate("chromeStyle.paneEnds.startFailed").toInt() == static_cast<int>(EndReason::StartFailed));
     CHECK(evaluate("chromeStyle.paneEnds.disconnected").toInt() == static_cast<int>(EndReason::Disconnected));
-    CHECK(evaluate("chromeStyle.paneEnds.restartUnavailable").toInt()
-          == static_cast<int>(FooterRestart::Unavailable));
-    CHECK(evaluate("chromeStyle.paneEnds.restartOffered").toInt()
-          == static_cast<int>(FooterRestart::Offered));
+    CHECK(evaluate("chromeStyle.paneEnds.footerNone").toInt() == static_cast<int>(PaneFooterKind::None));
+    CHECK(evaluate("chromeStyle.paneEnds.footerEnded").toInt() == static_cast<int>(PaneFooterKind::Ended));
+    CHECK(evaluate("chromeStyle.paneEnds.footerInterrupted").toInt()
+          == static_cast<int>(PaneFooterKind::Interrupted));
 
-    // One name per end and per offer, so a new enumerator needs a QML name too.
+    // One name per end and per footer, so a new enumerator needs a QML name too.
     auto const& meta = contour::window::ChromePaneEndNames::staticMetaObject;
     CHECK(static_cast<size_t>(meta.propertyCount() - meta.propertyOffset())
-          == contour::session::PaneFooterRows.size() + contour::session::FooterRestartCount);
+          == contour::session::PaneFooterRows.size() + contour::window::PaneFooterKindCount);
 }
 
 TEST_CASE("UiStyleProvider: paneStates names every window::PaneState for QML", "[contour][uistyle]")
