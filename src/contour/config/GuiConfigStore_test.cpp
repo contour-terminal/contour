@@ -187,17 +187,56 @@ TEST_CASE("FileGuiConfigStore: a name that would leave its directory is refused"
 {
     auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
     auto store = FileGuiConfigStore { fileSystem, configDir() };
-    for (auto const* name: { "../x", "a/b", "a\\b", ".hidden", "..", "" })
+    using namespace std::string_view_literals;
+    // A drive or an NTFS stream (':'), a control character, NUL, a Windows device name, and a trailing dot
+    // or space that Windows strips, as well as what climbs out of the directory.
+    for (auto const name: { "../x"sv,
+                            "a/b"sv,
+                            "a\\b"sv,
+                            ".hidden"sv,
+                            ".."sv,
+                            ""sv,
+                            "D:x"sv,
+                            "C:x"sv,
+                            "ab:c"sv,
+                            "a\0b"sv,
+                            "tab\there"sv,
+                            "bell\x7f"sv,
+                            "CON"sv,
+                            "con"sv,
+                            "Nul.backup"sv,
+                            "COM1"sv,
+                            "lpt9"sv,
+                            "x."sv,
+                            "x "sv })
     {
-        INFO(name);
+        INFO(std::string { name });
         CHECK_FALSE(contour::config::checkSideFileName(name).has_value());
-        CHECK_FALSE(store.write(profileFile(name), "x").has_value());
-        CHECK_FALSE(store.write(colorSchemeFile(name), "x").has_value());
-        CHECK_FALSE(store.remove(profileFile(name)).has_value());
-        CHECK_FALSE(store.read(profileFile(name)).has_value());
+        CHECK_FALSE(store.write(profileFile(std::string { name }), "x").has_value());
+        CHECK_FALSE(store.write(colorSchemeFile(std::string { name }), "x").has_value());
+        CHECK_FALSE(store.remove(profileFile(std::string { name })).has_value());
+        CHECK_FALSE(store.read(profileFile(std::string { name })).has_value());
     }
     CHECK_FALSE(fileSystem.exists(configDir() / "x.yml"));
     CHECK_FALSE(fileSystem.exists(std::filesystem::path { "/x.yml" }));
     CHECK(contour::config::checkSideFileName("Contour Dark").has_value());
     CHECK(contour::config::checkSideFileName("main copy 2").has_value());
+    CHECK(contour::config::checkSideFileName("console").has_value());
+    CHECK(contour::config::checkSideFileName("COM10").has_value());
+    CHECK(contour::config::checkSideFileName("Dark é").has_value());
+}
+
+TEST_CASE("GuiConfigStore: a side file's path stays in its directory", "[guiconfigstore]")
+{
+    using contour::config::sideFilePathStaysIn;
+    auto const profiles = std::filesystem::path { "profiles" };
+    CHECK(sideFilePathStaysIn(profiles / "main.yml", profiles));
+    CHECK_FALSE(sideFilePathStaysIn(std::filesystem::path { "/main.yml" }, profiles));
+    CHECK_FALSE(sideFilePathStaysIn(profiles / "sub" / "main.yml", profiles));
+    CHECK_FALSE(sideFilePathStaysIn(std::filesystem::path { "colorschemes" } / "main.yml", profiles));
+    CHECK_FALSE(sideFilePathStaysIn(std::filesystem::path { "main.yml" }, profiles));
+#ifdef _WIN32
+    // What `profiles / "D:x.yml"` gives on Windows: a path on another drive's working directory.
+    CHECK_FALSE(sideFilePathStaysIn(profiles / "D:x.yml", profiles));
+#endif
 }

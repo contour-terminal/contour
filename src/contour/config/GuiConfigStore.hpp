@@ -51,10 +51,22 @@ struct SideFile
 
 /// Whether @p name may name a profile's or a colour scheme's side file: a file name inside `profiles/` or
 /// `colorschemes/`, never a path. Refused: an empty name, a `/` or `\\`, a `..`, a leading `.` (a hidden
-/// file, and the durable write's temporaries), and a NUL.
+/// file, and the durable write's temporaries), a `:` (a drive on Windows, or an NTFS stream), a control
+/// character or NUL, and what Windows will not keep as a file name -- a device name (`CON`, `NUL`, `COM1`, …,
+/// also before a dot) or a trailing dot or space. The last are refused everywhere: a configuration
+/// directory travels between machines.
 /// @param name The name, as the user typed it.
 /// @return Nothing, or the reason a page shows.
 [[nodiscard]] std::expected<void, std::string> checkSideFileName(std::string_view name);
+
+/// Whether @p relative, a side file's path relative to the configuration directory, is a file directly
+/// inside @p directory: no root name or root directory, and @p directory as its parent. The store's own
+/// guard, beside checkSideFileName(), against a name the platform's path rules read otherwise.
+/// @param relative The side file's relative path.
+/// @param directory The directory its kind is kept in.
+/// @return Whether it stays there.
+[[nodiscard]] bool sideFilePathStaysIn(std::filesystem::path const& relative,
+                                       std::filesystem::path const& directory);
 
 /// @p file's relative path as a message spells it, in UTF-8 with forward slashes on every platform:
 /// `profiles/main.yml`.

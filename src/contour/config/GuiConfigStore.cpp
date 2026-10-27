@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <ranges>
 #include <utility>
 
@@ -68,17 +69,74 @@ std::filesystem::path relativePathOf(SideFile const& file)
     return std::filesystem::path { location.directory } / sideFileName(file.name);
 }
 
+namespace
+{
+    /// The names Windows keeps for devices; a file of that name, with any extension, opens the device.
+    constexpr auto WindowsDeviceNames = std::array<std::string_view, 22> {
+        "CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
+    /// Whether @p ch is a control character: below a space, or DEL.
+    [[nodiscard]] constexpr bool isControl(char ch) noexcept
+    {
+        constexpr auto Delete = 0x7F;
+        auto const code = static_cast<unsigned char>(ch);
+        return code < static_cast<unsigned char>(' ') || code == Delete;
+    }
+
+    /// Whether @p name, up to its first dot, is a Windows device name, in any case.
+    [[nodiscard]] bool namesWindowsDevice(std::string_view name)
+    {
+        auto const stem = name.substr(0, name.find('.'));
+        return std::ranges::any_of(WindowsDeviceNames, [stem](std::string_view device) {
+            return std::ranges::equal(stem, device, [](char a, char b) {
+                return std::toupper(static_cast<unsigned char>(a))
+                       == std::toupper(static_cast<unsigned char>(b));
+            });
+        });
+    }
+
+    /// One reason a name is refused, and the test that finds it.
+    struct NameRule
+    {
+        bool (*refuses)(std::string_view name); ///< Whether the name breaks the rule.
+        std::string_view reason;                ///< What the page says.
+    };
+
+    /// The rules checkSideFileName() applies, in order.
+    constexpr auto NameRules = std::array {
+        NameRule { .refuses = [](std::string_view name) { return name.empty(); }, .reason = "Enter a name." },
+        NameRule { .refuses =
+                       [](std::string_view name) {
+                           return name.find_first_of(std::string_view { "/\\:" }) != std::string_view::npos;
+                       },
+                   .reason = "A name cannot contain /, \\ or :." },
+        NameRule { .refuses = [](std::string_view name) { return std::ranges::any_of(name, isControl); },
+                   .reason = "A name cannot contain a control character." },
+        NameRule { .refuses = [](std::string_view name) { return name.contains(".."); },
+                   .reason = "A name cannot contain \"..\"." },
+        NameRule { .refuses = [](std::string_view name) { return name.starts_with('.'); },
+                   .reason = "A name cannot start with a dot." },
+        NameRule {
+            .refuses = [](std::string_view name) { return name.ends_with('.') || name.ends_with(' '); },
+            .reason = "A name cannot end with a dot or a space." },
+        NameRule { .refuses = namesWindowsDevice,
+                   .reason = "A name cannot be one Windows keeps for a device, such as CON or NUL." },
+    };
+} // namespace
+
 std::expected<void, std::string> checkSideFileName(std::string_view name)
 {
-    if (name.empty())
-        return std::unexpected(std::string { "Enter a name." });
-    if (name.find_first_of(std::string_view { "/\\\0", 3 }) != std::string_view::npos)
-        return std::unexpected(std::string { "A name cannot contain / or \\." });
-    if (name.contains(".."))
-        return std::unexpected(std::string { "A name cannot contain \"..\"." });
-    if (name.starts_with('.'))
-        return std::unexpected(std::string { "A name cannot start with a dot." });
+    for (auto const& rule: NameRules)
+        if (rule.refuses(name))
+            return std::unexpected(std::string { rule.reason });
     return {};
+}
+
+bool sideFilePathStaysIn(std::filesystem::path const& relative, std::filesystem::path const& directory)
+{
+    return !relative.has_root_name() && !relative.has_root_directory() && relative.parent_path() == directory;
 }
 
 namespace
@@ -89,7 +147,12 @@ namespace
     {
         if (file.kind == SideFileKind::GuiSettings)
             return {};
-        return checkSideFileName(file.name);
+        if (auto const valid = checkSideFileName(file.name); !valid)
+            return valid;
+        if (!sideFilePathStaysIn(relativePathOf(file),
+                                 std::filesystem::path { locationOf(file.kind).directory }))
+            return std::unexpected(std::string { "A name cannot leave its directory." });
+        return {};
     }
 } // namespace
 

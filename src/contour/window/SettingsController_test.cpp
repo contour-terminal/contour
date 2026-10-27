@@ -545,7 +545,8 @@ TEST_CASE("SettingsController: a name that would leave its directory is refused"
                || std::filesystem::exists(fx.configDir() / "colorschemes" / ".hidden.yml");
     };
 
-    for (auto const* name: { "../../x", "a/b", "a\\b", ".hidden", "a..b" })
+    for (auto const* name:
+         { "../../x", "a/b", "a\\b", ".hidden", "a..b", "D:x", "C:x", "ab:c", "CON", "x.", "a\tb" })
     {
         INFO(name);
         auto const profile = fx.controller->renameProfile("work", QString::fromUtf8(name));
