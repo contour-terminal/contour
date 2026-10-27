@@ -1506,10 +1506,15 @@ TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
             auto const& hint = row.colors[static_cast<size_t>(ToastTextSecondary)];
             if (style == ChromeStyle::Terminal)
             {
-                // Inverse video: the hint is an ink that reads on the toast's fill, the scheme's foreground.
+                // The toast's text and the hint after it are both inks that read on the toast's fill (Step
+                // 3c's Toast/ToastInk pair): inverse video where it reads, a bar strip where not.
+                auto const& text = row.colors[static_cast<size_t>(ToastText)];
                 REQUIRE(fill.kind == ColorSourceKind::Scheme);
+                REQUIRE(text.kind == ColorSourceKind::Scheme);
                 REQUIRE(hint.kind == ColorSourceKind::Scheme);
                 auto const colors = chromeSchemeColorsOf(palette);
+                CHECK(contrastRatio(slotIn(colors, text.slot), slotIn(colors, fill.slot))
+                      >= MinimumTextContrast);
                 CHECK(contrastRatio(slotIn(colors, hint.slot), slotIn(colors, fill.slot))
                       >= MinimumTextContrast);
                 continue;

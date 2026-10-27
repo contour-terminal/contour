@@ -237,8 +237,7 @@ enum class SchemeSlot : uint8_t
     /// The thumb while hovered or dragged: the first of @c ScrollbarThumbActiveFallbacks that stands off
     /// @c Background at 3:1.
     ScrollbarThumbActive,
-    /// The link pill's hint on the toast (which is @c Foreground on this row): vtbackend::legibleInkOn() on
-    /// @c Foreground, at least 4.5:1.
+    /// The link pill's hint on the toast: vtbackend::legibleInkOn() on @c Toast, at least 4.5:1.
     ToastHint,
 };
 
@@ -1478,7 +1477,7 @@ namespace detail
                     // The scheme's red where it reads on the bar at 4.5:1, else the bar's ink: the status
                     // hues follow the OS palette's tone, not the bar's.
                     schemeOnBar(SchemeSlot::Danger), // FindErrorText
-                    // Inverse video, as the toast: the hint is an ink that reads on the scheme's foreground.
+                    // On the toast's fill, as its text: the hint is an ink that reads on it (Toast).
                     schemeColor(SchemeSlot::ToastHint), // ToastTextSecondary
                     // The bar's thumb is a column of "┃" (UiStyleTokens::scrollThumbGlyph): ANSI 8 at rest,
                     // the accent while engaged, each falling back to a colour that marks against the pane; no
@@ -1752,8 +1751,7 @@ namespace detail
     for (auto const& chain: SchemeMarkChains)
         colors.bySlot[static_cast<size_t>(chain.slot)] =
             detail::firstMarkOn(colors, chain.candidates, background);
-    colors.bySlot[static_cast<size_t>(SchemeSlot::ToastHint)] =
-        vtbackend::legibleInkOn(palette, palette.defaultForeground);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::ToastHint)] = vtbackend::legibleInkOn(palette, toast.fill);
     return colors;
 }
 
