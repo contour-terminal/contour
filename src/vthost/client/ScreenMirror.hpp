@@ -44,6 +44,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -162,6 +163,11 @@ class ScreenMirror
     ///        this machine's identity as the daemon names machines (vthost::appSpecificIdentity).
     ///        Fixed for the mirror's life, as for the connection's: every attach builds a new mirror.
     ScreenMirror(vtbackend::Terminal& terminal, DaemonMachine daemon);
+
+    /// @return The command line a restart stopped in this session, as of the last apply() or replay();
+    ///         empty for none, or once the session started a command of its own. Untrusted text, bounded
+    ///         to vtbackend::MaxRecordedCommandLineBytes. Read on the reactor thread, like the mirror.
+    [[nodiscard]] std::string const& interruptedCommand() const noexcept { return _interruptedCommand; }
 
     /// Brings the mirror terminal up to date with @p screen after @p delta was applied to it.
     /// Falls back to a full replay on the first call, on snapshot deltas, and on generation,
@@ -431,6 +437,8 @@ class ScreenMirror
     uint64_t _syncedCommandBlocks = 0;
     /// The epoch the block ids on this mirror's rows count in (proto::SessionState::commandBlockIdEpoch).
     uint64_t _commandBlockIdEpoch = 0;
+    /// @see interruptedCommand
+    std::string _interruptedCommand;
 
     /// Where the primary page stood, in this mirror's own row ids, when an update last wrote it: its first
     /// line held the host row at `_viewportBase`. Kept in ids rather than offsets because this terminal's

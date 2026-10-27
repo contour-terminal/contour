@@ -564,6 +564,10 @@ struct SessionState
     /// NativeSession::SnapshotChunkBytes). Any older remainder the receiver lacks follows as
     /// increments. Replaces what the receiver holds from `commandBlocksFloor` on.
     std::vector<WireCommandBlock> commandBlocks = {};
+    /// The command line a restart stopped in this session, for the footer a client shows over its fresh
+    /// shell (the host keeps it until the session's next command starts); empty means none. Untrusted text:
+    /// it came from a snapshot's OSC 133 command line, and a receiver bounds it before use.
+    std::string interruptedCommand = {};
     bool operator==(SessionState const&) const = default;
 };
 

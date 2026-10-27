@@ -1253,6 +1253,11 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
     follow.lastCursorLine = delta.cursorLine;
     follow.lastCursorColumn = delta.cursorColumn;
     follow.lastStableFloor = delta.stableFloor;
+    // Stated outright, empty included, like the rest of a snapshot: the host forgot it when the session's
+    // next command started, and a client that attaches or resyncs after that is told none. Loop thread, as
+    // the host's table is.
+    if (state)
+        state->interruptedCommand = _host.interruptedCommandOf(session);
     return BuiltPush { .delta = std::move(delta), .state = std::move(state) };
 }
 

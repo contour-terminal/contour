@@ -631,6 +631,11 @@ struct SessionSpawnRequest
     /// pane's re-run program (@see rerunInputFor). Empty for nothing.
     std::string initialInput {};
 
+    /// The command line the restart stopped in this session, when no re-run program retyped it: kept until
+    /// the session's next command starts, and stated in every snapshot of it meanwhile
+    /// (@see SessionHost::interruptedCommandOf). Empty for none.
+    std::string interruptedCommand {};
+
     /// The UUIDs and labels the objects this spawn creates come back with, instead of fresh ones: a restored
     /// workspace keeps its ids. Nullopt mints them all.
     std::optional<PresetObjectIds> presetIds {};
@@ -926,6 +931,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param bytes The input, as the client encoded it.
     void writeInput(vtworkspace::SessionId session, std::string_view bytes);
 
+    /// @param session The session asked about.
+    /// @return The command line a restart stopped in @p session, held until its next command starts; empty
+    ///         for none, or for an unknown session. Untrusted text (it came from a snapshot).
+    [[nodiscard]] std::string interruptedCommandOf(vtworkspace::SessionId session) const;
+
     /// When a client last handed @p session input, on the host loop's clock. Loop thread only.
     ///
     /// The time doubles as the input's identity (FlushInputs::answeredInput compares stamps), which holds
@@ -1170,6 +1180,17 @@ class SessionHost final: public vtworkspace::ModelEvents
         std::optional<core::net::DeadlineTimer> fallback {}; ///< Types it anyway after InitialInputFallback.
     };
 
+    /// A restored session's interrupted command, with the newest command-block id it was restored behind.
+    struct Interruption
+    {
+        std::string commandLine;         ///< What the restart stopped.
+        vtbackend::CommandBlockId after; ///< A block newer than this that left its prompt ends it.
+    };
+
+    /// Forgets @p session's interruption once its terminal holds a command of its own: a record newer than
+    /// the restored ones that is no longer at its prompt. Loop thread, after a screen update.
+    void clearInterruptionOnNextCommand(vtworkspace::SessionId session);
+
     /// Holds @p input for @p session until its first prompt, arming the fallback. Loop thread.
     void holdInitialInput(vtworkspace::SessionId session, std::string input);
 
@@ -1378,6 +1399,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;
+    /// The restored sessions whose command the restart stopped and that have run nothing since. Loop thread.
+    std::unordered_map<uint64_t, Interruption> _interruptions;
     RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome
 
     /// The UUIDs and labels of windows, tabs and panes. Declared before the model, whose events bind into it.

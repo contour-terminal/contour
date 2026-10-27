@@ -414,6 +414,7 @@ void ScreenMirror::scrollInRow(vtbackend::Screen& page, RemoteScreen const& scre
 
 void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
 {
+    _interruptedCommand = screen.interruptedCommand; // reactor thread, like every call here
     // Nothing recorded is comparable yet.
     if (!_primed)
     {
@@ -585,6 +586,7 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
 
 void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, ReplayCause cause)
 {
+    _interruptedCommand = screen.interruptedCommand;
     // Decided before `_primed` flips: the first replay is the attach, and nothing it shows is news.
     auto const blockSync = _primed ? CommandBlockSync::Follow : CommandBlockSync::Prime;
     _primed = true;

@@ -4036,6 +4036,64 @@ TEST_CASE("the attach snapshot's command blocks are adopted without finish event
     CHECK(m.events.finishedBlocks.empty()); // it finished before this client looked: history, not news
 }
 
+TEST_CASE("the command a restart stopped is reported until the session runs one of its own",
+          "[vthost][mirror][interrupted]")
+{
+    auto m = BlockMirror {};
+    auto state = stateWith({ finishedWire(1, 0), promptingWire(2) });
+    state.interruptedCommand = "make test";
+    m.snapshot(state);
+    CHECK(m.mirror->interruptedCommand() == "make test");
+
+    SECTION("an increment that says nothing about blocks leaves it")
+    {
+        m.increment({});
+        CHECK(m.mirror->interruptedCommand() == "make test");
+    }
+
+    SECTION("the shell's own prompt record changing, still at its prompt, leaves it")
+    {
+        m.increment({ promptingWire(2) });
+        CHECK(m.mirror->interruptedCommand() == "make test");
+    }
+
+    SECTION("a live Running block clears it")
+    {
+        m.increment({ runningWire(2) });
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a command quicker than one delta clears it too")
+    {
+        m.increment({ finishedWire(2, 0), promptingWire(3) });
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a resync that states none clears it")
+    {
+        m.snapshot(stateWith({ finishedWire(1, 0), promptingWire(2) }));
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a resync after it cleared does not bring it back")
+    {
+        m.increment({ runningWire(2) });
+        REQUIRE(m.mirror->interruptedCommand().empty());
+        m.increment({}); // a later delta must not resurrect the stale value
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+}
+
+TEST_CASE("an over-long interrupted command is cut to what a record keeps", "[vthost][mirror][interrupted]")
+{
+    auto m = BlockMirror {};
+    auto state = stateWith({ promptingWire(1) });
+    state.interruptedCommand = std::string(vtbackend::MaxRecordedCommandLineBytes + 100, 'x');
+    m.snapshot(state);
+    CHECK(m.mirror->interruptedCommand().size() <= vtbackend::MaxRecordedCommandLineBytes);
+    CHECK_FALSE(m.mirror->interruptedCommand().empty());
+}
+
 TEST_CASE("a finish the mirror watched start raises exactly one finish event", "[vthost][mirror][blocks]")
 {
     auto m = BlockMirror {};

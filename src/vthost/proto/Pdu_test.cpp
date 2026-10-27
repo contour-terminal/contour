@@ -338,7 +338,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .hostTime = 1'700'000'040'000'000'000,
                            .commandBlockIdEpoch = 3,
                            .commandBlocksFloor = 0xFFFFFFFF,
-                           .commandBlocks = { sampleBlock() } },
+                           .commandBlocks = { sampleBlock() },
+                           .interruptedCommand = "make test" },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
@@ -1293,6 +1294,17 @@ TEST_CASE("an announced grid beyond MaxGridExtent is malformed", "[vthost][proto
         auto const* const state = std::get_if<SessionState>(&decoded->pdu);
         REQUIRE(state != nullptr);
         CHECK(state->columns == MaxGridExtent);
+    }
+
+    SECTION("a body that ends before the interrupted command decodes with it empty")
+    {
+        // sessionStateWith() stops after commandBlocks, as an older sender's body does.
+        auto const stream = sessionStateWith(80, 24);
+        auto const decoded = decodePdu(stream.view());
+        REQUIRE(decoded.has_value());
+        auto const* const state = std::get_if<SessionState>(&decoded->pdu);
+        REQUIRE(state != nullptr);
+        CHECK(state->interruptedCommand.empty());
     }
 
     SECTION("one column past it is refused")

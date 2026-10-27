@@ -538,6 +538,20 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     _pendingSessionId = id;
     if (!request.initialInput.empty())
         holdInitialInput(id, request.initialInput);
+    if (!request.interruptedCommand.empty())
+    {
+        // The newest record is the seeded history's, every one of them finished: what the shell mints
+        // next has a higher id.
+        auto const after = [&] {
+            auto& backing = _sessions.at(id.value)->terminal();
+            auto const guard = std::lock_guard { backing };
+            return backing.commandBlocks().currentId();
+        }();
+        _interruptions.insert_or_assign(
+            id.value,
+            Interruption { .commandLine = vtbackend::truncatedCommandLine(request.interruptedCommand),
+                           .after = after });
+    }
     sessionLog()("session {} spawned at {}x{} ({} live)",
                  id.value,
                  unbox(_pageSize.columns),
@@ -749,7 +763,12 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
                 request.restoredHistory = std::make_shared<proto::Delta const>(*pane.history);
                 request.restoredMarker = restore.marker;
             }
-            request.initialInput = rerunInputFor(pane, restore.rerunPrograms).value_or(std::string {});
+            // What the restart stopped, unless the daemon types it again itself: then there is nothing to
+            // tell.
+            if (auto rerun = rerunInputFor(pane, restore.rerunPrograms))
+                request.initialInput = std::move(*rerun);
+            else if (pane.runningCommandLine)
+                request.interruptedCommand = *pane.runningCommandLine;
             auto const paneUuid = restoredUuid(ObjectKind::Pane, pane.identity);
             request.presetIds = PresetObjectIds { .pane = paneUuid, .paneLabel = labelOf(pane.identity) };
             if (!tabUuid)
@@ -800,6 +819,7 @@ void SessionHost::onSessionScreenUpdated(SessionId session)
     if (hosted->second->hasExtensions() && hasScreenMirrors())
         hosted->second->requestStatusLineRepaint();
     typeInitialInputAtPrompt(session);
+    clearInterruptionOnNextCommand(session);
     for (auto* observer: _streamSubscribers)
         observer->sessionScreenUpdated(session);
 }
@@ -818,6 +838,30 @@ void SessionHost::typeInitialInputAtPrompt(SessionId session)
     }();
     if (prompting)
         typeInitialInput(session);
+}
+
+std::string SessionHost::interruptedCommandOf(SessionId session) const
+{
+    auto const it = _interruptions.find(session.value);
+    return it != _interruptions.end() ? it->second.commandLine : std::string {};
+}
+
+void SessionHost::clearInterruptionOnNextCommand(SessionId session)
+{
+    auto const held = _interruptions.find(session.value);
+    if (held == _interruptions.end())
+        return;
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return;
+    auto const started = [&] {
+        auto const guard = std::lock_guard { *backing };
+        return std::ranges::any_of(backing->commandBlocks().records(), [&](auto const& record) {
+            return record.id > held->second.after && record.state != vtbackend::CommandBlockState::Prompting;
+        });
+    }();
+    if (started)
+        _interruptions.erase(held);
 }
 
 void SessionHost::typeInitialInput(SessionId session)
@@ -1127,6 +1171,7 @@ std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionI
 void SessionHost::eraseSession(uint64_t session)
 {
     _initialInputs.erase(session);
+    _interruptions.erase(session);
     _lastInput.erase(session);
     _sessions.erase(session);
 }

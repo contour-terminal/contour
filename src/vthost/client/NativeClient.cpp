@@ -178,6 +178,18 @@ void RemoteScreen::apply(proto::SessionState const& state)
         dropped += dropCommandBlock(*this, id);
     if (dropped != 0)
         commandBlocksRetiredAt = ++commandBlocksRevision;
+
+    // After the table: the baseline is read off it. A newest record still at its prompt is the shell's own
+    // and belongs to what comes next, so the line stays standing until it, or one after it, has run.
+    interruptedCommand = vtbackend::truncatedCommandLine(state.interruptedCommand);
+    interruptedAfterBlock = 0;
+    if (!commandBlocks.empty())
+    {
+        auto const& [newestId, newest] = *commandBlocks.rbegin();
+        interruptedAfterBlock =
+            newest.wire.state == std::to_underlying(vtbackend::CommandBlockState::Prompting) ? newestId - 1
+                                                                                             : newestId;
+    }
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -288,6 +300,15 @@ void RemoteScreen::apply(proto::Delta const& delta)
         dropped += dropCommandBlock(*this, id);
     if (dropped != 0)
         commandBlocksRetiredAt = ++commandBlocksRevision;
+
+    if (!interruptedCommand.empty()
+        && std::ranges::any_of(
+            std::ranges::subrange(commandBlocks.upper_bound(interruptedAfterBlock), commandBlocks.end())
+                | std::views::values,
+            [](MirroredCommandBlock const& block) {
+                return block.wire.state != std::to_underlying(vtbackend::CommandBlockState::Prompting);
+            }))
+        interruptedCommand.clear();
 
     // Trim client-side scrollback. The server's floor is authoritative — a
     // `clear`/CSI 3 J jumps it up with no line changes, so honoring it is what

@@ -547,6 +547,7 @@ namespace
         out.varint(pdu.commandBlocks.size());
         for (auto const& block: pdu.commandBlocks)
             encodeCommandBlock(out, block);
+        out.string(pdu.interruptedCommand);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -1289,6 +1290,9 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.commandBlocks, decodeCommandBlock); !decoded)
             return std::unexpected(decoded.error());
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0 && !assign(in.string(), pdu.interruptedCommand, error))
+            return std::unexpected(error);
         return pdu;
     }
 

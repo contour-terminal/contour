@@ -259,6 +259,46 @@ TEST_CASE("an allow-listed program is typed into its restored shell once it show
     CHECK(mockOf(other).stdinBuffer().empty());
 }
 
+TEST_CASE("a pane whose command was not re-run remembers it until its next command",
+          "[vthost][snapshot][restore][interrupted]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore {
+        .snapshot = workspaceOf({ PaneSnapshot { .runningCommandLine = "make test" },
+                                  PaneSnapshot { .foregroundProcess = "htop", .runningCommandLine = "htop" },
+                                  PaneSnapshot {} }),
+        .rerunPrograms = { "htop" } });
+    auto& first = terminalOf(*host, 0);
+    auto& second = terminalOf(*host, 1);
+    auto const sessionOf = [&](int tab) {
+        return host->model().window(host->windowId())->tabAt(tab)->activePane()->session();
+    };
+    std::ignore = h.loop.runUntilIdle();
+
+    SECTION("only the pane whose command no program re-ran carries it")
+    {
+        CHECK(host->interruptedCommandOf(sessionOf(0)) == "make test");
+        CHECK(host->interruptedCommandOf(sessionOf(1)).empty());
+        CHECK(host->interruptedCommandOf(sessionOf(2)).empty());
+
+        pump(second, "\033]133;A\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(mockOf(second).stdinBuffer() == "htop\r");
+    }
+
+    SECTION("the shell's prompt does not clear it; its next command does, and a later attach is told none")
+    {
+        pump(first, "\033]133;A\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(host->interruptedCommandOf(sessionOf(0)) == "make test");
+
+        pump(first, "\033]133;B\033\\\033]133;C\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(host->interruptedCommandOf(sessionOf(0)).empty());
+        CHECK(host->interruptedCommandOf(sessionOf(2)).empty());
+    }
+}
+
 TEST_CASE("a shell without prompt marks still gets its re-run after the fallback",
           "[vthost][snapshot][restore]")
 {

@@ -159,6 +159,14 @@ struct RemoteScreen
     /// vtbackend::MaxRecordedWorkingDirectoryBytes), and the count to `commandBlockLimits`, the oldest
     /// dropped first. One older than every record a full table holds is not taken at all.
     std::map<uint32_t, MirroredCommandBlock> commandBlocks;
+    /// The command line a restart stopped in this session, as the last SessionState stated it (held to
+    /// vtbackend::MaxRecordedCommandLineBytes); empty for none. Cleared once the session starts a command of
+    /// its own: a block newer than @ref interruptedAfterBlock that has left its prompt. Untrusted text.
+    /// @see proto::SessionState::interruptedCommand
+    std::string interruptedCommand;
+    /// The id of the newest record the shell had already used when @ref interruptedCommand was stated: a
+    /// record above it that is no longer Prompting is the command that ends the interruption.
+    uint32_t interruptedAfterBlock = 0;
     /// Each record of `commandBlocks` under the revision it last changed at, mapped to its id: one entry
     /// per record. A consumer synced at a revision finds what changed since with an upper_bound, rather
     /// than by walking the table.
