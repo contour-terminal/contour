@@ -394,6 +394,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param daemonWindows The lost windows' ids, as the lost connection named them.
     void windowsLost(std::vector<uint64_t> daemonWindows);
 
+    /// The daemon says it restored its saved workspace before this client attached, and how much came back
+    /// (fires on the reactor thread, once per connection whose hello carries it; connect queued). Only the
+    /// first Attach connection after a restore is told, so a reconnect or a second client never raises it.
+    /// @param windows How many windows came back.
+    /// @param tabs How many tabs.
+    void workspaceRestored(quint32 windows, quint32 tabs);
+
     /// The daemon's tab/pane layout changed (fires on the reactor thread; connect
     /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
     void layoutChanged();

@@ -800,6 +800,29 @@ void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notic
             controller->notices().post(notice);
 }
 
+void TerminalSessionManager::noteWorkspaceRestored(vthost::RestoredCounts counts)
+{
+    _pendingRestoreSummary = counts;
+}
+
+void TerminalSessionManager::deliverRestoreSummaryTo(vtworkspace::WindowId window)
+{
+    if (!_pendingRestoreSummary)
+        return;
+    auto* const controller = controllerFor(window);
+    if (controller == nullptr)
+        return;
+    controller->notices().post(window::Notice {
+        .kind = window::NoticeKind::RestoreSummary,
+        .text = window::restoreSummaryText(_pendingRestoreSummary->windows, _pendingRestoreSummary->tabs) });
+    _pendingRestoreSummary.reset();
+}
+
+void TerminalSessionManager::expireRestoreSummary() noexcept
+{
+    _pendingRestoreSummary.reset();
+}
+
 void TerminalSessionManager::clearNoticeInEveryWindow(window::NoticeKind kind)
 {
     for (auto* const controller: _controllersByWindow | std::views::values)

@@ -741,6 +741,15 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::BlockActions:
             case SnapshotScript::StickyPaneHeader:
             case SnapshotScript::StickyTitleBand: checkBlockScript(scene, row, content); break;
+            case SnapshotScript::RestoreSummary: {
+                // The same toast, posted as the first restored window's notices post it.
+                auto const* toast = scene.root().findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+                REQUIRE(toast != nullptr);
+                CHECK(toast->property("shown").toBool());
+                CHECK(toast->opacity() == 1.0);
+                CHECK(toast->property("text").toString() == QStringLiteral("Restored 2 windows, 7 tabs"));
+                break;
+            }
             case SnapshotScript::SingleTab: break;
             case SnapshotScript::PermissionPaste: {
                 auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));

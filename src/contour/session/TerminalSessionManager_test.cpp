@@ -3658,3 +3658,82 @@ TEST_CASE("TerminalSessionManager: turning secure_input off at runtime releases 
     CHECK(secureRoleAt(*window, 0) == 0);
 }
 // }}}
+
+TEST_CASE("TerminalSessionManager: the restore summary waits for a window, and tells one",
+          "[manager][notices][restore]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+
+    // Nothing to post it in yet.
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    CHECK(first->notices().toastText().isEmpty());
+    CHECK(second->notices().toastText().isEmpty());
+
+    manager.deliverRestoreSummaryTo(first->windowId());
+    CHECK(first->notices().toastText() == "Restored 2 windows, 7 tabs");
+
+    // Told once: a second window shows nothing.
+    manager.deliverRestoreSummaryTo(second->windowId());
+    CHECK(second->notices().toastText().isEmpty());
+}
+
+TEST_CASE("TerminalSessionManager: the restore summary reads in the singular", "[manager][notices][restore]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const window { app.manager() };
+    app.manager().noteWorkspaceRestored(vthost::RestoredCounts { .windows = 1, .tabs = 1 });
+    app.manager().deliverRestoreSummaryTo(window->windowId());
+    CHECK(window->notices().toastText() == "Restored 1 window, 1 tab");
+}
+
+TEST_CASE("TerminalSessionManager: a reconnect to a restarted daemon puts the summary in a restored window, "
+          "never in a lost one",
+          "[manager][notices][restore]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    // The windows A and B of the lost run are open; the restored C and D arrive with the summary.
+    contour::test::ScopedController const lostA { manager };
+    contour::test::ScopedController const lostB { manager };
+    contour::test::ScopedController const restoredC { manager };
+    contour::test::ScopedController const restoredD { manager };
+
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    // The GUI reconciles the windows of the new layout, in order; the lost ones are not among them.
+    manager.deliverRestoreSummaryTo(restoredC->windowId());
+    manager.deliverRestoreSummaryTo(restoredD->windowId());
+
+    CHECK(restoredC->notices().toastText() == "Restored 2 windows, 7 tabs");
+    CHECK(restoredD->notices().toastText().isEmpty());
+    CHECK(lostA->notices().toastText().isEmpty());
+    CHECK(lostB->notices().toastText().isEmpty());
+}
+
+TEST_CASE("TerminalSessionManager: a summary no window of its layout took is not posted to a later window",
+          "[manager][notices][restore]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    manager.expireRestoreSummary();
+
+    contour::test::ScopedController const later { manager };
+    manager.deliverRestoreSummaryTo(later->windowId());
+    CHECK(later->notices().toastText().isEmpty());
+}
+
+TEST_CASE("TerminalSessionManager: a newer restore summary replaces one still held",
+          "[manager][notices][restore]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 5, .tabs = 5 });
+    manager.noteWorkspaceRestored(vthost::RestoredCounts { .windows = 2, .tabs = 7 });
+    contour::test::ScopedController const window { manager };
+    manager.deliverRestoreSummaryTo(window->windowId());
+    CHECK(window->notices().toastText() == "Restored 2 windows, 7 tabs");
+}

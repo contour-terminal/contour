@@ -829,6 +829,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param osWindow The OS window that mirrors it.
     void bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow);
 
+    /// Forgets a restore summary no window took, once a layout has been reconciled and no window of it is
+    /// still to be bound: a toast about a restore must not surface in a window opened later.
+    void expireRestoreSummaryAfterLayout();
+
     /// The installed log destination for the GUI verbs. Categories hold a reference into it, so it
     /// must outlive every one of them -- hence a member rather than a local of the verb handler.
     /// Separate from app::_logOutput, which is private to the base and serves the client/daemon

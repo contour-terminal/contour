@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include <QtTest/QSignalSpy>
+
 #ifndef _WIN32
     #include <unistd.h>
 #endif
@@ -216,7 +218,7 @@ struct DaemonFixture
     uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
     /// The host's profiles, by name; none resolves every spawn to the host's own settings.
     std::shared_ptr<vthost::ProfileCatalog const> profiles;
-    /// The workspace the host restores at construction; none starts it empty.
+    /// The workspace the first host restores as it starts; none restores nothing.
     std::optional<vthost::WorkspaceRestore> restore;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
@@ -233,19 +235,20 @@ struct DaemonFixture
                                         .extensions = extensions,
                                         .profiles = profiles,
                                         .instance = instance,
-                                        .restore = restore });
+                                        .restore = std::exchange(restore, std::nullopt) });
     }
 
     /// @param extensions The status-line extensions the hosted sessions run; none by default.
     /// @param services What each native connection is served with: what its handshake admits.
     /// @param instance Which run of the daemon the first host is; 0 for one that states none.
     /// @param profiles The host's profiles; none by default.
-    /// @param restore The workspace the host restores; none by default.
+    /// @param restore The workspace the first host restores as it starts; none by default. Only that host:
+    ///        restartHost()'s is a run with nothing to restore.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
                            std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
-                           std::optional<vthost::WorkspaceRestore> restore = {}):
+                           std::optional<vthost::WorkspaceRestore> restore = std::nullopt):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
@@ -3002,4 +3005,70 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(delegate.binds == 1);
     CHECK(delegate.boundPty == device);
     CHECK(delegate.boundTerminal == &terminal);
+}
+
+namespace
+{
+
+/// @return A restore of two windows holding three and four single-pane tabs.
+[[nodiscard]] vthost::WorkspaceRestore twoWindowsSevenTabs()
+{
+    auto snapshot = vthost::WorkspaceSnapshot {};
+    for (auto const tabs: { 3, 4 })
+    {
+        auto window = vthost::WindowSnapshot {};
+        for (auto const _: std::views::iota(0, tabs))
+            window.tabs.push_back(vthost::TabSnapshot {});
+        snapshot.windows.push_back(std::move(window));
+    }
+    return vthost::WorkspaceRestore { .snapshot = std::move(snapshot) };
+}
+
+} // namespace
+
+TEST_CASE("a controller attached after a daemon restore is told what came back, once",
+          "[attach][controller][restore]")
+{
+    auto daemon = DaemonFixture { {}, {}, 1, {}, twoWindowsSevenTabs() };
+    auto timeline = TestTimeline {};
+
+    auto const firstOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& first = *firstOwned;
+    auto told = QSignalSpy { &first, &contour::remote::NativeController::workspaceRestored };
+    REQUIRE(first.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return told.count() == 1; }));
+    CHECK(told.front().at(0).value<quint32>() == 2);
+    CHECK(told.front().at(1).value<quint32>() == 7);
+
+    // A second client of the same daemon run is told nothing.
+    auto const secondOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& second = *secondOwned;
+    auto untold = QSignalSpy { &second, &contour::remote::NativeController::workspaceRestored };
+    REQUIRE(second.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return second.layout().has_value(); }));
+    CHECK(untold.count() == 0);
+
+    // Nor does the first one's reconnect to it raise the summary again.
+    daemon.dropConnections();
+    REQUIRE(
+        waitUntil([&] { return first.connectionState() == vthost::client::ConnectionState::Reconnecting; }));
+    REQUIRE(waitUntil([&] { return first.connectionState() == vthost::client::ConnectionState::Connected; }));
+    CHECK(told.count() == 1);
+
+    first.stop();
+    second.stop();
+}
+
+TEST_CASE("a hello that restored nothing raises no summary", "[attach][controller][restore]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("plain");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto told = QSignalSpy { &controller, &contour::remote::NativeController::workspaceRestored };
+    REQUIRE(controller.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    CHECK(told.count() == 0);
+    controller.stop();
 }

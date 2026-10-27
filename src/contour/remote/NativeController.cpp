@@ -192,6 +192,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     auto const where = _transport->describe();
     auto closed = false;
     auto missingWindows = false;
+    auto restored = std::optional<vthost::RestoredCounts> {};
     {
         auto const lock = std::lock_guard { _mutex };
         _connection = state;
@@ -203,6 +204,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 // Each connection's own: a reconnect can reach an upgraded or downgraded daemon.
                 _negotiated.reset();
                 captureHandshake();
+                if (_client != nullptr)
+                    restored = _client->restoredCounts();
                 if (_acceptedConnections != 0)
                     adoptReconnect();
                 else if (_client != nullptr)
@@ -252,6 +255,10 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     _connected.notify_all();
     if (missingWindows)
         failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.windows)));
+    // After the lock is released, and ahead of the layout that follows the hello, so the GUI holds the
+    // summary by the time it realizes the windows it is for.
+    if (restored)
+        emit workspaceRestored(restored->windows, restored->tabs);
     emit connectionStateChanged();
     if (closed)
         emit connectionClosed();

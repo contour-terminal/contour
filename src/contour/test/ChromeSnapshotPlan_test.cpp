@@ -348,8 +348,8 @@ TEST_CASE("snapshot.scriptTable.permissionAndSaveLayout", "[snapshot]")
 TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    // The size indicator, the link pill on a pane and in a header, and the overlay scrollbar, appended after
-    // Step 3c's rows.
+    // The size indicator, the link pill on a pane and in a header, the overlay scrollbar and the restore
+    // summary, appended after Step 3c's rows.
     CHECK(static_cast<int>(SnapshotScript::SizeIndicator)
           == static_cast<int>(SnapshotScript::ConfigReloadBanner) + 1);
     CHECK(static_cast<int>(SnapshotScript::ScrollbarOverlay)
@@ -359,6 +359,7 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
           == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
     CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::PaneInterrupted)].script
           == SnapshotScript::PaneInterrupted);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::RestoreSummary);
     struct Expected
     {
         SnapshotScript script;
@@ -383,6 +384,10 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
                         "scrollbar-overlay",
                         PaneShape::SingleLeaf,
                         ScriptAction::ScrollBack },
+             Expected { SnapshotScript::RestoreSummary,
+                        "restore-summary",
+                        PaneShape::SingleLeaf,
+                        ScriptAction::ShowRestoreSummary },
          })
     {
         CAPTURE(expected.name);
@@ -405,8 +410,10 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
         CHECK((row.action == ScriptAction::HoldLinkModifier)
               == (row.script == SnapshotScript::LinkPill || row.script == SnapshotScript::LinkPillSplit));
         CHECK((row.action == ScriptAction::ScrollBack) == (row.script == SnapshotScript::ScrollbarOverlay));
+        CHECK((row.action == ScriptAction::ShowRestoreSummary)
+              == (row.script == SnapshotScript::RestoreSummary));
     }
-    // The matrix grows by the four rows on every row, edition and appearance.
+    // The matrix grows by the rows on every row, edition and appearance.
     auto const rows =
         std::array { contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal };
     CHECK(snapshotMatrix(rows).size()

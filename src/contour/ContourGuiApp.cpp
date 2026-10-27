@@ -1335,6 +1335,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // to its remote session. Incremental — what is already shown is left untouched.
     _onGuiBooted = [this] {
         reconcileAttachWindows();
+        expireRestoreSummaryAfterLayout();
     };
     // First: a Reconnect from a footer has the panes lost with the connection take their sessions back
     // before the layout is reconciled, which would otherwise find no live pane for them and realize them
@@ -1350,6 +1351,17 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             this,
             _onGuiBooted,
             Qt::QueuedConnection);
+    // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
+    // window of that layout is realized or reconciled, and says it there.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::workspaceRestored,
+        this,
+        [this](quint32 windows, quint32 tabs) {
+            _sessionManager.noteWorkspaceRestored(
+                vthost::RestoredCounts { .windows = windows, .tabs = tabs });
+        },
+        Qt::QueuedConnection);
     connectReconnectSignals();
     // A dying connection ends every mirror session (stop() closes the ptys), closing the tabs through the
     // shell-exit teardown.
@@ -2775,6 +2787,7 @@ void ContourGuiApp::reconcileAttachWindows()
             // Already shown: bring its tree up to date.
             contour::remote::applyRemoteLayout(
                 _sessionManager, mapped->second, *_nativeController, daemonWindow);
+            _sessionManager.deliverRestoreSummaryTo(mapped->second);
             continue;
         }
         if (_pendingAttachWindow == daemonWindow)
@@ -2896,6 +2909,17 @@ void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::Wi
     _attachBoot = AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+    _sessionManager.deliverRestoreSummaryTo(osWindow);
+}
+
+void ContourGuiApp::expireRestoreSummaryAfterLayout()
+{
+    // A window still to be bound -- the boot window is not up yet, or one is being spawned -- is where the
+    // summary goes; and without a layout nothing has been realized, so nothing is yet missed.
+    if (!_nativeController || _nativeController->windowIds().empty() || _pendingAttachWindow
+        || _attachBoot == AttachBoot::Pending)
+        return;
+    _sessionManager.expireRestoreSummary();
 }
 
 window::SettingsController& ContourGuiApp::settingsController()

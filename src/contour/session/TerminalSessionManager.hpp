@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <vthost/RestoredCounts.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
@@ -312,6 +313,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Tells the user of @p notice in every window: what is about the application, not one session.
     void postNoticeToEveryWindow(window::Notice const& notice);
+
+    /// Holds what the daemon's restore brought back until a window of the layout that follows is up to be
+    /// told it in (@see deliverRestoreSummaryTo). A summary still held is replaced. GUI thread.
+    /// @param counts The windows and tabs that came back.
+    void noteWorkspaceRestored(vthost::RestoredCounts counts);
+
+    /// Tells the window @p window of the summary held by noteWorkspaceRestored(), once: posts the
+    /// "Restored 2 windows, 7 tabs" notice there and forgets it, so a second window shows nothing. Without a
+    /// held summary, or a controller for @p window, does nothing. GUI thread.
+    /// @param window The window the daemon's restored layout was just realized or reconciled in.
+    void deliverRestoreSummaryTo(vtworkspace::WindowId window);
+
+    /// Forgets the summary held by noteWorkspaceRestored(), undelivered: the layout it belonged to showed no
+    /// window it could go to, and a toast about a restore must not surface in a window opened later. GUI
+    /// thread.
+    void expireRestoreSummary() noexcept;
 
     /// Takes every notice of @p kind away, in every window.
     void clearNoticeInEveryWindow(window::NoticeKind kind);
@@ -1415,6 +1432,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // Per-OS-window QML adapters, keyed by vtworkspace::WindowId. The ModelEvents router forwards each Qt
     // row/signal emission to the controller for the event's window. Owned via QQmlEngine CppOwnership.
     std::unordered_map<uint64_t, window::WindowController*> _controllersByWindow;
+    /// What the daemon's restore brought back, until a window is told it. @see noteWorkspaceRestored
+    std::optional<vthost::RestoredCounts> _pendingRestoreSummary;
     // Registry mapping a vtworkspace session id to the Qt TerminalSession that backs it. The reverse
     // (TerminalSession -> SessionId) needs no map: each TerminalSession stores its own
     // modelSessionId().

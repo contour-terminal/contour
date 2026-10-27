@@ -319,6 +319,7 @@ class ChromeSnapshotScene
             case ScriptAction::FocusTabWell: focusTabWell(); break;
             case ScriptAction::OpenBlockMenu: openBlockMenu(); break;
             case ScriptAction::HoverBlock: hoverBlock(); break;
+            case ScriptAction::ShowRestoreSummary: showRestoreSummary(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -387,6 +388,9 @@ class ChromeSnapshotScene
 
     /// The toast's message.
     [[nodiscard]] static QString toastText() { return QStringLiteral("Copied 3 lines"); }
+    /// The windows and tabs the restore-summary script's daemon brought back.
+    static constexpr std::size_t RestoredWindows = 2;
+    static constexpr std::size_t RestoredTabs = 7;
     /// The size of the paste the permission-paste script asks about, and the lines its preview leaves out.
     static constexpr std::size_t SnapshotPasteBytes = 2'400'000;
     static constexpr std::size_t SnapshotPasteMoreLines = 48'211;
@@ -1015,6 +1019,19 @@ class ChromeSnapshotScene
     {
         _controller.notices().post(
             window::Notice { .kind = window::NoticeKind::Copied, .text = toastText().toStdString() });
+        auto const* toast = _root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, PopupSettleMs));
+    }
+
+    /// Posts the summary the window the daemon restored is told, through its notices as the manager does
+    /// (TerminalSessionManager::deliverRestoreSummaryTo()): Main.qml places and shows it, in the band or the
+    /// Terminal row's bar. Waits for its fade-in to run out.
+    void showRestoreSummary()
+    {
+        _controller.notices().post(
+            window::Notice { .kind = window::NoticeKind::RestoreSummary,
+                             .text = window::restoreSummaryText(RestoredWindows, RestoredTabs) });
         auto const* toast = _root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
         REQUIRE(toast != nullptr);
         REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, PopupSettleMs));
