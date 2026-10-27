@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/QtInvoke.hpp>
@@ -84,17 +83,6 @@ bool applyFontDescription(text::DPI dpi,
     return true;
 }
 
-GutterChrome gutterChromeFor(config::ChromeStyle style) noexcept
-{
-    auto const& row = config::ChromeTokenRows[static_cast<size_t>(style)];
-    return GutterChrome { .form = row.layout.blockColumn,
-                          .stripPoints = row.space.blockGutter,
-                          .barPoints = row.size.rail,
-                          .barInsetPoints = row.space.railInset,
-                          .barRadiusPoints = row.radii.rail,
-                          .markPoints = row.size.railMark };
-}
-
 vtbackend::GutterLayout configuredGutterLayout(config::Config const& config, GutterChrome const& chrome)
 {
     return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config, chrome.form));
@@ -106,14 +94,25 @@ geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                        GutterChrome const& chrome)
 {
     auto const columns = gutterWidthFor(layout, cellSize);
-    auto const rail = layout.rail == vtbackend::BlockRailPresence::Present
-                          ? static_cast<geometry::GutterWidth>(std::ceil(chrome.stripPoints * scale))
-                          : 0;
+    auto const rail = gutterRailMetricsFor(layout, chrome, scale).strip;
     if (columns + rail == 0)
         return {};
     return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale),
                                     .columns = columns,
                                     .rail = rail };
+}
+
+vtrasterizer::GutterRailMetrics gutterRailMetricsFor(vtbackend::GutterLayout const& layout,
+                                                     GutterChrome const& chrome,
+                                                     double scale) noexcept
+{
+    if (layout.rail == vtbackend::BlockRailPresence::Absent)
+        return {};
+    return vtrasterizer::GutterRailMetrics { .strip = chromeDevicePixels(chrome.stripPoints, scale),
+                                             .bar = chromeDevicePixels(chrome.barPoints, scale),
+                                             .barInset = chromeDevicePixels(chrome.barInsetPoints, scale),
+                                             .radius = chromeDevicePixels(chrome.barRadiusPoints, scale),
+                                             .endInset = chromeDevicePixels(chrome.barEndPoints, scale) };
 }
 
 geometry::GutterExtent configuredGutterExtent(config::Config const& config,
@@ -177,7 +176,14 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
         [&](auto page) { return terminal.clampedTotalPageSize(page); },
         configuredGutterWidth(session.config(), cellSize, devicePixelRatio, session.gutterChrome()));
 
-    renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
+    // The strip the fit reserved, from the same layout, for the renderer to draw the rail in.
+    renderer.applyResize(
+        newPixelSize,
+        fit.pageSize,
+        fit.pageMargin,
+        gutterRailMetricsFor(configuredGutterLayout(session.config(), session.gutterChrome()),
+                             session.gutterChrome(),
+                             devicePixelRatio));
 
     // This runs on the render thread too (TerminalDisplay::createRenderer()).
     announcePageSize(session, oldPageSize, fit.pageSize);

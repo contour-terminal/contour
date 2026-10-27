@@ -309,6 +309,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/WindowLivenessQt.hpp
         session/SessionInput.hpp
         session/FontControl.hpp
+        session/GutterChrome.hpp
         session/SpawnCommand.hpp
         session/Logging.hpp
         Logging.hpp

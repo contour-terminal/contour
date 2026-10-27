@@ -8237,6 +8237,8 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     using contour::session::TerminalSession;
 
     TestApp testApp;
+    // Line numbers on, so the cells come first and the strip lies between them and column 0.
+    testApp.app().config().gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
     auto session = makeSessionWithSurface(testApp.app());
     CHECK(session->gutterChrome() == contour::session::gutterChromeFor(testApp.app().chromeStyle()));
     REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
@@ -8246,6 +8248,7 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     auto const extent = contour::session::configuredGutterExtent(
         session->config(), surface.cellSizeValue, surface.devicePixelRatioValue, session->gutterChrome());
     REQUIRE(extent.rail > 0);
+    REQUIRE(extent.columns > 0);
     surface.gridMetricsValue.pageMargin.left = extent.leadIn + extent.columns + extent.rail;
 
     runFailingCommand(*session);
@@ -8256,6 +8259,13 @@ TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[cont
     contour::session::sendMouseMoveEvent(&event, *session);
     CHECK(spy.count() == 1);
     CHECK(session->commandBlockTooltip().toStdString().starts_with("Exit code 2\n"));
+
+    // Over the line numbers, left of the strip, the block is not hovered.
+    auto const overTheNumbers = QPointF { extent.leadIn + (extent.columns / 2.0), 4.0 };
+    auto numbers = QHoverEvent(QEvent::HoverMove, overTheNumbers, overTheNumbers, overTheNumbers);
+    contour::session::sendMouseMoveEvent(&numbers, *session);
+    CHECK(spy.count() == 2);
+    CHECK(session->commandBlockTooltip().isEmpty());
 }
 
 TEST_CASE("TerminalSession: a scroll withdraws the block tooltip", "[contour][session][gutter]")

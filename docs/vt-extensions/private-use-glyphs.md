@@ -47,6 +47,8 @@ nothing to anyone who is already using it.
 | `U+10F00D` | FOLD HEAD CLOSED HEAVIER | `U+10F001` drawn at three times the stroke. |
 | `U+10F00E` | FOLD BODY HEAVIER | `U+10F006` drawn at three times the stroke. |
 | `U+10F00F` | FOLD BODY END HEAVIER | `U+10F007` drawn at three times the stroke. |
+| `U+10F010` | BLOCK SUCCEEDED | A light check mark, as `U+2713` ✓. |
+| `U+10F011` | BLOCK FAILED DISC | A filled disc with a diagonal cross knocked out of it: ✗ on ●. |
 
 The fold column is drawn as line art at the current foreground colour, scaled to the cell: the box is
 square whatever the cell's aspect ratio, and every glyph of the column shares one stroke and one column,
@@ -54,7 +56,7 @@ so that the head's stem, the body and its end meet exactly. The stroke is the ce
 twice it for the heavy four, three times for the heavier four -- even where the gutter draws its glyphs
 two cells wide.
 
-The four marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
+The marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
 and spanning 60% of its shorter side, so they sit on the same line as the fold column's stem.
 
 ### What they are for
@@ -94,7 +96,14 @@ collapsed too, where only the head is drawn. The fold under the pointer is drawn
 The gutter's block column may be two cells wide (`gutter.block_column_width`); its glyphs are then drawn
 across both cells, each twice the size.
 
-Unicode has these four shapes at `U+25B8`, `U+25C6`, `U+25CF` and `U+2717`, but the gutter does not use them:
+The native chromes draw the block column as a **rail** instead: a bar in a strip of pixels between the
+gutter's cells and the grid, which marks a block's head with `U+10F002` while it runs, with `U+10F011`
+when it failed -- one glyph, so the cross is the page showing through the disc -- and with `U+10F010`,
+only while the block is hovered or focused, when it succeeded. A row the user marked carries
+`U+10F003` there too. The rail's marks are drawn two cells wide, sized to the row; the Terminal chrome
+keeps the glyph column above.
+
+Unicode has these four shapes at `U+25B8`, `U+25C6`, `U+25CF` and `U+2717` (and the check at `U+2713`), but the gutter does not use them:
 the renderer's claim on a codepoint is global, so claiming those would draw every one a program
 writes -- the ● of `systemctl status`, a prompt theme's ▸ or ◆, DEC Special Graphics' `` ` `` -- as a
 gutter mark instead of in its font's own size and weight.

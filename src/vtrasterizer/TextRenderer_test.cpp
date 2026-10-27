@@ -1012,7 +1012,7 @@ TEST_CASE("Renderer.reconfig.geometry_published_synchronously", "[renderer]")
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
 
     // Published (UI-visible) metrics reflect the request synchronously...
     CHECK(renderer.gridMetrics().pageSize == newPageSize);
@@ -1037,7 +1037,7 @@ TEST_CASE("Renderer.reconfig.geometry_not_applied_to_live_until_render", "[rende
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
 
     // Before apply: the *live* metrics still hold the original page size, even though the published
     // (UI-visible) metrics already reflect the request.
@@ -1065,7 +1065,7 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
     CHECK(fixture.renderTarget.renderSize() != newPixelSize); // not yet applied
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
@@ -1142,8 +1142,10 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
     SECTION("growing the page past the budget rebuilds the atlas at the larger size")
     {
         auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-        renderer.applyResize(
-            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                             grown,
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
         auto const grownCells = static_cast<uint32_t>(grown.area());
@@ -1158,15 +1160,18 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
     SECTION("shrinking back does not rebuild the atlas again")
     {
         auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-        renderer.applyResize(
-            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                             grown,
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
         auto const grownTiles = backend.properties().tileCount.value;
         auto const grownConfigures = backend.configureCount;
 
         renderer.applyResize(vtbackend::ImageSize { Width(400), Height(300) },
                              PageSize { LineCount(10), ColumnCount(20) },
-                             vtrasterizer::PageMargin {});
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
         // Grow-only: a resize drag walks through dozens of sizes, and rebuilding on each would throw
@@ -1182,7 +1187,8 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
         // is the page's own cell count, not a round number near it.)
         renderer.applyResize(vtbackend::ImageSize { Width(700), Height(400) },
                              PageSize { LineCount(20), ColumnCount(70) },
-                             vtrasterizer::PageMargin {});
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
         CHECK(backend.configureCount == configuresAfterAttach);
     }
@@ -1249,7 +1255,8 @@ TEST_CASE("Renderer.reconfig.geometry_only_does_not_signal_font_resize", "[rende
 
     renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
                          PageSize { LineCount(30), ColumnCount(100) },
-                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 },
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
@@ -1381,7 +1388,8 @@ TEST_CASE("Renderer.reconfig.setup_apply_returns_consumed_font_reconfig_flag", "
     // A geometry-only change changes no cell size, so the setup apply reports no font reconfig.
     renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
                          PageSize { LineCount(30), ColumnCount(100) },
-                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 },
+                         vtrasterizer::GutterRailMetrics {});
     CHECK_FALSE(renderer.applyStagedReconfigDuringSetup());
 }
 
@@ -1421,7 +1429,7 @@ TEST_CASE("Renderer.reconfig.geometry_preserved_across_font_change", "[renderer]
     auto const newMargin = vtrasterizer::PageMargin { .left = 5, .top = 9, .bottom = 3 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1600), Height(900) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
     REQUIRE(renderer.setFontSize(text::FontSize { 9.0 })); // BDF test font's only available size.
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
@@ -1452,7 +1460,10 @@ TEST_CASE("Renderer.reconfig.requests_coalesce_until_applied", "[renderer]")
 
     auto const finalPageSize = PageSize { LineCount(50), ColumnCount(140) };
     auto const finalMargin = vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 };
-    renderer.applyResize(vtbackend::ImageSize { Width(1920), Height(1080) }, finalPageSize, finalMargin);
+    renderer.applyResize(vtbackend::ImageSize { Width(1920), Height(1080) },
+                         finalPageSize,
+                         finalMargin,
+                         vtrasterizer::GutterRailMetrics {});
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
@@ -1495,7 +1506,8 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
         auto const lines = 10 + (i % 50);
         renderer.applyResize(vtbackend::ImageSize { Width(640 + (i % 100)), Height(480 + (i % 100)) },
                              PageSize { LineCount(lines), ColumnCount(lines * 2) },
-                             vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 });
+                             vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 },
+                             vtrasterizer::GutterRailMetrics {});
         if (i % 3 == 0)
             renderer.setPageSize(PageSize { LineCount(lines), ColumnCount(lines * 2) });
         if (i % 11 == 0)
@@ -1592,7 +1604,8 @@ TEST_CASE("Renderer.reconfig.published_cell_size_tracks_grid_metrics", "[rendere
     // A geometry-only change does not alter the cell size; the mirror stays consistent.
     renderer.applyResize(vtbackend::ImageSize { Width(800), Height(600) },
                          PageSize { LineCount(25), ColumnCount(80) },
-                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 });
+                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 },
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
     CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
 
@@ -1613,7 +1626,10 @@ TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[rende
 
     auto const newPageSize = PageSize { LineCount(33), ColumnCount(111) };
     auto const newMargin = vtrasterizer::PageMargin { .left = 4, .top = 8, .bottom = 6 };
-    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) }, newPageSize, newMargin);
+    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) },
+                         newPageSize,
+                         newMargin,
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     // Re-stage the same (valid) font size, which exercises updateFontMetrics() in place.
@@ -2093,8 +2109,10 @@ TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[rendere
     auto const configuresBeforeGrow = backend.configureCount;
 
     auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-    fixture.renderer.applyResize(
-        vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+    fixture.renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                                 grown,
+                                 vtrasterizer::PageMargin {},
+                                 vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(fixture.renderer);
 
     REQUIRE(backend.configureCount > configuresBeforeGrow); // the atlas was actually rebuilt

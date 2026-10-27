@@ -222,17 +222,20 @@ class Renderer
     /// @param newPixelSize  new render surface size in pixels.
     /// @param newPageSize   new page size in columns/lines.
     /// @param newMargin     new page margin in pixels.
+    /// @param newRail       the block rail's strip inside the margin's left; all zero for none.
     void applyResize(vtbackend::ImageSize newPixelSize,
                      vtbackend::PageSize newPageSize,
-                     PageMargin newMargin) noexcept
+                     PageMargin newMargin,
+                     GutterRailMetrics newRail) noexcept
     {
         auto const l = std::scoped_lock { _reconfigMutex };
         _publishedMetrics.pageSize = newPageSize;
         _publishedMetrics.pageMargin = newMargin;
+        _publishedMetrics.rail = newRail;
         auto& pending = ensurePendingLocked();
-        pending.geometry = PendingReconfig::Geometry { .pixelSize = newPixelSize,
-                                                       .pageSize = newPageSize,
-                                                       .pageMargin = newMargin };
+        pending.geometry = PendingReconfig::Geometry {
+            .pixelSize = newPixelSize, .pageSize = newPageSize, .pageMargin = newMargin, .rail = newRail
+        };
     }
 
     /**
@@ -404,9 +407,22 @@ class Renderer
     /// needs no second coordinate system. Keeping that here means nothing that walks
     /// RenderBuffer::cells -- selection, hit-testing, accessibility -- ever meets one.
     ///
+    /// Where the gutter has the block rail's strip (GridMetrics::rail), the rail's bars are drawn in it,
+    /// the cells are drawn that much further left (cellGutterShift()), and each mark in a text pass of its
+    /// own, the grid's origin moved for it as the status line's pass moves it. Runs its own text frames, so
+    /// it is called between passes, never inside one.
+    ///
     /// @param gutter  The gutter cells of the frame.
+    /// @param smoothScrollOffset  The rows' sub-cell scroll offset, in device pixels.
     /// @see contour::geometry::fitPageToPixels
-    void renderGutter(std::span<vtbackend::RenderGutterCell const> gutter);
+    void renderGutter(std::span<vtbackend::RenderGutterCell const> gutter, int smoothScrollOffset);
+
+    /// Runs @p content as a text frame of its own with the grid's origin moved @p shift pixels left, and
+    /// moves it back once the frame's text is flushed.
+    /// @param shift  How far left, in device pixels.
+    /// @param content  What to draw.
+    template <typename Content>
+    void renderShiftedLeft(int shift, Content&& content);
 
     /// Draws the annotations -- render-only text such as a collapsed fold's `⋯ N lines` -- over the cells
     /// already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which selection,
@@ -504,6 +520,7 @@ class Renderer
             std::optional<vtbackend::ImageSize> pixelSize; //!< New render surface size, if it changed.
             vtbackend::PageSize pageSize;                  //!< New page size in columns/lines.
             PageMargin pageMargin;                         //!< New page margin in pixels.
+            GutterRailMetrics rail {};                     //!< The block rail's strip in that margin.
         };
 
         /// Pending font change. Either a size-only change (fontSize) or a full font-descriptions
@@ -600,7 +617,8 @@ class Renderer
         auto const pixelSize = pending.geometry ? pending.geometry->pixelSize : std::nullopt;
         pending.geometry = PendingReconfig::Geometry { .pixelSize = pixelSize,
                                                        .pageSize = _publishedMetrics.pageSize,
-                                                       .pageMargin = _publishedMetrics.pageMargin };
+                                                       .pageMargin = _publishedMetrics.pageMargin,
+                                                       .rail = _publishedMetrics.rail };
     }
 
     /// Follows a change of the terminal's total page size that no resize staged, such as the indicator

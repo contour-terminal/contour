@@ -15,7 +15,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/EndReason.hpp>
-#include <contour/session/FontControl.hpp>
+#include <contour/session/GutterChrome.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/PastePreview.hpp>

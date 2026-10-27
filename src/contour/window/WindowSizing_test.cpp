@@ -410,9 +410,9 @@ TEST_CASE("the size hints reserve the gutter the configuration lays out", "[cont
     // with.
     REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
     auto const dpr = requester.devicePixelRatioValue;
-    auto const gutterDevicePx = contour::geometry::gutterLeadIn(dpr)
-                                + (6 * unbox<int>(requester.cellSizeValue.width))
-                                + static_cast<int>(std::ceil(session->gutterChrome().stripPoints * dpr));
+    auto const gutterDevicePx =
+        contour::geometry::gutterLeadIn(dpr) + (6 * unbox<int>(requester.cellSizeValue.width))
+        + contour::session::chromeDevicePixels(session->gutterChrome().stripPoints, dpr);
     auto const expected = contour::geometry::sizeHintsFor(
         requester.cellSizeValue,
         contour::session::toGeometryMargins(session->profile().margins.value()),

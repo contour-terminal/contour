@@ -57,6 +57,19 @@ struct PageMargin
     int bottom;
 };
 
+/// The block rail's strip after the gutter's cells, in device pixels. All zero where there is no strip --
+/// the Terminal row, whose block column is cells, or a gutter with nothing for the rail to show.
+struct GutterRailMetrics
+{
+    int strip = 0;    ///< The strip's width, ending at the grid's column 0.
+    int bar = 0;      ///< The bar's width.
+    int barInset = 0; ///< The bar's left edge within the strip.
+    int radius = 0;   ///< The radius of the bar's rounded ends; 0 draws them square.
+    int endInset = 0; ///< What the bar keeps clear of a block's first row's top and last row's bottom.
+
+    bool operator==(GutterRailMetrics const&) const = default;
+};
+
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
@@ -77,6 +90,8 @@ struct GridMetrics
 
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.
     PageMargin pageMargin {};
+
+    GutterRailMetrics rail {}; ///< The block rail's strip, left of column 0 and inside pageMargin.left.
 
     /// Maps screen coordinates to target surface coordinates.
     ///

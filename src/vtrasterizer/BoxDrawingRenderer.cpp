@@ -438,6 +438,8 @@ namespace detail
             Diamond,           ///< U+10F003, a row the user marked.
             Disc,              ///< U+10F004, a finished block with no fold control on its head.
             Cross,             ///< U+10F005, a FAILED block with no fold control on its head.
+            Check,             ///< U+10F010, the rail's head of a succeeded block, hovered or focused.
+            FailureDisc, ///< U+10F011, the rail's head of a FAILED block: a disc with the cross knocked out.
         };
 
         /// The block column's status marks: a small right-pointing triangle, a diamond, a disc and a cross.
@@ -461,6 +463,31 @@ namespace detail
             /// Half the width of the cross's bars, as a fraction of the radius.
             static constexpr double CrossStroke = 0.22;
 
+            /// How far the failure disc's knocked-out cross reaches from the centre, as a fraction of the
+            /// radius.
+            static constexpr double KnockoutReach = 0.55;
+
+            /// Half the width of the knocked-out cross's bars, as a fraction of the radius.
+            static constexpr double KnockoutStroke = 0.18;
+
+            /// Half the width of the check's strokes, as a fraction of the radius: light, the rail's quietest
+            /// mark.
+            static constexpr double CheckStroke = 0.14;
+
+            /// Whether (@p px, @p py) lies within @p halfWidth of the segment from (@p ax, @p ay) to
+            /// (@p bx, @p by).
+            [[nodiscard]] static bool nearSegment(
+                double px, double py, double ax, double ay, double bx, double by, double halfWidth) noexcept
+            {
+                auto const dx = bx - ax;
+                auto const dy = by - ay;
+                auto const t =
+                    std::clamp((((px - ax) * dx) + ((py - ay) * dy)) / ((dx * dx) + (dy * dy)), 0.0, 1.0);
+                auto const ex = px - (ax + (t * dx));
+                auto const ey = py - (ay + (t * dy));
+                return (ex * ex) + (ey * ey) <= halfWidth * halfWidth;
+            }
+
             /// Whether the point (@p dx, @p dy), relative to the cell centre, lies in @p shape of
             /// half-extent @p radius.
             [[nodiscard]] static bool contains(StatusMarkShape shape,
@@ -475,6 +502,28 @@ namespace detail
                         return dx >= -radius * 0.8 && std::abs(dy) <= ((radius * 0.8) - dx) / 2.0;
                     case StatusMarkShape::Diamond: return std::abs(dx) + std::abs(dy) <= radius;
                     case StatusMarkShape::Disc: return (dx * dx) + (dy * dy) <= radius * radius;
+                    case StatusMarkShape::Check: {
+                        // A short stroke down to the knee, a long one up to the right.
+                        auto const halfWidth = radius * CheckStroke;
+                        return nearSegment(
+                                   dx, dy, -radius * 0.8, 0.0, -radius * 0.25, radius * 0.55, halfWidth)
+                               || nearSegment(dx,
+                                              dy,
+                                              -radius * 0.25,
+                                              radius * 0.55,
+                                              radius * 0.8,
+                                              -radius * 0.6,
+                                              halfWidth);
+                    }
+                    case StatusMarkShape::FailureDisc: {
+                        // The disc, less a cross heavy enough to read as the page showing through it.
+                        auto const reach = radius * KnockoutReach;
+                        auto const distance =
+                            std::min(std::abs(dx - dy), std::abs(dx + dy)) / std::numbers::sqrt2;
+                        auto const knockedOut = std::abs(dx) <= reach && std::abs(dy) <= reach
+                                                && distance <= radius * KnockoutStroke;
+                        return contains(StatusMarkShape::Disc, dx, dy, radius) && !knockedOut;
+                    }
                     case StatusMarkShape::Cross: {
                         // Two diagonal bars a fifth of the mark wide, in the disc's square: as wide as the
                         // disc, and heavy enough to read as a cross rather than as a hairline X.
@@ -2814,6 +2863,10 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0x10F003: return /* user mark, ◆ */ StatusMark { .size = size, .shape = StatusMarkShape::Diamond };
         case 0x10F004: return /* finished, ● */ StatusMark { .size = size, .shape = StatusMarkShape::Disc };
         case 0x10F005: return /* failed, ✗ */ StatusMark { .size = size, .shape = StatusMarkShape::Cross };
+        // The block rail's marks: a light check, and a disc with the cross knocked out of it -- the page shows
+        // through the cross, so the one glyph is the ✗ on a danger disc.
+        case 0x10F010: return /* succeeded, ✓ */ StatusMark { .size = size, .shape = StatusMarkShape::Check };
+        case 0x10F011: return /* failed, ✗ on ● */ StatusMark { .size = size, .shape = StatusMarkShape::FailureDisc };
 
         // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
         case 0xEE00: return progressBar().left();

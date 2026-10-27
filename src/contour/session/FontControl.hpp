@@ -2,13 +2,14 @@
 #pragma once
 
 #include <contour/config/Config.hpp>
-#include <contour/config/UiStyle.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/session/GutterChrome.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
 
 #include <text_shaper/Font.hpp>
 
@@ -57,29 +58,6 @@ class TerminalSession;
     return layout.totalColumns * unbox<int>(cellSize.width);
 }
 
-/// How a session's chrome row draws the gutter's block column, in points: the form, and the rail's metrics.
-///
-/// Fixed per session: the chrome row is resolved once, before the first session exists (`ui_style` takes
-/// effect on the next start), so whatever reads it -- the page fit on the render thread among them -- reads
-/// one value for the session's life.
-struct GutterChrome
-{
-    vtbackend::BlockColumnForm form =
-        vtbackend::BlockColumnForm::Glyphs; ///< Glyph cells, or the rail's strip.
-    int stripPoints = 0;                    ///< The strip's width (@c space.blockGutter); 0 under Glyphs.
-    int barPoints = 0;                      ///< The rail bar's width (@c size.rail).
-    int barInsetPoints = 0;                 ///< The bar's left edge within the strip (@c space.railInset).
-    int barRadiusPoints = 0;                ///< The bar's end radius (@c radius.rail).
-    int markPoints = 0;                     ///< The rail mark's edge (@c size.railMark).
-
-    bool operator==(GutterChrome const&) const = default;
-};
-
-/// The gutter chrome of chrome row @p style, from its tokens.
-/// @param style The chrome row.
-/// @return Its block column's form and the rail's metrics in points.
-[[nodiscard]] GutterChrome gutterChromeFor(config::ChromeStyle style) noexcept;
-
 /// The gutter layout @p config asks for under @p chrome: what the window reserves, what the hit-test reads,
 /// and -- through the same config::gutterSettingsFor() -- what the terminal draws.
 /// @param config The loaded configuration.
@@ -124,6 +102,16 @@ struct GutterChrome
                                                           vtbackend::ImageSize cellSize,
                                                           double scale,
                                                           GutterChrome const& chrome);
+
+/// The block rail's strip in device pixels, as the renderer draws it: what @p layout reserves under
+/// @p chrome at @p scale, and the bar's metrics within it. All zero where the layout has no strip.
+/// @param layout The gutter's segments.
+/// @param chrome The session's gutter chrome.
+/// @param scale The device-pixel ratio.
+/// @return The metrics.
+[[nodiscard]] vtrasterizer::GutterRailMetrics gutterRailMetricsFor(vtbackend::GutterLayout const& layout,
+                                                                   GutterChrome const& chrome,
+                                                                   double scale) noexcept;
 
 /// Resizes @p session's terminal to @p totalPageSize under its lock, and, when the page changed, asks for the
 /// size indicator. The request is posted to the session's thread, so it reads the main page as it is when it

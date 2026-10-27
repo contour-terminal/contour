@@ -939,13 +939,13 @@ TEST_CASE("BoxDrawingRenderer.contourGlyphsKeepTheCellsStrokeWhenDrawnTwoCellsWi
     auto const narrow = vtbackend::LineFlags {};
     CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, wide, 1) == 2);
     CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, narrow, 1) == 1);
-    for (auto const codepoint: std::views::iota(char32_t { 0x10F000 }, char32_t { 0x10F010 }))
+    for (auto const codepoint: std::views::iota(char32_t { 0x10F000 }, char32_t { 0x10F012 }))
     {
         CAPTURE(static_cast<uint32_t>(codepoint));
         CHECK(BoxDrawingRenderer::renderable(codepoint));
         CHECK(BoxDrawingRenderer::tileLineThickness(codepoint, wide, 1) == 1);
     }
-    CHECK_FALSE(BoxDrawingRenderer::isContourGlyph(char32_t { 0x10F010 }));
+    CHECK_FALSE(BoxDrawingRenderer::isContourGlyph(char32_t { 0x10F012 }));
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
@@ -1023,6 +1023,35 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
         CHECK(cross[(10 * 9) + 4] > 0);
         CHECK(cross[(2 * 9) + 0] == 0);
     }
+}
+
+TEST_CASE("BoxDrawingRenderer.railMarks", "[boxdrawing][renderer]")
+{
+    // The rail's own marks: a light check, and the failure disc -- a disc with a cross knocked out of it, so
+    // the cross is the page showing through. The Unicode shapes they look like stay the font's. Drawn two
+    // cells wide, as the rail draws them, so they size to the row.
+    auto constexpr Cell = ImageSize { Width(18), Height(20) };
+    auto const build = [&](char32_t codepoint) {
+        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, Cell, 1);
+        REQUIRE(buffer.has_value());
+        return *std::move(buffer);
+    };
+    CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F010 }));
+    CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F011 }));
+    CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x2713 }));
+    CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x2717 }));
+
+    auto const check = build(0x10F010);
+    CHECK(countLitPixels(check) > 0);
+    CHECK(check != build(0x10F005));
+
+    // The failure disc: lit where the disc is and the cross is not, dark at the cross's centre.
+    auto const failure = build(0x10F011);
+    auto const disc = build(0x10F004);
+    CHECK(countLitPixels(failure) > 0);
+    CHECK(countLitPixels(failure) < countLitPixels(disc));
+    CHECK(failure == horizontalMirror(failure, Cell));
+    CHECK(failure[(10 * 18) + 9] == 0);
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterGlyphsDrawnTwoCellsWideAreTwiceTheSize", "[boxdrawing]")

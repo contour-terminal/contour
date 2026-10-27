@@ -62,11 +62,11 @@ class BoxDrawingRenderer: public Renderable
 
     [[nodiscard]] static bool renderable(char32_t codepoint) noexcept;
 
-    /// Whether @p codepoint is one of Contour's own private-use glyphs: the gutter's fold column and status
-    /// marks (@see docs/vt-extensions/private-use-glyphs.md).
+    /// Whether @p codepoint is one of Contour's own private-use glyphs: the gutter's fold column, its status
+    /// marks and the block rail's (@see docs/vt-extensions/private-use-glyphs.md).
     [[nodiscard]] static constexpr bool isContourGlyph(char32_t codepoint) noexcept
     {
-        return 0x10F000 <= codepoint && codepoint <= 0x10F00F;
+        return 0x10F000 <= codepoint && codepoint <= 0x10F011;
     }
 
     /// The line thickness @p codepoint's tile is drawn with on a row with @p flags: the cell's own, doubled

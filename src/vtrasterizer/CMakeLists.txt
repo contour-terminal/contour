@@ -11,6 +11,7 @@ set(_header_files
     GutterCells.hpp
     ImageRenderer.hpp
     Pixmap.hpp
+    RailGeometry.hpp
     RenderTarget.hpp
     ReGISFontRasterizer.hpp
     Renderer.hpp
@@ -48,6 +49,7 @@ set(_test_files
     GridMetrics_test.cpp
     GutterCells_test.cpp
     ImageRenderer_test.cpp
+    RailGeometry_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
     UnderlineGeometry_test.cpp

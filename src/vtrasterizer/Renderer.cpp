@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/AtlasBudget.hpp>
 #include <vtrasterizer/GutterCells.hpp>
+#include <vtrasterizer/RailGeometry.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -580,6 +581,7 @@ void Renderer::applyPendingReconfig()
         }
         _gridMetrics.pageSize = geometry.pageSize;
         _gridMetrics.pageMargin = geometry.pageMargin;
+        _gridMetrics.rail = geometry.rail;
         growAtlasForPage(geometry.pageSize);
     }
 
@@ -846,9 +848,9 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             renderCells(split.mainCells);
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
             renderLines(split.mainLines);
-            renderGutter(std::span(buffer.gutter));
             renderAnnotations(std::span(buffer.annotations));
         });
+        renderGutter(std::span(buffer.gutter), 0);
         if (statusShifted)
             renderStatusRows(buffer, split);
         if (auto const& header = buffer.stickyHeader)
@@ -872,9 +874,9 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
-            renderGutter(std::span(renderBuffer.get().gutter));
             renderAnnotations(std::span(renderBuffer.get().annotations));
         });
+        renderGutter(std::span(renderBuffer.get().gutter), smoothPixelOffset);
 
         // Scissor clips the main display area so the offset content doesn't bleed into the status line.
         {
@@ -1017,17 +1019,45 @@ void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
     }
 }
 
-void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
+template <typename Content>
+void Renderer::renderShiftedLeft(int shift, Content&& content)
+{
+    _gridMetrics.pageMargin.left -= shift;
+    auto const restore = core::Finally { [&] { _gridMetrics.pageMargin.left += shift; } };
+    _textRenderer.beginFrame();
+    std::forward<Content>(content)();
+    _textRenderer.endFrame();
+}
+
+void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter, int smoothScrollOffset)
 {
     ZoneScoped;
-    for (auto const& marker: gutter)
-    {
-        // A rail cell names a segment of the strip after the cells, not a character at a column: there is no
-        // glyph to draw for it here.
-        if (marker.rail != vtbackend::RailSegment::None || marker.mark != vtbackend::RailMark::None)
-            continue;
-        renderOverlayCell(gutterRenderCell(marker), "renderGutter");
-    }
+    auto const isRailCell = [](vtbackend::RenderGutterCell const& cell) {
+        return cell.rail != vtbackend::RailSegment::None || cell.mark != vtbackend::RailMark::None;
+    };
+
+    // The bars, opaque, in the strip: rectangles draw before any glyph of the step, so the marks go over.
+    for (auto const& cell: gutter)
+        for (auto const& rect: railRects(cell, _gridMetrics, smoothScrollOffset))
+            _renderTarget->renderRectangle(rect.x,
+                                           rect.y,
+                                           vtbackend::Width::cast_from(rect.width),
+                                           vtbackend::Height::cast_from(rect.height),
+                                           vtbackend::RGBAColor(cell.railColor));
+
+    // The timestamps and line numbers, left of the strip; where there is none, where they always were.
+    renderShiftedLeft(cellGutterShift(_gridMetrics), [&] {
+        for (auto const& cell: gutter)
+            if (!isRailCell(cell))
+                renderOverlayCell(gutterRenderCell(cell), "renderGutter");
+    });
+
+    // The marks, centred on the bar: text only, so no cell background covers the strip around them.
+    renderShiftedLeft(railMarkShift(_gridMetrics), [&] {
+        for (auto const& cell: gutter)
+            if (cell.mark != vtbackend::RailMark::None)
+                _textRenderer.renderCell(railMarkCell(cell));
+    });
 }
 
 void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)

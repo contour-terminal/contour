@@ -141,7 +141,8 @@ TEST_CASE("FontControl.gutterChromeFor.followsTheChromeRow", "[contour][geometry
                             .barPoints = 3,
                             .barInsetPoints = 8,
                             .barRadiusPoints = 2,
-                            .markPoints = 13 });
+                            .markPoints = 13,
+                            .barEndPoints = 2 });
     CHECK(gutterChromeFor(ChromeStyle::Terminal).form == BlockColumnForm::Glyphs);
 }
 
@@ -169,4 +170,25 @@ TEST_CASE("FontControl.configuredGutterWidth.reservesTheRailStripAfterTheCells",
     CHECK(configuredGutterWidth(config, cell, Scale, terminal)
           == leadIn + ((timestampAndNumberCells + 2) * 9)); // the default two-cell block column
     CHECK(configuredGutterExtent(config, cell, Scale, terminal).rail == 0);
+}
+
+TEST_CASE("FontControl.gutterRailMetricsFor.isTheStripThePageFitReserves", "[contour][geometry][gutter]")
+{
+    // The renderer's strip and the page fit's are one width, both rounded from the row's points.
+    auto const cell = vtbackend::ImageSize { .width = vtbackend::Width(9), .height = vtbackend::Height(18) };
+    auto constexpr Scale = 1.5;
+    auto const config = contour::config::Config {};
+    auto const mac = gutterChromeFor(contour::config::ChromeStyle::MacOS);
+    auto const layout = contour::session::configuredGutterLayout(config, mac);
+    auto const rail = contour::session::gutterRailMetricsFor(layout, mac, Scale);
+    CHECK(rail
+          == vtrasterizer::GutterRailMetrics {
+              .strip = 33, .bar = 5, .barInset = 12, .radius = 3, .endInset = 3 });
+    CHECK(rail.strip == configuredGutterExtent(config, cell, Scale, mac).rail);
+
+    // The Terminal row has no strip, so the renderer moves nothing.
+    auto const terminal = gutterChromeFor(contour::config::ChromeStyle::Terminal);
+    CHECK(contour::session::gutterRailMetricsFor(
+              contour::session::configuredGutterLayout(config, terminal), terminal, Scale)
+          == vtrasterizer::GutterRailMetrics {});
 }
