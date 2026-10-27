@@ -3028,6 +3028,29 @@ TEST_CASE("TerminalSessionManager: closing the prompt's pane, its window, or the
     }
 }
 
+TEST_CASE("TerminalSessionManager: the prompt's program ending turns secure input off and the lock away",
+          "[manager][secureinput]")
+{
+    // Review M4: the program dies at its prompt, leaving the terminal's flags as they were; the pane stays
+    // (its footer), but nothing is typing a password into it any more.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const prompt = window->activeSession();
+    REQUIRE(prompt != nullptr);
+    promptWith(*prompt, vtpty::InputEcho::Hidden);
+    REQUIRE(doubles.record.enables == 1);
+    REQUIRE(secureRoleAt(*window, 0) != 0);
+
+    endEarly(*prompt);
+    CHECK(doubles.record.disables == 1);
+    CHECK(indicatorOf(*prompt) == contour::window::SecureIndicator::None);
+    CHECK(secureRoleAt(*window, 0) == 0);
+}
+
 TEST_CASE("TerminalSessionManager: another application in front turns secure input off",
           "[manager][secureinput]")
 {
