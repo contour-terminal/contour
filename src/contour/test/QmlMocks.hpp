@@ -504,6 +504,34 @@ class MockSession: public QObject
     int _restartOffer = 0; ///< session::FooterRestart::Unavailable.
 };
 
+/// A MockSession whose viewport scrolls, as TerminalSession's does: the chrome writes the offset when the bar
+/// moves, and is told whenever it moved.
+class ScrollingMockSession final: public MockSession
+{
+    Q_OBJECT
+    Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
+
+  public:
+    using MockSession::MockSession;
+
+    [[nodiscard]] int scrollOffset() const { return _scrollOffset; }
+
+    /// Moves the viewport, announcing it only when it moved, as the terminal's viewport does.
+    void setScrollOffset(int value)
+    {
+        if (value == _scrollOffset)
+            return;
+        _scrollOffset = value;
+        emit scrollOffsetChanged();
+    }
+
+  signals:
+    void scrollOffsetChanged();
+
+  private:
+    int _scrollOffset = 0;
+};
+
 /// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /
 /// active / isLeaf / first / second are settable and carry NOTIFY signals, so a test can drive the exact
 /// transitions a real split/collapse produces: a leaf becoming a split node, a session rebinding

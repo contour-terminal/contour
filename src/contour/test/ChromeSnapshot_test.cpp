@@ -31,6 +31,7 @@
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
 #include <QtCore/QSizeF>
+#include <QtCore/QStringList>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QFontInfo>
@@ -49,6 +50,7 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <ranges>
 
 #include <QtQuickControls2/QQuickStyle>
@@ -478,6 +480,53 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const inHeaderRow = variant.row == contour::config::ChromeStyle::Terminal
                                          && row.panes == PaneShape::SplitThree;
                 CHECK((parent->objectName() == QStringLiteral("paneHeaderFindSlot")) == inHeaderRow);
+                break;
+            }
+            case SnapshotScript::SizeIndicator: {
+                // Each pane of the split shows its own size, "columns × lines", centred on it.
+                auto const pills = contour::test::itemsNamed(content, QStringLiteral("sizeIndicator"));
+                REQUIRE(pills.size() == paneCount(row.panes));
+                auto texts = QStringList {};
+                for (auto const* pill: pills)
+                {
+                    CHECK(QTest::qWaitFor([pill] { return pill->property("shown").toBool(); }));
+                    auto const text = pill->property("text").toString();
+                    CHECK(text.contains(QStringLiteral(" × ")));
+                    texts << text;
+                }
+                // The split's panes are not all one size, and each pill reads its own.
+                texts.removeDuplicates();
+                CHECK(texts.size() > 1);
+                break;
+            }
+            case SnapshotScript::LinkPill:
+            case SnapshotScript::LinkPillSplit: {
+                // The active pane names the link's target and how to open it: over the grid's blank cells on
+                // one pane, in the pane header where a split gives it one.
+                auto const pills = contour::test::itemsNamed(content, QStringLiteral("linkPill"));
+                auto const shown = [](QQuickItem const* pill) {
+                    return pill->property("shown").toBool();
+                };
+                REQUIRE(QTest::qWaitFor([&] { return std::ranges::count_if(pills, shown) == 1; }));
+                auto const* pill = *std::ranges::find_if(pills, shown);
+                CHECK(pill->property("text").toString() == QString::fromUtf8(SnapshotLinkTarget));
+                CHECK_FALSE(pill->property("detail").toString().isEmpty());
+                REQUIRE(pill->parentItem() != nullptr);
+                auto const inHeader =
+                    pill->parentItem()->objectName() == QStringLiteral("paneHeaderLinkSlot");
+                CHECK(inHeader == (row.panes == PaneShape::SplitThree));
+                break;
+            }
+            case SnapshotScript::ScrollbarOverlay: {
+                // Scrolled back: the overlay bar shows, off the bottom, with the failure's and the running
+                // command's ticks.
+                auto const bars = contour::test::itemsNamed(content, QStringLiteral("verticalScrollBar"));
+                REQUIRE(bars.size() == 1);
+                auto const* bar = bars.front();
+                CHECK(QTest::qWaitFor([bar] { return bar->isVisible() && bar->opacity() == 1.0; }));
+                CHECK(bar->property("position").toReal()
+                      < 1.0 - bar->property("size").toReal() - std::numeric_limits<double>::epsilon());
+                CHECK(visibleItemsNamed(*bar, QStringLiteral("scrollbarMark")) == 2);
                 break;
             }
             case SnapshotScript::SingleTab: break;

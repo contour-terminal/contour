@@ -13,6 +13,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PermissionPrompt.hpp>
+#include <contour/session/SizeIndicator.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/PopupWaits.hpp>
@@ -32,6 +33,8 @@
 #include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+
 #include <core/platform/FileSystem.hpp>
 
 #include <QtCore/QByteArray>
@@ -43,6 +46,7 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
 #include <QtCore/QVariant>
+#include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
@@ -302,6 +306,9 @@ class ChromeSnapshotScene
             case ScriptAction::OpenFindBar: openFindBar(); break;
             case ScriptAction::OpenPermission: openPermission(scriptRow(_variant.script).permission); break;
             case ScriptAction::OpenSaveLayout: openSaveLayout(scriptRow(_variant.script).layoutName); break;
+            case ScriptAction::ShowSizeIndicator: showSizeIndicators(); break;
+            case ScriptAction::HoldLinkModifier: holdLinkModifier(); break;
+            case ScriptAction::ScrollBack: scrollBack(); break;
         }
         // The window's notices post their banner as the reload that failed would.
         if (scriptRow(_variant.script).banner == SnapshotBanner::ConfigReload)
@@ -419,6 +426,106 @@ class ChromeSnapshotScene
         }
     }
 
+    /// A cell of the stubbed terminal: StubContourTerminal's rows, and the width the link pill's clearance
+    /// measures columns in.
+    static constexpr qreal SnapshotCellWidth = 8;
+    static constexpr qreal SnapshotCellHeight = 20;
+
+    /// The terminal item of each leaf's session, in leaf order: the pane whose background is drawn for it.
+    /// Waits for the panes to be laid out: the window was only just shown.
+    [[nodiscard]] std::vector<QQuickItem*> terminalsOfLeaves()
+    {
+        _incubation.settle();
+        auto const backgrounds = itemsNamed(*window().contentItem(), QStringLiteral("paneBackground"));
+        auto terminals = std::vector<QQuickItem*> {};
+        for (auto const& session: _sessions)
+        {
+            auto const found = std::ranges::find_if(backgrounds, [&](QQuickItem const* background) {
+                return background->parentItem()->property("session").value<QObject*>() == session.get();
+            });
+            REQUIRE(found != backgrounds.end());
+            terminals.push_back((*found)->parentItem());
+        }
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                return std::ranges::all_of(terminals, [](QQuickItem const* terminal) {
+                    return terminal->width() >= SnapshotCellWidth && terminal->height() >= SnapshotCellHeight;
+                });
+            },
+            2000));
+        return terminals;
+    }
+
+    /// The page @p terminal holds in cells of SnapshotCellWidth × SnapshotCellHeight.
+    [[nodiscard]] static vtbackend::PageSize pageOf(QQuickItem const& terminal)
+    {
+        return vtbackend::PageSize { .lines = vtbackend::LineCount::cast_from(
+                                         static_cast<int>(terminal.height() / SnapshotCellHeight)),
+                                     .columns = vtbackend::ColumnCount::cast_from(
+                                         static_cast<int>(terminal.width() / SnapshotCellWidth)) };
+    }
+
+    /// Gives every leaf's session the page its pane holds, and raises its size indicator with that size, as
+    /// the resize that settled on it does.
+    void showSizeIndicators()
+    {
+        for (auto const [session, terminal]: std::views::zip(_sessions, terminalsOfLeaves()))
+        {
+            auto const page = pageOf(*terminal);
+            session->setPageSize(unbox(page.columns), unbox(page.lines));
+            session->requestSizeIndicator(QString::fromStdString(
+                session::sizeIndicatorText(session::SizeIndicatorKind::PageSize, page, 0.0)));
+        }
+    }
+
+    /// Holds the follow modifier over a link in the active pane: the session names SnapshotLinkTarget, how
+    /// the row's host opens it, and a page whose every cell is blank.
+    void holdLinkModifier()
+    {
+        auto* terminal = terminalsOfLeaves()[ActiveLeaf];
+        auto const page = pageOf(*terminal);
+        auto& session = *_sessions[ActiveLeaf];
+        session.setOverlayClearance(QVariantMap {
+            { QStringLiteral("marginLeft"), 0.0 },
+            { QStringLiteral("marginTop"), 0.0 },
+            { QStringLiteral("cellWidth"), SnapshotCellWidth },
+            { QStringLiteral("cellHeight"), SnapshotCellHeight },
+            { QStringLiteral("columns"), unbox(page.columns) },
+            { QStringLiteral("trailingBlank"),
+              QVariantList(unbox(page.lines), QVariant(unbox(page.columns))) },
+            { QStringLiteral("avoidRows"), QVariantList {} },
+        });
+        auto const hint = command::linkOpenHint(config::followHyperlinkModifiers(_paletteConfig),
+                                                vtbackend::Modifiers {},
+                                                command::shortcutStyleFor(variantHost(_variant)));
+        session.setLinkTarget(QString::fromUtf8(SnapshotLinkTarget), QString::fromStdString(hint), true);
+    }
+
+    /// Scrolls the active pane SnapshotScrollOffset lines back into SnapshotHistoryLines of history, with a
+    /// failed command's tick above the page and a running one's below it, in the variant's scheme colours.
+    void scrollBack()
+    {
+        auto* session = qobject_cast<ScrollingMockSession*>(_sessions[ActiveLeaf].get());
+        REQUIRE(session != nullptr); // makeSessions() gives a scrolling script's active leaf one
+        auto const palette =
+            config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance);
+        auto colors = QVariantList {};
+        for (auto const kind: vtbackend::ScrollbarMarkKindList)
+            colors.append(
+                QVariant::fromValue(platform::toQColor(vtbackend::scrollbarMarkColor(*palette, kind))));
+        auto const tick = [](double position, vtbackend::ScrollbarMarkKind kind, qint64 targetLine) {
+            return QVariantMap { { QStringLiteral("position"), position },
+                                 { QStringLiteral("kind"), static_cast<int>(kind) },
+                                 { QStringLiteral("targetLine"), targetLine } };
+        };
+        session->setHistoryLineCount(SnapshotHistoryLines);
+        session->setScrollbarMarks(QVariantList { tick(0.62, vtbackend::ScrollbarMarkKind::Failure, 620),
+                                                  tick(0.99, vtbackend::ScrollbarMarkKind::Running, 990) },
+                                   colors);
+        session->setScrollbarVisible(true);
+        session->setScrollOffset(SnapshotScrollOffset);
+    }
+
     /// Opens the active pane's find bar, as the SearchReverse action does, and waits for it to stand open.
     void openFindBar()
     {
@@ -442,7 +549,12 @@ class ChromeSnapshotScene
         auto sessions = std::vector<std::unique_ptr<MockSession>> {};
         for (auto const leaf: std::views::iota(std::size_t { 0 }, paneCount(script.panes)))
         {
-            auto session = std::make_unique<MockSession>(platform::toQColor(look.terminalBackground));
+            // A scrolled-back script's active leaf scrolls; every other session has no viewport of its own.
+            auto const background = platform::toQColor(look.terminalBackground);
+            auto session =
+                script.action == ScriptAction::ScrollBack && leaf == ActiveLeaf
+                    ? std::unique_ptr<MockSession> { std::make_unique<ScrollingMockSession>(background) }
+                    : std::make_unique<MockSession>(background);
             if (leaf != ActiveLeaf)
                 session->setDimUnfocused(static_cast<float>(look.dimUnfocused));
             auto const& label = SnapshotPaneLabels[leaf];

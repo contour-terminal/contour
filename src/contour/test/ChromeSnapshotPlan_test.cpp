@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <format>
+#include <string_view>
 #include <vector>
 
 using vtbackend::operator""_rgb;
@@ -286,6 +287,7 @@ TEST_CASE("snapshot.scriptTable.findBar", "[snapshot]")
 {
     using namespace contour::test::snapshot;
     // The find bar's three rows: on a pane, under a split's header, and on a refused pattern.
+    CHECK(static_cast<int>(SnapshotScript::FindBarInvalid) == static_cast<int>(SnapshotScript::FindBar) + 2);
     CHECK(scriptRow(SnapshotScript::FindBar).name == "find-bar");
     CHECK(scriptRow(SnapshotScript::FindBar).panes == PaneShape::SingleLeaf);
     CHECK(scriptRow(SnapshotScript::FindBar).find == SnapshotFind::Matches);
@@ -333,4 +335,66 @@ TEST_CASE("snapshot.scriptTable.permissionAndSaveLayout", "[snapshot]")
         return row.permission != SnapshotPermission::None || row.layoutName != SnapshotLayoutName::None;
     });
     CHECK(asking == 4);
+}
+
+TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    // The size indicator, the link pill on a pane and in a header, and the overlay scrollbar, appended after
+    // Step 3c's rows.
+    CHECK(static_cast<int>(SnapshotScript::SizeIndicator)
+          == static_cast<int>(SnapshotScript::ConfigReloadBanner) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ScrollbarOverlay);
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        PaneShape panes;
+        ScriptAction action;
+    };
+    for (auto const& expected: std::array {
+             Expected { SnapshotScript::SizeIndicator,
+                        "size-indicator",
+                        PaneShape::SplitThree,
+                        ScriptAction::ShowSizeIndicator },
+             Expected { SnapshotScript::LinkPill,
+                        "link-pill",
+                        PaneShape::SingleLeaf,
+                        ScriptAction::HoldLinkModifier },
+             Expected { SnapshotScript::LinkPillSplit,
+                        "link-pill-split",
+                        PaneShape::SplitThree,
+                        ScriptAction::HoldLinkModifier },
+             Expected { SnapshotScript::ScrollbarOverlay,
+                        "scrollbar-overlay",
+                        PaneShape::SingleLeaf,
+                        ScriptAction::ScrollBack },
+         })
+    {
+        CAPTURE(expected.name);
+        auto const& row = scriptRow(expected.script);
+        CHECK(row.name == expected.name);
+        CHECK(row.panes == expected.panes);
+        CHECK(row.action == expected.action);
+        // Every other field at its default: a plain window, the overlay alone on it.
+        CHECK(row.tabCount == 1);
+        CHECK(row.banner == SnapshotBanner::None);
+        CHECK(row.density == contour::config::ChromeDensity::Comfortable);
+        CHECK(row.find == SnapshotFind::None);
+    }
+    // Only these rows perform these actions.
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK((row.action == ScriptAction::ShowSizeIndicator)
+              == (row.script == SnapshotScript::SizeIndicator));
+        CHECK((row.action == ScriptAction::HoldLinkModifier)
+              == (row.script == SnapshotScript::LinkPill || row.script == SnapshotScript::LinkPillSplit));
+        CHECK((row.action == ScriptAction::ScrollBack) == (row.script == SnapshotScript::ScrollbarOverlay));
+    }
+    // The matrix grows by the four rows on every row, edition and appearance.
+    auto const rows =
+        std::array { contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal };
+    CHECK(snapshotMatrix(rows).size()
+          == SnapshotScripts.size() * rows.size() * SnapshotEditions.size() * SnapshotAppearances.size());
 }

@@ -74,6 +74,10 @@ enum class SnapshotScript : uint8_t
     SaveLayout,         //!< Save Layout over three tabs, "dev" typed, the name free.
     SaveLayoutTaken,    //!< Save Layout with "dev" typed, the name taken: "Replace?" offered.
     ConfigReloadBanner, //!< The banner a configuration that failed to reload shows.
+    SizeIndicator,      //!< split-three just resized: each pane's size indicator reads its own size.
+    LinkPill,           //!< One pane with the follow modifier held over a link: its target in a pill.
+    LinkPillSplit,      //!< split-three with the follow modifier held: the pill in the active pane's header.
+    ScrollbarOverlay,   //!< One pane scrolled back: the overlay scrollbar, with a failure and a running tick.
 };
 
 /// How a script's active tab is divided into panes.
@@ -120,6 +124,9 @@ enum class ScriptAction : uint8_t
     OpenFindBar,        //!< The active pane's find bar, opened as the SearchReverse action opens it.
     OpenPermission,     //!< The active pane's session asks the row's permission question.
     OpenSaveLayout,     //!< Save Layout opened, as a nameless SaveLayout action opens it, "dev" typed.
+    ShowSizeIndicator,  //!< Every pane's size indicator, raised as a resize raises it.
+    HoldLinkModifier,   //!< The follow modifier held over a link in the active pane.
+    ScrollBack,         //!< The active pane scrolled back into its history, its scrollbar ticked.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -229,6 +236,15 @@ enum class SnapshotHost : uint8_t
     RowDefault = 0, //!< Each row on its own host, as SnapshotRowHosts lists it.
     MacOS,          //!< Every row on macOS: its traffic lights, its shortcut glyphs and its title bar.
 };
+
+/// The link target the link-pill scripts hold the follow modifier over, as the session spells it: a
+/// breadcrumb.
+inline constexpr std::string_view SnapshotLinkTarget =
+    "github.com › contour-terminal › contour › issues › 2175";
+
+/// How far back the scrollbar-overlay script scrolls, in lines, through how much history.
+inline constexpr int SnapshotScrollOffset = 20;
+inline constexpr int SnapshotHistoryLines = 1000;
 
 /// What the active pane's search shows when its find bar is opened.
 enum class SnapshotFind : uint8_t
@@ -1012,6 +1028,90 @@ inline constexpr auto SnapshotScripts = std::array {
                         .connection = HostConnection::Local,
                         .hostLabel = "",
                         .banner = SnapshotBanner::ConfigReload,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None },
+    SnapshotScriptRow { .script = SnapshotScript::SizeIndicator,
+                        .name = "size-indicator",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::ShowSizeIndicator,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None },
+    SnapshotScriptRow { .script = SnapshotScript::LinkPill,
+                        .name = "link-pill",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::HoldLinkModifier,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None },
+    SnapshotScriptRow { .script = SnapshotScript::LinkPillSplit,
+                        .name = "link-pill-split",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::HoldLinkModifier,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None },
+    SnapshotScriptRow { .script = SnapshotScript::ScrollbarOverlay,
+                        .name = "scrollbar-overlay",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::ScrollBack,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
                         .activeTab = 0,
                         .drift = SnapshotDrift::None,

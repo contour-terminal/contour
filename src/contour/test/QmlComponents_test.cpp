@@ -103,6 +103,7 @@
 using contour::test::itemsNamed;
 using contour::test::MockPaneProxy;
 using contour::test::MockSession;
+using contour::test::ScrollingMockSession;
 using contour::test::StubContourTerminal;
 
 namespace
@@ -2523,32 +2524,6 @@ namespace
 {
     return item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint();
 }
-
-/// A MockSession whose viewport scrolls, as TerminalSession's does: the chrome writes the offset when the bar
-/// moves, and is told whenever it moved.
-class ScrollingMockSession final: public MockSession
-{
-    Q_OBJECT
-    Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
-
-  public:
-    [[nodiscard]] int scrollOffset() const { return _scrollOffset; }
-
-    /// Moves the viewport, announcing it only when it moved, as the terminal's viewport does.
-    void setScrollOffset(int value)
-    {
-        if (value == _scrollOffset)
-            return;
-        _scrollOffset = value;
-        emit scrollOffsetChanged();
-    }
-
-  signals:
-    void scrollOffsetChanged();
-
-  private:
-    int _scrollOffset = 0;
-};
 
 /// A MockSession whose viewport glides, as TerminalSession's does: the session moves its own view frame by
 /// frame and announces each move, and a write from the chrome is the user's scroll, which ends a glide.
