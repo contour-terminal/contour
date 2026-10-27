@@ -10,6 +10,7 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <vector>
 
 #include <vthost/HistorySeed.hpp>
 #include <vthost/WorkspaceCapture.hpp>
@@ -24,7 +25,11 @@ using vtbackend::PageSize;
 namespace
 {
 
-constexpr auto TakenAt = std::chrono::local_days { 2026y / 10 / 22 } + 14h + 3min;
+constexpr auto TakenAt = std::chrono::local_days { 2026y / 10 / 22 } + 14h + 3min + 31s;
+constexpr auto DividerOn =
+    RestoreDivider { .sessionEndedAt = TakenAt, .today = std::chrono::local_days { 2026y / 10 / 22 } };
+constexpr auto DividerNextDay =
+    RestoreDivider { .sessionEndedAt = TakenAt, .today = std::chrono::local_days { 2026y / 10 / 23 } };
 
 /// A terminal that has printed @p rows numbered rows and has its cursor under them: what a pane captured.
 [[nodiscard]] proto::Delta capturedRows(int rows, int columns = 80)
@@ -42,9 +47,72 @@ constexpr auto TakenAt = std::chrono::local_days { 2026y / 10 / 22 } + 14h + 3mi
 
 } // namespace
 
-TEST_CASE("restoredMarker spells the restore time", "[vthost][snapshot][seed]")
+TEST_CASE("the divider's words name the day only when it is not today", "[vthost][snapshot][seed]")
 {
-    CHECK(restoredMarker(TakenAt) == "\x1b[2m── restored · snapshot of 2026-10-22 14:03 ──\x1b[m\r\n");
+    CHECK(restoredDividerText(DividerOn) == "Restored · session ended 14:03");
+    CHECK(restoredDividerText(DividerNextDay) == "Restored · session ended 2026-10-22 14:03");
+}
+
+TEST_CASE("the divider is centred between rules and never wider than the pane", "[vthost][snapshot][seed]")
+{
+    auto const text = restoredDividerText(DividerOn);
+    auto const textWidth = static_cast<int>(std::ranges::count_if(
+        text, [](char byte) { return (static_cast<unsigned char>(byte) & 0b1100'0000U) != 0b1000'0000U; }));
+    REQUIRE(textWidth == 30);
+
+    SECTION("a wide pane")
+    {
+        constexpr auto Columns = 40;
+        auto const row = restoredDivider(DividerOn, ColumnCount(Columns));
+        auto const left = (Columns - textWidth - 2) / 2;
+        auto const right = Columns - textWidth - 2 - left;
+        auto repeated = [](int count) {
+            auto out = std::string {};
+            for (auto const _: std::views::iota(0, count))
+                out += "─";
+            return out;
+        };
+        CHECK(row == std::format("{} {} {}", repeated(left), text, repeated(right)));
+        CHECK(row.starts_with("──── Restored"));
+    }
+    SECTION("a pane as wide as the text plus its two spaces")
+    {
+        CHECK(restoredDivider(DividerOn, ColumnCount(textWidth + 2)) == std::format(" {} ", text));
+    }
+    SECTION("a pane narrower than that holds the text alone")
+    {
+        CHECK(restoredDivider(DividerOn, ColumnCount(20)) == text);
+        CHECK_FALSE(restoredDivider(DividerOn, ColumnCount(20)).contains("─"));
+    }
+}
+
+TEST_CASE("the seeded divider is one dim row that a resize cuts instead of wrapping",
+          "[vthost][snapshot][seed]")
+{
+    auto const history = capturedRows(3, 40);
+    auto fresh = freshTerminal(40);
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
+
+    auto& screen = fresh.terminal.primaryScreen();
+    CHECK(screen.grid().lineText(LineOffset(0)).starts_with("──── Restored · session ended 14:03"));
+    CHECK(screen.grid().lineAt(LineOffset(0)).storage().sgr[0].flags.contains(vtbackend::CellFlag::Faint));
+    CHECK_FALSE(screen.grid().lineAt(LineOffset(0)).wrappable());
+
+    for (auto const columns: { 30, 60 })
+    {
+        fresh.terminal.resizeScreen(PageSize { LineCount(24), ColumnCount(columns) });
+        fresh.terminal.writeToScreen("$ ");
+        auto const& grid = fresh.terminal.primaryScreen().grid();
+        CAPTURE(columns);
+        auto const rows =
+            std::views::iota(-3, 8)
+            | std::views::filter([&](int row) { return grid.lineText(LineOffset(row)).contains("Restored"); })
+            | std::ranges::to<std::vector>();
+        REQUIRE(rows.size() == 1);
+        auto const dividerRow = LineOffset(rows.front());
+        CHECK(grid.lineText(dividerRow).starts_with("──── Restored"));
+        CHECK(grid.lineText(dividerRow + 1).starts_with("$ "));
+    }
 }
 
 TEST_CASE("seeded rows sit in the history above a blank page", "[vthost][snapshot][seed]")
@@ -53,13 +121,13 @@ TEST_CASE("seeded rows sit in the history above a blank page", "[vthost][snapsho
     REQUIRE(history.lines.size() == 30);
     auto fresh = freshTerminal();
 
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
 
     auto const& grid = fresh.terminal.primaryScreen().grid();
     CHECK(grid.historyLineCount() >= LineCount(30));
     CHECK(grid.lineText(LineOffset(-30)).starts_with("r1 "));
     CHECK(grid.lineText(LineOffset(-1)).starts_with("r30"));
-    CHECK(grid.lineText(LineOffset(0)).contains("restored · snapshot of 2026-10-22 14:03"));
+    CHECK(grid.lineText(LineOffset(0)).contains("Restored · session ended 14:03"));
     CHECK(fresh.terminal.primaryScreen().cursor().position
           == vtbackend::CellLocation { .line = LineOffset(1), .column = vtbackend::ColumnOffset(0) });
     CHECK(grid.lineTextTrimmed(LineOffset(5)).empty());
@@ -70,7 +138,7 @@ TEST_CASE("fewer rows than the page leave no blank rows above them", "[vthost][s
     auto const history = capturedRows(5);
     auto fresh = freshTerminal();
 
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
 
     auto const& grid = fresh.terminal.primaryScreen().grid();
     CHECK(grid.historyLineCount() == LineCount(5));
@@ -82,7 +150,7 @@ TEST_CASE("exactly a page of rows lands in the history whole", "[vthost][snapsho
 {
     auto const history = capturedRows(23); // what a 24-line page above the cursor can hold
     auto fresh = freshTerminal();
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
     auto const& grid = fresh.terminal.primaryScreen().grid();
     CHECK(grid.historyLineCount() == LineCount(static_cast<int>(history.lines.size())));
     CHECK(grid.lineText(LineOffset(-1)).starts_with("r23"));
@@ -101,7 +169,7 @@ TEST_CASE("seeded command blocks are found and new ones get higher ids", "[vthos
     auto const second = history.commandBlocks[1].id;
 
     auto fresh = freshTerminal();
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
 
     auto const& store = fresh.terminal.commandBlocks();
     REQUIRE(store.find(vtbackend::CommandBlockId { first }) != nullptr);
@@ -120,7 +188,7 @@ TEST_CASE("a seeded hyperlink keeps its URI", "[vthost][snapshot][seed]")
     REQUIRE(history.hyperlinks.size() == 1);
 
     auto fresh = freshTerminal();
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
 
     auto const& grid = fresh.terminal.primaryScreen().grid();
     auto const id = grid.lineAt(LineOffset(-1)).storage().hyperlinks[0];
@@ -138,7 +206,7 @@ TEST_CASE("rows wider than the terminal are cut, not wrapped", "[vthost][snapsho
     REQUIRE(history.lines.size() == 1);
 
     auto fresh = freshTerminal(80);
-    seedRestoredHistory(fresh.terminal, history, restoredMarker(TakenAt));
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
 
     auto const& grid = fresh.terminal.primaryScreen().grid();
     CHECK(grid.historyLineCount() == LineCount(1));

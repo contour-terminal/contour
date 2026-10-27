@@ -521,7 +521,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
-        seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredMarker);
+        seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredDivider);
     if (_pumping == SessionPumping::Threaded)
         session->start();
     if (session->hasExtensions())
@@ -758,11 +758,10 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
                         "restore: {} no longer exists; the pane starts in the shell's default directory",
                         core::pathToUtf8(*pane.workingDirectory));
             }
-            if (pane.history)
-            {
-                request.restoredHistory = std::make_shared<proto::Delta const>(*pane.history);
-                request.restoredMarker = restore.marker;
-            }
+            // Every restored pane gets the divider, one without history on its first row.
+            request.restoredHistory =
+                std::make_shared<proto::Delta const>(pane.history.value_or(proto::Delta {}));
+            request.restoredDivider = restore.divider;
             // What the restart stopped, unless the daemon types it again itself: then there is nothing to
             // tell.
             if (auto rerun = rerunInputFor(pane, restore.rerunPrograms))

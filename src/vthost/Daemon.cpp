@@ -337,13 +337,15 @@ namespace
 
     /// @param store The snapshot file, while persistence is on.
     /// @param config How the daemon keeps its workspace.
+    /// @param wall The daemon's wall clock, which dates the restore divider.
     /// @return What the host restores at its start; nullopt for nothing.
     [[nodiscard]] std::optional<WorkspaceRestore> restoreOf(std::optional<SessionSnapshotStore> const& store,
-                                                            WorkspacePersistenceConfig const& config)
+                                                            WorkspacePersistenceConfig const& config,
+                                                            core::platform::WallClockRef wall)
     {
         if (!store)
             return std::nullopt;
-        return prepareRestore(*store, config, logPersistence);
+        return prepareRestore(*store, config, logPersistence, wall);
     }
 
     class BoundPersistence;
@@ -803,7 +805,7 @@ int runDaemon(DaemonConfig const& config)
 
     // Read before the host, which realizes it in its constructor; the store outlives the persistence below.
     auto const store = snapshotStoreOf(config.persistence);
-    auto restore = restoreOf(store, config.persistence);
+    auto restore = restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
 
@@ -1043,7 +1045,7 @@ int runDaemon(DaemonConfig const& config)
 
     // See the POSIX body above.
     auto const store = snapshotStoreOf(config.persistence);
-    auto restore = restoreOf(store, config.persistence);
+    auto restore = restoreOf(store, config.persistence, wallClock);
     auto const restoredFrom =
         restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
 

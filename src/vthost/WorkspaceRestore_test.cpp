@@ -35,6 +35,11 @@ using vtworkspace::SplitState;
 namespace
 {
 
+constexpr auto DividerOf =
+    RestoreDivider { .sessionEndedAt = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 }
+                                       + std::chrono::hours { 14 } + std::chrono::minutes { 2 },
+                     .today = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 } };
+
 constexpr auto Now = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } };
 
 /// What a PTY factory was asked for, in order; it fails every spawn while @ref failing is set, and the first
@@ -213,7 +218,7 @@ TEST_CASE("a directory that is gone opens the pane in the default directory", "[
         "restore: /gone no longer exists; the pane starts in the shell's default directory"));
 }
 
-TEST_CASE("restored history sits above the marker and the new prompt", "[vthost][snapshot][restore]")
+TEST_CASE("restored history sits above the divider and the new prompt", "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
     auto source = h.makeHost({});
@@ -222,15 +227,25 @@ TEST_CASE("restored history sits above the marker and the new prompt", "[vthost]
     auto const captured = captureWorkspace(*source, {}, Now);
     REQUIRE(captured.windows.at(0).tabs.at(0).root.pane.history.has_value());
 
-    auto const host = h.restore(
-        WorkspaceRestore { .snapshot = captured,
-                           .marker = restoredMarker(std::chrono::local_seconds { Now.time_since_epoch() }) });
+    auto const host = h.restore(WorkspaceRestore { .snapshot = captured, .divider = DividerOf });
 
     auto& terminal = terminalOf(*host, 0);
     auto const& grid = terminal.primaryScreen().grid();
     CHECK(grid.lineText(vtbackend::LineOffset(-3)).starts_with("old 1"));
     CHECK(grid.lineText(vtbackend::LineOffset(-1)).starts_with("old 3"));
-    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("restored · snapshot of"));
+    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("Restored · session ended 14:02"));
+}
+
+TEST_CASE("a pane restored without history still has the divider on its first row",
+          "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot {} }), .divider = DividerOf });
+
+    auto const& grid = terminalOf(*host, 0).primaryScreen().grid();
+    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("Restored · session ended 14:02"));
+    CHECK(grid.historyLineCount() == vtbackend::LineCount(0));
 }
 
 TEST_CASE("an allow-listed program is typed into its restored shell once it shows a prompt",

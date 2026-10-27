@@ -824,7 +824,7 @@ struct RestartHarness
     /// @return What the second daemon's host holds once it has started.
     [[nodiscard]] vthost::WorkspaceSnapshot runSecondDaemon()
     {
-        auto restore = vthost::prepareRestore(store, config, sink());
+        auto restore = vthost::prepareRestore(store, config, sink(), wallClock);
         auto const restoredFrom =
             restore.transform([](vthost::WorkspaceRestore const& restored) { return restored.source; });
         auto host = startHost(std::move(restore));
@@ -865,7 +865,7 @@ TEST_CASE("what one host discards at shutdown, the next one does not restore", "
     auto h = RestartHarness {};
     h.runFirstDaemon(vthost::ShutdownCause::StopRequested);
 
-    REQUIRE_FALSE(vthost::prepareRestore(h.store, h.config, h.sink()).has_value());
+    REQUIRE_FALSE(vthost::prepareRestore(h.store, h.config, h.sink(), h.wallClock).has_value());
     auto const started = h.runSecondDaemon();
     REQUIRE(started.windows.size() == 1);
     REQUIRE(started.windows[0].tabs.size() == 1); // the startup layout

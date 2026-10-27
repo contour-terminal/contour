@@ -54,6 +54,7 @@
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
@@ -624,8 +625,9 @@ struct SessionSpawnRequest
     /// (@see seedRestoredHistory); null for a session that restores nothing.
     std::shared_ptr<proto::Delta const> restoredHistory {};
 
-    /// Written under @ref restoredHistory, as the parser reads it (@see restoredMarker); only with history.
-    std::string restoredMarker {};
+    /// The divider written under @ref restoredHistory (@see seedRestoredHistory); read only with history,
+    /// which a restored pane without rows still carries, empty.
+    RestoreDivider restoredDivider {};
 
     /// Typed at the session's first OSC 133 `A` (prompt start), or after InitialInputFallback: a restored
     /// pane's re-run program (@see rerunInputFor). Empty for nothing.
@@ -650,7 +652,7 @@ struct WorkspaceRestore
 {
     WorkspaceSnapshot snapshot;                ///< The windows, tabs and panes to bring back.
     std::vector<std::string> rerunPrograms {}; ///< The programs a restored pane may re-run (rerunInputFor).
-    std::string marker {}; ///< restoredMarker(snapshot.takenAt) in the daemon's local time.
+    RestoreDivider divider {}; ///< What every restored pane's divider says (@see seedRestoredHistory).
     RestoreSource source = RestoreSource::Snapshot; ///< Which file it came from, for endRestore().
 };
 

@@ -403,7 +403,8 @@ DaemonPersistence::DaemonPersistence(core::net::EventLoop& loop,
 
 std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store,
                                                WorkspacePersistenceConfig const& config,
-                                               DiagnosticSink const& report)
+                                               DiagnosticSink const& report,
+                                               core::platform::WallClockRef wall)
 {
     auto loaded = store.load();
     auto const file =
@@ -441,10 +442,14 @@ std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store
                         loaded.droppedHistories));
     auto snapshot = *std::move(loaded.snapshot);
     report(std::format("workspace restore: restoring {} window(s) from {}", snapshot.windows.size(), name));
-    auto const marker = restoredMarker(localTimeOf(snapshot.takenAt));
+    auto const divider = RestoreDivider {
+        .sessionEndedAt = localTimeOf(snapshot.takenAt),
+        .today = std::chrono::floor<std::chrono::days>(
+            localTimeOf(std::chrono::floor<std::chrono::seconds>(wall.now()))),
+    };
     return WorkspaceRestore { .snapshot = std::move(snapshot),
                               .rerunPrograms = config.rerunPrograms,
-                              .marker = marker,
+                              .divider = divider,
                               .source = loaded.source };
 }
 
