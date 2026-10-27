@@ -71,10 +71,20 @@ std::filesystem::path relativePathOf(SideFile const& file)
 
 namespace
 {
-    /// The names Windows keeps for devices; a file of that name, with any extension, opens the device.
-    constexpr auto WindowsDeviceNames = std::array<std::string_view, 22> {
-        "CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    /// The names Windows keeps for devices (Microsoft's documented list, with the superscript digits and
+    /// the console handles); a file of that name, with any extension, opens the device.
+    constexpr auto WindowsDeviceNames = std::array {
+        std::string_view { "CON" },       std::string_view { "PRN" },       std::string_view { "AUX" },
+        std::string_view { "NUL" },       std::string_view { "CONIN$" },    std::string_view { "CONOUT$" },
+        std::string_view { "COM0" },      std::string_view { "COM1" },      std::string_view { "COM2" },
+        std::string_view { "COM3" },      std::string_view { "COM4" },      std::string_view { "COM5" },
+        std::string_view { "COM6" },      std::string_view { "COM7" },      std::string_view { "COM8" },
+        std::string_view { "COM9" },      std::string_view { "COM\u00B9" }, std::string_view { "COM\u00B2" },
+        std::string_view { "COM\u00B3" }, std::string_view { "LPT0" },      std::string_view { "LPT1" },
+        std::string_view { "LPT2" },      std::string_view { "LPT3" },      std::string_view { "LPT4" },
+        std::string_view { "LPT5" },      std::string_view { "LPT6" },      std::string_view { "LPT7" },
+        std::string_view { "LPT8" },      std::string_view { "LPT9" },      std::string_view { "LPT\u00B9" },
+        std::string_view { "LPT\u00B2" }, std::string_view { "LPT\u00B3" },
     };
 
     /// Whether @p ch is a control character: below a space, or DEL.
@@ -88,7 +98,10 @@ namespace
     /// Whether @p name, up to its first dot, is a Windows device name, in any case.
     [[nodiscard]] bool namesWindowsDevice(std::string_view name)
     {
-        auto const stem = name.substr(0, name.find('.'));
+        // Windows also strips the spaces before the dot: "CON .x" is the console.
+        auto stem = name.substr(0, name.find('.'));
+        while (stem.ends_with(' '))
+            stem.remove_suffix(1);
         return std::ranges::any_of(WindowsDeviceNames, [stem](std::string_view device) {
             return std::ranges::equal(stem, device, [](char a, char b) {
                 return std::toupper(static_cast<unsigned char>(a))
@@ -104,8 +117,9 @@ namespace
         std::string_view reason;                ///< What the page says.
     };
 
-    /// The rules checkSideFileName() applies, in order.
-    constexpr auto NameRules = std::array {
+    /// The rules every side file name keeps, which the store enforces on every read, write and removal: they
+    /// keep a name inside its directory and make it one name.
+    constexpr auto ContainmentRules = std::array {
         NameRule { .refuses = [](std::string_view name) { return name.empty(); }, .reason = "Enter a name." },
         NameRule { .refuses =
                        [](std::string_view name) {
@@ -118,9 +132,21 @@ namespace
                    .reason = "A name cannot contain \"..\"." },
         NameRule { .refuses = [](std::string_view name) { return name.starts_with('.'); },
                    .reason = "A name cannot start with a dot." },
+    };
+
+    /// The rules a NEW name keeps besides: what Windows will not keep as a file name. A file that exists
+    /// already under such a name (`aux.yml` on Linux) stays readable, editable and deletable, so the store
+    /// does not apply these.
+    constexpr auto NewNameRules = std::array {
         NameRule {
             .refuses = [](std::string_view name) { return name.ends_with('.') || name.ends_with(' '); },
             .reason = "A name cannot end with a dot or a space." },
+        NameRule { .refuses =
+                       [](std::string_view name) {
+                           return name.find_first_of(std::string_view { "<>\"|?*" })
+                                  != std::string_view::npos;
+                       },
+                   .reason = "A name cannot contain < > \" | ? or *." },
         NameRule { .refuses = namesWindowsDevice,
                    .reason = "A name cannot be one Windows keeps for a device, such as CON or NUL." },
     };
@@ -128,10 +154,20 @@ namespace
 
 std::expected<void, std::string> checkSideFileName(std::string_view name)
 {
-    for (auto const& rule: NameRules)
+    for (auto const& rule: ContainmentRules)
         if (rule.refuses(name))
             return std::unexpected(std::string { rule.reason });
     return {};
+}
+
+std::expected<void, std::string> checkNewSideFileName(std::string_view name)
+{
+    return checkSideFileName(name).and_then([name]() -> std::expected<void, std::string> {
+        for (auto const& rule: NewNameRules)
+            if (rule.refuses(name))
+                return std::unexpected(std::string { rule.reason });
+        return {};
+    });
 }
 
 bool sideFilePathStaysIn(std::filesystem::path const& relative, std::filesystem::path const& directory)

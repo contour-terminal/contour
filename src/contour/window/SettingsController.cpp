@@ -444,7 +444,7 @@ namespace
     /// A name the user typed for a profile or a colour scheme, checked as a side file's name: never a path.
     [[nodiscard]] std::expected<void, SettingsError> checkNewName(std::string const& name)
     {
-        return config::checkSideFileName(name).transform_error([](std::string reason) {
+        return config::checkNewSideFileName(name).transform_error([](std::string reason) {
             return SettingsError { .kind = SettingsErrorKind::InvalidValue, .message = std::move(reason) };
         });
     }

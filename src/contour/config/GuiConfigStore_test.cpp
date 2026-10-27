@@ -188,8 +188,8 @@ TEST_CASE("FileGuiConfigStore: a name that would leave its directory is refused"
     auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
     auto store = FileGuiConfigStore { fileSystem, configDir() };
     using namespace std::string_view_literals;
-    // A drive or an NTFS stream (':'), a control character, NUL, a Windows device name, and a trailing dot
-    // or space that Windows strips, as well as what climbs out of the directory.
+    // A drive or an NTFS stream (':'), a control character, NUL, as well as what climbs out of the
+    // directory. What Windows will not keep is for new names only (below).
     for (auto const name: { "../x"sv,
                             "a/b"sv,
                             "a\\b"sv,
@@ -202,13 +202,7 @@ TEST_CASE("FileGuiConfigStore: a name that would leave its directory is refused"
                             "a\0b"sv,
                             "tab\there"sv,
                             "bell\x7f"sv,
-                            "CON"sv,
-                            "con"sv,
-                            "Nul.backup"sv,
-                            "COM1"sv,
-                            "lpt9"sv,
-                            "x."sv,
-                            "x "sv })
+                            "back\\slash"sv })
     {
         INFO(std::string { name });
         CHECK_FALSE(contour::config::checkSideFileName(name).has_value());
@@ -224,6 +218,43 @@ TEST_CASE("FileGuiConfigStore: a name that would leave its directory is refused"
     CHECK(contour::config::checkSideFileName("console").has_value());
     CHECK(contour::config::checkSideFileName("COM10").has_value());
     CHECK(contour::config::checkSideFileName("Dark é").has_value());
+}
+
+TEST_CASE("checkNewSideFileName: a new name is one Windows can keep", "[guiconfigstore]")
+{
+    using namespace std::string_view_literals;
+    for (auto const name: { "CON"sv,       "con"sv,       "Nul.backup"sv,  "aux"sv,    "PRN"sv,
+                            "COM0"sv,      "COM1"sv,      "com9"sv,        "LPT0"sv,   "lpt9"sv,
+                            "COM\u00B9"sv, "LPT\u00B2"sv, "COM\u00B3.x"sv, "CONIN$"sv, "conout$"sv,
+                            "CON .x"sv,    "x."sv,        "x "sv,          "a<b"sv,    "a>b"sv,
+                            "a\"b"sv,      "a|b"sv,       "a?b"sv,         "a*b"sv,    "D:x"sv,
+                            "../x"sv,      ""sv })
+    {
+        INFO(std::string { name });
+        CHECK_FALSE(contour::config::checkNewSideFileName(name).has_value());
+    }
+    for (auto const name: { "Contour Dark"sv, "console"sv, "COM10"sv, "COM"sv, "Dark é"sv, "conin"sv })
+    {
+        INFO(std::string { name });
+        CHECK(contour::config::checkNewSideFileName(name).has_value());
+    }
+}
+
+TEST_CASE("GuiConfigStore: a file that exists under a name a new one may not take stays usable",
+          "[guiconfigstore]")
+{
+    // An aux.yml or nul.yml made on Linux is readable, editable and deletable through the store.
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiConfigStore { fileSystem, configDir() };
+    for (auto const* name: { "aux", "nul", "trailing." })
+    {
+        INFO(name);
+        REQUIRE(store.write(profileFile(name), "p").has_value());
+        auto const read = store.read(profileFile(name));
+        REQUIRE(read.has_value());
+        CHECK(*read == std::optional<std::string> { "p" });
+        CHECK(store.remove(profileFile(name)).has_value());
+    }
 }
 
 TEST_CASE("GuiConfigStore: a side file's path stays in its directory", "[guiconfigstore]")

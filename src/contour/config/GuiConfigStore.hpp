@@ -51,13 +51,20 @@ struct SideFile
 
 /// Whether @p name may name a profile's or a colour scheme's side file: a file name inside `profiles/` or
 /// `colorschemes/`, never a path. Refused: an empty name, a `/` or `\\`, a `..`, a leading `.` (a hidden
-/// file, and the durable write's temporaries), a `:` (a drive on Windows, or an NTFS stream), a control
-/// character or NUL, and what Windows will not keep as a file name -- a device name (`CON`, `NUL`, `COM1`, …,
-/// also before a dot) or a trailing dot or space. The last are refused everywhere: a configuration
-/// directory travels between machines.
+/// file, and the durable write's temporaries), a `:` (a drive on Windows, or an NTFS stream), and a control
+/// character or NUL. The store applies this to every read, write and removal.
 /// @param name The name, as the user typed it.
 /// @return Nothing, or the reason a page shows.
 [[nodiscard]] std::expected<void, std::string> checkSideFileName(std::string_view name);
+
+/// Whether @p name may name a NEW profile or colour scheme: checkSideFileName(), and what Windows will not
+/// keep as a file name -- a device name (`CON`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, their superscript
+/// forms, `CONIN$`, `CONOUT$`; also before a dot, and with spaces before it), a trailing dot or space, and
+/// any of `<>"|?*`. Refused on every platform, as a configuration directory travels between machines; a file
+/// that exists under such a name already stays usable, which is why the store does not apply it.
+/// @param name The name, as the user typed it.
+/// @return Nothing, or the reason a page shows.
+[[nodiscard]] std::expected<void, std::string> checkNewSideFileName(std::string_view name);
 
 /// Whether @p relative, a side file's path relative to the configuration directory, is a file directly
 /// inside @p directory: no root name or root directory, and @p directory as its parent. The store's own
