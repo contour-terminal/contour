@@ -19,7 +19,9 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <QtTest/QSignalSpy>
 #include <vtworkspace/SessionModel.hpp>
@@ -174,24 +176,42 @@ TEST_CASE("a tab inserted before the focused one leaves the focus on its tab",
     controller.activateTab(2);
     controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
     REQUIRE(controller.focusedTabIndex() == 2);
+    REQUIRE(f.tabs.tabs.size() == 3);
+
+    // What the focus names each time the window announces it: the model activates a tab it takes in, which
+    // moves the keyboard to it (the next test), so the insert's own announcement is the one to watch.
+    auto announced = std::vector<std::optional<vtworkspace::TabId>> {};
+    auto const connection = QObject::connect(&controller,
+                                             &contour::window::WindowController::chromeFocusChanged,
+                                             &controller,
+                                             [&] { announced.push_back(controller.focusedTab()); });
 
     // From another window, at row 0: the tab under the focus is now on row 3.
     controller.moveTabIntoThisWindow(other.id.value, incoming, 0);
     REQUIRE(controller.count() == 4);
+    REQUIRE_FALSE(announced.empty());
+
+    CHECK(announced.front() == f.tabs.tabs[2]);
+    CHECK(f.app->manager().model().window(controller.windowId())->indexOf(f.tabs.tabs[2]) == 3);
+    QObject::disconnect(connection);
+}
+
+TEST_CASE("activating a tab from outside the tab well moves the keyboard to it",
+          "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.activateTab(0);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == 0);
+
+    // What the native menu, the palette and the daemon do: activate, with no key pressed in the chrome.
+    controller.activateTab(2);
 
     CHECK(f.area() == ChromeArea::Tabs);
-    CHECK(controller.focusedTabIndex() == 3);
-
-    // Backspace acts on the tab the keyboard is on, the one it was on before the insert; the shell in front
-    // makes it idle, so it closes at once.
-    REQUIRE(f.factory->createdPtys.size() == 4);
-    f.factory->createdPtys[2]->setForegroundProcessName(
-        controller.activeSession()->profile().shell.value().program);
-    f.factory->createdPtys[1]->setForegroundProcessName(
-        controller.activeSession()->profile().shell.value().program);
-    CHECK(f.chromeKey(Qt::Key_Backspace));
-    CHECK(f.factory->createdPtys[2]->isClosed());
-    CHECK_FALSE(f.factory->createdPtys[1]->isClosed());
+    CHECK(controller.focusedTabIndex() == 2);
+    REQUIRE(f.tabs.tabs.size() == 3);
+    CHECK(controller.focusedTab() == f.tabs.tabs[2]);
 }
 
 TEST_CASE("closing the focused tab ends the chrome focus", "[windowcontroller][chromefocus]")

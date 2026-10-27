@@ -2730,6 +2730,15 @@ void WindowController::onTabMoved()
 
 void WindowController::onActiveTabChanged()
 {
+    // A real activation (the native menu, the palette, the daemon) takes the keyboard in the tab well with
+    // it. A reorder or a background close never reaches here: they announce the active row through
+    // activeTabIndexChanged() alone. The tab being closed under the focus is on its way out, not a target.
+    if (_chromeArea == window::ChromeArea::Tabs && _focusedTabRemoval == FocusedTabRemoval::None)
+        if (auto const active = tabIdAtRow(activeTabIndex()); active && active != _focusedTab)
+        {
+            _focusedTab = active;
+            emit chromeFocusChanged();
+        }
     emit activeTabIndexChanged();
     refreshActiveTabHighlight();
     rebuildActiveTabPaneProxies();
