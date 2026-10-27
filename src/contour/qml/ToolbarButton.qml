@@ -30,6 +30,10 @@ Item {
     /// The fill under a hovered or focused button: the band's unless the host sits on a surface of its own.
     property color hoverFill: chromeStyle.colors.tabHoverFill
 
+    /// Whether keyboard focus is on this button and the chrome says so: the host's to set, since a button
+    /// knows nothing of the window's chrome focus. Draws the focus ring.
+    property bool focusRingShown: false
+
     /// A left click, or the accessibility press action.
     signal clicked()
     /// A right click or a press-and-hold.
@@ -39,7 +43,8 @@ Item {
     Accessible.name: root.accessibleName
     Accessible.description: root.accessibleDescription
     Accessible.onPressAction: root.clicked()
-    Accessible.focusable: root.activeFocusOnTab
+    Accessible.focusable: root.activeFocusOnTab || root.focusRingShown
+    Accessible.focused: root.focusRingShown
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -79,6 +84,11 @@ Item {
         color: primary.pressed || secondary.pressed ? chromeStyle.colors.controlPressedFill
              : hover.hovered || root.activeFocus ? root.hoverFill
              : "transparent"
+    }
+
+    FocusRing {
+        shown: root.focusRingShown
+        hostRadius: background.radius
     }
 
     Text {

@@ -69,6 +69,17 @@ Item {
     }
     /// The trailing slot the drift chip is placed in while the band is shown (see Main.qml).
     readonly property Item driftSlot: driftSlotItem
+    /// The tab strip, while the middle holds the tabs; null otherwise.
+    readonly property Item tabStrip: tabStripLoader.item
+    /// The band's toolbar items that are on screen, in visual order: the host chip, the drift chip, then the
+    /// new-tab button. What the toolbar's keyboard focus walks (WindowController.focusedToolbarIndex).
+    readonly property var toolbarItems: {
+        const items = [hostChipSlot.item, driftSlotItem.chip, newTabSlot.item]
+        return items.filter((item) => item !== null && item.visible)
+    }
+    /// Whether the window's keyboard focus is in the toolbar: an item that also holds active focus rings.
+    /// `?? -1` keeps a mock controller without the property local.
+    readonly property bool toolbarHasFocus: !!root.controller && (root.controller.focusedToolbarIndex ?? -1) >= 0
 
     readonly property bool isBand: root.role === "band"
     readonly property bool isPill: chromeStyle.layout.isPill
@@ -126,6 +137,13 @@ Item {
 
     HoverHandler {
         id: bandHover
+    }
+
+    // The keys of the toolbar, offered to the controller while one of its items holds keyboard focus: an item
+    // that uses a key (the button's Return and Space) accepts it first, the rest arrive here.
+    Keys.onPressed: (event) => {
+        if (root.controller && root.controller.chromeKey)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
     }
 
     // Live OS palette handle: re-emits paletteChanged on an OS dark/light switch so the bar recolors
@@ -214,6 +232,7 @@ Item {
                 // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
                 hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
                 connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
+                focusRingShown: activeFocus && root.toolbarHasFocus
             }
         }
 
@@ -383,6 +402,7 @@ Item {
                 glyph: chromeStyle.newTabGlyph
                 accessibleName: qsTr("New tab")
                 accessibleDescription: qsTr("Right-click or press and hold for a new tab with a profile")
+                focusRingShown: activeFocus && root.toolbarHasFocus
                 onClicked: if (root.controller) root.controller.createNewTab()
                 onSecondaryClicked: {
                     if (root.controller)

@@ -56,6 +56,7 @@
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QStyleHints>
 #include <QtGui/QWindow>
@@ -3266,6 +3267,251 @@ TEST_CASE("no pane waiting for a password shows no lock anywhere (offscreen)",
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
     showWindow(*root);
     CHECK_FALSE(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
+
+// {{{ Keyboard focus in the chrome
+namespace
+{
+
+/// Asks the window to take keyboard focus, which an offscreen window needs before an item can hold it.
+/// @return The window.
+QQuickWindow& activated(QObject& root)
+{
+    auto* window = qobject_cast<QQuickWindow*>(&root);
+    REQUIRE(window != nullptr);
+    window->requestActivate();
+    REQUIRE(QTest::qWaitFor([window] { return window->isActive(); }, 1000));
+    return *window;
+}
+
+/// The tab ring items of the window's tabs that are drawn, by tab index.
+[[nodiscard]] std::vector<int> ringedTabs(QObject& root)
+{
+    auto rung = std::vector<int> {};
+    auto const tabs = tabDelegates(root);
+    for (auto const index: std::views::iota(std::size_t { 0 }, tabs.size()))
+        if (part(*tabs[index], QStringLiteral("focusRing")).isVisible())
+            rung.push_back(static_cast<int>(index));
+    return rung;
+}
+
+} // namespace
+
+TEST_CASE("keyboard focus draws the ring on the focused tab only (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    struct Row
+    {
+        ChromeStyle style;
+        int outset;
+    };
+    // The outset per row: 3 on the Mac, 2 on the other native rows, and cells cannot draw one.
+    for (auto const& [style, outset]: std::array { Row { ChromeStyle::MacOS, 3 },
+                                                   Row { ChromeStyle::Fluent, 2 },
+                                                   Row { ChromeStyle::ContourLinux, 2 },
+                                                   Row { ChromeStyle::Terminal, 0 } })
+    {
+        INFO("row: " << contour::config::chromeStyleName(style));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 3 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(style));
+        showWindow(*root);
+        activated(*root);
+
+        // Nothing is ringed until the chrome has keyboard focus.
+        CHECK(ringedTabs(*root).empty());
+
+        controller.focusTabWell(1);
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+
+        CHECK(ringedTabs(*root) == std::vector<int> { 1 });
+        auto& ring = part(*tabs[1], QStringLiteral("focusRing"));
+        auto const& size = styleGroup(engine, "size");
+        auto const& colors = styleGroup(engine, "colors");
+        CHECK(size.property("focusRing").toReal() == outset);
+        CHECK(ring.property("border").value<QObject*>()->property("width").toReal() == outset);
+        CHECK(ring.property("color").value<QColor>() == colors.property("focusFill").value<QColor>());
+        // Assistive technology hears the focused tab, and only that one.
+        auto const* focused = QAccessible::queryAccessibleInterface(tabs[1]);
+        REQUIRE(focused != nullptr);
+        CHECK(focused->state().focused);
+        auto const* unfocused = QAccessible::queryAccessibleInterface(tabs[0]);
+        REQUIRE(unfocused != nullptr);
+        CHECK_FALSE(unfocused->state().focused);
+        CHECK(tabs[1]->property("keyboardFocused").toBool());
+        CHECK_FALSE(tabs[0]->property("keyboardFocused").toBool());
+        CHECK_FALSE(tabs[2]->property("keyboardFocused").toBool());
+
+        // Leaving the chrome puts the ring away.
+        controller.leaveChrome();
+        CHECK(ringedTabs(*root).empty());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a pointer press shows no ring (offscreen)", "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    auto& window = activated(*root);
+    auto const tabs = tabDelegates(*root);
+    auto const leaveCalls = [&] {
+        return controller.calls.count(QStringLiteral("leaveChrome"));
+    };
+
+    // With no chrome focus a click has nothing to end: the controller is not asked.
+    QTest::mouseClick(&window, Qt::LeftButton, {}, tabs[2]->mapToScene(QPointF(4, 4)).toPoint());
+    CHECK(leaveCalls() == 0);
+    CHECK(ringedTabs(*root).empty());
+
+    // With it, the click ends it, and no tab is left ringed.
+    controller.focusTabWell(1);
+    REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+    REQUIRE(ringedTabs(*root) == std::vector<int> { 1 });
+    QTest::mouseClick(&window, Qt::LeftButton, {}, tabs[2]->mapToScene(QPointF(4, 4)).toPoint());
+    CHECK(leaveCalls() == 1);
+    CHECK(ringedTabs(*root).empty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("keys in the tab well reach the controller (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    auto& window = activated(*root);
+    controller.focusTabWell(1);
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+
+    // A key the controller handles is accepted, so it goes no further.
+    auto handled = QKeyEvent { QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier };
+    QCoreApplication::sendEvent(&window, &handled);
+    REQUIRE(controller.chromeKeys.size() == 1);
+    CHECK(controller.chromeKeys.front() == std::pair { static_cast<int>(Qt::Key_Right), 0 });
+    CHECK(handled.isAccepted());
+
+    // One it does not handle is not accepted: it goes on, up through the title bar, which offers it again.
+    controller.chromeKeysHandled = false;
+    auto unhandled = QKeyEvent { QEvent::KeyPress, Qt::Key_Home, Qt::NoModifier };
+    QCoreApplication::sendEvent(&window, &unhandled);
+    REQUIRE(controller.chromeKeys.size() > 1);
+    CHECK(std::ranges::all_of(std::views::drop(controller.chromeKeys, 1),
+                              [](auto const& key) { return key.first == Qt::Key_Home; }));
+    CHECK_FALSE(unhandled.isAccepted());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("closing a busy tab asks first, and Cancel keeps it (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    activated(*root);
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("closeTabConfirmation"));
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("opened").toBool());
+
+    SECTION("a named program")
+    {
+        emit controller.closeTabConfirmationRequested(1, QStringLiteral("build"), QStringLiteral("make"));
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+        CHECK(dialog->property("heading").toString() == QStringLiteral("Close “build”?"));
+        CHECK(dialog->property("message").toString()
+              == QStringLiteral("“make” is still running in this tab."));
+        CHECK(dialog->property("acceptText").toString() == QStringLiteral("Close"));
+        CHECK(dialog->property("rejectText").toString() == QStringLiteral("Cancel"));
+        // Cancel is what Enter takes, and Close is the destructive one.
+        CHECK(dialog->property("defaultButton").toInt() == 1);
+        // Both buttons are named, for a screen reader.
+        for (auto const& [part, label]: std::array { std::pair { "kitDialogAccept", "Close" },
+                                                     std::pair { "kitDialogReject", "Cancel" } })
+        {
+            auto* button = dialog->findChild<QQuickItem*>(QString::fromLatin1(part));
+            REQUIRE(button != nullptr);
+            auto const* accessible = QAccessible::queryAccessibleInterface(button);
+            REQUIRE(accessible != nullptr);
+            CHECK(accessible->text(QAccessible::Name) == QString::fromLatin1(label));
+        }
+        CHECK(dialog->property("acceptRole").toInt()
+              == chromeStyleOf(engine).property("statusDanger").toInt());
+
+        REQUIRE(QMetaObject::invokeMethod(dialog, "reject"));
+        REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 2000));
+        CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab")).isEmpty());
+
+        emit controller.closeTabConfirmationRequested(1, QStringLiteral("build"), QStringLiteral("make"));
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+        REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
+        CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab"))
+              == QStringList { "confirmCloseTab:1" });
+    }
+
+    SECTION("a program that cannot be known")
+    {
+        emit controller.closeTabConfirmationRequested(2, QStringLiteral("shell"), QString {});
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+        CHECK(dialog->property("message").toString()
+              == QStringLiteral("A program may still be running in this tab."));
+        REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
+        CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab"))
+              == QStringList { "confirmCloseTab:2" });
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the window reports what its chrome shows, and the toolbar's items wear the ring (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3,
+                                                      .hostLabel = QStringLiteral("home"),
+                                                      .drift =
+                                                          contour::test::snapshot::SnapshotDrift::Shown } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    activated(*root);
+
+    // The tab well, and three toolbar items in visual order: the host chip, the drift chip, the new-tab
+    // button.
+    CHECK(controller.reportedTabsShown);
+    CHECK(controller.reportedToolbarItems == 3);
+
+    auto const ringOf = [&root](char const* itemName) -> QQuickItem& {
+        auto& item = named(*root, QString::fromLatin1(itemName));
+        return part(item, QStringLiteral("focusRing"));
+    };
+    auto const items = std::array { "hostChip", "daemonDriftBadge", "newTabButton" };
+    for (auto const index: std::views::iota(std::size_t { 0 }, items.size()))
+    {
+        INFO("toolbar item: " << items[index]);
+        controller.focusToolbarItem(static_cast<int>(index));
+        auto& item = named(*root, QString::fromLatin1(items[index]));
+        REQUIRE(QTest::qWaitFor([&] { return item.hasActiveFocus(); }, 1000));
+        CHECK(ringOf(items[index]).isVisible());
+        for (auto const other: std::views::iota(std::size_t { 0 }, items.size()))
+            if (other != index)
+                CHECK_FALSE(ringOf(items[other]).isVisible());
+    }
+
+    // Hiding the tab strip is reported: the controller then takes focus out of a well that is gone.
+    controller.setTabBarShouldShow(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(controller.reportedTabsShown);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}

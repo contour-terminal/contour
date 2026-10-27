@@ -407,7 +407,6 @@ TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
     // Step 6.6's two rows, after Step 3e's: the lock in a split's header and on two tabs, and in the band.
     CHECK(static_cast<int>(SnapshotScript::SecureInput)
           == static_cast<int>(SnapshotScript::ScrollbarOverlay) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SecureInputBand);
 
     auto const& split = scriptRow(SnapshotScript::SecureInput);
     CHECK(split.name == "secure-input");
@@ -435,5 +434,31 @@ TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
             CHECK(row.banner == SnapshotBanner::None);
             CHECK(row.density == contour::config::ChromeDensity::Comfortable);
         }
+    }
+}
+
+TEST_CASE("snapshot.scriptTable.keyboardFocus", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    // The last row: three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still
+    // active.
+    CHECK(static_cast<int>(SnapshotScript::KeyboardFocus)
+          == static_cast<int>(SnapshotScript::SecureInputBand) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::KeyboardFocus);
+    auto const& row = scriptRow(SnapshotScript::KeyboardFocus);
+    CHECK(row.name == "keyboard-focus");
+    CHECK(row.tabCount == 3);
+    CHECK(row.panes == PaneShape::SingleLeaf);
+    CHECK(row.action == ScriptAction::FocusTabWell);
+    CHECK(row.activeTab == 0);
+    // The focused tab is a tab of the window, and not the active one: the ring is not hidden by its fill.
+    CHECK(SnapshotFocusedTab < row.tabCount);
+    CHECK(SnapshotFocusedTab != row.activeTab);
+    // Only this row moves focus into the chrome.
+    for (auto const& other: SnapshotScripts)
+    {
+        CAPTURE(other.name);
+        CHECK((other.action == ScriptAction::FocusTabWell)
+              == (other.script == SnapshotScript::KeyboardFocus));
     }
 }

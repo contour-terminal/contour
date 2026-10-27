@@ -23,8 +23,14 @@ Item {
     readonly property bool canRestart: root.model !== null && !root.model.isRestarting
     // Whether the chip is a run of bracketed cells (the Terminal row) rather than a rounded shape.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
+    /// This window's WindowController, which a key the chip does not use is offered to; null for none.
+    property var controller: null
+    /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
+    property bool focusRingShown: false
 
     Accessible.role: Accessible.Button
+    Accessible.focusable: root.focusRingShown
+    Accessible.focused: root.focusRingShown
     Accessible.name: label.text
     Accessible.onPressAction: root.offerRestart()
 
@@ -34,6 +40,17 @@ Item {
     implicitHeight: chromeStyle.size.toolbarChip
     width: root.implicitWidth
     height: root.implicitHeight
+
+    // Return and Space ask for the restart, as a click does; any other key is the chrome's (arrows, Escape, the
+    // focus chords), whether the chip sits in the band or, with no band, at the content's corner.
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.offerRestart()
+            event.accepted = true
+        } else if (root.controller && root.controller.chromeKey) {
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+        }
+    }
 
     /// Opens the confirmation, unless a restart already runs.
     function offerRestart() {
@@ -46,6 +63,11 @@ Item {
         anchors.fill: parent
         radius: chromeStyle.radii.toolbarChip
         color: chromeStyle.colors.chipFill
+    }
+
+    FocusRing {
+        shown: root.focusRingShown
+        hostRadius: chromeStyle.radii.toolbarChip
     }
 
     Row {

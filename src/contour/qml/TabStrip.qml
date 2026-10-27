@@ -53,6 +53,23 @@ Row {
 
     spacing: 0
 
+    // The keys of the tab well, offered to the controller while a tab holds keyboard focus (TabItem takes it
+    // from focusTab()): a key the controller handles is accepted here, so it never reaches the shell. The
+    // focused tab's own editor, when one is open, takes its keys first and never lets them up.
+    Keys.onPressed: (event) => {
+        if (root.controller && root.controller.chromeKey)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+    }
+
+    /// Gives keyboard focus to the tab at @p index, bringing it into view: how the controller's chrome focus
+    /// reaches a real active-focus item. Does nothing for a row that has no delegate.
+    function focusTab(index) {
+        list.positionViewAtIndex(index, ListView.Contain)
+        const tab = list.itemAtIndex(index)
+        if (tab)
+            tab.forceActiveFocus()
+    }
+
     // Brings the active tab into view, should the tabs have scrolled it out: the well's, or a Flat strip
     // that outgrew its width. Deferred, because it runs on changes the list has not laid out yet.
     //
@@ -140,6 +157,11 @@ Row {
             id: list
             objectName: "tabList" // so offscreen tests can findChild() it
             anchors.fill: root.pill ? well : parent
+            // A pill's focus ring reaches past the pill, into the well's own margin and a little beyond it:
+            // the list overhangs the well by the ring, or its clip would cut the ring's top and bottom.
+            // The pills stay centred, so nothing moves.
+            anchors.topMargin: root.pill ? -chromeStyle.size.focusRing : 0
+            anchors.bottomMargin: root.pill ? -chromeStyle.size.focusRing : 0
             // The well's padding at either end and between the pills; the Flat strip sets tabs flush.
             leftMargin: root.pill ? chromeStyle.space.s1 : 0
             rightMargin: root.pill ? chromeStyle.space.s1 : 0

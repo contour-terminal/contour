@@ -85,6 +85,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal linkPill READ linkPill CONSTANT)
     Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
     Q_PROPERTY(qreal secureInputGlyph READ secureInputGlyph CONSTANT)
+    Q_PROPERTY(qreal focusRing READ focusRing CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -219,6 +220,8 @@ class ChromeSizeTokens: public QObject
     {
         return _tokens.secureInputGlyph * _units.vertical;
     }
+    /// @return The keyboard focus ring's outset in logical pixels; 0 draws none.
+    [[nodiscard]] qreal focusRing() const noexcept { return _tokens.focusRing * _units.horizontal; }
 
   private:
     config::SizeTokens _tokens {};
@@ -840,6 +843,8 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor scrollbarThumb READ scrollbarThumb NOTIFY changed)
     Q_PROPERTY(QColor scrollbarThumbActive READ scrollbarThumbActive NOTIFY changed)
     Q_PROPERTY(QColor scrollbarTrack READ scrollbarTrack NOTIFY changed)
+    Q_PROPERTY(QColor focusRing READ focusRing NOTIFY changed)
+    Q_PROPERTY(QColor focusFill READ focusFill NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -944,6 +949,9 @@ class ChromeColorTokens: public QObject
         return color(config::ChromeColorRole::ScrollbarThumbActive);
     }
     [[nodiscard]] QColor scrollbarTrack() const { return color(config::ChromeColorRole::ScrollbarTrack); }
+    /// The keyboard focus ring and, on the Terminal row, the focused item's fill.
+    [[nodiscard]] QColor focusRing() const { return color(config::ChromeColorRole::FocusRing); }
+    [[nodiscard]] QColor focusFill() const { return color(config::ChromeColorRole::FocusFill); }
 
   signals:
     /// Every role may have changed colour.

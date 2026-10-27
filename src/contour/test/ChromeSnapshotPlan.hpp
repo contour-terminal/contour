@@ -82,6 +82,7 @@ enum class SnapshotScript : uint8_t
                         //!< and on both tabs (the active one's pane, and the second tab's).
     SecureInputBand,    //!< One tab, one pane, at a password prompt: the lock as a band chip where the tab
                         //!< well is hidden, on the tab where it shows.
+    KeyboardFocus, //!< Three tabs with keyboard focus on the second: its focus ring, or its selected cells.
 };
 
 /// How a script's active tab is divided into panes.
@@ -131,6 +132,7 @@ enum class ScriptAction : uint8_t
     ShowSizeIndicator,  //!< Every pane's size indicator, raised as a resize raises it.
     HoldLinkModifier,   //!< The follow modifier held over a link in the active pane.
     ScrollBack,         //!< The active pane scrolled back into its history, its scrollbar ticked.
+    FocusTabWell,       //!< Keyboard focus in the tab well, on tab SnapshotFocusedTab, as Ctrl+F6 puts it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -256,6 +258,10 @@ inline constexpr std::string_view SnapshotLinkTarget =
 /// How far back the scrollbar-overlay script scrolls, in lines, through how much history.
 inline constexpr int SnapshotScrollOffset = 20;
 inline constexpr int SnapshotHistoryLines = 1000;
+
+/// The tab the keyboard-focus script puts keyboard focus on: not the active one, so the ring is not hidden by
+/// the active tab's own fill.
+inline constexpr int SnapshotFocusedTab = 1;
 
 /// What the active pane's search shows when its find bar is opened.
 enum class SnapshotFind : uint8_t
@@ -1220,6 +1226,28 @@ inline constexpr auto SnapshotScripts = std::array {
                         .permission = SnapshotPermission::None,
                         .layoutName = SnapshotLayoutName::None,
                         .secure = SecureDecor::Locked },
+    SnapshotScriptRow { .script = SnapshotScript::KeyboardFocus,
+                        .name = "keyboard-focus",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::FocusTabWell,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None,
+                        .secure = SecureDecor::None },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

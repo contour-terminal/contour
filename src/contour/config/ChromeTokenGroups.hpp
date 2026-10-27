@@ -175,6 +175,14 @@ enum class ChromeColorRole : uint8_t
     ScrollbarThumb,       //!< The overlay scrollbar's thumb at rest (resolved against the pane, see colorOn).
     ScrollbarThumbActive, //!< The thumb while hovered or dragged.
     ScrollbarTrack,       //!< The overlay scrollbar's track.
+
+    // Keyboard focus in the chrome.
+    /// The ring around the item that has keyboard focus: a mark, so it reads at 3:1 on the window; none on
+    /// the Terminal row, which fills the focused cells instead (@c FocusFill).
+    FocusRing,
+    /// The fill of the focused item on the Terminal row (a cell run cannot draw an outset); none on the
+    /// native rows, which ring it.
+    FocusFill,
 };
 
 /// Where a chrome colour comes from.
@@ -274,7 +282,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FocusFill) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -300,6 +308,11 @@ inline constexpr size_t OverlayColorRoleBegin = static_cast<size_t>(ChromeColorR
 inline constexpr size_t ScrollbarColorRoleBegin = static_cast<size_t>(ChromeColorRole::ScrollbarThumb);
 /// One past the last overlay colour role.
 inline constexpr size_t OverlayColorRoleEnd = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
+
+/// The first keyboard focus colour role.
+inline constexpr size_t FocusColorRoleBegin = static_cast<size_t>(ChromeColorRole::FocusRing);
+/// One past the last keyboard focus colour role.
+inline constexpr size_t FocusColorRoleEnd = static_cast<size_t>(ChromeColorRole::FocusFill) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -434,6 +447,9 @@ struct SizeTokens
 
     // The secure-input lock.
     int secureInputGlyph = 0; ///< Edge of the lock's icon; 0 where the Terminal row draws it as cell text.
+
+    // Keyboard focus.
+    int focusRing = 0; ///< Outset of the keyboard focus ring (horizontal units); 0 draws none.
 
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
@@ -1005,6 +1021,17 @@ namespace detail
         label(1, 33), // ScrollbarThumb
         label(1, 55), // ScrollbarThumbActive
         label(1, 11), // ScrollbarTrack
+        // The ring is a mark, so it takes the accent only where that reaches 3:1 on the window, else the
+        // window's own ink (as the find toggle's ring does). The board's accent at 60 % would not: over a
+        // light window it reads about 1.9:1.
+        ChromeColorSource { .kind = ColorSourceKind::StatusMarkOnWindow,
+                            .rgb = 0,
+                            .status = StatusColorRole::Running,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 }, // FocusRing
+        // The ring leaves the item's own fill alone.
+        noColor(), // FocusFill
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -1069,7 +1096,8 @@ namespace detail
                   .findIcon = 14,
                   .linkPill = 22,
                   .scrollbar = 8,
-                  .secureInputGlyph = 11 },
+                  .secureInputGlyph = 11,
+                  .focusRing = 3 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -1166,7 +1194,8 @@ namespace detail
                   .findIcon = 14,
                   .linkPill = 22,
                   .scrollbar = 8,
-                  .secureInputGlyph = 11 },
+                  .secureInputGlyph = 11,
+                  .focusRing = 2 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -1260,7 +1289,8 @@ namespace detail
                   .findIcon = 14,
                   .linkPill = 22,
                   .scrollbar = 8,
-                  .secureInputGlyph = 11 },
+                  .secureInputGlyph = 11,
+                  .focusRing = 2 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -1358,7 +1388,8 @@ namespace detail
                   .findIcon = 0,
                   .linkPill = 1,
                   .scrollbar = 1,
-                  .secureInputGlyph = 0 },
+                  .secureInputGlyph = 0,
+                  .focusRing = 0 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -1491,7 +1522,11 @@ namespace detail
                     // track.
                     schemeColor(SchemeSlot::ScrollbarThumb),       // ScrollbarThumb
                     schemeColor(SchemeSlot::ScrollbarThumbActive), // ScrollbarThumbActive
-                    detail::noColor() },                           // ScrollbarTrack
+                    detail::noColor(),                             // ScrollbarTrack
+                    // Cells cannot draw an outset: the focused item is a run of selection-coloured cells,
+                    // the selection that also stands off the bar (BarSelection).
+                    detail::noColor(),                       // FocusRing
+                    schemeColor(SchemeSlot::BarSelection) }, // FocusFill
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

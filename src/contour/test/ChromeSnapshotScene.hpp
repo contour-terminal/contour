@@ -311,6 +311,7 @@ class ChromeSnapshotScene
             case ScriptAction::ShowSizeIndicator: showSizeIndicators(); break;
             case ScriptAction::HoldLinkModifier: holdLinkModifier(); break;
             case ScriptAction::ScrollBack: scrollBack(); break;
+            case ScriptAction::FocusTabWell: focusTabWell(); break;
         }
         // The window's notices post their banner as the reload that failed would.
         if (scriptRow(_variant.script).banner == SnapshotBanner::ConfigReload)
@@ -530,6 +531,23 @@ class ChromeSnapshotScene
         auto* pill = terminal->findChild<QQuickItem*>(QStringLiteral("linkPill"));
         REQUIRE(pill != nullptr);
         waitFullyShown(std::array { pill });
+    }
+
+    /// Puts keyboard focus in the tab well, on tab SnapshotFocusedTab, as Ctrl+F6 does, and waits for the
+    /// strip to have moved active focus there. The panes are incubated first: a pane taking focus as it
+    /// appears is the terminal's, and ends the chrome's.
+    void focusTabWell()
+    {
+        _incubation.settle();
+        QCoreApplication::processEvents();
+        window().requestActivate();
+        _controller.focusTabWell(SnapshotFocusedTab);
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* tab = window().activeFocusItem();
+                return tab != nullptr && tab->property("tabIndex").toInt() == SnapshotFocusedTab;
+            },
+            2000));
     }
 
     /// Scrolls the active pane SnapshotScrollOffset lines back into SnapshotHistoryLines of history, with a

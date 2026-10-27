@@ -64,6 +64,17 @@ namespace
     return static_cast<int>(std::ranges::count_if(contour::test::itemsNamed(root, name),
                                                   [](QQuickItem const* item) { return item->isVisible(); }));
 }
+/// @return The tab index of every tab beneath @p root that draws its focus ring (or focus fill), in order.
+[[nodiscard]] std::vector<int> ringedTabs(QQuickItem const& root)
+{
+    auto shown = std::vector<int> {};
+    for (auto const* ring: contour::test::itemsNamed(root, QStringLiteral("focusRing")))
+        if (auto const* tab = ring->parentItem();
+            ring->isVisible() && tab != nullptr && tab->property("tabIndex").isValid())
+            shown.push_back(tab->property("tabIndex").toInt());
+    return shown;
+}
+
 /// Role @p role of the palette model's row @p row.
 [[nodiscard]] QVariant paletteRole(contour::window::CommandPaletteModel const& model,
                                    int row,
@@ -544,6 +555,12 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(visibleItemsNamed(content, QStringLiteral("tabLock")) == (wellShown ? 1 : 0));
                 CHECK(visibleItemsNamed(content, QStringLiteral("secureInputChip"))
                       == (!wellShown && bandShown ? 1 : 0));
+                break;
+            }
+            case SnapshotScript::KeyboardFocus: {
+                // Keyboard focus is on the second tab, and on it alone: the ring (or, where cells cannot draw
+                // one, the focus fill) is drawn there and on no other tab.
+                CHECK(ringedTabs(content) == std::vector<int> { SnapshotFocusedTab });
                 break;
             }
             case SnapshotScript::SingleTab: break;

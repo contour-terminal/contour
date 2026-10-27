@@ -8,6 +8,7 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/window/ChromeFocus.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
@@ -134,6 +135,11 @@ class MockMainController: public MainWindowControllerMock
     // Ditto for the title bar's own menu surface, which Main.qml instantiates alongside it.
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
+    // Mirrors WindowController's keyboard focus in the chrome, which Main.qml, the tab strip and the toolbar
+    // read. Moved through focusTabWell() and leaveChrome(), as the production controller moves it.
+    Q_PROPERTY(int chromeFocusArea READ chromeFocusArea NOTIFY chromeFocusChanged)
+    Q_PROPERTY(int focusedTabIndex READ focusedTabIndex NOTIFY chromeFocusChanged)
+    Q_PROPERTY(int focusedToolbarIndex READ focusedToolbarIndex NOTIFY chromeFocusChanged)
     // Mirrors WindowController's hosting notice; writable here so a test can raise it before the load.
     Q_PROPERTY(QString hostingNotice READ hostingNotice WRITE setHostingNotice NOTIFY hostingNoticeChanged)
 
@@ -178,6 +184,54 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
+    /// @return The focused window::ChromeArea as its underlying value.
+    [[nodiscard]] int chromeFocusArea() const noexcept { return static_cast<int>(_chromeArea); }
+    /// @return The focused tab's row while the tab well has focus, else -1.
+    [[nodiscard]] int focusedTabIndex() const noexcept { return _focusedTab; }
+    /// @return The focused toolbar item's index while the toolbar has focus, else -1.
+    [[nodiscard]] int focusedToolbarIndex() const noexcept { return _focusedToolbar; }
+    /// Puts keyboard focus in the tab well, on tab @p tab, as the controller does for Ctrl+F6.
+    /// @param tab The row of the focused tab.
+    void focusTabWell(int tab)
+    {
+        _chromeArea = window::ChromeArea::Tabs;
+        _focusedTab = tab;
+        _focusedToolbar = -1;
+        emit chromeFocusChanged();
+    }
+    /// Puts keyboard focus in the toolbar, on item @p item, as the controller does for the toolbar chord.
+    /// @param item The index of the focused toolbar item.
+    void focusToolbarItem(int item)
+    {
+        _chromeArea = window::ChromeArea::Toolbar;
+        _focusedTab = -1;
+        _focusedToolbar = item;
+        emit chromeFocusChanged();
+    }
+    /// Mirrors WindowController::leaveChrome(): what a pointer press or the terminal taking focus calls.
+    Q_INVOKABLE void leaveChrome()
+    {
+        calls << QStringLiteral("leaveChrome");
+        _chromeArea = window::ChromeArea::Terminal;
+        _focusedTab = -1;
+        _focusedToolbar = -1;
+        emit chromeFocusChanged();
+    }
+    /// Records what the window reports it shows: how Main.qml tells the controller what there is to visit.
+    Q_INVOKABLE void setChromePresence(bool tabsShown, int toolbarItems)
+    {
+        reportedTabsShown = tabsShown;
+        reportedToolbarItems = toolbarItems;
+    }
+    /// Records a key the chrome offered, and answers as the controller does for one it handles.
+    /// @return Whether the key counts as handled: true unless a test set @c chromeKeysHandled to false.
+    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers)
+    {
+        chromeKeys.emplace_back(qtKey, qtModifiers);
+        return chromeKeysHandled;
+    }
+    /// Records the confirmed close of the tab at @p row.
+    Q_INVOKABLE void confirmCloseTab(int row) { calls << QStringLiteral("confirmCloseTab:%1").arg(row); }
     /// Mirrors WindowController::activateTab(): makes tab @p index the active one.
     void setActiveTab(int index)
     {
@@ -457,6 +511,13 @@ class MockMainController: public MainWindowControllerMock
 
     QStringList calls;
     QObject* boundWindow = nullptr;
+    /// What setChromePresence() was last told; nothing until Main.qml reports.
+    bool reportedTabsShown = false;
+    int reportedToolbarItems = -1;
+    /// The keys chromeKey() was offered, as (Qt::Key, Qt::KeyboardModifiers), oldest first.
+    std::vector<std::pair<int, int>> chromeKeys;
+    /// What chromeKey() answers.
+    bool chromeKeysHandled = true;
 
   signals:
     void activeTabIndexChanged();
@@ -470,6 +531,9 @@ class MockMainController: public MainWindowControllerMock
     void chromeHeightChanged();
     void multimediaReadyChanged();
     void hostingNoticeChanged();
+    void chromeFocusChanged();
+    /// Closing a busy tab asks first: the row, its label and the running program (empty when unknown).
+    void closeTabConfirmationRequested(int row, QString const& tabLabel, QString const& program);
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
@@ -514,6 +578,9 @@ class MockMainController: public MainWindowControllerMock
 
     MainWindowScene _scene;
     int _chromeHeight = 0;
+    window::ChromeArea _chromeArea = window::ChromeArea::Terminal;
+    int _focusedTab = -1;
+    int _focusedToolbar = -1;
     int _tabBarPosition;                    // seeded from the scene; 0 = Top, 1 = Bottom
     bool _tabBarShouldShow;                 // seeded from the scene's tab-bar visibility
     bool _titleBarVisible;                  // seeded from the scene's frame

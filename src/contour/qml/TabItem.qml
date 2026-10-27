@@ -24,6 +24,9 @@ Item {
     Accessible.name: root.tabTitle
     Accessible.selected: root.tabActive
     Accessible.focusable: true
+    // Keyboard focus in the chrome moves a real active focus here (TabStrip.focusTab), so an assistive
+    // client hears the focused tab, not only the selected one.
+    Accessible.focused: root.keyboardFocused
 
     required property var controller
     required property var window          // ApplicationWindow, for restoring terminal focus after rename
@@ -62,6 +65,12 @@ Item {
     // What the pill shows, as TabStrip reads it from chromeStyle.tabWellLayout(): "full", or "iconOnly"
     // once the well is too narrow for labels. The Flat shape always shows its label.
     property string labelMode: "full"
+
+    // Whether keyboard focus is on this tab: it holds active focus and the controller says the tab well has
+    // it (focusedTabIndex is -1 outside the tab well, so no area is compared). A click never sets either,
+    // so a pointer-activated tab shows no ring. `?? -1` keeps a mock controller without the property local.
+    readonly property bool keyboardFocused: root.activeFocus && !!root.controller
+                                            && (root.controller.focusedTabIndex ?? -1) === root.tabIndex
 
     // Which of the two drawings this tab is (the style's one QML-facing shape flag).
     readonly property bool pill: chromeStyle.layout.isPill
@@ -175,6 +184,10 @@ Item {
     // its window is in the background. With the OS palette: contrast against a coloured fill, else the
     // matching palette role.
     readonly property color foreground: {
+        // A row that fills the focused item instead of ringing it (size.focusRing 0: the Terminal row)
+        // inks the label for that fill, the selection's own text.
+        if (root.keyboardFocused && chromeStyle.size.focusRing === 0)
+            return root.colors.paletteSelectionText
         if (root.roleColors) {
             const background = root.pill && !Window.active
             if (root.tabActive)
@@ -242,6 +255,14 @@ Item {
         // A pill is rounded; the Flat strip's tabs are square, as they always were.
         radius: root.pill ? chromeStyle.radii.tab : 0
         color: root.effectiveBackground
+    }
+
+    // Keyboard focus. A pill rings outside itself, in the room its well leaves (TabStrip lets the list
+    // overhang the well by the ring); a Flat tab fills its strip, so its ring is drawn inside it.
+    FocusRing {
+        shown: root.keyboardFocused
+        reach: root.pill ? chromeStyle.size.focusRing : 0
+        hostRadius: background.radius
     }
 
     // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's

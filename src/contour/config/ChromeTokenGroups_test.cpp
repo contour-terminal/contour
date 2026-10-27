@@ -1490,6 +1490,52 @@ TEST_CASE("chromeTokens.overlayColourRoles", "[chrometokens]")
     }
 }
 
+TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
+{
+    using namespace contour::config;
+    using enum ChromeColorRole;
+
+    // The outset per row: the board's 3 pt on the Mac, 2 on the other native rows, none in cells.
+    struct RingRow
+    {
+        ChromeStyle style;
+        int outset;
+    };
+    for (auto const& [style, outset]: std::array { RingRow { ChromeStyle::MacOS, 3 },
+                                                   RingRow { ChromeStyle::Fluent, 2 },
+                                                   RingRow { ChromeStyle::ContourLinux, 2 },
+                                                   RingRow { ChromeStyle::Terminal, 0 } })
+    {
+        CAPTURE(static_cast<int>(style));
+        CHECK(ChromeTokenRows[static_cast<size_t>(style)].size.focusRing == outset);
+    }
+
+    // The two roles close the table, and the colour-role count derives from the last of them.
+    CHECK(FocusColorRoleEnd - FocusColorRoleBegin == 2);
+    CHECK(FocusColorRoleEnd == ChromeColorRoleCount);
+
+    // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
+    auto const none = contour::config::detail::noColor();
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        auto const& colors = ChromeTokenRows[index].colors;
+        if (style == ChromeStyle::Terminal)
+        {
+            CHECK(colors[static_cast<size_t>(FocusRing)] == none);
+            CHECK(colors[static_cast<size_t>(FocusFill)]
+                  == contour::config::detail::schemeColor(SchemeSlot::BarSelection));
+        }
+        else
+        {
+            CHECK(colors[static_cast<size_t>(FocusRing)].kind == ColorSourceKind::StatusMarkOnWindow);
+            CHECK(colors[static_cast<size_t>(FocusRing)].status == StatusColorRole::Running);
+            CHECK(colors[static_cast<size_t>(FocusFill)] == none);
+        }
+    }
+}
+
 TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
 {
     // The hint sits on the Toast's fill, which sits on the pane: on the native rows, over every bundled

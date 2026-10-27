@@ -464,11 +464,124 @@ ThemedWindow
     DaemonDriftBadge {
         id: driftChip
         readonly property bool inBand: titleBar.presence !== "hidden"
+        controller: appWindow.win
+        focusRingShown: activeFocus && appWindow.toolbarHasFocus
         parent: inBand ? titleBar.driftSlot : content
         x: inBand ? 0 : parent.width - width - chromeStyle.space.s4
         y: inBand ? (parent.height - height) / 2 : parent.height - height - chromeStyle.space.s4
         z: 10
     }
+
+    // {{{ Keyboard focus in the chrome (WindowController's chrome focus: Ctrl+F6 and its arrow keys)
+    // The controller decides where focus is; this is where it lands. The tab well and the toolbar's items take
+    // real active focus (their rings and keys are theirs), and the controller is told what there is to visit.
+
+    // The tab strip that holds the tabs: the band's while its middle shows them, else the tabs-only bar's.
+    readonly property Item tabStrip: titleBar.tabStrip ?? tabsBar.tabStrip
+    // Whether the tab well is on screen: a strip in a bar that is itself shown.
+    readonly property bool tabWellShown: (titleBar.visible && titleBar.tabStrip !== null)
+                                         || (tabsBar.visible && tabsBar.tabStrip !== null)
+    // The toolbar's items that are on screen, in visual order: the band's, then the drift chip where it sits
+    // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
+    readonly property var toolbarItems: {
+        const items = titleBar.toolbarItems.slice()
+        if (driftChip.visible && !driftChip.inBand)
+            items.push(driftChip)
+        return items
+    }
+    // Whether keyboard focus is in the toolbar, which an item that also holds active focus rings by.
+    readonly property bool toolbarHasFocus: !!appWindow.win && (appWindow.win.focusedToolbarIndex ?? -1) >= 0
+    // Whether keyboard focus is anywhere in the chrome.
+    readonly property bool chromeHasFocus: !!appWindow.win
+                                           && ((appWindow.win.focusedTabIndex ?? -1) >= 0
+                                               || (appWindow.win.focusedToolbarIndex ?? -1) >= 0)
+
+    // Tells the controller what the chrome shows, so its cycle skips what is not there and gives focus back
+    // to the terminal when the area it is in goes (the tab well closing under it).
+    function reportChromePresence() {
+        if (appWindow.win && appWindow.win.setChromePresence)
+            appWindow.win.setChromePresence(appWindow.tabWellShown, appWindow.toolbarItems.length)
+    }
+    onTabWellShownChanged: appWindow.reportChromePresence()
+    onToolbarItemsChanged: appWindow.reportChromePresence()
+    onWinChanged: appWindow.reportChromePresence()
+
+    // Moves the real active focus to where the controller says the chrome focus is.
+    function applyChromeFocus() {
+        if (!appWindow.win)
+            return
+        const tab = appWindow.win.focusedTabIndex ?? -1
+        const item = appWindow.win.focusedToolbarIndex ?? -1
+        if (tab >= 0 && appWindow.tabStrip)
+            appWindow.tabStrip.focusTab(tab)
+        else if (item >= 0 && item < appWindow.toolbarItems.length)
+            appWindow.toolbarItems[item].forceActiveFocus()
+    }
+
+    Connections {
+        target: appWindow.win
+        ignoreUnknownSignals: true // a lightweight mock controller may not carry the chrome focus
+        function onChromeFocusChanged() { appWindow.applyChromeFocus() }
+    }
+
+    // Whether @p item is inside the terminal content.
+    function inTerminal(item) {
+        while (item) {
+            if (item === paneContentLoader.item)
+                return true
+            item = item.parent
+        }
+        return false
+    }
+
+    // The terminal taking active focus ends the chrome's: it is where keys go again, so no ring stays up.
+    onActiveFocusItemChanged: {
+        if (appWindow.chromeHasFocus && appWindow.inTerminal(appWindow.activeFocusItem))
+            appWindow.win.leaveChrome()
+    }
+
+    // Any pointer press ends it too: the ring shows keyboard focus only, so a click never leaves one behind.
+    // Passive: it sees every press in the window and takes none, so the press still does what it was for.
+    PointHandler {
+        objectName: "chromePressHandler" // so offscreen tests can findChild() it
+        acceptedButtons: Qt.AllButtons
+        onActiveChanged: {
+            if (active && appWindow.chromeHasFocus)
+                appWindow.win.leaveChrome()
+        }
+    }
+
+    // Closing a tab that runs a program asks first (WindowController.closeTabConfirmationRequested): Cancel is
+    // the default and keeps the tab, and the focus on it; Close is destructive.
+    KitDialog {
+        id: closeTabDialog
+        objectName: "closeTabConfirmation"
+        property int row: -1
+        property string tabLabel
+        property string program
+        heading: qsTr("Close “%1”?").arg(closeTabDialog.tabLabel)
+        // A pane whose program cannot be known (a daemon-hosted one) names none: it may be running anything.
+        message: closeTabDialog.program !== ""
+                 ? qsTr("“%1” is still running in this tab.").arg(closeTabDialog.program)
+                 : qsTr("A program may still be running in this tab.")
+        acceptText: qsTr("Close")
+        rejectText: qsTr("Cancel")
+        acceptRole: chromeStyle.statusDanger
+        defaultButton: KitDialog.Reject
+        onAccepted: if (appWindow.win) appWindow.win.confirmCloseTab(closeTabDialog.row)
+    }
+
+    Connections {
+        target: appWindow.win
+        ignoreUnknownSignals: true
+        function onCloseTabConfirmationRequested(row, tabLabel, program) {
+            closeTabDialog.row = row
+            closeTabDialog.tabLabel = tabLabel
+            closeTabDialog.program = program
+            closeTabDialog.open()
+        }
+    }
+    // }}}
 
     // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes
     // through the session manager to THIS window's controller — so the popup appears over the window

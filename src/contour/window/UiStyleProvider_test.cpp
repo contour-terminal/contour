@@ -1995,6 +1995,54 @@ TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[con
     }
 }
 
+TEST_CASE("UiStyleProvider: the keyboard focus ring marks on every chrome and scheme", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MinimumMarkContrast;
+    using contour::config::MinimumTextContrast;
+    using contour::config::SchemeSlot;
+    using contour::config::StatusColorRole;
+
+    // Native rows: the ring is the accent where it reaches 3:1 on the window, else the window's ink, on a
+    // light and a dark chrome; no row fills the focused item.
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        CAPTURE(static_cast<int>(row));
+        auto const provider =
+            contour::window::UiStyleProvider(contour::window::chromeInputsFor(row, QGuiApplication::font()));
+        CHECK(tokenOf(provider, "size", "focusRing").toReal() > 0.0);
+        for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+            withWindowColor(window, [&] {
+                INFO("chrome: " << window.name().toStdString());
+                auto const ring = tokenOf(provider, "colors", "focusRing").value<QColor>();
+                CHECK(ring == provider.statusMarkOn(static_cast<int>(StatusColorRole::Running), window));
+                CHECK(contrastOf(ring, window) >= MinimumMarkContrast);
+                CHECK(tokenOf(provider, "colors", "focusFill").value<QColor>().alpha() == 0);
+            });
+    }
+
+    // The Terminal row draws no outset: the focused item is a run of selection-coloured cells that stands off
+    // the bar at 3:1, with its text at 4.5:1 on it, over every bundled scheme.
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto inputs = contour::window::chromeInputsFor(ChromeStyle::Terminal, QGuiApplication::font());
+        inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+        auto const terminal = contour::window::UiStyleProvider(inputs);
+        auto const role = [&terminal](char const* roleName) {
+            return tokenOf(terminal, "colors", roleName).value<QColor>();
+        };
+        auto const bar =
+            contour::platform::toQColor(inputs.scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)]);
+        CHECK(tokenOf(terminal, "size", "focusRing").toReal() == 0.0);
+        CHECK(role("focusRing").alpha() == 0);
+        CHECK(contrastOf(role("focusFill"), bar) >= MinimumMarkContrast);
+        CHECK(contrastOf(role("paletteSelectionText"), role("focusFill")) >= MinimumTextContrast);
+    }
+}
+
 TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;

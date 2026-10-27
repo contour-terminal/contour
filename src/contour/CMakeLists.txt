@@ -416,6 +416,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/TitleBar.qml
         qml/HostChip.qml
         qml/ToolbarButton.qml
+        qml/FocusRing.qml
         qml/TabStrip.qml
         qml/TabItem.qml
         qml/TabBadgeSlot.qml
