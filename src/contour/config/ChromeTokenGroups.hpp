@@ -449,6 +449,8 @@ struct SizeTokens
     int paneHeaderAction = 0; ///< Hit extent of a pane header's action button.
     int paneFooter = 0;       ///< Height of the exited footer.
     int footerButton = 0;     ///< Height of an exited footer's button.
+    /// Width of the shell-integration card; 0 where the pane's width less two cells is used (Terminal).
+    int noticeCard = 0;
 
     // The command palette.
     int paletteWidth = 0;       ///< Width of the palette (horizontal units).
@@ -505,8 +507,10 @@ struct SpaceTokens
     // The panes.
     int paneGapRows =
         0; ///< @c paneGap between stacked panes, in vertical units (a cell's height on Terminal).
-    int paneHeaderGap = 0; ///< Gap between a pane header's items.
-    int footerLeading = 0; ///< Leading padding of the exited footer.
+    int paneHeaderGap = 0;  ///< Gap between a pane header's items.
+    int footerLeading = 0;  ///< Leading padding of the exited footer.
+    int noticeCardPadX = 0; ///< Horizontal padding inside the shell-integration card.
+    int noticeCardPadY = 0; ///< Vertical padding inside the shell-integration card.
 
     int paletteInset = 0; ///< The palette rows' horizontal inset and the list's side padding.
 
@@ -530,11 +534,12 @@ struct SpaceTokens
 /// Corner radii.
 struct RadiusTokens
 {
-    int control = 0;  ///< Buttons and fields.
-    int popover = 0;  ///< Popovers.
-    int menu = 0;     ///< Menus.
-    int paneCard = 0; ///< Pane cards.
-    int toast = 0;    ///< Toasts.
+    int control = 0;    ///< Buttons and fields.
+    int popover = 0;    ///< Popovers.
+    int menu = 0;       ///< Menus.
+    int paneCard = 0;   ///< Pane cards.
+    int noticeCard = 0; ///< The shell-integration card.
+    int toast = 0;      ///< Toasts.
 
     // The title band.
     int tab = 0;         ///< A tab pill.
@@ -931,6 +936,8 @@ namespace detail
                              .paneGapRows = paneGap,
                              .paneHeaderGap = paneHeaderGap,
                              .footerLeading = 14,
+                             .noticeCardPadX = 14,
+                             .noticeCardPadY = 12,
                              .paletteInset = 8,
                              .findBarInset = 8,
                              .findBarInsetRows = 8,
@@ -1437,6 +1444,7 @@ namespace detail
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
                   .footerButton = 24,
+                  .noticeCard = 330,
                   .paletteWidth = 640,
                   .paletteMaxHeight = 420,
                   .paletteField = 44,
@@ -1466,6 +1474,7 @@ namespace detail
                    .popover = 14,
                    .menu = 10,
                    .paneCard = 10,
+                   .noticeCard = 12,
                    .toast = 18,
                    .tab = 12,
                    .tabWell = 14,
@@ -1549,6 +1558,7 @@ namespace detail
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
                   .footerButton = 24,
+                  .noticeCard = 330,
                   .paletteWidth = 640,
                   .paletteMaxHeight = 420,
                   .paletteField = 44,
@@ -1578,6 +1588,7 @@ namespace detail
                    .popover = 8,
                    .menu = 8,
                    .paneCard = 4,
+                   .noticeCard = 8,
                    .toast = 18,
                    .tab = 6,
                    .tabWell = 0,
@@ -1658,6 +1669,7 @@ namespace detail
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
                   .footerButton = 24,
+                  .noticeCard = 330,
                   .paletteWidth = 640,
                   .paletteMaxHeight = 420,
                   .paletteField = 44,
@@ -1687,6 +1699,7 @@ namespace detail
                    .popover = 12,
                    .menu = 10,
                    .paneCard = 6,
+                   .noticeCard = 12,
                    .toast = 18,
                    .tab = 8,
                    .tabWell = 0,
@@ -1771,6 +1784,7 @@ namespace detail
                   .paneHeaderAction = 1,
                   .paneFooter = 1,
                   .footerButton = 1,
+                  .noticeCard = 0,
                   .paletteWidth = 48,
                   .paletteMaxHeight = 20,
                   .paletteField = 1,
@@ -1805,6 +1819,8 @@ namespace detail
                    .paneGapRows = 1,
                    .paneHeaderGap = 1,
                    .footerLeading = 1,
+                   .noticeCardPadX = 1,
+                   .noticeCardPadY = 0,
                    .paletteInset = 1,
                    .findBarInset = 1,
                    .findBarInsetRows = 1,
@@ -1818,6 +1834,7 @@ namespace detail
                    .popover = 0,
                    .menu = 0,
                    .paneCard = 0,
+                   .noticeCard = 0,
                    .toast = 0,
                    .tab = 0,
                    .tabWell = 0,

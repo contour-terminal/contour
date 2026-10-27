@@ -13889,3 +13889,213 @@ TEST_CASE("kit controls: every ink reads on what it sits on, on every row, schem
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+// {{{ The shell integration card
+namespace
+{
+/// The line the Confirm stage shows in these cases.
+constexpr auto ShellCardLine = std::string_view { "source <(contour generate integration shell zsh)" };
+
+/// Puts the card on @p stage; Confirm shows ShellCardLine and, when @p error is not empty, the failure.
+void showCard(contour::test::MockSession& session, contour::window::CardStage stage, QString error = {})
+{
+    session.setShellCard(stage, QString::fromUtf8(ShellCardLine), std::move(error));
+}
+} // namespace
+
+TEST_CASE("shell integration card: the offer stands below the cells and answers both buttons (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& pane = host.cardOf(leaf);
+    auto const& shellCard = PaneTreeHost::partOf(pane, "shellIntegrationCard");
+    auto const& band = PaneTreeHost::partOf(pane, "shellIntegrationBand");
+    auto const& terminal = PaneTreeHost::terminalOf(pane);
+    CHECK_FALSE(shellCard.isVisible());
+    auto const heightWithoutCard = terminal.height();
+
+    showCard(session, CardStage::Offer);
+    host.settle();
+    REQUIRE(shellCard.isVisible());
+    CHECK(shellCard.width() == 330);
+    CHECK(PaneTreeHost::partOf(shellCard, "shellIntegrationFill").property("radius").toReal() == 12);
+    CHECK(PaneTreeHost::partOf(shellCard, "shellIntegrationTitle").property("text").toString()
+          == session.shellIntegrationTitle());
+    // The cells end where the card's band starts: the card is never over them.
+    CHECK(terminal.height() < heightWithoutCard);
+    CHECK(terminal.mapToItem(&pane, QPointF { 0, terminal.height() }).y() == band.y());
+    CHECK(band.mapToItem(&pane, QPointF { 0, band.height() }).y() == pane.height());
+    // Centred in its band.
+    CHECK(shellCard.x() == Catch::Approx((band.width() - shellCard.width()) / 2));
+
+    clickOn(host, PaneTreeHost::partOf(shellCard, "shellIntegrationPrimary"));
+    CHECK(session.cardAccepts == 1);
+    CHECK(session.cardDeclines == 0);
+    clickOn(host, PaneTreeHost::partOf(shellCard, "shellIntegrationSecondary"));
+    CHECK(session.cardDeclines == 1);
+    CHECK(session.cardAccepts == 1);
+
+    // Escape on the card is the other button's answer.
+    QMetaObject::invokeMethod(const_cast<QQuickItem*>(&shellCard), "forceActiveFocus");
+    QTest::keyClick(&host.window, Qt::Key_Escape);
+    CHECK(session.cardDeclines == 2);
+
+    showCard(session, CardStage::Hidden);
+    host.settle();
+    CHECK_FALSE(shellCard.isVisible());
+    CHECK(terminal.height() == heightWithoutCard);
+}
+
+TEST_CASE("shell integration card: the line is selectable, in the terminal font, with the failure beneath "
+          "(offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& shellCard = PaneTreeHost::partOf(host.cardOf(leaf), "shellIntegrationCard");
+
+    showCard(session, CardStage::Confirm);
+    host.settle();
+    auto const& body = PaneTreeHost::partOf(shellCard, "shellIntegrationBody");
+    CHECK(body.property("text").toString() == QString::fromUtf8(ShellCardLine));
+    CHECK(body.property("readOnly").toBool());
+    CHECK(body.property("selectByMouse").toBool());
+    CHECK(body.property("font").value<QFont>().family() == session.fontFamily());
+    CHECK_FALSE(PaneTreeHost::partOf(shellCard, "shellIntegrationError").isVisible());
+
+    showCard(session, CardStage::Confirm, QStringLiteral("~/.zshrc was not changed: it is read-only."));
+    host.settle();
+    auto const& error = PaneTreeHost::partOf(shellCard, "shellIntegrationError");
+    CHECK(error.isVisible());
+    CHECK(error.property("text").toString() == QStringLiteral("~/.zshrc was not changed: it is read-only."));
+    CHECK(error.y() > body.y());
+
+    // The offer's sentence is set in the chrome's font, not the terminal's.
+    showCard(session, CardStage::Offer);
+    host.settle();
+    CHECK(body.property("font").value<QFont>().family() != session.fontFamily());
+}
+
+TEST_CASE("shell integration card: an ended pane shows its footer and no card (offscreen)",
+          "[contour][gui][qml][shellintegration][paneend]")
+{
+    using contour::window::CardStage;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& pane = host.cardOf(leaf);
+    showCard(session, CardStage::Offer);
+    host.settle();
+    REQUIRE(PaneTreeHost::partOf(pane, "shellIntegrationCard").isVisible());
+
+    endWithExitCode(session);
+    host.settle();
+    CHECK_FALSE(PaneTreeHost::partOf(pane, "shellIntegrationCard").isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(pane, "shellIntegrationBand").isVisible());
+    auto const& footer = PaneTreeHost::partOf(pane, "exitedFooter");
+    REQUIRE(footer.isVisible());
+    CHECK(PaneTreeHost::terminalOf(pane)
+              .mapToItem(&pane, QPointF { 0, PaneTreeHost::terminalOf(pane).height() })
+              .y()
+          == footer.y());
+}
+
+TEST_CASE("shell integration card: the Terminal row's card is three cell rows with bracketed buttons "
+          "(offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    auto const& pane = host.cardOf(leaf);
+    showCard(session, CardStage::Offer);
+    host.settle();
+
+    auto const& shellCard = PaneTreeHost::partOf(pane, "shellIntegrationCard");
+    REQUIRE(shellCard.isVisible());
+    auto const cell = host.style().cellHeight();
+    CHECK(shellCard.height() == 3 * cell);
+    CHECK(shellCard.width() == pane.width() - (2 * host.style().cellWidth()));
+    // No room around it: the band is the card.
+    CHECK(PaneTreeHost::partOf(pane, "shellIntegrationBand").height() == shellCard.height());
+    auto const label = [&](char const* button) {
+        return PaneTreeHost::partOf(shellCard, button)
+            .findChild<QQuickItem*>(QString::fromLatin1(button) + QStringLiteral("Label"));
+    };
+    REQUIRE(label("shellIntegrationPrimary") != nullptr);
+    CHECK(label("shellIntegrationPrimary")->property("text").toString()
+          == host.style().chipOpenGlyph() + session.shellIntegrationPrimary()
+                 + host.style().chipCloseGlyph());
+    CHECK(label("shellIntegrationSecondary")->property("text").toString()
+          == host.style().chipOpenGlyph() + session.shellIntegrationSecondary()
+                 + host.style().chipCloseGlyph());
+}
+
+TEST_CASE("shell integration card: every ink reads at 4.5:1 on every row, scheme and appearance (offscreen)",
+          "[contour][gui][qml][shellintegration]")
+{
+    using contour::window::CardStage;
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const row = GENERATE(contour::config::ChromeStyle::MacOS,
+                              contour::config::ChromeStyle::Fluent,
+                              contour::config::ChromeStyle::ContourLinux,
+                              contour::config::ChromeStyle::Terminal);
+    auto const schemeName = GENERATE(from_range(vtbackend::defaultColorPaletteNames().begin(),
+                                                vtbackend::defaultColorPaletteNames().end()));
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    CAPTURE(static_cast<int>(row));
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+    auto setup = terminalRowSetup(schemeName);
+    setup.row = row;
+    auto const background = contour::platform::toQColor(palette.defaultBackground);
+
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    MockSession session { background };
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    // The Confirm stage shows every ink at once: title, line, failure and both buttons.
+    showCard(session, CardStage::Confirm, QStringLiteral("~/.zshrc was not changed: it is read-only."));
+    host.settle();
+
+    auto const& shellCard = PaneTreeHost::partOf(host.cardOf(leaf), "shellIntegrationCard");
+    auto const fill = over(colorOf(PaneTreeHost::partOf(shellCard, "shellIntegrationFill")), background);
+    for (auto const* name: { "shellIntegrationTitle", "shellIntegrationBody", "shellIntegrationError" })
+    {
+        INFO("text: " << name);
+        CHECK(contrastOf(colorOf(PaneTreeHost::partOf(shellCard, name)), fill) >= 4.5);
+    }
+    for (auto const* name: { "shellIntegrationPrimary", "shellIntegrationSecondary" })
+    {
+        INFO("button: " << name);
+        auto const& button = PaneTreeHost::partOf(shellCard, name);
+        auto const buttonFill = over(colorOf(button), fill);
+        auto const& label = PaneTreeHost::partOf(button, (std::string { name } + "Label").c_str());
+        CHECK(contrastOf(colorOf(label), buttonFill) >= 4.5);
+    }
+}
+// }}}

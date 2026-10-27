@@ -444,6 +444,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/PaneCard.qml
         qml/PaneHeader.qml
         qml/ExitedFooter.qml
+        qml/ShellIntegrationCard.qml
         qml/TerminalPane.qml
         qml/ActionContextMenu.qml
         qml/MenuSwatchRow.qml

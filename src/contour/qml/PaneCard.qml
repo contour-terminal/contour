@@ -10,7 +10,8 @@
 // only a card can be inactive), not its header.
 //
 // An ended pane, or a restored shell over the command a restart stopped, shows its ExitedFooter below the
-// cells, which end where it starts; a pane whose host
+// cells, which end where it starts; so does the shell integration offer, in a band of its own that an
+// ended pane's footer replaces; a pane whose host
 // connection is being sought again dims below its header and shows a pill naming the host.
 //
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
@@ -108,7 +109,9 @@ Item {
             x: card.contentInset
             y: (card.headerInline ? header.height : 0) + card.contentInset
             width: content.width - x - card.contentInset
-            height: content.height - y - (footer.visible ? footer.height : card.contentInset)
+            height: content.height - y - (footer.visible ? footer.height
+                                          : shellBand.visible ? shellBand.height + card.contentInset
+                                          : card.contentInset)
             backgroundOutset: card.contentInset
             session: card.session
             paneActive: card.isActive
@@ -116,7 +119,7 @@ Item {
             lockInPane: card.lockInPane && !card.headerShown
             cornerRadius: card.cornerRadius
             squareTop: card.headerInline ? card.cornerRadius : 0
-            squareBottom: footer.visible ? card.cornerRadius : 0
+            squareBottom: footer.visible || shellBand.visible ? card.cornerRadius : 0
             onActivated: { if (card.node) card.node.activate() }
             // The find bar's room in the header row, and whether the pane has an inline header to give it
             // (F5: not a Minimal overlay header, which comes and goes with a held key).
@@ -224,6 +227,45 @@ Item {
         // A click on the footer, as on the terminal, makes the ended pane the active one: Return then
         // restarts it.
         onActivated: { if (card.node) card.node.activate() }
+    }
+
+    // The shell integration offer's band: the card below the cells, which end where the band starts. Clipped to
+    // the band, so the card's shadow never reaches over the cells above it.
+    Item {
+        id: shellBand
+        objectName: "shellIntegrationBand"
+        x: 0
+        y: card.height - card.contentInset - height
+        z: 1
+        width: card.width
+        height: shellCard.shown ? shellCard.height + shellBandGap + shellBandGap : 0
+        visible: shellCard.shown
+        clip: true
+        // The room above and below the card: none on the Terminal row, whose card is whole cell rows.
+        readonly property real shellBandGap: chromeStyle.chipOpenGlyph !== "" ? 0 : chromeStyle.space.s4
+
+        // The pane's background at the profile's opacity, as the terminal above it is; its bottom corners
+        // follow the card.
+        Item {
+            anchors.fill: parent
+            clip: card.cornerRadius > 0
+
+            Rectangle {
+                objectName: "shellIntegrationBandBackground"
+                anchors.fill: parent
+                anchors.topMargin: -card.cornerRadius
+                radius: card.cornerRadius
+                color: card.fill
+                opacity: card.session ? card.session.opacity : 1.0
+            }
+        }
+
+        ShellIntegrationCard {
+            id: shellCard
+            x: (parent.width - width) / 2
+            y: shellBand.shellBandGap
+            session: card.session
+        }
     }
 
     // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal

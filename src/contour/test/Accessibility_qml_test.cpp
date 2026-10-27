@@ -19,6 +19,7 @@
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <vtbackend/core/Search.hpp>
@@ -364,6 +365,39 @@ TEST_CASE(
     {
         INFO("button " << part);
         auto const buttons = partsNamed(*footer, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the shell integration card is an alert named by its title, with two buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setShellCard(contour::window::CardStage::Offer);
+    auto card =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ShellIntegrationCard.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(card.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == session.shellIntegrationTitle());
+
+    for (auto const& [part, name]: std::array { std::pair { "shellIntegrationPrimary", "Install" },
+                                                std::pair { "shellIntegrationSecondary", "Not Now" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*card, QString::fromLatin1(part));
         REQUIRE(buttons.size() == 1);
         auto* button = accessibleAttachedOf(buttons.front());
         REQUIRE(button != nullptr);

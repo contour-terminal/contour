@@ -7,6 +7,7 @@
 #include <contour/session/SearchStatus.hpp>
 #include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <QtCore/QList>
 #include <QtCore/QObject>
@@ -21,6 +22,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -91,6 +93,19 @@ class MockSession: public QObject
     Q_PROPERTY(QString footerActionLabel READ footerActionLabel NOTIFY paneFooterChanged)
     Q_PROPERTY(QString footerDismissLabel READ footerDismissLabel NOTIFY paneFooterChanged)
     Q_PROPERTY(int footerTakesReturn READ footerTakesReturn NOTIFY paneFooterChanged)
+    // }}}
+    // {{{ The shell-integration card: what its stage says, mirroring TerminalSession's properties.
+    Q_PROPERTY(int shellIntegrationCard READ shellIntegrationCard NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationTitle READ shellIntegrationTitle NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationBody READ shellIntegrationBody NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationPrimary READ shellIntegrationPrimary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY shellIntegrationCardChanged)
+    // }}}
+    // {{{ The find bar and the permission question.
     // Mirrors TerminalSession's find bar surface (SearchBar.qml): the pattern, the summary and its flags,
     // the toggles as maps, and the current match's viewport rows.
     Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
@@ -390,6 +405,45 @@ class MockSession: public QObject
     int footerDismissals = 0; ///< How often dismissFooter() ran.
     // }}}
 
+    // {{{ The shell-integration card
+    [[nodiscard]] int shellIntegrationCard() const noexcept { return std::to_underlying(_cardStage); }
+    [[nodiscard]] QString shellIntegrationTitle() const { return cardWords(&window::CardStageRow::title); }
+    [[nodiscard]] QString shellIntegrationBody() const
+    {
+        return _cardStage == window::CardStage::Confirm ? _cardLine : cardWords(&window::CardStageRow::body);
+    }
+    [[nodiscard]] QString shellIntegrationPrimary() const
+    {
+        return cardWords(&window::CardStageRow::primary);
+    }
+    [[nodiscard]] QString shellIntegrationSecondary() const
+    {
+        return cardWords(&window::CardStageRow::secondary);
+    }
+    [[nodiscard]] QString const& shellIntegrationError() const noexcept { return _cardError; }
+    [[nodiscard]] QString fontFamily() const { return _fontFamily; }
+
+    /// Shows the card on @p stage, as TerminalSession::showShellIntegrationCard does.
+    /// @param stage The stage to show; Hidden hides it.
+    /// @param line The line the Confirm stage shows as its body.
+    /// @param error What the Confirm stage says went wrong; empty for nothing.
+    void setShellCard(window::CardStage stage, QString line = {}, QString error = {})
+    {
+        _cardStage = stage;
+        _cardLine = std::move(line);
+        _cardError = std::move(error);
+        emit shellIntegrationCardChanged();
+    }
+
+    /// Counts the card's accent button, as TerminalSession::acceptShellIntegrationCard() would act on it.
+    Q_INVOKABLE void acceptShellIntegrationCard() { ++cardAccepts; }
+    /// Counts the card's other button, as TerminalSession::declineShellIntegrationCard() would act on it.
+    Q_INVOKABLE void declineShellIntegrationCard() { ++cardDeclines; }
+
+    int cardAccepts = 0;  ///< How often acceptShellIntegrationCard() ran.
+    int cardDeclines = 0; ///< How often declineShellIntegrationCard() ran.
+    // }}}
+
     // {{{ The find bar
     [[nodiscard]] QString searchPattern() const { return _searchPattern; }
     [[nodiscard]] QString searchSummary() const { return _searchSummary; }
@@ -556,6 +610,7 @@ class MockSession: public QObject
     void paneProgramStatusChanged();
     void sessionEndChanged();
     void paneFooterChanged();
+    void shellIntegrationCardChanged();
     void searchStateChanged();
     void searchFocusedRowsChanged();
     void searchBarRequested(); //!< SessionChrome opens and focuses the find bar on it.
@@ -606,6 +661,16 @@ class MockSession: public QObject
     QString _footerActionLabel;
     QString _footerDismissLabel;
     int _footerTakesReturn = 0;
+    window::CardStage _cardStage = window::CardStage::Hidden;
+    QString _cardLine;
+    QString _cardError;
+    QString _fontFamily = QStringLiteral("Monospace"); ///< The card's line is set in it.
+
+    /// One column of the current stage's CardStageRows row.
+    [[nodiscard]] QString cardWords(std::string_view window::CardStageRow::* column) const
+    {
+        return QString::fromUtf8(window::CardStageRows[std::to_underlying(_cardStage)].*column);
+    }
 };
 
 /// A MockSession whose viewport scrolls, as TerminalSession's does: the chrome writes the offset when the bar

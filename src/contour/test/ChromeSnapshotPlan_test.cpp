@@ -361,7 +361,9 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
           == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
     CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::PaneInterrupted)].script
           == SnapshotScript::PaneInterrupted);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SettingsStatusLine);
+    // Step 6.1's two card rows close the table, after Step 4b's Settings rows.
+    CHECK(static_cast<int>(SnapshotScript::SettingsStatusLine) + 1
+          == static_cast<int>(SnapshotScript::ShellIntegrationOffer));
     struct Expected
     {
         SnapshotScript script;
@@ -554,7 +556,6 @@ TEST_CASE("snapshot.scriptTable.settingsPages", "[snapshot]")
     // The existing `settings` row is the General page; the new scripts come after the others, in the order
     // of the pages.
     CHECK(scriptRow(SnapshotScript::Settings).settingsPage == SnapshotSettingsPage::General);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SettingsStatusLine);
 
     // The names the plan fixes, and the page each script shows.
     struct Expected
@@ -622,5 +623,43 @@ TEST_CASE("snapshot.scriptTable.settingsPages", "[snapshot]")
         CAPTURE(id);
         CHECK((id.starts_with("section:") || id.starts_with("profile:")));
         CHECK(ids.insert(id).second);
+    }
+}
+
+TEST_CASE("snapshot.scriptTable.shellIntegrationCard", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    // The two card rows close the table, in stage order: a single leaf each, nothing else going on.
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ShellIntegrationConfirm);
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        SnapshotShellCard card;
+    };
+    for (auto const& expected: std::array {
+             Expected {
+                 SnapshotScript::ShellIntegrationOffer, "shell-integration-offer", SnapshotShellCard::Offer },
+             Expected { SnapshotScript::ShellIntegrationConfirm,
+                        "shell-integration-confirm",
+                        SnapshotShellCard::Confirm },
+         })
+    {
+        CAPTURE(expected.name);
+        auto const& row = scriptRow(expected.script);
+        CHECK(row.name == expected.name);
+        CHECK(row.shellCard == expected.card);
+        CHECK(row.panes == PaneShape::SingleLeaf);
+        CHECK(row.action == ScriptAction::None);
+        CHECK(row.paneEnd == SnapshotPaneEnd::None);
+        CHECK(row.banner == SnapshotBanner::None);
+    }
+    // Every row names its card, and only these two show one.
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK((row.shellCard != SnapshotShellCard::None)
+              == (row.script == SnapshotScript::ShellIntegrationOffer
+                  || row.script == SnapshotScript::ShellIntegrationConfirm));
     }
 }

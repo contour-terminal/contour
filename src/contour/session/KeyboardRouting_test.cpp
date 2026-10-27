@@ -123,6 +123,14 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(QString footerActionLabel READ footerActionLabel CONSTANT)
     Q_PROPERTY(QString footerDismissLabel READ footerDismissLabel CONSTANT)
     Q_PROPERTY(int footerTakesReturn READ footerTakesReturn CONSTANT)
+    // What the shell integration card reads: no offer.
+    Q_PROPERTY(int shellIntegrationCard READ shellIntegrationCard CONSTANT)
+    Q_PROPERTY(QString shellIntegrationTitle READ shellIntegrationTitle CONSTANT)
+    Q_PROPERTY(QString shellIntegrationBody READ shellIntegrationBody CONSTANT)
+    Q_PROPERTY(QString shellIntegrationPrimary READ shellIntegrationPrimary CONSTANT)
+    Q_PROPERTY(QString shellIntegrationSecondary READ shellIntegrationSecondary CONSTANT)
+    Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError CONSTANT)
+    Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)
 
   public:
     [[nodiscard]] int pageLineCount() const { return 25; }
@@ -146,6 +154,13 @@ class RoutingMockSession: public QObject
     [[nodiscard]] QString footerActionLabel() const { return {}; }
     [[nodiscard]] QString footerDismissLabel() const { return {}; }
     [[nodiscard]] int footerTakesReturn() const { return 0; }
+    [[nodiscard]] int shellIntegrationCard() const { return 0; }
+    [[nodiscard]] QString shellIntegrationTitle() const { return {}; }
+    [[nodiscard]] QString shellIntegrationBody() const { return {}; }
+    [[nodiscard]] QString shellIntegrationPrimary() const { return {}; }
+    [[nodiscard]] QString shellIntegrationSecondary() const { return {}; }
+    [[nodiscard]] QString shellIntegrationError() const { return {}; }
+    [[nodiscard]] QString fontFamily() const { return {}; }
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }

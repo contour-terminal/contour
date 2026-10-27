@@ -20,6 +20,7 @@
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 
@@ -370,6 +371,24 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
     // `work` is the editable profile, `main` the one contour.yml defines.
     CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("readOnlyBanner"))->isVisible()
           == (row.settingsPage == SnapshotSettingsPage::ProfileReadOnly));
+}
+
+/// Checks that @p content shows exactly one shell integration card, saying @p stage's title.
+void checkShellCard(QQuickItem const& content, contour::test::snapshot::SnapshotShellCard stage)
+{
+    using contour::test::snapshot::SnapshotShellCard;
+    auto const isVisible = [](QQuickItem const* item) {
+        return item->isVisible();
+    };
+    auto const cards = contour::test::itemsNamed(content, QStringLiteral("shellIntegrationCard"));
+    REQUIRE(std::ranges::count_if(cards, isVisible) == 1);
+    auto const& words = contour::window::CardStageRows[std::to_underlying(
+        stage == SnapshotShellCard::Offer ? contour::window::CardStage::Offer
+                                          : contour::window::CardStage::Confirm)];
+    auto const* title = (*std::ranges::find_if(cards, isVisible))
+                            ->findChild<QObject*>(QStringLiteral("shellIntegrationTitle"));
+    REQUIRE(title != nullptr);
+    CHECK(title->property("text").toString() == QString::fromUtf8(words.title));
 }
 } // namespace
 
@@ -813,6 +832,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(toast->property("text").toString() == QStringLiteral("Restored 2 windows, 7 tabs"));
                 break;
             }
+            case SnapshotScript::ShellIntegrationOffer:
+            case SnapshotScript::ShellIntegrationConfirm: checkShellCard(content, row.shellCard); break;
             case SnapshotScript::SingleTab: break;
             case SnapshotScript::PermissionPaste: {
                 auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));

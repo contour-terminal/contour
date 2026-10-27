@@ -727,6 +727,19 @@ class ChromeSnapshotScene
         REQUIRE(QTest::qWaitFor([&] { return bar->property("opened").toBool(); }, 2000));
     }
 
+    /// Puts @p stage's card on @p session, naming SnapshotShellCardLine on Confirm.
+    static void showShellCard(MockSession& session, SnapshotShellCard stage)
+    {
+        switch (stage)
+        {
+            case SnapshotShellCard::None: break;
+            case SnapshotShellCard::Offer: session.setShellCard(window::CardStage::Offer); break;
+            case SnapshotShellCard::Confirm:
+                session.setShellCard(window::CardStage::Confirm, QString::fromUtf8(SnapshotShellCardLine));
+                break;
+        }
+    }
+
     /// One session per leaf of @p script's pane shape, in the look's background; every one but the
     /// active leaf's dimmed as unfocused, each running what SnapshotPaneLabels names, all of them
     /// reconnecting when the host connection is, and the last one ended -- its program exited, Restart
@@ -772,6 +785,8 @@ class ChromeSnapshotScene
                             QString::fromUtf8(session::InterruptedFooterRow.actionLabel));
                     break;
             }
+            if (leaf == ActiveLeaf)
+                showShellCard(*session, script.shellCard);
             sessions.push_back(std::move(session));
         }
         return sessions;

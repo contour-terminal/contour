@@ -4079,6 +4079,11 @@ QString TerminalSession::shellIntegrationBody() const
     return shellCardText(window::CardStageRows[std::to_underlying(_shellCard.stage)].body);
 }
 
+QString TerminalSession::fontFamily() const
+{
+    return QString::fromStdString(_profile.fonts.value().regular.familyName);
+}
+
 QString TerminalSession::shellIntegrationPrimary() const
 {
     return QString::fromUtf8(window::CardStageRows[std::to_underlying(_shellCard.stage)].primary);

@@ -339,6 +339,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(
         QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
     Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
+    // The profile's regular font family, in which the card sets the line it would add.
+    Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY shellIntegrationCardChanged)
     // The question this session asks its user now, as the permission dialog shows it; empty while nothing is
     // asked. See pendingPermission().
     Q_PROPERTY(QVariantMap pendingPermission READ pendingPermission NOTIFY pendingPermissionChanged)
@@ -1066,6 +1068,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return The label of the card's other button.
     [[nodiscard]] QString shellIntegrationSecondary() const;
+
+    /// @return The profile's regular font family, in which the card sets the line on Confirm. Notified
+    /// with the card, which reads it whenever it changes stage.
+    [[nodiscard]] QString fontFamily() const;
 
     /// @return Why the last install failed, shown under the line on Confirm; empty otherwise.
     [[nodiscard]] QString shellIntegrationError() const { return QString::fromStdString(_shellCard.error); }

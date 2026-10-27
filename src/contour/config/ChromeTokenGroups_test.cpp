@@ -1077,6 +1077,50 @@ TEST_CASE("chromeTokens.paneTokens", "[chrometokens]")
     }
 }
 
+namespace
+{
+
+/// The shell-integration card's four tokens on one row (R-l).
+struct NoticeCardTokenRow
+{
+    contour::config::ChromeStyle style = contour::config::ChromeStyle::MacOS;
+    int width = 0;
+    int radius = 0;
+    int padX = 0;
+    int padY = 0;
+};
+
+/// One row per ChromeStyle, in enumerator order.
+constexpr auto NoticeCardTokenRows = std::array {
+    NoticeCardTokenRow {
+        .style = contour::config::ChromeStyle::MacOS, .width = 330, .radius = 12, .padX = 14, .padY = 12 },
+    NoticeCardTokenRow {
+        .style = contour::config::ChromeStyle::Fluent, .width = 330, .radius = 8, .padX = 14, .padY = 12 },
+    NoticeCardTokenRow { .style = contour::config::ChromeStyle::ContourLinux,
+                         .width = 330,
+                         .radius = 12,
+                         .padX = 14,
+                         .padY = 12 },
+    NoticeCardTokenRow {
+        .style = contour::config::ChromeStyle::Terminal, .width = 0, .radius = 0, .padX = 1, .padY = 0 },
+};
+
+} // namespace
+
+TEST_CASE("chromeTokens.noticeCard", "[chrometokens]")
+{
+    static_assert(NoticeCardTokenRows.size() == contour::config::ChromeTokenRows.size());
+    for (auto const& expected: NoticeCardTokenRows)
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const row = contour::config::resolveChromeTokens(expected.style, {});
+        CHECK(row.size.noticeCard == expected.width);
+        CHECK(row.radii.noticeCard == expected.radius);
+        CHECK(row.space.noticeCardPadX == expected.padX);
+        CHECK(row.space.noticeCardPadY == expected.padY);
+    }
+}
+
 TEST_CASE("chromeTokens.minimalSubRow", "[chrometokens]")
 {
     using namespace contour::config;

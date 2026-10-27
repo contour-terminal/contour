@@ -73,6 +73,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal paneHeaderAction READ paneHeaderAction CONSTANT)
     Q_PROPERTY(qreal paneFooter READ paneFooter CONSTANT)
     Q_PROPERTY(qreal footerButton READ footerButton CONSTANT)
+    Q_PROPERTY(qreal noticeCard READ noticeCard CONSTANT)
     Q_PROPERTY(qreal paletteWidth READ paletteWidth CONSTANT)
     Q_PROPERTY(qreal paletteMaxHeight READ paletteMaxHeight CONSTANT)
     Q_PROPERTY(qreal paletteField READ paletteField CONSTANT)
@@ -171,6 +172,7 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal paneFooter() const noexcept { return _tokens.paneFooter * _units.vertical; }
     /// @return The height of an exited footer's button in logical pixels.
     [[nodiscard]] qreal footerButton() const noexcept { return _tokens.footerButton * _units.vertical; }
+    [[nodiscard]] qreal noticeCard() const noexcept { return _tokens.noticeCard * _units.horizontal; }
 
     /// @return The command palette's width in logical pixels.
     [[nodiscard]] qreal paletteWidth() const noexcept { return _tokens.paletteWidth * _units.horizontal; }
@@ -269,6 +271,8 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal paneGapRows READ paneGapRows CONSTANT)
     Q_PROPERTY(qreal paneHeaderGap READ paneHeaderGap CONSTANT)
     Q_PROPERTY(qreal footerLeading READ footerLeading CONSTANT)
+    Q_PROPERTY(qreal noticeCardPadX READ noticeCardPadX CONSTANT)
+    Q_PROPERTY(qreal noticeCardPadY READ noticeCardPadY CONSTANT)
     Q_PROPERTY(qreal paletteInset READ paletteInset CONSTANT)
     Q_PROPERTY(qreal findBarInset READ findBarInset CONSTANT)
     Q_PROPERTY(qreal findBarInsetRows READ findBarInsetRows CONSTANT)
@@ -325,6 +329,8 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal paneHeaderGap() const noexcept { return _tokens.paneHeaderGap * _units.horizontal; }
     /// @return The exited footer's leading padding in logical pixels.
     [[nodiscard]] qreal footerLeading() const noexcept { return _tokens.footerLeading * _units.horizontal; }
+    [[nodiscard]] qreal noticeCardPadX() const noexcept { return _tokens.noticeCardPadX * _units.horizontal; }
+    [[nodiscard]] qreal noticeCardPadY() const noexcept { return _tokens.noticeCardPadY * _units.vertical; }
     /// @return The palette rows' horizontal inset and the list's side padding, in logical pixels.
     [[nodiscard]] qreal paletteInset() const noexcept { return _tokens.paletteInset * _units.horizontal; }
     /// @return The find bar's inset from the pane's right edge in logical pixels.
@@ -357,6 +363,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal popover READ popover CONSTANT)
     Q_PROPERTY(qreal menu READ menu CONSTANT)
     Q_PROPERTY(qreal paneCard READ paneCard CONSTANT)
+    Q_PROPERTY(qreal noticeCard READ noticeCard CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
     Q_PROPERTY(qreal tab READ tab CONSTANT)
     Q_PROPERTY(qreal tabWell READ tabWell CONSTANT)
@@ -385,6 +392,7 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal menu() const noexcept { return _tokens.menu * _units.horizontal; }
     /// @return The radius of pane cards.
     [[nodiscard]] qreal paneCard() const noexcept { return _tokens.paneCard * _units.horizontal; }
+    [[nodiscard]] qreal noticeCard() const noexcept { return _tokens.noticeCard * _units.horizontal; }
     /// @return The radius of toasts.
     [[nodiscard]] qreal toast() const noexcept { return _tokens.toast * _units.horizontal; }
     /// @return The radius of a tab pill.
