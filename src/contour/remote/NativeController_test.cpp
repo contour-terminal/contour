@@ -3018,8 +3018,7 @@ namespace
     for (auto const tabs: { 3, 4 })
     {
         auto window = vthost::WindowSnapshot {};
-        for (auto const _: std::views::iota(0, tabs))
-            window.tabs.push_back(vthost::TabSnapshot {});
+        window.tabs.resize(static_cast<size_t>(tabs));
         snapshot.windows.push_back(std::move(window));
     }
     return vthost::WorkspaceRestore { .snapshot = std::move(snapshot) };
