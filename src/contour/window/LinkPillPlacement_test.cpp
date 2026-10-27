@@ -114,7 +114,8 @@ TEST_CASE("linkPill.aNarrowHeaderSlotCutsThePillOrSendsItToTheGrid", "[linkpill]
 {
     // A slot narrower than the pill cuts it to the slot, flush with its trailing edge; one narrower than the
     // pill's minimum keeps it in the grid rather than squeezed over the header's actions.
-    auto inputs = Base {}.inputs();
+    auto const base = Base {}; // owns the rows the inputs' spans view
+    auto inputs = base.inputs();
     inputs.host = LinkPillHost::PaneHeader;
     inputs.headerSlotWidth = 200;
     CHECK(placeLinkPill(inputs)
