@@ -64,6 +64,9 @@ namespace
         std::pair { vtbackend::CellFlag::CharacterProtectedISO, 18 },
         std::pair { vtbackend::CellFlag::MulticellContinuation, 19 },
         std::pair { vtbackend::CellFlag::WrapPadding, 20 },
+        // Render-only: the grid never stores it, so it never travels. Pinned all the same, so that a later
+        // flag cannot take its bit while some peer still treats it as this one.
+        std::pair { vtbackend::CellFlag::InputMethodPreedit, 21 },
     };
 
     template <typename Flag, std::size_t N>

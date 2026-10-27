@@ -2409,6 +2409,21 @@ TEST_CASE("TerminalSession: a configuration reload hands the engine-read emulati
     }
 }
 
+TEST_CASE("TerminalSession: a configuration reload hands the preedit style to the running terminal",
+          "[contour][session][ime]")
+{
+    // The render buffer reads the terminal's own copy of the style, so a reload has to reach that copy.
+    contour::test::ConfiguredTestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const& settings = session->terminal().settings();
+    auto const born = settings.preeditStyle;
+    auto const other = born == vtbackend::PreeditStyle::Inline ? std::string_view { "highlighted" }
+                                                               : std::string_view { "inline" };
+
+    reloadSessionWith(*session, {}, std::format("        input_method_editor_style: {}\n", other));
+    CHECK(settings.preeditStyle != born);
+}
+
 TEST_CASE("TerminalSession: a configuration reload hands the context limits and mark policy over",
           "[contour][session][config]")
 {

@@ -110,6 +110,15 @@ enum class InputWriter : uint8_t
     ReaderThread,
 };
 
+/// How the text an input method is composing (the preedit) is drawn at the cursor.
+enum class PreeditStyle : uint8_t
+{
+    /// In the colour scheme's `input_method_editor` colours, bold and underlined.
+    Highlighted = 0,
+    /// In the cell's own colours, with a thin underline: as the text will read once committed.
+    Inline,
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -181,6 +190,9 @@ struct Settings
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };
     std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
+    /// How the input method's preedit is drawn. Read where the render buffer is built, under the terminal's
+    /// lock, which a configuration reload assigning it holds too.
+    PreeditStyle preeditStyle = PreeditStyle::Highlighted;
 
     bool usePrivateColorRegisters = false;
 

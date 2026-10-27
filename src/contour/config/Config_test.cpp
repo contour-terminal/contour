@@ -4156,6 +4156,7 @@ struct ExpectedEditionDefaults
     contour::config::GuiTheme theme;
     bool hyperlinkHoverTooltip; ///< `hyperlink_hover_tooltip`, a YAML boolean.
     contour::config::ScrollBarModePreference scrollBarMode;
+    vtbackend::PreeditStyle preeditStyle;
 };
 
 /// Every value the releases before the 2026 redesign shipped.
@@ -4191,6 +4192,7 @@ constexpr auto ClassicExpectation = ExpectedEditionDefaults {
     .theme = contour::config::GuiTheme::System,
     .hyperlinkHoverTooltip = true,
     .scrollBarMode = contour::config::ScrollBarModePreference::Always,
+    .preeditStyle = vtbackend::PreeditStyle::Highlighted,
 };
 
 /// Every first-launch value of the 2026 redesign.
@@ -4232,6 +4234,7 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .theme = contour::config::GuiTheme::Terminal,
     .hyperlinkHoverTooltip = false,
     .scrollBarMode = contour::config::ScrollBarModePreference::System,
+    .preeditStyle = vtbackend::PreeditStyle::Inline,
 };
 
 /// The palette a built-in scheme name resolves to.
@@ -4273,6 +4276,7 @@ void checkProfileDefaults(contour::config::TerminalProfile const& profile,
     CHECK(profile.modeInsert.value().cursor.cursorShape == expected.insertCursorShape);
     CHECK(profile.modeInsert.value().cursor.cursorDisplay == vtbackend::CursorDisplay::Steady);
     CHECK(profile.screenTransitionDuration.value() == expected.screenTransitionDuration);
+    CHECK(profile.inputMethodEditorStyle.value() == expected.preeditStyle);
     CHECK(profile.tabLabel.value() == "{WindowTitle}");
     CHECK(profile.scrollbar.value().mode == expected.scrollBarMode);
 
@@ -8695,6 +8699,60 @@ TEST_CASE("Config: the decorator names the documentation lists are the ones the 
     // The example's own values must be among them.
     CHECK(text.contains("normal: dotted-underline"));
     CHECK(text.contains("hover: underline"));
+}
+
+TEST_CASE("Config: input_method_editor_style follows the edition, reads and writes back", "[config][ime]")
+{
+    using vtbackend::PreeditStyle;
+
+    SECTION("a Classic profile keeps the highlighted preedit, a generated one is inline")
+    {
+        CHECK(
+            contour::config::TerminalProfile { .defaultsEdition = contour::config::DefaultsEdition::Classic }
+                .inputMethodEditorStyle.value()
+            == PreeditStyle::Highlighted);
+        CHECK(contour::config::defaultConfigString().contains("input_method_editor_style: inline\n"));
+        QTemporaryDir dir;
+        auto const generated = loadFromYaml(dir, contour::config::defaultConfigString());
+        auto const* profile = generated.profile(generated.defaultProfileName.value());
+        REQUIRE(profile != nullptr);
+        CHECK(profile->inputMethodEditorStyle.value() == PreeditStyle::Inline);
+    }
+
+    SECTION("highlighted in a Native2026 file is read, and written back as such")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(
+            dir,
+            "defaults_edition: native2026\nprofiles:\n  main:\n    input_method_editor_style: highlighted\n"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->inputMethodEditorStyle.value() == PreeditStyle::Highlighted);
+        CHECK(
+            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark, std::nullopt)
+                .preeditStyle
+            == PreeditStyle::Highlighted);
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        CHECK(written.contains("input_method_editor_style: highlighted\n"));
+        auto const reread = loadFromYaml(dir, written);
+        REQUIRE(reread.profile("main") != nullptr);
+        CHECK(reread.profile("main")->inputMethodEditorStyle.value() == PreeditStyle::Highlighted);
+    }
+
+    SECTION("an unknown spelling is reported and keeps the edition's value")
+    {
+        auto const capture = core::log::ScopedCapture { "error" };
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(
+            dir, "defaults_edition: native2026\nprofiles:\n  main:\n    input_method_editor_style: loud\n"sv);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("'loud'"));
+        CHECK(capture.contains("input_method_editor_style"));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->inputMethodEditorStyle.value() == PreeditStyle::Inline);
+    }
 }
 
 TEST_CASE("Config: hyperlink_decoration.mode reads, writes and defaults", "[config][links]")

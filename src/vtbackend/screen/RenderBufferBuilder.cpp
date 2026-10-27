@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <ranges>
+#include <span>
 #include <vector>
 
 using namespace std;
@@ -697,6 +698,9 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
         }
     }
 
+    // The grid's text at the cursor gives way to what the input method is composing there.
+    overlayInputMethodEditor(frontIndex, lineOffset);
+
     auto const backIndex = _output->cells.size() - 1;
 
     _output->cells[frontIndex].groupStart = true;
@@ -918,20 +922,26 @@ void RenderBufferBuilder::renderGridText(CellLocation screenPosition,
 
 ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
                                                 GraphicsAttributes textAttributes,
-                                                std::string_view text)
+                                                std::string_view text,
+                                                ColumnCount columnLimit)
 {
     auto columnCountRendered = ColumnCount(0);
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
+        auto const width = graphemeClusterWidth(graphemeCluster);
+        // Cut, not wrapped: the next row holds cells the program owns. A wide cluster that would straddle
+        // the limit is left out whole, and so is everything after it.
+        if (columnCountRendered + ColumnCount::cast_from(width) > columnLimit)
+            break;
+
         auto const gridPosition =
             gridPositionOf(screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
                                                 textAttributes.backgroundColor);
-        auto const width = graphemeClusterWidth(graphemeCluster);
         // std::cout << std::format(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
         //            columnOffset,
         //            width,
@@ -974,26 +984,82 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
     return columnCountRendered;
 }
 
+GraphicsAttributes RenderBufferBuilder::preeditAttributes() const noexcept
+{
+    auto textAttributes = GraphicsAttributes {};
+    switch (_terminal->settings().preeditStyle)
+    {
+        case PreeditStyle::Highlighted: {
+            auto const colors = _terminal->colorPalette().inputMethodEditor;
+            textAttributes.foregroundColor = colors.foreground;
+            textAttributes.backgroundColor = colors.background;
+            textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
+            break;
+        }
+        case PreeditStyle::Inline:
+            // The default colours, which makeColorsForCell() resolves as for any cell -- reversed under
+            // DECSCNM, so the preedit reads as the text around it. The rasterizer draws the flag's underline
+            // in the foreground.
+            textAttributes.flags.enable(CellFlag::InputMethodPreedit);
+            break;
+    }
+    return textAttributes;
+}
+
+void RenderBufferBuilder::overlayInputMethodEditor(size_t frontIndex, LineOffset line)
+{
+    if (!_cursorPosition || _inputMethodData.preeditString.empty())
+        return;
+
+    auto const screenPosition = CellLocation { .line = line, .column = _cursorPosition->column };
+    auto const rowCells = _output->cells.size() - frontIndex;
+    if (gridPositionOf(screenPosition) != *_cursorPosition
+        || unbox<size_t>(screenPosition.column) >= rowCells)
+        return;
+
+    auto const preeditFront = _output->cells.size();
+    if (!tryRenderInputMethodEditor(screenPosition, *_cursorPosition))
+        return;
+    // This row is already emitted whole: nothing is left to skip.
+    _inputMethodSkipColumns = ColumnCount(0);
+
+    // One render cell per column on both sides, so the preedit's cells take the place of the row's own
+    // from the cursor's column on. Its cut at the edge keeps that range inside the row.
+    auto const at = frontIndex + unbox<size_t>(screenPosition.column);
+    auto const preedit = std::span(_output->cells).subspan(preeditFront);
+    std::ranges::move(preedit, _output->cells.begin() + static_cast<std::ptrdiff_t>(at));
+    _output->cells.resize(preeditFront);
+    _output->cells.back().groupEnd = true;
+    if (at > frontIndex)
+        _output->cells[at - 1].groupEnd = true;
+}
+
 bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition)
 {
     // Render IME preeditString if available and screen position matches cursor position.
     if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
     {
-        auto const inputMethodEditorStyles = _terminal->colorPalette().inputMethodEditor;
-        auto textAttributes = GraphicsAttributes {};
-        textAttributes.foregroundColor = inputMethodEditorStyles.foreground;
-        textAttributes.backgroundColor = inputMethodEditorStyles.background;
-        textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
+        auto const textAttributes = preeditAttributes();
 
         if (!_output->cells.empty())
             _output->cells.back().groupEnd = true;
 
+        // The columns left on this line; DECDWL halves them, as it doubles every cell's width.
+        auto const lineColumns = _currentLineFlags.test(LineFlag::DoubleWidth)
+                                     ? _screen->pageSize().columns / 2
+                                     : _screen->pageSize().columns;
+        auto const columnsLeft = lineColumns - boxed_cast<ColumnCount>(screenPosition.column);
+
         _inputMethodSkipColumns =
-            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString);
+            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, columnsLeft);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
+            // After the preedit, as an input method's caret is -- but never past the line's last cell, where
+            // a preedit cut at the edge would put it.
             if (_output->cursor.has_value())
-                _output->cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
+                _output->cursor->position.column = std::min(
+                    _output->cursor->position.column + ColumnOffset::cast_from(_inputMethodSkipColumns),
+                    boxed_cast<ColumnOffset>(lineColumns) - 1);
             _output->cells.at(_output->cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart =
                 true;
             _output->cells.back().groupEnd = true;

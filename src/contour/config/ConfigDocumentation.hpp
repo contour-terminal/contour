@@ -848,6 +848,29 @@ constexpr StringLiteral InputMethodEditorSupportConfig {
     "\n"
 };
 
+constexpr StringLiteral InputMethodEditorStyleConfig {
+    "{comment} How text an input method is composing is drawn at the cursor: `inline` in the cell's own\n"
+    "{comment} colours with a thin underline, or `highlighted` in the colour scheme's `input_method_editor`\n"
+    "{comment} colours.\n"
+    "input_method_editor_style: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral InputMethodEditorStyleWeb {
+    "How text an input method is composing is drawn at the cursor.\n"
+    "\n"
+    "Valid values are:\n"
+    "- `inline` - in the cell's own colours with a thin underline, as it will read once committed\n"
+    "- `highlighted` - in the colour scheme's `input_method_editor` colours, bold and underlined\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    input_method_editor_style: inline\n"
+    "```\n"
+    "\n"
+};
+
 constexpr StringLiteral HighlightDoubleClickerWordConfig {
     "{comment} If enabled, and you double-click on a word in the primary screen,\n"
     "{comment} all other words matching this word will be highlighted as well.\n"
@@ -3667,6 +3690,7 @@ using StickyHeaderColors = DocumentationEntry<StickyHeaderColorsConfig, Dummy>;
 using StickyHeaderColorsHeader = DocumentationEntry<StickyHeaderColorsHeaderConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
+using InputMethodEditorStyle = DocumentationEntry<InputMethodEditorStyleConfig, InputMethodEditorStyleWeb>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
 using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
 using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;

@@ -80,8 +80,39 @@ TEST_CASE("Terminal.IME.CursorVisibleDuringComposition", "[terminal]")
     // Post-fix: the render buffer cursor must be present -- IME composition
     // overrides the blink-off state so the cursor anchors the preedit text.
     auto const renderBuffer = terminal.renderBuffer();
+    // It stands after the preedit, as an input method's caret does: "test" covers columns 0 to 3.
     REQUIRE(renderBuffer.get().cursor.has_value());
-    CHECK(renderBuffer.get().cursor->position.column == ColumnOffset(0));
+    CHECK(renderBuffer.get().cursor->position.column == ColumnOffset(4));
+    CHECK(renderBuffer.get().cursor->position.line == LineOffset(0));
+}
+
+TEST_CASE("Terminal.IME.CursorVisibleDuringCompositionInline", "[terminal]")
+{
+    // The case above, under the inline preedit: the style changes the preedit's cells, never whether the
+    // cursor anchoring them is drawn.
+    auto settings =
+        MockTerm<>::createSettings(PageSize { .lines = LineCount { 4 }, .columns = ColumnCount { 6 } },
+                                   vtbackend::HistoryLimits {},
+                                   1024);
+    settings.preeditStyle = vtbackend::PreeditStyle::Inline;
+    auto mc = MockTerm { std::move(settings) };
+    auto& terminal = mc.terminal;
+    terminal.setCursorDisplay(vtbackend::CursorDisplay::Blink);
+    auto constexpr BlinkInterval = chrono::milliseconds(500);
+    terminal.setCursorBlinkingInterval(BlinkInterval);
+
+    auto const clockBlinkOff = chrono::steady_clock::time_point() + BlinkInterval + chrono::milliseconds(1);
+    terminal.tick(clockBlinkOff);
+    terminal.ensureFreshRenderBuffer();
+    CHECK(!terminal.cursorCurrentlyVisible());
+
+    terminal.updateInputMethodPreeditString("test");
+    terminal.tick(clockBlinkOff + chrono::milliseconds(100));
+    terminal.ensureFreshRenderBuffer();
+
+    auto const renderBuffer = terminal.renderBuffer();
+    REQUIRE(renderBuffer.get().cursor.has_value());
+    CHECK(renderBuffer.get().cursor->position.column == ColumnOffset(4));
     CHECK(renderBuffer.get().cursor->position.line == LineOffset(0));
 }
 

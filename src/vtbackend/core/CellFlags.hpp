@@ -50,7 +50,11 @@
     _(MulticellContinuation, 19)                                                                          \
     /* Structural: an empty cell a wide character left at the end of its row when it did not fit  \ \ \ \ \
        there and moved on to the next (foot's spacer). Not part of the text: a reflow drops it. */        \
-    _(WrapPadding, 20)
+    _(WrapPadding, 20)                                                                                    \
+    /* Render-only: a cell of the text an input method is composing, drawn inline (PreeditStyle::Inline). \
+       No control sequence sets it and the grid never stores it -- only RenderBufferBuilder puts it on    \
+       the preedit's render cells, for the rasterizer to underline them. */                               \
+    _(InputMethodPreedit, 21)
 
 namespace vtbackend
 {

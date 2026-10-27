@@ -6916,6 +6916,7 @@ namespace
         &vtbackend::Settings::screenTransitionStyle,
         &vtbackend::Settings::screenTransitionDuration,
         &vtbackend::Settings::cursorMotionAnimationDuration,
+        &vtbackend::Settings::preeditStyle,
         &vtbackend::Settings::smoothLineScrolling,
         &vtbackend::Settings::smoothScrolling,
         &vtbackend::Settings::momentumScrolling,

@@ -225,6 +225,18 @@ class RenderBufferBuilder
 
     [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
 
+    /// The attributes the input method's preedit is drawn with, by @c Settings::preeditStyle.
+    [[nodiscard]] GraphicsAttributes preeditAttributes() const noexcept;
+
+    /// Draws the preedit over a row already emitted one render cell per column, when the cursor is on it.
+    ///
+    /// A uniform row is emitted whole by @c renderTrivialLine rather than cell by cell through
+    /// @c renderCell, so the preedit, which @c renderCell draws as it reaches the cursor, needs this to
+    /// reach it there too.
+    /// @param frontIndex The index of the row's first render cell.
+    /// @param line       The row, as a screen line.
+    void overlayInputMethodEditor(size_t frontIndex, LineOffset line);
+
     /// Emits one render cell per column for text taken from the grid.
     ///
     /// The grid has already decided where each cell begins and how wide it is, so this only counts
@@ -242,10 +254,13 @@ class RenderBufferBuilder
     /// Emits render cells for text whose cell boundaries are not yet known -- the IME preedit
     /// string -- segmenting it into grapheme clusters and measuring each.
     /// @see renderGridText for text that comes from the grid.
+    /// @param columnLimit How many columns the text may cover: the first cluster that would end past them
+    ///                    is not drawn, and neither is anything after it.
     /// @return How many columns were covered.
     ColumnCount renderUtf8Text(CellLocation screenPosition,
                                GraphicsAttributes attributes,
-                               std::string_view text);
+                               std::string_view text,
+                               ColumnCount columnLimit);
 
     /// The display column a grid column draws at.
     ///

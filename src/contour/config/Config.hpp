@@ -12,6 +12,7 @@
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/HostUrl.hpp>
+#include <contour/config/PreeditStyle.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -1073,6 +1074,7 @@ struct EditionDefaults
     /// carve-out; the session converts it at the boundary.
     bool hyperlinkHoverTooltip;
     ScrollBarModePreference scrollBarMode; ///< The profile's `scrollbar.mode`.
+    vtbackend::PreeditStyle preeditStyle;  ///< How an input method's preedit is drawn.
 };
 
 namespace detail
@@ -1124,6 +1126,7 @@ namespace detail
             .chromeDensity = ChromeDensity::Comfortable,
             .hyperlinkHoverTooltip = true,
             .scrollBarMode = ScrollBarModePreference::Always,
+            .preeditStyle = vtbackend::PreeditStyle::Highlighted,
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1146,6 +1149,7 @@ namespace detail
             .chromeDensity = ChromeDensity::Comfortable,
             .hyperlinkHoverTooltip = false,
             .scrollBarMode = ScrollBarModePreference::System,
+            .preeditStyle = vtbackend::PreeditStyle::Inline,
         },
     };
 
@@ -1249,6 +1253,9 @@ struct TerminalProfile
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
     ConfigEntry<bool, documentation::InputMethodEditorSupport> inputMethodEditor { true };
+    ConfigEntry<vtbackend::PreeditStyle, documentation::InputMethodEditorStyle> inputMethodEditorStyle {
+        editionDefaults(defaultsEdition).preeditStyle
+    };
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont(defaultsEdition) };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
