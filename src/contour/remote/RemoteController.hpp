@@ -227,6 +227,12 @@ class RemoteController
     /// @param reason What went wrong, verbatim into `_failure`.
     void failConnect(std::string reason);
 
+    /// The reactor's run ended with an exception, on the reactor thread. The default settles the connection
+    /// phase to Failed (@see failConnect); a controller that tells its owner when a connection ends
+    /// overrides it to say so too, since nothing else will.
+    /// @param reason The exception's message.
+    virtual void reactorDied(std::string const& reason) { failConnect(reason); }
+
     /// @return Whether a run of the connection is in progress: connecting, up, or lost and being sought
     /// again,
     ///         and not stopped. Safe from any thread.

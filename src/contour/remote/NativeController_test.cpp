@@ -2093,6 +2093,12 @@ struct NativeControllerTestAccess
         done.get_future().wait();
     }
 
+    /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.
+    static void killReactor(contour::remote::NativeController& controller)
+    {
+        controller._reactor.post([] { throw std::runtime_error("reactor died"); });
+    }
+
     /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.
     static void closeWhileEnding(contour::remote::NativeController& controller, uint64_t session)
     {
@@ -2536,6 +2542,37 @@ TEST_CASE("NativeController.reconnect.afterARefusal", "[attach][controller][reco
     REQUIRE_FALSE(again.has_value());
     CHECK(again.error() == ReconnectError::AlreadyConnected);
 
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.afterTheReactorDied", "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // A reactor that dies tells its owner the connection closed, so the owner stop()s the controller and
+    // Reconnect is not refused for good.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto closed = std::atomic<int> { 0 };
+    auto const connection = QObject::connect(
+        &controller,
+        &contour::remote::NativeController::connectionClosed,
+        &controller,
+        [&] { ++closed; },
+        Qt::DirectConnection);
+
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    REQUIRE(waitUntil([&] { return closed.load() == 1; }));
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+    CHECK_FALSE(controller.failure().empty());
+
+    controller.stop(); // what the GUI's connectionClosed handler does
+    QObject::disconnect(connection);
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
     controller.stop();
 }
 

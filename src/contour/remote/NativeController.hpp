@@ -447,6 +447,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         return true;
     }
     void closeReactorBindings() override { closeAllBindings(); }
+    /// A reactor that died mid-run never reaches the supervisor's own Failed, so this reports it: without
+    /// connectionClosed() the GUI never stop()s the controller, and Reconnect is refused for good.
+    void reactorDied(std::string const& reason) override;
     [[nodiscard]] std::string connectTimeoutMessage() const override
     {
         return "timed out waiting for the daemon's snapshot";

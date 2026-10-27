@@ -257,6 +257,22 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
         emit connectionClosed();
 }
 
+void NativeController::reactorDied(std::string const& reason)
+{
+    using vthost::client::ConnectionState;
+    auto ended = false;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        ended = _connection == ConnectionState::Failed || _connection == ConnectionState::Refused
+                || _connection == ConnectionState::Stopped;
+    }
+    // A connection that already ended told its owner so.
+    if (ended)
+        failConnect(reason);
+    else
+        onConnectionState(ConnectionState::Failed, reason);
+}
+
 void NativeController::forgetInputEchoes()
 {
     // With the connection down, typed input is dropped and nothing reads the program's reply: a stale Hidden

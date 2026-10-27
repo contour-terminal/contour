@@ -91,7 +91,7 @@ void RemoteController::startConnecting()
     // leaves the phase stuck in Connecting, and without this the GUI would sit out the full budget
     // and then blame it on a slow daemon.
     _reactor.start([this](core::net::EventLoop* loop) { return runClient(loop); },
-                   [this](std::string const& reason) { failConnect(reason); });
+                   [this](std::string const& reason) { reactorDied(reason); });
 }
 
 void RemoteController::restartConnecting()
@@ -104,7 +104,7 @@ void RemoteController::restartConnecting()
     }
     _connectStartedAt = _clock.now();
     _reactor.restart([this](core::net::EventLoop* loop) { return runClient(loop); },
-                     [this](std::string const& reason) { failConnect(reason); });
+                     [this](std::string const& reason) { reactorDied(reason); });
 }
 
 std::expected<void, std::string> RemoteController::awaitConnected(std::chrono::milliseconds budget)
