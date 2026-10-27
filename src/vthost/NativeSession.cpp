@@ -45,6 +45,7 @@
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/TabEdits.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -1696,19 +1697,8 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         pauseReadingIfBackedUp(SessionId { request->session });
         return;
     }
-    if (auto const* edit = std::get_if<proto::EditTab>(&frame.pdu))
-    {
-        // A client that did not negotiate it may not edit: it is refused as a PDU this daemon does not know.
-        if (!_negotiated->shared.contains(proto::Capability::TabEdits))
-        {
-            refuse(frame);
-            return;
-        }
-        // A change fans out as a model event, and so as a layout push to every client, this one included.
-        if (auto const applied = applyTabEdit(_host.model(), *edit); !applied)
-            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(applied.error()));
+    if (serveTabVerb(frame) == TabVerb::Served)
         return;
-    }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
         _host.closeSession(vtworkspace::SessionId { close->session });
@@ -1727,6 +1717,38 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     // all the same — "the daemon ignored what I sent" is otherwise indistinguishable from "the
     // daemon never received it".
     errorLog()("{}: ignoring unexpected {} (serial {})", _id, proto::describe(frame.pdu), frame.serial);
+}
+
+NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& frame)
+{
+    if (auto const* edit = std::get_if<proto::EditTab>(&frame.pdu))
+    {
+        // A client that did not negotiate it may not edit: it is refused as a PDU this daemon does not know.
+        if (!_negotiated->shared.contains(proto::Capability::TabEdits))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // A change fans out as a model event, and so as a layout push to every client, this one included.
+        if (auto const applied = applyTabEdit(_host.model(), *edit); !applied)
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(applied.error()));
+        return TabVerb::Served;
+    }
+    if (auto const* merge = std::get_if<proto::MergeTabIntoSplit>(&frame.pdu))
+    {
+        // As for EditTab, a client that did not negotiate it is refused.
+        if (!_negotiated->shared.contains(proto::Capability::TabMerge))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, so the layout push that reaches every client, this one included, is the
+        // answer: the dragged tab's sessions move into the target tab and none is spawned or closed.
+        if (auto const merged = applyTabMerge(_host.model(), *merge); !merged)
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(merged.error()));
+        return TabVerb::Served;
+    }
+    return TabVerb::None;
 }
 
 NativeSession::GrantCheck NativeSession::requireGrant(vtcontrol::Permission permission,

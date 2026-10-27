@@ -60,6 +60,10 @@ enum class Capability : uint8_t
     /// The peer pushes, or mirrors, what a session's terminal does with typed text (PDU SessionInputEcho), so
     /// a client locks a pane at a password prompt and turns its OS's secure keyboard entry on.
     InputEcho = 12,
+    /// The peer serves MergeTabIntoSplit: it grafts a whole tab, sessions and all, beside a pane of another
+    /// tab. A daemon without it cannot move a tab's sessions into a split, so a client does not offer
+    /// drop-to-split.
+    TabMerge = 13,
 };
 
 /// One row of the table naming a Capability.
@@ -83,6 +87,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ProgramStatus, .name = "program-status" },
     CapabilityRow { .capability = Capability::ControlPermissions, .name = "control-permissions" },
     CapabilityRow { .capability = Capability::InputEcho, .name = "input-echo" },
+    CapabilityRow { .capability = Capability::TabMerge, .name = "tab-merge" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

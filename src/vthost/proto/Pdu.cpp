@@ -232,6 +232,10 @@ namespace
     {
         return std::to_underlying(PduType::EditTab);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(MergeTabIntoSplit const&) noexcept
+    {
+        return std::to_underlying(PduType::MergeTabIntoSplit);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(Heartbeat const&) noexcept
     {
         return std::to_underlying(PduType::Heartbeat);
@@ -787,6 +791,13 @@ namespace
         out.u8(std::to_underlying(pdu.kind));
         out.string(pdu.title);
         out.u32(pdu.color);
+    }
+
+    void encodeBody(Writer& out, MergeTabIntoSplit const& pdu)
+    {
+        out.varint(pdu.tabSession);
+        out.varint(pdu.targetSession);
+        out.u8(pdu.side);
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1623,6 +1634,17 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeMergeTabIntoSplit(Reader& in)
+    {
+        auto pdu = MergeTabIntoSplit {};
+        auto error = DecodeError {};
+        // The side is carried, not judged: the host refuses a byte it does not know.
+        if (!assign(in.varint(), pdu.tabSession, error) || !assign(in.varint(), pdu.targetSession, error)
+            || !assign(in.u8(), pdu.side, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -1815,6 +1837,7 @@ namespace
         DecodeRow { PduType::ControlEvent, decodeControlEvent },
         DecodeRow { PduType::ProgramStatus, decodeProgramStatus },
         DecodeRow { PduType::SessionInputEcho, decodeSessionInputEcho },
+        DecodeRow { PduType::MergeTabIntoSplit, decodeMergeTabIntoSplit },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

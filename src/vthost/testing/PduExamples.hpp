@@ -160,6 +160,8 @@ namespace vthost::testing
                                                             .message = "Continue?" } } } } },
         { proto::PduType::SessionInputEcho,
           proto::DecodedPdu { proto::SessionInputEcho { .session = 4, .echo = 3 } } },
+        { proto::PduType::MergeTabIntoSplit,
+          proto::DecodedPdu { proto::MergeTabIntoSplit { .tabSession = 4, .targetSession = 9, .side = 2 } } },
     };
 }
 

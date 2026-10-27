@@ -88,7 +88,8 @@ struct HandshakePolicy
                                                                    proto::Capability::Heartbeat,
                                                                    proto::Capability::ProgramStatus,
                                                                    proto::Capability::ControlPermissions,
-                                                                   proto::Capability::InputEcho });
+                                                                   proto::Capability::InputEcho,
+                                                                   proto::Capability::TabMerge });
 };
 
 /// When a connection sends a session's program-status set.
@@ -442,6 +443,20 @@ class NativeSession final: public SessionStreamEvents
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a request.
     [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// Whether a frame was a verb that changes how a tab is presented or where its panes are.
+    enum class TabVerb : uint8_t
+    {
+        None = 0,   ///< It was not one: the frame is dispatched on.
+        Served = 1, ///< It was, and it has been carried out or refused.
+    };
+
+    /// Serves @p frame if it is an EditTab (gated on Capability::TabEdits) or a MergeTabIntoSplit (gated on
+    /// Capability::TabMerge): applied to the daemon's model, whose events push the new layout to every
+    /// client, and answered Unsupported when the capability was not negotiated.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was such a verb.
+    [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
     /// What requireGrant() decided.
     enum class GrantCheck : uint8_t

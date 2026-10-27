@@ -548,6 +548,19 @@ Delivery NativeClient::editTab(proto::EditTab edit)
     return Delivery::Sent;
 }
 
+Delivery NativeClient::mergeTabIntoSplit(uint64_t tabSession,
+                                         uint64_t targetSession,
+                                         vtworkspace::SplitSide side)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request = proto::MergeTabIntoSplit { .tabSession = tabSession,
+                                                    .targetSession = targetSession,
+                                                    .side = std::to_underlying(side) };
+    if (!shares(proto::Capability::TabMerge) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
 void NativeClient::restateSessionSettings(std::optional<proto::WireSessionSettings> settings)
 {
     // A daemon resolving profiles owns emulation: what this client would restate it ignores anyway.

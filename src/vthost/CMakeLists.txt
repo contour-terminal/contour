@@ -102,6 +102,8 @@ add_library(vthost STATIC
     StdioPreamble.hpp
     TabEdits.cpp
     TabEdits.hpp
+    TabMerge.cpp
+    TabMerge.hpp
     TappingPty.hpp
     Transport.cpp
     Transport.hpp
@@ -231,6 +233,7 @@ if(VTHOST_TESTING)
         AttachPlan_test.cpp
         ByteStream_test.cpp
         TabEdits_test.cpp
+        TabMerge_test.cpp
         GracefulClose_test.cpp
         HostIdentity_test.cpp
         LoopDrain_test.cpp

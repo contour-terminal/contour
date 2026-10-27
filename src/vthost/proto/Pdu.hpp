@@ -79,6 +79,7 @@ enum class PduType : uint8_t
     ControlEvent = 32,
     ProgramStatus = 33,
     SessionInputEcho = 34,
+    MergeTabIntoSplit = 35,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1268,6 +1269,22 @@ struct EditTab
     bool operator==(EditTab const&) const = default;
 };
 
+/// Client→server (Capability::TabMerge): graft the whole tab holding @p tabSession beside the pane hosting
+/// @p targetSession, on @p side. Nothing is spawned or closed: the dragged tab's sessions keep running and
+/// move into the target tab, and every attached client is pushed one new LayoutState.
+///
+/// Both ends are named by session, like every other client→server layout verb, because tab and pane ids are
+/// minted per model and the two ends have their own.
+struct MergeTabIntoSplit
+{
+    uint64_t tabSession = 0;    ///< Any session of the tab to merge.
+    uint64_t targetSession = 0; ///< The pane to split, by the session it hosts.
+    /// A vtworkspace::SplitSide as the wire spells it. The codec carries any byte; the host refuses one it
+    /// does not know (@see vthost::splitSideFrom).
+    uint8_t side = 0;
+    bool operator==(MergeTabIntoSplit const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1346,7 +1363,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ControlReply,
                                 ControlEvent,
                                 ProgramStatus,
-                                SessionInputEcho>;
+                                SessionInputEcho,
+                                MergeTabIntoSplit>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -433,6 +433,13 @@ namespace
                        auto const& value = std::get<SessionInputEcho>(pdu);
                        return std::format("session={} echo={}", value.session, value.echo);
                    } },
+        TraceRow { PduType::MergeTabIntoSplit,
+                   "MergeTabIntoSplit",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MergeTabIntoSplit>(pdu);
+                       return std::format(
+                           "tab={} target={} side={}", value.tabSession, value.targetSession, value.side);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

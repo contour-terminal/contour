@@ -1895,6 +1895,15 @@ TEST_CASE("the tab-edit and heartbeat tags are pinned", "[vthost][pdu]")
     STATIC_CHECK(std::to_underlying(PduType::Heartbeat) == 29);
 }
 
+TEST_CASE("MergeTabIntoSplit round-trips and carries a side no enumerator names", "[vthost][pdu][merge]")
+{
+    auto const merge = MergeTabIntoSplit { .tabSession = 4, .targetSession = 9, .side = 3 };
+    CHECK(roundTrip(DecodedPdu { merge }) == DecodedPdu { merge });
+    auto const unknown = MergeTabIntoSplit { .tabSession = 1, .targetSession = 2, .side = 0xEE };
+    CHECK(std::get<MergeTabIntoSplit>(roundTrip(DecodedPdu { unknown })).side == 0xEE);
+    STATIC_CHECK(std::to_underlying(PduType::MergeTabIntoSplit) == 35);
+}
+
 TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[vthost][pdu]")
 {
     CHECK(std::get<CreateTab>(roundTrip(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } }))

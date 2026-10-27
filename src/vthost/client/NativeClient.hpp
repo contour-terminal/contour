@@ -41,6 +41,7 @@
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Unsupported.hpp>
+#include <vtworkspace/Primitives.hpp>
 
 namespace vthost::client
 {
@@ -411,6 +412,15 @@ class NativeClient final
     /// @param edit The change.
     /// @return Sent, or Unsupported — nothing written — unless the daemon shares Capability::TabEdits.
     Delivery editTab(proto::EditTab edit);
+
+    /// Asks the daemon to graft a whole tab beside a pane of another tab. The daemon moves the tab's sessions
+    /// into the target tab -- none is spawned or closed -- and re-pushes a LayoutState to every attached
+    /// client.
+    /// @param tabSession Any session of the tab to merge.
+    /// @param targetSession The session of the pane to split.
+    /// @param side Which side of that pane the tab goes on.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::TabMerge.
+    Delivery mergeTabIntoSplit(uint64_t tabSession, uint64_t targetSession, vtworkspace::SplitSide side);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.

@@ -5407,6 +5407,79 @@ TEST_CASE("an EditTab from a client without TabEdits is answered Unsupported", "
     CHECK_FALSE(tab->runtimeTitle());
 }
 
+TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pushes one layout",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const targetSession = target->rootPane()->session();
+    auto const draggedSession = dragged->rootPane()->session();
+    auto const window = h.host.windowId().value;
+    auto const tabCount = [&] {
+        return h.host.model().window(h.host.windowId())->tabCount();
+    };
+    auto const tabsBefore = tabCount();
+    REQUIRE(tabsBefore >= 2);
+
+    auto const merging =
+        proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) };
+    auto const received = h.exchangeUntil(
+        { merging,
+          proto::MergeTabIntoSplit { .tabSession = draggedSession.value,
+                                     .targetSession = targetSession.value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+        [&](auto const& got) {
+            auto const* layout = lastLayoutOf(got, window);
+            return layout != nullptr && std::cmp_equal(layout->tabs.size(), tabsBefore - 1);
+        });
+
+    CHECK(std::cmp_equal(tabCount(), tabsBefore - 1));
+    auto const [mergedWindow, mergedTab, mergedLeaf] = h.host.model().findSessionLeaf(draggedSession);
+    CHECK(mergedTab == target);
+    CHECK(mergedLeaf != nullptr);
+    CHECK(target->paneCount() == 2);
+    // Moved, not re-created: both sessions are the ones that were already running.
+    CHECK(h.host.terminal(targetSession) != nullptr);
+    CHECK(h.host.terminal(draggedSession) != nullptr);
+    CHECK_FALSE(std::ranges::any_of(
+        received, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); }));
+}
+
+TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupported and changes nothing",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+
+    // An older client's hello offers nothing, and a daemon of today still refuses what it did not negotiate.
+    auto const received = h.exchangeUntil(
+        { proto::ClientHello {},
+          proto::MergeTabIntoSplit { .tabSession = dragged->rootPane()->session().value,
+                                     .targetSession = target->rootPane()->session().value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+        [](auto const& got) {
+            return std::ranges::any_of(
+                got, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); });
+        });
+    auto const refused = std::ranges::find_if(
+        received, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); });
+    REQUIRE(refused != received.end());
+    CHECK(std::get<proto::Unsupported>(refused->pdu).ident
+          == std::to_underlying(proto::PduType::MergeTabIntoSplit));
+    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(target->paneCount() == 1);
+}
+
+TEST_CASE("the daemon's default handshake offers TabMerge", "[vthost][native][tab-merge][daemon]")
+{
+    CHECK(vthost::HandshakePolicy {}.capabilities.contains(proto::Capability::TabMerge));
+}
+
 TEST_CASE("the daemon echoes a heartbeat under its serial", "[vthost][native][liveness]")
 {
     auto h = NativeHarness {};

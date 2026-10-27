@@ -50,6 +50,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
 #ifdef CONTOUR_EXTENSIONS
     #include <vthost/DaemonExtensions.hpp>
@@ -2290,6 +2291,84 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
         CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
         CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
     }
+}
+
+TEST_CASE("mergeTabIntoSplit is sent to a daemon that shares TabMerge, and the tab joins the target",
+          "[vthost][attach][tab-merge][daemon]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::TabMerge }) } };
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const targetSession = target->rootPane()->session();
+    auto const draggedSession = dragged->rootPane()->session();
+    auto delivery = vthost::client::Delivery::Unsupported;
+    auto scenario = [](IntentHarness* h,
+                       vthost::client::Delivery* delivery,
+                       uint64_t draggedSession,
+                       uint64_t targetSession) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        auto const tabsBefore = h->layouts.back().tabs.size();
+        *delivery = h->client->mergeTabIntoSplit(draggedSession, targetSession, vtworkspace::SplitSide::Left);
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, tabsBefore] { return h->layouts.back().tabs.size() == tabsBefore - 1; });
+        h->client->detach();
+    }(&h, &delivery, draggedSession.value, targetSession.value);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery == vthost::client::Delivery::Sent);
+    // The mirror holds the merged tree: the tab that took the drop now has both sessions as leaves.
+    auto const merged = std::ranges::find_if(h.layouts.back().tabs, [&](auto const& tab) {
+        return vthost::client::paneTreeHosts(tab.root, targetSession.value)
+               && vthost::client::paneTreeHosts(tab.root, draggedSession.value);
+    });
+    CHECK(merged != h.layouts.back().tabs.end());
+    CHECK(h.host.terminal(draggedSession) != nullptr);
+}
+
+TEST_CASE("against a daemon without TabMerge no MergeTabIntoSplit is written",
+          "[vthost][attach][compat][tab-merge]")
+{
+    // A newer client, an older daemon: the daemon shares nothing, so the verb is not written at all and the
+    // caller learns it, to tear the tab off as it did before the verb existed.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                      { proto::Capability::TabMerge }) },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto delivery = vthost::client::Delivery::Sent;
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen,
+                       vthost::client::Delivery* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        *delivery = client->mergeTabIntoSplit(1, 2, vtworkspace::SplitSide::Right);
+        // A verb that is written reaches the daemon in order, so this one arriving proves the other was not
+        // sent.
+        client->createTab(0, "x");
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+        client->detach();
+    }(&loop, &client, &seen, &delivery);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(
+            &loop, daemonSocket, answeringHello(Script { { std::nullopt, acceptingHello() } }), &seen),
+        std::move(scenario)));
+
+    CHECK(delivery == vthost::client::Delivery::Unsupported);
+    CHECK_FALSE(std::ranges::any_of(seen, carries<proto::MergeTabIntoSplit>));
 }
 
 TEST_CASE("editTab is sent when the daemon shares TabEdits", "[vthost][attach][intent]")
