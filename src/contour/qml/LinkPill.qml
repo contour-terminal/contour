@@ -26,6 +26,9 @@ Toast {
     property Item headerSlot: null
     /// Whether the pane shows an inline header (1) or not (0): an overlay header covers cells, so it is none.
     property int headerPresent: 0
+    /// Which of the pill's places the pane's find bar holds (a window::FindBarPresence, from
+    /// chromeStyle.findBarPresence()): the pill and the bar never overlap.
+    property int findBar: chromeStyle.findBarPresence("")
 
     // Guarded against `undefined`, not merely against a null session: a mock session may carry no link target
     // at all, and reading one into a typed property would be a QML warning.
@@ -41,8 +44,7 @@ Toast {
             return { anchor: "hidden", x: 0, y: 0, width: 0 }
         var revision = pill.session.overlayClearanceRevision
         var host = pill.headerPresent > 0 && pill.headerSlot !== null ? 1 : 0
-        // The find bar's input stays "closed" (0) until the find bar is on the branch (Step 3b).
-        return chromeStyle.linkPillPlacement(host, 0, pill.gridItem.width, pill.gridItem.height,
+        return chromeStyle.linkPillPlacement(host, pill.findBar, pill.gridItem.width, pill.gridItem.height,
                                              pill.implicitWidth, pill.extent, pill.session.overlayClearance())
     }
 

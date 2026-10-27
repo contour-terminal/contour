@@ -80,6 +80,8 @@ Item {
         gridHost: chrome.overlayHost ? chrome.overlayHost : chrome
         headerSlot: chrome.headerLinkSlot
         headerPresent: chrome.headerPresent
+        // Where the find bar is while it is open: the pill keeps out of the places it holds.
+        findBar: chromeStyle.findBarPresence(searchBar.visible ? searchBar.placement.anchor : "")
     }
 
     // The gutter's block-column tooltip: how the hovered command ended, how long it took, when and where it

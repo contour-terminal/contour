@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/FindBarPlacement.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -23,15 +25,30 @@ enum class LinkPillHost : uint8_t
 /// How many LinkPillHost values there are, derived from the last one.
 inline constexpr size_t LinkPillHostCount = static_cast<size_t>(LinkPillHost::PaneHeader) + 1;
 
-/// Whether the pane's find bar is open: it owns the header's trailing area and the grid's top right.
+/// Where the pane's find bar is, as the link pill sees it: which of the pill's places it holds.
 enum class FindBarPresence : uint8_t
 {
-    Closed = 0, ///< The pill may take either.
-    Open,       ///< The pill takes neither, and falls back to the bottom right.
+    Closed = 0, ///< No bar: the pill may take any place.
+    Top,        ///< In the header row or at the top right: it holds the header's trailing area and the top.
+    Bottom,     ///< At the bottom right, out of the current match's way: it holds the bottom.
 };
 
 /// How many FindBarPresence values there are, derived from the last one.
-inline constexpr size_t FindBarPresenceCount = static_cast<size_t>(FindBarPresence::Open) + 1;
+inline constexpr size_t FindBarPresenceCount = static_cast<size_t>(FindBarPresence::Bottom) + 1;
+
+/// The presence of a shown find bar at each FindBarAnchor, indexed by it.
+inline constexpr auto FindBarPresenceAt = std::array<FindBarPresence, FindBarAnchorCount> {
+    FindBarPresence::Top,    // TopRight
+    FindBarPresence::Bottom, // BottomRight
+    FindBarPresence::Top,    // HeaderRow
+};
+
+/// @param anchor Where a shown find bar sits (window::placeFindBar).
+/// @return The places it holds against the link pill.
+[[nodiscard]] constexpr FindBarPresence findBarPresenceAt(FindBarAnchor anchor) noexcept
+{
+    return FindBarPresenceAt[static_cast<size_t>(anchor)];
+}
 
 /// Where the link pill goes.
 enum class LinkPillAnchor : uint8_t
@@ -61,7 +78,7 @@ struct LinkPillGrid
 struct LinkPillInputs
 {
     LinkPillHost host = LinkPillHost::Grid;            ///< What hosts it.
-    FindBarPresence findBar = FindBarPresence::Closed; ///< Whether the find bar holds the header and the top.
+    FindBarPresence findBar = FindBarPresence::Closed; ///< Which places the find bar holds.
     double paneWidth = 0;                              ///< The pane's width.
     double paneHeight = 0;                             ///< The pane's height.
     double pillWidth = 0;                              ///< The pill's natural width.
@@ -119,9 +136,10 @@ namespace detail
 
 /// Where the link pill goes (spec R-g), so that it only ever covers blank cells and never the prompt.
 ///
-/// In order: no pill, nowhere. In a pane header, its trailing area, unless the find bar holds it. Otherwise
-/// at the grid's top right when every cell under it is blank and none is on an avoided row, unless the find
-/// bar holds the top; else at the bottom right under the same test; else nowhere. The pill is shrunk to the
+/// In order: no pill, nowhere. In a pane header, its trailing area, unless the find bar holds the top.
+/// Otherwise at the grid's top right when every cell under it is blank and none is on an avoided row, unless
+/// the find bar holds the top; else at the bottom right under the same test, unless the find bar holds the
+/// bottom; else nowhere. So the pill and the find bar never overlap. The pill is shrunk to the
 /// pane's width less its insets, and never moves to dodge the link: a link's cells are not blank.
 /// @param in What the place depends on.
 /// @return The place; LinkPillAnchor::Hidden with no extent where there is none.
@@ -129,7 +147,7 @@ namespace detail
 {
     if (in.pillWidth <= 0 || in.pillHeight <= 0)
         return {};
-    if (in.host == LinkPillHost::PaneHeader && in.findBar == FindBarPresence::Closed)
+    if (in.host == LinkPillHost::PaneHeader && in.findBar != FindBarPresence::Top)
         return { .anchor = LinkPillAnchor::HeaderTrailing, .x = 0, .y = 0, .width = in.pillWidth };
 
     auto const width = std::min(in.pillWidth, in.paneWidth - (2 * in.insetRight));
@@ -139,12 +157,13 @@ namespace detail
     auto const firstColumn =
         std::max(0, static_cast<int>(std::floor((x - in.grid.marginLeft) / in.grid.cellWidth)));
 
-    if (in.findBar == FindBarPresence::Closed
+    if (in.findBar != FindBarPresence::Top
         && detail::isBandClear(in.grid, in.insetTop, in.pillHeight, firstColumn))
         return { .anchor = LinkPillAnchor::TopRight, .x = x, .y = in.insetTop, .width = width };
 
     auto const bottom = in.paneHeight - in.insetTop - in.pillHeight;
-    if (bottom > in.insetTop && detail::isBandClear(in.grid, bottom, in.pillHeight, firstColumn))
+    if (in.findBar != FindBarPresence::Bottom && bottom > in.insetTop
+        && detail::isBandClear(in.grid, bottom, in.pillHeight, firstColumn))
         return { .anchor = LinkPillAnchor::BottomRight, .x = x, .y = bottom, .width = width };
     return {};
 }

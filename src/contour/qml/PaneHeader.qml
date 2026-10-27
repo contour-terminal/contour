@@ -31,12 +31,12 @@ Item {
     property var policy: ({})
     /// The card's corner radius: the header's top corners take it, its bottom edge stays square.
     property real cornerRadius: 0
-    /// What holds the header's trailing area: "none", "find" while the find bar has taken this row (the
-    /// Terminal row's, SearchBar's headerRow anchor), or "linkPill" while the link pill shows there. One state
-    /// rather than a flag per occupant: whatever holds it, the name stays, and the working directory and the
-    /// actions give it their room.
-    property string trailingOccupant: "none"
-    readonly property bool trailingHeld: trailingOccupant !== "none"
+    /// What holds the header's trailing area, one of chromeStyle.headerOccupants
+    /// (window::HeaderTrailingOccupant): none, the find bar while it has taken this row (the Terminal row's,
+    /// SearchBar's headerRow anchor), or the link pill while it shows there. Whatever holds it, the name stays,
+    /// and the working directory and the actions give it their room.
+    property int trailingOccupant: chromeStyle.headerOccupants.none
+    readonly property bool trailingHeld: trailingOccupant !== chromeStyle.headerOccupants.none
     // Where the find bar goes when it takes this row: after the name, to the trailing edge.
     readonly property alias findSlot: findSlotItem
     /// Where the link pill sits in the header: from after the pane's name to the trailing edge, full height.

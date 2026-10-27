@@ -260,7 +260,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _paneRoles { this },
     _badgeKinds { this },
     _paneEnds { this },
-    _paneStates { this }
+    _paneStates { this },
+    _headerOccupants { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);
@@ -622,6 +623,18 @@ QVariantMap UiStyleProvider::linkPillPlacement(int host,
              { QStringLiteral("x"), placement.x },
              { QStringLiteral("y"), placement.y },
              { QStringLiteral("width"), placement.width } };
+}
+
+int UiStyleProvider::findBarPresence(QString const& anchor) const
+{
+    if (anchor.isEmpty())
+        return static_cast<int>(FindBarPresence::Closed);
+    auto const anchors =
+        std::views::iota(size_t { 0 }, FindBarAnchorCount)
+        | std::views::transform([](size_t index) { return static_cast<FindBarAnchor>(index); });
+    auto const named = std::ranges::find_if(
+        anchors, [&](FindBarAnchor candidate) { return anchor == nameOf(findBarAnchorName(candidate)); });
+    return named != anchors.end() ? static_cast<int>(findBarPresenceAt(*named)) : -1;
 }
 
 QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const

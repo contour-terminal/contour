@@ -109,19 +109,48 @@ TEST_CASE("linkPill.inThePaneHeader", "[linkpill]")
 
 TEST_CASE("linkPill.theFindBarOwnsTheHeaderAndTheTopRight", "[linkpill]")
 {
-    // While the find bar is open it holds the header's trailing area and the grid's top right: the pill falls
-    // back to the bottom right, or nowhere.
+    // While the find bar is at the top it holds the header's trailing area and the grid's top right: the pill
+    // falls back to the bottom right, or nowhere.
     auto base = Base {};
     auto inputs = base.inputs();
-    inputs.findBar = FindBarPresence::Open;
+    inputs.findBar = FindBarPresence::Top;
     CHECK(placeLinkPill(inputs) == BottomRight);
     inputs.host = LinkPillHost::PaneHeader;
     CHECK(placeLinkPill(inputs) == BottomRight);
 
     base.trailingBlank.back() = 0;
     inputs = base.inputs();
-    inputs.findBar = FindBarPresence::Open;
+    inputs.findBar = FindBarPresence::Top;
     CHECK(placeLinkPill(inputs) == LinkPillPlacement {});
+}
+
+TEST_CASE("linkPill.aFindBarAtTheBottomLeavesTheTop", "[linkpill]")
+{
+    // Moved out of the current match's way, the bar holds the bottom right: the pill keeps the header and the
+    // top right, and where the top is not blank it shows nowhere rather than over the bar.
+    auto base = Base {};
+    auto inputs = base.inputs();
+    inputs.findBar = FindBarPresence::Bottom;
+    CHECK(placeLinkPill(inputs) == TopRight);
+    inputs.host = LinkPillHost::PaneHeader;
+    CHECK(placeLinkPill(inputs).anchor == LinkPillAnchor::HeaderTrailing);
+
+    base.trailingBlank.front() = 0;
+    inputs = base.inputs();
+    inputs.findBar = FindBarPresence::Bottom;
+    CHECK(placeLinkPill(inputs) == LinkPillPlacement {});
+}
+
+TEST_CASE("linkPill.everyFindBarAnchorHoldsAPlace", "[linkpill]")
+{
+    using contour::window::FindBarAnchor;
+    using contour::window::findBarPresenceAt;
+    CHECK(findBarPresenceAt(FindBarAnchor::TopRight) == FindBarPresence::Top);
+    CHECK(findBarPresenceAt(FindBarAnchor::HeaderRow) == FindBarPresence::Top);
+    CHECK(findBarPresenceAt(FindBarAnchor::BottomRight) == FindBarPresence::Bottom);
+    // A shown bar always holds a place: no anchor reads as a closed one.
+    CHECK(std::ranges::none_of(contour::window::FindBarPresenceAt,
+                               [](FindBarPresence presence) { return presence == FindBarPresence::Closed; }));
 }
 
 TEST_CASE("linkPill.aNarrowPaneShrinksThePill", "[linkpill]")

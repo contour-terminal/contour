@@ -9,6 +9,7 @@
 
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/TabBadge.hpp>
 
@@ -1155,6 +1156,31 @@ class ChromePaneStateNames: public QObject
 
   private:
     [[nodiscard]] static constexpr int of(PaneState state) noexcept { return static_cast<int>(state); }
+};
+
+/// The QML names of what holds a pane header's trailing area, `chromeStyle.headerOccupants`, for
+/// PaneHeader's `trailingOccupant`.
+class ChromeHeaderOccupantNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int find READ find CONSTANT)
+    Q_PROPERTY(int linkPill READ linkPill CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeHeaderOccupantNames(QObject* parent);
+
+    /// @return Each window::HeaderTrailingOccupant as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return of(HeaderTrailingOccupant::None); }
+    [[nodiscard]] static constexpr int find() noexcept { return of(HeaderTrailingOccupant::Find); }
+    [[nodiscard]] static constexpr int linkPill() noexcept { return of(HeaderTrailingOccupant::LinkPill); }
+
+  private:
+    [[nodiscard]] static constexpr int of(HeaderTrailingOccupant occupant) noexcept
+    {
+        return static_cast<int>(occupant);
+    }
 };
 
 } // namespace contour::window

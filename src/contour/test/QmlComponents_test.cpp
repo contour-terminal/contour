@@ -7036,8 +7036,69 @@ TEST_CASE("link pill: a split's pill sits in the pane header (offscreen)",
     panes.leftSession.setLinkTarget(
         QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), false);
     CHECK(QTest::qWaitFor([&] { return !pill->property("shown").toBool(); }));
-    CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toString()
-          == QStringLiteral("none"));
+    CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toInt()
+          == static_cast<int>(contour::window::HeaderTrailingOccupant::None));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: an open find bar at the top right sends the pill to the bottom right (offscreen)",
+          "[contour][gui][qml][linkpill]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = LinkPillScene {};
+    auto* bar = scene.host.chrome->findChild<QObject*>(QStringLiteral("searchBar"));
+    REQUIRE(bar != nullptr);
+    QMetaObject::invokeMethod(bar, "open");
+    REQUIRE(QTest::qWaitFor([bar] { return bar->property("visible").toBool(); }));
+    REQUIRE(bar->property("placement").toMap().value(QStringLiteral("anchor")).toString()
+            == QStringLiteral("topRight"));
+
+    scene.show();
+    auto* pill = scene.pill;
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool() && pill->isVisible(); }));
+    CHECK(pill->property("placement").toMap().value(QStringLiteral("anchor")).toString()
+          == QStringLiteral("bottomRight"));
+    // Below the bar, never over it.
+    CHECK(pill->y() >= bar->property("y").toReal() + bar->property("height").toReal());
+
+    // Closed, the bar gives the top right back.
+    QMetaObject::invokeMethod(bar, "close");
+    CHECK(QTest::qWaitFor([&] {
+        return pill->property("placement").toMap().value(QStringLiteral("anchor")).toString()
+               == QStringLiteral("topRight");
+    }));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: the find bar in the header row keeps the pill out of the header (offscreen)",
+          "[contour][gui][qml][linkpill][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOverlayClearance(linkClearance(40, 18, 40));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto& bar = openFindBarOf(card);
+    REQUIRE(parentOf(bar) == &PaneTreeHost::partOf(card, "paneHeaderFindSlot"));
+    auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+    CHECK(header.property("trailingOccupant").toInt()
+          == static_cast<int>(contour::window::HeaderTrailingOccupant::Find));
+
+    auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
+    REQUIRE(pill != nullptr);
+    panes.leftSession.setLinkTarget(
+        QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), true);
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
+    CHECK(pill->property("placement").toMap().value(QStringLiteral("anchor")).toString()
+          == QStringLiteral("bottomRight"));
+    CHECK(pill->parentItem() != &PaneTreeHost::partOf(card, "paneHeaderLinkSlot"));
+    // The bar keeps the header: the occupant stays the find bar while the pill shows over the grid.
+    CHECK(header.property("trailingOccupant").toInt()
+          == static_cast<int>(contour::window::HeaderTrailingOccupant::Find));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}

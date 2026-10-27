@@ -66,6 +66,20 @@ inline constexpr auto ActivePaneFocus =
     return ActivePaneFocus[static_cast<size_t>(activation)];
 }
 
+/// What holds a pane header's trailing area, the room from after the pane's name to the trailing edge. One
+/// state rather than a flag per occupant: whatever holds it, the working directory and the actions step
+/// aside.
+enum class HeaderTrailingOccupant : uint8_t
+{
+    None = 0, //!< Nothing: the working directory and the actions show.
+    Find,     //!< The find bar, in the Terminal row's header row. It takes precedence over the link pill.
+    LinkPill, //!< The link pill.
+};
+
+/// The number of @c HeaderTrailingOccupant enumerators.
+inline constexpr size_t HeaderTrailingOccupantCount =
+    static_cast<size_t>(HeaderTrailingOccupant::LinkPill) + 1;
+
 /// What the header text shows.
 enum class PaneHeaderContent : uint8_t
 {

@@ -261,6 +261,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* paneEnds READ paneEnds CONSTANT)
     /// The QML names of a pane's states (window::PaneState), for a session's paneState.
     Q_PROPERTY(QObject* paneStates READ paneStates CONSTANT)
+    /// The QML names of what holds a pane header's trailing area (window::HeaderTrailingOccupant).
+    Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     // }}}
@@ -325,6 +327,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
     [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
+    [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
     /// @return The row's pane header height before the density applies, in logical pixels.
@@ -349,7 +352,7 @@ class UiStyleProvider: public QObject
     ///
     /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
     /// @param host       A window::LinkPillHost.
-    /// @param findBar    A window::FindBarPresence.
+    /// @param findBar    A window::FindBarPresence (findBarPresence()).
     /// @param paneWidth  The pane's width in logical pixels.
     /// @param paneHeight The pane's height in logical pixels.
     /// @param pillWidth  The pill's natural width.
@@ -365,6 +368,16 @@ class UiStyleProvider: public QObject
                                                             qreal pillWidth,
                                                             qreal pillHeight,
                                                             QVariantMap const& clearance) const;
+
+    /// Which of the link pill's places the pane's find bar holds (window::findBarPresenceAt).
+    ///
+    /// Read from the bar QML already has rather than re-decided: its placement's anchor name.
+    /// @param anchor The shown find bar's `placement.anchor` (window::findBarAnchorName), or empty while the
+    /// bar
+    ///               is closed.
+    /// @return A window::FindBarPresence as its underlying value; -1 for a name no anchor has, which
+    ///         linkPillPlacement() answers with an empty map.
+    [[nodiscard]] Q_INVOKABLE int findBarPresence(QString const& anchor) const;
 
     /// The name a pane header shows (window::paneHeaderName).
     /// @param processName The foreground process name.
@@ -775,6 +788,7 @@ class UiStyleProvider: public QObject
     ChromeBadgeKindNames _badgeKinds;
     ChromePaneEndNames _paneEnds;
     ChromePaneStateNames _paneStates;
+    ChromeHeaderOccupantNames _headerOccupants;
     int _paletteRevision = 0;
 };
 

@@ -221,4 +221,8 @@ ChromePaneStateNames::ChromePaneStateNames(QObject* parent): QObject { parent }
 {
 }
 
+ChromeHeaderOccupantNames::ChromeHeaderOccupantNames(QObject* parent): QObject { parent }
+{
+}
+
 } // namespace contour::window

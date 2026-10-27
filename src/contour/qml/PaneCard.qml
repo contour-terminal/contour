@@ -175,7 +175,9 @@ Item {
         cornerRadius: card.cornerRadius
         // The find bar takes the trailing area before the link pill: while the bar is in this row, the pill is
         // placed elsewhere (window::placeLinkPill).
-        trailingOccupant: terminal.findInHeaderRow ? "find" : terminal.linkPillInHeader ? "linkPill" : "none"
+        trailingOccupant: terminal.findInHeaderRow ? chromeStyle.headerOccupants.find
+                        : terminal.linkPillInHeader ? chromeStyle.headerOccupants.linkPill
+                        : chromeStyle.headerOccupants.none
         // A hidden header button drops the keyboard focus; typing goes back to this pane's grid.
         onFocusReleased: terminal.forceActiveFocus()
     }

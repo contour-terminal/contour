@@ -1311,6 +1311,30 @@ TEST_CASE("UiStyleProvider: paneStates names every window::PaneState for QML", "
     CHECK(names == contour::window::PaneStateCount);
 }
 
+TEST_CASE("UiStyleProvider: headerOccupants names every window::HeaderTrailingOccupant for QML",
+          "[contour][uistyle]")
+{
+    using contour::window::HeaderTrailingOccupant;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        return qmlExpression.evaluate();
+    };
+
+    CHECK(evaluate("chromeStyle.headerOccupants.none").toInt()
+          == static_cast<int>(HeaderTrailingOccupant::None));
+    CHECK(evaluate("chromeStyle.headerOccupants.find").toInt()
+          == static_cast<int>(HeaderTrailingOccupant::Find));
+    CHECK(evaluate("chromeStyle.headerOccupants.linkPill").toInt()
+          == static_cast<int>(HeaderTrailingOccupant::LinkPill));
+
+    // One name per occupant, so a new enumerator needs a QML name too.
+    auto const& meta = contour::window::ChromeHeaderOccupantNames::staticMetaObject;
+    auto const names = static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
+    CHECK(names == contour::window::HeaderTrailingOccupantCount);
+}
+
 TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")
 {
     using contour::config::ChromeDensity;
@@ -1990,6 +2014,25 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     // The insets are the row's s4 and s5, and a host or find bar out of range answers nothing.
     CHECK(mac.linkPillPlacement(-1, closed, 800, 400, 300, 22, clearance).isEmpty());
     CHECK(mac.linkPillPlacement(grid, 99, 800, 400, 300, 22, clearance).isEmpty());
+
+    // The find bar's presence is read from its placement's anchor name: closed, or the places it holds.
+    using contour::window::FindBarPresence;
+    CHECK(mac.findBarPresence(QString {}) == static_cast<int>(FindBarPresence::Closed));
+    CHECK(mac.findBarPresence(QStringLiteral("topRight")) == static_cast<int>(FindBarPresence::Top));
+    CHECK(mac.findBarPresence(QStringLiteral("headerRow")) == static_cast<int>(FindBarPresence::Top));
+    CHECK(mac.findBarPresence(QStringLiteral("bottomRight")) == static_cast<int>(FindBarPresence::Bottom));
+    CHECK(mac.linkPillPlacement(
+                 grid, mac.findBarPresence(QStringLiteral("nowhere")), 800, 400, 300, 22, clearance)
+              .isEmpty());
+    // A bar at the top sends the pill to the bottom right; a bar at the bottom leaves it the top.
+    CHECK(mac.linkPillPlacement(
+                 grid, mac.findBarPresence(QStringLiteral("topRight")), 800, 400, 300, 22, clearance)
+              .value(QStringLiteral("anchor"))
+          == QStringLiteral("bottomRight"));
+    CHECK(mac.linkPillPlacement(
+                 grid, mac.findBarPresence(QStringLiteral("bottomRight")), 800, 400, 300, 22, clearance)
+              .value(QStringLiteral("anchor"))
+          == QStringLiteral("topRight"));
 
     // The prompt on the top row sends it to the bottom right.
     clearance.insert(QStringLiteral("avoidRows"), QVariantList { 0 });
