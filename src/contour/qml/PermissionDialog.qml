@@ -27,17 +27,6 @@ KitDialog {
 
     readonly property var _lines: root.prompt.lines !== undefined ? root.prompt.lines : []
 
-    // The footnote type, bold: built anew, since the token's font is shared (a copy's bold does not stick).
-    readonly property font _strongFont: {
-        let footnote = chromeStyle.type.footnote;
-        let strong = { family: footnote.family, bold: true };
-        if (footnote.pixelSize > 0)
-            strong.pixelSize = footnote.pixelSize;
-        else
-            strong.pointSize = footnote.pointSize;
-        return Qt.font(strong);
-    }
-
     function _answer(decision, memory) {
         if (root._answered)
             return;
@@ -92,7 +81,7 @@ KitDialog {
                 text: modelData.text
                 // Program-supplied, made safe by the session: text, never markup.
                 textFormat: Text.PlainText
-                font: modelData.weight === Permission.Strong ? root._strongFont : chromeStyle.type.footnote
+                font: modelData.weight === Permission.Strong ? chromeStyle.type.footnoteStrong : chromeStyle.type.footnote
                 color: sys.windowText
                 wrapMode: modelData.style === Permission.Verbatim ? Text.NoWrap : Text.Wrap
                 elide: modelData.style === Permission.Verbatim ? Text.ElideRight : Text.ElideNone

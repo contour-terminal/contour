@@ -330,16 +330,9 @@ Item {
         anchors.centerIn: parent
         width: Math.min(implicitWidth, root.titleRoom)
         text: titleRows.activeTitle
-        font: root.titleFont
+        font: chromeStyle.type.bodyMedium
         color: chromeStyle.colors.tabText
         elide: Text.ElideMiddle
-    }
-
-    // The title in the body type, medium: a copy, since the token's font is shared.
-    readonly property font titleFont: {
-        let font = chromeStyle.type.body;
-        font.weight = Font.Medium;
-        return font;
     }
 
     // One object per tab, carrying its title and whether it is active, while the band shows a title.

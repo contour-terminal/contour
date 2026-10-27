@@ -3036,3 +3036,34 @@ TEST_CASE("Main.qml notices: a banner pushes the content down, and shows its tex
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+// {{{ Strong and medium type
+TEST_CASE("Main.qml: the host chip's name is bold, and the band's title medium (offscreen)",
+          "[contour][gui][qml][mainwindow][type]")
+{
+    SECTION("the host chip")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.attachedHost = QStringLiteral("home");
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+        REQUIRE(chip != nullptr);
+        auto const* label = chip->findChild<QObject*>(QStringLiteral("hostChipLabel"));
+        REQUIRE(label != nullptr);
+        CHECK(label->property("font").value<QFont>().weight() == QFont::Bold);
+    }
+
+    SECTION("the band's title")
+    {
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                          .tabBarVisibility = TabBarVisibility::Multiple } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        auto& title = named(*root, QStringLiteral("bandTitle"));
+        CHECK(title.property("font").value<QFont>().weight() == QFont::Medium);
+    }
+}
+// }}}

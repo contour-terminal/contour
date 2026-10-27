@@ -64,13 +64,6 @@ Dialog {
     x: parent ? (parent.width - width) / 2 : 0
     y: _isSheet || !parent ? 0 : (parent.height - height) / 2
 
-    // The body type, bold: a copy, since the token's font is shared and a font cannot be both assigned and tweaked.
-    readonly property font _headingFont: {
-        let heading = chromeStyle.type.body;
-        heading.bold = true;
-        return heading;
-    }
-
     // The text colours come from the application palette directly, as ConfirmDialog's do. The popup's
     // inherited palette is not enough: a binding to `root.palette.windowText` is taken before the popup
     // reaches its window and keeps the style's default (black) once the window's palette arrives, which on
@@ -100,7 +93,7 @@ Dialog {
             objectName: "kitDialogHeading"
             Layout.fillWidth: true
             text: root.heading
-            font: root._headingFont
+            font: chromeStyle.type.bodyStrong
             color: sys.windowText
             wrapMode: Text.Wrap
             // A heading can name what a program chose (a title, an extension's name): text, never markup.

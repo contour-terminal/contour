@@ -381,6 +381,11 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont paneHeaderAction READ paneHeaderAction CONSTANT)
     Q_PROPERTY(QFont paletteInput READ paletteInput CONSTANT)
     Q_PROPERTY(QFont shortcut READ shortcut CONSTANT)
+    // The weighted variants QML would otherwise make by copying a font and setting its weight -- which does
+    // not stick on a CONSTANT QFont property: the copy keeps the token's weight.
+    Q_PROPERTY(QFont bodyStrong READ bodyStrong CONSTANT)
+    Q_PROPERTY(QFont bodyMedium READ bodyMedium CONSTANT)
+    Q_PROPERTY(QFont footnoteStrong READ footnoteStrong CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
@@ -408,6 +413,12 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& paletteInput() const noexcept { return _paletteInput; }
     /// @return The font of a command palette row's shortcut.
     [[nodiscard]] QFont const& shortcut() const noexcept { return _shortcut; }
+    /// @return The body font, bold: a dialog's heading.
+    [[nodiscard]] QFont const& bodyStrong() const noexcept { return _bodyStrong; }
+    /// @return The body font, medium: the band's title.
+    [[nodiscard]] QFont const& bodyMedium() const noexcept { return _bodyMedium; }
+    /// @return The footnote font, bold: the host chip's name, a permission line that can run commands.
+    [[nodiscard]] QFont const& footnoteStrong() const noexcept { return _footnoteStrong; }
 
   private:
     QFont _caption {};
@@ -420,6 +431,9 @@ class ChromeTypeTokens: public QObject
     QFont _paneHeaderAction {};
     QFont _paletteInput {};
     QFont _shortcut {};
+    QFont _bodyStrong {};
+    QFont _bodyMedium {};
+    QFont _footnoteStrong {};
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.

@@ -92,7 +92,7 @@ Item {
             // The room after the dot; padding, since a positioner skips an item without height.
             leftPadding: root.gap
             text: root.hostLabel
-            font: root.hostFont
+            font: chromeStyle.type.footnoteStrong
             color: chromeStyle.colors.chipTextStrong
         }
 
@@ -119,12 +119,5 @@ Item {
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.chipText
         }
-    }
-
-    // The host in the chip's type, bold: a copy, since the token's font is shared.
-    readonly property font hostFont: {
-        let font = chromeStyle.type.footnote;
-        font.bold = true;
-        return font;
     }
 }

@@ -9019,6 +9019,24 @@ TEST_CASE("KitDialog: a sheet on the macOS row, centred elsewhere (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("KitDialog: the heading is bold (offscreen)", "[contour][gui][qml][kit][dialog]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    DialogHost const host;
+    auto dialog = openKitDialog(
+        engine, host.window.contentItem(), QVariantMap { { "heading", QStringLiteral("Close this tab?") } });
+    auto const* heading = dialog->findChild<QObject*>(QStringLiteral("kitDialogHeading"));
+    REQUIRE(heading != nullptr);
+    CHECK(heading->property("font").value<QFont>().weight() == QFont::Bold);
+    // The body type otherwise: the bold is the only difference.
+    auto const* style =
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const body = style->property("type").value<QObject*>()->property("body").value<QFont>();
+    CHECK(heading->property("font").value<QFont>().pixelSize() == body.pixelSize());
+}
+
 TEST_CASE("KitDialog: accept and reject close it and emit (offscreen)", "[contour][gui][qml][kit][dialog]")
 {
     QQmlEngine engine;

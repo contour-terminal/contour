@@ -71,7 +71,10 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font,
     _paneHeaderWeight { tokens.paneHeaderWeight },
     _paneHeaderAction { sizedFont(font, tokens.paneHeaderAction) },
     _paletteInput { sizedFont(font, tokens.paletteInput) },
-    _shortcut { sizedFont(font, tokens.shortcut) }
+    _shortcut { sizedFont(font, tokens.shortcut) },
+    _bodyStrong { weightedFont(_body, QFont::Bold) },
+    _bodyMedium { weightedFont(_body, QFont::Medium) },
+    _footnoteStrong { weightedFont(_footnote, QFont::Bold) }
 {
 }
 
