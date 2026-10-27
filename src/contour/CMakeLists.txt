@@ -290,6 +290,9 @@ if(CONTOUR_FRONTEND_GUI)
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
+        window/SettingsFields.hpp
+        window/SettingsSearch.hpp
+        window/SettingsSections.hpp
         window/QtSaveScheduler.hpp
         window/SettingsWindowHost.hpp
         session/PastePreview.hpp
@@ -349,6 +352,7 @@ if(CONTOUR_FRONTEND_GUI)
         config/LayoutStore.cpp
         session/SessionFactory.cpp
         window/SettingsController.cpp
+        window/SettingsFields.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
@@ -1286,6 +1290,8 @@ if(CONTOUR_TESTING)
         window/NoticeQueue_test.cpp
         window/ToastPlacement_test.cpp
         window/SaveLayoutCheck_test.cpp
+        window/SettingsSearch_test.cpp
+        window/SettingsSections_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp
         window/TitleBandSurface_test.cpp

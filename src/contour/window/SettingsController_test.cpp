@@ -13,6 +13,7 @@
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/ManualSaveScheduler.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsSections.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
@@ -45,6 +46,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1887,7 +1889,7 @@ TEST_CASE("SettingsController: profile fields are grouped for the settings page"
     for (auto const& raw: fx.controller->profileFields())
     {
         auto const row = raw.toMap();
-        auto const group = row.value("group").toString();
+        auto const group = row.value("groupTitle").toString();
         INFO("field: " << row.value("key").toString().toStdString());
         CHECK(!group.isEmpty()); // every field belongs to a section
         CHECK(!row.value("groupGlyph").toString().isEmpty());
@@ -1974,7 +1976,7 @@ TEST_CASE("SettingsController: the command-block profile fields form their own g
 
     auto keys = QStringList {};
     for (auto const& raw: fx.controller->profileFields())
-        if (raw.toMap().value("group").toString() == "Command blocks")
+        if (raw.toMap().value("groupTitle").toString() == "Command blocks")
             keys.push_back(raw.toMap().value("key").toString());
     CHECK(keys
           == QStringList { "scrollbar_marks_failures",
@@ -2503,7 +2505,7 @@ TEST_CASE("SettingsController: Show links edits hyperlink_decoration.mode", "[se
     auto const fields = fx.controller->profileFields();
     auto const row = rowWithKey(fields, "hyperlink_decoration_mode");
     CHECK(row.value("value").toString() == "never");
-    CHECK(row.value("group").toString() == "Links");
+    CHECK(row.value("groupTitle").toString() == "Links");
     CHECK(row.value("options").toStringList() == QStringList { "always", "hover", "modifier", "never" });
 }
 
@@ -2531,7 +2533,7 @@ TEST_CASE("SettingsController: link detection switches edit link_detection", "[s
     {
         INFO(row.key.toStdString());
         REQUIRE_FALSE(field(row.key).isEmpty());
-        CHECK(field(row.key).value("group").toString() == "Links");
+        CHECK(field(row.key).value("groupTitle").toString() == "Links");
         CHECK(field(row.key).value("type").toString() == "bool");
         CHECK(field(row.key).value("value").toBool() == row.value);
         // The settings search (QML) matches on label, help text and key.
@@ -2553,7 +2555,7 @@ TEST_CASE("SettingsController: Open files with validates its placeholders inline
     };
 
     REQUIRE_FALSE(field("file_opener_command").isEmpty());
-    CHECK(field("file_opener_command").value("group").toString() == "Links");
+    CHECK(field("file_opener_command").value("groupTitle").toString() == "Links");
     CHECK(field("file_opener_command").value("problem").toString().isEmpty()); // empty: the system default
 
     REQUIRE(fx.controller->setProfileField("file_opener_command", "code {file}").has_value());
@@ -2966,6 +2968,108 @@ TEST_CASE("SettingsController: link patterns of a read-only profile cannot chang
     fx.controller->setLinkPattern(builtinRow("filepath"), toggled);
     fx.controller->removeLinkPattern(index);
     CHECK(fx.controller->linkPatterns() == before);
+}
+
+// }}}
+
+// {{{ Sections and groups
+
+TEST_CASE("SettingsController: every field group appears exactly once", "[settings][sections]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->editProfile("main");
+
+    auto named = std::set<int> {};
+    auto const collect = [&named](QVariantList const& rows, SettingsScope scope) {
+        for (auto const& raw: rows)
+        {
+            auto const row = raw.toMap();
+            INFO(row.value("key").toString().toStdString());
+            REQUIRE(row.contains("group"));
+            auto const index = row.value("group").toInt();
+            REQUIRE(index >= 0);
+            auto const groupIndex = static_cast<std::size_t>(index);
+            REQUIRE(groupIndex < SettingsGroupCount);
+            auto const& group = settingsGroupRow(static_cast<SettingsGroup>(index));
+            CHECK(group.scope == scope);
+            CHECK(row.value("groupTitle").toString()
+                  == QString::fromUtf8(group.title.data(), static_cast<qsizetype>(group.title.size())));
+            named.insert(index);
+        }
+    };
+    collect(fx.controller->globalFields(), SettingsScope::Global);
+    collect(fx.controller->profileFields(), SettingsScope::Profile);
+    // The two groups that are pages rather than field rows.
+    named.insert(static_cast<int>(SettingsGroup::KeyboardBindings));
+    named.insert(static_cast<int>(SettingsGroup::ProfileColors));
+
+    auto all = std::set<int> {};
+    for (auto const& row: SettingsGroupRows)
+        all.insert(static_cast<int>(row.group));
+    CHECK(named == all);
+
+    CHECK(rowWithKey(fx.controller->profileFields(), "option_key_as_alt").value("group").toInt()
+          == static_cast<int>(SettingsGroup::ProfileKeyboard));
+    CHECK(rowWithKey(fx.controller->globalFields(), "chrome_density").value("group").toInt()
+          == static_cast<int>(SettingsGroup::AppearanceChrome));
+}
+
+TEST_CASE("SettingsController: the sections and the sidebar come from the table", "[settings][sections]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+
+    auto const sections = fx.controller->sections();
+    auto const sectionCount = static_cast<std::size_t>(sections.size());
+    REQUIRE(sectionCount == SettingsSectionCount);
+    for (auto const index: std::views::iota(std::size_t { 0 }, SettingsSectionCount))
+    {
+        auto const section = sections.at(static_cast<qsizetype>(index)).toMap();
+        auto const& row = SettingsSectionRows.at(index);
+        CHECK(section.value("id").toString().toStdString() == row.id);
+        CHECK(section.value("title").toString().toStdString() == row.title);
+        CHECK(section.value("icon").toInt() == static_cast<int>(row.icon));
+        auto const groups = section.value("groups").toList();
+        auto const groupCount = static_cast<std::size_t>(groups.size());
+        auto const tableCount = static_cast<std::size_t>(std::ranges::distance(groupsOf(row.section)));
+        CHECK(groupCount == tableCount);
+    }
+
+    auto const sidebar = fx.controller->sidebar();
+    auto const sidebarCount = static_cast<std::size_t>(sidebar.size());
+    REQUIRE(sidebarCount == SettingsSectionCount + 2 + 1); // main, work, edit
+    CHECK(sidebar.at(0).toMap().value("kind").toString() == "section");
+    auto const work = sidebar.at(static_cast<qsizetype>(SettingsSectionCount) + 1).toMap();
+    CHECK(work.value("kind").toString() == "profile");
+    CHECK(work.value("name").toString() == "work");
+    CHECK(work.value("editable").toBool());
+    CHECK(work.contains("tabColor"));
+    auto const edit = sidebar.back().toMap();
+    CHECK(edit.value("kind").toString() == "edit");
+    CHECK(edit.value("title").toString() == QStringLiteral("Edit contour.yml…"));
+}
+
+TEST_CASE("SettingsController: search finds a profile field and a global one", "[settings][sections]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->editProfile("main");
+
+    auto const found = fx.controller->searchSettings("scrollback");
+    REQUIRE_FALSE(found.isEmpty());
+    auto const first = found.first().toMap();
+    CHECK(first.value("key").toString() == "history_max_lines");
+    CHECK(first.value("scope").toString() == "profile");
+    CHECK(first.value("section").toString() == "profiles");
+    CHECK(first.value("group").toInt() == static_cast<int>(SettingsGroup::ProfileHistory));
+
+    auto const gutter = fx.controller->searchSettings("GUTTER.");
+    REQUIRE_FALSE(gutter.isEmpty());
+    for (auto const& raw: gutter)
+    {
+        CHECK(raw.toMap().value("scope").toString() == "global");
+        CHECK(raw.toMap().value("section").toString() == "shell-integration");
+    }
+    CHECK(fx.controller->searchSettings("  ").isEmpty());
 }
 
 // }}}

@@ -81,19 +81,29 @@ class SettingsController: public QObject
     Q_PROPERTY(QVariantList keybindings READ keybindings NOTIFY changed)
 
     /// The editable global (application-scope) settings: one QVariantMap per field
-    /// { key, label, help, type, value, options, overridden }. Edits are written to settings.yml as
-    /// overrides on contour.yml — the same side-file discipline the rest of the page uses. A dotted
-    /// key ("gutter.line_numbers") is a path to one leaf of a contour.yml section, and overrides only
-    /// that leaf. A value the loader would reject is refused with errorOccurred and not written. `overridden`
-    /// says that settings.yml holds an override of the key and that it took, or that one is committed and
-    /// not yet written; `value` is then the committed one.
+    /// { key, label, help, type, group (a SettingsGroup), groupTitle, value, options, overridden }. Edits are
+    /// written to settings.yml as overrides on contour.yml — the same side-file discipline the rest of the
+    /// page uses. A dotted key ("gutter.line_numbers") is a path to one leaf of a contour.yml section, and
+    /// overrides only that leaf. A value the loader would reject is refused with errorOccurred and not
+    /// written. `overridden` says that settings.yml holds an override of the key and that it took, or that
+    /// one is committed and not yet written; `value` is then the committed one.
     Q_PROPERTY(QVariantList globalFields READ globalFields NOTIFY globalFieldsChanged)
+
+    /// The Settings sections, from SettingsSectionRows: one QVariantMap per section { id, title, icon (a
+    /// SettingsIcon), groups: [{ id (a SettingsGroup), title, scope ("global"|"profile") }] }.
+    Q_PROPERTY(QVariantList sections READ sections NOTIFY changed)
+
+    /// The sidebar's rows: the sections { kind: "section", id, title, icon }, then one row per profile
+    /// { kind: "profile", name, origin, editable, isDefault, tabColor ("#rrggbb", or empty for none) }, then
+    /// { kind: "edit", title: "Edit contour.yml…" }.
+    Q_PROPERTY(QVariantList sidebar READ sidebar NOTIFY changed)
 
     /// Whether this Settings session changed anything "Revert Changes" can put back. A QML-facing bool.
     Q_PROPERTY(bool hasChanges READ hasChanges NOTIFY changesChanged)
 
     /// The scalar fields of the profile currently being edited: one QVariantMap per field
-    /// { key, label, help, type ("bool"|"int"|"double"|"string"), value }. Empty when nothing is open.
+    /// { key, label, help, type ("bool"|"int"|"double"|"string"), group (a SettingsGroup), groupTitle,
+    /// groupGlyph, value }. Empty when nothing is open.
     Q_PROPERTY(QVariantList profileFields READ profileFields NOTIFY draftChanged)
 
     /// The link patterns of the profile draft: the built-ins first, in table order, then the profile's own,
@@ -175,6 +185,14 @@ class SettingsController: public QObject
     [[nodiscard]] QVariantList schemeColors() const;
     [[nodiscard]] QString editingScheme() const { return _editingScheme; }
     [[nodiscard]] bool hasChanges() const noexcept;
+    [[nodiscard]] QVariantList sections() const;
+    [[nodiscard]] QVariantList sidebar() const;
+
+    /// The rows @p query finds, as matchSettings() orders them: the open profile's fields, then the globals.
+    /// @param query What was typed into the search field.
+    /// @return One QVariantMap per row { key, label, section (its id), group (a SettingsGroup), scope
+    ///         ("global"|"profile") }; empty for a blank query.
+    [[nodiscard]] Q_INVOKABLE QVariantList searchSettings(QString const& query) const;
 
     /// Rebuilds the list models (profiles, color schemes, default) from the current configuration, and the
     /// settings.yml draft while nothing is pending for it. Leaves the open drafts as they are. The host calls

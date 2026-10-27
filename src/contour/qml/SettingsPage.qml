@@ -103,7 +103,7 @@ Rectangle {
     //
     // The field panes are long — a profile has around ninety settings — so they are shown as collapsible
     // groups with a search box over them. The grouping is not decided here: each row of
-    // SettingsController.profileFields carries the `group` and `groupGlyph` it belongs under, so which
+    // SettingsController.profileFields carries the `groupTitle` and `groupGlyph` it belongs under, so which
     // fields belong together is a fact about the fields, stated next to them in C++.
 
     /// Live filter over the field panes. Matches a field's label, help text or key.
@@ -164,7 +164,7 @@ Rectangle {
             var field = rows[i]
             if (!root.fieldMatches(field))
                 continue
-            var title = field.group !== undefined ? field.group : ""
+            var title = field.groupTitle !== undefined ? field.groupTitle : ""
             if (byTitle[title] === undefined) {
                 byTitle[title] = {
                     "title": title,
