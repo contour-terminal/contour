@@ -5953,6 +5953,38 @@ TEST_CASE("an echo change with no output after it reaches a viewer by the idle c
     CHECK(inputEchoFrames(client.received)[1].second.echo == std::to_underlying(vtpty::InputEcho::Echoed));
 }
 
+TEST_CASE("the idle check of the echo state runs only within the activity window",
+          "[vthost][native][flush][inputecho]")
+{
+    // An idle connection wakes nothing: the check keeps itself armed for FlushPolicy::inputEchoWindow after
+    // the attach, an output or an input, then stays off until the next of them. On a ManualClock.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto const& flush = f.h.options.services.flush;
+    auto& client = f.attach(id, inputEchoHello());
+    REQUIRE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // Quiet past the window: the check that finds it over arms nothing.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 12))
+    {
+        f.clock.advance(flush.inputEchoCheck);
+        turnIdle(f.h.loop);
+    }
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // An echo change with no activity is not told ...
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.clock.advance(flush.inputEchoCheck * 4);
+    turnIdle(f.h.loop);
+    CHECK(inputEchoFrames(client.received).empty());
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // ... until output opens the window: the echo rides the output's flush, and the check is armed again.
+    f.update(client, id, "Password:");
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+}
+
 TEST_CASE("a viewer that does not mirror the echo state arms no idle check",
           "[vthost][native][flush][inputecho]")
 {

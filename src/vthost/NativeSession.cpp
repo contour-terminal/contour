@@ -501,8 +501,15 @@ void NativeSession::checkInputEchoWhenDue()
             pushInputEcho(SessionId { session });
     }
     // The next check rides a flush of its own; an earlier flush that output arms runs this again, and
-    // supersedes the one armed here, which then finds its deadline moved.
-    scheduleFlush(_nextInputEchoCheck);
+    // supersedes the one armed here, which then finds its deadline moved. Past the activity window nothing
+    // is armed: an idle connection wakes no timer, and the next output or input opens the window again.
+    if (now < _inputEchoActiveUntil)
+        scheduleFlush(_nextInputEchoCheck);
+}
+
+void NativeSession::noteInputEchoActivity()
+{
+    _inputEchoActiveUntil = _loop.clock().now() + _services.flush.inputEchoWindow;
 }
 
 void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
@@ -593,6 +600,8 @@ core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint d
     // member, which `exchange` just emptied, not the range being walked.
     // The echo first, so a client's pane holds it by the time the output that follows it lands: sudo turns
     // echo off before it prints the prompt.
+    if (!_pendingSessions.empty() || !_inputEchoPending.empty())
+        noteInputEchoActivity();
     for (auto const session: _pendingSessions)
         pushInputEcho(SessionId { session });
     for (auto const session: std::exchange(_inputEchoPending, {}))
@@ -1493,6 +1502,7 @@ void NativeSession::handleInput(proto::Input const& input)
     // next flush, which the session's pump has written the keys by.
     if (mirrorsInputEcho())
     {
+        noteInputEchoActivity();
         _inputEchoPending.insert(input.session);
         scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
     }
@@ -2005,8 +2015,9 @@ void NativeSession::attachClient(uint64_t serial,
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
-    // The idle check of the echo state starts one interval from now.
+    // The idle check of the echo state starts one interval from now, and runs for the activity window.
     _nextInputEchoCheck = _loop.clock().now() + _services.flush.inputEchoCheck;
+    noteInputEchoActivity();
     if (mirrorsInputEcho())
         scheduleFlush(_nextInputEchoCheck);
 

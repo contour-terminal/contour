@@ -31,6 +31,9 @@ struct FlushPolicy
     /// output or input has: a program may turn echo off after its prompt, or back on without printing, and
     /// nothing else would say so. Coarse on purpose: it bounds how late a lock appears, not a frame.
     core::platform::SteadyDuration inputEchoCheck = std::chrono::milliseconds { 250 };
+    /// How long after the connection attached, a followed session's output, or an input, the idle check
+    /// keeps itself armed. Past it the connection is quiet and wakes nothing; the next activity re-arms it.
+    core::platform::SteadyDuration inputEchoWindow = std::chrono::seconds { 2 };
 };
 
 /// Why a flush is scheduled.

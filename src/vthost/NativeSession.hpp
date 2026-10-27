@@ -658,6 +658,11 @@ class NativeSession final: public SessionStreamEvents
     /// mirror the echo state does nothing.
     void checkInputEchoWhenDue();
 
+    /// Opens (or extends) the window in which the idle check keeps itself armed
+    /// (FlushPolicy::inputEchoWindow): output of a followed session, an input, or the attach itself happened
+    /// just now.
+    void noteInputEchoActivity();
+
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
     /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
@@ -887,6 +892,8 @@ class NativeSession final: public SessionStreamEvents
     std::unordered_map<uint64_t, uint8_t> _inputEchoSent;
     /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
     core::platform::SteadyTimePoint _nextInputEchoCheck {};
+    /// Until when the idle check keeps itself armed. @see noteInputEchoActivity
+    core::platform::SteadyTimePoint _inputEchoActiveUntil {};
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer
