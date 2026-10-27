@@ -1177,8 +1177,8 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
             .role = PaneFooterText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
         PaneColorRow { .role = PaneHeaderActionHover, .native = fill(1), .terminal = transparent },
     };
-    // Every pane role, PaneGapFill up to PaneColorRoleEnd, has a row here.
-    CHECK(rows.size() == PaneColorRoleEnd - static_cast<size_t>(PaneGapFill));
+    // Every pane role has a row here.
+    CHECK(rows.size() == PaneColorRoleEnd - PaneColorRoleBegin);
 
     for (auto const index: AllStyles())
     {
@@ -1239,8 +1239,8 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
                                                      .level = 0 },
                        .terminal = schemeOnBar(SchemeSlot::Danger) },
     };
-    // Every find bar role, PaletteColorRoleEnd up to FindColorRoleEnd, has a row here.
-    CHECK(rows.size() == FindColorRoleEnd - PaletteColorRoleEnd);
+    // Every find bar role has a row here.
+    CHECK(rows.size() == FindColorRoleEnd - FindColorRoleBegin);
 
     for (auto const index: AllStyles())
     {
@@ -1333,8 +1333,8 @@ TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
         PaletteColorRow {
             .role = PaletteSeparator, .native = separator(), .terminal = schemeColor(SchemeSlot::Secondary) },
     };
-    // Every palette role, PaneColorRoleEnd up to PaletteColorRoleEnd, has a row here.
-    CHECK(rows.size() == PaletteColorRoleEnd - PaneColorRoleEnd);
+    // Every palette role has a row here.
+    CHECK(rows.size() == PaletteColorRoleEnd - PaletteColorRoleBegin);
 
     for (auto const index: AllStyles())
     {
@@ -1438,16 +1438,17 @@ TEST_CASE("chromeTokens.overlayColourRoles", "[chrometokens]")
                                                         .slot = SchemeSlot::Background,
                                                         .alphaPercent = 60,
                                                         .level = 0 },
-                          .terminal = schemeColor(SchemeSlot::Background) },
-        OverlayColorRow {
-            .role = ScrollbarThumb, .native = labelAt(33), .terminal = schemeColor(SchemeSlot::Secondary) },
+                          .terminal = schemeColor(SchemeSlot::ToastHint) },
+        OverlayColorRow { .role = ScrollbarThumb,
+                          .native = labelAt(33),
+                          .terminal = schemeColor(SchemeSlot::ScrollbarThumb) },
         OverlayColorRow { .role = ScrollbarThumbActive,
                           .native = labelAt(55),
-                          .terminal = schemeColor(SchemeSlot::Accent) },
+                          .terminal = schemeColor(SchemeSlot::ScrollbarThumbActive) },
         OverlayColorRow { .role = ScrollbarTrack, .native = labelAt(11), .terminal = noColor() },
     };
-    // Every overlay role, FindColorRoleEnd up to OverlayColorRoleEnd, has a row here.
-    CHECK(rows.size() == OverlayColorRoleEnd - FindColorRoleEnd);
+    // Every overlay role has a row here.
+    CHECK(rows.size() == OverlayColorRoleEnd - OverlayColorRoleBegin);
 
     for (auto const index: AllStyles())
     {
@@ -1505,10 +1506,12 @@ TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
             auto const& hint = row.colors[static_cast<size_t>(ToastTextSecondary)];
             if (style == ChromeStyle::Terminal)
             {
-                // Inverse video: the hint is the toast's own text, the scheme's background on its foreground,
-                // so it reads exactly as the toast does. (That pair falls short of 4.5:1 on one-dark and
-                // solarized-light: the Toast's, not the hint's.)
-                CHECK(hint == row.colors[static_cast<size_t>(ToastText)]);
+                // Inverse video: the hint is an ink that reads on the toast's fill, the scheme's foreground.
+                REQUIRE(fill.kind == ColorSourceKind::Scheme);
+                REQUIRE(hint.kind == ColorSourceKind::Scheme);
+                auto const colors = chromeSchemeColorsOf(palette);
+                CHECK(contrastRatio(slotIn(colors, hint.slot), slotIn(colors, fill.slot))
+                      >= MinimumTextContrast);
                 continue;
             }
             REQUIRE(fill.kind == ColorSourceKind::Fixed);
@@ -1516,5 +1519,36 @@ TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
             auto const toast = over(fill, palette.defaultBackground);
             CHECK(contrastRatio(over(hint, toast), toast) >= MinimumTextContrast);
         }
+    }
+}
+
+TEST_CASE("chromeTokens.theTerminalRowsScrollbarThumbsMark", "[chrometokens]")
+{
+    // The Terminal row's thumb is a column of "┃" on the pane: at rest and engaged, it stands off the pane's
+    // background at 3:1 on every bundled scheme -- ANSI 8 or the accent where they do, a fallback where not.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    auto const row = resolveChromeTokens(ChromeStyle::Terminal, {});
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        for (auto const role: { ScrollbarThumb, ScrollbarThumbActive })
+        {
+            CAPTURE(static_cast<int>(role));
+            auto const& source = row.colors[static_cast<size_t>(role)];
+            REQUIRE(source.kind == ColorSourceKind::Scheme);
+            CHECK(contrastRatio(slotIn(colors, source.slot), palette.defaultBackground)
+                  >= MinimumMarkContrast);
+        }
+        // ANSI 8 and the accent are kept wherever they already mark.
+        auto const secondary = slotIn(colors, SchemeSlot::Secondary);
+        if (contrastRatio(secondary, palette.defaultBackground) >= MinimumMarkContrast)
+            CHECK(slotIn(colors, SchemeSlot::ScrollbarThumb) == secondary);
+        auto const accent = slotIn(colors, SchemeSlot::Accent);
+        if (contrastRatio(accent, palette.defaultBackground) >= MinimumMarkContrast)
+            CHECK(slotIn(colors, SchemeSlot::ScrollbarThumbActive) == accent);
     }
 }

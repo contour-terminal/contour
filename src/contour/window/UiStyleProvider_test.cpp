@@ -1226,10 +1226,9 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
     };
     // The pane roles, and the overlay scrollbar's, which colorOn() resolves on the pane's own background.
     CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
-          == (contour::config::PaneColorRoleEnd - static_cast<size_t>(ChromeColorRole::PaneGapFill))
-                 + (contour::config::FindColorRoleEnd - contour::config::PaletteColorRoleEnd)
-                 + (contour::config::OverlayColorRoleEnd
-                    - static_cast<size_t>(ChromeColorRole::ScrollbarThumb)));
+          == (contour::config::PaneColorRoleEnd - contour::config::PaneColorRoleBegin)
+                 + (contour::config::FindColorRoleEnd - contour::config::FindColorRoleBegin)
+                 + (contour::config::OverlayColorRoleEnd - contour::config::ScrollbarColorRoleBegin));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
 }
@@ -1812,7 +1811,7 @@ TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appear
     std::ranges::sort(covered);
     auto const [first, last] = std::ranges::unique(covered);
     covered.erase(first, last);
-    CHECK(covered.size() == contour::config::PaletteColorRoleEnd - contour::config::PaneColorRoleEnd);
+    CHECK(covered.size() == contour::config::PaletteColorRoleEnd - contour::config::PaletteColorRoleBegin);
 
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
@@ -2002,4 +2001,52 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     CHECK(tokenOf(terminal, "size", "scrollbar").toReal() == Catch::Approx(terminal.widthQuantum()));
     CHECK(tokenOf(terminal, "motion", "linger").toInt() == 600);
     CHECK(terminal.property("scrollThumbGlyph").toString() == QStringLiteral("┃"));
+}
+
+TEST_CASE("UiStyleProvider: the overlay's inks read on every row, appearance and bundled scheme",
+          "[contour][uistyle]")
+{
+    // The link pill's hint on the toast, and the overlay scrollbar's thumb on the pane (resolved, as QML
+    // does, by colorOn() on the pane's own background). The resting native thumb is a tint (passive, like the
+    // plain match fill), exempt from a ratio; engaged it is a state mark, held to 3:1. Every one on the
+    // Terminal row is.
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::config::MinimumMarkContrast;
+    using contour::config::MinimumTextContrast;
+    using contour::window::UiStyleProvider;
+    using enum ChromeColorRole;
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto const pane = contour::platform::toQColor(palette.defaultBackground);
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            auto const style = static_cast<ChromeStyle>(index);
+            CAPTURE(index);
+            auto inputs = contour::window::chromeInputsFor(style, QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const* colors =
+                qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+            REQUIRE(colors != nullptr);
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    auto const toast = over(colors->color(ToastFill), pane);
+                    CHECK(contrastOf(over(colors->color(ToastTextSecondary), toast), toast)
+                          >= MinimumTextContrast);
+
+                    auto const thumbOf = [&](ChromeColorRole role) {
+                        return over(provider.colorOn(static_cast<int>(role), pane), pane);
+                    };
+                    CHECK(contrastOf(thumbOf(ScrollbarThumbActive), pane) >= MinimumMarkContrast);
+                    if (style == ChromeStyle::Terminal)
+                        CHECK(contrastOf(thumbOf(ScrollbarThumb), pane) >= MinimumMarkContrast);
+                });
+        }
+    }
 }

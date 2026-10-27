@@ -167,3 +167,19 @@ TEST_CASE("linkPill.names", "[linkpill]")
     CHECK(names.size() == contour::window::LinkPillAnchorCount);
     CHECK(contour::window::linkPillAnchorName(LinkPillAnchor::TopRight) == "topRight");
 }
+
+TEST_CASE("linkPill.aBandEndingOnARowEdgeLeavesTheNextRowBe", "[linkpill]")
+{
+    // A pill one row high on that row's top edge covers that row alone: its bottom is the next row's top, and
+    // the cell there is not under it.
+    auto base = Base {};
+    base.trailingBlank[2] = 0;
+    auto inputs = base.inputs();
+    inputs.insetTop = 20;
+    inputs.pillHeight = 20;
+    CHECK(placeLinkPill(inputs).anchor == LinkPillAnchor::TopRight);
+
+    // A hair lower, and it reaches into the next row.
+    inputs.insetTop = 21;
+    CHECK(placeLinkPill(inputs).anchor != LinkPillAnchor::TopRight);
+}

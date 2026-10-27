@@ -945,9 +945,9 @@ class ChromeColorTokens: public QObject
 /// The QML names of the pane colour roles, `chromeStyle.roles`, for UiStyleProvider::colorOn().
 ///
 /// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
-/// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneGapFill up to @c PaneColorRoleEnd,
-/// and per find bar role, @c PaletteColorRoleEnd up to @c FindColorRoleEnd: the find bar sits on the pane,
-/// and per overlay scrollbar role, which a pane resolves on its own background too.
+/// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneColorRoleBegin up to @c
+/// PaneColorRoleEnd, and per find bar role, @c FindColorRoleBegin up to @c FindColorRoleEnd: the find bar
+/// sits on the pane, and per overlay scrollbar role, which a pane resolves on its own background too.
 class ChromePaneRoleNames: public QObject
 {
     Q_OBJECT

@@ -227,26 +227,64 @@ enum class SchemeSlot : uint8_t
     /// bar.
     Toast,
     ToastInk, //!< The text on @c Toast, which reads on it wherever either candidate does.
+    /// Ink on the pane's own background (@c Background): vtbackend::legibleInkOn(), at least 4.5:1. The last
+    /// resort of the mark chains below, which therefore always end in a legible mark.
+    PaneInk,
+    /// The overlay scrollbar's thumb on the pane: the first of @c ScrollbarThumbFallbacks that stands off
+    /// @c Background at 3:1 (a mark, WCAG 1.4.11).
+    ScrollbarThumb,
+    /// The thumb while hovered or dragged: the first of @c ScrollbarThumbActiveFallbacks that stands off
+    /// @c Background at 3:1.
+    ScrollbarThumbActive,
+    /// The link pill's hint on the toast (which is @c Foreground on this row): vtbackend::legibleInkOn() on
+    /// @c Foreground, at least 4.5:1.
+    ToastHint,
 };
 
 /// Number of @c SchemeSlot enumerators, derived from the last one.
-inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::ToastInk) + 1;
+inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::ToastHint) + 1;
+
+/// Where the Terminal row's resting scrollbar thumb takes its colour, first that marks against the pane wins:
+/// ANSI 8, else the foreground, else the pane's ink, which always does.
+inline constexpr std::array ScrollbarThumbFallbacks {
+    SchemeSlot::Secondary,
+    SchemeSlot::Foreground,
+    SchemeSlot::PaneInk,
+};
+
+/// Where the Terminal row's engaged scrollbar thumb takes its colour, by the same rule: the accent first.
+inline constexpr std::array ScrollbarThumbActiveFallbacks {
+    SchemeSlot::Accent,
+    SchemeSlot::Foreground,
+    SchemeSlot::PaneInk,
+};
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
 inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
 
-/// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
+// Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
+// family added between two others then shifts no count.
+
+/// The first pane colour role.
+inline constexpr size_t PaneColorRoleBegin = static_cast<size_t>(ChromeColorRole::PaneGapFill);
+/// One past the last pane colour role.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
 
-/// One past the last command palette colour role: the palette roles run from @c PaneColorRoleEnd to here,
-/// so a family appended after them does not shift their count.
+/// The first command palette colour role.
+inline constexpr size_t PaletteColorRoleBegin = static_cast<size_t>(ChromeColorRole::PaletteSurface);
+/// One past the last command palette colour role.
 inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
 
-/// One past the last find bar colour role: the find bar's roles run from @c PaletteColorRoleEnd to here.
+/// The first find bar colour role.
+inline constexpr size_t FindColorRoleBegin = static_cast<size_t>(ChromeColorRole::FindToggleOnFill);
+/// One past the last find bar colour role.
 inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
 
-/// One past the last overlay colour role: the overlay roles (the link pill's hint, the overlay scrollbar) run
-/// from @c FindColorRoleEnd to here, so a family appended after them does not shift their count.
+/// The first overlay colour role: the link pill's hint, then the overlay scrollbar's.
+inline constexpr size_t OverlayColorRoleBegin = static_cast<size_t>(ChromeColorRole::ToastTextSecondary);
+/// The first of the overlay scrollbar's roles, which a pane resolves on its own background (colorOn).
+inline constexpr size_t ScrollbarColorRoleBegin = static_cast<size_t>(ChromeColorRole::ScrollbarThumb);
+/// One past the last overlay colour role.
 inline constexpr size_t OverlayColorRoleEnd = static_cast<size_t>(ChromeColorRole::ScrollbarTrack) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
@@ -1425,13 +1463,14 @@ namespace detail
                     // The scheme's red where it reads on the bar at 4.5:1, else the bar's ink: the status
                     // hues follow the OS palette's tone, not the bar's.
                     schemeOnBar(SchemeSlot::Danger), // FindErrorText
-                    // Inverse video, as the toast: the hint is the scheme's background on its foreground.
-                    schemeColor(SchemeSlot::Background), // ToastTextSecondary
-                    // The bar's thumb is a column of "┃" (UiStyleTokens::scrollThumbGlyph): ANSI 8, the
-                    // accent while engaged, and no track.
-                    schemeColor(SchemeSlot::Secondary), // ScrollbarThumb
-                    schemeColor(SchemeSlot::Accent),    // ScrollbarThumbActive
-                    detail::noColor() },                // ScrollbarTrack
+                    // Inverse video, as the toast: the hint is an ink that reads on the scheme's foreground.
+                    schemeColor(SchemeSlot::ToastHint), // ToastTextSecondary
+                    // The bar's thumb is a column of "┃" (UiStyleTokens::scrollThumbGlyph): ANSI 8 at rest,
+                    // the accent while engaged, each falling back to a colour that marks against the pane; no
+                    // track.
+                    schemeColor(SchemeSlot::ScrollbarThumb),       // ScrollbarThumb
+                    schemeColor(SchemeSlot::ScrollbarThumbActive), // ScrollbarThumbActive
+                    detail::noColor() },                           // ScrollbarTrack
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
@@ -1610,6 +1649,27 @@ namespace detail
         }
         return pairOf(candidates.back());
     }
+
+    /// The first of @p candidates whose colour stands off @p ground at 3:1 (a mark, WCAG 1.4.11); failing
+    /// all, the last.
+    /// @param colors     The scheme's slots, those named in @p candidates already resolved.
+    /// @param candidates The slots to try, in order; not empty.
+    /// @param ground     What the mark is drawn on.
+    /// @return The chosen colour.
+    template <size_t N>
+    [[nodiscard]] vtbackend::RGBColor firstMarkOn(ChromeSchemeColors const& colors,
+                                                  std::array<SchemeSlot, N> const& candidates,
+                                                  vtbackend::RGBColor ground)
+    {
+        static_assert(N > 0);
+        for (auto const slot: candidates)
+        {
+            auto const color = colors.bySlot[static_cast<size_t>(slot)];
+            if (vtbackend::contrastRatio(color, ground) >= MinimumMarkContrast)
+                return color;
+        }
+        return colors.bySlot[static_cast<size_t>(candidates.back())];
+    }
 } // namespace detail
 
 /// Reduces a terminal colour palette to the slots the Terminal chrome paints with.
@@ -1672,6 +1732,16 @@ namespace detail
     colors.bySlot[static_cast<size_t>(SchemeSlot::BarSelectionText)] = barSelection.text;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Toast)] = toast.fill;
     colors.bySlot[static_cast<size_t>(SchemeSlot::ToastInk)] = toast.text;
+
+    // The overlays drawn on the pane itself: marks that stand off its background, and the hint on the toast.
+    auto const background = palette.defaultBackground;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::PaneInk)] = vtbackend::legibleInkOn(palette, background);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::ScrollbarThumb)] =
+        detail::firstMarkOn(colors, ScrollbarThumbFallbacks, background);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::ScrollbarThumbActive)] =
+        detail::firstMarkOn(colors, ScrollbarThumbActiveFallbacks, background);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::ToastHint)] =
+        vtbackend::legibleInkOn(palette, palette.defaultForeground);
     return colors;
 }
 
