@@ -1325,6 +1325,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     fillGutter(output, baseLine);
     fillFoldLabels(output, baseLine);
     auto const chipStatus = fillBlockChips(output, baseLine);
+    fillBlockHighlight(output, baseLine);
 
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
     // status line put it.
@@ -4149,9 +4150,11 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
     // A native row's chip is a pill the renderer shapes: the label rides along, and no cell is laid out.
     if (drawsPills())
     {
-        auto const inks = pillInks(_colorPalette, PillStyle::Fold);
         for (auto const& placement: placements)
         {
+            auto const* const block = commandBlockAt(placement.gridLine);
+            auto const inks =
+                pillInks(_colorPalette, PillStyle::Fold, block ? hoverUnderlayOf(block->id) : std::nullopt);
             auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
             if (auto const columns = foldLabelExtent(screenLine,
                                                      placement.textColumns,
@@ -4433,7 +4436,8 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
         // A native row's chip is a pill the renderer shapes, right-aligned in the columns placed for it.
         if (drawsPills())
         {
-            auto const inks = pillInks(_colorPalette, style);
+            // Legible over the hovered block's tint as well as over the page.
+            auto const inks = pillInks(_colorPalette, style, hoverUnderlayOf(record->id));
             output.chips.push_back(RenderChip { .lineOffset = placement.columns.line,
                                                 .columns = placement.columns,
                                                 .style = style,
@@ -4460,6 +4464,53 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output, LineOffset baseLine
                     RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F))) });
     }
     return status;
+}
+
+std::optional<CommandBlockId> Terminal::hoveredBlock() const
+{
+    if (_hoveredCommandBlock)
+        return _hoveredCommandBlock;
+    if (auto const* const record = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr)
+        return record->id;
+    return std::nullopt;
+}
+
+std::optional<RGBAColor> Terminal::hoverUnderlayOf(CommandBlockId block) const
+{
+    if (!drawsPills() || hoveredBlock() != block)
+        return std::nullopt;
+    return blockHoverInks(_colorPalette).tint;
+}
+
+void Terminal::fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) const
+{
+    // A native row's hover only, and only where blocks are: the primary page.
+    if (!drawsPills() || !foldingAppliesToDisplayedPage())
+        return;
+    auto const hovered = hoveredBlock();
+    if (!hovered)
+        return;
+
+    // The block's drawn rows: contiguous on screen, a collapsed fold's hidden ones not among them.
+    auto first = std::optional<int> {};
+    auto last = 0;
+    for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
+    {
+        auto const* const record = commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y)));
+        if (record == nullptr || record->id != *hovered)
+            continue;
+        if (!first)
+            first = y;
+        last = y;
+    }
+    if (!first)
+        return;
+
+    auto const inks = blockHoverInks(_colorPalette);
+    output.blockHighlight = RenderBlockHighlight { .top = baseLine + LineOffset(*first),
+                                                   .height = LineCount(last - *first + 1),
+                                                   .tint = inks.tint,
+                                                   .ring = inks.ring };
 }
 
 ColumnCount Terminal::chipColumns(PillStyle style, std::u32string_view text) const noexcept

@@ -5745,6 +5745,22 @@ class Terminal: public IStatusLinePublishTarget
     /// @return The columns.
     [[nodiscard]] ColumnCount chipColumns(PillStyle style, std::u32string_view text) const noexcept;
 
+    /// The block the pointer hovers: over its rows (setHoveredCommandBlock()), else over the rail's strip
+    /// beside them (setGutterHoverLine()).
+    /// @return Its id, or nullopt while no block is hovered.
+    [[nodiscard]] std::optional<CommandBlockId> hoveredBlock() const;
+
+    /// What a native row's hovered block lays between the page and a pill on its rows: its tint.
+    /// @param block The pill's block.
+    /// @return The tint while @p block is hovered on a native row; nullopt otherwise.
+    [[nodiscard]] std::optional<RGBAColor> hoverUnderlayOf(CommandBlockId block) const;
+
+    /// Fills @p output's block highlight: the hovered block's drawn rows, head to tail, under a tint and a
+    /// ring, on a native row only (the Terminal row draws cells, not tints).
+    /// @param output The buffer being built.
+    /// @param baseLine As for fillGutter().
+    void fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) const;
+
     /// Whether this terminal's chips are pills the renderer draws (BlockColumnForm::Rail), or cells.
     [[nodiscard]] bool drawsPills() const noexcept
     {

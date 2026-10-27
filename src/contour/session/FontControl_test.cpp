@@ -220,6 +220,7 @@ TEST_CASE("FontControl.blockChipMetricsFor.areTheCanvasPillsAtTheScale", "[conto
     CHECK(metrics.markEdge == 26);
     CHECK(metrics.markFontSize == 9);
     CHECK(metrics.markWeight == 700);
+    CHECK(metrics.hoverRing == 2);
 
     // At 1x the 0.5-pt ring is still a pixel: a hairline never vanishes.
     CHECK(

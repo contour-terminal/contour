@@ -197,6 +197,18 @@ struct RenderChip
     bool operator==(RenderChip const&) const = default;
 };
 
+/// The block the pointer hovers on a native row, as the canvas draws it: its rows tinted under their text,
+/// and a ring around them across the page -- the grid's first column to its last.
+struct RenderBlockHighlight
+{
+    LineOffset top {};   ///< The block's first drawn screen row.
+    LineCount height {}; ///< How many rows it spans on screen, clipped to the page.
+    RGBAColor tint {};   ///< Laid over its rows, under their text.
+    RGBAColor ring {};   ///< The one-pixel ring inside its outline.
+
+    bool operator==(RenderBlockHighlight const&) const = default;
+};
+
 /// Marks @p cells as one shaping group: the text shaper takes them as a single run, first to last.
 /// @param cells The cells, left to right; none is marked when it is empty.
 void markShapingGroup(std::span<RenderCell> cells) noexcept;
@@ -283,6 +295,9 @@ struct RenderBuffer
     /// The row a jump just landed on, while its flash fades; absent otherwise.
     std::optional<RenderLineFlash> lineFlash {};
 
+    /// The hovered block's tint and ring on a native row; absent while no block is hovered.
+    std::optional<RenderBlockHighlight> blockHighlight {};
+
     uint64_t frameID {};
 
     /// Starts this frame's sticky header on the storage the last one left behind, so a header shown frame
@@ -307,6 +322,7 @@ struct RenderBuffer
         chips.clear();
         cursor.reset();
         lineFlash.reset();
+        blockHighlight.reset();
         if (stickyHeader)
         {
             _retiredStickyHeader = std::move(*stickyHeader);

@@ -485,6 +485,16 @@ class Renderer
                          vtbackend::ColumnCount columns,
                          int smoothScrollOffset);
 
+    /// Draws the hovered block's tint across the page's columns on its rows -- after the cells' backgrounds,
+    /// under their text, which a step draws after every rectangle -- and the ring inside its outline, from
+    /// the grid's first column to the page's last.
+    /// @param highlight The highlight, as the frame carries it; nothing is drawn without one.
+    /// @param columns The main page's width.
+    /// @param smoothScrollOffset The pixel offset the page's rows are drawn at on this pass.
+    void renderBlockHighlight(std::optional<vtbackend::RenderBlockHighlight> const& highlight,
+                              vtbackend::ColumnCount columns,
+                              int smoothScrollOffset);
+
     void executeImageDiscards();
 
     /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.

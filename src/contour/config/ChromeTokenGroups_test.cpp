@@ -1709,6 +1709,7 @@ TEST_CASE("chromeTokens.blockChipsAreTheCanvasPills", "[chrometokens]")
         CHECK(fold.radius == row.radii.chip);
         CHECK(row.blockChips.markType == 9);
         CHECK(row.blockChips.markWeight == 700);
+        CHECK(row.blockChips.hoverRing == 1);
         CHECK(row.size.railMark == 13);
     }
 }

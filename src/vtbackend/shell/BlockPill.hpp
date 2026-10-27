@@ -130,4 +130,38 @@ struct PillInks
                                 PillStyle style,
                                 std::optional<RGBAColor> underlay = std::nullopt) noexcept;
 
+/// The canvas's tint of a hovered block, of the label: at most this, less where it would cost a scheme's text
+/// its contrast (blockHoverInks()).
+inline constexpr int BlockHoverTintPercent = 5;
+
+/// The canvas's ring around a hovered block, of the label.
+inline constexpr int BlockHoverRingPercent = 6;
+
+/// How far a hovered block's tint may move a colour's contrast against the page: the text keeps reading as
+/// it did.
+inline constexpr double BlockHoverContrastSlack = 0.25;
+
+/// A hovered block's inks.
+struct BlockHoverInks
+{
+    RGBAColor tint {}; ///< Laid over the block's rows, under their text.
+    RGBAColor ring {}; ///< The one-pixel ring inside the block's outline.
+
+    bool operator==(BlockHoverInks const&) const = default;
+};
+
+/// Whether a tint of the label at @p percent leaves @p palette's text reading as it did: its foreground and
+/// its 16 ANSI colours each within BlockHoverContrastSlack of their contrast against the page, and none that
+/// reached MinimumTextContrast falling below it.
+/// @param palette The colour scheme.
+/// @param percent The tint's opacity.
+/// @return Whether it does.
+[[nodiscard]] bool hoverTintKeepsContrast(ColorPalette const& palette, int percent) noexcept;
+
+/// The inks of a hovered block on @p palette: the label at BlockHoverTintPercent, or as much less as
+/// hoverTintKeepsContrast() needs, and the ring at BlockHoverRingPercent.
+/// @param palette The colour scheme.
+/// @return The inks.
+[[nodiscard]] BlockHoverInks blockHoverInks(ColorPalette const& palette) noexcept;
+
 } // namespace vtbackend

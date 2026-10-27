@@ -2594,6 +2594,71 @@ TEST_CASE("Renderer.chips.aNativeRowsChipIsAPillInTheUiFont", "[renderer][chip]"
           <= 24);
 }
 
+TEST_CASE("Renderer.blockHighlight.tintsUnderTheTextAndRingsTheBlock", "[renderer][blockhover]")
+{
+    // The hovered block's tint across the page's columns on its rows, issued after the cells' backgrounds
+    // and in the same step -- so over them and under the text, which a step draws after every rectangle --
+    // and a one-pixel ring inside its outline, from the grid's first column to the page's last.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.rail.chips.hoverRing = 1;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes("one-dark", palette)); // a scheme that keeps a visible tint
+    mc.terminal.colorPalette() = palette;
+    mc.terminal.settings().gutter =
+        GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+    mc.writeToScreen("\033[41m \033[m"); // a coloured cell background on row 0, outside every block
+    mc.writeToScreen(vtbackend::test::commandRun("ls", { "a", "b" }, 0));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+    auto const* block = mc.terminal.commandBlockAt(LineOffset(1));
+    REQUIRE(block != nullptr);
+    mc.terminal.setHoveredCommandBlock(block->id);
+    (void) mc.terminal.refreshRenderBuffer();
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+    auto const highlight = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().blockHighlight;
+    }();
+    REQUIRE(highlight.has_value());
+    REQUIRE(highlight->tint.alpha() > 0);
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const top = unbox<int>(highlight->top) * 20;
+    auto const height = unbox<int>(highlight->height) * 20;
+    auto const tint =
+        std::ranges::find_if(rectangles, [&](auto const& r) { return r.color == highlight->tint; });
+    REQUIRE(tint != rectangles.end());
+    CHECK(tint->x == 0);
+    CHECK(tint->y == top);
+    CHECK(tint->width == Width(200));
+    CHECK(tint->height == Height::cast_from(height));
+
+    // After the cells' backgrounds, in their step.
+    auto const background = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.color.rgb() == palette.normalColor(1) && r.color.alpha() == 0xFF;
+    });
+    REQUIRE(background != rectangles.end());
+    CHECK(background < tint);
+    CHECK(background->step == tint->step);
+
+    auto const ring = std::ranges::to<std::vector>(
+        rectangles | std::views::filter([&](auto const& r) { return r.color == highlight->ring; }));
+    REQUIRE(ring.size() == 4);
+    CHECK(std::ranges::all_of(ring, [&](auto const& r) { return r.step == tint->step; }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.y == top && r.width == Width(200); }));
+    CHECK(std::ranges::any_of(
+        ring, [&](auto const& r) { return r.y == top + height - 1 && r.height == Height(1); }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.x == 0 && r.width == Width(1); }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.x == 199 && r.width == Width(1); }));
+}
+
 TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", "[renderer][statusline]")
 {
     // DECSASD selects the host-writable status line, so the cursor is its own. The page's smooth scroll moves

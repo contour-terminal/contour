@@ -855,6 +855,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
                 renderStatusBar(*bar);
             renderCells(split.mainCells);
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
+            renderBlockHighlight(buffer.blockHighlight, mainPageSize.columns, 0);
             renderLines(split.mainLines);
             renderChipBands(std::span(buffer.chipBands), 0);
             renderAnnotations(std::span(buffer.annotations));
@@ -882,6 +883,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             renderCells(split.mainCells, smoothPixelOffset);
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
+            renderBlockHighlight(renderBuffer.get().blockHighlight, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
             renderChipBands(std::span(renderBuffer.get().chipBands), smoothPixelOffset);
@@ -1153,6 +1155,34 @@ void Renderer::renderLineFlash(std::optional<vtbackend::RenderLineFlash> const& 
     auto const alpha = static_cast<uint8_t>(std::lround(std::clamp(flash.alpha, 0.0f, 1.0f) * 255.0f));
     _renderTarget->renderRectangle(
         topLeft.x, topLeft.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(flash.color, alpha));
+}
+
+void Renderer::renderBlockHighlight(std::optional<vtbackend::RenderBlockHighlight> const& highlight,
+                                    vtbackend::ColumnCount columns,
+                                    int smoothScrollOffset)
+{
+    if (!highlight)
+        return;
+    ZoneScoped;
+    auto const topLeft = _gridMetrics.map(highlight->top, vtbackend::ColumnOffset(0), smoothScrollOffset);
+    auto const width = unbox<int>(_gridMetrics.cellSize.width) * unbox<int>(columns);
+    auto const height = unbox<int>(_gridMetrics.cellSize.height) * unbox<int>(highlight->height);
+    auto const rectangle = [&](int x, int y, int w, int h, vtbackend::RGBAColor color) {
+        if (w > 0 && h > 0 && color.alpha() > 0)
+            _renderTarget->renderRectangle(
+                x, y, vtbackend::Width::cast_from(w), vtbackend::Height::cast_from(h), color);
+    };
+
+    rectangle(topLeft.x, topLeft.y, width, height, highlight->tint);
+
+    // The ring inside the outline: the top and bottom edges whole, the sides between them.
+    auto const ring = std::min(_gridMetrics.rail.chips.hoverRing, std::min(width, height) / 2);
+    if (ring <= 0)
+        return;
+    rectangle(topLeft.x, topLeft.y, width, ring, highlight->ring);
+    rectangle(topLeft.x, topLeft.y + height - ring, width, ring, highlight->ring);
+    rectangle(topLeft.x, topLeft.y + ring, ring, height - (2 * ring), highlight->ring);
+    rectangle(topLeft.x + width - ring, topLeft.y + ring, ring, height - (2 * ring), highlight->ring);
 }
 
 void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)

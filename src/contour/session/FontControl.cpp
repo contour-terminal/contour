@@ -105,9 +105,11 @@ geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
 
 vtrasterizer::BlockChipMetrics blockChipMetricsFor(GutterChrome const& chrome, double scale) noexcept
 {
-    auto metrics = vtrasterizer::BlockChipMetrics { .markEdge = chromeDevicePixels(chrome.markPoints, scale),
-                                                    .markFontSize = chrome.chips.markType,
-                                                    .markWeight = chrome.chips.markWeight };
+    auto metrics =
+        vtrasterizer::BlockChipMetrics { .markEdge = chromeDevicePixels(chrome.markPoints, scale),
+                                         .markFontSize = chrome.chips.markType,
+                                         .markWeight = chrome.chips.markWeight,
+                                         .hoverRing = chromeDevicePixels(chrome.chips.hoverRing, scale) };
     for (auto const index: std::views::iota(std::size_t { 0 }, vtbackend::PillStyleCount))
     {
         auto const& tokens = chrome.chips.pills[index];

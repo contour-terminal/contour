@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <ranges>
@@ -42,6 +43,16 @@ namespace
     }
     return "?";
 }
+
+/// The schemes whose hovered block takes a lighter tint than the canvas's 5 %, so their text reads as before.
+///
+/// The 0.25 bound is absolute, and a dark scheme's light foreground near 15:1 loses more than that to any
+/// visible tint: on most schemes the tint is clamped to nothing, and the ring alone marks the hover.
+std::set<std::string> const lighterHoverTints {
+    "contour",          "contour-classic", "contour-dark",    "contour-light", "gruvbox-dark",
+    "gruvbox-light",    "monokai",         "one-dark",        "one-light",     "papercolor-dark",
+    "papercolor-light", "solarized-dark",  "solarized-light",
+};
 
 /// The scheme and style of every pill whose canvas ink is too faint for the scheme, and is lifted.
 std::set<std::string> const liftedPills {
@@ -145,4 +156,41 @@ TEST_CASE("blockPill.everyInkReadsAtFourAndAHalf", "[blockpill]")
         }
     }
     CHECK(lifted == liftedPills);
+}
+
+TEST_CASE("blockPill.aHoveredBlocksTintKeepsTheText", "[blockpill][blockhover]")
+{
+    // The canvas's tint (the label at 5 %) and ring (6 %) of a hovered block: every scheme's foreground and
+    // 16 ANSI colours over the tinted page stay within 0.25 of their contrast against the page, and any that
+    // read at 4.5:1 still do. Where 5 % would cost a scheme that, the tint is lighter, and the schemes that
+    // needed it are named here.
+    auto lighter = std::set<std::string> {};
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const inks = blockHoverInks(palette);
+        CHECK(inks.ring == RGBAColor(palette.defaultForeground, 0x0F));
+        CHECK(inks.tint.rgb() == palette.defaultForeground);
+        if (inks.tint.alpha() != 0x0D)
+            lighter.insert(std::string(name));
+
+        auto const page = palette.defaultBackground;
+        auto const tinted = mixColor(page, inks.tint.rgb(), static_cast<float>(inks.tint.alpha()) / 255.0F);
+        auto const check = [&](RGBColor text) {
+            auto const before = contrastRatio(text, page);
+            auto const after = contrastRatio(text, tinted);
+            CHECK(std::abs(after - before) <= BlockHoverContrastSlack);
+            if (before >= MinimumTextContrast)
+                CHECK(after >= MinimumTextContrast);
+        };
+        check(palette.defaultForeground);
+        for (auto const index: std::views::iota(std::size_t { 0 }, std::size_t { 16 }))
+        {
+            CAPTURE(index);
+            check(palette.palette.at(index));
+        }
+    }
+    CHECK(lighter == lighterHoverTints);
 }

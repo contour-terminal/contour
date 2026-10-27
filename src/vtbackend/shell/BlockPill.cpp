@@ -52,4 +52,28 @@ PillInks pillInks(ColorPalette const& palette, PillStyle style, std::optional<RG
     return inks;
 }
 
+bool hoverTintKeepsContrast(ColorPalette const& palette, int percent) noexcept
+{
+    auto const page = palette.defaultBackground;
+    auto const tinted = over(page, RGBAColor(palette.defaultForeground, alphaOf(percent)));
+    auto const keeps = [&](RGBColor text) {
+        auto const before = contrastRatio(text, page);
+        auto const after = contrastRatio(text, tinted);
+        return std::abs(after - before) <= BlockHoverContrastSlack
+               && (before < MinimumTextContrast || after >= MinimumTextContrast);
+    };
+    return keeps(palette.defaultForeground)
+           && std::ranges::all_of(std::views::iota(std::size_t { 0 }, std::size_t { 16 }),
+                                  [&](std::size_t index) { return keeps(palette.palette.at(index)); });
+}
+
+BlockHoverInks blockHoverInks(ColorPalette const& palette) noexcept
+{
+    auto percent = BlockHoverTintPercent;
+    while (percent > 0 && !hoverTintKeepsContrast(palette, percent))
+        --percent;
+    return BlockHoverInks { .tint = RGBAColor(palette.defaultForeground, alphaOf(percent)),
+                            .ring = RGBAColor(palette.defaultForeground, alphaOf(BlockHoverRingPercent)) };
+}
+
 } // namespace vtbackend

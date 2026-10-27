@@ -673,6 +673,7 @@ struct BlockChipTokens
     std::array<PillTokens, vtbackend::PillStyleCount> pills {}; ///< By vtbackend::PillStyle.
     double markType = 0.0; ///< The glyph in a rail mark (size.railMark is its disc).
     int markWeight = 400;  ///< Its weight.
+    int hoverRing = 0;     ///< The ring around a hovered block, inside its outline; 0 draws none.
 
     [[nodiscard]] bool operator==(BlockChipTokens const&) const = default;
 };
@@ -1096,7 +1097,8 @@ namespace detail
     /// The native rows' block chips, the canvas's `blocks` board: 11-pt labels -- semibold for a failure and
     /// a running command, regular for a success's duration and the fold chip -- the status pills padded 1 x 8
     /// at radius 9, the fold chip 0 x 10, 20 pt tall at radius 10 (size.foldChip, radius.chip) with a 0.5-pt
-    /// ring; a rail mark's glyph 9 pt bold on its 13-pt disc (size.railMark).
+    /// ring; a rail mark's glyph 9 pt bold on its 13-pt disc (size.railMark); a 1-pt ring around a hovered
+    /// block.
     inline constexpr BlockChipTokens NativeBlockChips {
         .pills = { PillTokens { .type = 11, .weight = 400 },
                    PillTokens { .type = 11, .weight = 600, .padX = 8, .padY = 1, .radius = 9 },
@@ -1105,6 +1107,7 @@ namespace detail
                        .type = 11, .weight = 400, .padX = 10, .height = 20, .radius = 10, .ring = 0.5 } },
         .markType = 9,
         .markWeight = 700,
+        .hoverRing = 1,
     };
 
     /// The native rows' status inks, indexed by @c StatusColorRole: the status hues' mark inks, since every

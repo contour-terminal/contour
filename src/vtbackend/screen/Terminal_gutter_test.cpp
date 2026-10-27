@@ -6,6 +6,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/shell/BlockChipPlacement.hpp>
+#include <vtbackend/shell/BlockPill.hpp>
 #include <vtbackend/shell/BlockRail.hpp>
 #include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/Folding.hpp>
@@ -1216,4 +1217,76 @@ TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchi
     REQUIRE(buffer.chips.size() == 1);
     CHECK(buffer.chips[0].text == U"3 lines hidden ⌄");
     CHECK(buffer.chips[0].style == PillStyle::Fold);
+}
+
+TEST_CASE("Gutter.terminal.aHoveredBlockIsTintedAndRinged", "[gutter][blockhover]")
+{
+    // The canvas's hover: the hovered block's rows, head to tail, under a tint and a ring of the label.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runASuccessAndAFailure(mc, RailGutter); // `ls` on rows 0..2, `false` on rows 3..4
+    CHECK_FALSE(renderOf(mc.terminal).blockHighlight.has_value());
+
+    auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
+    auto const* second = mc.terminal.commandBlockAt(LineOffset(3));
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
+    mc.terminal.setHoveredCommandBlock(first->id);
+    auto const lit = renderOf(mc.terminal).blockHighlight;
+    REQUIRE(lit.has_value());
+    CHECK(lit->top == LineOffset(0));
+    CHECK(lit->height == LineCount(3));
+    auto const inks = blockHoverInks(mc.terminal.colorPalette());
+    CHECK(lit->tint == inks.tint);
+    CHECK(lit->ring == inks.ring);
+
+    mc.terminal.setHoveredCommandBlock(second->id);
+    auto const next = renderOf(mc.terminal).blockHighlight;
+    REQUIRE(next.has_value());
+    CHECK(next->top == LineOffset(3));
+    CHECK(next->height == LineCount(2));
+
+    // The pointer left every block: nothing is tinted.
+    mc.terminal.setHoveredCommandBlock(std::nullopt);
+    CHECK_FALSE(renderOf(mc.terminal).blockHighlight.has_value());
+}
+
+TEST_CASE("Gutter.terminal.theTerminalRowTintsNoBlock", "[gutter][blockhover]")
+{
+    // The Terminal row draws cells only.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runASuccessAndAFailure(mc, GutterSettings { .exitStatus = true });
+    auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
+    REQUIRE(first != nullptr);
+    mc.terminal.setHoveredCommandBlock(first->id);
+    CHECK_FALSE(renderOf(mc.terminal).blockHighlight.has_value());
+}
+
+TEST_CASE("Gutter.terminal.aHoverTintClipsAtThePage", "[gutter][blockhover]")
+{
+    // A page of four rows shows `file2`, `false`, `bad` and the prompt: of the first block, one row.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(100) };
+    runASuccessAndAFailure(mc, RailGutter);
+    auto const* first = mc.terminal.commandBlockAt(LineOffset(-2));
+    REQUIRE(first != nullptr);
+    mc.terminal.setHoveredCommandBlock(first->id);
+    auto const lit = renderOf(mc.terminal).blockHighlight;
+    REQUIRE(lit.has_value());
+    CHECK(lit->top == LineOffset(0));
+    CHECK(lit->height == LineCount(1));
+}
+
+TEST_CASE("Gutter.terminal.aHoverTintFoldsWithItsBlock", "[gutter][blockhover]")
+{
+    // A collapsed block is its head row: so is its tint.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    runASuccessAndAFailure(mc, RailGutter);
+    auto const* second = mc.terminal.commandBlockAt(LineOffset(3));
+    REQUIRE(second != nullptr);
+    REQUIRE(mc.terminal.collapseLastFold());
+    mc.terminal.setHoveredCommandBlock(second->id);
+    auto const lit = renderOf(mc.terminal).blockHighlight;
+    REQUIRE(lit.has_value());
+    CHECK(lit->top == LineOffset(3));
+    CHECK(lit->height == LineCount(1));
 }

@@ -81,6 +81,7 @@ struct BlockChipMetrics
     int markEdge = 0;          ///< A rail mark's disc, and the box its glyph is centred in.
     double markFontSize = 0.0; ///< The mark glyph's size in points.
     int markWeight = 400;      ///< The mark glyph's weight.
+    int hoverRing = 0;         ///< The ring around a hovered block; 0 draws none.
 
     bool operator==(BlockChipMetrics const&) const = default;
 };
