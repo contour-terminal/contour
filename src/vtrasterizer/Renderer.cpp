@@ -40,7 +40,7 @@ namespace vtrasterizer
 namespace
 {
 
-    /// How thick the input method preedit's underline is, in points.
+    /// How thick the input method preedit's underline is, in logical points.
     constexpr auto PreeditUnderlinePoints = 1.0;
 
     /// Loads the font-derived fields of @p gm.
@@ -61,7 +61,7 @@ namespace
         gm.underline.position = gm.baseline + m.underlinePosition;
         gm.underline.thickness = m.underlineThickness;
         // A vertical length, so the vertical DPI.
-        gm.preeditUnderlineThickness = pointsToPixels(PreeditUnderlinePoints, dpi.y);
+        gm.preeditUnderlineThickness = logicalPointsToPixels(PreeditUnderlinePoints, dpi.y);
 
         rendererLog()("Loading grid metrics {}", gm);
     }

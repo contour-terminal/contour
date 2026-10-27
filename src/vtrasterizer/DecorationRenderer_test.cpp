@@ -260,8 +260,20 @@ TEST_CASE("DecorationRenderer.underlineFamilyStaysBelowTheBaseline", "[decoratio
     // `underline.position` above the cell bottom, and no sibling may reach higher -- reaching higher
     // means reaching the baseline, which means painting into the glyphs. Asserted in a loop so a
     // sixth decorator is a row in the table above rather than a sixth place to get this wrong.
-    auto const gridMetrics =
-        gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
+    //
+    // Over a thin and a thick line, and a thick line under a font whose underline sits only three pixels up:
+    // a stroke thicker than the room below its position must not grow upwards to make room for itself.
+    // (Three, not fewer: the curly underline's smallest wave needs three rows, and grows its tile to get
+    // them -- by design, @see curlyUnderlineGeometry.)
+    struct Metrics
+    {
+        int position;
+        int thickness;
+    };
+    auto const [position, thickness] = GENERATE(
+        Metrics { NimbusUnderlinePosition, 1 }, Metrics { NimbusUnderlinePosition, 3 }, Metrics { 3, 4 });
+    auto gridMetrics = gridMetricsFor(NimbusCellSize, NimbusBaseline, position, thickness);
+    gridMetrics.preeditUnderlineThickness = thickness;
     auto probe = DecorationProbe { gridMetrics };
 
     for (auto const decoration: UnderlineFamily)
@@ -600,23 +612,24 @@ TEST_CASE("DecorationRenderer.thePreeditFlagMapsToThePreeditUnderline", "[decora
 TEST_CASE("DecorationRenderer.everyDecoratorAndDottedPhaseHasATileOfItsOwn", "[decoration]")
 {
     // Each decorator's tile and each further phase of the dotted underline is uploaded to a direct-mapped
-    // slot of its own; two sharing one would draw one in place of the other.
+    // slot of its own; two sharing one would draw one in place of the other. The decorators are taken from
+    // the names tables rather than from eachElement<Decorator>(), which ends where numeric_limits says the
+    // enumeration does -- the very count a slot of its own depends on.
     auto probe =
         DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, 1) };
     auto locations = std::vector<std::pair<int, int>> {};
-    for (auto const decoration: eachElement<Decorator>())
-    {
-        auto const& tile = probe.upload(decoration).location;
-        locations.emplace_back(tile.x.value, tile.y.value);
-    }
+    auto const add = [&](atlas::UploadTile const& tile) {
+        locations.emplace_back(tile.location.x.value, tile.location.y.value);
+    };
+    for (auto const& [token, decoration]: DecoratorNames)
+        add(probe.upload(decoration));
+    for (auto const& [token, decoration]: InternalDecoratorNames)
+        add(probe.upload(decoration));
     auto const phases =
         dottedUnderlineGeometry(unbox<int>(NimbusCellSize.width), NimbusUnderlinePosition, 1).phaseCount;
-    for (auto const phase: std::views::iota(1, phases))
-    {
-        auto const& tile = probe.uploadDottedPhase(phase).location;
-        locations.emplace_back(tile.x.value, tile.y.value);
-    }
     REQUIRE(phases > 1);
+    for (auto const phase: std::views::iota(1, phases))
+        add(probe.uploadDottedPhase(phase));
 
     std::ranges::sort(locations);
     CHECK(std::ranges::adjacent_find(locations) == locations.end());

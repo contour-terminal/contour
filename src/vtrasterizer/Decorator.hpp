@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <limits>
@@ -119,6 +120,42 @@ struct std::numeric_limits<vtrasterizer::Decorator>
         return static_cast<size_t>(max()) - static_cast<size_t>(min()) + 1;
     }
 };
+
+namespace vtrasterizer::detail
+{
+/// Whether the names tables name every decorator below the count exactly once, and nothing at or past it.
+///
+/// Together with the size check below this makes the tables and the count agree: a decorator added with
+/// a name but past @ref LastDecorator, or a count that grew without a name, fails to compile.
+[[nodiscard]] consteval bool everyDecoratorIsNamedOnce()
+{
+    auto constexpr Count = std::numeric_limits<Decorator>::count();
+    auto seen = std::array<int, Count> {};
+    auto const tally = [&](Decorator decorator) {
+        auto const index = static_cast<size_t>(decorator);
+        if (index >= Count)
+            return false;
+        ++seen[index];
+        return true;
+    };
+    for (auto const& [token, decorator]: DecoratorNames)
+        if (!tally(decorator))
+            return false;
+    for (auto const& [token, decorator]: InternalDecoratorNames)
+        if (!tally(decorator))
+            return false;
+    return std::ranges::all_of(seen, [](int times) { return times == 1; });
+}
+} // namespace vtrasterizer::detail
+
+static_assert(
+    vtrasterizer::DecoratorNames.size() + vtrasterizer::InternalDecoratorNames.size()
+        == std::numeric_limits<vtrasterizer::Decorator>::count(),
+    "Every Decorator has one name, in DecoratorNames or InternalDecoratorNames, and LastDecorator is "
+    "the last enumerator: the count of direct-mapped tile slots is taken from it.");
+static_assert(
+    vtrasterizer::detail::everyDecoratorIsNamedOnce(),
+    "A Decorator is named twice, or past LastDecorator: each needs one name and a tile slot of its own.");
 
 template <>
 struct std::formatter<vtrasterizer::Decorator>: formatter<std::string_view>

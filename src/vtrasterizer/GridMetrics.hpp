@@ -13,15 +13,23 @@
 namespace vtrasterizer
 {
 
-/// How many device pixels a length in typographic points covers, at least one.
-/// @param points The length, in points (1/72 inch); not negative.
-/// @param dpi    The device's resolution, in dots per inch; not negative. Zero still yields one pixel.
-/// @return `max(1, round(points * dpi / 72))`.
-[[nodiscard]] constexpr int pointsToPixels(double points, double dpi) noexcept
+/// The DPI Contour hands the renderer per unit of content scale (@see TerminalDisplay::fontDPI): what one
+/// logical point -- Qt's device-independent pixel -- is measured against.
+inline constexpr auto LogicalPointsDpi = 96.0;
+
+/// How many device pixels a length in logical points covers, at least one.
+///
+/// A logical point is Qt's device-independent pixel, the unit the window chrome is drawn in: one device
+/// pixel at 1x, two at 2x. It is not a typographic point (1/72 inch), which at Contour's 96 DPI per unit
+/// of scale would make every line a third thicker than the chrome's own.
+/// @param points The length, in logical points; not negative.
+/// @param dpi    The font's DPI, @ref LogicalPointsDpi times the content scale; not negative. Zero still
+///               yields one pixel.
+/// @return `max(1, round(points * dpi / 96))`, a half rounded up: 1.5x gives two pixels for one point.
+[[nodiscard]] constexpr int logicalPointsToPixels(double points, double dpi) noexcept
 {
-    constexpr auto PointsPerInch = 72.0;
     // Rounded half up by hand: std::lround is not constexpr in every standard library this builds with.
-    auto const exact = points * dpi / PointsPerInch;
+    auto const exact = points * dpi / LogicalPointsDpi;
     auto const whole = static_cast<int>(exact);
     return std::max(1, exact - whole >= 0.5 ? whole + 1 : whole);
 }
@@ -63,8 +71,8 @@ struct GridMetrics
         int thickness = 1; // underline thickness
     } underline {};
 
-    /// How thick the input method preedit's underline is drawn, in pixels: one point at the font's DPI,
-    /// whatever the font says its own underline is. @see pointsToPixels
+    /// How thick the input method preedit's underline is drawn, in pixels: one logical point at the font's
+    /// DPI, whatever the font says its own underline is. @see logicalPointsToPixels
     int preeditUnderlineThickness = 1;
 
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.

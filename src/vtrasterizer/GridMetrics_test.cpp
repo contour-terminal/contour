@@ -22,13 +22,15 @@ TEST_CASE("GridMetrics.map.aPositionBetweenCellsMapsBetweenTheirPixels", "[vtras
           == crispy::Point { .x = 3 + 48, .y = 5 + 50 + 7 }); // 47.5 pixels to the nearest
 }
 
-TEST_CASE("GridMetrics.pointsToPixels.isOnePointAtTheDpiAndNeverLessThanAPixel", "[gridmetrics]")
+TEST_CASE("GridMetrics.logicalPointsToPixels.isOneLogicalPointAtTheContentScale", "[gridmetrics]")
 {
-    // One point is 1/72 inch: a pixel at 72 DPI, two on a 2x display (144), three at 216. At 96 DPI it
-    // rounds to one, and below 72 DPI a point still draws a whole pixel rather than none.
-    STATIC_REQUIRE(vtrasterizer::pointsToPixels(1.0, 72.0) == 1);
-    STATIC_REQUIRE(vtrasterizer::pointsToPixels(1.0, 144.0) == 2);
-    STATIC_REQUIRE(vtrasterizer::pointsToPixels(1.0, 96.0) == 1);
-    STATIC_REQUIRE(vtrasterizer::pointsToPixels(1.0, 216.0) == 3);
-    STATIC_REQUIRE(vtrasterizer::pointsToPixels(1.0, 36.0) == 1);
+    // A logical point is Qt's device-independent pixel: Contour hands the renderer 96 DPI per unit of content
+    // scale, so one point is one device pixel at 1x (96), two at 2x (192), and 1.5x (144) rounds up to two.
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 96.0) == 1);
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 144.0) == 2);
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 192.0) == 2);
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 288.0) == 3);
+    // Never less than a pixel: below 1x, and with no DPI yet known.
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 72.0) == 1);
+    STATIC_REQUIRE(vtrasterizer::logicalPointsToPixels(1.0, 0.0) == 1);
 }
