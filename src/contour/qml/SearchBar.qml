@@ -310,6 +310,8 @@ Popup {
             id: count
             objectName: "searchBarCount"
             Layout.alignment: Qt.AlignVCenter
+            // Parted from the first toggle: one cell on the Terminal row, whose spacing is none.
+            Layout.rightMargin: chromeStyle.space.findBarCountGap
             text: root._search ? root._search.searchSummary : ""
             font.family: chromeStyle.type.footnote.family
             font.pixelSize: chromeStyle.type.footnote.pixelSize

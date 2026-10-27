@@ -237,6 +237,7 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal paletteInset READ paletteInset CONSTANT)
     Q_PROPERTY(qreal findBarInset READ findBarInset CONSTANT)
     Q_PROPERTY(qreal findBarInsetRows READ findBarInsetRows CONSTANT)
+    Q_PROPERTY(qreal findBarCountGap READ findBarCountGap CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -295,6 +296,11 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal findBarInsetRows() const noexcept
     {
         return _tokens.findBarInsetRows * _units.vertical;
+    }
+    /// @return What the count keeps from the first toggle beyond the bar's spacing, in logical pixels.
+    [[nodiscard]] qreal findBarCountGap() const noexcept
+    {
+        return _tokens.findBarCountGap * _units.horizontal;
     }
 
   private:

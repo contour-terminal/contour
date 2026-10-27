@@ -388,6 +388,9 @@ struct SpaceTokens
     // The find bar.
     int findBarInset = 0;     ///< The find bar's inset from the pane's right edge.
     int findBarInsetRows = 0; ///< Its inset from the pane's top edge, in vertical units (a row on Terminal).
+    /// What the count keeps from the first toggle beyond the bar's own spacing: one cell on Terminal, whose
+    /// spacing is none, so "2 of 5" does not run into "[Aa]"; none where the spacing already parts them.
+    int findBarCountGap = 0;
 
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
@@ -648,7 +651,8 @@ namespace detail
                              .footerLeading = 14,
                              .paletteInset = 8,
                              .findBarInset = 8,
-                             .findBarInsetRows = 8 };
+                             .findBarInsetRows = 8,
+                             .findBarCountGap = 0 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -1232,7 +1236,8 @@ namespace detail
                    .footerLeading = 1,
                    .paletteInset = 1,
                    .findBarInset = 1,
-                   .findBarInsetRows = 1 },
+                   .findBarInsetRows = 1,
+                   .findBarCountGap = 1 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,

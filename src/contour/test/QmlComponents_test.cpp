@@ -8037,6 +8037,17 @@ struct SearchBarHost
     return found.empty() ? nullptr : found.front();
 }
 
+/// The room between the count and the first toggle of @p bar, in the bar's row.
+[[nodiscard]] qreal countToToggleGap(QObject const& bar)
+{
+    auto const* count = searchBarPart(bar, QStringLiteral("searchBarCount"));
+    auto const* toggle =
+        searchBarPart(bar, QString::fromUtf8(contour::session::SearchToggleRows.front().objectName));
+    REQUIRE(count != nullptr);
+    REQUIRE(toggle != nullptr);
+    return toggle->x() - (count->x() + count->width());
+}
+
 /// The toggle buttons of @p bar, in the session table's order.
 [[nodiscard]] std::vector<QQuickItem*> searchToggleButtons(QObject const& bar)
 {
@@ -8313,6 +8324,10 @@ TEST_CASE("The find bar sits at its pane's top right with the design's extents (
     auto* count = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCount"));
     REQUIRE(count != nullptr);
     CHECK(count->property("font").value<QFont>().featureValue(QFont::Tag("tnum")) == 1);
+    // The count and the first toggle are parted by the bar's spacing alone, s2.
+    auto const* space = providerOf(engine).property("space").value<QObject*>();
+    REQUIRE(space != nullptr);
+    CHECK(countToToggleGap(*host.bar) == Catch::Approx(space->property("s2").toReal()));
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -8540,6 +8555,8 @@ TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[conto
         REQUIRE(buttons[index] != nullptr);
         CHECK(buttons[index]->property("text").toString() == texts[index]);
     }
+    // "2 of 5" does not run into "[Aa]": one cell between them, to the pixel the layout snaps to.
+    CHECK(countToToggleGap(*host.bar) == Catch::Approx(cellWidth).margin(1.0));
     // A lit toggle is its cells in inverse video, with no ring.
     auto* regex = buttons[static_cast<std::size_t>(contour::session::SearchToggle::Regex)];
     REQUIRE(regex->property("checked").toBool());

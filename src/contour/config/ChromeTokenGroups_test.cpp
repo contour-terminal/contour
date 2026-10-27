@@ -155,6 +155,7 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(size.findIcon),
              double(row.space.findBarInset),
              double(row.space.findBarInsetRows),
+             double(row.space.findBarCountGap),
              double(radii.findBar) });
     return out;
 }
@@ -201,8 +202,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     // ... e3, separator ring dim opacity tint, pane.dim 15/10, Minimal { 0, 1, 1, 8, 0, 0 }
     auto const nativeTail = std::vector<double> { 0,  0,  0, 0,  0,   1,  2,  12, 0, 4, 16, 25, 0, 12, 40,
                                                   35, 10, 0, -1, 1.0, 20, 15, 10, 0, 1, 1,  8,  0, 0 };
-    // the find bar: size(7) inset(2) radius(1), mac-find-menu
-    auto const nativeFind = std::vector<double> { 32, 380, 24, 22, 22, 22, 14, 8, 8, 8 };
+    // the find bar: size(7) inset(2) count gap(1) radius(1), mac-find-menu
+    auto const nativeFind = std::vector<double> { 32, 380, 24, 22, 22, 22, 14, 8, 8, 0, 8 };
     auto const rows = std::vector<ExpectedRow> {
         { ChromeStyle::MacOS,
           joined({ { 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480 },
@@ -295,7 +296,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 15, 10, 0, 1, 1, 1, 0, 0 },
                    { 48, 20, 1, 1, 1, 1, 1, 0, 0, 100, 18 },
                    // the find bar, in cells and rows (tui)
-                   { 1, 48, 4, 1, 2, 1, 0, 1, 1, 0 } }),
+                   { 1, 48, 4, 1, 2, 1, 0, 1, 1, 1, 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
