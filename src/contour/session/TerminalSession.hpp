@@ -1078,15 +1078,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// `lines` (a list of `{text, weight, style}` maps), `denyText`, `allowText`, `rememberText`,
     /// `rememberScope`, `initialMemory`, `defaultDecision`, `allowOnce`, and each line's `weight` and `style`
     /// -- every enum as its underlying int, which QML compares with Permission.* (a uint8_t-based enum inside
-    /// a QVariant does not reach JavaScript as a number). Changes are notified by pendingPermissionChanged().
-    /// GUI thread.
+    /// a QVariant does not reach JavaScript as a number) -- and `allowHeld` (AllowHeldKey), true for
+    /// RepresentedAllowHold after the question is re-presented and absent otherwise. Changes are notified by
+    /// pendingPermissionChanged(). GUI thread.
     /// @return The question, as the dialog shows it.
     [[nodiscard]] QVariantMap pendingPermission() const { return _pendingPermission; }
 
     /// Answers the question shown: runs its role with @p decision and @p memory, and, when another waits, has
     /// it shown on the next turn of the event loop, once the dialog that answered this one has closed. An
     /// answer naming any other question -- a doubled click, or one that something else settled meanwhile --
-    /// is ignored: nothing is granted or refused for a question the user did not see.
+    /// is ignored: nothing is granted or refused for a question the user did not see. So is an Allow while
+    /// `allowHeld` is set (RepresentedAllowHold after a re-presentation); a Deny is taken.
     /// @param questionId The `id` of the pendingPermission() answered (an int: QML passes it back).
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.

@@ -5281,7 +5281,12 @@ TEST_CASE("TerminalSession: a question asked again with more to it is another qu
     // Answered with what is shown now -- once Allow is given back after the re-presentation -- it is.
     testApp.steadyClock().advance(contour::session::RepresentedAllowHold);
     REQUIRE(QTest::qWaitFor(
-        [&] { return !held->pendingPermission().value(QStringLiteral("allowHeld")).toBool(); }, 2000));
+        [&] {
+            return !held->pendingPermission()
+                        .value(QString::fromUtf8(contour::session::AllowHeldKey))
+                        .toBool();
+        },
+        2000));
     answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(capturedSeededScreen(*held));
 }
@@ -5296,7 +5301,7 @@ TEST_CASE("TerminalSession: Allow waits a moment after a question is re-presente
     using contour::session::PermissionAsk;
     using contour::session::RepresentedAllowHold;
     auto const allowHeld = [](contour::session::TerminalSession const& session) {
-        return session.pendingPermission().value(QStringLiteral("allowHeld")).toBool();
+        return session.pendingPermission().value(QString::fromUtf8(contour::session::AllowHeldKey)).toBool();
     };
 
     TestApp testApp;
@@ -5318,6 +5323,21 @@ TEST_CASE("TerminalSession: Allow waits a moment after a question is re-presente
         testApp.steadyClock().advance(RepresentedAllowHold);
         REQUIRE(QTest::qWaitFor([&] { return !allowHeld(*held); }, 2000));
         CHECK(shownQuestionId(*held) == regrown); // the same question, Allow given back
+        answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("the hold ends by the clock, not by a timer that fires first")
+    {
+        // The clock stands still: however long the timer has waited, the hold has not run out.
+        QTest::qWait(static_cast<int>(RepresentedAllowHold.count()) * 3 / 2);
+        CHECK(allowHeld(*held));
+        answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+        CHECK(mockPtyOf(*held).stdinBuffer().empty());
+
+        testApp.steadyClock().advance(RepresentedAllowHold);
+        REQUIRE(QTest::qWaitFor([&] { return !allowHeld(*held); }, 2000));
         answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(capturedSeededScreen(*held));
     }

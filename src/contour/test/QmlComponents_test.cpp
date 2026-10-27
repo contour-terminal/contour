@@ -10446,7 +10446,7 @@ TEST_CASE(
 
     // Re-presented: another id, Allow held; Deny stays live.
     question.insert(QStringLiteral("id"), 2);
-    question.insert(QStringLiteral("allowHeld"), true);
+    question.insert(QString::fromUtf8(contour::session::AllowHeldKey), true);
     session.setPendingPermission(question);
     REQUIRE(QTest::qWaitFor([&] { return host.opened() && host.dialog->property("questionId").toInt() == 2; },
                             2000));
@@ -10454,7 +10454,7 @@ TEST_CASE(
     CHECK(host.part("kitDialogReject")->property("enabled").toBool());
 
     // Given back: the same question, Allow live again.
-    question.remove(QStringLiteral("allowHeld"));
+    question.remove(QString::fromUtf8(contour::session::AllowHeldKey));
     session.setPendingPermission(question);
     QCoreApplication::processEvents();
     CHECK(host.part("kitDialogAccept")->property("enabled").toBool());

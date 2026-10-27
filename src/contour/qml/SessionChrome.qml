@@ -342,11 +342,13 @@ Item {
             askingSession = session;
             questionId = asked.id;
             // Put up from inside the answer to the last one, it is presented once that answer's dialog has
-            // closed -- presented now, the close would take it too -- and only if it is still the one asked.
+            // closed -- presented now, the close would take it too -- and only if it is still the one asked,
+            // as the session publishes it then (Allow may have been held or given back meanwhile).
             if (answering) {
                 Qt.callLater(() => {
-                    if (askingSession === session && questionId === asked.id)
-                        present(asked);
+                    if (askingSession === session && questionId === asked.id
+                        && session.pendingPermission.id === asked.id)
+                        present(session.pendingPermission);
                 });
                 return;
             }
