@@ -539,11 +539,17 @@ TEST_CASE("TerminalSession: an extension waits behind a guarded role", "[contour
     CHECK(session->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
 
     // The capture's answer is the capture's alone; the extension is asked next.
+    auto const captureQuestion = session->pendingPermission().value(QStringLiteral("id")).toInt();
     answerShown(*session, PermissionDecision::Deny, PermissionMemory::Once);
     QCoreApplication::processEvents();
     CHECK(daemon.answers.empty());
     REQUIRE(session->pendingPermissionAsk() == PermissionAsk { ExtensionConsentAsk {} });
     CHECK(pendingText(*session).contains("“git” wants to run commands"));
+
+    // A second answer aimed at the capture -- its old id -- grants the extension nothing.
+    session->answerPermission(captureQuestion, PermissionDecision::Allow, PermissionMemory::Persistent);
+    CHECK(daemon.answers.empty());
+    REQUIRE(session->pendingPermissionAsk() == PermissionAsk { ExtensionConsentAsk {} });
 
     answerShown(*session, PermissionDecision::Deny, PermissionMemory::Persistent);
     CHECK(daemon.answers

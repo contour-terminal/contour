@@ -5301,6 +5301,60 @@ TEST_CASE("TerminalSession: a question asked again with more to it is another qu
     CHECK(capturedSeededScreen(*held));
 }
 
+TEST_CASE("TerminalSession: a click before a larger capture's request is in serves only what was shown",
+          "[contour][session][permission][queue]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+
+    TestApp testApp;
+    auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    REQUIRE(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+
+    // The program asks for the whole page; its request is still on its way to the GUI thread when the user
+    // clicks Allow on the one-line question shown.
+    held.surface->runPostsImmediately = false;
+    held->requestCaptureBuffer(held->terminal().pageSize().lines, vtbackend::CaptureLineMode::Physical);
+    REQUIRE(held.surface->pendingPosts.size() == 1);
+    answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+
+    // One line, the one asked about: not the page, whose top line is the seeded one.
+    CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 1);
+    CHECK_FALSE(mockPtyOf(*held).stdinBuffer().contains(SeededLine));
+
+    // The larger request arrives, and is asked about on its own.
+    held.surface->drainPosts();
+    QCoreApplication::processEvents();
+    CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    CHECK(held->pendingPermission()
+              .value(QStringLiteral("lines"))
+              .toList()
+              .front()
+              .toMap()
+              .value(QStringLiteral("text"))
+              .toString()
+              .contains(QString::number(unbox(held->terminal().pageSize().lines))));
+}
+
+TEST_CASE("TerminalSession: a question re-asked with more to it is said anew",
+          "[contour][session][permission]")
+{
+    TestApp testApp;
+    auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+    auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    held->setAnnouncer(std::move(announcer));
+
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    REQUIRE(recorder->said.size() == 1);
+    held->requestCaptureBuffer(held->terminal().pageSize().lines, vtbackend::CaptureLineMode::Physical);
+    CHECK(recorder->said.size() == 2);
+    // Asked again unchanged, it is not said again.
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    CHECK(recorder->said.size() == 2);
+}
+
 TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves its setting alone, and not "
           "one that changes it",
           "[contour][session][permission]")

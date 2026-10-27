@@ -2344,9 +2344,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Capture requests accepted but not yet answered, oldest first.
     ///
-    /// A queue rather than one slot, and mutex-guarded, because the two ends sit on different threads:
-    /// requestCaptureBuffer() is a Terminal::Events hook and appends from the terminal thread, while
-    /// the permission gate drains it on the GUI thread. A single slot silently dropped whichever
+    /// A queue rather than one slot. GUI thread only: requestCaptureBuffer(), a Terminal::Events hook raised
+    /// on the parser thread, appends in the request it posts to the GUI thread, so a request and the
+    /// question about it arrive in one step. The mutex is a guard that costs nothing. A single slot silently
+    /// dropped whichever
     /// request arrived while another was outstanding, and every dropped request is a client blocked
     /// forever -- the protocol has no way to say "no reply is coming".
     /// @see docs/vt-extensions/buffer-capture.md

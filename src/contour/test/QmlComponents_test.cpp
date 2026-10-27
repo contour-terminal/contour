@@ -10165,6 +10165,31 @@ TEST_CASE("PermissionDialog: keyboard-only answering (offscreen)", "[contour][gu
     }
 }
 
+TEST_CASE("PermissionDialog: a question replaced while shown is shown anew (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    session.setPendingPermission(captureQuestion(1));
+    REQUIRE(host.waitOpened(true));
+    auto shows = QSignalSpy { host.dialog, SIGNAL(aboutToShow()) };
+    auto hides = QSignalSpy { host.dialog, SIGNAL(aboutToHide()) };
+
+    // The same question, asked again with more to it, under a new id while the dialog is open.
+    session.setPendingPermission(captureQuestion(2, "zsh (larger)"));
+    QCoreApplication::processEvents();
+    REQUIRE(host.waitOpened(true));
+    CHECK(hides.count() == 1); // closed...
+    CHECK(shows.count() == 1); // ...and opened again with it
+    CHECK(host.part("kitDialogHeading")->property("text").toString().contains("zsh (larger)"));
+
+    // An answer now names the question shown now: the old one can never be answered from this dialog.
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogAccept"), "clicked"));
+    REQUIRE(session.lastPermissionAnswer.has_value());
+    CHECK(session.lastPermissionAnswer->id == 2);
+    CHECK(session.permissionAnswers == 1);
+}
+
 TEST_CASE("PermissionDialog: the dialog reopens for the next question (offscreen)",
           "[contour][gui][qml][permission]")
 {

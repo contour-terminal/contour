@@ -43,6 +43,7 @@
 #include <core/Environment.hpp>
 
 #include <QtCore/QBuffer>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QRunnable>
 #include <QtCore/QSemaphore>
@@ -2548,8 +2549,10 @@ TEST_CASE("display: a font change approved with no render target is deferred, no
     REQUIRE(h.display->hasSession());
     REQUIRE_FALSE(h.display->hasRenderTarget()); // never had a window, so never had one
 
-    // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort.
+    // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort. The
+    // request reaches the GUI thread through the display's queue, as every guarded request does.
     h.session->setFontDef(fontRequest(RequestedFontSize));
+    QCoreApplication::processEvents();
     CHECK_NOTHROW(h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
 
     // Deferred, not dropped: recorded as this session's own font, which every re-seeding path applies

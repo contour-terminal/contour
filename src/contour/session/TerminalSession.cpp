@@ -1083,9 +1083,11 @@ void TerminalSession::offerPermissionAsk(PermissionAsk const& ask)
             break;
         case PromptChange::None:
             // Already asked. Shown, what it asks may have changed since (a later font, another paste, a
-            // larger capture), so the dialog's data follows; waiting, it is built when it is shown.
+            // larger capture), so the dialog's data follows -- as another question, with its own id, said
+            // anew (showNextPermission() announces an id it has not announced yet); waiting, it is built
+            // when it is shown.
             if (_permissionQueue.current() == ask)
-                publishPendingPermission();
+                showNextPermission();
             break;
     }
 }
@@ -1618,12 +1620,17 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, vtbackend::CaptureLi
         return;
     }
 
-    {
-        auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
-        _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .mode = mode });
-    }
-
-    postPermissionRequest(GuardedRole::CaptureBuffer);
+    // Raised on the parser thread. The request joins the pending ones on the GUI thread, in the same posted
+    // step that asks about it: added here, it would be served by a click on a question that was shown before
+    // it arrived -- a larger capture granted by a click on a smaller one. The configured permission is read
+    // in the lambda for the reason postPermissionRequest() gives.
+    _display->post([this, lines, mode]() {
+        {
+            auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
+            _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .mode = mode });
+        }
+        requestPermission(configuredPermissionFor(GuardedRole::CaptureBuffer), GuardedRole::CaptureBuffer);
+    });
 }
 
 void TerminalSession::executePendingBufferCapture(PermissionDecision decision, PermissionMemory memory)

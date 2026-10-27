@@ -327,6 +327,14 @@ Item {
                     close();
                 return;
             }
+            // Another question while one is shown -- the same one asked again with more to it, or the next --
+            // is shown anew: the dialog closes and opens with it, so a click aimed at what was shown can never
+            // reach the question that replaced it. The session says the new one to a screen reader.
+            if (visible && (askingSession !== session || questionId !== asked.id)) {
+                askingSession = null;
+                questionId = -1;
+                close();
+            }
             askingSession = session;
             questionId = asked.id;
             present(asked);

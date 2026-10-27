@@ -69,7 +69,8 @@ KitDialog {
             permissionRemember.checked = question.initialMemory !== undefined
                                          && question.initialMemory !== Permission.Once;
         }
-        if (!root.visible)
+        // Opened again even while it closes: a question re-presented is closed and opened in one step.
+        if (fresh || !root.visible)
             root.open();
     }
     onAccepted: root._answer(Permission.Allow, root._memoryFor(permissionRemember.checked))
