@@ -2400,7 +2400,8 @@ TEST_CASE("TerminalSession: a configuration reload hands the engine-read emulati
         auto const& settings = terminal.settings();
         CHECK_FALSE(settings.autoCollapseFoldOnNewCommand);
         CHECK(settings.foldJumpBehavior == vtbackend::FoldJumpBehavior::Skip);
-        CHECK(settings.gutter == contour::config::gutterSettingsFor(session->config()));
+        CHECK(settings.gutter
+              == contour::config::gutterSettingsFor(session->config(), session->gutterChrome().form));
         CHECK_FALSE(settings.gutter.foldMarkers);
         CHECK(settings.gutter.exitStatus); // the block column stays, for the exit status
         CHECK(settings.contextSignalling == vtbackend::ContextSignalling::Disabled);
@@ -7077,7 +7078,8 @@ TEST_CASE("TerminalSession: the terminal draws the gutter the configuration asks
     registerProfile(testApp.app(), "night", [](contour::config::TerminalProfile&) {});
     auto session = makeDisplaylessSession(testApp.app());
 
-    CHECK(session->terminal().settings().gutter == contour::config::gutterSettingsFor(session->config()));
+    CHECK(session->terminal().settings().gutter
+          == contour::config::gutterSettingsFor(session->config(), session->gutterChrome().form));
     CHECK(session->terminal().settings().gutter.lineNumbers == vtbackend::LineNumberMode::Absolute);
 
     // A profile switch -- the path a configuration reload takes -- re-applies it over whatever was there.
@@ -8226,6 +8228,34 @@ TEST_CASE("TerminalSession: hovering a block's gutter row describes the block", 
     CHECK(spy.count() == 4);
     CHECK(session->commandBlockTooltip().isEmpty());
     CHECK(session->commandBlockTooltipAnchor().isEmpty());
+}
+
+TEST_CASE("TerminalSession: the window reserves the cells and the strip", "[contour][session][gutter]")
+{
+    // The session's gutter chrome is its chrome row's, and with that row's rail the strip beside the cells is
+    // reserved by the page fit and found by the hit-test: a pointer over its middle names the block column.
+    using contour::session::TerminalSession;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    CHECK(session->gutterChrome() == contour::session::gutterChromeFor(testApp.app().chromeStyle()));
+    REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
+
+    auto& surface = *session.surface;
+    surface.gridMetricsValue.cellSize = surface.cellSizeValue;
+    auto const extent = contour::session::configuredGutterExtent(
+        session->config(), surface.cellSizeValue, surface.devicePixelRatioValue, session->gutterChrome());
+    REQUIRE(extent.rail > 0);
+    surface.gridMetricsValue.pageMargin.left = extent.leadIn + extent.columns + extent.rail;
+
+    runFailingCommand(*session);
+    QSignalSpy const spy(session.session.get(), &TerminalSession::commandBlockHoverChanged);
+    auto const overTheStrip =
+        QPointF { surface.gridMetricsValue.pageMargin.left - (extent.rail / 2.0), 4.0 }; // beside row 0
+    auto event = QHoverEvent(QEvent::HoverMove, overTheStrip, overTheStrip, overTheStrip);
+    contour::session::sendMouseMoveEvent(&event, *session);
+    CHECK(spy.count() == 1);
+    CHECK(session->commandBlockTooltip().toStdString().starts_with("Exit code 2\n"));
 }
 
 TEST_CASE("TerminalSession: a scroll withdraws the block tooltip", "[contour][session][gutter]")

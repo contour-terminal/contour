@@ -34,6 +34,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
+#include <cmath>
 #include <fstream>
 #include <memory>
 #include <string_view>
@@ -403,10 +404,15 @@ TEST_CASE("the size hints reserve the gutter the configuration lays out", "[cont
     controller->updateSizeHintsFor(requester,
                                    contour::window::WindowController::HintApplyMode::RespectWindowState);
 
-    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor). Eight cells -- six
-    // of line numbers, two of block column -- behind the blank lead-in every reserved gutter begins with.
-    auto const gutterDevicePx = contour::geometry::gutterLeadIn(requester.devicePixelRatioValue)
-                                + (8 * unbox<int>(requester.cellSizeValue.width));
+    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor). Six cells of line
+    // numbers, then the block column -- on the TestApp's native chrome row the rail's strip of
+    // space.blockGutter points after them (R-b) -- behind the blank lead-in every reserved gutter begins
+    // with.
+    REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
+    auto const dpr = requester.devicePixelRatioValue;
+    auto const gutterDevicePx = contour::geometry::gutterLeadIn(dpr)
+                                + (6 * unbox<int>(requester.cellSizeValue.width))
+                                + static_cast<int>(std::ceil(session->gutterChrome().stripPoints * dpr));
     auto const expected = contour::geometry::sizeHintsFor(
         requester.cellSizeValue,
         contour::session::toGeometryMargins(session->profile().margins.value()),
@@ -634,8 +640,10 @@ TEST_CASE("DPI settlement waits for the native move loop to end", "[contour][siz
         {},
         surface.devicePixelRatioValue,
         contour::geometry::Chrome { .width = 0, .height = 34 },
-        contour::session::configuredGutterWidth(
-            session->config(), surface.cellSizeValue, surface.devicePixelRatioValue));
+        contour::session::configuredGutterWidth(session->config(),
+                                                surface.cellSizeValue,
+                                                surface.devicePixelRatioValue,
+                                                session->gutterChrome()));
     SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
     QCoreApplication::processEvents();
     CHECK(window.size() == QSize(expected.width, expected.height));

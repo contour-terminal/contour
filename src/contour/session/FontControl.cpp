@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/QtInvoke.hpp>
@@ -12,6 +13,8 @@
 #include <vtrasterizer/Renderer.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <mutex>
 
 using std::string;
@@ -81,34 +84,53 @@ bool applyFontDescription(text::DPI dpi,
     return true;
 }
 
-vtbackend::GutterLayout configuredGutterLayout(config::Config const& config)
+GutterChrome gutterChromeFor(config::ChromeStyle style) noexcept
 {
-    return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config));
+    auto const& row = config::ChromeTokenRows[static_cast<size_t>(style)];
+    return GutterChrome { .form = row.layout.blockColumn,
+                          .stripPoints = row.space.blockGutter,
+                          .barPoints = row.size.rail,
+                          .barInsetPoints = row.space.railInset,
+                          .barRadiusPoints = row.radii.rail,
+                          .markPoints = row.size.railMark };
+}
+
+vtbackend::GutterLayout configuredGutterLayout(config::Config const& config, GutterChrome const& chrome)
+{
+    return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config, chrome.form));
 }
 
 geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                        vtbackend::ImageSize cellSize,
-                                       double scale)
+                                       double scale,
+                                       GutterChrome const& chrome)
 {
     auto const columns = gutterWidthFor(layout, cellSize);
-    if (columns == 0)
+    auto const rail = layout.rail == vtbackend::BlockRailPresence::Present
+                          ? static_cast<geometry::GutterWidth>(std::ceil(chrome.stripPoints * scale))
+                          : 0;
+    if (columns + rail == 0)
         return {};
-    return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale), .columns = columns };
+    return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale),
+                                    .columns = columns,
+                                    .rail = rail };
 }
 
 geometry::GutterExtent configuredGutterExtent(config::Config const& config,
                                               vtbackend::ImageSize cellSize,
-                                              double scale)
+                                              double scale,
+                                              GutterChrome const& chrome)
 {
-    return gutterExtentFor(configuredGutterLayout(config), cellSize, scale);
+    return gutterExtentFor(configuredGutterLayout(config, chrome), cellSize, scale, chrome);
 }
 
 geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                             vtbackend::ImageSize cellSize,
-                                            double scale)
+                                            double scale,
+                                            GutterChrome const& chrome)
 {
-    auto const extent = configuredGutterExtent(config, cellSize, scale);
-    return extent.leadIn + extent.columns;
+    auto const extent = configuredGutterExtent(config, cellSize, scale, chrome);
+    return extent.leadIn + extent.columns + extent.rail;
 }
 
 void announcePageSize(TerminalSession& session, vtbackend::PageSize oldPage, vtbackend::PageSize newPage)
@@ -153,7 +175,7 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
         cellSize,
         marginsDevicePx,
         [&](auto page) { return terminal.clampedTotalPageSize(page); },
-        configuredGutterWidth(session.config(), cellSize, devicePixelRatio));
+        configuredGutterWidth(session.config(), cellSize, devicePixelRatio, session.gutterChrome()));
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 

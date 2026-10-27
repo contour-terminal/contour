@@ -405,6 +405,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
+    _gutterChrome { gutterChromeFor(app.chromeStyle()) },
     _systemScrollBars { app.platformAppearance().scrollBars },
     _localIdentity { app.hostIdentity() },
     _accumulatedPixelScroll {},
@@ -418,7 +419,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 std::move(pty),
                 withHomeDirectory(
                     config::motionAdjusted(
-                        config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
+                        config::sessionSettings(
+                            _config, _profile, _currentColorPreference, _gutterChrome.form, initialPageSize),
                         app.accessibilityPreferences().motion),
                     app.sessionsManager().homeDirectory()),
                 app.statusLineCommandServices(),
@@ -1812,7 +1814,8 @@ void TerminalSession::applyMotionPreference(config::MotionPreference motion)
     // Recomputed from the configuration rather than remembered, so turning Reduce Motion off restores
     // exactly what the profile configures. Built before the lock, from GUI-thread state only.
     auto const adjusted = config::motionAdjusted(
-        config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt), motion);
+        config::sessionSettings(_config, _profile, _currentColorPreference, _gutterChrome.form, std::nullopt),
+        motion);
 
     // Locked: the render thread reads both durations as it animates. The factory settings follow too, so a
     // RIS returns to the durations the preference allows, as configureTerminal() hands them over.
@@ -7087,7 +7090,10 @@ namespace
     /// around it, both read where the page is fitted (session::applyResize).
     struct PageFrame
     {
-        int gutterColumns = 0;            ///< The columns the gutter reserves.
+        int gutterColumns = 0; ///< The columns the gutter reserves.
+        /// Whether the block rail's strip follows them: a reload that switches the block column's jobs off
+        /// or on under the rail moves the grid by the strip's width, with no column changing.
+        vtbackend::BlockRailPresence rail = vtbackend::BlockRailPresence::Absent;
         config::WindowMargins margins {}; ///< The profile's margins.
 
         /// Member-wise equality: a frame that differs in either moves the grid.
@@ -7097,12 +7103,14 @@ namespace
     /// The frame @p terminal's page is drawn in under @p profile.
     /// @param terminal The terminal, whose gutter is the one it draws.
     /// @param profile The profile whose margins surround the page.
-    /// @return The gutter's width in columns and the profile's margins.
+    /// @return The gutter's width in columns, its rail strip, and the profile's margins.
     [[nodiscard]] PageFrame pageFrameOf(vtbackend::Terminal& terminal, config::TerminalProfile const& profile)
     {
-        auto const gutterColumns = core::locked(
-            terminal, [&] { return vtbackend::gutterLayoutFor(terminal.settings().gutter).totalColumns; });
-        return { .gutterColumns = gutterColumns, .margins = profile.margins.value() };
+        auto const layout =
+            core::locked(terminal, [&] { return vtbackend::gutterLayoutFor(terminal.settings().gutter); });
+        return { .gutterColumns = layout.totalColumns,
+                 .rail = layout.rail,
+                 .margins = profile.margins.value() };
     }
 } // namespace
 
@@ -7213,7 +7221,7 @@ void TerminalSession::configureTerminal()
     _currentColorPreference = _app.colorPreference();
     // Under Reduce Motion as a new terminal would be, so a reload does not bring the glide back.
     auto configured = config::motionAdjusted(
-        config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt),
+        config::sessionSettings(_config, _profile, _currentColorPreference, _gutterChrome.form, std::nullopt),
         _app.accessibilityPreferences().motion);
 
     // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding

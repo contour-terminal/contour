@@ -2017,7 +2017,8 @@ void WindowController::showInitial()
         marginsDevice,
         scale,
         chrome(),
-        session::configuredGutterWidth(session->config(), display->cellSize(), scale));
+        session::configuredGutterWidth(
+            session->config(), display->cellSize(), scale, session->gutterChrome()));
 
     if (auto const grid = rowResizeGrid())
         size.height = geometry::snapLogicalHeightToRows(size.height, scale, *grid);
@@ -2209,7 +2210,8 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     // Handed over in DEVICE pixels, the unit it is decided in: sizeHintsFor converts it once, where
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
-    auto const gutterDevicePx = session::configuredGutterWidth(requester.session().config(), cellSize, scale);
+    auto const gutterDevicePx = session::configuredGutterWidth(
+        requester.session().config(), cellSize, scale, requester.session().gutterChrome());
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
@@ -2392,7 +2394,8 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
         marginsDevice,
         scale,
         geometry::Chrome {},
-        session::configuredGutterWidth(requester.session().config(), requester.cellSize(), scale));
+        session::configuredGutterWidth(
+            requester.session().config(), requester.cellSize(), scale, requester.session().gutterChrome()));
     return applyContentDrivenResize(requester, leafLogical);
 }
 

@@ -3294,14 +3294,16 @@ void compareEntries(Config& config, auto const& output);
 [[nodiscard]] vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile);
 
 /// What the terminal's gutter shows under @p config: the `gutter` section, with the fold switch taken from
-/// `folding`.
+/// `folding`, and the block column drawn in @p form.
 ///
 /// Whatever configures a terminal's gutter and whatever reserves the gutter's width must both take it
 /// from here, or the strip reserved and the strip drawn can disagree.
 /// @see FoldingConfig::markersVisible
 /// @param config The loaded configuration.
+/// @param form How the block column is drawn: the chrome row's choice, not a configuration key.
 /// @return The gutter settings vtbackend draws with.
-[[nodiscard]] vtbackend::GutterSettings gutterSettingsFor(Config const& config);
+[[nodiscard]] vtbackend::GutterSettings gutterSettingsFor(Config const& config,
+                                                          vtbackend::BlockColumnForm form);
 
 /// One profile's @ref emulationSettings, from a configuration already loaded in memory -- what
 /// `contour client` needs, whose new sessions follow the configuration as a reload left it.
@@ -3375,6 +3377,8 @@ struct ResolvedSessionConfig
 /// @param profile The resolved profile.
 /// @param colorPreference Which half of a dual (dark/light) color config to prefer; irrelevant for
 ///        a simple (single) color config.
+/// @param blockColumnForm How the gutter draws the block column: the presenting chrome row's form. A
+///        daemon-hosted session, which no local chrome draws, takes BlockColumnForm::Glyphs.
 /// @param initialPageSize Overrides `profile.terminal_size` when set (a new tab/split inherits the
 ///        live window's running grid rather than starting at the profile's configured size).
 /// @return The resolved settings.
@@ -3382,6 +3386,7 @@ struct ResolvedSessionConfig
     Config const& config,
     TerminalProfile const& profile,
     vtbackend::ColorPreference colorPreference,
+    vtbackend::BlockColumnForm blockColumnForm,
     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
 
 /// The animation durations Reduce Motion zeroes: the cursor glide and the screen transition. A duration

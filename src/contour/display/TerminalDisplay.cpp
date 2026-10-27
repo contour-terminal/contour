@@ -948,7 +948,8 @@ void TerminalDisplay::createRenderer()
             gridMetrics().cellSize,
             marginsDevicePx,
             [this](auto page) { return _session->terminal().clampedTotalPageSize(page); },
-            session::configuredGutterWidth(_session->config(), gridMetrics().cellSize, devicePixelRatio()));
+            session::configuredGutterWidth(
+                _session->config(), gridMetrics().cellSize, devicePixelRatio(), _session->gutterChrome()));
         _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
@@ -1682,7 +1683,8 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         _session->terminal().totalPageSize(),
         cellSize,
         geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), devicePixelRatio()),
-        session::configuredGutterWidth(_session->config(), cellSize, devicePixelRatio()));
+        session::configuredGutterWidth(
+            _session->config(), cellSize, devicePixelRatio(), _session->gutterChrome()));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const

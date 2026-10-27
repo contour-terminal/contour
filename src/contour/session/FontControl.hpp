@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/Config.hpp>
+#include <contour/config/UiStyle.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -56,41 +57,73 @@ class TerminalSession;
     return layout.totalColumns * unbox<int>(cellSize.width);
 }
 
-/// The gutter layout @p config asks for: what the window reserves, what the hit-test reads, and -- through
-/// the same config::gutterSettingsFor() -- what the terminal draws.
-/// @param config The loaded configuration.
-/// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config)).
-[[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
+/// How a session's chrome row draws the gutter's block column, in points: the form, and the rail's metrics.
+///
+/// Fixed per session: the chrome row is resolved once, before the first session exists (`ui_style` takes
+/// effect on the next start), so whatever reads it -- the page fit on the render thread among them -- reads
+/// one value for the session's life.
+struct GutterChrome
+{
+    vtbackend::BlockColumnForm form =
+        vtbackend::BlockColumnForm::Glyphs; ///< Glyph cells, or the rail's strip.
+    int stripPoints = 0;                    ///< The strip's width (@c space.blockGutter); 0 under Glyphs.
+    int barPoints = 0;                      ///< The rail bar's width (@c size.rail).
+    int barInsetPoints = 0;                 ///< The bar's left edge within the strip (@c space.railInset).
+    int barRadiusPoints = 0;                ///< The bar's end radius (@c radius.rail).
+    int markPoints = 0;                     ///< The rail mark's edge (@c size.railMark).
 
-/// The gutter @p layout reserves, in device pixels, in its two parts: the blank lead-in against the pane's
-/// edge, and the columns behind it.
+    bool operator==(GutterChrome const&) const = default;
+};
+
+/// The gutter chrome of chrome row @p style, from its tokens.
+/// @param style The chrome row.
+/// @return Its block column's form and the rail's metrics in points.
+[[nodiscard]] GutterChrome gutterChromeFor(config::ChromeStyle style) noexcept;
+
+/// The gutter layout @p config asks for under @p chrome: what the window reserves, what the hit-test reads,
+/// and -- through the same config::gutterSettingsFor() -- what the terminal draws.
+/// @param config The loaded configuration.
+/// @param chrome The session's gutter chrome, whose form decides whether the block column is cells.
+/// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config, chrome.form)).
+[[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config,
+                                                             GutterChrome const& chrome);
+
+/// The gutter @p layout reserves, in device pixels, in its three parts: the blank lead-in against the pane's
+/// edge, the cell columns behind it, and the rail's strip against the grid.
 /// @param layout The gutter's segments.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return Both parts; both 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome: the strip's width in points.
+/// @return The parts; all 0 when the layout has neither columns nor a rail.
 [[nodiscard]] geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                                      vtbackend::ImageSize cellSize,
-                                                     double scale);
+                                                     double scale,
+                                                     GutterChrome const& chrome);
 
-/// The gutter @p config reserves, in device pixels, in its two parts: the blank lead-in against the pane's
-/// edge, and the columns behind it. What the hit-test maps a pointer onto, the lead-in included.
+/// The gutter @p config reserves under @p chrome, in device pixels, in its three parts. What the hit-test
+/// maps a pointer onto, the lead-in included.
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return Both parts; both 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome.
+/// @return The parts; all 0 when there is no gutter.
 [[nodiscard]] geometry::GutterExtent configuredGutterExtent(config::Config const& config,
                                                             vtbackend::ImageSize cellSize,
-                                                            double scale);
+                                                            double scale,
+                                                            GutterChrome const& chrome);
 
-/// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
-/// takes off the page. Its columns behind the blank lead-in that keeps them clear of the window's edge.
+/// The gutter width, in device pixels, @p config reserves under @p chrome: what every page fit, window size
+/// and size hint takes off the page. Its cells and the rail's strip behind the blank lead-in that keeps them
+/// clear of the window's edge.
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return configuredGutterExtent()'s two parts added up; 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome.
+/// @return configuredGutterExtent()'s parts added up; 0 when there is no gutter.
 [[nodiscard]] geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                                           vtbackend::ImageSize cellSize,
-                                                          double scale);
+                                                          double scale,
+                                                          GutterChrome const& chrome);
 
 /// Resizes @p session's terminal to @p totalPageSize under its lock, and, when the page changed, asks for the
 /// size indicator. The request is posted to the session's thread, so it reads the main page as it is when it

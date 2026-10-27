@@ -796,8 +796,10 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     settings.pageSize = profile.terminalSize.value();
     settings.historyLimits = profile.history.value().limits();
     auto const& folding = config.folding.value();
-    // Through the one conversion the window geometry reserves the strip's width from.
-    settings.gutter = gutterSettingsFor(config);
+    // Through the one conversion the window geometry reserves the strip's width from. The emulation half
+    // is what a daemon hosts, and no chrome of the daemon's draws a rail: the glyph cells, which a client
+    // presenting the session replaces with its own chrome's form (sessionSettings()).
+    settings.gutter = gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs);
     settings.autoCollapseFoldOnNewCommand = folding.autoCollapseOnNewCommand;
     settings.foldJumpBehavior = folding.onJumpIntoFold;
     settings.foldingAvailability = folding.availability();
@@ -826,7 +828,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     return settings;
 }
 
-vtbackend::GutterSettings gutterSettingsFor(Config const& config)
+vtbackend::GutterSettings gutterSettingsFor(Config const& config, vtbackend::BlockColumnForm form)
 {
     auto const& gutter = config.gutter.value();
     return vtbackend::GutterSettings {
@@ -840,6 +842,7 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config)
         .timestampFormat = gutter.timestampFormat,
         .hoverStroke =
             gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
+        .blockColumnForm = form,
     };
 }
 
@@ -995,6 +998,7 @@ vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreferenc
 vtbackend::Settings sessionSettings(Config const& config,
                                     TerminalProfile const& profile,
                                     vtbackend::ColorPreference colorPreference,
+                                    vtbackend::BlockColumnForm blockColumnForm,
                                     std::optional<vtbackend::PageSize> initialPageSize)
 {
     // The emulation half comes from the shared table, so a GUI-hosted session and a
@@ -1009,6 +1013,9 @@ vtbackend::Settings sessionSettings(Config const& config,
     // (which never happens for a background tab).
     if (initialPageSize)
         settings.pageSize = *initialPageSize;
+
+    // The presenting chrome decides whether the block column is cells or the rail's strip.
+    settings.gutter.blockColumnForm = blockColumnForm;
 
     // Focus is granted, never assumed: a session born focused (a background tab, a non-active
     // split pane, a daemon-hosted session before any client attaches) would otherwise render an
@@ -1085,7 +1092,9 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
                                             vtbackend::ColorPreference colorPreference,
                                             std::optional<vtbackend::PageSize> initialPageSize)
 {
-    auto settings = sessionSettings(config, profile, colorPreference, initialPageSize);
+    // Hosted by a daemon, whose terminal no chrome of its own draws: the glyph cells.
+    auto settings = sessionSettings(
+        config, profile, colorPreference, vtbackend::BlockColumnForm::Glyphs, initialPageSize);
 
     // The shell: a copy of the profile's configured ExecInfo (program/arguments/workingDirectory
     // already carry the profile's `shell:` block), with CONTOUR_PROFILE added exactly as a local

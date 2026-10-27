@@ -6841,7 +6841,8 @@ profiles:
     CHECK(gutter.exitStatus == false);
     CHECK(gutter.userMarks == false);
     CHECK(gutter.boldOnHover == false);
-    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Unchanged);
+    CHECK(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).hoverStroke
+          == vtbackend::FoldHoverStroke::Unchanged);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Hybrid);
     CHECK(gutter.lineNumberWidth == 8);
     CHECK(gutter.timestamps == true);
@@ -6856,7 +6857,8 @@ TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[conf
     CHECK(gutter.userMarks);
     CHECK(gutter.blockColumnWidth == 2);
     CHECK(gutter.boldOnHover);
-    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Bolder);
+    CHECK(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).hoverStroke
+          == vtbackend::FoldHoverStroke::Bolder);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Off);
     CHECK(gutter.lineNumberWidth == 6);
     CHECK_FALSE(gutter.timestamps);
@@ -6864,7 +6866,10 @@ TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[conf
 
     // Exit status and user marks share the fold column, which takes two cells: its controls and marks are
     // drawn across both, at twice the size, and a click anywhere in it lands.
-    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 2);
+    CHECK(vtbackend::gutterLayoutFor(
+              contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs))
+              .totalColumns
+          == 2);
 }
 
 TEST_CASE("Config: gutter.block_column_width takes 1 or 2 cells", "[config]")
@@ -6889,7 +6894,8 @@ TEST_CASE("Config: gutter.block_column_width takes 1 or 2 cells", "[config]")
                          contour::test::profileConfigYaml(
                              "main", std::format("gutter:\n    block_column_width: {}\n", testCase.width)));
         CHECK(config.gutter.value().blockColumnWidth == testCase.expected);
-        CHECK(contour::config::gutterSettingsFor(config).blockColumnWidth == testCase.expected);
+        CHECK(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).blockColumnWidth
+              == testCase.expected);
         // Refused, and said so, rather than taken: a width out of range is a typo.
         CHECK(capture.text().contains("block_column_width")
               == (testCase.expected != std::stoi(std::string { testCase.width })));
@@ -7008,7 +7014,7 @@ TEST_CASE("Config: gutterSettingsFor joins the gutter section and the fold switc
     config.gutter.value().timestamps = true;
     config.gutter.value().timestampFormat = "%H:%M";
 
-    auto const settings = contour::config::gutterSettingsFor(config);
+    auto const settings = contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs);
     CHECK(settings.foldMarkers); // folding.enabled and folding.show_markers, both on by default
     CHECK(settings.exitStatus);
     CHECK(settings.userMarks);
@@ -7018,7 +7024,7 @@ TEST_CASE("Config: gutterSettingsFor joins the gutter section and the fold switc
     CHECK(settings.timestampFormat == "%H:%M");
 
     config.folding.value().enabled = false;
-    CHECK_FALSE(contour::config::gutterSettingsFor(config).foldMarkers);
+    CHECK_FALSE(contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs).foldMarkers);
 }
 
 TEST_CASE("Config: the gutter section survives a write and a read", "[config]")
@@ -7067,10 +7073,23 @@ profiles:
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
     auto const settings = contour::config::emulationSettings(config, *profile);
-    CHECK(settings.gutter == contour::config::gutterSettingsFor(config));
+    CHECK(settings.gutter == contour::config::gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs));
     CHECK(settings.gutter.lineNumbers == vtbackend::LineNumberMode::Absolute);
     CHECK_FALSE(settings.gutter.foldMarkers);
     CHECK(settings.gutter.exitStatus); // the block column outlives the fold markers
+
+    // A presenting session draws the block column in its chrome's form; the daemon's hosted half in glyphs.
+    for (auto const form: { vtbackend::BlockColumnForm::Glyphs, vtbackend::BlockColumnForm::Rail })
+    {
+        CAPTURE(static_cast<int>(form));
+        auto const session =
+            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark, form);
+        CHECK(session.gutter == contour::config::gutterSettingsFor(config, form));
+    }
+    CHECK(
+        contour::config::resolvedSessionConfig(config, *profile, "main", vtbackend::ColorPreference::Dark, {})
+            .settings.gutter.blockColumnForm
+        == vtbackend::BlockColumnForm::Glyphs);
 }
 
 namespace
@@ -8243,9 +8262,10 @@ profiles:
         REQUIRE(profile != nullptr);
         CHECK(profile->stickyHeader.value().mode == vtbackend::StickyHeaderMode::Scrolled);
         CHECK(profile->stickyHeader.value().showEvicted);
-        CHECK(
-            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark).stickyHeader
-            == vtbackend::StickyHeaderSettings {});
+        CHECK(contour::config::sessionSettings(
+                  config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs)
+                  .stickyHeader
+              == vtbackend::StickyHeaderSettings {});
     }
 
     SECTION("explicit values reach vtbackend, the YAML bool as the engine's enum")
@@ -8261,11 +8281,12 @@ profiles:
 )"sv);
         auto const* profile = config.profile("main");
         REQUIRE(profile != nullptr);
-        CHECK(
-            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark).stickyHeader
-            == vtbackend::StickyHeaderSettings { .mode = vtbackend::StickyHeaderMode::Always,
-                                                 .evictedPlaceholder =
-                                                     vtbackend::EvictedPlaceholder::Hidden });
+        CHECK(contour::config::sessionSettings(
+                  config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs)
+                  .stickyHeader
+              == vtbackend::StickyHeaderSettings { .mode = vtbackend::StickyHeaderMode::Always,
+                                                   .evictedPlaceholder =
+                                                       vtbackend::EvictedPlaceholder::Hidden });
     }
 
     SECTION("an unknown mode keeps the default, and its sibling still loads")
@@ -8662,8 +8683,8 @@ profiles:
 )");
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    auto const settings =
-        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    auto const settings = contour::config::sessionSettings(
+        config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs);
     CHECK(settings.linkDetection == contour::config::linkDetectionPolicyOf(profile->linkDetection.value()));
     CHECK_FALSE(settings.linkDetection.primaryScreen.urls == vtbackend::DetectLinks::Yes);
 }
@@ -8814,10 +8835,10 @@ TEST_CASE("Config: input_method_editor_style follows the edition, reads and writ
         auto const* profile = config.profile("main");
         REQUIRE(profile != nullptr);
         CHECK(profile->inputMethodEditorStyle.value() == PreeditStyle::Highlighted);
-        CHECK(
-            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark, std::nullopt)
-                .preeditStyle
-            == PreeditStyle::Highlighted);
+        CHECK(contour::config::sessionSettings(
+                  config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs)
+                  .preeditStyle
+              == PreeditStyle::Highlighted);
 
         auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
         CHECK(written.contains("input_method_editor_style: highlighted\n"));
@@ -8972,8 +8993,8 @@ TEST_CASE("Config: sessionSettings hands the terminal the profile's compiled lin
         "profiles:\n  main:\n    shell: /bin/sh\n    hint_patterns:\n      - name: jira\n        regex: '\\b[A-Z]+-\\d+\\b'\n"sv);
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    auto const settings =
-        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    auto const settings = contour::config::sessionSettings(
+        config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs);
     REQUIRE(settings.linkPatterns != nullptr);
     CHECK(settings.linkPatterns->find("jira") != nullptr);
     CHECK(settings.linkPatterns != vtbackend::LinkPatterns::builtins());
@@ -9018,8 +9039,8 @@ TEST_CASE("Config: sessionSettings carries the follow modifiers", "[config][link
                      "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"sv);
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    auto const settings =
-        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    auto const settings = contour::config::sessionSettings(
+        config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs);
     CHECK(settings.linkFollowModifiers
           == std::optional { vtbackend::Modifiers { vtbackend::Modifier::Alt } });
 }

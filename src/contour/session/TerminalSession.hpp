@@ -15,6 +15,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/FontControl.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/PastePreview.hpp>
@@ -1072,6 +1073,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
+
+    /// How this session's chrome row draws the gutter's block column: what its page fit reserves, its
+    /// hit-test reads and its terminal draws. Fixed at construction from ContourGuiApp::chromeStyle(),
+    /// which no reload changes, so the render thread's page fit may read it without a lock.
+    /// @return The session's gutter chrome.
+    [[nodiscard]] GutterChrome const& gutterChrome() const noexcept { return _gutterChrome; }
 
     /// Resolves @p button through the BUILT-IN fallback mouse mappings alone and runs what it binds.
     ///
@@ -2291,6 +2298,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
+    /// The chrome row's gutter form and rail metrics, fixed for the session's life: the chrome row is
+    /// resolved before any session exists and no reload changes it. Declared before _terminal, whose
+    /// settings are built from it. Read on the GUI and the render thread; never written after construction.
+    GutterChrome _gutterChrome;
     /// The system's scroller style: read from the app when the session is made, then as
     /// applySystemScrollBars() reports it; nullopt where the platform publishes none. GUI thread.
     std::optional<config::ScrollBarMode> _systemScrollBars;

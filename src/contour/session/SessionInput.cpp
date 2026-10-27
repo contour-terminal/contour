@@ -156,14 +156,20 @@ namespace
         auto const dpr = display.devicePixelRatio();
         auto const cellSize = display.gridMetrics().cellSize;
         auto const pageMargin = display.gridMetrics().pageMargin;
-        auto const layout = configuredGutterLayout(session.config());
+        auto const& chrome = session.gutterChrome();
+        auto const layout = configuredGutterLayout(session.config(), chrome);
 
         auto const sx = static_cast<int>(positionPx.x() * dpr);
         // The layout built once, for the extent and the segment both: with timestamps on, building one
         // formats a sample time, and this runs on every pointer motion.
-        auto const column = geometry::gutterColumnAt(
-            sx, pageMargin.left, gutterExtentFor(layout, cellSize, dpr), unbox<int>(cellSize.width));
-        auto const segment = column ? vtbackend::gutterSegmentAt(layout, *column) : std::nullopt;
+        auto const point = geometry::gutterPointAt(
+            sx, pageMargin.left, gutterExtentFor(layout, cellSize, dpr, chrome), unbox<int>(cellSize.width));
+        if (!point)
+            return std::nullopt;
+        // The rail's strip is the block column's, drawn as pixels rather than cells: it names no new segment.
+        auto const segment = point->part == geometry::GutterPart::Rail
+                                 ? std::optional { vtbackend::GutterSegmentKind::BlockColumn }
+                                 : vtbackend::gutterSegmentAt(layout, point->column);
         if (!segment)
             return std::nullopt;
 

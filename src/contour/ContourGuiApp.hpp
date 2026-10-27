@@ -601,6 +601,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return How the resolved chrome style presents menus.
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
 
+    /// The chrome row, resolved from `ui_style` and the host platform at construction and once more when
+    /// terminalGuiAction() has loaded the configuration -- before any session exists. A reload does not
+    /// change it (`ui_style` takes effect on the next start), so a session reads it once.
+    /// @return The resolved chrome row.
+    [[nodiscard]] config::ChromeStyle chromeStyle() const noexcept { return _chromeStyle; }
+
     /// The title band's tokens: the chrome row, its resolved title-band material, the band's token height
     /// for @p centre, on the Terminal row one cell's height, and the chrome density. From the published
     /// provider once the GUI built it; before that (and in a headless test) from the row's tokens alone,
