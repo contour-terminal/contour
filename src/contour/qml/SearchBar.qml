@@ -198,6 +198,13 @@ Popup {
             root._syncOpenState(null);
     }
 
+    // An already-open bar asked for again: show the session's pattern, which a request may have just set
+    // (Use Selection for Find), without pushing it back; onOpened does this for a bar that was closed.
+    function showSessionPattern() {
+        if (root.visible)
+            root._seedField(root._search ? root._search.searchPattern : "");
+    }
+
     // Re-focusing an already-open bar, for a second Ctrl+Shift+F.
     function focusField() {
         field.forceActiveFocus();

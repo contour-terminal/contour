@@ -316,6 +316,13 @@ class MockSession: public QObject
         emit searchStateChanged();
     }
 
+    /// Installs @p text as the pattern and asks for the find bar, as the SearchSelection action does.
+    void searchSelection(QString const& text)
+    {
+        setSearchPattern(text);
+        emit searchBarRequested();
+    }
+
     Q_INVOKABLE void searchBarOpened() { ++openNotifications; }
     Q_INVOKABLE void searchBarClosed() { ++closeNotifications; }
     Q_INVOKABLE void searchNext() { ++nextCalls; }
@@ -395,6 +402,7 @@ class MockSession: public QObject
     void sessionEndChanged();
     void searchStateChanged();
     void searchFocusedRowsChanged();
+    void searchBarRequested(); //!< SessionChrome opens and focuses the find bar on it.
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);

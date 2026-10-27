@@ -9779,6 +9779,57 @@ TEST_CASE("pane end: the pill's mark reads on its own fill (offscreen)", "[conto
 // }}}
 
 // {{{ The palette over the find bar: closing hands the keyboard back to the bar, not the terminal.
+TEST_CASE("Use Selection for Find over an open find bar shows the new pattern (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    // I1: ⌘E with the bar already open installs the selection as the pattern; the field must say so, not keep
+    // what it held before.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    MockSession session;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    engine.rootContext()->setContextProperty("mockSession", &session);
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral("import QtQuick\n"
+                                        "import QtQuick.Window\n"
+                                        "import Contour.Ui\n"
+                                        "Window {\n"
+                                        "  width: 800; height: 400; visible: true\n"
+                                        "  property alias chrome: chromeItem\n"
+                                        "  Item {\n"
+                                        "    anchors.fill: parent\n"
+                                        "    SessionChrome { id: chromeItem; session: mockSession }\n"
+                                        "  }\n"
+                                        "}\n"),
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchSelectionHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO("errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const window = std::unique_ptr<QObject>(component.create());
+    REQUIRE(window != nullptr);
+    auto* chrome = window->property("chrome").value<QObject*>();
+    REQUIRE(chrome != nullptr);
+    auto* bar = chrome->findChild<QObject*>(QStringLiteral("searchBar"));
+    REQUIRE(bar != nullptr);
+
+    session.searchSelection(QStringLiteral("foo"));
+    QCoreApplication::processEvents();
+    REQUIRE(bar->property("opened").toBool());
+    auto* field = bar->findChild<QQuickItem*>(QStringLiteral("searchBarField"));
+    REQUIRE(field != nullptr);
+    REQUIRE(field->property("text").toString() == QStringLiteral("foo"));
+
+    session.searchSelection(QStringLiteral("bar"));
+    QCoreApplication::processEvents();
+    CHECK(field->property("text").toString() == QStringLiteral("bar"));
+    CHECK(session.searchPattern() == QStringLiteral("bar"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("Closing the palette over the find bar gives the find bar its focus back (offscreen)",
           "[contour][gui][qml][palette][search]")
 {

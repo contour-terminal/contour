@@ -486,7 +486,9 @@ Item {
         // open() is a no-op on an already-open Popup (and onOpened does not re-fire), so focusing
         // afterwards covers both cases: a second Ctrl+Shift+F means "search for something else"
         // rather than doing nothing.
+        // A request may also have set the pattern (Use Selection for Find), which an open bar must then show.
         function onSearchBarRequested() {
+            searchBar.showSessionPattern();
             searchBar.open();
             searchBar.focusField();
         }
