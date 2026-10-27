@@ -167,6 +167,12 @@
           <li>Groups the command palette's rows (Pane, Tab, Window, Layouts, Blocks, Profiles, Hosts, Edit, View, Shell, Contour), most recently used first.</li>
           <li>Collapses commands that take a name, such as Change Profile, Launch Layout, Attach to Host and Switch to Tab, into one row that opens their list; typing a name at the top still finds and runs it directly. Escape steps back.</li>
           <li>Redraws the palette at 640 points with one-line rows and the selected command's description in a footer, and opens it with a short scale and fade, a fade only under Reduce Motion.</li>
+          <li>Adds regular-expression and whole-word search to the find bar, beside match case; an invalid pattern says so in the count</li>
+          <li>Counts search matches in steps, so a long scrollback or a heavy pattern no longer freezes the window, and the count fills in as it goes</li>
+          <li>Searches match across wrapped lines, wide characters and accented letters however they were composed</li>
+          <li>Paints search matches yellow in contour-dark and contour-light, the current one stronger</li>
+          <li>Places the find bar at the active pane's top right under its header, moving it out of the way of the current match; under <code>ui_style: terminal</code> it takes the pane header row</li>
+          <li>Adds ⌘F, ⌘G, ⇧⌘G and ⌘E (Use Selection for Find) on macOS; Find Next and Find Previous wrap and open the bar when nothing is being searched for. Adds the <code>SearchSelection</code> action</li>
         </ul>
       </description>
     </release>
