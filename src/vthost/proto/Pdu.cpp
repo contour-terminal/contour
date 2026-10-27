@@ -252,6 +252,10 @@ namespace
     {
         return std::to_underlying(PduType::ProgramStatus);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(SessionInputEcho const&) noexcept
+    {
+        return std::to_underlying(PduType::SessionInputEcho);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -822,6 +826,12 @@ namespace
             out.string(record.title);
             out.string(record.message);
         }
+    }
+
+    void encodeBody(Writer& out, SessionInputEcho const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(pdu.echo);
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -1668,6 +1678,16 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeSessionInputEcho(Reader& in)
+    {
+        // The value is carried, not judged: one this build does not know reads as Unknown where it is used.
+        auto pdu = SessionInputEcho {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.echo, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeResizeSplit(Reader& in)
     {
         auto pdu = ResizeSplit {};
@@ -1784,6 +1804,7 @@ namespace
         DecodeRow { PduType::ControlReply, decodeControlReply },
         DecodeRow { PduType::ControlEvent, decodeControlEvent },
         DecodeRow { PduType::ProgramStatus, decodeProgramStatus },
+        DecodeRow { PduType::SessionInputEcho, decodeSessionInputEcho },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

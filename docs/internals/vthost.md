@@ -157,6 +157,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 |--------------|-------|------|-------|
 | `ExtensionPermissions` | 1 | `extension-permissions` | `PermissionRequest` / `PermissionReply`: the daemon asks an extension's permission question only of a client with which it shares it; one that did not offer it is never asked, and the question waits for another client, as it does while none is attached |
 | `ControlPermissions` | 11 | `control-permissions` | A `PermissionRequest`'s appended `control` list (the control-API permissions an extension's manifest declares, granted with its commands): a question that asks for any is sent only to a client sharing it, whose prompt shows them; one that would prompt with the commands alone is not asked, and the question waits for another. So an older client is never asked about such an extension at all -- its commands stay ungranted there too, and the extension shows only its own "not granted yet" text until a client sharing the capability answers |
+| `InputEcho` | 12 | `input-echo` | `SessionInputEcho`: the daemon tells a client sharing it what each session's terminal does with typed text, so the client locks a pane at a password prompt and turns its OS's Secure Keyboard Entry on. A client of an older daemon stays at `Unknown`: no lock, no secure input |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -1016,6 +1017,23 @@ both only to a connection granted `screen`: a record names a program and what it
 command line `block.finished` keeps behind `screen` does.
 
 The text is never traced (`ProgramStatus session=1 records=2`).
+
+### Input echo
+
+What a hosted session's terminal does with typed text (`vtpty::InputEcho`: `Echoed`, `Raw`, `Hidden`, or
+`Unknown` where the device cannot tell) travels to viewers so a client can lock a pane at a password prompt,
+gated on `Capability::InputEcho` (`input-echo`, 12):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `SessionInputEcho` | 34 | daemon → client | a session id and the echo state's value (`vthost/InputEchoWire.hpp`) |
+
+The daemon reads it from the hosted PTY (`UnixPty::inputEcho()`, under the device's own lock, never the
+terminal's; `TappingPty` forwards it) on the loop thread at each flush, before the session's output, after
+input the client sent, and in a snapshot, and sends it only when it differs from what that connection was
+last told. The client stores it on the pane's `ChannelPty`, where the session reads it on the GUI thread
+when the output that follows it lands. A value the client does not know reads as `Unknown`. tmux panes have
+no such field and stay `Unknown`.
 
 ### Who configures a daemon session
 

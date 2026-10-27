@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/InputEchoWire.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/testing/PduExamples.hpp>
@@ -1340,6 +1341,12 @@ TEST_CASE("asSessionEvent projects the catalog onto the transient events", "[vth
     REQUIRE(clipboard.has_value());
     CHECK(std::holds_alternative<SessionClipboard>(*clipboard));
     CHECK(sessionOf(*clipboard) == 5);
+
+    // State rather than an event, but pushed per session the same way: a mirror applies it as it arrives.
+    auto const echo = asSessionEvent(DecodedPdu { SessionInputEcho { .session = 6, .echo = 3 } });
+    REQUIRE(echo.has_value());
+    CHECK(std::holds_alternative<SessionInputEcho>(*echo));
+    CHECK(sessionOf(*echo) == 6);
 }
 
 TEST_CASE("asSessionEvent rejects everything that is not a session event", "[vthost][proto]")
@@ -1986,4 +1993,17 @@ TEST_CASE("the connection role byte: absent is Attach, 1 is Control, unknown is 
               encodeWithoutTrailingField(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, 5))
               .role
           == ConnectionRole::Attach);
+}
+
+TEST_CASE("inputEchoFromWire reads every known state back and anything else as Unknown",
+          "[vthost][proto][inputecho]")
+{
+    // Total: a newer peer's state must neither lock a pane nor turn secure input on here.
+    for (auto const echo: { vtpty::InputEcho::Unknown,
+                            vtpty::InputEcho::Echoed,
+                            vtpty::InputEcho::Raw,
+                            vtpty::InputEcho::Hidden })
+        CHECK(vthost::inputEchoFromWire(vthost::inputEchoToWire(echo)) == echo);
+    CHECK(vthost::inputEchoFromWire(4) == vtpty::InputEcho::Unknown);
+    CHECK(vthost::inputEchoFromWire(255) == vtpty::InputEcho::Unknown);
 }

@@ -2102,6 +2102,112 @@ TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][p
     }
 }
 
+namespace
+{
+/// The SessionInputEcho frames among @p frames, and where each stands.
+std::vector<std::pair<std::size_t, proto::SessionInputEcho>> inputEchoFrames(
+    std::vector<proto::DecodedFrame> const& frames)
+{
+    auto found = std::vector<std::pair<std::size_t, proto::SessionInputEcho>> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, frames.size()))
+        if (auto const* echo = std::get_if<proto::SessionInputEcho>(&frames[index].pdu))
+            found.emplace_back(index, *echo);
+    return found;
+}
+
+/// How many Delta frames @p frames holds.
+std::size_t deltaCount(std::vector<proto::DecodedFrame> const& frames)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(frames, [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::Delta>(frame.pdu);
+    }));
+}
+
+/// A hello from a viewer that mirrors the echo state.
+proto::ClientHello inputEchoHello()
+{
+    return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::InputEcho }) };
+}
+
+/// The hosted session @p id's mock PTY.
+vtpty::MockPty& mockPtyOf(NativeHarness& h, vtworkspace::SessionId id)
+{
+    // The host taps every device it makes; the factory's MockPty is the tap's inner one.
+    return dynamic_cast<vtpty::MockPty&>(
+        dynamic_cast<vthost::TappingPty&>(h.host.terminal(id)->device()).inner());
+}
+
+/// Writes @p bytes into @p id and kicks the debounced flush, then waits past the debounce, so the next step
+/// earns a flush of its own.
+Task<void> writeAndSettle(NativeHarness* h, vtworkspace::SessionId id, std::string bytes)
+{
+    h->host.terminal(id)->writeToScreen(bytes);
+    h->session->sessionScreenUpdated(id);
+    co_await h->loop.delay(30ms);
+}
+
+/// Once @p gate holds: a password prompt as sudo shows one -- echo off, then the prompt; more output while
+/// it waits; echo back on, then the newline that ends it; and output after.
+Task<void> promptAndAnswer(NativeHarness* h, vtworkspace::SessionId id, StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    mockPtyOf(*h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    co_await writeAndSettle(h, id, "Password:");
+    co_await writeAndSettle(h, id, "*");
+    mockPtyOf(*h, id).setInputEcho(vtpty::InputEcho::Echoed);
+    co_await writeAndSettle(h, id, "\r\n");
+    co_await writeAndSettle(h, id, "$ ");
+}
+} // namespace
+
+TEST_CASE("a viewer sharing InputEcho is told what the hosted terminal does with typed text",
+          "[vthost][native][inputecho]")
+{
+    constexpr auto Writes = std::size_t { 4 };
+
+    SECTION("each change once, before the output that follows it, and nothing while unchanged")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { inputEchoHello() } },
+            [&](auto const& got) { return deltaCount(got) >= 1 + Writes; },
+            promptAndAnswer(&h, sessionId, holdsFrames(&h.received, AttachSnapshotFrames)));
+        auto const echoes = inputEchoFrames(received);
+        REQUIRE(echoes.size() == 2);
+        CHECK(echoes[0].second.session == sessionId.value);
+        CHECK(echoes[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+        CHECK(echoes[1].second.echo == std::to_underlying(vtpty::InputEcho::Echoed));
+        // Ahead of the prompt's delta, so a client's mirror has the state when the output lands.
+        REQUIRE(echoes[0].first + 1 < received.size());
+        CHECK(std::holds_alternative<proto::Delta>(received[echoes[0].first + 1].pdu));
+    }
+
+    SECTION("a viewer without the capability gets none")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { proto::ClientHello {} } },
+            [&](auto const& got) { return deltaCount(got) >= 1 + Writes; },
+            promptAndAnswer(&h, sessionId, holdsFrames(&h.received, AttachSnapshotFrames)));
+        CHECK(deltaCount(received) >= 1 + Writes);
+        CHECK(inputEchoFrames(received).empty());
+    }
+
+    SECTION("a viewer attaching to a waiting prompt is told in its snapshot")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        mockPtyOf(h, sessionId).setInputEcho(vtpty::InputEcho::Hidden);
+        auto const received =
+            h.exchange({ proto::DecodedPdu { inputEchoHello() } }, AttachSnapshotFrames + 1);
+        auto const echoes = inputEchoFrames(received);
+        REQUIRE(echoes.size() == 1);
+        CHECK(echoes[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+    }
+}
+
 TEST_CASE("program status waits for a client that stopped reading instead of costing the connection",
           "[vthost][native][programstatus]")
 {

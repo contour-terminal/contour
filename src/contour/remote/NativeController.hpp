@@ -544,6 +544,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     void captureHandshake();
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
+    /// What the daemon last said each session's terminal does with typed text (SessionInputEcho), kept so a
+    /// pane bound after it arrived starts from it. Guarded by _mutex.
+    std::unordered_map<uint64_t, vtpty::InputEcho> _inputEchoes;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
     /// yields a stable ascending order (the primary window is the lowest id).
     std::map<uint64_t, vthost::proto::LayoutState> _layouts;

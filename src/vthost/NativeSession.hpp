@@ -87,7 +87,8 @@ struct HandshakePolicy
                                                                    proto::Capability::TabEdits,
                                                                    proto::Capability::Heartbeat,
                                                                    proto::Capability::ProgramStatus,
-                                                                   proto::Capability::ControlPermissions });
+                                                                   proto::Capability::ControlPermissions,
+                                                                   proto::Capability::InputEcho });
 };
 
 /// When a connection sends a session's program-status set.
@@ -422,6 +423,11 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
+    /// A viewer's keys for one of its sessions: written through the host, and the session's echo read again
+    /// at the next flush. Loop thread.
+    /// @param input The PDU.
+    void handleInput(proto::Input const& input);
+
     /// Whether a frame was a request to the daemon itself -- daemon control, or the control API -- which is
     /// served (or refused) before the frame would be dispatched on.
     enum class DaemonRequest : uint8_t
@@ -637,6 +643,14 @@ class NativeSession final: public SessionStreamEvents
     /// @param session The session.
     /// @param when Whether an empty set is news (a change emptied it) or not worth a PDU (a snapshot).
     void pushProgramStatus(vtworkspace::SessionId session, ProgramStatusPush when);
+
+    /// Whether this connection is a viewer that mirrors the echo state (shares Capability::InputEcho).
+    [[nodiscard]] bool mirrorsInputEcho() const noexcept;
+
+    /// Sends what @p session's terminal does with typed text, when it differs from what this connection was
+    /// last told. Read from the hosted PTY on the loop thread, never under the terminal lock.
+    /// @param session The session.
+    void pushInputEcho(vtworkspace::SessionId session);
 
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
@@ -859,6 +873,12 @@ class NativeSession final: public SessionStreamEvents
     std::unordered_set<uint64_t> _pendingSessions;
     /// Sessions whose program-status records changed since the last flush. @see sessionSignal
     std::unordered_set<uint64_t> _programStatusPending;
+    /// Sessions whose echo state is to be read at the next flush, beside those with new output: one that took
+    /// typed input, whose program may have turned echo back on without printing. @see pushInputEcho
+    std::unordered_set<uint64_t> _inputEchoPending;
+    /// What this connection was last told of each session's echo, as its wire byte; absent is Unknown, which
+    /// a client assumes before it is told anything.
+    std::unordered_map<uint64_t, uint8_t> _inputEchoSent;
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer

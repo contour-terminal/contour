@@ -233,3 +233,15 @@ TEST_CASE("any other pty reads only live output", "[vtpty][channelpty]")
     vtpty::Pty const& base = pty;
     CHECK(base.lastReadOrigin() == vtpty::ReadOrigin::Live);
 }
+
+TEST_CASE("ChannelPty answers the echo its peer last reported", "[vtpty][channelpty][inputecho]")
+{
+    // A mirrored pane has no termios of its own: the daemon reads its PTY's and tells the client, which
+    // stores it here for the session's GUI-thread read.
+    auto pty = vtpty::ChannelPty { vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) } };
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
+    pty.setInputEcho(vtpty::InputEcho::Hidden);
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Hidden);
+    pty.setInputEcho(vtpty::InputEcho::Echoed);
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Echoed);
+}

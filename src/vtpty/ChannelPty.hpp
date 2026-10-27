@@ -17,6 +17,7 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -79,6 +80,18 @@ class ChannelPty: public Pty
     /// so this must stay zero.
     [[nodiscard]] int resizesAfterClose() const noexcept;
 
+    /// Stores what the peer's terminal does with typed text, as the peer last reported it (a daemon's
+    /// SessionInputEcho). Any thread: the reactor stores, the GUI thread reads.
+    /// @param echo The peer's echo state.
+    void setInputEcho(InputEcho echo) noexcept { _inputEcho.store(echo, std::memory_order_relaxed); }
+
+    /// @return The echo the peer last reported; Unknown before it reported any, or for a peer that does
+    ///         not report it (a tmux pane, an older daemon).
+    [[nodiscard]] InputEcho inputEcho() const noexcept override
+    {
+        return _inputEcho.load(std::memory_order_relaxed);
+    }
+
     // vtpty::Pty overrides
     [[nodiscard]] PtySlave& slave() noexcept override { return _slave; }
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
@@ -114,6 +127,8 @@ class ChannelPty: public Pty
     mutable std::mutex _mutex;
     std::condition_variable _wakeup;
     PageSize _pageSize;
+    /// @see setInputEcho
+    std::atomic<InputEcho> _inputEcho { InputEcho::Unknown };
     std::optional<ImageSize> _pixelSize;
     WriteSink _writeSink;
     ResizeSink _resizeSink;

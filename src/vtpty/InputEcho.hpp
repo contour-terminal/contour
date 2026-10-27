@@ -16,7 +16,7 @@ namespace vtpty
 /// terminal is in the remote shell's raw mode) reads Raw, and gets no lock.
 enum class InputEcho : std::uint8_t
 {
-    Unknown = 0, ///< The device cannot tell: a mirrored or remote pane, a ConPTY.
+    Unknown = 0, ///< The device cannot tell: a tmux pane, a ConPTY, a daemon too old to report it.
     Echoed,      ///< The terminal echoes what is typed.
     Raw,    ///< Neither echo nor line editing: the program draws its own echo (an editor, a line editor).
     Hidden, ///< Line editing without echo: a password prompt.

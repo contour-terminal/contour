@@ -37,6 +37,7 @@
 #include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
+#include <vthost/InputEchoWire.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
@@ -462,6 +463,32 @@ void NativeSession::pushProgramStatus(SessionId session, ProgramStatusPush when)
     emitSessionEvent(std::move(pdu));
 }
 
+bool NativeSession::mirrorsInputEcho() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::InputEcho);
+}
+
+void NativeSession::pushInputEcho(SessionId session)
+{
+    if (!mirrorsInputEcho())
+        return;
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+    {
+        _inputEchoSent.erase(session.value); // gone: nothing more to tell of it
+        return;
+    }
+    // The device's own lock guards the read (UnixPty::inputEcho); the terminal's is not taken, so a parser
+    // thread holding it never holds up the loop here.
+    auto const echo = inputEchoToWire(terminal->device().inputEcho());
+    auto const [sent, inserted] =
+        _inputEchoSent.try_emplace(session.value, inputEchoToWire(vtpty::InputEcho::Unknown));
+    if (sent->second == echo)
+        return;
+    sent->second = echo;
+    emitSessionEvent(proto::SessionInputEcho { .session = session.value, .echo = echo });
+}
+
 void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
 {
     // A question is asked in its pane: one in a window this client does not show waits for a client that
@@ -548,6 +575,12 @@ core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint d
     // the mirror apply and repaint a grid it has only half received. Put it back rather than drop
     // it — rows changed after the snapshot was captured are still news. The reinsert targets the
     // member, which `exchange` just emptied, not the range being walked.
+    // The echo first, so a client's pane holds it by the time the output that follows it lands: sudo turns
+    // echo off before it prints the prompt.
+    for (auto const session: _pendingSessions)
+        pushInputEcho(SessionId { session });
+    for (auto const session: std::exchange(_inputEchoPending, {}))
+        pushInputEcho(SessionId { session });
     for (auto const session: std::exchange(_pendingSessions, {}))
         if (snapshotPending(SessionId { session }))
             _pendingSessions.insert(session);
@@ -1342,6 +1375,8 @@ core::async::Task<void> NativeSession::streamSnapshots()
         // Before the rows, so that the screen holds the set by the time the completing piece replays it.
         if (mirrorsProgramStatus())
             pushProgramStatus(session, ProgramStatusPush::IfAny);
+        // A snapshot states the echo too, for a client that attached while a prompt waits.
+        pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older
         // remainder as increments, which the debounce holds back until this run is off the wire.
         co_await sendSnapshotPieces(std::move(built->delta), session);
@@ -1423,6 +1458,29 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
     }
 }
 
+void NativeSession::handleInput(proto::Input const& input)
+{
+    if (_host.terminal(SessionId { input.session }) == nullptr)
+    {
+        errorLog()(
+            "{}: Input for unknown session {} ({} bytes dropped)", _id, input.session, input.data.size());
+        return;
+    }
+    // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
+    // PTY write while the application leaves its input unread.
+    _host.writeInput(
+        SessionId { input.session },
+        std::string_view { reinterpret_cast<char const*>(input.data.data()), input.data.size() });
+    pauseReadingIfBackedUp(SessionId { input.session });
+    // The program may answer the keys by turning echo back on without printing a byte: read it again at the
+    // next flush, which the session's pump has written the keys by.
+    if (mirrorsInputEcho())
+    {
+        _inputEchoPending.insert(input.session);
+        scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
+    }
+}
+
 void NativeSession::handlePdu(proto::DecodedFrame const& frame)
 {
     // An unknown PDU from a newer client is answered rather than dropped, and an Unsupported it sent is
@@ -1466,20 +1524,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* input = std::get_if<proto::Input>(&frame.pdu))
     {
-        if (_host.terminal(SessionId { input->session }) == nullptr)
-        {
-            errorLog()("{}: Input for unknown session {} ({} bytes dropped)",
-                       _id,
-                       input->session,
-                       input->data.size());
-            return;
-        }
-        // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
-        // PTY write while the application leaves its input unread.
-        _host.writeInput(
-            SessionId { input->session },
-            std::string_view { reinterpret_cast<char const*>(input->data.data()), input->data.size() });
-        pauseReadingIfBackedUp(SessionId { input->session });
+        handleInput(*input);
         return;
     }
     if (auto const* resize = std::get_if<proto::ResizeRequest>(&frame.pdu))

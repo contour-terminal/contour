@@ -158,6 +158,8 @@ namespace vthost::testing
                                                             .app = "cargo",
                                                             .title = "Tests",
                                                             .message = "Continue?" } } } } },
+        { proto::PduType::SessionInputEcho,
+          proto::DecodedPdu { proto::SessionInputEcho { .session = 4, .echo = 3 } } },
     };
 }
 

@@ -78,6 +78,7 @@ enum class PduType : uint8_t
     ControlReply = 31,
     ControlEvent = 32,
     ProgramStatus = 33,
+    SessionInputEcho = 34,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -954,10 +955,21 @@ struct ProgramStatus
     bool operator==(ProgramStatus const&) const = default;
 };
 
+/// Server→client push (Capability::InputEcho): what a session's terminal does with typed text, sent when it
+/// changes and in a snapshot. Raw on the wire: `echo` is a vtpty::InputEcho's value (0 Unknown, 1 Echoed,
+/// 2 Raw, 3 Hidden); a value this build does not know reads as Unknown (vthost::inputEchoFromWire).
+struct SessionInputEcho
+{
+    uint64_t session = 0; ///< The session whose terminal it is.
+    uint8_t echo = 0;     ///< A vtpty::InputEcho's value.
+    bool operator==(SessionInputEcho const&) const = default;
+};
+
 /// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
 /// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
 /// without enumerating the catalog's tags itself.
-using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus>;
+using SessionEventPdu =
+    std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -1323,7 +1335,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ControlRequest,
                                 ControlReply,
                                 ControlEvent,
-                                ProgramStatus>;
+                                ProgramStatus,
+                                SessionInputEcho>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

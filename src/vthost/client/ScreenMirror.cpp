@@ -1026,6 +1026,9 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                        auto const guard = std::lock_guard { *_terminal };
                        syncProgramStatus(status.records);
                    },
+                   // The device's, not the grid's: the frontend that owns the pane's device stores it there
+                   // (contour's NativeController, on its ChannelPty), and the session reads it from there.
+                   [](proto::SessionInputEcho const&) {},
                },
                event);
 }

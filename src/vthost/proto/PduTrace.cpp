@@ -424,6 +424,12 @@ namespace
                        auto const& value = std::get<ProgramStatus>(pdu);
                        return std::format("session={} records={}", value.session, value.records.size());
                    } },
+        TraceRow { PduType::SessionInputEcho,
+                   "SessionInputEcho",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SessionInputEcho>(pdu);
+                       return std::format("session={} echo={}", value.session, value.echo);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

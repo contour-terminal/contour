@@ -37,6 +37,7 @@ add_library(vthost STATIC
     ImageWire.hpp
     TimeWire.hpp
     MouseWire.hpp
+    InputEchoWire.hpp
     NotifyWire.hpp
     WireEnum.hpp
     Daemon.cpp

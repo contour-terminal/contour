@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <vthost/HostIdentity.hpp>
+#include <vthost/InputEchoWire.hpp>
 
 namespace contour::remote
 {
@@ -94,7 +95,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // the hello and every spawning verb name a profile for the daemon to resolve in its own
             // configuration. TabEdits because the user's changes to a tab's presentation are reported
             // (reportTabPresentation). ProgramStatus because the mirrors take the OSC 7501 records the daemon
-            // pushes, for the tab strip to show.
+            // pushes, for the tab strip to show. InputEcho because a pane at a password prompt is locked, and
+            // turns secure keyboard entry on, only when the daemon says its terminal hides typing.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -103,7 +105,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::Heartbeat,
                                                    vthost::proto::Capability::ProfileByName,
                                                    vthost::proto::Capability::TabEdits,
-                                                   vthost::proto::Capability::ProgramStatus }),
+                                                   vthost::proto::Capability::ProgramStatus,
+                                                   vthost::proto::Capability::InputEcho }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = _attachSettings.transform([](auto const& s) {
@@ -827,6 +830,17 @@ void NativeController::onImage(RemoteScreen const& screen, uint32_t imageId)
 void NativeController::onSessionEvent(RemoteScreen const& screen, vthost::proto::SessionEventPdu const& event)
 {
     auto const lock = std::lock_guard { _mutex };
+    // On the reactor thread. Stored on the pane's device, which the session reads on the GUI thread when the
+    // output that follows it lands (TerminalSession::refreshInputEcho); never applied to the grid.
+    if (auto const* echo = std::get_if<vthost::proto::SessionInputEcho>(&event))
+    {
+        auto const value = vthost::inputEchoFromWire(echo->echo);
+        _inputEchoes.insert_or_assign(screen.session, value);
+        if (auto const binding = _bindings.find(screen.session);
+            binding != _bindings.end() && binding->second.pty != nullptr)
+            binding->second.pty->setInputEcho(value);
+        return;
+    }
     if (auto const binding = _bindings.find(screen.session);
         binding != _bindings.end() && binding->second.mirror)
         binding->second.mirror->applyEvent(event);
@@ -1045,6 +1059,9 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
         },
         [this, session, serial] { unbind(session, serial); });
     _bindings[session] = Binding { .serial = serial, .pty = pty.get(), .terminal = nullptr, .mirror = {} };
+    // A prompt that was waiting before this pane was bound.
+    if (auto const echo = _inputEchoes.find(session); echo != _inputEchoes.end())
+        pty->setInputEcho(echo->second);
     // The birth size is this pane's first known grid, so the composition is complete from the
     // moment the pane exists rather than only once something resizes it.
     {
