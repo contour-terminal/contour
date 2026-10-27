@@ -5,6 +5,7 @@
 #include <contour/window/NewDefaultsNotice.hpp>
 
 #include <core/Utils.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -28,6 +29,7 @@ namespace
 /// edition as settings.yml would.
 struct NoticeFixture
 {
+    core::platform::NativeFileSystem fileSystem {};
     QTemporaryDir dir;
     std::filesystem::path configDir = std::filesystem::path(dir.path().toStdU16String());
     contour::config::Config config = contour::config::Config { .defaultsEdition = DefaultsEdition::Classic };
@@ -39,7 +41,7 @@ struct NoticeFixture
     {
         return std::make_unique<NewDefaultsNotice>(
             [this]() -> contour::config::Config const& { return config; },
-            std::make_shared<contour::config::FileGuiConfigStore>(configDir),
+            std::make_shared<contour::config::FileGuiConfigStore>(fileSystem, configDir),
             std::make_shared<contour::config::FileGuiStateStore>(configDir),
             [this]() -> std::expected<void, std::string> {
                 ++reloads;
@@ -204,7 +206,7 @@ TEST_CASE("NewDefaultsNotice: Keep Mine over a broken state store still hides th
     auto const store = std::make_shared<BrokenGuiStateStore>();
     auto notice = NewDefaultsNotice {
         [&fixture]() -> contour::config::Config const& { return fixture.config; },
-        std::make_shared<contour::config::FileGuiConfigStore>(fixture.configDir),
+        std::make_shared<contour::config::FileGuiConfigStore>(fixture.fileSystem, fixture.configDir),
         store,
         [] { return std::expected<void, std::string> {}; },
     };

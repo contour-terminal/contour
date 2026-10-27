@@ -2517,11 +2517,11 @@ int ContourGuiApp::terminalGuiAction()
         // The new-defaults banner's decision, over the files beside contour.yml: "Use New" writes
         // settings.yml and reloads, "Keep Mine" remembers the answer in the GUI state file.
         auto const configDir = _config.configFile.parent_path();
-        _newDefaultsNotice =
-            make_unique<window::NewDefaultsNotice>([this]() -> config::Config const& { return _config; },
-                                                   std::make_shared<config::FileGuiConfigStore>(configDir),
-                                                   std::make_shared<config::FileGuiStateStore>(configDir),
-                                                   [this] { return _sessionManager.reloadAllSessions(); });
+        _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
+            [this]() -> config::Config const& { return _config; },
+            std::make_shared<config::FileGuiConfigStore>(_fileSystem, configDir),
+            std::make_shared<config::FileGuiStateStore>(configDir),
+            [this] { return _sessionManager.reloadAllSessions(); });
         context->setContextProperty("newDefaults", _newDefaultsNotice.get());
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
@@ -2932,7 +2932,7 @@ window::SettingsController& ContourGuiApp::settingsController()
     if (!_settingsController)
         _settingsController = std::make_unique<window::SettingsController>(
             [this]() -> config::Config const& { return _config; },
-            std::make_shared<config::FileGuiConfigStore>(_config.configFile.parent_path()),
+            std::make_shared<config::FileGuiConfigStore>(_fileSystem, _config.configFile.parent_path()),
             [this]() {
                 if (auto const reloaded = _sessionManager.reloadAllSessions(); !reloaded)
                     errorLog()("Failed to reload configuration. {}", reloaded.error());

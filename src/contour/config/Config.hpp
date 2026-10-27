@@ -2141,6 +2141,13 @@ struct YAMLConfigReader
     [[nodiscard]] static std::expected<YAML::Node, std::string> parseSideFile(
         std::filesystem::path const& file);
 
+    /// Parses @p contents as side file @p file, as parseSideFile() parses what it reads.
+    /// @param file     The side file the contents are of, for messages.
+    /// @param contents Its bytes; a CR is dropped as parseSideFile() drops it.
+    /// @return Its document, a map or empty, or why there is none: `<file>: <reason>`.
+    [[nodiscard]] static std::expected<YAML::Node, std::string> parseSideFileText(
+        std::filesystem::path const& file, std::string contents);
+
     /// @p entry of @p node, spelled out from the document's root as loadGuarded() descended to it:
     /// `profiles.main.cursor`.
     /// @param node  The mapping @p entry is read from.
@@ -3559,6 +3566,14 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
 /// @param path The color scheme file to read.
 /// @return The parsed palette, or nullopt if the file is missing or unreadable.
 [[nodiscard]] std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path);
+
+/// Parses @p contents as a bare-body `colorschemes/<name>.yml` palette, as loadColorSchemeFile() parses the
+/// file it reads. Used where the bytes come through a GuiConfigStore rather than from the disk directly.
+/// @param path     The file the contents are of, for messages.
+/// @param contents The file's bytes.
+/// @return The parsed palette, or nullopt if the contents do not parse.
+[[nodiscard]] std::optional<vtbackend::ColorPalette> parseColorSchemeYaml(std::filesystem::path const& path,
+                                                                          std::string contents);
 
 /// Loads ONLY the GUI-owned `settings.yml` at @p path (no merge). A missing file yields default
 /// (all-unset) settings — nothing saved yet is not an error; a file that fails to parse yields the

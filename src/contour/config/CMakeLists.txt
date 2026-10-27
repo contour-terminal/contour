@@ -47,6 +47,7 @@ set_source_files_properties(Config.cpp PROPERTIES
 target_link_libraries(contour_config PUBLIC
     core::base
     core::log
+    core::platform
     crispy::core
     reflection-cpp::reflection-cpp
     vtbackend

@@ -20,6 +20,7 @@
 #include <contour/window/WindowController.hpp>
 
 #include <core/Utils.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <QtCore/QLocale>
 #include <QtCore/QPointer>
@@ -295,28 +296,24 @@ class UnwritableStore final: public config::GuiConfigStore
     /// Why every write fails.
     static constexpr auto Reason = std::string_view { "The configuration directory is read-only." };
 
-    [[nodiscard]] std::expected<void, std::string> saveProfile(
-        std::string const& /*name*/, config::TerminalProfile const& /*profile*/) override
+    [[nodiscard]] std::expected<std::optional<std::string>, std::string> read(
+        config::SideFile const& /*file*/) const override
+    {
+        return std::optional<std::string> {};
+    }
+    [[nodiscard]] std::expected<void, std::string> write(config::SideFile const& /*file*/,
+                                                         std::string_view /*bytes*/) override
     {
         return refuse();
     }
-    [[nodiscard]] std::expected<void, std::string> deleteProfile(std::string const& /*name*/) override
+    [[nodiscard]] std::expected<void, std::string> remove(config::SideFile const& /*file*/) override
     {
         return refuse();
     }
-    [[nodiscard]] std::expected<void, std::string> saveColorScheme(
-        std::string const& /*name*/, vtbackend::ColorPalette const& /*palette*/) override
+    [[nodiscard]] std::expected<std::vector<config::SideFile>, std::string> list(
+        config::SideFileKind /*kind*/) const override
     {
-        return refuse();
-    }
-    [[nodiscard]] std::expected<void, std::string> deleteColorScheme(std::string const& /*name*/) override
-    {
-        return refuse();
-    }
-    [[nodiscard]] std::expected<void, std::string> saveGuiSettings(
-        config::GuiManagedSettings const& /*settings*/) override
-    {
-        return refuse();
+        return std::vector<config::SideFile> {};
     }
 
   private:
@@ -821,12 +818,13 @@ TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the cur
     }
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
-    auto const controller =
-        contour::window::SettingsController([&]() -> config::Config const& { return cfg; },
-                                            std::make_shared<config::FileGuiConfigStore>(configDir),
-                                            [&]() {},
-                                            std::make_shared<FakeGpuInventory>(),
-                                            vtbackend::ColorPreference::Dark);
+    auto const fileSystem = core::platform::NativeFileSystem {};
+    auto const controller = contour::window::SettingsController(
+        [&]() -> config::Config const& { return cfg; },
+        std::make_shared<config::FileGuiConfigStore>(fileSystem, configDir),
+        [&]() {},
+        std::make_shared<FakeGpuInventory>(),
+        vtbackend::ColorPreference::Dark);
     auto const row = globalRow(controller, "renderer.gpu");
     REQUIRE(!row.isEmpty());
 

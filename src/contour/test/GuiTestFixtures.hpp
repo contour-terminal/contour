@@ -860,7 +860,9 @@ class TestApp
 };
 
 /// A TestApp whose configuration is a file of its own, in a directory that lives as long as the app: what a
-/// test that reloads the configuration from disk needs.
+/// test that reloads the configuration from disk needs. Its file system is this machine's, as the
+/// configuration loader's is: Settings writes its side files through the app's file system, and the loader
+/// reads them back from the disk.
 class ConfiguredTestApp
 {
   public:
@@ -869,10 +871,15 @@ class ConfiguredTestApp
     explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                                contour::platform::AppearanceServices const& appearance =
                                    contour::platform::nullAppearanceServices()):
-        _testApp {
-            std::move(factory), nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr,
-            appearance
-        },
+        _testApp { std::move(factory),
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   TestApp::testHostIdentity(),
+                   &core::platform::NativeFileSystem::instance(),
+                   {},
+                   nullptr,
+                   appearance },
         _configFile { std::filesystem::path(_configDir.path().toStdU16String()) / "contour.yml" }
     {
         REQUIRE(_configDir.isValid());

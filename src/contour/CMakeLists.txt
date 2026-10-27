@@ -1215,6 +1215,7 @@ if(CONTOUR_TESTING)
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
+        config/GuiConfigStore_test.cpp
         config/GuiStateStore_test.cpp
         config/IndicatorTemplate_test.cpp
         config/HostUrl_test.cpp

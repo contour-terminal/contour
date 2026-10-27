@@ -72,7 +72,7 @@ inline constexpr std::string_view GuiStateFileName = "gui-state.yml";
 inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 
 /// The production GuiStateStore: GuiStateFileName in the configuration directory, written atomically
-/// (see contour::config::atomicWriteFile) as FileGuiConfigStore writes `settings.yml`.
+/// (see contour::config::atomicWriteFile).
 ///
 /// The file reads `dismissed_new_defaults: [existing_config]`. A token no offer answers to is skipped,
 /// so a file written by a newer release still loads, and a save keeps those tokens and any other keys.

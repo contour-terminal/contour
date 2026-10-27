@@ -38,6 +38,7 @@
 #include <core/Utf8Path.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 #include <core/testing/EnvHelper.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 #include <core/testing/ScopedWorkingDirectory.hpp>
@@ -5607,11 +5608,14 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
     auto profile = *base.findProfile("main");
     profile.showTitleBar = false;
 
-    auto store = contour::config::FileGuiConfigStore(configDir);
-    REQUIRE(store.saveProfile("saved", profile).has_value());
+    auto const fileSystem = core::platform::NativeFileSystem {};
+    auto store = contour::config::FileGuiConfigStore(fileSystem, configDir);
+    REQUIRE(store.write(contour::config::profileFile("saved"), contour::config::emitProfileYaml(profile))
+                .has_value());
     REQUIRE(store
-                .saveGuiSettings(
-                    contour::config::GuiManagedSettings { .defaultProfile = "saved", .globalOverrides = {} })
+                .write(contour::config::guiSettingsFile(),
+                       contour::config::emitGuiSettingsYaml(contour::config::GuiManagedSettings {
+                           .defaultProfile = "saved", .globalOverrides = {} }))
                 .has_value());
 
     auto const afterSave = loadFromYaml(dir, "default_profile: main\n");
@@ -5621,7 +5625,7 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
     CHECK(afterSave.defaultProfileName.value() == "saved");
     CHECK(afterSave.profileOrigins.at("saved") == contour::config::SettingsOrigin::SideFile);
 
-    REQUIRE(store.deleteProfile("saved").has_value());
+    REQUIRE(store.remove(contour::config::profileFile("saved")).has_value());
     auto const afterDelete = loadFromYaml(dir, "default_profile: main\n");
     CHECK(afterDelete.findProfile("saved") == nullptr);
 }
@@ -5648,8 +5652,13 @@ TEST_CASE("Config: the configuration is found and kept under a directory beyond 
 
     // A side file is named for its profile, and read back under that name.
     auto const name = std::string { "\xe6\x9d\x8e" }; // U+674E
-    auto store = contour::config::FileGuiConfigStore(expected.parent_path());
-    REQUIRE(store.saveProfile(name, *loaded.findProfile(loaded.defaultProfileName.value())).has_value());
+    auto const fileSystem = core::platform::NativeFileSystem {};
+    auto store = contour::config::FileGuiConfigStore(fileSystem, expected.parent_path());
+    REQUIRE(
+        store
+            .write(contour::config::profileFile(name),
+                   contour::config::emitProfileYaml(*loaded.findProfile(loaded.defaultProfileName.value())))
+            .has_value());
     CHECK(
         std::filesystem::exists(expected.parent_path() / "profiles" / std::u8string_view { u8"\u674e.yml" }));
     CHECK(contour::config::loadConfig().findProfile(name) != nullptr);

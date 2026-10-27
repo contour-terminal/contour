@@ -25,6 +25,8 @@
 
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <core/platform/NativeFileSystem.hpp>
+
 #include <yaml-cpp/yaml.h>
 
 #include <QtCore/QStringList>
@@ -89,6 +91,7 @@ class FakeGpuInventory final: public display::IGpuInventory
 /// create/edit/save/delete workflow runs against real files under a temp directory.
 struct Fixture
 {
+    core::platform::NativeFileSystem fileSystem; ///< What the store writes through: the fixture's own files.
     QTemporaryDir dir;
     config::Config cfg;
     std::filesystem::path configPath;
@@ -103,8 +106,8 @@ struct Fixture
         configPath = writeConfig(dir, yaml);
         // Through the path overload, as production loads: it reads the file's defaults_edition first.
         cfg = config::loadConfigFromFile(configPath);
-        store =
-            std::make_shared<config::FileGuiConfigStore>(std::filesystem::path(dir.path().toStdU16String()));
+        store = std::make_shared<config::FileGuiConfigStore>(
+            fileSystem, std::filesystem::path(dir.path().toStdU16String()));
         controller =
             std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                  store,
@@ -373,7 +376,7 @@ TEST_CASE("SettingsController: rename keeps the colors of a side-file scheme nam
     auto palette = vtbackend::ColorPalette {};
     palette.defaultBackground = vtbackend::RGBColor { 0x10, 0x20, 0x30 };
     auto const name = std::string { vtpty::testing::NonAsciiNameUtf8 };
-    REQUIRE(fx.store->saveColorScheme(name, palette).has_value());
+    REQUIRE(fx.store->write(config::colorSchemeFile(name), config::emitColorSchemeYaml(palette)).has_value());
 
     REQUIRE(fx.controller->renameColorScheme(QString::fromStdString(name), "nightfall"));
     auto const renamed = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())

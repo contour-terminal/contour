@@ -8,6 +8,8 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/window/SettingsController.hpp>
 
+#include <core/platform/NativeFileSystem.hpp>
+
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
@@ -26,6 +28,7 @@ namespace contour::test
 /// beside that contour.yml, and a saved change reloads it.
 struct ControllerFixture
 {
+    core::platform::NativeFileSystem fileSystem; ///< What the store writes through: the fixture's own files.
     QTemporaryDir dir;
     config::Config cfg;
     std::filesystem::path configDir;
@@ -45,7 +48,8 @@ struct ControllerFixture
             out << yaml;
         }
         config::loadConfigFromFile(cfg, configPath);
-        store = writeStore ? std::move(writeStore) : std::make_shared<config::FileGuiConfigStore>(configDir);
+        store = writeStore ? std::move(writeStore)
+                           : std::make_shared<config::FileGuiConfigStore>(fileSystem, configDir);
         controller =
             std::make_unique<window::SettingsController>([this]() -> config::Config const& { return cfg; },
                                                          store,

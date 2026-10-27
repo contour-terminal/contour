@@ -38,7 +38,8 @@ std::expected<void, std::string> NewDefaultsNotice::switchToNewDefaults()
     auto settings = _config().guiManagedSettings;
     settings.globalOverrides[std::string { config::DefaultsEditionKey }] =
         std::string { config::configEnumToken(config::DefaultsEdition::Native2026) };
-    return _settings->saveGuiSettings(settings).and_then([this] { return _reload(); });
+    return _settings->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings))
+        .and_then([this] { return _reload(); });
 }
 
 void NewDefaultsNotice::useNew()

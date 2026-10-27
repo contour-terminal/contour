@@ -1752,15 +1752,21 @@ std::expected<YAML::Node, std::string> YAMLConfigReader::parseSideFile(fs::path 
 {
     // Through readFile, which reads in binary and drops each CR, so a file saved with Windows line endings
     // parses as it does everywhere else: YAML::LoadFile would keep the CR on every scalar off Windows.
-    auto const contents = readFile(file);
+    auto contents = readFile(file);
     if (!contents)
         return std::unexpected(std::format("{}: the file cannot be read", core::pathToUtf8(file)));
+    return parseSideFileText(file, std::move(*contents));
+}
 
+std::expected<YAML::Node, std::string> YAMLConfigReader::parseSideFileText(fs::path const& file,
+                                                                           std::string contents)
+{
+    std::erase(contents, '\r'); // as readFile() does
     try
     {
         // A side file holds a map of settings, or nothing yet. A bare word or a list parses too, but names
         // no setting, and subscripting a bare word throws.
-        auto document = YAML::Load(*contents);
+        auto document = YAML::Load(contents);
         if (!document.IsMap() && !document.IsNull())
             return std::unexpected(
                 std::format("{}: the document is not a map of settings", core::pathToUtf8(file)));
@@ -5538,27 +5544,45 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     return std::string { out.c_str() } + '\n';
 }
 
+namespace
+{
+    /// The palette a parsed `colorschemes/<name>.yml` document holds.
+    /// @param path     The file the document is of, for messages.
+    /// @param document The parsed document, or why there is none.
+    /// @return The palette, or nullopt when there is no document or it does not read as one.
+    [[nodiscard]] std::optional<vtbackend::ColorPalette> paletteFrom(
+        std::filesystem::path const& path, std::expected<YAML::Node, std::string> const& document)
+    {
+        if (!document)
+        {
+            configLog()("Could not read color scheme {}", document.error());
+            return std::nullopt;
+        }
+
+        try
+        {
+            auto reader = YAMLConfigReader(path, *document, configLog, configEnvironment());
+            auto palette = vtbackend::ColorPalette {};
+            reader.loadFromEntry(*document, palette);
+            return palette;
+        }
+        catch (std::exception const& e)
+        {
+            configLog()("Could not read color scheme {}: {}", core::pathToUtf8(path), e.what());
+            return std::nullopt;
+        }
+    }
+} // namespace
+
 std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path)
 {
-    auto const document = YAMLConfigReader::parseSideFile(path);
-    if (!document)
-    {
-        configLog()("Could not read color scheme {}", document.error());
-        return std::nullopt;
-    }
+    return paletteFrom(path, YAMLConfigReader::parseSideFile(path));
+}
 
-    try
-    {
-        auto reader = YAMLConfigReader(path, *document, configLog, configEnvironment());
-        auto palette = vtbackend::ColorPalette {};
-        reader.loadFromEntry(*document, palette);
-        return palette;
-    }
-    catch (std::exception const& e)
-    {
-        configLog()("Could not read color scheme {}: {}", core::pathToUtf8(path), e.what());
-        return std::nullopt;
-    }
+std::optional<vtbackend::ColorPalette> parseColorSchemeYaml(std::filesystem::path const& path,
+                                                            std::string contents)
+{
+    return paletteFrom(path, YAMLConfigReader::parseSideFileText(path, std::move(contents)));
 }
 
 std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)

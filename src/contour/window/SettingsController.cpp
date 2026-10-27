@@ -20,6 +20,7 @@
 
 #include <core/Assert.hpp>
 #include <core/Utf8Path.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -1983,8 +1984,7 @@ vtbackend::ColorPalette SettingsController::schemePalette(std::string const& nam
     auto palette = vtbackend::ColorPalette {};
     if (auto const it = cfg.colorschemes.value().find(name); it != cfg.colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
-                                                             / config::sideFileName(name)))
+    else if (auto const loaded = sideFileScheme(name))
         palette = *loaded;
     else
         (void) vtbackend::defaultColorPalettes(name, palette);
@@ -2017,9 +2017,18 @@ SettingsOrigin SettingsController::profileOrigin(std::string const& name) const
 
 bool SettingsController::colorSchemeSideFileExists(std::string const& name) const
 {
-    auto ec = std::error_code {};
-    auto const path = _config().configFile.parent_path() / "colorschemes" / config::sideFileName(name);
-    return std::filesystem::exists(path, ec) && !ec;
+    auto const read = _store->read(config::colorSchemeFile(name));
+    return read && read->has_value();
+}
+
+std::optional<vtbackend::ColorPalette> SettingsController::sideFileScheme(std::string const& name) const
+{
+    auto const file = config::colorSchemeFile(name);
+    auto read = _store->read(file);
+    if (!read || !read->has_value())
+        return std::nullopt;
+    return config::parseColorSchemeYaml(_config().configFile.parent_path() / config::relativePathOf(file),
+                                        std::move(**read));
 }
 
 bool SettingsController::isInlineColorScheme(std::string const& name) const
@@ -2090,18 +2099,15 @@ void SettingsController::refresh()
     auto schemeNames = std::set<std::string> {};
     for (auto const& [name, _]: cfg.colorschemes.value())
         schemeNames.insert(name);
-    auto const schemesDir = cfg.configFile.parent_path() / "colorschemes";
     auto onDisk = std::set<std::string> {};
-    auto ec = std::error_code {};
-    if (std::filesystem::is_directory(schemesDir, ec))
-        for (auto const& entry: std::filesystem::directory_iterator(schemesDir, ec))
-            if (entry.is_regular_file() && entry.path().extension() == ".yml")
-            {
-                // Its name, read back as sideFileName() spelled it.
-                auto name = core::pathToUtf8(entry.path().stem());
-                schemeNames.insert(name);
-                onDisk.insert(std::move(name));
-            }
+    if (auto const listed = _store->list(config::SideFileKind::ColorScheme))
+        for (auto const& file: *listed)
+        {
+            schemeNames.insert(file.name);
+            onDisk.insert(file.name);
+        }
+    else
+        errorLog()("Could not list the color schemes: {}", listed.error());
 
     _colorSchemes.clear();
     for (auto const& name: schemeNames)
@@ -2289,7 +2295,9 @@ bool SettingsController::saveProfile()
     if (auto const problem = draftProblem())
         return fail(*problem);
 
-    if (auto const result = _store->saveProfile(_editingProfile.toStdString(), _draft); !result)
+    if (auto const result = _store->write(config::profileFile(_editingProfile.toStdString()),
+                                          config::emitProfileYaml(_draft));
+        !result)
         return fail(result.error());
 
     _apply();
@@ -2313,7 +2321,9 @@ bool SettingsController::saveProfileAs(QString const& newName)
     if (auto const problem = draftProblem())
         return fail(*problem);
 
-    if (auto const result = _store->saveProfile(trimmed.toStdString(), _draft); !result)
+    if (auto const result =
+            _store->write(config::profileFile(trimmed.toStdString()), config::emitProfileYaml(_draft));
+        !result)
         return fail(result.error());
 
     _apply();
@@ -2329,7 +2339,7 @@ bool SettingsController::deleteProfile(QString const& name)
     if (profileOrigin(name.toStdString()) != SettingsOrigin::SideFile)
         return fail("Only GUI-created profiles can be deleted here.");
 
-    if (auto const result = _store->deleteProfile(name.toStdString()); !result)
+    if (auto const result = _store->remove(config::profileFile(name.toStdString())); !result)
         return fail(result.error());
 
     if (_editingProfile == name)
@@ -2366,15 +2376,19 @@ bool SettingsController::renameProfile(QString const& oldName, QString const& ne
     auto const profileCopy = *profile;
     bool const wasDefault = (_defaultProfile == oldName);
 
-    if (auto const result = _store->saveProfile(trimmed.toStdString(), profileCopy); !result)
+    if (auto const result =
+            _store->write(config::profileFile(trimmed.toStdString()), config::emitProfileYaml(profileCopy));
+        !result)
         return fail(result.error());
-    if (auto const result = _store->deleteProfile(oldName.toStdString()); !result)
+    if (auto const result = _store->remove(config::profileFile(oldName.toStdString())); !result)
         return fail(result.error());
     if (wasDefault)
     {
         auto settings = _config().guiManagedSettings;
         settings.defaultProfile = trimmed.toStdString();
-        if (auto const result = _store->saveGuiSettings(settings); !result)
+        if (auto const result =
+                _store->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings));
+            !result)
             return fail(result.error());
     }
 
@@ -2392,7 +2406,8 @@ bool SettingsController::setDefaultProfile(QString const& name)
 
     auto settings = _config().guiManagedSettings;
     settings.defaultProfile = name.toStdString();
-    if (auto const result = _store->saveGuiSettings(settings); !result)
+    if (auto const result = _store->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings));
+        !result)
         return fail(result.error());
 
     _apply();
@@ -2460,7 +2475,9 @@ bool SettingsController::setGlobalField(QString const& key, QVariant const& valu
                 return fail("This setting cannot be saved: settings.yml does not apply it.");
             auto settings = _config().guiManagedSettings;
             settings.globalOverrides[key.toStdString()] = descriptor.toYaml(value);
-            if (auto const result = _store->saveGuiSettings(settings); !result)
+            if (auto const result =
+                    _store->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings));
+                !result)
                 return fail(result.error());
             _apply();
             refresh();
@@ -2475,7 +2492,8 @@ bool SettingsController::resetGlobalField(QString const& key)
         return fail("The settings page is read-only.");
     auto settings = _config().guiManagedSettings;
     settings.globalOverrides.erase(key.toStdString());
-    if (auto const result = _store->saveGuiSettings(settings); !result)
+    if (auto const result = _store->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings));
+        !result)
         return fail(result.error());
     _apply();
     refresh();
@@ -2509,8 +2527,7 @@ void SettingsController::editColorScheme(QString const& name)
     if (auto const it = cfg.colorschemes.value().find(name.toStdString());
         it != cfg.colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
-                                                             / config::sideFileName(name.toStdString())))
+    else if (auto const loaded = sideFileScheme(name.toStdString()))
         palette = *loaded;
 
     _schemeDraft = palette;
@@ -2564,7 +2581,6 @@ bool SettingsController::renameColorScheme(QString const& oldName, QString const
 {
     if (_locked)
         return fail("The settings page is read-only.");
-    auto const schemesDir = _config().configFile.parent_path() / "colorschemes";
     if (!colorSchemeSideFileExists(oldName.toStdString()))
         return fail("Only GUI-created color schemes can be renamed here.");
     auto const trimmed = newName.trimmed();
@@ -2585,13 +2601,14 @@ bool SettingsController::renameColorScheme(QString const& oldName, QString const
     if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
         it != _config().colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded =
-                 config::loadColorSchemeFile(schemesDir / config::sideFileName(oldName.toStdString())))
+    else if (auto const loaded = sideFileScheme(oldName.toStdString()))
         palette = *loaded;
 
-    if (auto const result = _store->saveColorScheme(trimmed.toStdString(), palette); !result)
+    if (auto const result = _store->write(config::colorSchemeFile(trimmed.toStdString()),
+                                          config::emitColorSchemeYaml(palette));
+        !result)
         return fail(result.error());
-    if (auto const result = _store->deleteColorScheme(oldName.toStdString()); !result)
+    if (auto const result = _store->remove(config::colorSchemeFile(oldName.toStdString())); !result)
         return fail(result.error());
 
     _apply();
@@ -2612,7 +2629,9 @@ bool SettingsController::saveColorScheme(QString const& name)
     if (isInlineColorScheme(name.trimmed().toStdString()))
         return fail("A color scheme with that name is defined in contour.yml; choose another name.");
 
-    if (auto const result = _store->saveColorScheme(name.toStdString(), _schemeDraft); !result)
+    if (auto const result = _store->write(config::colorSchemeFile(name.toStdString()),
+                                          config::emitColorSchemeYaml(_schemeDraft));
+        !result)
         return fail(result.error());
 
     _apply();
@@ -2633,7 +2652,7 @@ bool SettingsController::deleteColorScheme(QString const& name)
     if (!colorSchemeSideFileExists(name.toStdString()))
         return fail("Only GUI-created color schemes can be deleted here.");
 
-    if (auto const result = _store->deleteColorScheme(name.toStdString()); !result)
+    if (auto const result = _store->remove(config::colorSchemeFile(name.toStdString())); !result)
         return fail(result.error());
 
     if (_editingScheme == name)

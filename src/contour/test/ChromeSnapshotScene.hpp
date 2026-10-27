@@ -42,6 +42,7 @@
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 
 #include <core/platform/FileSystem.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
@@ -993,7 +994,7 @@ class ChromeSnapshotScene
                 return std::make_unique<window::SettingsController>(
                     [this]() -> config::Config const& { return _config; },
                     std::make_shared<config::FileGuiConfigStore>(
-                        std::filesystem::path(_settingsDir.path().toStdU16String())),
+                        _settingsFiles, std::filesystem::path(_settingsDir.path().toStdU16String())),
                     [] {},
                     nullptr,
                     vtbackend::ColorPreference::Dark);
@@ -1293,6 +1294,7 @@ class ChromeSnapshotScene
     command::LayoutCommandSource _layoutCommands;
     command::ActionCommandSource _actionCommands;
     std::unique_ptr<window::CommandPaletteModel> _paletteModel;
+    core::platform::NativeFileSystem _settingsFiles; ///< What the Settings controller's store writes through.
     QTemporaryDir _settingsDir;
     std::unique_ptr<window::SettingsController> _settings;
     MockMainController _controller;

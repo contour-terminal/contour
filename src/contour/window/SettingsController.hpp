@@ -299,10 +299,14 @@ class SettingsController: public QObject
   private:
     /// The origin of @p name among the current profiles, defaulting to Builtin if unknown.
     [[nodiscard]] config::SettingsOrigin profileOrigin(std::string const& name) const;
-    /// Whether a GUI-owned side file @c colorschemes/<name>.yml exists on disk. This is the editability
-    /// ground truth the color-scheme list uses: only such schemes can be edited, renamed or deleted.
+    /// Whether a GUI-owned side file @c colorschemes/<name>.yml exists, as the store reads it. This is the
+    /// editability ground truth the color-scheme list uses: only such schemes can be edited, renamed or
+    /// deleted.
     /// @param name The color scheme name. @return true if the side file exists.
     [[nodiscard]] bool colorSchemeSideFileExists(std::string const& name) const;
+    /// The palette of colour scheme @p name's GUI side file, read through the store.
+    /// @param name The color scheme name. @return The palette; nullopt without a side file that parses.
+    [[nodiscard]] std::optional<vtbackend::ColorPalette> sideFileScheme(std::string const& name) const;
     /// Whether @p name is a color scheme declared inline in contour.yml with no GUI side file backing it.
     /// Such a name would shadow a @c colorschemes/<name>.yml side file at load time (the inline node wins),
     /// so the GUI must refuse to write one. @param name The color scheme name. @return true if inline.
