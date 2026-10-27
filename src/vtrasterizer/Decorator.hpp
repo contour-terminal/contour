@@ -42,14 +42,13 @@ enum class Decorator : uint8_t
     /// The thin line under the text an input method is composing: one point thick, where the font's
     /// underline is. Internal -- drawn for CellFlag::InputMethodPreedit, never named in a configuration.
     PreeditUnderline,
-};
 
-/// The last enumerator of Decorator, written beside it so that the two change together.
-///
-/// What std::numeric_limits<Decorator>::max() reports, and so what counts the renderer's direct-mapped tile
-/// slots: one per decorator, then the dotted underline's further phases. An enumerator left past it gets no
-/// slot of its own and draws whichever tile sits where its slot would be.
-inline constexpr auto LastDecorator = Decorator::PreeditUnderline;
+    /// Not a decorator: how many there are. Stays last, so a new decorator is counted wherever it is added.
+    ///
+    /// What std::numeric_limits<Decorator> reports, and so what counts the renderer's direct-mapped tile
+    /// slots: one per decorator, then the dotted underline's further phases.
+    Count,
+};
 
 /// Every decorator paired with the token that names it in a configuration file.
 ///
@@ -114,11 +113,11 @@ struct std::numeric_limits<vtrasterizer::Decorator>
 {
     using Decorator = vtrasterizer::Decorator;
     constexpr static Decorator min() noexcept { return Decorator::Underline; }
-    constexpr static Decorator max() noexcept { return vtrasterizer::LastDecorator; }
-    constexpr static size_t count() noexcept
+    constexpr static Decorator max() noexcept
     {
-        return static_cast<size_t>(max()) - static_cast<size_t>(min()) + 1;
+        return static_cast<Decorator>(static_cast<size_t>(Decorator::Count) - 1);
     }
+    constexpr static size_t count() noexcept { return static_cast<size_t>(Decorator::Count); }
 };
 
 namespace vtrasterizer::detail
@@ -126,7 +125,7 @@ namespace vtrasterizer::detail
 /// Whether the names tables name every decorator below the count exactly once, and nothing at or past it.
 ///
 /// Together with the size check below this makes the tables and the count agree: a decorator added with
-/// a name but past @ref LastDecorator, or a count that grew without a name, fails to compile.
+/// no name, which Decorator::Count counts all the same, fails to compile.
 [[nodiscard]] consteval bool everyDecoratorIsNamedOnce()
 {
     auto constexpr Count = std::numeric_limits<Decorator>::count();
@@ -151,11 +150,10 @@ namespace vtrasterizer::detail
 static_assert(
     vtrasterizer::DecoratorNames.size() + vtrasterizer::InternalDecoratorNames.size()
         == std::numeric_limits<vtrasterizer::Decorator>::count(),
-    "Every Decorator has one name, in DecoratorNames or InternalDecoratorNames, and LastDecorator is "
-    "the last enumerator: the count of direct-mapped tile slots is taken from it.");
-static_assert(
-    vtrasterizer::detail::everyDecoratorIsNamedOnce(),
-    "A Decorator is named twice, or past LastDecorator: each needs one name and a tile slot of its own.");
+    "Every Decorator has one name, in DecoratorNames or InternalDecoratorNames: the count of direct-mapped "
+    "tile slots, Decorator::Count, includes a decorator whether it is named or not.");
+static_assert(vtrasterizer::detail::everyDecoratorIsNamedOnce(),
+              "A Decorator is named twice, or Decorator::Count is named: each decorator needs one name.");
 
 template <>
 struct std::formatter<vtrasterizer::Decorator>: formatter<std::string_view>

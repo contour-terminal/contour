@@ -345,6 +345,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 return image;
             });
         }
+        case Decorator::Count: break; // not a decorator
     }
     (void) SoftRequire(false);
     return {};
