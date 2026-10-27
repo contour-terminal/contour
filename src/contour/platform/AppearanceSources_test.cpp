@@ -141,3 +141,38 @@ TEST_CASE("Both service sets build a null menu bar integration", "[appearance-so
         CHECK(dynamic_cast<contour::platform::NullMenuBarIntegration const*>(integration.get()) != nullptr);
     }
 }
+
+TEST_CASE("Both service sets build a null secure input", "[appearance-source][secureinput]")
+{
+    // A fixture-built app must never reach the OS's secure keyboard entry: the system-wide state would leak
+    // out of the test run.
+    auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
+    auto appearanceSwitch = contour::test::AppearanceSwitch {};
+    for (auto const& services:
+         { contour::platform::nullAppearanceServices(),
+           contour::test::appearanceServicesWith(accessibilitySwitch, appearanceSwitch) })
+    {
+        auto const secureInput = services.secureInput();
+        REQUIRE(secureInput != nullptr);
+        CHECK(secureInput->support() == contour::platform::SecureInputSupport::None);
+    }
+}
+
+TEST_CASE("appearanceServicesWith counts secure input into a record", "[appearance-source][secureinput]")
+{
+    auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
+    auto appearanceSwitch = contour::test::AppearanceSwitch {};
+    auto record = contour::test::SecureInputRecord {};
+    auto const services =
+        contour::test::appearanceServicesWith(accessibilitySwitch, appearanceSwitch, record);
+    {
+        auto const secureInput = services.secureInput();
+        REQUIRE(secureInput != nullptr);
+        CHECK(secureInput->support() == contour::platform::SecureInputSupport::Native);
+        secureInput->enable();
+        secureInput->disable();
+    }
+    // Still readable after the object is gone, as a test reads it after the app that owned it.
+    CHECK(record.enables == 1);
+    CHECK(record.disables == 1);
+}

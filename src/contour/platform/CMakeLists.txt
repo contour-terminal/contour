@@ -37,6 +37,8 @@ add_library(contour_platform STATIC
     PortalExternalLauncher.cpp PortalExternalLauncher.hpp
     PlatformAppearance.cpp PlatformAppearance.hpp
     PortalNotificationTransport.cpp PortalNotificationTransport.hpp
+    SecureInput.cpp SecureInput.hpp
+    SecureInputGate.hpp
     GuiTheme.hpp
     NotificationIdMap.hpp
     NotificationRouter.hpp
@@ -91,15 +93,18 @@ if(APPLE)
         CocoaMenuBarIntegration.mm
         CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm
+        CocoaSecureInput.mm
         CocoaTaskbarProgressSink.mm
         CocoaTitleBandMaterial.mm
         CocoaWindowFrame.mm
         CocoaWindowResizeGrid.mm)
     set_source_files_properties(
         CocoaAccessibilityPreferenceSource.mm CocoaMenuBarIntegration.mm CocoaNativeMenuPresenter.mm
-        CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm CocoaTitleBandMaterial.mm
+        CocoaPlatformAppearance.mm CocoaSecureInput.mm CocoaTaskbarProgressSink.mm CocoaTitleBandMaterial.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
+    # EnableSecureEventInput() and DisableSecureEventInput(), for CocoaSecureInput.mm: HIToolbox's.
+    target_link_libraries(contour_platform PUBLIC "-framework Carbon")
     # QMenu::toNSMenu(), for the menu bar integration alone; the interface only forward-declares QMenu.
     target_link_libraries(contour_platform PRIVATE Qt6::Widgets)
 endif()

@@ -11,6 +11,7 @@
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
+#include <contour/test/SecureInputFixtures.hpp>
 
 #include <functional>
 #include <memory>
@@ -136,7 +137,7 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
 
 /// Services whose factories attach to the given switches: each stores the callback it is handed into
 /// its switch and returns a source that reads that switch. Menus get the null presenter, the menu
-/// bar the null integration, and the title band the null material.
+/// bar the null integration, the title band the null material, and secure input the null one.
 /// @param accessibility The accessibility switch; it must outlive the services and their sources.
 /// @param appearance The appearance switch; it must outlive the services and their sources.
 /// @return The services.
@@ -166,6 +167,10 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
         .titleBand = []() -> std::unique_ptr<platform::ITitleBandMaterial> {
             return std::make_unique<platform::NullTitleBandMaterial>();
         },
+        // The null secure input, so a fixture-built app never turns on the system's Secure Keyboard Entry.
+        .secureInput = []() -> std::unique_ptr<platform::ISecureInput> {
+            return std::make_unique<platform::NullSecureInput>();
+        },
     };
 }
 
@@ -182,6 +187,23 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
     auto services = appearanceServicesWith(accessibility, appearance);
     services.titleBand = [&titleBand]() -> std::unique_ptr<platform::ITitleBandMaterial> {
         return std::make_unique<RecordingTitleBandMaterial>(titleBand);
+    };
+    return services;
+}
+
+/// The services of appearanceServicesWith(AccessibilitySwitch&, AppearanceSwitch&), with a secure input
+/// that counts into @p secureInput.
+/// @param accessibility The accessibility switch; it must outlive the services and their sources.
+/// @param appearance The appearance switch; it must outlive the services and their sources.
+/// @param secureInput The record; it must outlive the services and their secure input.
+/// @return The services.
+[[nodiscard]] inline platform::AppearanceServices appearanceServicesWith(AccessibilitySwitch& accessibility,
+                                                                         AppearanceSwitch& appearance,
+                                                                         SecureInputRecord& secureInput)
+{
+    auto services = appearanceServicesWith(accessibility, appearance);
+    services.secureInput = [&secureInput]() -> std::unique_ptr<platform::ISecureInput> {
+        return std::make_unique<RecordingSecureInput>(secureInput);
     };
     return services;
 }

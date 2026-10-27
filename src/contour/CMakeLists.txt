@@ -869,6 +869,7 @@ if(CONTOUR_FRONTEND_GUI)
                 platform/CocoaAppearanceSources_test.mm
                 platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm
+                platform/CocoaSecureInput_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm
                 platform/CocoaTitleBandMaterial_test.mm
                 platform/CocoaWindowFrame_test.mm
@@ -878,8 +879,9 @@ if(CONTOUR_FRONTEND_GUI)
                 OBJCXX_STANDARD_REQUIRED ON)
             set_source_files_properties(
                 platform/CocoaAppearanceSources_test.mm platform/CocoaMenuBarIntegration_test.mm
-                platform/CocoaNativeMenuPresenter_test.mm platform/CocoaTaskbarProgressSink_test.mm
-                platform/CocoaTitleBandMaterial_test.mm platform/CocoaWindowFrame_test.mm
+                platform/CocoaNativeMenuPresenter_test.mm platform/CocoaSecureInput_test.mm
+                platform/CocoaTaskbarProgressSink_test.mm platform/CocoaTitleBandMaterial_test.mm
+                platform/CocoaWindowFrame_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)
@@ -1240,6 +1242,7 @@ if(CONTOUR_TESTING)
         session/EndReason_test.cpp
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
+        platform/SecureInputGate_test.cpp
         platform/SessionVisibility_test.cpp
         window/HeldModifierReveal_test.cpp
         window/FindBarPlacement_test.cpp

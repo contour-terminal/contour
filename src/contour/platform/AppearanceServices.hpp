@@ -5,6 +5,7 @@
 #include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/SecureInput.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 
 #include <functional>
@@ -29,10 +30,13 @@ struct AppearanceServices
     std::function<std::unique_ptr<IMenuBarIntegration>()> menuBar = makeMenuBarIntegration;
     /// Builds the material the OS draws behind a client-drawn title band.
     std::function<std::unique_ptr<ITitleBandMaterial>()> titleBand = makeTitleBandMaterial;
+    /// Builds the OS's secure keyboard entry.
+    std::function<std::unique_ptr<ISecureInput>()> secureInput = makeSecureInput;
 };
 
 /// @return Factories that build the null sources, the null menu presenter, the null menu bar
-///         integration and the null title-band material on every platform; no source ever calls back.
+///         integration, the null title-band material and the null secure input on every platform; no
+///         source ever calls back.
 [[nodiscard]] inline AppearanceServices nullAppearanceServices()
 {
     return AppearanceServices {
@@ -52,6 +56,7 @@ struct AppearanceServices
         .titleBand = []() -> std::unique_ptr<ITitleBandMaterial> {
             return std::make_unique<NullTitleBandMaterial>();
         },
+        .secureInput = []() -> std::unique_ptr<ISecureInput> { return std::make_unique<NullSecureInput>(); },
     };
 }
 
