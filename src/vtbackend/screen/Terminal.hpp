@@ -3,6 +3,7 @@
 
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/core/CaptureLineMode.hpp>
+#include <vtbackend/core/ClipboardWriter.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -583,7 +584,8 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
-        virtual void copyToClipboard(std::string_view /*data*/) {}
+        /// @p data is to go on the clipboard; @p writer says who put it there.
+        virtual void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) {}
 
         /// The application asked for a different mouse pointer shape, by CSS name (`OSC 22`).
         /// @see vtbackend::pointer_shape::SupportedNames.
@@ -806,7 +808,7 @@ class Terminal: public IStatusLinePublishTarget
         void pageResized() override {}
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
-        void copyToClipboard(std::string_view /*data*/) override {}
+        void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) override {}
         void setPointerShape(std::string_view /*cssName*/) override {}
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
@@ -3264,7 +3266,12 @@ class Terminal: public IStatusLinePublishTarget
     void renderBufferUpdated();
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
-    void copyToClipboard(std::string_view data);
+    /// Puts @p data on the frontend's clipboard. A user's copy is handed over once the state lock is released
+    /// (runOutsideStateLock()), as the frontend tells its window of it, which reads terminal state; a
+    /// program's goes out at once.
+    /// @param data What to copy.
+    /// @param writer Who copies it.
+    void copyToClipboard(std::string_view data, ClipboardWriter writer);
 
     // {{{ Mouse pointer shape (OSC 22)
     /// @return the CSS name of the shape currently in effect.

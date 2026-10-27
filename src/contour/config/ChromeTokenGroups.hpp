@@ -217,10 +217,14 @@ enum class SchemeSlot : uint8_t
     /// palette): @c Selection where it does, else inverse video on the bar (@c BarInk as the fill).
     BarSelection,
     BarSelectionText, //!< The text on @c BarSelection, at 4.5:1.
+    /// The toast's fill: inverse video (the foreground) where the background reads on it at 4.5:1, else the
+    /// bar.
+    Toast,
+    ToastInk, //!< The text on @c Toast, which reads on it wherever either candidate does.
 };
 
 /// Number of @c SchemeSlot enumerators, derived from the last one.
-inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::BarSelectionText) + 1;
+inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::ToastInk) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
 inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindErrorText) + 1;
@@ -1298,11 +1302,13 @@ namespace detail
                     .findBar = FindBarHost::PaneHeaderRow },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
+        // The banner's mark in the scheme's warning hue where that reads on the bar, else the bar's ink; the
+        // toast an inverse strip where inverse video reads, else a bar strip.
         .colors = { schemeColor(SchemeSlot::Bar),
                     schemeColor(SchemeSlot::BarInk),
-                    schemeColor(SchemeSlot::Warning),
-                    schemeColor(SchemeSlot::Foreground),
-                    schemeColor(SchemeSlot::Background),
+                    schemeOnBar(SchemeSlot::Warning),
+                    schemeColor(SchemeSlot::Toast),
+                    schemeColor(SchemeSlot::ToastInk),
                     schemeColor(SchemeSlot::Foreground),
                     schemeColor(SchemeSlot::Bar),           // TabWellFill
                     schemeColor(SchemeSlot::Selection),     // TabActiveFill
@@ -1448,6 +1454,17 @@ enum class SelectionSource : uint8_t
     BarInverse, //!< The bar's ink as the fill, the bar as the text: legible, and stands off the bar.
 };
 
+/// Where the Terminal row's toast takes its colours from, in the order it is tried.
+enum class ToastSource : uint8_t
+{
+    Inverse = 0, //!< Inverse video: the foreground as the fill, the background as the text.
+    Bar,         //!< The bar and its ink (vtbackend::legibleInkOn()): always legible.
+};
+
+/// The candidates for the Terminal row's toast, first legible one wins: some schemes' two ends do not read
+/// on each other at 4.5:1 (one-dark).
+inline constexpr std::array ToastFallbacks { ToastSource::Inverse, ToastSource::Bar };
+
 /// The candidates for the chrome's selection, first legible one wins. Most bundled schemes inherit a
 /// saturated blue selection on which neither end of the scheme reaches 4.5:1 (one-dark, solarized-dark);
 /// the last candidate always reads, so the active tab does on every scheme.
@@ -1558,6 +1575,12 @@ namespace detail
     auto const selection = detail::firstLegiblePair(SelectionFallbacks, pairOf);
     auto const barSelection = detail::firstMarkedPair(BarSelectionFallbacks, bar, pairOf);
 
+    auto const toast = detail::firstLegiblePair(ToastFallbacks, [&](ToastSource source) {
+        if (source == ToastSource::Inverse)
+            return detail::InkPair { .fill = palette.defaultForeground, .text = palette.defaultBackground };
+        return detail::InkPair { .fill = bar, .text = barInk };
+    });
+
     auto colors = ChromeSchemeColors {};
     colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
@@ -1572,6 +1595,8 @@ namespace detail
     colors.bySlot[static_cast<size_t>(SchemeSlot::Warning)] = palette.normalColor(3);
     colors.bySlot[static_cast<size_t>(SchemeSlot::BarSelection)] = barSelection.fill;
     colors.bySlot[static_cast<size_t>(SchemeSlot::BarSelectionText)] = barSelection.text;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Toast)] = toast.fill;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::ToastInk)] = toast.text;
     return colors;
 }
 

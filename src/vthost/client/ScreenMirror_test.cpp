@@ -127,7 +127,10 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
     {
         shownNotifications.push_back(notification);
     }
-    void copyToClipboard(std::string_view data) override { clipboard = data; }
+    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
+    {
+        clipboard = data;
+    }
     int screenUpdates = 0; ///< Frames that brought output.
     int screenReplays = 0; ///< Frames that repainted what the mirror showed already.
     void screenUpdated() override { ++screenUpdates; }

@@ -30,6 +30,7 @@ constexpr auto BareBandHeight = 28;
              .bandHeight = bandHeight,
              .toastHeight = ToastHeight,
              .cursorRow = cursorRow,
+             .footer = contour::window::PaneFooter::Hidden,
              .coveredRows = ToastCoveredRows };
 }
 
@@ -82,4 +83,23 @@ TEST_CASE("placeToast: the band's names read back", "[toastplacement]")
     }
     CHECK_FALSE(barPresenceNamed("sideways").has_value());
     CHECK_FALSE(barEdgeNamed("").has_value());
+}
+
+TEST_CASE("placeToast: an ended session's footer keeps it at the top", "[toastplacement]")
+{
+    auto ended = inputs(BarPresence::Hidden, BarEdge::Top, 0, 0);
+    ended.footer = contour::window::PaneFooter::Shown;
+    CHECK(placeToast(ended) == ToastHost::ContentTop);
+    // A band that holds it still does.
+    ended = inputs(BarPresence::Shown, BarEdge::Top, BandHeight, 0);
+    ended.footer = contour::window::PaneFooter::Shown;
+    CHECK(placeToast(ended) == ToastHost::TitleBand);
+}
+
+TEST_CASE("placeToast: each host has its own name", "[toastplacement]")
+{
+    using contour::window::toastHostName;
+    CHECK(toastHostName(ToastHost::TitleBand) == "titleBand");
+    CHECK(toastHostName(ToastHost::ContentTop) == "contentTop");
+    CHECK(toastHostName(ToastHost::ContentBottom) == "contentBottom");
 }

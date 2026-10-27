@@ -1355,10 +1355,10 @@ bool WindowController::dressesTitleBand() const noexcept
     return framePolicy().shadow == platform::FrameShadowStrategy::FullSizeContent;
 }
 
-int WindowController::toastHost(QString const& band,
-                                QString const& edge,
-                                int bandHeight,
-                                int toastHeight) const
+QString WindowController::toastHost(QString const& band,
+                                    QString const& edge,
+                                    int bandHeight,
+                                    int toastHeight) const
 {
     auto const* const session = activeSession();
     auto const host = placeToast(ToastPlacementInputs {
@@ -1367,9 +1367,11 @@ int WindowController::toastHost(QString const& band,
         .bandHeight = bandHeight,
         .toastHeight = toastHeight,
         .cursorRow = session != nullptr ? session->cursorLine() : 0,
+        .footer =
+            session != nullptr && session->getSessionEnd() != 0 ? PaneFooter::Shown : PaneFooter::Hidden,
         .coveredRows = ToastCoveredRows,
     });
-    return static_cast<int>(host);
+    return QString::fromUtf8(toastHostName(host));
 }
 
 TitleBand WindowController::titleBand() const

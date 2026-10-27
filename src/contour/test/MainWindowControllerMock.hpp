@@ -272,19 +272,20 @@ class MainWindowControllerMock: public QAbstractListModel
     [[nodiscard]] window::NoticeModel* noticesForQml() noexcept { return &_notices; }
 
     /// Mirrors WindowController::toastHost(), with the active pane's cursor row a test sets.
-    [[nodiscard]] Q_INVOKABLE int toastHost(QString const& band,
-                                            QString const& edge,
-                                            int bandHeight,
-                                            int toastHeight) const
+    [[nodiscard]] Q_INVOKABLE QString toastHost(QString const& band,
+                                                QString const& edge,
+                                                int bandHeight,
+                                                int toastHeight) const
     {
-        return static_cast<int>(window::placeToast(window::ToastPlacementInputs {
+        return QString::fromUtf8(window::toastHostName(window::placeToast(window::ToastPlacementInputs {
             .band = window::barPresenceNamed(band.toStdString()).value_or(window::BarPresence::Hidden),
             .edge = window::barEdgeNamed(edge.toStdString()).value_or(window::BarEdge::Top),
             .bandHeight = bandHeight,
             .toastHeight = toastHeight,
             .cursorRow = cursorRow,
+            .footer = window::PaneFooter::Hidden,
             .coveredRows = window::ToastCoveredRows,
-        }));
+        })));
     }
 
     core::platform::ManualClock noticeClock {}; ///< What the notices' toasts are timed by.

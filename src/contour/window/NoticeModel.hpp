@@ -52,7 +52,8 @@ class NoticeModel final: public QObject
     /// @return The banner's action button label; empty without one.
     [[nodiscard]] QString bannerActionText() const;
 
-    /// Shows @p notice, or queues it behind the toast shown (see NoticeQueue).
+    /// Shows @p notice, or queues it behind the toast shown (see NoticeQueue). GUI thread, and never under a
+    /// terminal's lock: a toast that shows asks the window where to go, which reads the cursor under it.
     void post(Notice notice);
 
     /// Takes every notice of @p kind away.

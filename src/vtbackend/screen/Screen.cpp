@@ -4466,7 +4466,7 @@ namespace impl
             if (splits[1] == "?")
                 terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
             else
-                terminal.copyToClipboard(core::base64::decode(splits[1]));
+                terminal.copyToClipboard(core::base64::decode(splits[1]), ClipboardWriter::Program);
             return ApplyResult::Ok;
         }
 
@@ -5308,7 +5308,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // An empty chunk is the end-of-transmission marker.
             if (packet.payload.empty())
             {
-                _terminal->copyToClipboard(_terminal->kittyClipboardWrite());
+                _terminal->copyToClipboard(_terminal->kittyClipboardWrite(), ClipboardWriter::Program);
                 _terminal->kittyClipboardWrite().clear();
                 _terminal->kittyClipboardWriteOpen() = false;
                 respond("DONE");

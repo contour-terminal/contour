@@ -1020,7 +1020,7 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                    [this](proto::SessionClipboard const& clipboard) {
                        // Under the CLIENT's own write permission, which is the point of routing it
                        // through the terminal rather than to the clipboard directly.
-                       _terminal->copyToClipboard(clipboard.data);
+                       _terminal->copyToClipboard(clipboard.data, vtbackend::ClipboardWriter::Program);
                    },
                    [this](proto::ProgramStatus const& status) {
                        auto const guard = std::lock_guard { *_terminal };

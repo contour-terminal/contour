@@ -471,7 +471,7 @@ class HostedSession
             if (onNotify)
                 onNotify(notification.title, notification.body, notification.occasion);
         }
-        void copyToClipboard(std::string_view data) override
+        void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
         {
             if (onCopyToClipboard)
                 onCopyToClipboard(std::string { data });

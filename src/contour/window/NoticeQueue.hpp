@@ -204,16 +204,28 @@ enum class NoticeChange : uint8_t
     Changed,  ///< The toast or the banner changed.
 };
 
-/// The most toasts that wait behind the one shown; a further one drops the oldest.
+/// The most toasts that wait behind the one shown. No drop is needed to keep to it: a waiting toast of a kind
+/// already waiting replaces it, and one of the shown kind replaces the shown one, so at most one per other
+/// toast kind waits -- which the assertion below holds the table to.
 inline constexpr std::size_t NoticeWaitingLimit = 4;
+
+/// How many notice kinds show as a toast.
+inline constexpr auto ToastKindCount =
+    static_cast<std::size_t>(std::ranges::count(NoticeRows, NoticeSurface::Toast, &NoticeRow::surface));
+
+static_assert(
+    NoticeWaitingLimit >= ToastKindCount - 1,
+    "every toast kind but the shown one must be able to wait: raise NoticeWaitingLimit, or drop the "
+    "oldest when it is exceeded");
 
 /// A window's notices: one toast shown at a time, others waiting, and one banner.
 ///
 /// A toast shows for its row's duration from the moment it becomes current; while hovered its deadline is
 /// suspended, and leaving restarts the full duration. A toast posted while one of the same kind is current
 /// replaces its text and restarts it; one posted while another kind shows waits, replacing a waiting one of
-/// its own kind; at most NoticeWaitingLimit wait, the oldest dropped. The banner slot holds one notice; a
-/// later post replaces it. Time comes in through each call, so the queue is a value a test steps through.
+/// its own kind, so at most one of each other kind waits (NoticeWaitingLimit). The banner slot holds one
+/// notice; a later post replaces it. Time comes in through each call, so the queue is a value a test steps
+/// through.
 class NoticeQueue
 {
   public:
@@ -238,11 +250,7 @@ class NoticeQueue
         if (auto const same = std::ranges::find(_waiting, notice.kind, &Notice::kind); same != _waiting.end())
             *same = std::move(notice);
         else
-        {
             _waiting.push_back(std::move(notice));
-            if (_waiting.size() > NoticeWaitingLimit)
-                _waiting.pop_front();
-        }
         return NoticeChange::None;
     }
 

@@ -2941,18 +2941,63 @@ TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 
-    SECTION("the Terminal row: the one-row toast is the window's")
+    SECTION("the Terminal row: the one-row toast sits in the one-row bar")
     {
         QQmlEngine engine;
         MockMainController controller;
         contour::test::QmlMessageCapture warnings;
         auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+        showWindow(*root);
+        REQUIRE(root->property("band").toMap().value("band").toString() == "shown");
         controller.notices().post(copiedNotice());
         QCoreApplication::processEvents();
         auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
         REQUIRE(toast != nullptr);
+        REQUIRE(titleBar != nullptr);
         CHECK(toast->property("shown").toBool());
+        CHECK(toast->property("host").toString() == "titleBand");
+        CHECK(sceneRectOf(*titleBar).contains(sceneRectOf(*toast).center()));
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("without a band, a cursor in the top rows sends it to the bottom")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.cursorRow = 0;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
+        controller.setTabBarShouldShow(false);
+        QCoreApplication::processEvents();
+        REQUIRE(root->property("band").toMap().value("band").toString() == "hidden");
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(content != nullptr);
+        CHECK(toast->property("host").toString() == "contentBottom");
+        CHECK(sceneRectOf(*toast).center().y() > sceneRectOf(*content).center().y());
+        CHECK(sceneRectOf(*content).contains(sceneRectOf(*toast)));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("it is no alert of its own: the notices say it, once")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        auto const children = toast->findChildren<QObject*>(Qt::FindDirectChildrenOnly);
+        auto const attached = std::ranges::find_if(
+            children, [](QObject const* child) { return child->inherits("QQuickAccessibleAttached"); });
+        REQUIRE(attached != children.end());
+        CHECK((*attached)->property("role").toInt() == QAccessible::StaticText);
     }
 }
 

@@ -401,20 +401,23 @@ ThemedWindow
 
     // This window's toast (window::NoticeModel): centred, in the title band while a band at the top can hold
     // it, else at the content's top -- or its bottom, while the cursor is in the rows the top one would
-    // cover. Where it goes is decided as it shows (WindowController.toastHost, a ToastHost's value:
-    // 0 TitleBand, 1 ContentTop, 2 ContentBottom); a hovered toast stays.
+    // cover, or at the top again over an ended pane's footer. Where it goes is decided as it shows
+    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered toast stays. Not an
+    // alert to a screen reader: the window's NoticeModel says each notice once, and an AlertMessage would
+    // have it said twice.
     Toast {
         id: noticeToast
         objectName: "noticeToast" // so offscreen tests can findChild() it
         readonly property var notices: appWindow.win && appWindow.win.notices ? appWindow.win.notices : null
-        property int host: 0
+        property string host: "titleBand"
         text: notices !== null ? notices.toastText : ""
         glyph: notices !== null ? notices.toastGlyph : ""
         shown: notices !== null && notices.toastShown
         x: (parent.width - width) / 2
-        y: host === 0 ? titleBar.y + (titleBar.height - height) / 2
-                      : host === 1 ? content.y + chromeStyle.space.s4
-                                   : content.y + content.height - height - chromeStyle.space.s4
+        y: host === "titleBand" ? titleBar.y + (titleBar.height - height) / 2
+                                : host === "contentTop" ? content.y + chromeStyle.space.s4
+                                                        : content.y + content.height - height - chromeStyle.space.s4
+        Accessible.role: Accessible.StaticText
         z: 20
 
         function placeHost() {

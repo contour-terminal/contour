@@ -3537,9 +3537,10 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
 
-    session->copyToClipboard("hello clipboard"); // display-less: guarded no-op
-    session->onSelectionCompleted();             // display-less: guarded no-op
-    session->focusTerminalWindow();              // display-less: guarded no-op
+    session->copyToClipboard("hello clipboard",
+                             vtbackend::ClipboardWriter::Program); // display-less: guarded no-op
+    session->onSelectionCompleted();                               // display-less: guarded no-op
+    session->focusTerminalWindow();                                // display-less: guarded no-op
     session->discardDesktopNotification("no-such-id");
 
     // Multi-count paste replicates the clipboard text N times into the PTY.
@@ -5269,6 +5270,35 @@ TEST_CASE("TerminalSession: an answer counts only for the question it answers",
         CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
         CHECK(mockPtyOf(*held).stdinBuffer().empty());
     }
+}
+
+TEST_CASE("TerminalSession: a question asked again with more to it is another question",
+          "[contour][session][permission][queue]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+
+    TestApp testApp;
+    auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    REQUIRE(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    auto const shown = shownQuestionId(*held);
+
+    // The program asks for more before the user clicks: the click on what was shown grants nothing.
+    held->requestCaptureBuffer(held->terminal().pageSize().lines, vtbackend::CaptureLineMode::Physical);
+    CHECK(shownQuestionId(*held) != shown);
+    held->answerPermission(shown, PermissionDecision::Allow, PermissionMemory::Once);
+    CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    CHECK(mockPtyOf(*held).stdinBuffer().empty());
+
+    // The same question asked again, unchanged, keeps its id.
+    auto const grown = shownQuestionId(*held);
+    held->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    CHECK(shownQuestionId(*held) == grown);
+
+    // Answered with what is shown now, it is.
+    answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
+    CHECK(capturedSeededScreen(*held));
 }
 
 TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves its setting alone, and not "
@@ -12082,5 +12112,51 @@ TEST_CASE("TerminalSession: a clipboard over the hard limit is refused with a to
         == contour::window::pasteTooLargeNoticeText(contour::session::TerminalSession::PasteHardLimitBytes));
 
     clipboard->clear();
+    contour::test::closeAllTabs(*controller);
+}
+
+TEST_CASE("TerminalSession: a vi yank tells its window once, outside the terminal lock",
+          "[contour][session][clipboard][notices][vi]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+    windowed.session.terminal().writeToScreen("yanked line\r\n");
+    windowed.session.terminal().writeToScreen("\033[A");
+
+    // What a shown toast does as it shows: asks where to go, which reads the cursor under the terminal lock.
+    auto toasts = 0;
+    QObject::connect(&controller->notices(), &contour::window::NoticeModel::toastChanged, [&] {
+        if (!controller->notices().toastShown())
+            return;
+        ++toasts;
+        std::ignore = controller->toastHost(QStringLiteral("hidden"), QStringLiteral("top"), 0, 0);
+    });
+
+    vtbackend::test::failOnDeadlock(std::chrono::seconds(10), [&] {
+        windowed.session.terminal().inputHandler().setMode(vtbackend::ViMode::Normal);
+        typeKeys(windowed.session, "yy");
+    });
+    CHECK(toasts == 1);
+    CHECK(controller->notices().toastText() == "Copied 1 line");
+
+    contour::test::closeAllTabs(*controller);
+}
+
+TEST_CASE("TerminalSession: a program's clipboard write tells no one",
+          "[contour][session][clipboard][notices]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+
+    // OSC 52, "c" (the clipboard), "aGk=" ("hi").
+    windowed.session.terminal().writeToScreen("\033]52;c;aGk=\033\\");
+    QCoreApplication::processEvents();
+    CHECK_FALSE(controller->notices().toastShown());
+    CHECK(clipboard.text() == "hi"); // it did write
+
     contour::test::closeAllTabs(*controller);
 }

@@ -369,11 +369,12 @@ class WindowController:
     /// @param edge Its edge, by name ("top" or "bottom").
     /// @param bandHeight The band's height, in logical pixels.
     /// @param toastHeight The toast's height (size.toast), in logical pixels.
-    /// @return A ToastHost's value. The names are the band's QML vocabulary, read back at this boundary.
-    [[nodiscard]] Q_INVOKABLE int toastHost(QString const& band,
-                                            QString const& edge,
-                                            int bandHeight,
-                                            int toastHeight) const;
+    /// @return Where it goes, by name (toastHostName(): "titleBand", "contentTop" or "contentBottom"). The
+    ///         band comes in, and the host goes out, as the band's QML vocabulary has them: names.
+    [[nodiscard]] Q_INVOKABLE QString toastHost(QString const& band,
+                                                QString const& edge,
+                                                int bandHeight,
+                                                int toastHeight) const;
 
     /// Rebuilds the palette against the CURRENT state — live tabs, the configured profiles/layouts and
     /// the key bindings as they stand after any reload — and asks the QML to show it.

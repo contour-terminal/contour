@@ -1135,6 +1135,13 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
 void TerminalSession::publishPendingPermission()
 {
     auto const prompt = currentPermissionPrompt();
+    // The question shown, asked again with more to it (a larger capture, another paste, another font), is
+    // another question: a click on what was shown must never grant what was not. So it takes a new id, and an
+    // answer to the old one is ignored.
+    if (prompt && _pendingPermission.value(QStringLiteral("id")).toInt() == _shownQuestionId
+        && permissionPromptMap(*prompt, _shownQuestionId) != _pendingPermission
+        && !_pendingPermission.isEmpty())
+        ++_shownQuestionId;
     auto next = prompt ? permissionPromptMap(*prompt, _shownQuestionId) : QVariantMap {};
     if (next == _pendingPermission)
         return;
@@ -1799,26 +1806,26 @@ int TerminalSession::cursorLine() const
 
 void TerminalSession::copyExplicitly(std::string_view text)
 {
-    // Only what reached the clipboard is told: without a display copyToClipboard() copies nothing.
-    if (text.empty() || _display == nullptr || _manager == nullptr)
-    {
-        copyToClipboard(text);
-        return;
-    }
-    copyToClipboard(text);
-    // A line for every line feed, and one for a last line without one.
-    auto const lines =
-        static_cast<std::size_t>(std::ranges::count(text, '\n')) + (text.back() != '\n' ? 1 : 0);
-    _manager->postNotice(
-        window::Notice { .kind = window::NoticeKind::Copied, .text = window::copiedNoticeText(lines) }, this);
+    copyToClipboard(text, vtbackend::ClipboardWriter::User);
 }
 
-void TerminalSession::copyToClipboard(std::string_view data)
+void TerminalSession::copyToClipboard(std::string_view data, vtbackend::ClipboardWriter writer)
 {
     if (!_display)
         return;
 
     _display->post([data = string(data)]() { platform::copyToClipboard(data); });
+
+    // A user's copy is told, a program's is not. Only what reached the clipboard is: without a display
+    // nothing does. GUI thread, outside the terminal lock: a vi yank's or a hint's arrives through
+    // Terminal::runOutsideStateLock(), as the window's toast reads the cursor under that lock.
+    if (writer != vtbackend::ClipboardWriter::User || data.empty() || _manager == nullptr)
+        return;
+    // A line for every line feed, and one for a last line without one.
+    auto const lines =
+        static_cast<std::size_t>(std::ranges::count(data, '\n')) + (data.back() != '\n' ? 1 : 0);
+    _manager->postNotice(
+        window::Notice { .kind = window::NoticeKind::Copied, .text = window::copiedNoticeText(lines) }, this);
 }
 
 void TerminalSession::openDocument(std::string_view fileOrUrl)
@@ -4944,12 +4951,12 @@ bool TerminalSession::operator()(actions::CopyHyperlink const& action)
     // pins nothing, and for it "the link under the cursor" is exactly the right question.
     if (action.link)
     {
-        copyToClipboard(action.link->target);
+        copyExplicitly(action.link->target);
         return true;
     }
     if (!action.uri.empty())
     {
-        copyToClipboard(action.uri);
+        copyExplicitly(action.uri);
         return true;
     }
 
@@ -4965,7 +4972,7 @@ bool TerminalSession::operator()(actions::CopyHyperlink const& action)
     if (!address)
         return false;
 
-    copyToClipboard(*address);
+    copyExplicitly(*address);
     return true;
 }
 

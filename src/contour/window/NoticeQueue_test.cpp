@@ -105,9 +105,8 @@ TEST_CASE("NoticeQueue: the same kind replaces the toast and restarts it", "[not
     CHECK(queue.toast() == nullptr); // one toast, not a backlog
 }
 
-TEST_CASE("NoticeQueue: at most NoticeWaitingLimit wait, each kind once, in order", "[notices]")
+TEST_CASE("NoticeQueue: each other kind waits once, in order", "[notices]")
 {
-    using contour::window::NoticeWaitingLimit;
     auto queue = NoticeQueue {};
     std::ignore = queue.post(notice(NoticeKind::Copied, "shown"), T0);
     auto const waiting = std::array {
@@ -127,7 +126,6 @@ TEST_CASE("NoticeQueue: at most NoticeWaitingLimit wait, each kind once, in orde
         if (queue.toast() != nullptr)
             shown.push_back(queue.toast()->text);
     }
-    CHECK(shown.size() <= NoticeWaitingLimit);
     CHECK(shown == std::vector<std::string> { "waiting 4", "waiting 5", "waiting 2", "waiting 3" });
 }
 

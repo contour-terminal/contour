@@ -24,6 +24,7 @@
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
@@ -8897,10 +8898,11 @@ TEST_CASE("Toast: the Terminal row is a one-row inverse strip (offscreen)", "[co
     QQmlEngine engine;
     auto setup = contour::test::defaultChromeSetup();
     setup.row = contour::config::ChromeStyle::Terminal;
-    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Foreground)] =
-        vtbackend::RGBColor { 0xD9DCE3u };
-    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)] =
-        vtbackend::RGBColor { 0x1C1E24u };
+    // A scheme whose two ends read on each other: its toast is their inverse (chromeSchemeColorsOf()).
+    auto palette = vtbackend::ColorPalette {};
+    palette.defaultForeground = vtbackend::RGBColor { 0xD9DCE3u };
+    palette.defaultBackground = vtbackend::RGBColor { 0x1C1E24u };
+    setup.scheme = contour::config::chromeSchemeColorsOf(palette);
     contour::test::installChromeStyle(engine, setup);
     contour::test::QmlMessageCapture const warnings;
 
@@ -10246,6 +10248,58 @@ TEST_CASE("PermissionDialog: the Terminal row's lines read on its surface (offsc
     REQUIRE_FALSE(lines.isEmpty());
     for (auto const* line: lines)
         CHECK(contrastOn(line, fillOf(surface)) >= 4.5);
+}
+// }}}
+
+// {{{ Notices read on every row
+TEST_CASE("notices: toast and banner text read on every scheme, row and appearance (offscreen)",
+          "[contour][gui][qml][kit][notices]")
+{
+    // Text at 4.5:1 (WCAG 1.4.3), the "!" mark at 3:1 (1.4.11), on what each paints behind it.
+    for (auto const appearance: { vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark })
+    {
+        contour::test::ScopedChromeAppearance const forced { appearance };
+        for (auto const& rowHost: contour::test::snapshot::SnapshotRowHosts)
+            for (auto const schemeName: vtbackend::defaultColorPaletteNames())
+            {
+                INFO("Qt palette: " << appearanceName(appearance));
+                INFO("row: " << contour::config::chromeStyleName(rowHost.row));
+                INFO("scheme: " << schemeName);
+                auto palette = vtbackend::ColorPalette {};
+                REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+                auto setup = contour::test::defaultChromeSetup();
+                setup.row = rowHost.row;
+                setup.scheme = contour::config::chromeSchemeColorsOf(palette);
+                QQmlEngine engine;
+                contour::test::installChromeStyle(engine, setup);
+
+                auto toast = createToast(engine,
+                                         QVariantMap { { "text", QStringLiteral("Not pasted") },
+                                                       { "glyph", QStringLiteral("!") } });
+                auto const* toastFill = toast->property("background").value<QQuickItem*>();
+                REQUIRE(toastFill != nullptr);
+                auto const* toastText = toast->findChild<QObject*>(QStringLiteral("toastText"));
+                auto const* toastGlyph = toast->findChild<QObject*>(QStringLiteral("toastGlyph"));
+                REQUIRE(toastText != nullptr);
+                REQUIRE(toastGlyph != nullptr);
+                CHECK(contrastOn(toastText, fillOf(toastFill)) >= 4.5);
+                CHECK(contrastOn(toastGlyph, fillOf(toastFill)) >= 3.0);
+
+                auto banner =
+                    createBanner(engine,
+                                 QVariantMap { { "text", QStringLiteral("Contour could not reload") },
+                                               { "glyph", QStringLiteral("!") },
+                                               { "actionText", QStringLiteral("Show in Editor") } });
+                auto const* bannerFill = banner->property("background").value<QQuickItem*>();
+                REQUIRE(bannerFill != nullptr);
+                auto const* bannerText = banner->findChild<QObject*>(QStringLiteral("bannerText"));
+                auto const* bannerGlyph = banner->findChild<QObject*>(QStringLiteral("bannerGlyph"));
+                REQUIRE(bannerText != nullptr);
+                REQUIRE(bannerGlyph != nullptr);
+                CHECK(contrastOn(bannerText, fillOf(bannerFill)) >= 4.5);
+                CHECK(contrastOn(bannerGlyph, fillOf(bannerFill)) >= 3.0);
+            }
+    }
 }
 // }}}
 

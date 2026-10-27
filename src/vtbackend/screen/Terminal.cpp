@@ -5122,9 +5122,15 @@ void Terminal::resetPointerShape()
     _eventListener.setPointerShape("");
 }
 
-void Terminal::copyToClipboard(string_view data)
+void Terminal::copyToClipboard(string_view data, ClipboardWriter writer)
 {
-    _eventListener.copyToClipboard(data);
+    if (writer == ClipboardWriter::User)
+    {
+        runOutsideStateLock(
+            [this, copied = string(data)] { _eventListener.copyToClipboard(copied, ClipboardWriter::User); });
+        return;
+    }
+    _eventListener.copyToClipboard(data, writer);
 }
 
 void Terminal::requestClipboardRead(string_view pc)
@@ -5589,7 +5595,7 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
     auto const& matchedText = match.matchedText;
     switch (action)
     {
-        case HintAction::Copy: terminal._eventListener.copyToClipboard(matchedText); break;
+        case HintAction::Copy: terminal.copyToClipboard(matchedText, ClipboardWriter::User); break;
         case HintAction::Open:
             // As Ctrl+click opens it, with its refusals: a path with file_opener at its location, a URL as a
             // link is followed. Nothing, where the printed text chose a scheme no link may open (§7.6).
@@ -5598,7 +5604,7 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
             break;
         case HintAction::Paste: typeHint(terminal, matchedText); break;
         case HintAction::CopyAndPaste:
-            terminal._eventListener.copyToClipboard(matchedText);
+            terminal.copyToClipboard(matchedText, ClipboardWriter::User);
             typeHint(terminal, matchedText);
             break;
         case HintAction::Select: {

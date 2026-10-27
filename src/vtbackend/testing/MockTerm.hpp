@@ -371,7 +371,7 @@ class MockTerm: public Terminal::NullEvents
         pointerShapeNotifications.emplace_back(cssName);
     }
 
-    void copyToClipboard(std::string_view data) override { clipboardData = data; }
+    void copyToClipboard(std::string_view data, ClipboardWriter /*writer*/) override { clipboardData = data; }
 
     std::string getClipboard() override { return clipboardData; }
 

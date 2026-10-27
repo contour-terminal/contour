@@ -345,12 +345,12 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
             CHECK(fill.slot == SchemeSlot::Bar);
             CHECK(text.kind == ColorSourceKind::Scheme);
             CHECK(text.slot == SchemeSlot::BarInk);
-            CHECK(glyph.kind == ColorSourceKind::Scheme);
+            CHECK(glyph.kind == ColorSourceKind::SchemeOnBar);
             CHECK(glyph.slot == SchemeSlot::Warning);
             CHECK(toastFill.kind == ColorSourceKind::Scheme);
-            CHECK(toastFill.slot == SchemeSlot::Foreground);
+            CHECK(toastFill.slot == SchemeSlot::Toast);
             CHECK(toastText.kind == ColorSourceKind::Scheme);
-            CHECK(toastText.slot == SchemeSlot::Background);
+            CHECK(toastText.slot == SchemeSlot::ToastInk);
             // The scheme's own foreground, not Qt's palette: the ring sits on scheme-coloured swatches.
             CHECK(swatchRing.kind == ColorSourceKind::Scheme);
             CHECK(swatchRing.slot == SchemeSlot::Foreground);
@@ -1234,6 +1234,25 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
             auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
             CHECK(ChromeTokenRows[index].colors[static_cast<size_t>(row.role)] == expected);
         }
+    }
+}
+
+TEST_CASE("chromeTokens.toastReadsOnEveryScheme", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        CHECK(contrastRatio(slotIn(colors, SchemeSlot::ToastInk), slotIn(colors, SchemeSlot::Toast))
+              >= MinimumTextContrast);
+        // Inverse video where it reads, as the row's toast style says; the bar where it does not.
+        if (contrastRatio(palette.defaultBackground, palette.defaultForeground) >= MinimumTextContrast)
+            CHECK(slotIn(colors, SchemeSlot::Toast) == palette.defaultForeground);
+        else
+            CHECK(slotIn(colors, SchemeSlot::Toast) == slotIn(colors, SchemeSlot::Bar));
     }
 }
 

@@ -281,6 +281,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] std::expected<void, std::string> reloadAllSessions();
 
     /// Tells the user of @p notice in the window hosting @p acting; logs it when no window hosts it.
+    /// GUI thread, and never under the terminal lock: a toast that shows asks where to go, which reads the
+    /// active pane's cursor under that lock (WindowController::toastHost()).
     /// @param notice What to tell.
     /// @param acting The session the notice is about.
     void postNotice(window::Notice notice, TerminalSession const* acting);

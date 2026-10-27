@@ -25,6 +25,7 @@ set(vtbackend_HEADERS
     core/Color.hpp
     core/ContextId.hpp
     core/CaptureLineMode.hpp
+    core/ClipboardWriter.hpp
     core/CommandBlockId.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp

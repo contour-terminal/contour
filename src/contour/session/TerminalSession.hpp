@@ -1166,7 +1166,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     vtbackend::FontDef getFontDef() override;
     void setFontDef(vtbackend::FontDef const& fontDef) override;
-    void copyToClipboard(std::string_view data) override;
+    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter writer) override;
     void setPointerShape(std::string_view cssName) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
     /// Opens a resolved link: a URL or a template's expansion as a hyperlink, a path through openLocalPath().
