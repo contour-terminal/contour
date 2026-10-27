@@ -17,9 +17,12 @@
 #include <text_shaper/Font.hpp>
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -74,6 +77,24 @@ struct PillQuad
                                  int labelLineHeight,
                                  GridMetrics const& metrics,
                                  int smoothScrollOffset) noexcept;
+
+/// The longest prefix of @p text, in whole codepoints, that @p measure says is at most @p width pixels wide.
+///
+/// What a pill draws its label as when the label is wider than the columns placed for it, so the text never
+/// runs over the cells beside the pill.
+/// @param text The label.
+/// @param width The room the label has, in pixels; nothing fits in none.
+/// @param measure The label's shaped width in pixels, of any prefix of @p text.
+/// @return @p text itself where it fits, else the longest prefix that does; empty where not even one
+///         codepoint does.
+template <std::invocable<std::u32string_view> Measure>
+[[nodiscard]] std::u32string fittedLabel(std::u32string_view text, int width, Measure const& measure)
+{
+    auto fitting = text;
+    while (!fitting.empty() && (width <= 0 || measure(fitting) > width))
+        fitting.remove_suffix(1);
+    return std::u32string(fitting);
+}
 
 /// The CSS weight @p weight as the font's: 400 regular, 600 semibold, 700 bold, and the nearest between.
 /// @param weight A weight on the CSS 100-900 scale.

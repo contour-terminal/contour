@@ -274,6 +274,14 @@ void ChipRenderer::renderChip(RenderTarget& target, vtbackend::RenderChip const&
     auto const box =
         pillBoxOf(chip, pill, labelWidth, fontMetrics.lineHeight, _gridMetrics, smoothScrollOffset);
 
+    // Cut to what the box holds inside its padding: the box was clamped to the placed columns, the text must
+    // not outrun it.
+    auto const label = fittedLabel(chip.text, box.width - (2 * pill.padX), [&](std::u32string_view text) {
+        return _textRenderer.labelWidth(font, text);
+    });
+    auto const shownWidth =
+        label.size() == chip.text.size() ? labelWidth : _textRenderer.labelWidth(font, label);
+
     drawQuads(target, pillQuads(box, pill.radius, chip.fill, chip.ring, pill.ring));
 
     // Centred in the pill, the label's line centred on the row.
@@ -281,9 +289,9 @@ void ChipRenderer::renderChip(RenderTarget& target, vtbackend::RenderChip const&
         _gridMetrics.mapTopLeft(chip.lineOffset, chip.columns.fromColumn, smoothScrollOffset).y;
     auto const rowHeight = _gridMetrics.cellSize.height.as<int>();
     auto const baseline = rowTop + ((rowHeight - fontMetrics.lineHeight) / 2) + fontMetrics.ascender;
-    _textRenderer.renderLabel(crispy::Point { .x = box.x + ((box.width - labelWidth) / 2), .y = baseline },
+    _textRenderer.renderLabel(crispy::Point { .x = box.x + ((box.width - shownWidth) / 2), .y = baseline },
                               font,
-                              chip.text,
+                              label,
                               vtbackend::RGBAColor(chip.ink));
 }
 

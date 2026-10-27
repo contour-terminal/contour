@@ -154,6 +154,29 @@ TEST_CASE("ChipRenderer.aStatusPillKeepsToItsColumnsRightEdge", "[renderer][chip
     CHECK(pillBoxOf(chip, pill, 40, 14, metrics, 5).y == 47);
 }
 
+TEST_CASE("ChipRenderer.aLabelWiderThanItsPillIsCutToFit", "[renderer][chip]")
+{
+    // Before the labels are measured, or where kerning made a shaped run wider than the sum of its parts, the
+    // text would spill over the neighbouring cells: it is cut, whole codepoints, to what the pill holds.
+    auto const tenPerCodepoint = [](std::u32string_view text) {
+        return static_cast<int>(text.size()) * 10;
+    };
+
+    CHECK(fittedLabel(U"Failed", 60, tenPerCodepoint) == U"Failed");
+    CHECK(fittedLabel(U"Failed", 59, tenPerCodepoint) == U"Faile");
+    CHECK(fittedLabel(U"Failed · exit 8", 30, tenPerCodepoint) == U"Fai");
+    CHECK(fittedLabel(U"Failed", 5, tenPerCodepoint).empty());
+    CHECK(fittedLabel(U"Failed", 0, tenPerCodepoint).empty());
+    CHECK(fittedLabel(U"Failed", -4, tenPerCodepoint).empty());
+    CHECK(fittedLabel(U"", 20, tenPerCodepoint).empty());
+
+    // A label that fits is left as it is, whatever the measure says of its prefixes.
+    auto const lopsided = [](std::u32string_view text) {
+        return text.size() == 3 ? 100 : 10;
+    };
+    CHECK(fittedLabel(U"abc", 100, lopsided) == U"abc");
+}
+
 TEST_CASE("ChipRenderer.aFoldPillFollowsTheCommand", "[renderer][chip]")
 {
     // Left-aligned in its columns, its height the token's (size.foldChip), clamped to the row.
