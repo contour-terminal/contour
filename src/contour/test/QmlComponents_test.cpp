@@ -2522,6 +2522,19 @@ TEST_CASE("SessionChrome: the Terminal row draws the bar as a column of its thum
     CHECK(QTest::qWaitFor([&] { return inkOfAll(pressed); }));
     QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
     CHECK(QTest::qWaitFor([&] { return inkOfAll(resting); }));
+
+    // Hovered alone, without a press, the glyphs take the active ink too. The offscreen platform enables no
+    // hover effects of its own, so the bar is asked to take hover as a desktop style would have it do.
+    auto const away =
+        QPoint(static_cast<int>(host.paneWidth / 2), static_cast<int>(host.chrome->height() / 2));
+    QTest::mouseMove(window, away);
+    host.bar->setProperty("hoverEnabled", true);
+    QTest::mouseMove(window, centreOf(*handle));
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->property("hovered").toBool(); }));
+    REQUIRE_FALSE(host.bar->property("pressed").toBool());
+    CHECK(QTest::qWaitFor([&] { return inkOfAll(pressed); }));
+    QTest::mouseMove(window, away);
+    CHECK(QTest::qWaitFor([&] { return inkOfAll(resting); }));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -9400,7 +9413,13 @@ TEST_CASE("Toast: a host sets its extent, radius and detail (offscreen)", "[cont
     contour::test::installChromeStyle(engine, setup);
     contour::test::QmlMessageCapture const warnings;
 
-    auto plain = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    // Shown, as the detail case below is: a toast that is not shown is invisible whole (Step 3c), which would
+    // leave its detail hidden whatever the detail said.
+    auto plain =
+        createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") }, { "shown", true } });
+    auto* plainItem = qobject_cast<QQuickItem*>(plain.get());
+    REQUIRE(plainItem != nullptr);
+    REQUIRE(QTest::qWaitFor([plainItem] { return plainItem->isVisible(); }));
     auto* plainDetail = plain->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
     REQUIRE(plainDetail != nullptr);
     CHECK_FALSE(plainDetail->isVisible());

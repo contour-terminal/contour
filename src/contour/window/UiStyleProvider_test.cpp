@@ -2078,11 +2078,18 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     CHECK(tokenOf(terminal, "motion", "linger").toInt() == 600);
     CHECK(terminal.property("scrollThumbGlyph").toString() == QStringLiteral("┃"));
     // The Terminal row's thumb is chosen against the pane it is drawn on: a light pane under the dark
-    // default and a dark one alike get a thumb that stands off them at 3:1.
-    for (auto const ground: { QColor(0xFA, 0xFA, 0xF8), QColor(0x1C, 0x1E, 0x24) })
+    // default and a dark one alike get a thumb that stands off them at 3:1 -- and so does a pane whose
+    // background is the very colour the default profile chose for its thumb, on which that one would vanish.
+    auto* const colors = terminal.property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    for (auto const ground: { QColor(0xFA, 0xFA, 0xF8),
+                              QColor(0x1C, 0x1E, 0x24),
+                              colors->property("scrollbarThumb").value<QColor>(),
+                              colors->property("scrollbarThumbActive").value<QColor>() })
         for (auto const role: { contour::config::ChromeColorRole::ScrollbarThumb,
                                 contour::config::ChromeColorRole::ScrollbarThumbActive })
         {
+            CAPTURE(ground.name().toStdString(), static_cast<int>(role));
             auto const thumb = terminal.colorOn(static_cast<int>(role), ground);
             CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(thumb),
                                            contour::platform::toRGBColor(ground))

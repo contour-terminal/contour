@@ -12086,6 +12086,28 @@ namespace
 }
 } // namespace
 
+TEST_CASE("ContourGuiApp: the chrome's inputs ignore a scroller-style flip", "[contour][chromehost]")
+{
+    // The scroller style is a session's (the overlay scrollbar's mode), not the chrome's: a mouse plugged in
+    // must not rebuild every window's chromeStyle. What the app builds the chrome from is pinned, through the
+    // same appearance source the OS reports to.
+    using contour::config::ScrollBarMode;
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto const testApp = makeMotionTestApp(accessibility, appearance);
+    auto const before = testApp->app().chromeInputs();
+
+    auto flipped = appearance.appearance;
+    flipped.scrollBars = ScrollBarMode::Always;
+    appearance.set(flipped);
+    CHECK(testApp->app().chromeInputs() == before);
+
+    // The path does read the appearance: an accent change reaches the chrome.
+    flipped.accent = vtbackend::RGBColor { 0x12, 0x34, 0x56 };
+    appearance.set(flipped);
+    CHECK_FALSE(testApp->app().chromeInputs() == before);
+}
+
 TEST_CASE("TerminalSession: a session born under Reduce Motion has no glide and no transition",
           "[contour][session][motion]")
 {
