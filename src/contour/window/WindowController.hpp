@@ -1204,12 +1204,12 @@ class WindowController:
     // headers then: nothing else would ask while the modifier is merely held.
     QTimer _headerRevealTimer;
 
-    // Says this window's notices to a screen reader, against the window while it is shown. Declared before
-    // _notices, which speaks through it.
     // The names of the layouts saved, as beginSaveLayoutPrompt() last read them (the layouts file's
     // included), for checkLayoutName(), which runs on every key typed.
     std::vector<std::string> _savedLayoutNames;
 
+    // Says this window's notices to a screen reader, against the window while it is shown. Declared before
+    // _notices, which speaks through it.
     platform::QtAnnouncer _noticeAnnouncer;
     // This window's toast and banner, timed by _clock.
     NoticeModel _notices;

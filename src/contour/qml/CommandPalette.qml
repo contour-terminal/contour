@@ -228,13 +228,9 @@ Popup {
             list.positionViewAtIndex(index, ListView.Contain);
     }
 
-    // The group headers' font: the footnote type at Font.DemiBold, a copy, since the token's font is shared
-    // and a font cannot be both assigned and tweaked (as KitDialog's heading).
-    readonly property font headerFont: {
-        let header = chromeStyle.type.footnote;
-        header.weight = Font.DemiBold;
-        return header;
-    }
+    // The group headers' font: the footnote type at Font.DemiBold, built in C++ -- a copy of the token with its
+    // weight set here would keep the token's weight.
+    readonly property font headerFont: chromeStyle.type.footnoteSemibold
 
     // Renders a command title as StyledText with the filter's matched characters in bold, so the user
     // sees WHY a row matched. In the row's own colour on every row, selected or not: an accent tint does
@@ -461,6 +457,7 @@ Popup {
                     Accessible.name: row.groupTitle
 
                     Label {
+                        objectName: "commandPaletteGroupHeaderLabel"
                         x: root.textInset
                         width: parent.width - x - root.textInset
                         anchors.verticalCenter: parent.verticalCenter

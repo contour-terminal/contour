@@ -5962,6 +5962,34 @@ TEST_CASE("Rows are grouped, and only the first row of a group draws a header (o
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("A group header is drawn semibold at the footnote size (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+    auto* first = paletteRowAt(list, 0);
+    REQUIRE(first != nullptr);
+    auto* label = first->findChild<QQuickItem*>(QStringLiteral("commandPaletteGroupHeaderLabel"));
+    REQUIRE(label != nullptr);
+
+    // A copy of the footnote token with its weight set in QML keeps the token's weight; the header reads
+    // the semibold token instead.
+    auto const font = label->property("font").value<QFont>();
+    CHECK(font.weight() == QFont::DemiBold);
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const footnote = style->property("type").value<QObject*>()->property("footnote").value<QFont>();
+    CHECK(font.pixelSize() == footnote.pixelSize());
+    CHECK(font.pointSizeF() == footnote.pointSizeF());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("The footer shows the selected row's description only (offscreen)", "[contour][gui][qml][palette]")
 {
     contour::test::QmlMessageCapture const warnings;
@@ -10400,52 +10428,35 @@ TEST_CASE("notices: toast and banner text read on every scheme, row and appearan
           "[contour][gui][qml][kit][notices]")
 {
     // Text at 4.5:1 (WCAG 1.4.3), the "!" mark at 3:1 (1.4.11), on what each paints behind it.
-    for (auto const appearance: { vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark })
-    {
-        contour::test::ScopedChromeAppearance const forced { appearance };
-        for (auto const& rowHost: contour::test::snapshot::SnapshotRowHosts)
-            for (auto const schemeName: vtbackend::defaultColorPaletteNames())
-            {
-                INFO("Qt palette: " << appearanceName(appearance));
-                INFO("row: " << contour::config::chromeStyleName(rowHost.row));
-                INFO("scheme: " << schemeName);
-                auto palette = vtbackend::ColorPalette {};
-                REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
-                auto setup = contour::test::defaultChromeSetup();
-                setup.row = rowHost.row;
-                setup.windowControls = contour::config::resolveWindowControlStyle(
-                    contour::config::WindowControlStyle::Auto, rowHost.host);
-                setup.scheme = contour::config::chromeSchemeColorsOf(palette);
-                QQmlEngine engine;
-                contour::test::installChromeStyle(engine, setup);
+    forEverySchemeRowAndAppearance([](contour::test::ChromeSetup const& setup) {
+        QQmlEngine engine;
+        contour::test::installChromeStyle(engine, setup);
 
-                auto toast = createToast(engine,
-                                         QVariantMap { { "text", QStringLiteral("Not pasted") },
-                                                       { "glyph", QStringLiteral("!") } });
-                auto const* toastFill = toast->property("background").value<QQuickItem*>();
-                REQUIRE(toastFill != nullptr);
-                auto const* toastText = toast->findChild<QObject*>(QStringLiteral("toastText"));
-                auto const* toastGlyph = toast->findChild<QObject*>(QStringLiteral("toastGlyph"));
-                REQUIRE(toastText != nullptr);
-                REQUIRE(toastGlyph != nullptr);
-                CHECK(contrastOn(toastText, fillOf(toastFill)) >= 4.5);
-                CHECK(contrastOn(toastGlyph, fillOf(toastFill)) >= 3.0);
+        auto toast = createToast(
+            engine,
+            QVariantMap { { "text", QStringLiteral("Not pasted") }, { "glyph", QStringLiteral("!") } });
+        auto const* toastFill = toast->property("background").value<QQuickItem*>();
+        REQUIRE(toastFill != nullptr);
+        auto const* toastText = toast->findChild<QObject*>(QStringLiteral("toastText"));
+        auto const* toastGlyph = toast->findChild<QObject*>(QStringLiteral("toastGlyph"));
+        REQUIRE(toastText != nullptr);
+        REQUIRE(toastGlyph != nullptr);
+        CHECK(contrastOn(toastText, fillOf(toastFill)) >= 4.5);
+        CHECK(contrastOn(toastGlyph, fillOf(toastFill)) >= 3.0);
 
-                auto banner =
-                    createBanner(engine,
-                                 QVariantMap { { "text", QStringLiteral("Contour could not reload") },
-                                               { "glyph", QStringLiteral("!") },
-                                               { "actionText", QStringLiteral("Show in Editor") } });
-                auto const* bannerFill = banner->property("background").value<QQuickItem*>();
-                REQUIRE(bannerFill != nullptr);
-                auto const* bannerText = banner->findChild<QObject*>(QStringLiteral("bannerText"));
-                auto const* bannerGlyph = banner->findChild<QObject*>(QStringLiteral("bannerGlyph"));
-                REQUIRE(bannerText != nullptr);
-                REQUIRE(bannerGlyph != nullptr);
-                CHECK(contrastOn(bannerText, fillOf(bannerFill)) >= 4.5);
-                CHECK(contrastOn(bannerGlyph, fillOf(bannerFill)) >= 3.0);
-            }
-    }
+        auto banner = createBanner(engine,
+                                   QVariantMap { { "text", QStringLiteral("Contour could not reload") },
+                                                 { "glyph", QStringLiteral("!") },
+                                                 { "actionText", QStringLiteral("Show in Editor") } });
+        auto const* bannerFill = banner->property("background").value<QQuickItem*>();
+        REQUIRE(bannerFill != nullptr);
+        auto const* bannerText = banner->findChild<QObject*>(QStringLiteral("bannerText"));
+        auto const* bannerGlyph = banner->findChild<QObject*>(QStringLiteral("bannerGlyph"));
+        REQUIRE(bannerText != nullptr);
+        REQUIRE(bannerGlyph != nullptr);
+        CHECK(contrastOn(bannerText, fillOf(bannerFill)) >= 4.5);
+        CHECK(contrastOn(bannerGlyph, fillOf(bannerFill)) >= 3.0);
+    });
 }
 // }}}
 

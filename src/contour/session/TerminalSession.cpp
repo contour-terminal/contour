@@ -1135,11 +1135,8 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
         case GuardedRole::CaptureBuffer: {
             // One answer serves every capture outstanding, so the prompt names the largest.
             auto lines = vtbackend::LineCount(0);
-            {
-                auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
-                for (auto const& request: _pendingBufferCaptures)
-                    lines = std::max(lines, request.lines);
-            }
+            for (auto const& request: _pendingBufferCaptures)
+                lines = std::max(lines, request.lines);
             return bufferCapturePrompt(subject, lines);
         }
         case GuardedRole::ShowHostWritableStatusLine: return hostStatusLinePrompt(subject);
@@ -1624,10 +1621,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, vtbackend::CaptureLi
     // it arrived -- a larger capture granted by a click on a smaller one. The configured permission is read
     // in the lambda for the reason postPermissionRequest() gives.
     _display->post([this, lines, mode]() {
-        {
-            auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
-            _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .mode = mode });
-        }
+        _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .mode = mode });
         requestPermission(configuredPermissionFor(GuardedRole::CaptureBuffer), GuardedRole::CaptureBuffer);
     });
 }
@@ -1638,11 +1632,7 @@ void TerminalSession::executePendingBufferCapture(PermissionDecision decision, P
 
     // One verdict answers every request outstanding at this moment: the user was asked once, about
     // capturing this buffer, and each request still owes its own reply.
-    auto requests = std::vector<CaptureBufferRequest> {};
-    {
-        auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
-        requests = std::exchange(_pendingBufferCaptures, {});
-    }
+    auto const requests = std::exchange(_pendingBufferCaptures, {});
 
     if (requests.empty())
         return;

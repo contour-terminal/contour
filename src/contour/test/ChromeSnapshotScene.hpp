@@ -740,6 +740,8 @@ class ChromeSnapshotScene
                                                 .moreLines = SnapshotPasteMoreLines }),
                     1);
             case SnapshotPermission::Consent: {
+                // Re-spells vtextension::consentQuestion() rather than calling it: vtextension exists only
+                // with CONTOUR_EXTENSIONS, and the snapshots must build without it.
                 auto lines = std::vector<session::PromptLine> {
                     session::consentLine("Module: git-stats@/usr/share/contour/extensions/git-stats.wasm",
                                          vtcontrol::ConsentWeight::Observes),
@@ -781,7 +783,8 @@ class ChromeSnapshotScene
     void openSaveLayout(SnapshotLayoutName name)
     {
         _controller.layoutTabs = scriptRow(_variant.script).tabCount;
-        _controller.layoutPanes = scriptRow(_variant.script).tabCount;
+        _controller.layoutPanes = scriptRow(_variant.script).tabCount
+                                  * static_cast<int>(paneCount(scriptRow(_variant.script).panes));
         _controller.existingLayouts.clear();
         if (name == SnapshotLayoutName::Taken)
             _controller.existingLayouts.emplace_back(SnapshotLayoutTyped);
@@ -985,8 +988,9 @@ class ChromeSnapshotScene
     /// The Settings window over *_settings, on _engine; null unless the script's surface is that window.
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
-    std::unique_ptr<QObject> _root;           ///< The QML tree dies before everything it borrows.
-    std::unique_ptr<QObject> _overlay;        ///< Last: the toast, parented into _root's tree, dies first.
+    std::unique_ptr<QObject> _root; ///< The QML tree dies before everything it borrows.
+    /// Last: openKitDialog()'s dialog, parented into _root's tree, dies first.
+    std::unique_ptr<QObject> _overlay;
     QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.
     std::optional<SnapshotNativeTitleBar>
         _measuredTitleBar; ///< What measureBand() measured over, if anything.

@@ -44,10 +44,11 @@ KitDialog {
     rejectText: qsTr("Cancel")
 
     // Start empty with the caret already in the field on every open, so the user can type immediately.
+    // What it saves is read before it shows, so the dialog never opens on the last opening's count.
+    onAboutToShow: root.summary = root._canCheck ? root.controller.layoutSummary() : ""
     onOpened: {
         nameField.clear();
         root.confirmedReplace = false;
-        root.summary = root._canCheck ? root.controller.layoutSummary() : "";
         nameField.forceActiveFocus();
     }
 

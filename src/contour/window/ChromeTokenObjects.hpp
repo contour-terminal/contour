@@ -386,6 +386,7 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont bodyStrong READ bodyStrong CONSTANT)
     Q_PROPERTY(QFont bodyMedium READ bodyMedium CONSTANT)
     Q_PROPERTY(QFont footnoteStrong READ footnoteStrong CONSTANT)
+    Q_PROPERTY(QFont footnoteSemibold READ footnoteSemibold CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
@@ -419,6 +420,8 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& bodyMedium() const noexcept { return _bodyMedium; }
     /// @return The footnote font, bold: the host chip's name, a permission line that can run commands.
     [[nodiscard]] QFont const& footnoteStrong() const noexcept { return _footnoteStrong; }
+    /// @return The footnote font, semibold: a command palette group's header.
+    [[nodiscard]] QFont const& footnoteSemibold() const noexcept { return _footnoteSemibold; }
 
   private:
     QFont _caption {};
@@ -434,6 +437,7 @@ class ChromeTypeTokens: public QObject
     QFont _bodyStrong {};
     QFont _bodyMedium {};
     QFont _footnoteStrong {};
+    QFont _footnoteSemibold {};
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.

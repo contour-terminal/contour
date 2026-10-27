@@ -74,7 +74,8 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font,
     _shortcut { sizedFont(font, tokens.shortcut) },
     _bodyStrong { weightedFont(_body, QFont::Bold) },
     _bodyMedium { weightedFont(_body, QFont::Medium) },
-    _footnoteStrong { weightedFont(_footnote, QFont::Bold) }
+    _footnoteStrong { weightedFont(_footnote, QFont::Bold) },
+    _footnoteSemibold { weightedFont(_footnote, QFont::DemiBold) }
 {
 }
 

@@ -2347,15 +2347,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Capture requests accepted but not yet answered, oldest first.
     ///
-    /// A queue rather than one slot. GUI thread only: requestCaptureBuffer(), a Terminal::Events hook raised
-    /// on the parser thread, appends in the request it posts to the GUI thread, so a request and the
-    /// question about it arrive in one step. The mutex is a guard that costs nothing. A single slot silently
-    /// dropped whichever
-    /// request arrived while another was outstanding, and every dropped request is a client blocked
-    /// forever -- the protocol has no way to say "no reply is coming".
+    /// A queue rather than one slot: a single slot silently dropped whichever request arrived while another
+    /// was outstanding, and every dropped request is a client blocked forever -- the protocol has no way to
+    /// say "no reply is coming". GUI thread only, so unlocked: requestCaptureBuffer(), a Terminal::Events
+    /// hook raised on the parser thread, appends in the request it posts to the GUI thread, so a request and
+    /// the question about it arrive in one step; the prompt and the executor read it there too.
     /// @see docs/vt-extensions/buffer-capture.md
     std::vector<CaptureBufferRequest> _pendingBufferCaptures;
-    std::mutex _pendingBufferCaptureMutex;
 
     /// The font a program asked for, while its question waits. GUI thread only: setFontDef() writes it in the
     /// request it posts there.

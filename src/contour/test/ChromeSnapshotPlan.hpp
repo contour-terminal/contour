@@ -1040,6 +1040,20 @@ static_assert(std::ranges::all_of(SnapshotScripts,
                                   }),
               "every pane of every script needs a label");
 
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return (row.action == ScriptAction::OpenPermission)
+                                             == (row.permission != SnapshotPermission::None);
+                                  }),
+              "a script names a permission question exactly when it opens the permission dialog");
+
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return (row.action == ScriptAction::OpenSaveLayout)
+                                             == (row.layoutName != SnapshotLayoutName::None);
+                                  }),
+              "a script names a layout name exactly when it opens Save Layout");
+
 /// The row describing @p script.
 /// @param script The script to look up.
 /// @return Its row of the script table.
