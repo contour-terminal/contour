@@ -3440,6 +3440,43 @@ TEST_CASE("SettingsController: Use New keeps a hand edit of a profile that was n
     CHECK(fx.fileContent(config::relativePathOf(config::profileFile("work"))) == handEdited);
 }
 
+TEST_CASE("SettingsController: a profile saved by hand in a state that does not parse is kept", "[settings]")
+{
+    // N3: the flush finds the conflict, the reload cannot parse the file, and the draft still shows
+    // Settings' own edit: the next commit must not write it over the hand edit.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    fx.controller->commitProfileField("show_title_bar", false);
+    auto const path = config::relativePathOf(config::profileFile("work"));
+    fx.handEdit(path, "this: [is not\n  a profile");
+    fx.fire();
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front().contains("changed outside Settings"));
+
+    fx.controller->commitProfileField("show_title_bar", true);
+    fx.fire();
+
+    CHECK(fx.fileContent(path) == "this: [is not\n  a profile");
+}
+
+TEST_CASE("SettingsController: a profile deleted by hand is not re-created by the next commit",
+          "[settings]")
+{
+    // N3, the deleted file.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    fx.controller->commitProfileField("show_title_bar", false);
+    auto const path = config::relativePathOf(config::profileFile("work"));
+    std::filesystem::remove(fx.configDir() / path);
+    fx.fire();
+    REQUIRE(fx.errors.size() == 1);
+
+    fx.controller->commitProfileField("show_title_bar", true);
+    fx.fire();
+
+    CHECK_FALSE(fx.fileContent(path).has_value());
+}
+
 TEST_CASE("SettingsController: a hand edit of settings.yml before Settings opens is not written over",
           "[settings]")
 {
