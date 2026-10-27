@@ -14,6 +14,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -3034,26 +3035,61 @@ TEST_CASE("a controller attached after a daemon restore is told what came back, 
 
     auto const firstOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& first = *firstOwned;
-    auto told = QSignalSpy { &first, &contour::remote::NativeController::workspaceRestored };
+    // The signals fire on the reactor thread; queued delivery keeps what they record on this thread, in
+    // the order they were raised.
+    auto const context = QObject {};
+    auto restoredTold = std::vector<std::pair<quint32, quint32>> {};
+    auto stateSignals = size_t { 0 };
+    auto stateSeenByLastSignal = vthost::client::ConnectionState::Connecting;
+    QObject::connect(
+        &first,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { restoredTold.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
+    QObject::connect(
+        &first,
+        &contour::remote::NativeController::connectionStateChanged,
+        &context,
+        [&] {
+            ++stateSignals;
+            stateSeenByLastSignal = first.connectionState();
+        },
+        Qt::QueuedConnection);
     REQUIRE(first.connectAndWait(10s).has_value());
-    REQUIRE(waitUntil([&] { return told.count() == 1; }));
-    CHECK(told.front().at(0).value<quint32>() == 2);
-    CHECK(told.front().at(1).value<quint32>() == 7);
+    REQUIRE(waitUntil([&] { return restoredTold.size() == 1; }));
+    CHECK(restoredTold.front() == std::pair<quint32, quint32> { 2, 7 });
 
     // A second client of the same daemon run is told nothing.
     auto const secondOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& second = *secondOwned;
-    auto untold = QSignalSpy { &second, &contour::remote::NativeController::workspaceRestored };
+    auto untold = std::vector<std::pair<quint32, quint32>> {};
+    QObject::connect(
+        &second,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { untold.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
     REQUIRE(second.connectAndWait(10s).has_value());
     REQUIRE(waitUntil([&] { return second.layout().has_value(); }));
-    CHECK(untold.count() == 0);
+    CHECK(untold.empty());
 
-    // Nor does the first one's reconnect to it raise the summary again.
+    // Nor does the first one's reconnect to it raise the summary again. The reactor raises the summary (if
+    // it were to) just before the state signal that announces Connected, and queued signals arrive in
+    // order, so once this thread has seen that state signal the summary has had its chance. A reconnect
+    // raises at least two state signals: Reconnecting, then Connected.
+    REQUIRE(waitUntil([&] {
+        return first.connectionState() == vthost::client::ConnectionState::Connected
+               && stateSeenByLastSignal == vthost::client::ConnectionState::Connected;
+    }));
+    auto const signalsBeforeDrop = stateSignals;
     daemon.dropConnections();
-    REQUIRE(
-        waitUntil([&] { return first.connectionState() == vthost::client::ConnectionState::Reconnecting; }));
-    REQUIRE(waitUntil([&] { return first.connectionState() == vthost::client::ConnectionState::Connected; }));
-    CHECK(told.count() == 1);
+    REQUIRE(waitUntil([&] {
+        return stateSignals >= signalsBeforeDrop + 2
+               && first.connectionState() == vthost::client::ConnectionState::Connected
+               && stateSeenByLastSignal == vthost::client::ConnectionState::Connected;
+    }));
+    CHECK(restoredTold.size() == 1);
 
     first.stop();
     second.stop();
@@ -3066,9 +3102,16 @@ TEST_CASE("a hello that restored nothing raises no summary", "[attach][controlle
     auto timeline = TestTimeline {};
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
     auto& controller = *controllerOwned;
-    auto told = QSignalSpy { &controller, &contour::remote::NativeController::workspaceRestored };
+    auto const context = QObject {};
+    auto told = std::vector<std::pair<quint32, quint32>> {};
+    QObject::connect(
+        &controller,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { told.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
     REQUIRE(controller.connectAndWait(10s).has_value());
     REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
-    CHECK(told.count() == 0);
+    CHECK(told.empty());
     controller.stop();
 }
