@@ -67,6 +67,13 @@ namespace detail
         No,      ///< It is taken whatever else is there.
     };
 
+    /// The pane edge a spot sits on.
+    enum class SpotEdge : uint8_t
+    {
+        Bottom = 0, ///< The pane's bottom.
+        Top,        ///< The pane's top.
+    };
+
     /// One place the lock may go, and what holds it.
     struct SecureLockSpot
     {
@@ -75,7 +82,7 @@ namespace detail
         LinkPillAnchor heldByLinkPill; ///< The link pill anchor that holds it.
         SpotCells cells;               ///< What it needs of the cells under it.
         SpotYields yields;             ///< Whether the holders above keep it from the lock.
-        bool atTop;                    ///< Whether it is at the pane's top (else its bottom).
+        SpotEdge edge;                 ///< The pane edge it sits on.
     };
 
     /// The places the lock may go, in order of preference.
@@ -85,13 +92,13 @@ namespace detail
                          LinkPillAnchor::TopRight,
                          SpotCells::Blank,
                          SpotYields::Yes,
-                         true },
+                         SpotEdge::Top },
         SecureLockSpot { SecureLockAnchor::BottomRight,
                          FindBarPresence::Bottom,
                          LinkPillAnchor::BottomRight,
                          SpotCells::Blank,
                          SpotYields::Yes,
-                         false },
+                         SpotEdge::Bottom },
         // The lock must never be invisible while secure input is on: with no blank place free (a
         // full-screen program, the find bar and the link pill holding both) it covers a few cells.
         SecureLockSpot { SecureLockAnchor::TopRightOver,
@@ -99,7 +106,7 @@ namespace detail
                          LinkPillAnchor::Hidden,
                          SpotCells::Any,
                          SpotYields::No,
-                         true },
+                         SpotEdge::Top },
     };
 
     /// The anchors' QML names, indexed by SecureLockAnchor.
@@ -142,7 +149,8 @@ namespace detail
         if (spot.yields == detail::SpotYields::Yes
             && (in.findBar == spot.heldByFindBar || in.linkPill == spot.heldByLinkPill))
             continue;
-        auto const y = spot.atTop ? in.insetTop : in.paneHeight - in.insetTop - in.lockHeight;
+        auto const y =
+            spot.edge == detail::SpotEdge::Top ? in.insetTop : in.paneHeight - in.insetTop - in.lockHeight;
         if (spot.cells == detail::SpotCells::Blank
             && (y < in.insetTop || !detail::isBandClear(in.grid, y, in.lockHeight, firstColumn)))
             continue;
