@@ -270,6 +270,9 @@ std::expected<void, SettingsError> SettingsEditSession::settleAll(std::map<SideF
         auto files = std::vector<StagedFile> {};
         for (auto& member: members)
             files.push_back(std::move(member.second));
+        // Every write before any removal: a change that fails part-way then has removed nothing, whatever
+        // order its files were staged in (a chained rename keeps its first-staged places).
+        std::ranges::stable_partition(files, [](StagedFile const& file) { return file.bytes.has_value(); });
         auto settled = settleChange(files);
         if (settled.change == DiskChange::Changed)
             change = DiskChange::Changed;

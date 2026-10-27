@@ -588,6 +588,41 @@ TEST_CASE("SettingsEditSession: a failed removal rolls back what the change wrot
     CHECK(contentOf(fileSystem, newProfile) == std::nullopt);
 }
 
+TEST_CASE("SettingsEditSession: a chained rename writes before it removes", "[settingssession]")
+{
+    // N2: work -> office, then office -> home, merge into one change in which the first-staged order puts
+    // work's removal before home's write. When home cannot be written (a full disk), work must survive:
+    // the rollback that would re-create it cannot write either.
+    auto const home = configDir() / "profiles" / "home.yml";
+    auto const work = configDir() / "profiles" / "work.yml";
+    auto armed = false; // the faults wait until work.yml is on disk
+    auto const fileSystem = vthost::testing::FaultyFileSystem {
+        [&](auto op, std::filesystem::path const& path) {
+            return armed
+                   && (op == vthost::testing::FaultOp::Rename || op == vthost::testing::FaultOp::WriteFile)
+                   && (path == home || path == work);
+        },
+    };
+    handEdit(fileSystem, std::filesystem::path { "profiles" } / "work.yml", "p0");
+    armed = true;
+    auto fx = SessionFixture { fileSystem };
+    auto const first = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p0" } },
+        StagedFile { .file = profileFile("work"), .bytes = std::nullopt },
+    };
+    auto const second = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::nullopt },
+        StagedFile { .file = profileFile("home"), .bytes = std::string { "p0" } },
+    };
+    REQUIRE(fx.session.stageTogether(first).has_value());
+    REQUIRE(fx.session.stageTogether(second).has_value());
+
+    auto const flushed = fx.session.flush();
+
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(contentOf(fileSystem, std::filesystem::path { "profiles" } / "work.yml") == "p0");
+}
+
 TEST_CASE("SettingsEditSession: what is pending for a file", "[settingssession]")
 {
     auto const fileSystem = core::platform::testing::InMemoryFileSystem {};

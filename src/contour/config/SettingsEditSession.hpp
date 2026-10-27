@@ -146,9 +146,9 @@ class SettingsEditSession
     [[nodiscard]] std::expected<void, SettingsError> stage(SideFile const& file,
                                                            std::optional<std::string> bytes);
 
-    /// Stages @p files as one change, written in their order, together or not at all, and (re)starts the
-    /// debounce. A file already staged keeps its place, and every change it was part of becomes one with
-    /// this: a later stage() of a rename's new file leaves it in the rename.
+    /// Stages @p files as one change, written together or not at all (every write before any removal), and
+    /// (re)starts the debounce. A file already staged keeps its place, and every change it was part of
+    /// becomes one with this: a later stage() of a rename's new file leaves it in the rename.
     /// @param files The files and their new contents.
     /// @return Nothing, or why nothing was staged.
     [[nodiscard]] std::expected<void, SettingsError> stageTogether(std::span<StagedFile const> files);
