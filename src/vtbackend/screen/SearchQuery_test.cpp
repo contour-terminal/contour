@@ -45,7 +45,8 @@ std::vector<Span> spansOf(Grid const& grid, int row, std::u32string_view pattern
 {
     auto const query = SearchQuery::compile(pattern, options, WordDelimiters);
     REQUIRE(query.has_value());
-    auto const matches = query->matchesIn(grid, vtbackend::searchSegmentAt(grid, LineOffset(row)));
+    auto const matches =
+        query->matchesIn(grid, vtbackend::searchSegmentAt(grid, LineOffset(row), query->segmentCells()));
     REQUIRE(matches.has_value());
     auto spans = std::vector<Span> {};
     for (auto const& match: *matches)
@@ -149,7 +150,7 @@ TEST_CASE("searchQuery.aRegexSpansASoftWrapButNotAHardBreak", "[searchquery]")
     SECTION("a soft wrap is one segment")
     {
         auto const mock = termWith(2, 10, "abc 12 de 345");
-        CHECK(vtbackend::searchSegmentAt(gridOf(mock), LineOffset(0))
+        CHECK(vtbackend::searchSegmentAt(gridOf(mock), LineOffset(0), vtbackend::RegexSegmentCells)
               == SearchSegment { .first = LineOffset(0), .last = LineOffset(1) });
         CHECK(spansOf(gridOf(mock), 0, U"de 3", RegexOptions) == std::vector<Span> { { 0, 7, 1, 0 } });
     }
@@ -157,7 +158,7 @@ TEST_CASE("searchQuery.aRegexSpansASoftWrapButNotAHardBreak", "[searchquery]")
     SECTION("a hard break ends one")
     {
         auto const mock = termWith(2, 10, "abc 12 de\r\n345");
-        CHECK(vtbackend::searchSegmentAt(gridOf(mock), LineOffset(1))
+        CHECK(vtbackend::searchSegmentAt(gridOf(mock), LineOffset(1), vtbackend::RegexSegmentCells)
               == SearchSegment { .first = LineOffset(1), .last = LineOffset(1) });
         CHECK(spansOf(gridOf(mock), 0, U"de.*3", RegexOptions).empty());
         CHECK(spansOf(gridOf(mock), 1, U"de.*3", RegexOptions).empty());
@@ -293,7 +294,9 @@ TEST_CASE("searchQuery.foldedRegexIsUnicodeAware", "[searchquery]")
 
 TEST_CASE("searchQuery.segmentsCutALongLineAtFixedRows", "[searchquery]")
 {
-    // One logical line 400 rows long, 200 columns wide: a segment holds 36 864 / 200 = 184 of its rows.
+    // One logical line 400 rows long, 200 columns wide: a literal's segment holds 36 864 / 200 = 184 of its
+    // rows.
+    auto constexpr Literal = vtbackend::MaxScanCells;
     auto constexpr Columns = 200;
     auto constexpr Rows = 400;
     auto const mock = termWith(Rows, Columns, std::string(std::size_t { Columns } * Rows, 'x'));
@@ -302,35 +305,39 @@ TEST_CASE("searchQuery.segmentsCutALongLineAtFixedRows", "[searchquery]")
         return SearchSegment { .first = LineOffset(first), .last = LineOffset(last) };
     };
 
-    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(0)) == segment(0, 183));
-    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(183)) == segment(0, 183));
-    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(184)) == segment(184, 367));
-    CHECK(vtbackend::nextSearchSegment(grid, segment(0, 183)) == segment(184, 367));
-    CHECK(vtbackend::nextSearchSegment(grid, segment(368, Rows - 1)) == std::nullopt);
-    CHECK(vtbackend::previousSearchSegment(grid, segment(184, 367)) == segment(0, 183));
-    CHECK(vtbackend::previousSearchSegment(grid, segment(0, 183)) == std::nullopt);
+    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(0), Literal) == segment(0, 183));
+    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(183), Literal) == segment(0, 183));
+    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(184), Literal) == segment(184, 367));
+    CHECK(vtbackend::nextSearchSegment(grid, segment(0, 183), Literal) == segment(184, 367));
+    CHECK(vtbackend::nextSearchSegment(grid, segment(368, Rows - 1), Literal) == std::nullopt);
+    CHECK(vtbackend::previousSearchSegment(grid, segment(184, 367), Literal) == segment(0, 183));
+    CHECK(vtbackend::previousSearchSegment(grid, segment(0, 183), Literal) == std::nullopt);
     // Stepping within the line, both ways, lands on the cuts searchSegmentAt() makes.
-    CHECK(vtbackend::nextSearchSegment(grid, segment(184, 367)) == segment(368, Rows - 1));
-    CHECK(vtbackend::previousSearchSegment(grid, segment(368, Rows - 1)) == segment(184, 367));
-    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(Rows - 1)) == segment(368, Rows - 1));
+    CHECK(vtbackend::nextSearchSegment(grid, segment(184, 367), Literal) == segment(368, Rows - 1));
+    CHECK(vtbackend::previousSearchSegment(grid, segment(368, Rows - 1), Literal) == segment(184, 367));
+    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(Rows - 1), Literal) == segment(368, Rows - 1));
 }
 
 TEST_CASE("searchQuery.aLiteralSpansASegmentCutButARegexDoesNot", "[searchquery]")
 {
-    // "nee" ends row 183, the last of the first segment, and "dle" begins row 184 on its soft wrap.
+    // 200 columns: a literal's segment is 184 rows (MaxScanCells), a regex's 10 (RegexSegmentCells). One
+    // "needle" straddles each cut: rows 9 and 10, rows 183 and 184.
     auto constexpr Columns = 200;
     auto constexpr Rows = 400;
     auto text = std::string(std::size_t { Columns } * Rows, 'x');
+    text.replace((std::size_t { Columns } * 10) - 3, 6, "needle");
     text.replace((std::size_t { Columns } * 184) - 3, 6, "needle");
     auto const mock = termWith(Rows, Columns, text);
     auto const& grid = gridOf(mock);
 
-    // Found once, by the segment it begins in.
-    CHECK(spansOf(grid, 0, U"needle") == std::vector<Span> { { 183, 197, 184, 2 } });
+    // A literal finds each once, by the segment it begins in.
+    CHECK(spansOf(grid, 0, U"needle") == std::vector<Span> { { 9, 197, 10, 2 }, { 183, 197, 184, 2 } });
     CHECK(spansOf(grid, 184, U"needle").empty());
+    // A regex finds neither across its own cut, and the second within one of its segments.
     CHECK(spansOf(grid, 0, U"needle", RegexOptions).empty());
-    CHECK(spansOf(grid, 184, U"needle", RegexOptions).empty());
-    CHECK(spansOf(grid, 184, U"dle", RegexOptions) == std::vector<Span> { { 184, 0, 184, 2 } });
+    CHECK(spansOf(grid, 10, U"needle", RegexOptions).empty());
+    CHECK(spansOf(grid, 10, U"dle", RegexOptions) == std::vector<Span> { { 10, 0, 10, 2 } });
+    CHECK(spansOf(grid, 180, U"needle", RegexOptions) == std::vector<Span> { { 183, 197, 184, 2 } });
 }
 
 TEST_CASE("searchQuery.wholeWordResumesAtTheNextDelimiter", "[searchquery]")

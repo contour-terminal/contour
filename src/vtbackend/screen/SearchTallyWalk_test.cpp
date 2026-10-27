@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 using namespace vtbackend;
 
@@ -43,7 +44,8 @@ Drained drain(SearchTallyWalk walk, Grid const& grid, LineCount budget)
 SearchMatchTally oracle(Grid const& grid, SearchQuery const& query, CellLocation position)
 {
     auto tally = SearchMatchTally {};
-    auto segment = std::optional { searchSegmentAt(grid, -boxed_cast<LineOffset>(grid.historyLineCount())) };
+    auto segment = std::optional { searchSegmentAt(
+        grid, -boxed_cast<LineOffset>(grid.historyLineCount()), query.segmentCells()) };
     while (segment)
     {
         auto const matches = query.matchesIn(grid, *segment);
@@ -54,7 +56,7 @@ SearchMatchTally oracle(Grid const& grid, SearchQuery const& query, CellLocation
             if (match.first == position)
                 tally.ordinal = tally.total;
         }
-        segment = nextSearchSegment(grid, *segment);
+        segment = nextSearchSegment(grid, *segment, query.segmentCells());
     }
     return tally;
 }
@@ -125,6 +127,37 @@ TEST_CASE("searchWalk.chunkedEqualsUnchunked", "[searchwalk]")
         }
     }
     CHECK(oracle(grid, *compiled(U"needle"), tenthNeedle).ordinal == 10);
+}
+
+TEST_CASE("searchWalk.aRegexStepFeedsTheEngineOneSegmentBudget", "[searchwalk]")
+{
+    // C1: `.*x` over a long run of `a` fails at every start without tripping libc++'s complexity limit, so
+    // its cost grows with the square of what it is fed. One wrapped line of 3 200 cells: a step of a regex
+    // walk feeds it RegexSegmentCells at most, however many rows the caller allows; a literal's is unbounded.
+    auto constexpr Columns = 80;
+    auto constexpr Rows = 40;
+    auto mock = MockTerm<> { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
+    mock.writeToScreen(std::string(std::size_t { Columns } * Rows, 'a'));
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    REQUIRE(grid.isLineWrapped(LineOffset(Rows - 1)));
+
+    auto regexWalk = SearchTallyWalk { compiled(U".*x", Regex), grid, CellLocation {} };
+    auto steps = 0;
+    auto progress = WalkProgress::Running;
+    while (progress == WalkProgress::Running)
+    {
+        auto const result = regexWalk.step(grid, SearchWalkStepLines);
+        REQUIRE(result.has_value());
+        progress = *result;
+        ++steps;
+        CHECK(unbox<std::size_t>(regexWalk.rowsLastStep()) * Columns <= RegexSegmentCells);
+    }
+    CHECK(regexWalk.tally().total == 0);
+    CHECK(steps == 2); // 25 rows (2 000 cells), then the other 15.
+
+    auto literalWalk = SearchTallyWalk { compiled(U"x"), grid, CellLocation {} };
+    REQUIRE(literalWalk.step(grid, SearchWalkStepLines).has_value());
+    CHECK(literalWalk.rowsLastStep() == LineCount(Rows));
 }
 
 TEST_CASE("searchWalk.aStepReadsWholeSegmentsWithinItsBudget", "[searchwalk]")
@@ -413,4 +446,31 @@ TEST_CASE("searchWalk.theTerminalRestartsTheWalkOnAnotherPage", "[searchwalk]")
     CHECK(terminal.continueSearchTally(*tally) == WalkProgress::Finished);
     CHECK(tally->page == terminal.displayedPageIndex());
     CHECK(tally->walk.tally().total == 0);
+}
+
+TEST_CASE("searchWalk.countingSteppingAndTheCurrentMatchCutARegexAlike", "[searchwalk]")
+{
+    // One wrapped line, `ab` straddling the regex cut after 25 rows (2 000 of 80-column cells): no reader
+    // finds it as a regex, every reader finds it as a literal, which reads on past a cut.
+    auto constexpr Columns = 80;
+    auto constexpr Rows = 30;
+    auto constexpr Cut = 25 * Columns;
+    auto mock = MockTerm<> { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
+    auto text = std::string(std::size_t { Columns } * Rows, '.');
+    text[Cut - 1] = 'a';
+    text[Cut] = 'b';
+    mock.writeToScreen(text);
+    auto& terminal = mock.terminal;
+    auto const at = CellLocation { .line = LineOffset(24), .column = ColumnOffset(Columns - 1) };
+
+    for (auto const& [options, found]: { std::pair { Regex, false }, std::pair { SearchOptions {}, true } })
+    {
+        INFO(std::format("regex: {}", options.syntax == SearchSyntax::Regex));
+        REQUIRE(terminal.setSearchOptions(options).has_value());
+        REQUIRE(terminal.setNewSearchTerm(U"ab", SearchOrigin::Typed).has_value());
+        CHECK((terminal.tallySearchMatches(at).total == 1) == found);
+        CHECK(terminal.search(CellLocation {}).has_value() == found);
+        terminal.moveNormalModeCursorTo(at);
+        CHECK(terminal.focusedSearchMatch().has_value() == found);
+    }
 }

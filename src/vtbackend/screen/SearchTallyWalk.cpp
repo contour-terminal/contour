@@ -39,6 +39,10 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
     if (_progress == WalkProgress::Finished)
         return _progress;
 
+    // A regex is fed about one segment per step, whatever the caller allows: its cost grows faster than its
+    // subject, and the step runs under the terminal's lock.
+    budget = _query->boundedRows(budget, grid.pageSize().columns);
+
     // The segment just read: the next one is found from it without walking back to its line's head, so a
     // step looks a head up once, where it begins, however long the line.
     auto previous = std::optional<SearchSegment> {};
@@ -56,7 +60,8 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
         // Between steps the history's top may have passed this line's head, which moves its cuts: the
         // segment holding the next row may then begin above it (rows read by the step before, filtered
         // below), and a regex match across the old cut, which neither cut reads whole, is not counted.
-        auto const segment = previous ? *nextSearchSegment(grid, *previous) : segmentFromHead(grid, *row);
+        auto const segment = previous ? *nextSearchSegment(grid, *previous, _query->segmentCells())
+                                      : segmentFromHead(grid, *row);
         previous = segment;
         auto const matches = _query->matchesIn(grid, segment);
         if (!matches)
@@ -100,7 +105,7 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
 SearchSegment SearchTallyWalk::segmentFromHead(Grid const& grid, LineOffset row)
 {
     ++_headLookups;
-    return searchSegmentAt(grid, row);
+    return searchSegmentAt(grid, row, _query->segmentCells());
 }
 
 std::optional<CellLocation> SearchTallyWalk::locate(Grid const& grid, std::optional<StableCell> cell) noexcept

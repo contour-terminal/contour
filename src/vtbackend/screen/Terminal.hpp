@@ -3462,6 +3462,10 @@ class Terminal: public IStatusLinePublishTarget
     /// disagree in the first place, so there is no longer one.
     [[nodiscard]] Search const& search() const noexcept { return _search; }
 
+    /// The render pass's remembered regex matches, kept across frames (@see SearchMatchMemo). Mutable from
+    /// a const terminal, as the render pass holds one; guarded by the terminal's lock like the grid.
+    [[nodiscard]] SearchMatchMemo& searchMatchMemo() const noexcept { return _searchMatchMemo; }
+
     // {{{ hint mode
     /// Activates hint mode, scanning the region @p request asks for.
     void activateHintMode(HintModeRequest request);
@@ -5257,6 +5261,8 @@ class Terminal: public IStatusLinePublishTarget
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;
+    /// @see searchMatchMemo
+    mutable SearchMatchMemo _searchMatchMemo;
 
     /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
     ChecksumFlags _checksumExtension = _settings.checksumExtension;

@@ -3,8 +3,12 @@
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/Search.hpp>
+#include <vtbackend/links/ScanText.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <string>
@@ -15,13 +19,32 @@ namespace vtbackend
 {
 
 class Grid;
+class SearchMatchMemo;
 
-/// The rows of one logical line a search matches as one text: at most @ref MaxScanCells cells of it.
+namespace detail
+{
+    struct SearchSubjectCell;
+    struct SearchSubject;
+} // namespace detail
+
+/// How many cells a regex is fed as one text: a regex segment's budget, and what one step of a walk or the
+/// keystroke's probe feeds it at most.
 ///
-/// A long logical line is cut from its head every `max(1, MaxScanCells / columns)` rows, so every reader of
-/// the grid -- stepping, counting, highlighting -- cuts it at the same rows and sees the same matches. A
-/// regex match across a cut is not found, as the link scanner does not find one; a literal one is, since a
-/// literal spans no more cells than it has codepoints.
+/// Derived from cost. libc++'s std::wregex is quadratic in its subject for patterns such as `.*timeout`,
+/// `\w+q` or `a*q` that fail at every start without ever tripping its complexity limit: measured on Apple
+/// clang -O2, 1 024 units take 23 ms, 2 048 take 95 ms and 8 192 take 1.5 s (Debug: about nine times
+/// that), all under the terminal lock. At 2 048 one segment stays under a tenth of a second at its very
+/// worst, and an ordinary pattern over ordinary text far under a frame; a long logical line's regex
+/// matches across its cuts are not found (R-d).
+inline constexpr std::size_t RegexSegmentCells = 2048;
+
+/// The rows of one logical line a search matches as one text: at most a query's segment budget of cells
+/// (SearchQuery::segmentCells: @ref MaxScanCells for a literal, @ref RegexSegmentCells for a regex).
+///
+/// A long logical line is cut from its head every `max(1, cells / columns)` rows, so every reader of the
+/// grid -- stepping, counting, highlighting -- cuts it at the same rows under the same query and sees the
+/// same matches. A regex match across a cut is not found, as the link scanner does not find one; a literal
+/// one is, since a literal spans no more cells than it has codepoints.
 struct SearchSegment
 {
     LineOffset first {}; ///< Its top row.
@@ -31,23 +54,30 @@ struct SearchSegment
 };
 
 /// The segment holding @p row.
-/// @param grid The grid.
-/// @param row  A row of the grid, history or page.
+/// @param grid  The grid.
+/// @param row   A row of the grid, history or page.
+/// @param cells The segment budget, in cells (SearchQuery::segmentCells).
 /// @return Its segment: cut from the head of @p row's logical line, and ending at that line's end, the cut
 ///         or the page's bottom, whichever comes first.
-[[nodiscard]] SearchSegment searchSegmentAt(Grid const& grid, LineOffset row);
+[[nodiscard]] SearchSegment searchSegmentAt(Grid const& grid, LineOffset row, std::size_t cells);
 
 /// The segment right below @p segment.
 /// @param grid    The grid.
-/// @param segment A segment of @p grid.
+/// @param segment A segment of @p grid, cut at @p cells.
+/// @param cells   The segment budget, in cells (SearchQuery::segmentCells).
 /// @return It, or nothing where @p segment ends at the page's bottom.
-[[nodiscard]] std::optional<SearchSegment> nextSearchSegment(Grid const& grid, SearchSegment segment);
+[[nodiscard]] std::optional<SearchSegment> nextSearchSegment(Grid const& grid,
+                                                             SearchSegment segment,
+                                                             std::size_t cells);
 
 /// The segment right above @p segment.
 /// @param grid    The grid.
-/// @param segment A segment of @p grid.
+/// @param segment A segment of @p grid, cut at @p cells.
+/// @param cells   The segment budget, in cells (SearchQuery::segmentCells).
 /// @return It, or nothing where @p segment begins at the history's top.
-[[nodiscard]] std::optional<SearchSegment> previousSearchSegment(Grid const& grid, SearchSegment segment);
+[[nodiscard]] std::optional<SearchSegment> previousSearchSegment(Grid const& grid,
+                                                                 SearchSegment segment,
+                                                                 std::size_t cells);
 
 /// A search pattern compiled once, with the options it was compiled under.
 ///
@@ -81,6 +111,20 @@ class SearchQuery
     /// @return How letter case is compared: the options' case policy resolved against the pattern.
     [[nodiscard]] CaseComparison comparison() const noexcept { return _comparison; }
 
+    /// @return The cells one of its segments holds at most: @ref RegexSegmentCells for a regex, whose cost
+    ///         grows faster than its subject; @ref MaxScanCells for a literal, whose cost does not.
+    [[nodiscard]] std::size_t segmentCells() const noexcept
+    {
+        return _regex ? RegexSegmentCells : MaxScanCells;
+    }
+
+    /// The rows a bounded read -- a walk's step, the keystroke's probe -- may cover at most under this query.
+    /// @param budget  The rows the caller would read.
+    /// @param columns The grid's width.
+    /// @return @p budget for a literal; for a regex, no more than one segment's worth of rows, so one read
+    ///         feeds the engine about @ref RegexSegmentCells cells at most.
+    [[nodiscard]] LineCount boundedRows(LineCount budget, ColumnCount columns) const noexcept;
+
     /// Every match whose first cell is in @p segment, in order.
     ///
     /// The segment is read as its cells' text: a cell's grapheme cluster NFC-normalized (and folded where
@@ -98,6 +142,15 @@ class SearchQuery
         Grid const& grid, SearchSegment segment) const;
 
   private:
+    friend class SearchMatchMemo;
+
+    /// @p segment of @p grid as the matcher reads it. @see matchesIn
+    [[nodiscard]] detail::SearchSubject subjectOf(Grid const& grid, SearchSegment segment) const;
+
+    /// The matches in @p subject. @see matchesIn
+    [[nodiscard]] std::expected<std::vector<CellLocationRange>, SearchPatternError> matchesOf(
+        detail::SearchSubject const& subject) const;
+
     SearchQuery(std::u32string pattern,
                 SearchOptions options,
                 CaseComparison comparison,
@@ -111,6 +164,43 @@ class SearchQuery
     std::u32string _wordDelimiters;    ///< What ends a word, read at compile time.
     std::wstring _needle;              ///< Literal: the NFC, folded pattern, one unit per codepoint.
     std::optional<std::wregex> _regex; ///< Regex: the compiled pattern.
+};
+
+/// A regex's matches per segment, kept while the segment reads as it did when they were found, so a visible
+/// segment that a slow pattern takes long over is matched once rather than on every frame.
+///
+/// Reading a segment to compare costs as much as reading it to match a literal does; only the regex engine's
+/// own work, which grows faster than its subject, is saved. Not thread-safe: the terminal's lock guards it,
+/// as it guards the grid it reads.
+class SearchMatchMemo
+{
+  public:
+    /// @p query's matches in @p segment of @p grid: the remembered ones where the segment's text and layout
+    /// are as they were under the same query, the same grid generation and the same top row; otherwise
+    /// found now and remembered. A literal query is matched every time.
+    [[nodiscard]] std::expected<std::vector<CellLocationRange>, SearchPatternError> matchesIn(
+        std::shared_ptr<SearchQuery const> const& query, Grid const& grid, SearchSegment segment);
+
+    /// @return How often it has run the regex engine rather than remembered: a cost, read by the tests.
+    [[nodiscard]] std::size_t engineRuns() const noexcept { return _engineRuns; }
+
+  private:
+    /// One segment's matches, its lines relative to its top row.
+    struct Entry
+    {
+        int64_t firstRow = 0;                   ///< Its top row's stable id.
+        std::wstring units;                     ///< What the engine read.
+        std::vector<CellLocationRange> cells;   ///< Which cells spelled it.
+        std::vector<CellLocationRange> matches; ///< What it found.
+    };
+
+    /// More than a page shows: a page of one-row lines is a few hundred segments at most.
+    static constexpr std::size_t MaxEntries = 512;
+
+    std::shared_ptr<SearchQuery const> _query;
+    uint64_t _generation = 0;
+    std::vector<Entry> _entries;
+    std::size_t _engineRuns = 0;
 };
 
 /// @p text with every regex metacharacter escaped, so a regex of it matches the text literally.

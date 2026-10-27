@@ -8699,6 +8699,9 @@ std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocati
 
 SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
 {
+    // A keystroke's read: a regex is fed about one segment, as a walk's step is; the walk finds the rest.
+    if (_search.query)
+        budget = _search.query->boundedRows(budget, pageSize().columns);
     auto match = searchReverseWithin(from, budget);
     auto const wholeGridFits = displayedPage().grid().linesUsed() <= budget;
     if (!match && wholeGridFits)

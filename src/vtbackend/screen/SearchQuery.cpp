@@ -223,28 +223,39 @@ namespace
         return units;
     }
 
-    /// The rows a segment holds at most, from its logical line's head: @ref MaxScanCells cells' worth.
-    [[nodiscard]] int rowsPerSegment(Grid const& grid) noexcept
+    /// The rows a segment holds at most, from its logical line's head: @p cells cells' worth, and one row
+    /// at least.
+    [[nodiscard]] int rowsPerSegment(ColumnCount columns, std::size_t cells) noexcept
     {
-        return std::max(1, static_cast<int>(MaxScanCells) / std::max(1, unbox<int>(grid.pageSize().columns)));
+        return std::max(1, static_cast<int>(cells) / std::max(1, unbox<int>(columns)));
     }
 
+} // namespace
+
+namespace detail
+{
     /// One cell of a segment's subject: the units it spells and the columns it covers.
-    struct SubjectCell
+    struct SearchSubjectCell
     {
-        std::size_t firstUnit = 0; ///< Its first unit in Subject::units.
+        std::size_t firstUnit = 0; ///< Its first unit in SearchSubject::units.
         std::size_t endUnit = 0;   ///< One past its last unit.
         CellLocation first {};     ///< Its column.
         CellLocation last {};      ///< Its last column: a wide character's second half.
     };
 
     /// A segment as the matcher reads it (R-a): its cells' text in order, and which cells spelled it.
-    struct Subject
+    struct SearchSubject
     {
-        std::wstring units;             ///< The text, in the regex engine's units.
-        std::vector<SubjectCell> cells; ///< Every cell that spelled units, in order.
+        std::wstring units;                   ///< The text, in the regex engine's units.
+        std::vector<SearchSubjectCell> cells; ///< Every cell that spelled units, in order.
         std::size_t segmentCells = 0; ///< How many of @ref cells are the segment's; a match begins in those.
     };
+} // namespace detail
+
+namespace
+{
+    using SubjectCell = detail::SearchSubjectCell;
+    using Subject = detail::SearchSubject;
 
     /// Whether @p line shows no text at all, and so reads as one line break: unmaterialized, or every cell
     /// of it empty. A row of nothing but cells with no text of their own -- a tall block's lower part -- is
@@ -460,9 +471,19 @@ std::expected<SearchQuery, SearchPatternError> SearchQuery::compile(std::u32stri
 std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::matchesIn(
     Grid const& grid, SearchSegment segment) const
 {
+    return matchesOf(subjectOf(grid, segment));
+}
+
+detail::SearchSubject SearchQuery::subjectOf(Grid const& grid, SearchSegment segment) const
+{
     // A literal reads on past the segment's end by as many cells as it can span, so a match across a cut is
     // found by the segment it begins in; a regex reads the segment alone (R-d).
-    auto const subject = subjectOf(grid, segment, _comparison, _regex ? 0 : _needle.size());
+    return vtbackend::subjectOf(grid, segment, _comparison, _regex ? 0 : _needle.size());
+}
+
+std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::matchesOf(
+    detail::SearchSubject const& subject) const
+{
     auto const boundary = _options.wordBoundary;
     auto matches = std::vector<CellLocationRange> {};
 
@@ -509,40 +530,119 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::m
     return matches;
 }
 
-SearchSegment searchSegmentAt(Grid const& grid, LineOffset row)
+namespace
+{
+    /// @p cell with its line taken relative to @p top, so a segment that scrolled reads as the one it was.
+    [[nodiscard]] CellLocation relativeTo(CellLocation cell, LineOffset top) noexcept
+    {
+        return CellLocation { .line = cell.line - top, .column = cell.column };
+    }
+} // namespace
+
+std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchMatchMemo::matchesIn(
+    std::shared_ptr<SearchQuery const> const& query, Grid const& grid, SearchSegment segment)
+{
+    // A literal's cost grows with its subject alone, no faster than reading it to compare would.
+    if (query->segmentCells() != RegexSegmentCells)
+        return query->matchesIn(grid, segment);
+
+    if (query != _query || grid.generation() != _generation)
+    {
+        _query = query;
+        _generation = grid.generation();
+        _entries.clear();
+    }
+
+    auto const subject = query->subjectOf(grid, segment);
+    auto cells = std::vector<CellLocationRange> {};
+    cells.reserve(subject.cells.size());
+    for (auto const& cell: subject.cells)
+        cells.push_back(CellLocationRange { .first = relativeTo(cell.first, segment.first),
+                                            .second = relativeTo(cell.last, segment.first) });
+
+    auto const firstRow = grid.stableLineIdOf(segment.first);
+    auto const absolute = [&segment](std::vector<CellLocationRange> const& matches) {
+        auto out = matches;
+        for (auto& match: out)
+        {
+            match.first.line += segment.first;
+            match.second.line += segment.first;
+        }
+        return out;
+    };
+
+    auto const entry = std::ranges::find(_entries, firstRow, &Entry::firstRow);
+    auto const sameCells = [](CellLocationRange const& a, CellLocationRange const& b) {
+        return a.first == b.first && a.second == b.second;
+    };
+    if (entry != _entries.end() && entry->units == subject.units
+        && std::ranges::equal(entry->cells, cells, sameCells))
+        return absolute(entry->matches);
+
+    ++_engineRuns;
+    auto matches = query->matchesOf(subject);
+    if (!matches)
+        return matches;
+    auto relative = *matches;
+    for (auto& match: relative)
+        match = CellLocationRange { .first = relativeTo(match.first, segment.first),
+                                    .second = relativeTo(match.second, segment.first) };
+    if (entry != _entries.end())
+        _entries.erase(entry);
+    // Bounded: the oldest go first, and a page shows far fewer segments than this.
+    if (_entries.size() >= MaxEntries)
+        _entries.erase(_entries.begin());
+    _entries.push_back(Entry { .firstRow = firstRow,
+                               .units = subject.units,
+                               .cells = std::move(cells),
+                               .matches = std::move(relative) });
+    return matches;
+}
+
+LineCount SearchQuery::boundedRows(LineCount budget, ColumnCount columns) const noexcept
+{
+    if (!_regex)
+        return budget;
+    return std::min(budget, LineCount::cast_from(rowsPerSegment(columns, RegexSegmentCells)));
+}
+
+SearchSegment searchSegmentAt(Grid const& grid, LineOffset row, std::size_t cells)
 {
     auto const head = grid.logicalLineHead(row);
-    auto const rows = rowsPerSegment(grid);
+    auto const rows = rowsPerSegment(grid.pageSize().columns, cells);
     auto const first = head + LineOffset::cast_from(((unbox<int>(row) - unbox<int>(head)) / rows) * rows);
     auto const lastPageLine = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
     auto const limit = std::min(first + LineOffset::cast_from(rows - 1), lastPageLine);
     return SearchSegment { .first = first, .last = grid.logicalLineEnd(first, limit) };
 }
 
-std::optional<SearchSegment> nextSearchSegment(Grid const& grid, SearchSegment segment)
+std::optional<SearchSegment> nextSearchSegment(Grid const& grid, SearchSegment segment, std::size_t cells)
 {
     auto const lastPageLine = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
     if (segment.last >= lastPageLine)
         return std::nullopt;
     auto const first = segment.last + 1;
     if (!grid.continuesRowAbove(first))
-        return searchSegmentAt(grid, first);
+        return searchSegmentAt(grid, first, cells);
     // The rest of the same logical line, cut where its head's cuts fall: no walk back up to the head, which
     // would make walking a long line's segments quadratic.
-    auto const limit = std::min(first + LineOffset::cast_from(rowsPerSegment(grid) - 1), lastPageLine);
+    auto const limit = std::min(
+        first + LineOffset::cast_from(rowsPerSegment(grid.pageSize().columns, cells) - 1), lastPageLine);
     return SearchSegment { .first = first, .last = grid.logicalLineEnd(first, limit) };
 }
 
-std::optional<SearchSegment> previousSearchSegment(Grid const& grid, SearchSegment segment)
+std::optional<SearchSegment> previousSearchSegment(Grid const& grid, SearchSegment segment, std::size_t cells)
 {
     auto const historyTop = -boxed_cast<LineOffset>(grid.historyLineCount());
     if (segment.first <= historyTop)
         return std::nullopt;
     if (!grid.continuesRowAbove(segment.first))
-        return searchSegmentAt(grid, segment.first - 1);
+        return searchSegmentAt(grid, segment.first - 1, cells);
     // The cut above, within the same logical line, as nextSearchSegment() steps down without a head walk.
     return SearchSegment {
-        .first = std::max(segment.first - LineOffset::cast_from(rowsPerSegment(grid)), historyTop),
+        .first =
+            std::max(segment.first - LineOffset::cast_from(rowsPerSegment(grid.pageSize().columns, cells)),
+                     historyTop),
         .last = segment.first - 1,
     };
 }

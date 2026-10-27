@@ -639,6 +639,28 @@ TEST_CASE("search.regexHighlightCoversBothHalvesOfAWideCharacter", "[renderbuffe
     CHECK(regexHighlightOf(mock, U"\u65E5", CellLocation { LineOffset(1), ColumnOffset(0) }, 0) == ".mm...");
 }
 
+TEST_CASE("search.aRegexIsMatchedOncePerSegmentAcrossFrames", "[renderbuffer][search]")
+{
+    // C1: a frame that changes nothing on a segment does not run the regex over it again; output that does
+    // runs it over that segment alone.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("abc\r\nabd\r\nabe");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"ab.", SearchOrigin::Typed).has_value());
+    auto const& memo = mock.terminal.searchMatchMemo();
+
+    mock.terminal.refreshRenderBuffer(true);
+    auto const firstFrame = memo.engineRuns();
+    CHECK(firstFrame == 3);
+
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(memo.engineRuns() == firstFrame);
+
+    mock.writeToScreen("x");
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(memo.engineRuns() == firstFrame + 1);
+}
+
 TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][search]")
 {
     // (a+)+$ over a run of a's that ends in a b is exponential for a backtracking engine. Where the engine
@@ -651,7 +673,7 @@ TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][se
     auto const query = mock.terminal.search().query;
     REQUIRE(query != nullptr);
     auto const& grid = mock.terminal.primaryScreen().grid();
-    auto const direct = query->matchesIn(grid, searchSegmentAt(grid, LineOffset(0)));
+    auto const direct = query->matchesIn(grid, searchSegmentAt(grid, LineOffset(0), query->segmentCells()));
 
     mock.terminal.refreshRenderBuffer(true);
     if (direct)

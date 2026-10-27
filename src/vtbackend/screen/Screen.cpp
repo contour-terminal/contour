@@ -8754,7 +8754,7 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(Sea
     if (startPosition.line >= boxed_cast<LineOffset>(pageSize().lines))
         return nullopt;
 
-    auto segment = optional { searchSegmentAt(_grid, startPosition.line) };
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line, query.segmentCells()) };
     while (segment)
     {
         auto const matches = query.matchesIn(_grid, *segment);
@@ -8765,7 +8765,7 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(Sea
         });
         if (match != matches->end())
             return match->first;
-        segment = nextSearchSegment(_grid, *segment);
+        segment = nextSearchSegment(_grid, *segment, query.segmentCells());
     }
     return nullopt;
 }
@@ -8789,7 +8789,7 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
 
     // Whole segments, so a match is found or missed as one: the budget is a floor on the rows read.
     auto rowsRead = LineCount(0);
-    auto segment = optional { searchSegmentAt(_grid, startPosition.line) };
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line, query.segmentCells()) };
     while (segment)
     {
         auto const matches = query.matchesIn(_grid, *segment);
@@ -8804,7 +8804,7 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
         rowsRead += boxed_cast<LineCount>(segment->last - segment->first) + LineCount(1);
         if (rowsRead >= budget)
             break;
-        segment = previousSearchSegment(_grid, *segment);
+        segment = previousSearchSegment(_grid, *segment, query.segmentCells());
     }
     return nullopt;
 }
@@ -8815,7 +8815,7 @@ std::expected<optional<CellLocationRange>, SearchPatternError> Screen::matchStar
     if (start.line < -boxed_cast<LineOffset>(historyLineCount())
         || start.line >= boxed_cast<LineOffset>(pageSize().lines))
         return nullopt;
-    auto const matches = query.matchesIn(_grid, searchSegmentAt(_grid, start.line));
+    auto const matches = query.matchesIn(_grid, searchSegmentAt(_grid, start.line, query.segmentCells()));
     if (!matches)
         return std::unexpected { matches.error() };
     auto const match = std::ranges::find(*matches, start, &CellLocationRange::first);

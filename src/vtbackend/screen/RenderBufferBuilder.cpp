@@ -720,9 +720,10 @@ void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
     // line's head, which per row would cost a long line's length per row.
     if (!_searchSegment || gridLine < _searchSegment->first || gridLine > _searchSegment->last)
     {
-        auto const segment = searchSegmentAt(grid, gridLine);
+        auto const segment = searchSegmentAt(grid, gridLine, search.query->segmentCells());
         _searchSegment = segment;
-        auto const matches = search.query->matchesIn(grid, segment);
+        // Remembered across frames: a slow regex over a visible segment is paid once, not on every frame.
+        auto const matches = _terminal->searchMatchMemo().matchesIn(search.query, grid, segment);
         if (!matches)
         {
             _searchFailure = matches.error();
