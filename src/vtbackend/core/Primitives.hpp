@@ -600,6 +600,9 @@ enum class ScreenType : uint8_t
     Alternate = 1,
 };
 
+/// How many screen types there are, derived from the last one: the size of a table indexed by ScreenType.
+inline constexpr size_t ScreenTypeCount = static_cast<size_t>(ScreenType::Alternate) + 1;
+
 /// Returns the ScreenType for a given page index.
 constexpr ScreenType screenTypeFromPage(PageIndex page) noexcept
 {

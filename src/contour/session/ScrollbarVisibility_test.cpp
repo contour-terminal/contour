@@ -22,13 +22,13 @@ using vtbackend::ScreenType;
 namespace
 {
 
-/// Every enumerator of @p Enum up to and including @p last, in order.
-template <typename Enum>
-[[nodiscard]] std::vector<Enum> enumeratorsThrough(Enum last)
+/// Every value of @p Enum, in order, given how many there are (its `…Count` constant).
+template <typename Enum, size_t Count>
+[[nodiscard]] std::vector<Enum> everyValue()
 {
     return std::ranges::to<std::vector>(
-        std::views::iota(0, static_cast<int>(last) + 1)
-        | std::views::transform([](int value) { return static_cast<Enum>(value); }));
+        std::views::iota(size_t { 0 }, Count)
+        | std::views::transform([](size_t value) { return static_cast<Enum>(value); }));
 }
 
 /// One row of the visibility table.
@@ -113,11 +113,12 @@ TEST_CASE("scrollbarVisibility.everyCombination", "[scrollbarvisibility]")
     auto const historyCounts = std::array<int64_t, 2> { 0, History };
     auto const scrollOffsets = std::array<int64_t, 2> { 0, 3 };
     auto combinations = size_t { 0 };
-    for (auto const position: enumeratorsThrough(ScrollBarPosition::Right))
-        for (auto const mode: enumeratorsThrough(ScrollBarMode::Always))
-            for (auto const screen: enumeratorsThrough(ScreenType::Alternate))
-                for (auto const altScreen: enumeratorsThrough(AltScreenScrollbar::Shown))
-                    for (auto const marks: enumeratorsThrough(MarksAbove::Some))
+    for (auto const position: everyValue<ScrollBarPosition, contour::config::ScrollBarPositionCount>())
+        for (auto const mode: everyValue<ScrollBarMode, contour::config::ScrollBarModeCount>())
+            for (auto const screen: everyValue<ScreenType, vtbackend::ScreenTypeCount>())
+                for (auto const altScreen:
+                     everyValue<AltScreenScrollbar, contour::session::AltScreenScrollbarCount>())
+                    for (auto const marks: everyValue<MarksAbove, vtbackend::MarksAboveCount>())
                         for (auto const historyLines: historyCounts)
                             for (auto const scrollOffset: scrollOffsets)
                             {
@@ -141,9 +142,10 @@ TEST_CASE("scrollbarVisibility.everyCombination", "[scrollbarvisibility]")
                             }
     // Every enumerator of every input was visited.
     CHECK(combinations
-          == enumeratorsThrough(ScrollBarPosition::Right).size()
-                 * enumeratorsThrough(ScrollBarMode::Always).size()
-                 * enumeratorsThrough(ScreenType::Alternate).size()
-                 * enumeratorsThrough(AltScreenScrollbar::Shown).size()
-                 * enumeratorsThrough(MarksAbove::Some).size() * historyCounts.size() * scrollOffsets.size());
+          == everyValue<ScrollBarPosition, contour::config::ScrollBarPositionCount>().size()
+                 * everyValue<ScrollBarMode, contour::config::ScrollBarModeCount>().size()
+                 * everyValue<ScreenType, vtbackend::ScreenTypeCount>().size()
+                 * everyValue<AltScreenScrollbar, contour::session::AltScreenScrollbarCount>().size()
+                 * everyValue<MarksAbove, vtbackend::MarksAboveCount>().size() * historyCounts.size()
+                 * scrollOffsets.size());
 }

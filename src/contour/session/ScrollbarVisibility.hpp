@@ -7,6 +7,7 @@
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -27,6 +28,9 @@ enum class AltScreenScrollbar : uint8_t
     Hidden = 0, //!< Hidden over the alternate screen (`hide_in_alt_screen: true`).
     Shown,      //!< Decided by the remaining rules, as over the primary screen.
 };
+
+/// How many AltScreenScrollbar values there are, derived from the last one.
+inline constexpr size_t AltScreenScrollbarCount = static_cast<size_t>(AltScreenScrollbar::Shown) + 1;
 
 /// Everything the scrollbar's visibility depends on. Every member has the value of a fresh primary screen
 /// with no scrollback, so a case names only what it is about.

@@ -4,6 +4,7 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -22,6 +23,9 @@ enum class ScrollBarPosition : uint8_t
     Right   //!< Against the right edge of the pane.
 };
 
+/// How many scrollbar positions there are, derived from the last one.
+inline constexpr size_t ScrollBarPositionCount = static_cast<size_t>(ScrollBarPosition::Right) + 1;
+
 /// How the scrollbar behaves at the bottom of the scrollback (spec §3.11).
 ///
 /// Zero is `Overlay`, so a zero-initialised value is the default the spec names.
@@ -30,6 +34,9 @@ enum class ScrollBarMode : uint8_t
     Overlay = 0, //!< Hidden at the bottom of the scrollback unless a held mark is above the viewport.
     Always,      //!< Shown whenever there is scrollback.
 };
+
+/// How many scrollbar modes there are, derived from the last one.
+inline constexpr size_t ScrollBarModeCount = static_cast<size_t>(ScrollBarMode::Always) + 1;
 
 /// What `scrollbar.mode` asks for: one of the two modes, or whatever the operating system uses.
 ///

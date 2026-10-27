@@ -317,4 +317,14 @@ TEST_CASE("ScrollbarMarks.marksAbove.onlyHeldDrawnKindsAboveTheRowCount", "[scro
     // The row itself is not above.
     CHECK(marksAbove(marks, 7, AllScrollbarMarkSources) == MarksAbove::None);
     CHECK(marksAbove({}, 30, AllScrollbarMarkSources) == MarksAbove::None);
+
+    // A user's own mark holds the bar too, unless the bar does not draw user marks.
+    auto const userMarked = std::array { markAt(5, Kind::Command, 1), markAt(9, Kind::UserMark, 4) };
+    CHECK(marksAbove(userMarked, 30, AllScrollbarMarkSources) == MarksAbove::Some);
+    CHECK(marksAbove(userMarked, 30, ScrollbarMarkSources { ScrollbarMarkSource::UserMarks })
+          == MarksAbove::Some);
+    CHECK(marksAbove(userMarked,
+                     30,
+                     ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::Failures })
+          == MarksAbove::None);
 }

@@ -96,6 +96,9 @@ enum class MarksAbove : uint8_t
     Some,     ///< At least one is.
 };
 
+/// How many MarksAbove values there are, derived from the last one.
+inline constexpr size_t MarksAboveCount = static_cast<size_t>(MarksAbove::Some) + 1;
+
 /// Everything that sets one kind of tick apart from the others.
 struct ScrollbarMarkKindRow
 {
@@ -113,8 +116,9 @@ struct ScrollbarMarkKindRow
     std::optional<CommandBlockOutcome> outcome;
 
     /// Whether a mark of this kind above the view keeps an overlay scrollbar shown. A finished command leaves
-    /// a mark after every prompt, so only the kinds worth a look hold the bar.
-    OverlayHold overlay = OverlayHold::Quiet;
+    /// a mark after every prompt, so only the kinds worth a look hold the bar. No default, so a row that
+    /// forgets it does not compile.
+    OverlayHold overlay;
 };
 
 /// One row per kind, in enumerator order.
