@@ -715,6 +715,20 @@ void Renderer::reconcileTotalPageSize(vtbackend::PageSize totalPageSize)
     _lastObservedTotalPageSize = totalPageSize;
 }
 
+namespace
+{
+    /// The frame's sticky header where the renderer draws it, over the top row; nullptr for none, and for one
+    /// the chrome shows -- the pane header, the title band --, which is data for it and covers no row here.
+    [[nodiscard]] vtbackend::RenderStickyHeader const* inGridStickyHeader(
+        vtbackend::RenderBuffer const& buffer)
+    {
+        auto const& header = buffer.stickyHeader;
+        if (!header || header->presentation != vtbackend::StickyHeaderPresentation::InGrid)
+            return nullptr;
+        return &*header;
+    }
+} // namespace
+
 bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     ZoneScoped;
@@ -864,7 +878,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderGutter(std::span(buffer.gutter), 0);
         if (statusShifted)
             renderStatusRows(buffer, split);
-        if (auto const& header = buffer.stickyHeader)
+        if (auto const* const header = inGridStickyHeader(buffer))
         {
             _renderTarget->execute(now);
             renderStickyHeaderStep(*header);
@@ -908,7 +922,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         }
 
         // The scissored step has flushed the page, and the header is not clipped with the content under it.
-        if (auto const& header = renderBuffer.get().stickyHeader)
+        if (auto const* const header = inGridStickyHeader(renderBuffer.get()))
             renderStickyHeaderStep(*header);
 
         // Pass 2: Status line (no scroll offset, no scissor), its bar ahead of its rows.

@@ -644,7 +644,9 @@ struct StickyHeaderConfig
         return vtbackend::StickyHeaderSettings { .mode = mode,
                                                  .evictedPlaceholder =
                                                      showEvicted ? vtbackend::EvictedPlaceholder::Shown
-                                                                 : vtbackend::EvictedPlaceholder::Hidden };
+                                                                 : vtbackend::EvictedPlaceholder::Hidden,
+                                                 .presentation =
+                                                     vtbackend::StickyHeaderPresentation::InGrid };
     }
 
     bool operator==(StickyHeaderConfig const&) const = default;

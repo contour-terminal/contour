@@ -23,6 +23,8 @@ namespace
 constexpr auto Modes =
     std::array { StickyHeaderMode::Never, StickyHeaderMode::Scrolled, StickyHeaderMode::Always };
 constexpr auto Placeholders = std::array { EvictedPlaceholder::Hidden, EvictedPlaceholder::Shown };
+constexpr auto Presentations =
+    std::array { StickyHeaderPresentation::InGrid, StickyHeaderPresentation::Chrome };
 constexpr auto Screens = std::array { ScreenType::Primary, ScreenType::Alternate };
 constexpr auto Viewports = std::array { ViewportScroll::Live, ViewportScroll::Scrolled };
 constexpr auto Ages = std::array { TopRowAge::Newer, TopRowAge::Oldest };
@@ -48,27 +50,30 @@ constexpr auto Block = CommandBlockId(7);
     return blocks;
 }
 
-/// Every input the decision can be handed: one per combination of its fields.
+/// Every input the decision can be handed: one per combination of its fields, where the header is drawn
+/// included -- which must decide nothing (specFor() does not read it).
 [[nodiscard]] std::vector<StickyHeaderInput> everyInput()
 {
     auto inputs = std::vector<StickyHeaderInput> {};
     auto const blocks = everyBlock();
     for (auto const mode: Modes)
         for (auto const placeholder: Placeholders)
-            for (auto const screen: Screens)
-                for (auto const viewport: Viewports)
-                    for (auto const age: Ages)
-                        for (auto const cursor: Cursors)
-                            for (auto const& block: blocks)
-                                inputs.push_back(StickyHeaderInput {
-                                    .settings = StickyHeaderSettings { .mode = mode,
-                                                                       .evictedPlaceholder = placeholder },
-                                    .screen = screen,
-                                    .viewport = viewport,
-                                    .topRowAge = age,
-                                    .cursor = cursor,
-                                    .block = block,
-                                });
+            for (auto const presentation: Presentations)
+                for (auto const screen: Screens)
+                    for (auto const viewport: Viewports)
+                        for (auto const age: Ages)
+                            for (auto const cursor: Cursors)
+                                for (auto const& block: blocks)
+                                    inputs.push_back(StickyHeaderInput {
+                                        .settings = StickyHeaderSettings { .mode = mode,
+                                                                           .evictedPlaceholder = placeholder,
+                                                                           .presentation = presentation },
+                                        .screen = screen,
+                                        .viewport = viewport,
+                                        .topRowAge = age,
+                                        .cursor = cursor,
+                                        .block = block,
+                                    });
     return inputs;
 }
 
@@ -109,7 +114,9 @@ constexpr auto Block = CommandBlockId(7);
 [[nodiscard]] StickyHeaderInput scrolledIntoOutput(StickyHeaderMode mode)
 {
     return StickyHeaderInput {
-        .settings = StickyHeaderSettings { .mode = mode, .evictedPlaceholder = EvictedPlaceholder::Shown },
+        .settings = StickyHeaderSettings { .mode = mode,
+                                           .evictedPlaceholder = EvictedPlaceholder::Shown,
+                                           .presentation = StickyHeaderPresentation::InGrid },
         .screen = ScreenType::Primary,
         .viewport = ViewportScroll::Scrolled,
         .topRowAge = TopRowAge::Newer,
@@ -145,8 +152,8 @@ TEST_CASE("StickyHeader.decision.matchesTheSpecForEveryInput", "[stickyheader]")
     auto const inputs = everyInput();
     // One input per combination of the fields; a block may also be absent.
     REQUIRE(inputs.size()
-            == Modes.size() * Placeholders.size() * Screens.size() * Viewports.size() * Ages.size()
-                   * Cursors.size() * (1 + (States.size() * Heads.size() * TopRows.size())));
+            == Modes.size() * Placeholders.size() * Presentations.size() * Screens.size() * Viewports.size()
+                   * Ages.size() * Cursors.size() * (1 + (States.size() * Heads.size() * TopRows.size())));
 
     for (auto const& input: inputs)
     {
@@ -171,7 +178,9 @@ TEST_CASE("StickyHeader.decision.isPossibleExactlyWhereSomeBlockGetsAHeader", "[
                     {
                         auto input = StickyHeaderInput {
                             .settings =
-                                StickyHeaderSettings { .mode = mode, .evictedPlaceholder = placeholder },
+                                StickyHeaderSettings { .mode = mode,
+                                                       .evictedPlaceholder = placeholder,
+                                                       .presentation = StickyHeaderPresentation::InGrid },
                             .screen = screen,
                             .viewport = viewport,
                             .topRowAge = age,
@@ -198,7 +207,8 @@ TEST_CASE("StickyHeader.decision.isPossibleAtTheVeryTopWhileLive", "[stickyheade
     // A collapsed fold can make the live page's top row the oldest row kept. Following live output is no
     // reason to skip the lookup there: the placeholder shows at the very top whatever the mode.
     auto const settings = StickyHeaderSettings { .mode = StickyHeaderMode::Scrolled,
-                                                 .evictedPlaceholder = EvictedPlaceholder::Shown };
+                                                 .evictedPlaceholder = EvictedPlaceholder::Shown,
+                                                 .presentation = StickyHeaderPresentation::InGrid };
     CHECK(stickyHeaderPossible(settings, ScreenType::Primary, ViewportScroll::Live, TopRowAge::Oldest));
     CHECK_FALSE(stickyHeaderPossible(settings, ScreenType::Primary, ViewportScroll::Live, TopRowAge::Newer));
 }
@@ -477,4 +487,29 @@ TEST_CASE("StickyHeader.placeholder.namesTheCommandItLost", "[stickyheader]")
     auto const hostile = evictedPlaceholderText(CommandLineText { "make\x1b[201~" }, Page);
     CHECK_FALSE(hostile.contains(U'\x1b'));
     CHECK(hostile.contains(U'\uFFFD'));
+}
+
+TEST_CASE("StickyHeader.commandLine.isTheDisplayFormCutToItsBound", "[stickyheader]")
+{
+    CHECK(stickyHeaderCommandLine(CommandLineText { "cmake --build" }) == "cmake --build");
+    CHECK(stickyHeaderCommandLine(CommandLineText {}).empty());
+
+    // Untrusted: no control sequence reaches the chrome.
+    auto const hostile = stickyHeaderCommandLine(CommandLineText { "make\x1b[201~" });
+    CHECK_FALSE(hostile.contains('\x1b'));
+
+    // A long record is cut to the header's bound with an ellipsis, never inside a codepoint: a two-byte `ä`
+    // straddling the bound goes whole.
+    auto const straddling =
+        CommandLineText { std::string(MaxStickyHeaderCommandLineBytes - 1, 'x') + "\xC3\xA4" };
+    auto const cut = stickyHeaderCommandLine(straddling);
+    CHECK(cut.size() <= MaxStickyHeaderCommandLineBytes);
+    CHECK(cut.ends_with("x…"));
+    auto const longest =
+        stickyHeaderCommandLine(CommandLineText { std::string(MaxRecordedCommandLineBytes, 'y') });
+    CHECK(longest.size() <= MaxStickyHeaderCommandLineBytes);
+    CHECK(longest.ends_with("y…"));
+    // One that fits is not touched.
+    auto const fits = std::string(MaxStickyHeaderCommandLineBytes, 'z');
+    CHECK(stickyHeaderCommandLine(CommandLineText { fits }) == fits);
 }

@@ -1230,6 +1230,34 @@ void Terminal::detectLinks(FrameChange change)
     _linkScanDue.store(due ? now + *due : chrono::steady_clock::time_point::max(), std::memory_order_relaxed);
 }
 
+namespace
+{
+    /// What a sticky header in the chrome shows, hashed: its block, kind, outcome and every codepoint of its
+    /// text and chip. Zero for no header, or one drawn in the grid -- which the chrome shows nothing of.
+    [[nodiscard]] uint64_t chromeStickyHeaderKey(std::optional<RenderStickyHeader> const& header)
+    {
+        if (!header || header->presentation != StickyHeaderPresentation::Chrome)
+            return 0;
+        auto key = uint64_t { 0xcbf29ce484222325 }; // FNV-1a
+        auto const mix = [&key](uint64_t value) {
+            key ^= value;
+            key *= uint64_t { 0x100000001b3 };
+        };
+        mix(header->block.value);
+        mix(static_cast<uint64_t>(header->kind));
+        mix(static_cast<uint64_t>(header->outcome));
+        for (auto const* const cells: { &header->cells, &header->chip })
+        {
+            mix(cells->size());
+            for (auto const& cell: *cells)
+                for (auto const codepoint: cell.codepoints)
+                    mix(codepoint);
+        }
+        // Never zero for a header, which zero would take for none.
+        return key | 1;
+    }
+} // namespace
+
 void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
 {
     ZoneScoped;
@@ -1345,6 +1373,9 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         chipStatus == RunningStatus::Shown || headerRunning ? RunningStatus::Shown : RunningStatus::Hidden;
     if (_runningStatus.exchange(status, std::memory_order_relaxed) != status)
         _eventListener.runningStatusChanged();
+    if (auto const key = chromeStickyHeaderKey(output.stickyHeader);
+        std::exchange(_chromeStickyHeaderKey, key) != key)
+        _eventListener.chromeStickyHeaderChanged();
     fillLineFlash(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
@@ -4755,18 +4786,44 @@ void Terminal::fillLineFlash(RenderBuffer& output, LineOffset baseLine)
 void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
 {
     auto const gathered = stickyHeaderInput();
+    if (auto const decision = stickyHeaderFor(gathered.input))
+        layoutStickyHeader(output.showStickyHeader(), gathered, *decision, baseLine);
+}
+
+std::optional<RenderStickyHeader> Terminal::stickyHeaderSnapshot() const
+{
+    auto const gathered = stickyHeaderInput();
     auto const decision = stickyHeaderFor(gathered.input);
     if (!decision)
-        return;
+        return std::nullopt;
+    auto header = RenderStickyHeader {};
+    layoutStickyHeader(header, gathered, *decision, LineOffset(0));
+    return header;
+}
 
+void Terminal::setStickyHeaderPresentation(StickyHeaderPresentation presentation)
+{
+    if (_settings.stickyHeader.presentation == presentation)
+        return;
+    _settings.stickyHeader.presentation = presentation;
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::layoutStickyHeader(RenderStickyHeader& header,
+                                  GatheredStickyHeader const& gathered,
+                                  StickyHeaderDecision const& decision,
+                                  LineOffset baseLine) const
+{
     // A decision names the block it was handed, whose record the gathering kept.
     auto const* const record = gathered.record;
 
-    auto& header = output.showStickyHeader();
-    header.kind = decision->kind;
-    header.block = decision->block;
+    header.kind = decision.kind;
+    header.block = decision.block;
     header.background = _colorPalette.stickyHeaderBackgroundColor();
     header.separator = _colorPalette.stickyHeaderSeparatorColor();
+    header.presentation = _settings.stickyHeader.presentation;
+    header.outcome = outcomeOf(*record);
+    header.commandLine = stickyHeaderCommandLine(record->commandLine);
 
     // The page's own background, which the renderer leaves unpainted: the header's text sits on its opaque
     // band without a rectangle per cell repainting the band over the band.
@@ -4775,7 +4832,9 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
     // The chip first, as it decides how much room the text gets: right-aligned, StickyHeaderChipInset columns
     // short of the page's end (clear of the overlay scrollbar), and never pushed left of column 0 on a page
     // too narrow for it. The injected wall clock, so a test drives the running time.
-    auto const statusColor = _colorPalette.blockStatusColor(outcomeOf(*record));
+    // On the band, not the page: the outcome's colour, lifted toward a legible ink where it would not read.
+    auto const statusColor =
+        legibleTintOn(_colorPalette, _colorPalette.blockStatusColor(header.outcome), header.background);
     auto const chipStart = layoutRightAligned(
         header.chip,
         stickyHeaderChip(*record, _clocks.wall.now()),
@@ -4790,7 +4849,7 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
     // One blank column between the text and the chip, so a long command never runs into it.
     auto const textColumns = std::max(ColumnCount(0), boxed_cast<ColumnCount>(chipStart) - ColumnCount(1));
 
-    switch (decision->kind)
+    switch (decision.kind)
     {
         case StickyHeaderKind::Command: {
             // Decided only for a head above the viewport, whose input row the gathering found -- on the
@@ -4809,7 +4868,8 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
         case StickyHeaderKind::Evicted: {
             // No row of the block's prompt survives to be copied, so the record speaks for it: the command
             // line it kept, sanitised, in the gutter's own quieter text colour.
-            auto const textColor = _colorPalette.gutterTextColor();
+            auto const textColor =
+                legibleTintOn(_colorPalette, _colorPalette.gutterTextColor(), header.background);
             layoutRenderText(header.cells,
                              evictedPlaceholderText(record->commandLine, textColumns),
                              RenderAttributes { .foregroundColor = textColor,
@@ -4917,28 +4977,31 @@ std::optional<CommandBlockId> Terminal::focusCommandBlock(BlockStep step)
     auto const& chosen = candidates[*target];
     if (!_viewport.isLineVisible(chosen.head))
         std::ignore = scrollToCommandBlockHead(chosen.id);
-    _focusedCommandBlock = chosen.id;
-    publishBindingModes();
+    std::ignore = setCommandBlockFocus(chosen.id);
     breakLoopAndRefreshRenderBuffer();
     return chosen.id;
 }
 
 void Terminal::clearCommandBlockFocus()
 {
-    if (!_focusedCommandBlock)
-        return;
-    _focusedCommandBlock.reset();
-    publishBindingModes();
-    breakLoopAndRefreshRenderBuffer();
+    if (setCommandBlockFocus(std::nullopt))
+        breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::reconcileCommandBlockFocus()
 {
     if (_focusedCommandBlock && _commandBlocks.find(*_focusedCommandBlock) == nullptr)
-    {
-        _focusedCommandBlock.reset();
-        publishBindingModes();
-    }
+        std::ignore = setCommandBlockFocus(std::nullopt);
+}
+
+bool Terminal::setCommandBlockFocus(std::optional<CommandBlockId> block)
+{
+    if (_focusedCommandBlock == block)
+        return false;
+    _focusedCommandBlock = block;
+    publishBindingModes();
+    _eventListener.commandBlockFocusChanged(block);
+    return true;
 }
 
 void Terminal::autoCollapseOnNewPrompt()
@@ -5428,9 +5491,10 @@ OverlayClearance Terminal::overlayClearance() const
                 avoid(LineOffset(line));
     if (_cursorPage == _displayedPage && _activeStatusDisplay == ActiveStatusDisplay::Main)
         avoid(currentScreen().cursor().position.line);
-    // The sticky command header, where this frame draws one, covers the page's top row with its command and
-    // its chip, whatever the grid row under it holds.
-    if (stickyHeaderFor(stickyHeaderInput().input))
+    // The sticky command header, where this frame draws one over the grid, covers the page's top row with its
+    // command and its chip, whatever the grid row under it holds. One in the chrome covers nothing.
+    if (_settings.stickyHeader.presentation == StickyHeaderPresentation::InGrid
+        && stickyHeaderFor(stickyHeaderInput().input))
         clearance.avoidRows.push_back(mainTop);
 
     std::ranges::sort(clearance.avoidRows);
@@ -7207,6 +7271,15 @@ void Terminal::endCommand(int exitCode, ContextOutcome outcome)
     // The command may have switched branches; the next frame asks.
     if (_gitHead)
         _gitHead->invalidate();
+}
+
+void Terminal::abandonRunningCommand()
+{
+    auto const* const current = _commandBlocks.current();
+    if (current == nullptr || current->state != CommandBlockState::Running)
+        return;
+    _commandBlocks.abandonRunning();
+    breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::commandContextStarted(ContextId started)

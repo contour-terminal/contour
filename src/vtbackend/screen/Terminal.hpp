@@ -576,6 +576,12 @@ class Terminal: public IStatusLinePublishTarget
         /// render or the parser thread, with the terminal's lock held -- under renderBufferUpdated()'s rules:
         /// hand the work to the thread that owns it.
         virtual void runningStatusChanged() {}
+        /// What a sticky header in the chrome (StickyHeaderPresentation::Chrome) shows changed: another
+        /// block, another outcome, another chip -- a running time's next second -- or none any more. What the
+        /// pane header or the title band re-binds on (Terminal::stickyHeaderSnapshot). Raised by the frame
+        /// build, on the render or the parser thread with the terminal's lock held, under
+        /// runningStatusChanged()'s rules; never while the header is drawn in the grid.
+        virtual void chromeStickyHeaderChanged() {}
         /// As screenUpdated(), for a frame that repainted what the screen showed already rather than
         /// output: a mirror's full replay (vthost::client::ScreenMirror::fullReplay) -- the attach, a resync.
         /// A listener that does not tell the two apart need not override it.
@@ -702,6 +708,15 @@ class Terminal: public IStatusLinePublishTarget
         /// frontend needs of it travels in @p change --; defer to the GUI thread.
         /// @param change The block whose record changed, and the newest block that ran a command.
         virtual void commandBlockChanged(CommandBlockChange const& /*change*/) {}
+
+        /// The keyboard's block focus moved, or went (Terminal::focusedCommandBlock): a step, a key or click
+        /// that cleared it, or its record leaving the store.
+        ///
+        /// Raised with Terminal::_stateMutex ALREADY HELD -- on the GUI thread for a step or a clear, on the
+        /// parser thread when the store forgot the focused record -- under progressChanged()'s rule: do not
+        /// read terminal state here; what changed travels in @p focused. Defer to the GUI thread.
+        /// @param focused The block focused now; nullopt for none.
+        virtual void commandBlockFocusChanged(std::optional<CommandBlockId> /*focused*/) {}
 
         /// The user placed or took off a user mark (vi `mm`) on a replica, whose marks are its host's
         /// (Terminal::toggleUserMark): the terminal leaves its line alone, and the listener asks the host,
@@ -2131,6 +2146,13 @@ class Terminal: public IStatusLinePublishTarget
     /// block was focused. Called under the terminal's lock, as every mutator is.
     void clearCommandBlockFocus();
 
+    /// The session ended -- its shell exited or was killed, its connection lost -- while a command may still
+    /// have been running: that block stops running (CommandBlockStore::abandonRunning), so no rail, chip,
+    /// tick or sticky header goes on showing it as running, and no frame asks for a once-a-second redraw.
+    /// Nothing is announced. Redraws when a block was running. Called under the terminal's lock, as every
+    /// mutator is.
+    void abandonRunningCommand();
+
     // }}}
 
     // {{{ Sticky command header (OSC 133 blocks)
@@ -2146,6 +2168,7 @@ class Terminal: public IStatusLinePublishTarget
     /// @return The block, or nullopt when the frame in front drew no header.
     [[nodiscard]] std::optional<CommandBlockId> stickyHeaderBlock() const noexcept
     {
+        // A header in the chrome covers no row: the frame publishes none for it (RenderBuffer::swapBuffers).
         auto const block = _renderBuffer.frontStickyHeaderBlock.load();
         if (!foldingAppliesToDisplayedPage() || block == CommandBlockId {})
             return std::nullopt;
@@ -2164,6 +2187,18 @@ class Terminal: public IStatusLinePublishTarget
     /// @return Nothing once the viewport moved (or already showed the head as high as it can); why not
     ///         otherwise, in which case nothing changed.
     [[nodiscard]] std::expected<void, CommandBlockJumpError> scrollToCommandBlockHead(CommandBlockId id);
+
+    /// The sticky header the next frame would carry, laid out as fillStickyHeader() lays it out, on screen
+    /// row 0: what the pane header or the title band binds while the header lives in the chrome.
+    ///
+    /// Called under the terminal's lock. Costs what a frame's header costs: no walk of the block's output.
+    /// @return The header, or nullopt when stickyHeaderFor() decides on none.
+    [[nodiscard]] std::optional<RenderStickyHeader> stickyHeaderSnapshot() const;
+
+    /// Moves the sticky header between the top row and the chrome (StickyHeaderSettings::presentation), and
+    /// redraws when it moved. Called under the terminal's lock, as every mutator is.
+    /// @param presentation Where the header is drawn from now on.
+    void setStickyHeaderPresentation(StickyHeaderPresentation presentation);
 
     // }}}
 
@@ -5799,6 +5834,11 @@ class Terminal: public IStatusLinePublishTarget
     /// frontend's timer (@see hasVisibleRunningStatus).
     std::atomic<RunningStatus> _runningStatus { RunningStatus::Hidden };
 
+    /// What the last frame's sticky header in the chrome showed, hashed (@see chromeStickyHeaderKey); zero
+    /// for none. Written by the frame build, under the lock, to raise chromeStickyHeaderChanged() once per
+    /// change rather than once per frame.
+    uint64_t _chromeStickyHeaderKey = 0;
+
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
     std::optional<CommandBlockId> _hoveredCommandBlock;
 
@@ -5809,6 +5849,11 @@ class Terminal: public IStatusLinePublishTarget
     /// Drops the block focus when the focused block's record has left the store (evicted, discarded, retired
     /// or cleared). Called under the lock after every parsed batch.
     void reconcileCommandBlockFocus();
+
+    /// Focuses @p block (nullopt: none), publishing the binding modes and telling the listener when it
+    /// changed. Under the terminal's lock.
+    /// @return Whether the focus changed.
+    bool setCommandBlockFocus(std::optional<CommandBlockId> block);
 
     /// The UI font's label advances, by which a native row's pills are placed (@see setPillLabelMetrics).
     PillLabelMetrics _pillLabelMetrics {};
@@ -5865,6 +5910,20 @@ class Terminal: public IStatusLinePublishTarget
     /// @param output The buffer being built.
     /// @param baseLine The screen row the main page starts at, as for fillGutter().
     void fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// What one frame's sticky header is decided from (@see stickyHeaderInput).
+    struct GatheredStickyHeader;
+
+    /// Lays out the header @p decision names into @p header, from what @p gathered kept: the band's
+    /// colours, the chip, the text, and what the chrome binds (presentation, outcome, command line).
+    /// @param header Where it goes; its cell vectors are appended to, so they come in cleared.
+    /// @param gathered The frame's gathering, whose record the decision names.
+    /// @param decision What stickyHeaderFor() decided on it.
+    /// @param baseLine The screen row the main page starts at, as for fillGutter().
+    void layoutStickyHeader(RenderStickyHeader& header,
+                            GatheredStickyHeader const& gathered,
+                            StickyHeaderDecision const& decision,
+                            LineOffset baseLine) const;
 
     /// Fills @p output's line flash while one fades on a drawn row of the primary page, and ends the flash
     /// once it has faded out.

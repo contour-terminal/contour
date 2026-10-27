@@ -7198,7 +7198,8 @@ TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the ter
     CHECK((*session)(contour::actions::ChangeProfile { .name = name }));
     CHECK(session->terminal().settings().stickyHeader
           == vtbackend::StickyHeaderSettings { .mode = vtbackend::StickyHeaderMode::Always,
-                                               .evictedPlaceholder = vtbackend::EvictedPlaceholder::Hidden });
+                                               .evictedPlaceholder = vtbackend::EvictedPlaceholder::Hidden,
+                                               .presentation = vtbackend::StickyHeaderPresentation::InGrid });
 }
 
 namespace
@@ -10972,12 +10973,31 @@ TEST_CASE("TerminalSession: a click on a finish notice brings its session's tab 
     REQUIRE(recorders.size() == 2);
     auto* const recorder = recorders.front();
 
+    // History above the block and output below it, and the view parked at the very top: the click must
+    // bring the block to the eye, not only its tab.
+    auto& terminal = background->terminal();
+    writeFiller(terminal, 60);
     runAndDeliverShellCommand(*background, "make", 2);
     REQUIRE(recorder->raised.size() == 1);
     CHECK(recorder->raised[0].title == "✗ make failed (exit 2)");
+    writeFiller(terminal, 60);
+    REQUIRE(core::locked(terminal, [&] { return terminal.viewport().scrollToTop(); }));
+    auto const block = core::locked(terminal, [&] { return terminal.commandBlocks().lastCommand()->id; });
 
     recorder->fireActivated(finishNotificationIdentifier(background->id()));
     CHECK(window->activeSession() == background);
+
+    // Its command row is at the top of the view, and flashes.
+    auto const& grid = terminal.primaryScreen().grid();
+    auto const* const record = terminal.commandBlocks().find(block);
+    REQUIRE(record != nullptr);
+    auto const head = vtbackend::headOffsetOf(grid, *record);
+    REQUIRE(head.has_value());
+    CHECK(terminal.viewport().isLineVisible(*head));
+    CHECK(grid.lineText(terminal.viewport().topLine()).starts_with("$ make"));
+    auto const flash = vtbackend::test::drawFrame(terminal).lineFlash;
+    REQUIRE(flash.has_value());
+    CHECK(flash->lineOffset == terminal.mainPageTopRow());
 
     contour::test::closeAllTabs(*window);
 }
@@ -14016,3 +14036,222 @@ TEST_CASE("TerminalSession: a nested shell without integration is focused as one
                           std::chrono::steady_clock::now());
     CHECK_FALSE(core::locked(terminal, [&] { return terminal.focusedCommandBlock(); }).has_value());
 }
+
+// {{{ Step 3f, Tasks 11 and 12: the sticky header as chrome, a running block when the session ends
+
+TEST_CASE("TerminalSession: the sticky header in the pane header takes no cells",
+          "[contour][session][stickyheader]")
+{
+    using contour::session::ConsumedByStickyHeader;
+    using contour::session::TerminalSession;
+    using contour::window::StickyHeaderHost;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& session = scene.session();
+    auto& terminal = scene.terminal();
+    scene.runCommand(numberedOutput(60));
+    auto const spy = QSignalSpy(&session, &TerminalSession::stickyHeaderChanged);
+
+    // Following live output under the default mode there is no header to bind, in the chrome or not.
+    session.setStickyHeaderHost(StickyHeaderHost::PaneHeader);
+    CHECK(terminal.settings().stickyHeader.presentation == vtbackend::StickyHeaderPresentation::Chrome);
+    CHECK(session.stickyHeader().isEmpty());
+    CHECK(spy.count() == 0);
+
+    // Scrolled into the output: the frame carries it for the chrome, and the session binds it once.
+    REQUIRE(terminal.viewport().scrollUp(vtbackend::LineCount(5)));
+    auto const header = vtbackend::test::drawFrame(terminal).stickyHeader;
+    REQUIRE(header.has_value());
+    CHECK(header->presentation == vtbackend::StickyHeaderPresentation::Chrome);
+    QCoreApplication::processEvents();
+    CHECK(spy.count() == 1);
+    auto const bound = session.stickyHeader();
+    CHECK(bound.value(QStringLiteral("command")).toString() == QStringLiteral("make"));
+    CHECK(bound.value(QStringLiteral("glyph")).toString() == QStringLiteral("✓"));
+    CHECK(bound.value(QStringLiteral("outcome")).toInt()
+          == static_cast<int>(vtbackend::CommandBlockOutcome::Success));
+    CHECK(bound.value(QStringLiteral("statusRole")).toInt()
+          == static_cast<int>(contour::config::StatusColorRole::Success));
+    CHECK_FALSE(bound.value(QStringLiteral("jumpLabel")).toString().isEmpty());
+
+    // Another frame showing the same says nothing new.
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK(spy.count() == 1);
+
+    // Row 0 is the grid's: a press there is no press on a header.
+    CHECK(session.sendStickyHeaderPressEvent(
+              vtbackend::LineOffset(0), vtbackend::MouseButton::Left, vtbackend::Modifiers {})
+          == ConsumedByStickyHeader::No);
+
+    // A profile switch -- the path a configuration reload takes too -- keeps where the header lives: it is
+    // the card's, not the profile's.
+    auto const other =
+        registerProfile(testApp.app(), "sticky-chrome", [](contour::config::TerminalProfile&) {});
+    REQUIRE(session(contour::actions::ChangeProfile { .name = other }));
+    CHECK(terminal.settings().stickyHeader.presentation == vtbackend::StickyHeaderPresentation::Chrome);
+
+    // The jump link brings the command to the top.
+    session.jumpToStickyHeader();
+    CHECK(terminal.primaryScreen().grid().lineText(terminal.viewport().topLine()).starts_with("$ make"));
+
+    // Back in the grid, the chrome shows nothing and row 0 jumps as before.
+    session.setStickyHeaderHost(StickyHeaderHost::Grid);
+    CHECK(session.stickyHeader().isEmpty());
+    REQUIRE(terminal.viewport().scrollToBottom());
+    REQUIRE(terminal.viewport().scrollUp(vtbackend::LineCount(5)));
+    REQUIRE(vtbackend::test::drawFrame(terminal).stickyHeader.has_value());
+    CHECK(session.sendStickyHeaderPressEvent(
+              vtbackend::LineOffset(0), vtbackend::MouseButton::Left, vtbackend::Modifiers {})
+          == ConsumedByStickyHeader::Yes);
+}
+
+TEST_CASE("TerminalSession: the title band follows the active session's sticky header",
+          "[contour][session][stickyheader][manager]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const window { testApp.manager() };
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    auto const spy = QSignalSpy(&*window, &contour::window::WindowController::activeStickyHeaderChanged);
+
+    session->setStickyHeaderHost(contour::window::StickyHeaderHost::TitleBand);
+    auto& terminal = session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(60)));
+    REQUIRE(core::locked(terminal, [&] { return terminal.viewport().scrollUp(vtbackend::LineCount(5)); }));
+    REQUIRE(vtbackend::test::drawFrame(terminal).stickyHeader.has_value());
+    QCoreApplication::processEvents();
+    CHECK(spy.count() >= 1);
+    CHECK(window->activeStickyHeader().value(QStringLiteral("command")).toString() == QStringLiteral("make"));
+
+    // Another tab in front: its session has no header to show.
+    window->createNewTab();
+    REQUIRE(window->activeSession() != session);
+    CHECK(window->activeStickyHeader().isEmpty());
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSession: QML hears the sticky header host as an int, and nothing outside the enum",
+          "[contour][session][stickyheader]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->setStickyHeaderHost(static_cast<int>(contour::window::StickyHeaderHost::TitleBand));
+    CHECK(session->stickyHeaderHost() == contour::window::StickyHeaderHost::TitleBand);
+    session->setStickyHeaderHost(7);
+    CHECK(session->stickyHeaderHost() == contour::window::StickyHeaderHost::TitleBand);
+}
+
+TEST_CASE("TerminalSession: QML sees which block the keyboard focuses", "[contour][session][blockfocus]")
+{
+    using contour::session::TerminalSession;
+
+    TestApp testApp;
+    auto test = BlockFocusSession { testApp.app() };
+    auto& session = *test.session;
+    auto const spy = QSignalSpy(&session, &TerminalSession::focusedCommandBlockChanged);
+    CHECK(session.focusedCommandBlock() == 0);
+
+    REQUIRE(session(contour::actions::FocusPreviousCommand {}));
+    QCoreApplication::processEvents();
+    CHECK(spy.count() == 1);
+    REQUIRE(test.focused().has_value());
+    CHECK(session.focusedCommandBlock() == test.focused()->value);
+
+    REQUIRE(session(contour::actions::FocusPreviousCommand {}));
+    QCoreApplication::processEvents();
+    CHECK(spy.count() == 2);
+    CHECK(session.focusedCommandBlock() == test.focused()->value);
+
+    REQUIRE(session(contour::actions::ClearCommandBlockFocus {}));
+    QCoreApplication::processEvents();
+    CHECK(spy.count() == 3);
+    CHECK(session.focusedCommandBlock() == 0);
+}
+
+TEST_CASE("TerminalSession: a block running when the shell exits stops running",
+          "[contour][session][paneend]")
+{
+    // Review Focus 3, and N5: no ;D will come from a shell that is gone. The ended pane shows no running
+    // mark, no hollow tick and no ticking time, and nothing wakes it once a second.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(
+        testApp.app(),
+        registerMarkedScrollbarProfile(testApp.app(), "marked", vtbackend::AllScrollbarMarkSources));
+    auto& terminal = pane->terminal();
+    terminal.writeToScreen(vtbackend::test::commandStarted("sleep 100"));
+    writeFiller(terminal, 60);
+    pane->setScrollbarMarkTrackPixels(200);
+    // Any drawn row of the block reads as running: its rail, and the mark on its head.
+    auto const runningRail = [&] {
+        return std::ranges::any_of(vtbackend::test::drawFrame(terminal).gutter, [](auto const& cell) {
+            return cell.outcome == vtbackend::CommandBlockOutcome::Running
+                   || cell.mark == vtbackend::RailMark::Running;
+        });
+    };
+    auto const hollowTicks = [&] {
+        pane->refreshScrollbarMarks();
+        return std::ranges::count_if(
+            std::views::iota(qsizetype { 0 }, pane->scrollbarMarks().size()), [&](qsizetype index) {
+                return markStyle(*pane, index) == static_cast<int>(vtbackend::ScrollbarTickStyle::Hollow);
+            });
+    };
+    // Scrolled to the command's own row, where its chip ticks.
+    REQUIRE(terminal.viewport().scrollToTop());
+    REQUIRE(runningRail());
+    QCoreApplication::processEvents();
+    REQUIRE(terminal.hasVisibleRunningStatus());
+    REQUIRE(pane->refreshesRunningStatus());
+    REQUIRE(hollowTicks() == 1);
+
+    terminal.device().close();
+    pane->onClosed();
+    REQUIRE(pane->getSessionEnd() != static_cast<int>(contour::session::EndReason::None));
+
+    CHECK_FALSE(pane->refreshesRunningStatus());
+    auto const* const record = terminal.commandBlocks().lastCommand();
+    REQUIRE(record != nullptr);
+    CHECK(record->state == vtbackend::CommandBlockState::Finished);
+    CHECK(record->end == vtbackend::CommandBlockEnd::Abandoned);
+    CHECK_FALSE(runningRail());
+    QCoreApplication::processEvents();
+    CHECK_FALSE(terminal.hasVisibleRunningStatus());
+    CHECK_FALSE(pane->refreshesRunningStatus());
+    CHECK(hollowTicks() == 0);
+
+    // Nor does the exposure coming back start the tick again.
+    pane->displayExposureChanged();
+    CHECK_FALSE(pane->refreshesRunningStatus());
+}
+
+TEST_CASE("TerminalSession: an abandoned block raises no finish notice",
+          "[contour][session][paneend][notification]")
+{
+    // Under `always`, with no floor: a command that ended would be notified. One whose shell went away
+    // ended unseen -- nothing is raised, and nothing withdrawn.
+    FinishNoticeHarness h { { .when = NotifyWhen::Always, .minDuration = 0s } };
+    h.write(vtbackend::test::commandStarted("sleep 100"));
+
+    SECTION("the shell exits")
+    {
+        h.session->terminal().device().close();
+        h.session->onClosed();
+    }
+    SECTION("the pane is closed")
+    {
+        h.session->terminate();
+        h.session->onClosed();
+    }
+    h.deliver();
+
+    CHECK(h.recorder->raised.empty());
+    CHECK(h.recorder->closed.empty());
+    auto const* const record = h.session->terminal().commandBlocks().lastCommand();
+    REQUIRE(record != nullptr);
+    CHECK(record->end == vtbackend::CommandBlockEnd::Abandoned);
+}
+
+// }}}

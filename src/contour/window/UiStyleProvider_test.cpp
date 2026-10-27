@@ -19,6 +19,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/StickyHeaderChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -2215,4 +2216,51 @@ TEST_CASE("UiStyleProvider: the overlay's inks read on every row, appearance and
                 });
         }
     }
+}
+
+TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header and the title band",
+          "[contour][uistyle][stickyheader]")
+{
+    // The chrome inks the ✓/✗/▸ by its status role on the ground it sits on (statusMarkOn): a mark, so
+    // 3:1, on every row, appearance and bundled scheme, in the pane header and on the band. Its command and
+    // detail are the header's own text, which "the pane text reads at 4.5:1" covers.
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::window::StickyHeaderGlyphRows;
+    using contour::window::UiStyleProvider;
+    auto const empty = QStringLiteral("empty");
+    auto fellBack = 0;
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto const background = contour::platform::toQColor(palette.defaultBackground);
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            CAPTURE(index);
+            auto inputs = bandInputs(static_cast<ChromeStyle>(index), palette.defaultBackground);
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    auto const header =
+                        over(paneColorOn(provider, ChromeColorRole::PaneHeaderFill, background), background);
+                    auto const band = provider.bandFill(0, 0, empty);
+                    for (auto const& row: StickyHeaderGlyphRows)
+                    {
+                        CAPTURE(static_cast<int>(row.outcome));
+                        for (auto const& ground: { header, band })
+                        {
+                            auto const ink = provider.statusMarkOn(static_cast<int>(row.role), ground);
+                            CHECK(contrastOf(ink, ground) >= contour::config::MinimumMarkContrast);
+                            fellBack += ink == provider.onColor(ground) ? 1 : 0;
+                        }
+                    }
+                });
+        }
+    }
+    // Not vacuous: some hues fall short somewhere and take the black or white fallback.
+    CHECK(fellBack > 0);
 }

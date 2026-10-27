@@ -600,6 +600,19 @@ inline constexpr std::array InkFallbacks {
 /// @return The ink; at least 4.5:1 against @p ground.
 [[nodiscard]] RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept;
 
+/// How far legibleTintOn() moves an ink toward legibleInkOn() per step: tenths, so a hue keeps as much of
+/// itself as legibility allows.
+inline constexpr auto LegibleTintSteps = 10;
+
+/// @p ink where it reads on @p ground at @ref MinimumTextContrast; else the first tenth-step mix of it
+/// toward legibleInkOn() that does, keeping what it can of its hue -- a status colour stays a tint of
+/// itself rather than turning plain. The sticky header's chip and placeholder on their band take it.
+/// @param palette The scheme legibleInkOn() reads.
+/// @param ink     The colour the text would be drawn in.
+/// @param ground  What it is drawn on.
+/// @return The ink; at least 4.5:1 against @p ground.
+[[nodiscard]] RGBColor legibleTintOn(ColorPalette const& palette, RGBColor ink, RGBColor ground) noexcept;
+
 enum class ColorTarget : uint8_t
 {
     Foreground,

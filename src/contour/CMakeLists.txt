@@ -249,6 +249,8 @@ set(_header_files
     window/ProgramStatusBadge.hpp
     window/SecureInputPolicy.hpp
     window/SecureLockPlacement.hpp
+    window/StickyHeaderChrome.hpp
+    window/StickyHeaderPlacement.hpp
     window/TabLabel.hpp
 )
 
@@ -1280,6 +1282,8 @@ if(CONTOUR_TESTING)
         window/TitleBandLayout_test.cpp
         window/TitleBandSurface_test.cpp
         window/TitleBandGeometry_test.cpp
+        window/StickyHeaderPlacement_test.cpp
+        window/StickyHeaderChrome_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing

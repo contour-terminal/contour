@@ -7,6 +7,7 @@
 #include <vtbackend/shell/CommandLineText.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -38,6 +39,8 @@ struct StickyHeaderSettings
     StickyHeaderMode mode = StickyHeaderMode::Scrolled; ///< When the command header may appear.
     /// Whether the evicted-output placeholder may stand in for an evicted head.
     EvictedPlaceholder evictedPlaceholder = EvictedPlaceholder::Shown;
+    /// Where it is drawn; set by the session, not the profile (@see Terminal::setStickyHeaderPresentation).
+    StickyHeaderPresentation presentation = StickyHeaderPresentation::InGrid;
 
     bool operator==(StickyHeaderSettings const&) const = default;
 };
@@ -164,6 +167,20 @@ constexpr inline auto StickyHeaderChipInset = ColumnCount(2);
 /// @return The chip text; empty for a block still at its prompt, which has run nothing to name.
 [[nodiscard]] std::u32string stickyHeaderChip(CommandBlockRecord const& record,
                                               std::chrono::system_clock::time_point now);
+
+/// The most bytes of a command line RenderStickyHeader::commandLine carries: more than a pane header or a
+/// title band can show, and little enough that a frame copies no megabyte command.
+constexpr inline auto MaxStickyHeaderCommandLineBytes = std::size_t { 256 };
+
+/// A record's command line as the chrome names its block by (RenderStickyHeader::commandLine): its display
+/// form, at most MaxStickyHeaderCommandLineBytes.
+///
+/// Built on every frame a header shows, so the raw line is cut before it is sanitised, as
+/// evictedPlaceholderText() cuts it, and the sanitised text is cut again -- whole codepoints either time, a
+/// cut one ending in an ellipsis (truncateUtf8).
+/// @param commandLine The record's command line; untrusted, so it is read through its display form.
+/// @return The display form; empty when the record has none.
+[[nodiscard]] std::string stickyHeaderCommandLine(CommandLineText const& commandLine);
 
 /// The evicted-output placeholder for a block whose command line is @p commandLine.
 ///

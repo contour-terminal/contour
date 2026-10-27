@@ -146,6 +146,12 @@ struct RenderStickyHeader
     std::vector<RenderCell> chip {};
     RGBColor background {}; ///< The band's colour.
     RGBColor separator {};  ///< The one-pixel line along the band's bottom edge.
+    /// Where it is drawn: Chrome leaves it to the pane header or the title band, and the renderer skips it.
+    StickyHeaderPresentation presentation = StickyHeaderPresentation::InGrid;
+    CommandBlockOutcome outcome = CommandBlockOutcome::Success; ///< How its block reads (@see outcomeOf).
+    /// The block's command line in its display form, at most MaxStickyHeaderCommandLineBytes: what the
+    /// chrome names the block by. Empty when the record has none (a recovered prompt row speaks for it).
+    std::string commandLine {};
 };
 
 /// Lays @p text out as render cells from @p origin rightwards, appended to @p output, for host-drawn text

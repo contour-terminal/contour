@@ -30,6 +30,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
@@ -2638,6 +2639,33 @@ TEST_CASE("TerminalSessionManager: a modified Return in an ended pane is left to
     pressReturn(*ended);
     CHECK(factory->createdPtys.size() == ptysBefore + 1);
     CHECK(manager.sessionForId(endedId) == nullptr);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a pane restarted mid-command starts with no blocks", "[manager][paneend]")
+{
+    // Review Focus 3: the block that was running when the shell died stays with the ended session; the
+    // restarted one has nothing to show as running, in its rail, its header or its chrome.
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    auto* const ended = manager.createSession(window.id);
+    REQUIRE(ended != nullptr);
+    ended->terminal().writeToScreen(vtbackend::test::commandStarted("sleep 100"));
+    REQUIRE(ended->terminal().commandBlocks().size() == 1);
+    endEarly(*ended);
+    auto const endedId = ended->modelSessionId();
+
+    pressReturn(*ended);
+    auto* const restarted = window->activeSession();
+    REQUIRE(restarted != nullptr);
+    REQUIRE(manager.sessionForId(endedId) == nullptr);
+    CHECK(restarted->terminal().commandBlocks().size() == 0);
+    CHECK(restarted->stickyHeader().isEmpty());
+    CHECK(restarted->blockActionsAnchor().isEmpty());
+    CHECK(restarted->focusedCommandBlock() == 0);
 
     contour::test::closeAllTabs(*window);
 }

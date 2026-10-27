@@ -30,6 +30,8 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/StickyHeaderChrome.hpp>
+#include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
@@ -251,6 +253,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // display's item-local logical pixels. Empty with no block under the pointer, on the alternate screen,
     // and with nothing to anchor to.
     Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
+    // The block the keyboard focuses (⌘↑ / ⌘↓), as its id; 0 while none is. What a focus ring binds to.
+    Q_PROPERTY(qulonglong focusedCommandBlock READ focusedCommandBlock NOTIFY focusedCommandBlockChanged)
+    // The sticky command header while it lives in the chrome (@see setStickyHeaderHost): { glyph, command,
+    // detail, outcome: a CommandBlockOutcome as an int, statusRole: the config::StatusColorRole that inks the
+    // glyph, jumpLabel }. Empty with no header, and always while the header is drawn over the grid.
+    Q_PROPERTY(QVariantMap stickyHeader READ stickyHeader NOTIFY stickyHeaderChanged)
 
     // The scrollbar's tick marks, top first: { position: 0..1 down the track, kind: a ScrollbarMarkKind as
     // an int, targetLine: what scrollToScrollbarMark() takes }. Empty with nothing to mark, on the
@@ -507,6 +515,37 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Opens the menu of the block under the pointer, below its ⋯ button: what the button does.
     /// Nothing without a block under the pointer.
     Q_INVOKABLE void openBlockActions();
+
+    /// The block the keyboard focuses, mirrored on the GUI thread from the terminal's
+    /// commandBlockFocusChanged() (@see focusedCommandBlock above). GUI thread.
+    /// @return Its id; 0 while none is focused.
+    [[nodiscard]] qulonglong focusedCommandBlock() const noexcept
+    {
+        return _focusedBlock ? static_cast<qulonglong>(_focusedBlock->value) : 0;
+    }
+
+    /// Where this pane's sticky header lives (window::stickyHeaderHostFor): domain state the pane's card
+    /// decides from its header policy, handed to the terminal as its presentation and kept across a
+    /// configuration reload. Grid until a card says otherwise, which is the in-grid band of before. GUI
+    /// thread.
+    /// @param host The pane header, the title band, or the grid.
+    void setStickyHeaderHost(window::StickyHeaderHost host);
+
+    /// setStickyHeaderHost() for QML, which passes the host as its underlying value (the QML-facing carve-out
+    /// of enum class over int). A value outside window::StickyHeaderHost is ignored.
+    /// @param host A window::StickyHeaderHost as an int.
+    Q_INVOKABLE void setStickyHeaderHost(int host);
+
+    /// @return Where this pane's sticky header lives.
+    [[nodiscard]] window::StickyHeaderHost stickyHeaderHost() const noexcept { return _stickyHeaderHost; }
+
+    /// The sticky header as the chrome shows it; empty under window::StickyHeaderHost::Grid or with no
+    /// header. @see the stickyHeader Q_PROPERTY for its keys. GUI thread.
+    [[nodiscard]] QVariantMap stickyHeader() const;
+
+    /// Scrolls the block the chrome's sticky header names to the top, as a press on the in-grid band does
+    /// (vtbackend::Terminal::scrollToCommandBlockHead). Nothing without a header in the chrome.
+    Q_INVOKABLE void jumpToStickyHeader();
 
     /// Withdraws the hyperlink tooltip, whatever the pointer is over.
     ///
@@ -1337,6 +1376,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void screenUpdated() override;
     /// Posts updateRunningStatusRefresh() to the session's thread: raised by the frame build, under the lock.
     void runningStatusChanged() override;
+    /// Posts refreshStickyHeader() to the session's thread: raised by the frame build, under the lock.
+    void chromeStickyHeaderChanged() override;
+    /// Posts the focus to the session's thread, where focusedCommandBlock() reads it: raised under the
+    /// lock, on the GUI or the parser thread.
+    void commandBlockFocusChanged(std::optional<vtbackend::CommandBlockId> focused) override;
     void screenReplayed() override;
     void pageResized() override;
 
@@ -1818,6 +1862,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The block under the pointer changed, or the row its button sits beside moved: re-read
     /// blockActionsAnchor().
     void blockActionsAnchorChanged();
+    /// focusedCommandBlock() changed.
+    void focusedCommandBlockChanged();
+    /// stickyHeader() changed.
+    void stickyHeaderChanged();
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
     /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
     void searchBarRequested();
@@ -2028,6 +2076,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param block The block.
     /// @return The rectangle in the display's item-local logical coordinates; empty where nothing shows.
     [[nodiscard]] QRectF blockActionsAnchorLocked(vtbackend::CommandBlockId block) const;
+
+    /// Re-binds stickyHeader() from the terminal (Terminal::stickyHeaderSnapshot, under its lock), and
+    /// emits stickyHeaderChanged() when what it shows changed. Empty under the grid host. GUI thread.
+    void refreshStickyHeader();
+
+    /// The session ended -- its shell exited or was killed, its connection lost --: a command it was running
+    /// will never report its end, so its block stops running (Terminal::abandonRunningCommand), and nothing
+    /// wakes the session once a second for a time that can no longer move (N5, R-n). GUI thread.
+    void abandonRunningCommand();
 
     /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved. GUI thread only.
     ///
@@ -2442,6 +2499,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<vtbackend::LineOffset> _blockHoverRow {};
 
     QRectF _blockActionsAnchor {}; ///< @see blockActionsAnchor
+
+    /// The block the keyboard focuses, as the terminal last told (@see focusedCommandBlock). GUI thread.
+    std::optional<vtbackend::CommandBlockId> _focusedBlock {};
+
+    /// Where the sticky header lives (@see setStickyHeaderHost). GUI thread.
+    window::StickyHeaderHost _stickyHeaderHost = window::StickyHeaderHost::Grid;
+
+    /// What the chrome shows of the sticky header; nullopt for nothing (@see stickyHeader). GUI thread.
+    std::optional<window::StickyHeaderChrome> _stickyHeaderChrome {};
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;

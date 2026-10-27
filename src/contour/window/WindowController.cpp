@@ -106,6 +106,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
 
     // The band's centre follows the tab-bar gate, its edge and the host's connection (titleBand()); under
     // Minimal an empty centre is the bare band, which is shorter and detaches the compact toolbar.
+    connect(this, &WindowController::activeSessionChanged, this, &WindowController::followActiveStickyHeader);
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
@@ -2869,5 +2870,22 @@ void WindowController::updateStatusLine()
     }
 }
 // }}}
+
+QVariantMap WindowController::activeStickyHeader() const
+{
+    auto const* const session = activeSession();
+    return session != nullptr ? session->stickyHeader() : QVariantMap {};
+}
+
+void WindowController::followActiveStickyHeader()
+{
+    disconnect(_activeStickyHeaderConnection);
+    if (auto* const session = activeSession())
+        _activeStickyHeaderConnection = connect(session,
+                                                &session::TerminalSession::stickyHeaderChanged,
+                                                this,
+                                                &WindowController::activeStickyHeaderChanged);
+    emit activeStickyHeaderChanged();
+}
 
 } // namespace contour::window

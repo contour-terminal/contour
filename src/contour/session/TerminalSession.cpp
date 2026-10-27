@@ -2419,6 +2419,10 @@ void TerminalSession::dismiss()
 
 void TerminalSession::onClosed()
 {
+    // Before the end is handled, which may prune the pane: whichever way it ends, nothing it ran is still
+    // running. Under the terminal's lock alone, never inside _onClosedMutex.
+    abandonRunningCommand();
+
     // The end is announced outside the lock, so a QML binding re-reading it cannot meet a held mutex.
     // onClosed() always runs on the GUI thread (posted by the exit watcher and by TerminalDisplay), so
     // the signal needs no queued hop.
@@ -2429,6 +2433,14 @@ void TerminalSession::onClosed()
     }
     if (_end != endBefore)
         announceSessionEnd();
+}
+
+void TerminalSession::abandonRunningCommand()
+{
+    core::locked(_terminal, [this] { _terminal.abandonRunningCommand(); });
+    // The frame that shows the block stopped would stop the redraw too, but an ended pane may never be
+    // drawn again: no tick waits for it.
+    _runningStatusTimer.stop();
 }
 
 void TerminalSession::handleDeviceClosedLocked()
@@ -3161,8 +3173,14 @@ void TerminalSession::connectFinishNoticeEvents()
     connectMatching(_desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this]() {
         if (!_finishNotice)
             return;
+        // Taken before the notice is forgotten. The pane is brought forward first, then its block to the
+        // top of it and flashed -- a no-op once the record has gone (UnknownBlock).
+        auto const block = _finishNotice->block;
         forgetFinishNotice();
         _manager->revealSession(*this);
+        std::ignore = withScrollableChange([block](vtbackend::Terminal& terminal) {
+            return terminal.scrollToCommandBlockHead(block).has_value();
+        });
     });
 
     // Only a close the desktop reported retires it. One a timer merely assumed is no evidence the notice
@@ -4649,12 +4667,92 @@ void TerminalSession::runningStatusChanged()
     platform::postToObject(this, [this]() { updateRunningStatusRefresh(); });
 }
 
+void TerminalSession::chromeStickyHeaderChanged()
+{
+    // Raised by the frame build, with the terminal's lock held: only posts, for the reason
+    // runningStatusChanged() does. The binding is read again when the post runs, under the lock.
+    platform::postToObject(this, [this]() { refreshStickyHeader(); });
+}
+
+void TerminalSession::commandBlockFocusChanged(std::optional<vtbackend::CommandBlockId> focused)
+{
+    // Under the lock, on the GUI thread (a step, a clear) or the parser thread (the record went): only
+    // posts, carrying the focus, so the GUI thread reads nothing of the terminal. Posts run in order, so
+    // the last one leaves the last focus.
+    platform::postToObject(this, [this, focused]() {
+        if (_focusedBlock == focused)
+            return;
+        _focusedBlock = focused;
+        emit focusedCommandBlockChanged();
+    });
+}
+
+void TerminalSession::setStickyHeaderHost(window::StickyHeaderHost host)
+{
+    if (_stickyHeaderHost == host)
+        return;
+    _stickyHeaderHost = host;
+    core::locked(_terminal, [&] { _terminal.setStickyHeaderPresentation(window::presentationOf(host)); });
+    refreshStickyHeader();
+}
+
+void TerminalSession::setStickyHeaderHost(int host)
+{
+    switch (static_cast<window::StickyHeaderHost>(host))
+    {
+        case window::StickyHeaderHost::Grid:
+        case window::StickyHeaderHost::PaneHeader:
+        case window::StickyHeaderHost::TitleBand:
+            setStickyHeaderHost(static_cast<window::StickyHeaderHost>(host));
+            return;
+    }
+    sessionLog()("Ignoring an unknown sticky header host {}.", host);
+}
+
+void TerminalSession::refreshStickyHeader()
+{
+    auto next = std::optional<window::StickyHeaderChrome> {};
+    if (_stickyHeaderHost != window::StickyHeaderHost::Grid)
+        if (auto const header = core::locked(_terminal, [&] { return _terminal.stickyHeaderSnapshot(); }))
+            next = window::bindStickyHeader(*header);
+    if (next == _stickyHeaderChrome)
+        return;
+    _stickyHeaderChrome = std::move(next);
+    emit stickyHeaderChanged();
+}
+
+QVariantMap TerminalSession::stickyHeader() const
+{
+    if (!_stickyHeaderChrome)
+        return {};
+    auto const& chrome = *_stickyHeaderChrome;
+    return QVariantMap {
+        { QStringLiteral("glyph"), QString::fromStdString(chrome.glyph) },
+        { QStringLiteral("command"), QString::fromStdString(chrome.command) },
+        { QStringLiteral("detail"), QString::fromStdString(chrome.detail) },
+        { QStringLiteral("outcome"), static_cast<int>(chrome.outcome) },
+        { QStringLiteral("statusRole"), static_cast<int>(chrome.statusRole) },
+        { QStringLiteral("jumpLabel"), tr("Jump to Command ↑") },
+    };
+}
+
+void TerminalSession::jumpToStickyHeader()
+{
+    if (!_stickyHeaderChrome)
+        return;
+    // As a press on the in-grid band: an evicted head has nowhere to go, and the viewport stays.
+    std::ignore = withScrollableChange([block = _stickyHeaderChrome->block](vtbackend::Terminal& terminal) {
+        return terminal.scrollToCommandBlockHead(block).has_value();
+    });
+}
+
 bool TerminalSession::wantsRunningStatusRedraw() const
 {
     // A pane with no display shows nothing, whatever its last frame did; and a display whose window is
     // minimised, hidden or covered is sent no frame, so the flag a frame sets never clears while it is.
+    // An ended session's times can no longer move (N5): its device is closed, and its block abandoned.
     return _display != nullptr && _display->exposure() == DisplayExposure::Exposed
-           && _terminal.hasVisibleRunningStatus();
+           && !_terminal.device().isClosed() && _terminal.hasVisibleRunningStatus();
 }
 
 void TerminalSession::updateRunningStatusRefresh()
@@ -7493,6 +7591,8 @@ void TerminalSession::configureTerminal()
     auto configured = config::motionAdjusted(
         config::sessionSettings(_config, _profile, _currentColorPreference, _gutterChrome.form, std::nullopt),
         _app.accessibilityPreferences().motion);
+    // Where the sticky header lives is the pane card's, not the profile's: a reload keeps it.
+    configured.stickyHeader.presentation = window::presentationOf(_stickyHeaderHost);
 
     // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding
     // the palette with mode 2031 set. See ViNormalMode.

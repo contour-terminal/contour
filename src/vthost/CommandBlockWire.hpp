@@ -35,6 +35,7 @@ static_assert(std::to_underlying(vtbackend::CommandBlockState::Running) == 1);
 static_assert(std::to_underlying(vtbackend::CommandBlockState::Finished) == 2);
 static_assert(std::to_underlying(vtbackend::CommandBlockEnd::Reported) == 0);
 static_assert(std::to_underlying(vtbackend::CommandBlockEnd::Implicit) == 1);
+static_assert(std::to_underlying(vtbackend::CommandBlockEnd::Abandoned) == 2);
 static_assert(std::to_underlying(vtbackend::CommandLineSource::None) == 0);
 static_assert(std::to_underlying(vtbackend::CommandLineSource::Reported) == 1);
 static_assert(std::to_underlying(vtbackend::CommandLineSource::Recovered) == 2);
@@ -56,7 +57,7 @@ static_assert(std::to_underlying(vtbackend::ForeignDirectory::Reported) == 1);
 /// @return The end it names, or nullopt.
 [[nodiscard]] constexpr std::optional<vtbackend::CommandBlockEnd> commandBlockEndOf(uint8_t value) noexcept
 {
-    return enumUpTo(value, vtbackend::CommandBlockEnd::Implicit);
+    return enumUpTo(value, vtbackend::CommandBlockEnd::Abandoned);
 }
 
 /// @param value A CommandLineSource as the wire spells it.

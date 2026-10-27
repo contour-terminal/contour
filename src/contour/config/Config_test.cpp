@@ -8320,9 +8320,10 @@ profiles:
         CHECK(contour::config::sessionSettings(
                   config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs)
                   .stickyHeader
-              == vtbackend::StickyHeaderSettings { .mode = vtbackend::StickyHeaderMode::Always,
-                                                   .evictedPlaceholder =
-                                                       vtbackend::EvictedPlaceholder::Hidden });
+              == vtbackend::StickyHeaderSettings {
+                  .mode = vtbackend::StickyHeaderMode::Always,
+                  .evictedPlaceholder = vtbackend::EvictedPlaceholder::Hidden,
+                  .presentation = vtbackend::StickyHeaderPresentation::InGrid });
     }
 
     SECTION("an unknown mode keeps the default, and its sibling still loads")

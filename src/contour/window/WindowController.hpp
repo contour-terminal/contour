@@ -145,6 +145,9 @@ class WindowController:
         contour::session::PaneProxy* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(
         contour::session::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
+    // The active session's sticky header as the title band shows it (TerminalSession::stickyHeader): empty
+    // unless that session's header lives in the band or a pane header, and has a block to name.
+    Q_PROPERTY(QVariantMap activeStickyHeader READ activeStickyHeader NOTIFY activeStickyHeaderChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // All four follow titleBarVisible, so they re-evaluate on the same signal.
     Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
@@ -587,6 +590,9 @@ class WindowController:
     /// zoom, density and reveal changes.
     void refreshHeaderFollowers();
     [[nodiscard]] session::TerminalSession* activeSession() const noexcept;
+    /// @return The active session's sticky header for the title band (@see activeStickyHeader above); empty
+    ///         without an active session.
+    [[nodiscard]] QVariantMap activeStickyHeader() const;
     [[nodiscard]] bool titleBarVisible() const noexcept;
     [[nodiscard]] bool isMultimediaReady() const noexcept;
     // }}}
@@ -1023,6 +1029,8 @@ class WindowController:
     /// @param tab The tab's vtworkspace::TabId value.
     void closeTabConfirmationWithdrawn(quint64 tab);
     void activeSessionChanged();
+    /// activeStickyHeader() may have changed: the active session did, or its header.
+    void activeStickyHeaderChanged();
     void chromeHeightChanged();
     /// @see hostingNotice
     void hostingNoticeChanged();
@@ -1042,6 +1050,13 @@ class WindowController:
     // }}}
 
   private:
+    /// Follows the active session's stickyHeaderChanged() for activeStickyHeaderChanged(), dropping the
+    /// previous session's. Run on every activeSessionChanged(). GUI thread.
+    void followActiveStickyHeader();
+
+    /// The connection followActiveStickyHeader() made to the active session. GUI thread.
+    QMetaObject::Connection _activeStickyHeaderConnection;
+
     /// The backing vtworkspace::Window, or nullptr if it has been removed.
     [[nodiscard]] vtworkspace::Window* window() const noexcept;
     /// The active tab of this window's vtworkspace::Window, or nullptr.

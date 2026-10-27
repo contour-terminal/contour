@@ -2154,7 +2154,10 @@ TEST_CASE("Renderer.stickyHeader.drawsABandItsCellsTheChipAndASeparator", "[rend
                                                   .cells = {},
                                                   .chip = {},
                                                   .background = band,
-                                                  .separator = edge };
+                                                  .separator = edge,
+                                                  .presentation = StickyHeaderPresentation::InGrid,
+                                                  .outcome = vtbackend::CommandBlockOutcome::Success,
+                                                  .commandLine = {} };
     for (auto const column: std::views::iota(0, 3))
         header.cells.push_back(vtbackend::RenderCell {
             .codepoints = {},
@@ -2260,6 +2263,41 @@ TEST_CASE("Renderer.stickyHeader.coversTheTopRowInAStepAfterThePage", "[renderer
     });
     REQUIRE(separator != rectangles.end());
     CHECK(separator->step == band->step);
+}
+
+TEST_CASE("Renderer.stickyHeader.aHeaderInTheChromeDrawsNothingOverTheTopRow", "[renderer][stickyheader]")
+{
+    // The pane header or the title band shows it: the frame still carries it, as data, but no band, no
+    // separator and no copied cell lands on row 0 -- with the page still or scrolling smoothly.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    vtbackend::test::startCommand(mc, "make");
+    vtbackend::test::printLines(mc, "out", 20);
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::Chrome);
+    mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    auto const smooth = GENERATE(false, true);
+    CAPTURE(smooth);
+    if (smooth)
+        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const header = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().stickyHeader;
+    }();
+    REQUIRE(header.has_value());
+    CHECK(header->presentation == StickyHeaderPresentation::Chrome);
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    CHECK(std::ranges::none_of(
+        rectangles, [&](auto const& r) { return r.color == RGBAColor(header->background, 0xFF); }));
+    CHECK(std::ranges::none_of(rectangles,
+                               [&](auto const& r) { return r.color == RGBAColor(header->separator, 0xFF); }));
 }
 
 TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[renderer][stickyheader]")

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -465,6 +466,21 @@ RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept
         if (auto const ink = inkOf(source); contrastRatio(ink, ground) >= MinimumTextContrast)
             return ink;
     return inkOf(InkSource::Mono);
+}
+
+RGBColor legibleTintOn(ColorPalette const& palette, RGBColor ink, RGBColor ground) noexcept
+{
+    if (contrastRatio(ink, ground) >= MinimumTextContrast)
+        return ink;
+    auto const target = legibleInkOn(palette, ground);
+    for (auto const step: std::views::iota(1, LegibleTintSteps))
+    {
+        auto const tint =
+            mixColor(ink, target, static_cast<float>(step) / static_cast<float>(LegibleTintSteps));
+        if (contrastRatio(tint, ground) >= MinimumTextContrast)
+            return tint;
+    }
+    return target;
 }
 
 std::span<std::string_view const> defaultColorPaletteNames() noexcept

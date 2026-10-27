@@ -547,6 +547,58 @@ TEST_CASE("CommandBlockStore.aNewPromptClosesARunningBlockImplicitly", "[semanti
     CHECK_FALSE(f.store.commandFinished(0).has_value());
 }
 
+TEST_CASE("CommandBlockStore.anEndedSessionAbandonsTheRunningCommand",
+          "[semanticblocks][blockstore][commandblock]")
+{
+    // The shell exited or was killed mid-command: no ;D will ever come. The block stops running, with
+    // nothing known of how it went, and nothing is announced.
+    auto f = StoreFixture {};
+    auto const id = f.store.promptStarted(0, 0);
+    f.store.commandStarted(reported("sleep 100"));
+    f.steady.advance(5s);
+    std::ignore = f.takeChanges();
+    std::ignore = f.revisionMoved();
+
+    f.store.abandonRunning();
+
+    auto const* record = f.store.find(id);
+    REQUIRE(record != nullptr);
+    CHECK(record->state == CommandBlockState::Finished);
+    CHECK(record->end == CommandBlockEnd::Abandoned);
+    CHECK_FALSE(record->exitCode.has_value());
+    CHECK_FALSE(record->duration.has_value());
+    CHECK(outcomeOf(*record) == CommandBlockOutcome::Success);
+    CHECK(f.store.current() == nullptr);
+    CHECK(f.takeChanges() == std::vector { id });
+    CHECK(f.revisionMoved());
+
+    // Once only: a second end finds nothing running, and a late ;D finishes nothing.
+    f.store.abandonRunning();
+    CHECK(f.takeChanges().empty());
+    CHECK_FALSE(f.revisionMoved());
+    CHECK_FALSE(f.store.commandFinished(0).has_value());
+}
+
+TEST_CASE("CommandBlockStore.anEndedSessionLeavesAPromptAlone", "[semanticblocks][blockstore][commandblock]")
+{
+    auto f = StoreFixture {};
+    auto const id = f.store.promptStarted(0, 0);
+    std::ignore = f.revisionMoved();
+
+    f.store.abandonRunning();
+
+    REQUIRE(f.store.current() != nullptr);
+    CHECK(f.store.current()->id == id);
+    CHECK(f.store.current()->state == CommandBlockState::Prompting);
+    CHECK(f.takeChanges().empty());
+    CHECK_FALSE(f.revisionMoved());
+
+    // Nor does an empty store mind.
+    auto empty = StoreFixture {};
+    empty.store.abandonRunning();
+    CHECK(empty.store.size() == 0);
+}
+
 TEST_CASE("CommandBlockStore.aCommandStartWithoutAPromptMintsItsOwnRecord", "[semanticblocks][blockstore]")
 {
     // A shell integration sourced halfway through a session: its first sequence may well be a ;C.

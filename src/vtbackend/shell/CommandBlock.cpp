@@ -285,6 +285,19 @@ std::optional<CommandBlockSummary> CommandBlockStore::commandFinished(int exitCo
     return summaryOf(*record);
 }
 
+void CommandBlockStore::abandonRunning()
+{
+    auto* const record = running();
+    if (!record)
+        return;
+
+    record->state = CommandBlockState::Finished;
+    record->end = CommandBlockEnd::Abandoned;
+    endRun();
+    stamp(record->id, StampNotice::Told);
+    ++_revision;
+}
+
 void CommandBlockStore::commandContextStarted(ContextId started, ContextId parent)
 {
     auto* const record = running();

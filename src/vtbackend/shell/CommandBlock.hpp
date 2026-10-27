@@ -50,6 +50,9 @@ enum class CommandBlockEnd : uint8_t
 {
     Reported = 0, ///< OSC 133;D, or an OSC 3008 end= while OSC 3008 owns the marks.
     Implicit,     ///< A newer prompt superseded it: a nested shell's prompt, or a missing ;D.
+    /// The session ended while it ran -- its shell exited or was killed, its connection lost -- so no end
+    /// will ever be reported: no exit code, no duration, and nothing announced.
+    Abandoned,
 };
 
 /// How a record replicated from a daemon host enters the store.
@@ -460,6 +463,13 @@ class CommandBlockStore
     /// @return What a frontend needs to announce the finish, or nullopt when nothing finished.
     [[nodiscard]] std::optional<CommandBlockSummary> commandFinished(int exitCode,
                                                                      ContextOutcome outcome = {});
+
+    /// The session ended: the running command, if any, will never report its end. It becomes Finished with
+    /// CommandBlockEnd::Abandoned, its exit code and duration left empty -- so outcomeOf() reads Success,
+    /// nothing being known -- and the change listener is told. No CommandBlockSummary is produced: a
+    /// command nobody saw finish raises no finish notification. A Prompting record, or none, is left as it
+    /// is.
+    void abandonRunning();
 
     /// An OSC 3008 command context started while OSC 133 owns the marks: when a command is running whose ;C
     /// saw no command context of its own, one starting directly beneath the context its ;C did see is that

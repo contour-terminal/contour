@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <ranges>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -276,6 +278,35 @@ TEST_CASE("ColorPalette.stickyHeader.isDistinctInTheBuiltinSchemes", "[ColorPale
         CHECK(distance(palette.stickyHeaderBackgroundColor(), palette.defaultBackground) > 6.0);
         CHECK(distance(palette.stickyHeaderSeparatorColor(), palette.stickyHeaderBackgroundColor()) > 15.0);
     }
+}
+
+TEST_CASE("ColorPalette.stickyHeader.theChipAndTheTextReadOnTheBand", "[ColorPalette][stickyheader]")
+{
+    // The in-grid band's chip is drawn in its outcome's colour, the evicted placeholder in the gutter's
+    // text colour, both straight on the band: text, so 4.5:1, in every bundled scheme and for every outcome.
+    auto lifted = 0;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        INFO("scheme: " << name);
+        auto const band = palette.stickyHeaderBackgroundColor();
+        for (auto const outcome: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
+        {
+            INFO("outcome: " << outcome);
+            auto const hue = palette.blockStatusColor(static_cast<CommandBlockOutcome>(outcome));
+            auto const ink = legibleTintOn(palette, hue, band);
+            CHECK(contrastRatio(ink, band) >= MinimumTextContrast);
+            // A hue that already reads is left alone.
+            if (contrastRatio(hue, band) >= MinimumTextContrast)
+                CHECK(ink == hue);
+            lifted += ink == hue ? 0 : 1;
+        }
+        CHECK(contrastRatio(legibleTintOn(palette, palette.gutterTextColor(), band), band)
+              >= MinimumTextContrast);
+    }
+    // Not vacuous: the status hues fall short on the band in most schemes, and are lifted there.
+    CHECK(lifted > 0);
 }
 
 namespace

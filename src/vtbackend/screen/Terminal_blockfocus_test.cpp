@@ -35,6 +35,16 @@ struct RedrawCountingTerm final: MockTerm<>
     void renderBufferUpdated() override { ++redraws; }
 };
 
+/// A MockTerm that records every block-focus change it is told of.
+struct FocusRecordingTerm final: MockTerm<>
+{
+    using MockTerm<>::MockTerm;
+
+    std::vector<std::optional<CommandBlockId>> told; ///< Each focus it was told of, in order.
+
+    void commandBlockFocusChanged(std::optional<CommandBlockId> focused) override { told.push_back(focused); }
+};
+
 /// Three finished commands, `one` (success), `two` (failure) and `three` (success), then a live prompt.
 void runThreeBlocks(MockTerm<>& mc)
 {
@@ -251,4 +261,36 @@ TEST_CASE("Terminal.blockfocus.aNestedShellWithoutIntegrationStaysOneRunningBloc
     CHECK(mc.terminal.focusCommandBlock(BlockStep::Previous) == ids.front());
     CHECK_FALSE(mc.terminal.focusCommandBlock(BlockStep::Next).has_value());
     CHECK(mc.terminal.focusedCommandBlock() == ids.front());
+}
+
+TEST_CASE("Terminal.blockfocus.theListenerHearsEveryChangeAndOnlyChanges", "[blockfocus]")
+{
+    // What a frontend mirrors the focus from: a step, a clear, and the record going -- each told once, with
+    // the block focused now; a step that cannot move and a clear with nothing focused tell nothing.
+    auto mc = FocusRecordingTerm { PageSize { LineCount(20), ColumnCount(20) } };
+    runThreeBlocks(mc);
+    auto const ids = blockIds(mc.terminal);
+    REQUIRE(ids.size() >= 3);
+
+    auto const first = mc.terminal.focusCommandBlock(BlockStep::Previous);
+    REQUIRE(first.has_value());
+    CHECK(mc.told == std::vector<std::optional<CommandBlockId>> { first });
+
+    mc.told.clear();
+    while (mc.terminal.focusCommandBlock(BlockStep::Previous))
+    {
+    }
+    CHECK(mc.told.size() == 2); // three, two, one: two moves past the first, then none
+    CHECK(mc.told.back() == ids.front());
+
+    mc.told.clear();
+    mc.terminal.clearCommandBlockFocus();
+    mc.terminal.clearCommandBlockFocus();
+    CHECK(mc.told == std::vector<std::optional<CommandBlockId>> { std::nullopt });
+
+    // A hard reset forgets every record: the focus goes with its block, from the parse.
+    std::ignore = mc.terminal.focusCommandBlock(BlockStep::Previous);
+    mc.told.clear();
+    mc.writeToScreen("\033c");
+    CHECK(mc.told == std::vector<std::optional<CommandBlockId>> { std::nullopt });
 }

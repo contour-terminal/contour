@@ -17,6 +17,7 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <format>
@@ -258,7 +259,8 @@ TEST_CASE("StickyHeader.terminal.theChipNamesTheOutcome", "[stickyheader]")
         REQUIRE(header.has_value());
         REQUIRE(cellText(header->chip).starts_with("running "));
         CHECK(header->chip.front().attributes.foregroundColor
-              == palette.blockStatusColor(CommandBlockOutcome::Running));
+              == legibleTintOn(
+                  palette, palette.blockStatusColor(CommandBlockOutcome::Running), header->background));
     }
 
     SECTION("failed, with its exit code")
@@ -268,7 +270,8 @@ TEST_CASE("StickyHeader.terminal.theChipNamesTheOutcome", "[stickyheader]")
         REQUIRE(header.has_value());
         REQUIRE(cellText(header->chip).starts_with("✗ 2"));
         CHECK(header->chip.front().attributes.foregroundColor
-              == palette.blockStatusColor(CommandBlockOutcome::Failure));
+              == legibleTintOn(
+                  palette, palette.blockStatusColor(CommandBlockOutcome::Failure), header->background));
     }
 }
 
@@ -449,7 +452,10 @@ TEST_CASE("StickyHeader.terminal.anEvictedHeadLeavesThePlaceholderAtTheTop", "[s
         CHECK(header->kind == StickyHeaderKind::Evicted);
         CHECK(header->block == id);
         CHECK(cellText(header->cells) == "⋯ make — earlier output evicted");
-        CHECK(header->cells[0].attributes.foregroundColor == mc.terminal.colorPalette().gutterTextColor());
+        // The gutter's quieter text colour, lifted where it would not read on the band.
+        auto const& palette = mc.terminal.colorPalette();
+        CHECK(header->cells[0].attributes.foregroundColor
+              == legibleTintOn(palette, palette.gutterTextColor(), header->background));
         CHECK(header->cells[0].attributes.backgroundColor == mc.terminal.colorPalette().defaultBackground);
         CHECK(cellText(header->chip).starts_with("running "));
         CHECK(mc.terminal.stickyHeaderBlock() == id);
@@ -1137,4 +1143,135 @@ TEST_CASE("StickyHeader.terminal.anOverlayKeepsOffTheHeadersRow", "[stickyheader
     REQUIRE(mc.terminal.viewport().scrollToBottom());
     REQUIRE_FALSE(drawFrame(mc.terminal).stickyHeader.has_value());
     CHECK_FALSE(std::ranges::contains(mc.terminal.overlayClearance().avoidRows, headerRow));
+}
+
+TEST_CASE("StickyHeader.terminal.aHeaderInTheChromeCarriesItsDataAndCoversNoRow", "[stickyheader]")
+{
+    // In the pane header or the title band, the frame still carries the header -- what the chrome binds --
+    // but no press on row 0 lands on it and no overlay steps aside for it: the row is the grid's.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    startCommand(mc, "make");
+    printLines(mc, "out", 20);
+    auto const id = runningBlock(mc);
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::Chrome);
+
+    auto const header = drawFrame(mc.terminal).stickyHeader;
+    REQUIRE(header.has_value());
+    CHECK(header->presentation == StickyHeaderPresentation::Chrome);
+    CHECK(header->block == id);
+    CHECK(header->outcome == CommandBlockOutcome::Running);
+    CHECK(header->commandLine == "make");
+    CHECK(cellText(header->cells) == "$ make");
+    CHECK_FALSE(mc.terminal.stickyHeaderBlock().has_value());
+    auto const headerRow = unbox<int>(mc.terminal.mainPageTopRow());
+    CHECK_FALSE(std::ranges::contains(mc.terminal.overlayClearance().avoidRows, headerRow));
+
+    // What the chrome reads between frames is the frame's own header.
+    auto const snapshot = mc.terminal.stickyHeaderSnapshot();
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->block == header->block);
+    CHECK(snapshot->outcome == header->outcome);
+    CHECK(snapshot->commandLine == header->commandLine);
+    CHECK(cellText(snapshot->cells) == cellText(header->cells));
+    CHECK(cellText(snapshot->chip) == cellText(header->chip));
+
+    // A failure is named as one.
+    mc.writeToScreen(commandEnd(2));
+    auto const failed = mc.terminal.stickyHeaderSnapshot();
+    REQUIRE(failed.has_value());
+    CHECK(failed->outcome == CommandBlockOutcome::Failure);
+    CHECK(cellText(failed->chip).starts_with("✗ 2"));
+
+    // Back over the grid, it takes the press and the row again.
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::InGrid);
+    REQUIRE(drawFrame(mc.terminal).stickyHeader.has_value());
+    CHECK(mc.terminal.stickyHeaderBlock() == id);
+    CHECK(std::ranges::contains(mc.terminal.overlayClearance().avoidRows, headerRow));
+}
+
+TEST_CASE("StickyHeader.terminal.noSnapshotWhereNoHeaderShows", "[stickyheader]")
+{
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    startCommand(mc, "make");
+    printLines(mc, "out", 20);
+    // Following live output under the default mode: no header, in the grid or out of it.
+    CHECK_FALSE(mc.terminal.stickyHeaderSnapshot().has_value());
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::Chrome);
+    CHECK_FALSE(mc.terminal.stickyHeaderSnapshot().has_value());
+}
+
+TEST_CASE("StickyHeader.terminal.aDoubledRowIsDrawnSingleOnTheBand", "[stickyheader]")
+{
+    // DECDWL and either half of DECDHL, on the command's own row or on the row the band covers: the band is
+    // one row of single cells, so nothing it draws is doubled, and the text keeps a blank column short of the
+    // chip -- a doubled copy would run twice as far, over the chip and past the page.
+    auto const [rendition, name] = GENERATE(std::pair { "\033#6", "DECDWL" },
+                                            std::pair { "\033#3", "DECDHL top" },
+                                            std::pair { "\033#4", "DECDHL bottom" });
+    INFO(name);
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    mc.writeToScreen(
+        std::format("\033]133;A\033\\{}$ \033]133;B\033\\make all\r\n\033]133;C\033\\", rendition));
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("{}out {}\r\n", rendition, i));
+
+    auto const header = renderOf(mc.terminal).stickyHeader;
+    REQUIRE(header.has_value());
+    CHECK(cellText(header->cells) == "$ make all");
+    REQUIRE_FALSE(header->chip.empty());
+    auto const singleCells = [](std::vector<RenderCell> const& cells) {
+        auto column = cells.front().position.column;
+        for (auto const& cell: cells)
+        {
+            if (cell.attributes.lineFlags != LineFlag::None || cell.position.column != column)
+                return false;
+            column += ColumnOffset::cast_from(cell.width);
+        }
+        return true;
+    };
+    CHECK(singleCells(header->cells));
+    CHECK(singleCells(header->chip));
+    CHECK(header->cells.back().position.column < header->chip.front().position.column - ColumnOffset(1));
+    CHECK(header->chip.back().position.column < ColumnOffset(30));
+}
+
+namespace
+{
+/// A MockTerm that counts how often the chrome's sticky header changed.
+struct ChromeHeaderCountingTerm final: MockTerm<>
+{
+    using MockTerm<>::MockTerm;
+
+    int changes = 0; ///< chromeStickyHeaderChanged() calls.
+
+    void chromeStickyHeaderChanged() override { ++changes; }
+};
+} // namespace
+
+TEST_CASE("StickyHeader.terminal.theChromeHearsOfEachChangeOnce", "[stickyheader]")
+{
+    // The pane header re-binds on this: once per change of what it shows -- not once per frame, and never
+    // for a header the grid draws.
+    auto mc = ChromeHeaderCountingTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    startCommand(mc, "make");
+    printLines(mc, "out", 20);
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+    REQUIRE(drawFrame(mc.terminal).stickyHeader.has_value());
+    CHECK(mc.changes == 0);
+
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::Chrome);
+    (void) drawFrame(mc.terminal);
+    CHECK(mc.changes == 1);
+    (void) drawFrame(mc.terminal);
+    CHECK(mc.changes == 1);
+
+    mc.writeToScreen(commandEnd(2)); // the chip says how it ended
+    (void) drawFrame(mc.terminal);
+    CHECK(mc.changes == 2);
+
+    REQUIRE(mc.terminal.viewport().scrollToBottom()); // no header following live output
+    REQUIRE_FALSE(drawFrame(mc.terminal).stickyHeader.has_value());
+    CHECK(mc.changes == 3);
 }
