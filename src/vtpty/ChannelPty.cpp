@@ -29,10 +29,10 @@ void ChannelPty::setInputEcho(InputEcho echo)
         _inputEchoObserver();
 }
 
-void ChannelPty::setInputEchoObserver(InputEchoObserver observer)
+void ChannelPty::setInputEchoObserver(InputEchoObserver const& observer)
 {
     auto const lock = std::lock_guard { _observerMutex };
-    _inputEchoObserver = std::move(observer);
+    _inputEchoObserver = observer;
 }
 
 void ChannelPty::feed(std::string_view data)

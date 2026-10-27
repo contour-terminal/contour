@@ -94,7 +94,7 @@ class ChannelPty: public Pty
     }
 
     // vtpty::Pty overrides
-    void setInputEchoObserver(InputEchoObserver observer) override;
+    void setInputEchoObserver(InputEchoObserver const& observer) override;
     [[nodiscard]] PtySlave& slave() noexcept override { return _slave; }
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,

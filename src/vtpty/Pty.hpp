@@ -193,7 +193,7 @@ class Pty
     /// before it goes: once this returns with an empty observer, none is running. A device that cannot be
     /// told of a change (a local PTY, which is only ever asked) never calls it.
     /// @param observer What to run on a change of inputEcho().
-    virtual void setInputEchoObserver(InputEchoObserver observer) { std::ignore = observer; }
+    virtual void setInputEchoObserver(InputEchoObserver const& /*observer*/) {}
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
