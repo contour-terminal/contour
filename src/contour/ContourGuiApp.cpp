@@ -441,6 +441,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     _titleBandMaterial(appearanceServices.titleBand()),
+    _secureInput(appearanceServices.secureInput()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -448,7 +449,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_layoutStore,
                     *_commandHistoryStore,
                     QDir::homePath().toStdString(),
-                    *_taskbarProgressSink),
+                    *_taskbarProgressSink,
+                    *_secureInput),
     _gpuInventory { display::makePlatformGpuInventory() },
     _hostPlatform(config::detectHostPlatform(env)),
     _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
@@ -1858,6 +1860,7 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
         .appearance = window::chromeAppearanceOf(platformAppearance()),
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
         .density = _config.chromeDensity.value(),
+        .secureInput = _secureInput->support(),
     };
 }
 

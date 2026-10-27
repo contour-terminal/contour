@@ -16,6 +16,7 @@
 #include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/SecureInput.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
@@ -401,6 +402,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] bool liveConfig() const noexcept { return _config.live.value(); }
 
     session::TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
+
+    /// The OS's secure keyboard entry, built from the appearance services. Only the session manager's gate
+    /// switches it; the rest of the app asks it what it supports.
+    /// @return The secure keyboard entry; it outlives the session manager.
+    [[nodiscard]] platform::ISecureInput& secureInput() noexcept { return *_secureInput; }
 
     /// The shared capture and pool every session's status-line commands run on. Sessions are never
     /// destroyed in production, so nothing here is torn down under a terminal; at quit the destructor
@@ -945,6 +951,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Declared before _sessionManager and _qmlEngine, unlike the appearance sources below, so it is destroyed
     // after them: the manager's window controllers, and the windows they drive, borrow it.
     std::unique_ptr<platform::ITitleBandMaterial> _titleBandMaterial;
+    // The OS's secure keyboard entry, built from the appearance services. Declared before _sessionManager,
+    // whose gate calls it and turns it off as the manager is destroyed: so it is destroyed after the gate.
+    std::unique_ptr<platform::ISecureInput> _secureInput;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

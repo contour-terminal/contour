@@ -6,6 +6,7 @@
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/SecureInput.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -112,6 +113,8 @@ struct ChromeInputs
     platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
     config::ChromeSchemeColors scheme {};              ///< The terminal scheme the Terminal row paints with.
     config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
+    /// Whether the OS turns secure keyboard entry on here; it decides the words beside the lock.
+    platform::SecureInputSupport secureInput = platform::SecureInputSupport::None;
 
     [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
 };
@@ -272,6 +275,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
+    /// The words beside a pane's lock, and every lock's accessible name (window::secureInputStateText).
+    Q_PROPERTY(QString secureInputText READ secureInputText CONSTANT)
     // }}}
 
   public:
@@ -395,6 +400,18 @@ class UiStyleProvider: public QObject
     /// @param title       The pane's title.
     /// @return @p processName unless empty, else @p title.
     [[nodiscard]] Q_INVOKABLE QString paneHeaderName(QString const& processName, QString const& title) const;
+
+    /// @return "Secure input on" where the OS has secure keyboard entry, "Input hidden" elsewhere.
+    [[nodiscard]] QString secureInputText() const;
+
+    /// Where a locked pane's lock is drawn (window::secureIndicatorSpots).
+    ///
+    /// Ints rather than enums or two adjacent bools: the QML-facing carve-out, as paneHeader() takes it.
+    /// A value out of range answers an empty map.
+    /// @param header  Whether the pane's header is shown (a window::SpotShown's value).
+    /// @param tabWell Whether the tab well is shown (a window::SpotShown's value).
+    /// @return `{ header, tab, band }`, each whether the lock goes there.
+    [[nodiscard]] Q_INVOKABLE QVariantMap secureIndicatorSpots(int header, int tabWell) const;
 
     /// Where the find bar goes in a pane (window::placeFindBar), with this row's tokens.
     /// @param header      Whether the pane shows an inline header (a window::PaneHeaderPresence's value).

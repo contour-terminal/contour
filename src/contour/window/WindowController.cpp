@@ -18,6 +18,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
@@ -506,6 +507,7 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::BadgeRole), "badge" },
         { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
         { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
+        { static_cast<int>(Roles::SecureRole), "tabSecure" },
     };
 }
 
@@ -561,6 +563,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
         }
         case Roles::BadgeProgressRole:
             return tab != nullptr ? tabBadge(*tab, row).progressPercent.value_or(-1) : -1;
+        case Roles::SecureRole: return tab != nullptr && isTabLocked(*tab) ? 1 : 0;
         default: return {};
     }
 }
@@ -616,6 +619,20 @@ TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab, int row) const
         .finishedBlock = pooled.finished,
         .activity = pooled.activity,
     });
+}
+
+bool WindowController::isTabLocked(vtworkspace::Tab const& tab) const
+{
+    // Every pane, not only the active one: a background pane waiting for a password locks its tab.
+    auto locked = false;
+    if (auto* root = tab.rootPane())
+        root->walkTree([&](vtworkspace::Pane& pane) {
+            if (!pane.isLeaf() || locked)
+                return;
+            if (auto const* session = _manager.sessionForId(pane.session()))
+                locked = static_cast<SecureIndicator>(session->secureIndicator()) == SecureIndicator::Locked;
+        });
+    return locked;
 }
 
 std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const
@@ -2414,6 +2431,18 @@ void WindowController::refreshActiveTabHighlight()
                            static_cast<int>(Roles::BadgeRole),
                            static_cast<int>(Roles::BadgeTextRole),
                            static_cast<int>(Roles::BadgeProgressRole) });
+}
+
+void WindowController::notifyAllTabRowsChanged(QList<Roles> const& roles)
+{
+    auto const rows = rowCount();
+    if (rows <= 0)
+        return;
+    auto roleIds = QList<int> {};
+    roleIds.reserve(roles.size());
+    for (auto const role: roles)
+        roleIds.append(static_cast<int>(role));
+    emit dataChanged(index(0), index(rows - 1), roleIds);
 }
 
 void WindowController::refreshAllTabTitles()

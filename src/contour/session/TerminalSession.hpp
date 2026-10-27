@@ -27,6 +27,7 @@
 #include <contour/session/SizeIndicator.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
@@ -262,6 +263,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // reconnecting pill and the ended pane's footer read one decision instead of making it again. An int,
     // not the enum, until it is registered with the meta-object system (AGENT.md, QML-facing exception).
     Q_PROPERTY(int paneState READ getPaneState NOTIFY paneStateChanged)
+    // Whether the pane shows the lock (a window::SecureIndicator's value): the program in it hides what is
+    // typed. An int, not the enum, for the QML-facing exception paneState takes.
+    Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
     // How the session ended while its pane waits (an EndReason's value; 0 while it runs), what the pane's
     // footer says about it, and whether the footer offers Restart (a FooterRestart's value). Ints, not
     // the enums, until they are registered with the meta-object system (AGENT.md, QML-facing exception).
@@ -956,6 +960,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return paneState() as its enumerator value, for QML.
     [[nodiscard]] int getPaneState() const noexcept { return static_cast<int>(paneState()); }
+
+    /// What the terminal did with typed text when last read (refreshInputEcho). GUI thread.
+    /// @return The last read; Unknown before the first, after the session ended, or where the device
+    ///         cannot tell.
+    [[nodiscard]] vtpty::InputEcho inputEcho() const noexcept { return _inputEcho; }
+
+    /// Whether the pane shows the lock, from the configured `secure_input` and inputEcho(). GUI thread.
+    /// @return A window::SecureIndicator's value.
+    [[nodiscard]] int secureIndicator() const noexcept;
+
+    /// Re-reads what the terminal does with typed text from the device. On a change, announces the lock
+    /// (secureIndicatorChanged) and tells the manager, which re-decides the OS's secure input. GUI thread
+    /// only, and never under the terminal lock: the device's read takes its own. Called when output was
+    /// noticed, after input reached the PTY, on focus-in, and at the session's end.
+    void refreshInputEcho();
 
     /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked
     /// of the device now (vtpty::Pty::foregroundProcessName). GUI thread. One query of the process table per
@@ -1674,6 +1693,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The session ended and its pane now waits (sessionEnd, endMessage and restartOffer changed). Raised
     /// once per end, on the GUI thread, after _onClosedMutex is released.
     void sessionEndChanged();
+    /// secureIndicator() may have changed: the echo, or the configured `secure_input`. GUI thread.
+    void secureIndicatorChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -2141,6 +2162,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Where the session's program runs: here, or on a daemon or tmux server the pane mirrors. A mirrored
     /// pane runs no status-line extension of its own -- they run where its terminal does, on the remote end.
     SessionHosting _hosting;
+    /// What the terminal did with typed text when last read. GUI thread. @see refreshInputEcho
+    vtpty::InputEcho _inputEcho = vtpty::InputEcho::Unknown;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
     /// When the resync grace ends -- armed at construction for a mirrored pane, and by each return of the

@@ -68,12 +68,14 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                config::LayoutStore& layouts,
                                                command::CommandHistoryStore& commands,
                                                std::string homeDirectory,
-                                               platform::TaskbarProgressSink& taskbarProgressSink):
+                                               platform::TaskbarProgressSink& taskbarProgressSink,
+                                               platform::ISecureInput& secureInput):
     _app { app },
     _sessionFactory { factory },
     _layoutStore { layouts },
     _commandHistoryStore { commands },
     _taskbarProgressSink { taskbarProgressSink },
+    _secureInputGate { secureInput },
     _homeDirectory { std::move(homeDirectory) },
     // Not seeded here, and capacity deliberately left at 0: the config file has not been loaded yet at
     // this point (ContourGuiApp constructs the manager before it reads the file), so the configured
@@ -405,6 +407,7 @@ void TerminalSessionManager::setFocusedSession(TerminalSession* next)
         _focusedSession->sendFocusInEvent();
     if (nextBackground.has_value())
         _app.followLiveBackground(*nextBackground);
+    refreshSecureInput();
 }
 
 void TerminalSessionManager::sessionBackgroundChanged(vtworkspace::SessionId id, vtbackend::RGBColor color)
@@ -428,6 +431,8 @@ void TerminalSessionManager::setFocusedWindow(vtworkspace::WindowId window)
     // that one implementation rather than a second copy of it.
     _focusedWindow = window;
     syncFocusForWindow(controllerFor(window));
+    // The app came to the front with focus where it was: no focus-in moved the session to refresh.
+    refreshSecureInput();
 
     // Activated with focus where it already was, as after a window manager that kept it through a
     // minimise: no focus-in tells the pane it is being looked at.
@@ -454,6 +459,8 @@ void TerminalSessionManager::clearFocusedWindow(vtworkspace::WindowId window)
     if (_focusedWindow != window) // guarded like clearFocusIfCurrent
         return;
     _lastFocusedWindow = std::exchange(_focusedWindow, std::nullopt);
+    // Another application in front, or the window closing: setFocusedSession() re-decides the OS's secure
+    // input, now with no window of ours in front, so it turns off.
     setFocusedSession(nullptr);
 }
 
@@ -830,6 +837,7 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
     // And what else derives from the configuration: the chrome tokens (a reload may change the chrome font
     // and the scheme the Terminal row paints with) and the new-defaults banner (it may change the edition).
     _app.onConfigurationReloaded();
+    secureInputModeChanged();
 
     for (auto& [windowId, controller]: _controllersByWindow)
         if (controller != nullptr)
@@ -1217,6 +1225,8 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     // session that is already tearing down), so _focusedSession can never dangle.
     if (_focusedSession == &thatSession)
         _focusedSession = nullptr;
+    // The prompt's pane is gone: the OS's secure input must not outlive it.
+    refreshSecureInput();
 
     // And forget whatever progress it was reporting: with no expiry configured (the default) a
     // report is kept until it is withdrawn, so a pane closed mid-operation would otherwise keep
@@ -1636,6 +1646,38 @@ void TerminalSessionManager::refreshTabBadge(vtworkspace::Tab const& tab)
                                { window::WindowController::Roles::BadgeRole,
                                  window::WindowController::Roles::BadgeTextRole,
                                  window::WindowController::Roles::BadgeProgressRole });
+}
+
+void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session)
+{
+    // A session that was already removed (an end announced while it awaits deletion) has no tab to repaint,
+    // and the gate was refreshed when it went.
+    if (sessionForId(session.modelSessionId()) != &session)
+        return;
+    if (auto* tab = findTabHostingSession(session.modelSessionId()))
+        if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
+            c->notifyTabRowChanged(tab->id(), { window::WindowController::Roles::SecureRole });
+    refreshSecureInput();
+}
+
+void TerminalSessionManager::refreshSecureInput()
+{
+    auto const app =
+        _focusedWindow.has_value() ? window::AppActivity::Foreground : window::AppActivity::Background;
+    auto const focusedEcho =
+        _focusedSession != nullptr ? _focusedSession->inputEcho() : vtpty::InputEcho::Unknown;
+    _secureInputGate.apply(window::desiredSecureInput(_app.config().secureInput.value(), app, focusedEcho));
+}
+
+void TerminalSessionManager::secureInputModeChanged()
+{
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr)
+            emit session->secureIndicatorChanged();
+    for (auto* controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notifyAllTabRowsChanged({ window::WindowController::Roles::SecureRole });
+    refreshSecureInput();
 }
 
 void TerminalSessionManager::noteSessionOutput(vtworkspace::SessionId session, window::OutputOrigin origin)

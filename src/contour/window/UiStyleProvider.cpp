@@ -8,6 +8,7 @@
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
@@ -236,7 +237,8 @@ ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
                           .accessibility = {},
                           .appearance = {},
                           .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}),
-                          .density = config::ChromeDensity::Comfortable };
+                          .density = config::ChromeDensity::Comfortable,
+                          .secureInput = platform::SecureInputSupport::None };
 }
 
 UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
@@ -645,6 +647,22 @@ int UiStyleProvider::findBarPresence(QString const& anchor) const
     auto const named = std::ranges::find_if(
         anchors, [&](FindBarAnchor candidate) { return anchor == nameOf(findBarAnchorName(candidate)); });
     return named != anchors.end() ? static_cast<int>(findBarPresenceAt(*named)) : -1;
+}
+
+QString UiStyleProvider::secureInputText() const
+{
+    return nameOf(secureInputStateText(_inputs.secureInput));
+}
+
+QVariantMap UiStyleProvider::secureIndicatorSpots(int header, int tabWell) const
+{
+    if (!inRange(header, SpotShownCount) || !inRange(tabWell, SpotShownCount))
+        return {};
+    auto const& rule =
+        window::secureIndicatorSpots(static_cast<SpotShown>(header), static_cast<SpotShown>(tabWell));
+    return { { QStringLiteral("header"), rule.lockInHeader == SpotShown::Yes },
+             { QStringLiteral("tab"), rule.lockOnTab == SpotShown::Yes },
+             { QStringLiteral("band"), rule.bandChip == SpotShown::Yes } };
 }
 
 QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const

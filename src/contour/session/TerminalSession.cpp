@@ -984,7 +984,27 @@ void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
                                _hostConnection, _app.terminalClocks().steady.now(), _resyncGraceEnd)
                          : window::OutputOrigin::Live;
         _manager->noteSessionOutput(modelSessionId(), origin);
+        // sudo and readpassphrase(3) turn echo off before they print the prompt, so the prompt's own
+        // output is when the lock is noticed. Here, on the GUI thread, with no terminal lock held.
+        refreshInputEcho();
     });
+}
+
+int TerminalSession::secureIndicator() const noexcept
+{
+    return static_cast<int>(window::secureIndicatorFor(_app.config().secureInput.value(), _inputEcho));
+}
+
+void TerminalSession::refreshInputEcho()
+{
+    // An ended pane's program is gone, whatever its terminal's flags were left as.
+    auto const echo = _end != EndReason::None ? vtpty::InputEcho::Unknown : _terminal.device().inputEcho();
+    if (echo == _inputEcho)
+        return;
+    _inputEcho = echo;
+    emit secureIndicatorChanged();
+    if (_manager != nullptr)
+        _manager->noteInputEchoChanged(*this);
 }
 
 void TerminalSession::pageResized()
@@ -2116,6 +2136,8 @@ void TerminalSession::announceSessionEnd()
     _linesAtEnd = _terminal.totalPageSize().lines;
     // The footer stands where the program ran: its header has no program in front to name.
     stopFollowingForegroundProcess(ProcessNameFollower::Header);
+    // The program is gone: its pane is locked no longer, and secure input follows.
+    refreshInputEcho();
     emit sessionEndChanged();
     emit paneStateChanged();
 }
@@ -3652,6 +3674,9 @@ void TerminalSession::sendKeyEvent(Key key,
         return;
     }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
+    // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
+    // noticed at the next key, once the key's bytes have reached the PTY.
+    refreshInputEcho();
 }
 
 void TerminalSession::sendCharEvent(char32_t value,
@@ -3717,6 +3742,7 @@ void TerminalSession::sendCharEvent(char32_t value,
     if (ended)
         return;
     terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
+    refreshInputEcho(); // as in sendKeyEvent
 }
 
 void TerminalSession::sendMousePressEvent(Modifiers modifiers,
@@ -4623,6 +4649,8 @@ void TerminalSession::sendFocusInEvent()
     setDefaultCursor();
 
     terminal().sendFocusInEvent();
+    // Re-read as the pane takes focus: the manager decides the OS's secure input from this pane now.
+    refreshInputEcho();
 
     if (_display)
         _display->setBlurBehind(_profile.background.value().blur);

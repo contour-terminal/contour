@@ -245,6 +245,7 @@ set(_header_files
     session/ScrollbarVisibility.hpp
     session/SizeIndicator.hpp
     window/ProgramStatusBadge.hpp
+    window/SecureInputPolicy.hpp
     window/TabLabel.hpp
 )
 
@@ -1253,6 +1254,7 @@ if(CONTOUR_TESTING)
         window/SplitChrome_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
+        window/SecureInputPolicy_test.cpp
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
         window/TabBadge_test.cpp

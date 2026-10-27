@@ -10,15 +10,19 @@
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
 #include <contour/config/Config.hpp>
+#include <contour/config/SecureInputMode.hpp>
 #include <contour/platform/FreeDesktopNotifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/SecureInputFixtures.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
@@ -2802,3 +2806,302 @@ TEST_CASE("TerminalSessionManager: a configuration that fails to reload says so 
     CHECK(first->notices().bannerText().isEmpty());
     CHECK(second->notices().bannerText().isEmpty());
 }
+
+// {{{ Secure input: a lock while the terminal hides typing, and the OS's secure keyboard entry
+
+namespace
+{
+
+/// The doubles a secure-input app is built over. Declared before the app, so the counts can be read after it.
+struct SecureInputDoubles
+{
+    contour::test::SecureInputRecord record {};
+    contour::test::AccessibilitySwitch accessibility {};
+    contour::test::AppearanceSwitch appearance {};
+};
+
+/// A test app over mock PTYs whose secure input counts into @p doubles, with `secure_input: auto`.
+[[nodiscard]] std::unique_ptr<contour::test::TestApp> makeSecureInputApp(SecureInputDoubles& doubles)
+{
+    auto app = std::make_unique<contour::test::TestApp>(
+        std::make_unique<contour::test::MockPtySessionFactory>(),
+        nullptr,
+        nullptr,
+        nullptr,
+        contour::test::TestApp::testHostIdentity(),
+        nullptr,
+        contour::test::TestEnvironment::Overrides {},
+        nullptr,
+        contour::test::appearanceServicesWith(doubles.accessibility, doubles.appearance, doubles.record));
+    app->app().config().secureInput = contour::config::SecureInputMode::Auto;
+    return app;
+}
+
+/// Sets what @p session's terminal does with typed text, then lets it print, as a prompt does.
+void promptWith(contour::session::TerminalSession& session, vtpty::InputEcho echo)
+{
+    contour::test::mockPtyOf(session).setInputEcho(echo);
+    session.terminal().writeToScreen("x");
+    drainPosted();
+}
+
+/// @return The lock @p session shows.
+[[nodiscard]] contour::window::SecureIndicator indicatorOf(contour::session::TerminalSession const& session)
+{
+    return static_cast<contour::window::SecureIndicator>(session.secureIndicator());
+}
+
+/// @return Whether tab @p row of @p window shows the lock.
+[[nodiscard]] int secureRoleAt(contour::window::WindowController& window, int row)
+{
+    return window
+        .data(window.index(row), static_cast<int>(contour::window::WindowController::Roles::SecureRole))
+        .toInt();
+}
+
+/// Types one character into @p session, as a key press reaching the PTY.
+void typeInto(contour::session::TerminalSession& session)
+{
+    session.sendCharEvent(U'a',
+                          vtbackend::KeyIdentity {},
+                          vtbackend::KeyboardModifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a raw-mode program shows no lock", "[manager][secureinput]")
+{
+    // Review Focus 1: an editor or a shell's line editor clears echo too, and must not read as a prompt.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    promptWith(*session, vtpty::InputEcho::Raw);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+    CHECK(doubles.record.enables == 0);
+}
+
+TEST_CASE("TerminalSessionManager: a focused password prompt turns secure input on, once",
+          "[manager][secureinput]")
+{
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    promptWith(*session, vtpty::InputEcho::Hidden);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
+    CHECK(secureRoleAt(*window, 0) == 1);
+    CHECK(doubles.record.enables == 1);
+
+    promptWith(*session, vtpty::InputEcho::Hidden);
+    CHECK(doubles.record.enables == 1);
+    CHECK(doubles.record.disables == 0);
+}
+
+TEST_CASE("TerminalSessionManager: closing the prompt's pane, its window, or the manager turns it off",
+          "[manager][secureinput]")
+{
+    // Review Focus 2: no way of the prompt's going away may leave secure input on.
+    auto doubles = SecureInputDoubles {};
+
+    SECTION("its pane closes")
+    {
+        auto app = makeSecureInputApp(doubles);
+        auto& manager = app->manager();
+        contour::test::ScopedController const window { manager };
+        window->createNewTab();
+        auto* const survivor = window->activeSession();
+        REQUIRE(survivor != nullptr);
+        manager.splitActivePane(/*vertical*/ true, survivor);
+        manager.setFocusedWindow(window.id);
+        auto* const prompt = window->activeSession();
+        REQUIRE(prompt != survivor);
+        promptWith(*prompt, vtpty::InputEcho::Hidden);
+        REQUIRE(doubles.record.enables == 1);
+
+        manager.closeActivePane(prompt, contour::session::SessionEnd::Destroy);
+        prompt->onClosed();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        CHECK(doubles.record.disables == 1);
+    }
+
+    SECTION("its window closes")
+    {
+        auto app = makeSecureInputApp(doubles);
+        auto& manager = app->manager();
+        contour::test::ScopedController const window { manager };
+        window->createNewTab();
+        manager.setFocusedWindow(window.id);
+        auto* const prompt = window->activeSession();
+        REQUIRE(prompt != nullptr);
+        promptWith(*prompt, vtpty::InputEcho::Hidden);
+        REQUIRE(doubles.record.enables == 1);
+
+        manager.removeWindowController(window.id);
+        CHECK(doubles.record.disables == 1);
+    }
+
+    SECTION("the manager goes, with the app")
+    {
+        {
+            auto app = makeSecureInputApp(doubles);
+            auto& manager = app->manager();
+            // Not a ScopedController: the window must still be open when the manager goes, or closing it
+            // would be what turned secure input off.
+            auto* const window = manager.createWindowController();
+            window->createNewTab();
+            manager.setFocusedWindow(window->windowId());
+            auto* const prompt = window->activeSession();
+            REQUIRE(prompt != nullptr);
+            promptWith(*prompt, vtpty::InputEcho::Hidden);
+            REQUIRE(doubles.record.enables == 1);
+            REQUIRE(doubles.record.disables == 0);
+        }
+        CHECK(doubles.record.disables == 1);
+    }
+}
+
+TEST_CASE("TerminalSessionManager: another application in front turns secure input off",
+          "[manager][secureinput]")
+{
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const prompt = window->activeSession();
+    REQUIRE(prompt != nullptr);
+    promptWith(*prompt, vtpty::InputEcho::Hidden);
+    REQUIRE(doubles.record.enables == 1);
+
+    manager.clearFocusedWindow(window.id);
+    CHECK(doubles.record.disables == 1);
+    // The lock stays: the prompt still waits.
+    CHECK(indicatorOf(*prompt) == contour::window::SecureIndicator::Locked);
+
+    manager.setFocusedWindow(window.id);
+    CHECK(doubles.record.enables == 2);
+}
+
+TEST_CASE("TerminalSessionManager: focus between two prompts calls nothing", "[manager][secureinput]")
+{
+    // Review Focus 3: secure input is process-wide, so moving between two windows that both wait for a
+    // password keeps it on without a call.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    first->createNewTab();
+    second->createNewTab();
+    auto* const a = first->activeSession();
+    auto* const b = second->activeSession();
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    promptWith(*a, vtpty::InputEcho::Hidden);
+    promptWith(*b, vtpty::InputEcho::Hidden);
+
+    manager.setFocusedWindow(first.id);
+    manager.setFocusedWindow(second.id);
+    CHECK(doubles.record.enables == 1);
+    CHECK(doubles.record.disables == 0);
+
+    promptWith(*b, vtpty::InputEcho::Echoed);
+    CHECK(doubles.record.disables == 1);
+}
+
+TEST_CASE("TerminalSessionManager: a background prompt locks its tab, not the OS", "[manager][secureinput]")
+{
+    // Review Focus 4: ssh asks for a passphrase in a tab the user is not typing into.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 1);
+    REQUIRE(background != nullptr);
+    window->activateTab(0);
+    manager.setFocusedWindow(window.id);
+
+    promptWith(*background, vtpty::InputEcho::Hidden);
+    CHECK(secureRoleAt(*window, 1) == 1);
+    CHECK(secureRoleAt(*window, 0) == 0);
+    CHECK(doubles.record.enables == 0);
+
+    window->activateTab(1);
+    CHECK(doubles.record.enables == 1);
+}
+
+TEST_CASE("TerminalSessionManager: echo restored without output is noticed on the next key",
+          "[manager][secureinput]")
+{
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    promptWith(*session, vtpty::InputEcho::Hidden);
+    REQUIRE(doubles.record.enables == 1);
+
+    contour::test::mockPtyOf(*session).setInputEcho(vtpty::InputEcho::Echoed);
+    typeInto(*session);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+    CHECK(doubles.record.disables == 1);
+}
+
+TEST_CASE("TerminalSessionManager: secure_input: off never calls the OS", "[manager][secureinput]")
+{
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    app->app().config().secureInput = contour::config::SecureInputMode::Off;
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    promptWith(*session, vtpty::InputEcho::Hidden);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+    CHECK(secureRoleAt(*window, 0) == 0);
+    CHECK(doubles.record.enables == 0);
+}
+
+TEST_CASE("TerminalSessionManager: turning secure_input off at runtime releases it", "[manager][secureinput]")
+{
+    // A reload that turns the setting off must not leave the OS's secure input on until the prompt ends.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    promptWith(*session, vtpty::InputEcho::Hidden);
+    REQUIRE(doubles.record.enables == 1);
+
+    app->app().config().secureInput = contour::config::SecureInputMode::Off;
+    manager.secureInputModeChanged();
+    CHECK(doubles.record.disables == 1);
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::None);
+    CHECK(secureRoleAt(*window, 0) == 0);
+}
+// }}}

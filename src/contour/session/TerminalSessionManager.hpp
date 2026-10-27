@@ -5,6 +5,8 @@
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/SecureInput.hpp>
+#include <contour/platform/SecureInputGate.hpp>
 #include <contour/platform/SessionVisibility.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
@@ -163,12 +165,15 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///                write it as `~`. Read once, by the composition root, so nothing below it reads
     ///                the environment.
     /// @param taskbarProgressSink Application-owned native progress adapter; must outlive the manager.
+    /// @param secureInput The OS's secure keyboard entry, which only this manager's gate calls. Owned by the
+    ///                app and declared before it, so it outlives the gate, whose destruction turns it off.
     TerminalSessionManager(ContourGuiApp& app,
                            SessionFactory& factory,
                            config::LayoutStore& layouts,
                            command::CommandHistoryStore& commands,
                            std::string homeDirectory,
-                           platform::TaskbarProgressSink& taskbarProgressSink);
+                           platform::TaskbarProgressSink& taskbarProgressSink,
+                           platform::ISecureInput& secureInput);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -709,6 +714,26 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose records changed.
     void refreshTabBadgeForSession(vtworkspace::SessionId session);
 
+    /// What @p session's terminal does with typed text changed (TerminalSession::refreshInputEcho): repaints
+    /// the lock on the tab hosting it, and re-decides the OS's secure input. GUI thread.
+    /// @param session The session whose echo changed.
+    void noteInputEchoChanged(TerminalSession const& session);
+
+    /// Moves the OS's secure input to what window::desiredSecureInput says for the configured mode, whether
+    /// one of our windows has focus, and the focused session's echo. Called at every change of the three:
+    /// focus (session or window), an echo change, a session's removal, a reload. GUI thread.
+    void refreshSecureInput();
+
+    /// The configured `secure_input` changed (a reload): every pane's lock and every tab's are re-announced,
+    /// and the OS's secure input is re-decided, so turning the setting off releases it at once. GUI thread.
+    void secureInputModeChanged();
+
+    /// @return The OS's secure input as the gate last set it.
+    [[nodiscard]] platform::SecureInputState secureInputState() const noexcept
+    {
+        return _secureInputGate.state();
+    }
+
     /// The output path: @p session wrote something. While it is off screen, and the output is live, its
     /// tab's badge shows the unseen-output dot; the badge is repainted only when that changed. GUI thread.
     /// @param session The session written to.
@@ -1247,6 +1272,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     config::LayoutStore& _layoutStore;
     command::CommandHistoryStore& _commandHistoryStore;
     platform::TaskbarProgressSink& _taskbarProgressSink;
+    /// The only caller of the OS's secure keyboard entry. Declared early, so it is destroyed late -- after
+    /// everything that may still ask it to move -- and its destruction turns secure input off. GUI thread.
+    platform::SecureInputGate _secureInputGate;
     std::string _homeDirectory; ///< The user's home, read once by the composition root.
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it
