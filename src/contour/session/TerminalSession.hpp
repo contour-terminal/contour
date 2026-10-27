@@ -558,6 +558,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// does not. GUI thread.
     void updateRunningStatusRefresh();
 
+    /// Whether a running block's time should be redrawn once a second now: the terminal shows one, on a
+    /// display whose window is exposed. GUI thread.
+    [[nodiscard]] bool wantsRunningStatusRedraw() const;
+
     /// The fewest columns a click on a fold chip spans, for the display's cell: @c size.foldChipHit of the
     /// session's chrome row in cells (R-k). One without a display. GUI thread.
     [[nodiscard]] vtbackend::ColumnCount foldChipHitColumns() const;
@@ -1296,6 +1300,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return Whether the pane redraws once a second for a running block's time on display. GUI thread.
     [[nodiscard]] bool refreshesRunningStatus() const noexcept { return _runningStatusTimer.isActive(); }
+
+    /// The display's window became visible, or stopped being: re-decides whether a running block's time is
+    /// redrawn, which only an exposed display wants. Called on every window-state change. GUI thread.
+    void displayExposureChanged();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 

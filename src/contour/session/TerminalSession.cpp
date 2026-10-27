@@ -475,7 +475,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     // Once a second, the coarsest step a running time is shown in ("Running · 8s").
     _runningStatusTimer.setInterval(RunningStatusRefreshInterval);
     connect(&_runningStatusTimer, &QTimer::timeout, this, [this]() {
-        if (_display != nullptr && _terminal.hasVisibleRunningStatus())
+        if (wantsRunningStatusRedraw())
             scheduleRedraw();
         else
             _runningStatusTimer.stop();
@@ -591,8 +591,9 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
     // resize must read as the page, not as this burst's zoom.
     _sizeIndicatorBurst = SizeIndicatorBurst::Idle;
     _display = nullptr;
-    // A pane nobody sees -- in another tab, a minimised window -- builds no frame that would take its running
-    // time back, so its redraw stops here rather than waking the app once a second for good (I1).
+    // A pane nobody sees -- in another tab -- builds no frame that would take its running time back, so its
+    // redraw stops here rather than waking the app once a second for good (I1). A minimised window keeps its
+    // display, and is stopped by its exposure instead (wantsRunningStatusRedraw()).
     _runningStatusTimer.stop();
 }
 
@@ -4627,14 +4628,26 @@ void TerminalSession::runningStatusChanged()
     platform::postToObject(this, [this]() { updateRunningStatusRefresh(); });
 }
 
+bool TerminalSession::wantsRunningStatusRedraw() const
+{
+    // A pane with no display shows nothing, whatever its last frame did; and a display whose window is
+    // minimised, hidden or covered is sent no frame, so the flag a frame sets never clears while it is.
+    return _display != nullptr && _display->exposure() == DisplayExposure::Exposed
+           && _terminal.hasVisibleRunningStatus();
+}
+
 void TerminalSession::updateRunningStatusRefresh()
 {
-    // Read when it runs rather than carried in the post: a later frame may already have taken it back. A
-    // pane with no display shows nothing, whatever its last frame did.
-    if (_display == nullptr || !_terminal.hasVisibleRunningStatus())
+    // Read when it runs rather than carried in the post: a later frame may already have taken it back.
+    if (!wantsRunningStatusRedraw())
         _runningStatusTimer.stop();
     else if (!_runningStatusTimer.isActive())
         _runningStatusTimer.start();
+}
+
+void TerminalSession::displayExposureChanged()
+{
+    updateRunningStatusRefresh();
 }
 
 void TerminalSession::requestOverlayClearanceRefresh()

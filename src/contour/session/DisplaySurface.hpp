@@ -15,6 +15,7 @@
 
 #include <QtCore/QPointF>
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -26,6 +27,13 @@ QT_END_NAMESPACE
 
 namespace contour::session
 {
+
+/// Whether a display can be seen: its window is on screen, neither minimised, hidden nor covered.
+enum class DisplayExposure : uint8_t
+{
+    Hidden = 0, ///< Nothing built for it reaches the screen; a frame is never drawn.
+    Exposed,    ///< Frames are drawn and shown.
+};
 
 class TerminalSession;
 
@@ -85,6 +93,12 @@ class DisplaySurface
     /// @param local The point in the surface's own coordinates.
     /// @return The same point in the window's; @p local unchanged while there is no window.
     [[nodiscard]] virtual QPointF mapToWindow(QPointF local) const = 0;
+
+    /// Whether this surface is on screen right now. A minimised window keeps its display attached but gets no
+    /// frames, so whatever redraws for a frame's sake must stop while this says Hidden, and start again
+    /// when the window state changes (TerminalSession::displayExposureChanged()).
+    /// @return Exposed while its window is visible and exposed; Hidden otherwise, and without a window.
+    [[nodiscard]] virtual DisplayExposure exposure() const = 0;
     // }}}
 
     // {{{ Metrics the terminal is sized and reported in

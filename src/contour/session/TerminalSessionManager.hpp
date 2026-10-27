@@ -811,6 +811,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window whose sessions to look at.
     void markVisibleSessionsSeen(vtworkspace::WindowId window);
 
+    /// Tells every session of @p window that its display's exposure may have changed (a window-state change).
+    /// @param window The window.
+    void notifyDisplaysExposureChanged(vtworkspace::WindowId window);
+
     /// @return Every session's unseen output and finished commands, which the tab strips' badges pool.
     [[nodiscard]] window::TabAttention const& tabAttention() const noexcept { return _attention; }
 

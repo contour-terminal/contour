@@ -33,6 +33,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     vtbackend::ImageSize pixelSizeValue { vtbackend::Width(640), vtbackend::Height(384) };
     vtbackend::ImageSize reportedPixelSizeValue { vtbackend::Width(640), vtbackend::Height(384) };
     vtbackend::RefreshRate refreshRateValue { 60.0 };
+    session::DisplayExposure exposureValue = session::DisplayExposure::Exposed; ///< What exposure() reports.
     double reportedPixelScaleValue = 1.0;
     double contentScaleValue = 1.0;
     double devicePixelRatioValue = 1.0;
@@ -107,6 +108,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     void releaseSession() override { ++releaseSessionCount; }
     [[nodiscard]] QQuickWindow* window() const override { return nullptr; }
     [[nodiscard]] QPointF mapToWindow(QPointF local) const override { return local; }
+    [[nodiscard]] session::DisplayExposure exposure() const override { return exposureValue; }
 
     [[nodiscard]] vtbackend::RefreshRate refreshRate() const override { return refreshRateValue; }
     [[nodiscard]] vtbackend::ImageSize cellSize() const override { return cellSizeValue; }

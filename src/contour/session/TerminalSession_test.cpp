@@ -8435,11 +8435,43 @@ TEST_CASE("TerminalSession: a running block's time is redrawn while it shows, an
     session->attachDisplay(*session.surface);
     CHECK(session->refreshesRunningStatus());
 
+    // I1 again: a minimised window keeps its display attached but is sent no frames, so its last frame's time
+    // would tick for good. Hidden stops the redraw, and the window-state change that brings it back restarts
+    // it.
+    session.surface->exposureValue = contour::session::DisplayExposure::Hidden;
+    session->displayExposureChanged();
+    CHECK_FALSE(session->refreshesRunningStatus());
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK(terminal.hasVisibleRunningStatus());
+    CHECK_FALSE(session->refreshesRunningStatus());
+
+    session.surface->exposureValue = contour::session::DisplayExposure::Exposed;
+    session->displayExposureChanged();
+    CHECK(session->refreshesRunningStatus());
+
     terminal.writeToScreen(vtbackend::test::commandEnd(0));
     terminal.writeToScreen(std::string { vtbackend::test::PromptStart });
     (void) vtbackend::test::drawFrame(terminal);
     QCoreApplication::processEvents();
     CHECK_FALSE(terminal.hasVisibleRunningStatus());
+    CHECK_FALSE(session->refreshesRunningStatus());
+}
+
+TEST_CASE("TerminalSession: a minimised window's time is not redrawn when the frame asks for it",
+          "[contour][session][gutter]")
+{
+    // Whatever armed it first -- a frame built while the window still showed -- the timer's tick and the
+    // frame build's request both look at the exposure, not only at the last frame's flag.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto& terminal = session->terminal();
+    session.surface->exposureValue = contour::session::DisplayExposure::Hidden;
+
+    terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
+    (void) vtbackend::test::drawFrame(terminal);
+    QCoreApplication::processEvents();
+    CHECK(terminal.hasVisibleRunningStatus());
     CHECK_FALSE(session->refreshesRunningStatus());
 }
 

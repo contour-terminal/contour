@@ -450,6 +450,9 @@ void TerminalSessionManager::windowStateChanged(vtworkspace::WindowId window)
         focusedSessionSeen();
     // A restore puts the window's sessions back on screen, which is the tab badges' "seen" too.
     markVisibleSessionsSeen(window);
+    // A minimise or a restore changes what a display's frames are for: the running times redraw only while it
+    // is on screen.
+    notifyDisplaysExposureChanged(window);
 }
 
 void TerminalSessionManager::focusedSessionSeen()
@@ -1752,6 +1755,23 @@ void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
     if (_attention.noteFinished(session.modelSessionId(), sessionVisibility(session), ending)
         == window::AttentionChange::Changed)
         refreshTabBadgeOf(session.modelSessionId());
+}
+
+void TerminalSessionManager::notifyDisplaysExposureChanged(vtworkspace::WindowId window)
+{
+    auto const* win = _model->window(window);
+    if (win == nullptr)
+        return;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto const* tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (auto* const s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr; s != nullptr)
+                s->displayExposureChanged();
+        });
+    }
 }
 
 void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WindowId window)

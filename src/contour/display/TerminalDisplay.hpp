@@ -221,6 +221,13 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// answer is QQuickItem's, unchanged.
     [[nodiscard]] QQuickWindow* window() const final { return QQuickItem::window(); }
     [[nodiscard]] QPointF mapToWindow(QPointF local) const final { return mapToScene(local); }
+    [[nodiscard]] session::DisplayExposure exposure() const final
+    {
+        auto const* const host = QQuickItem::window();
+        auto const shown = host != nullptr && host->isExposed() && host->visibility() != QWindow::Minimized
+                           && host->visibility() != QWindow::Hidden;
+        return shown ? session::DisplayExposure::Exposed : session::DisplayExposure::Hidden;
+    }
 
     /// Announces a caret move to the platform: refreshes the IME cursor rectangle and, when assistive
     /// technology is listening, the accessible caret. The IME update is kept alongside the accessibility
