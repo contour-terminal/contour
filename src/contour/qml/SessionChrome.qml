@@ -310,11 +310,15 @@ Item {
         property var askingSession: null
         property int questionId: -1
 
+        // Unbound before the answer goes: the session may put its next question up from inside the answer,
+        // binding it here, and clearing afterwards would leave that one with nobody to answer it.
         onAnswered: (decision, memory) => {
-            if (askingSession !== null && questionId >= 0)
-                askingSession.answerPermission(questionId, decision, memory);
+            let session = askingSession;
+            let id = questionId;
             askingSession = null;
             questionId = -1;
+            if (session !== null && id >= 0)
+                session.answerPermission(id, decision, memory);
         }
 
         // Shows what @p session asks now, or closes the dialog when it asks nothing.
@@ -337,6 +341,15 @@ Item {
             }
             askingSession = session;
             questionId = asked.id;
+            // Put up from inside the answer to the last one, it is presented once that answer's dialog has
+            // closed -- presented now, the close would take it too -- and only if it is still the one asked.
+            if (answering) {
+                Qt.callLater(() => {
+                    if (askingSession === session && questionId === asked.id)
+                        present(asked);
+                });
+                return;
+            }
             present(asked);
         }
     }

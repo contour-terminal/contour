@@ -24,6 +24,9 @@ KitDialog {
 
     // Set as each question opens, so a doubled close (a button, then a stray Escape) answers only once.
     property bool _answered: false
+    /// True while `answered` is being emitted. The dialog closes only after that returns, so a question put
+    /// up from inside the answer must be presented once it has: see SessionChrome's follow().
+    property bool answering: false
 
     readonly property var _lines: root.prompt.lines !== undefined ? root.prompt.lines : []
     // The most the lines may take: half of what the dialog hangs in.
@@ -36,7 +39,9 @@ KitDialog {
         if (root._answered)
             return;
         root._answered = true;
+        root.answering = true;
         root.answered(decision, memory);
+        root.answering = false;
     }
 
     function _memoryFor(checked) {

@@ -10433,6 +10433,37 @@ TEST_CASE("PermissionDialog: its lines and checkbox read on its surface everywhe
     });
 }
 
+TEST_CASE("PermissionDialog: a question put up from inside the answer to the last is shown and answered",
+          "[contour][gui][qml][permission]")
+{
+    // The session's answer may publish the next question before the dialog that answered has closed: the
+    // next one must still end up shown, bound to its session and id, and take its own answer.
+    MockSession session;
+    auto host = PermissionChrome { session };
+    session.setPendingPermission(pasteQuestion(1));
+    REQUIRE(host.waitOpened(true));
+    session.nextPermissionOnAnswer = captureQuestion(2);
+
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogAccept"), "clicked"));
+    REQUIRE(session.lastPermissionAnswer.has_value());
+    CHECK(session.lastPermissionAnswer->id == 1);
+
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            return host.opened() && host.dialog->property("questionId").toInt() == 2
+                   && host.dialog->property("prompt").toMap().value("id").toInt() == 2;
+        },
+        2000));
+    QTest::qWait(200); // nothing closes it behind the answer's back
+    REQUIRE(host.opened());
+    CHECK(host.dialog->property("askingSession").value<QObject*>() == &session);
+
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogReject"), "clicked"));
+    REQUIRE(session.lastPermissionAnswer.has_value());
+    CHECK(session.lastPermissionAnswer->id == 2);
+    CHECK(session.permissionAnswers == 2);
+}
+
 TEST_CASE("PermissionDialog: long consent text scrolls, and the buttons stay in view (offscreen)",
           "[contour][gui][qml][permission][extensions]")
 {

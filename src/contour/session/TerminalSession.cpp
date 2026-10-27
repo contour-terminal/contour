@@ -1478,9 +1478,12 @@ void TerminalSession::answerExtensionConsent(PermissionDecision decision, Permis
     }();
     auto const next = _extensionState->consent->answer(answer);
     withdrawPermissionAsk(ExtensionConsentAsk {});
-    // The next extension waits its turn behind whatever else is asked meanwhile.
+    // The next extension waits its turn behind whatever else is asked meanwhile -- and is offered on the next
+    // turn of the event loop, as withdrawPermissionAsk() shows a guarded role's next question: offered now,
+    // it would be put up inside the answer, before the dialog that answered has closed, and close with it.
     if (next == vtextension::ConsentPrompt::Due)
-        offerPermissionAsk(ExtensionConsentAsk {});
+        QMetaObject::invokeMethod(
+            this, [this]() { offerPermissionAsk(ExtensionConsentAsk {}); }, Qt::QueuedConnection);
 }
 
 std::string_view TerminalSession::foregroundProcessToldToExtensions() const noexcept

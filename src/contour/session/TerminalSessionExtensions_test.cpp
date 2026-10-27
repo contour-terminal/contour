@@ -551,6 +551,37 @@ TEST_CASE("TerminalSession: an extension waits behind a guarded role", "[contour
     session->detachDisplay(surface);
 }
 
+TEST_CASE("TerminalSession: the next extension is asked once the answered one's dialog has gone",
+          "[contour][session][extensions]")
+{
+    // Answering one consent while another waits must not put the next one up inside the answer: the dialog
+    // that answered still has to close, and would close the next question with it -- stranding it, and every
+    // question behind it in the pane. The next one comes on the next turn of the event loop, as a guarded
+    // role's does.
+    TestApp testApp;
+    installFiles(testApp);
+    auto const session = makeSession(testApp.app());
+    auto daemon = RecordedAnswers {};
+    constexpr auto OtherHostId = std::string_view { "other@/usr/share/contour/extensions/other.wasm" };
+    session->askForHostedExtension(vtextension::ExtensionConsentRequest { .hostId = std::string { GitHostId },
+                                                                          .manifest = gitManifest() },
+                                   daemon);
+    session->askForHostedExtension(
+        vtextension::ExtensionConsentRequest { .hostId = std::string { OtherHostId },
+                                               .manifest = gitManifest() },
+        daemon);
+    REQUIRE(pendingText(*session).contains(GitHostId));
+    auto const first = session->pendingPermission().value(QStringLiteral("id")).toInt();
+
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Persistent);
+    CHECK(pendingText(*session).empty());
+
+    QCoreApplication::processEvents();
+    auto const text = pendingText(*session);
+    CHECK(text.contains(OtherHostId));
+    CHECK(session->pendingPermission().value(QStringLiteral("id")).toInt() != first);
+}
+
 TEST_CASE("TerminalSession: a guest's manifest cannot turn the prompt into rich text",
           "[contour][session][extensions]")
 {

@@ -385,7 +385,17 @@ class MockSession: public QObject
     {
         lastPermissionAnswer = PermissionAnswer { .id = questionId, .decision = decision, .memory = memory };
         ++permissionAnswers;
+        // As an extension's consent answered while another waits once did: the question goes, and the next
+        // is put up inside the answer.
+        if (auto next = std::exchange(nextPermissionOnAnswer, std::nullopt))
+        {
+            setPendingPermission({});
+            setPendingPermission(std::move(*next));
+        }
     }
+
+    /// The question the next answer puts up from inside answerPermission(), if any.
+    std::optional<QVariantMap> nextPermissionOnAnswer;
 
     /// An answer the chrome gave: to which question, and what.
     struct PermissionAnswer
