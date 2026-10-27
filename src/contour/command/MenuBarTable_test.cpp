@@ -441,7 +441,8 @@ TEST_CASE("menuBar.useSelectionForFindFollowsFindPrevious", "[menubar]")
     // Without a selection there is nothing to use.
     auto state = fullState();
     state.selection = SelectionPresence::Absent;
-    auto const* row = find(buildMenuBar(state), "Use Selection for Find");
+    auto const withoutSelection = buildMenuBar(state); // find() points into it, so it must outlive the row
+    auto const* row = find(withoutSelection, "Use Selection for Find");
     REQUIRE(row != nullptr);
     CHECK(row->availability == RowAvailability::Disabled);
 }
