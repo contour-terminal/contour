@@ -5535,19 +5535,11 @@ struct SaveLayoutHost
             return nullptr;
         if (auto* direct = dialog->findChild<QQuickItem*>(name))
             return direct;
-        auto pending = std::vector<QQuickItem*> {};
-        if (auto* content = dialog->property("contentItem").value<QQuickItem*>())
-            pending.push_back(content);
-        while (!pending.empty())
-        {
-            auto* item = pending.back();
-            pending.pop_back();
-            if (item->objectName() == name)
-                return item;
-            for (auto* child: item->childItems())
-                pending.push_back(child);
-        }
-        return nullptr;
+        auto const* content = dialog->property("contentItem").value<QQuickItem*>();
+        if (content == nullptr)
+            return nullptr;
+        auto const found = itemsNamed(*content, name);
+        return found.empty() ? nullptr : found.front();
     }
 };
 
@@ -9966,18 +9958,9 @@ using contour::session::PermissionMemory;
 [[nodiscard]] QList<QQuickItem*> dialogPartsNamed(QObject const& dialog, QString const& name)
 {
     auto parts = QList<QQuickItem*> {};
-    auto pending = std::vector<QQuickItem*> {};
-    if (auto* content = dialog.property("contentItem").value<QQuickItem*>())
-        pending.push_back(content);
-    while (!pending.empty())
-    {
-        auto* item = pending.back();
-        pending.pop_back();
-        if (item->objectName() == name)
-            parts.append(item);
-        for (auto* child: item->childItems())
-            pending.push_back(child);
-    }
+    if (auto const* content = dialog.property("contentItem").value<QQuickItem*>())
+        for (auto* part: itemsNamed(*content, name))
+            parts.append(part);
     // In their parent's order -- the order a layout places them in, settled or not.
     std::ranges::sort(parts, {}, [](QQuickItem* part) {
         auto const* parent = part->parentItem();

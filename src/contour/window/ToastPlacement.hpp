@@ -96,4 +96,32 @@ struct ToastPlacementInputs
     return std::nullopt;
 }
 
+/// Where the toast goes, decided from the band as QML names it (UiStyleProvider::titleBand()): what the
+/// window controller's toastHost() answers, and its test double's. A name QML does not use reads as no band
+/// at the top.
+/// @param band The band's presence, by name.
+/// @param edge Its edge, by name.
+/// @param bandHeight The band's height, in logical pixels.
+/// @param toastHeight The toast's height, in logical pixels.
+/// @param cursorRow The active pane's cursor row.
+/// @param footer Whether the active pane's session ended.
+/// @return The host, by name (toastHostName()).
+[[nodiscard]] constexpr std::string_view placeToastNamed(std::string_view band,
+                                                         std::string_view edge,
+                                                         int bandHeight,
+                                                         int toastHeight,
+                                                         int cursorRow,
+                                                         PaneFooter footer) noexcept
+{
+    return toastHostName(placeToast(ToastPlacementInputs {
+        .band = barPresenceNamed(band).value_or(BarPresence::Hidden),
+        .edge = barEdgeNamed(edge).value_or(BarEdge::Top),
+        .bandHeight = bandHeight,
+        .toastHeight = toastHeight,
+        .cursorRow = cursorRow,
+        .footer = footer,
+        .coveredRows = ToastCoveredRows,
+    }));
+}
+
 } // namespace contour::window

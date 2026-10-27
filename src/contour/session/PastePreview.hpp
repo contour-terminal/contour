@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Utf8Prefix.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <algorithm>
@@ -30,19 +31,10 @@ struct PastePreview
 
 namespace detail
 {
-    /// The longest prefix of @p text of at most @p maxBytes that ends before a UTF-8 lead byte, so no
-    /// character is split. A run of continuation bytes too long to back out of is cut where the limit falls.
+    /// The longest prefix of @p text of at most @p maxBytes that splits no character (vtbackend's cut).
     [[nodiscard]] inline std::string_view cutAtCharacter(std::string_view text, std::size_t maxBytes) noexcept
     {
-        if (text.size() <= maxBytes)
-            return text;
-        auto const isContinuation = [](char c) noexcept {
-            return (static_cast<unsigned char>(c) & 0b1100'0000U) == 0b1000'0000U;
-        };
-        auto end = maxBytes;
-        while (end > 0 && isContinuation(text[end]))
-            --end;
-        return text.substr(0, end == 0 ? maxBytes : end);
+        return text.substr(0, vtbackend::utf8PrefixLength(text, maxBytes));
     }
 
     /// The ellipsis a cut line ends with.

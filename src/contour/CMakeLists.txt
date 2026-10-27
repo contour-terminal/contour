@@ -816,6 +816,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/MockMainController.hpp
             test/QmlMocks.hpp
             test/RecordingAnnouncer.hpp
+            test/PermissionFixtures.hpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp

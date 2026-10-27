@@ -27,6 +27,7 @@
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
@@ -104,6 +105,8 @@ using contour::session::PermissionMemory;
 namespace
 {
 
+using contour::test::answerShown;
+using contour::test::shownQuestionId;
 using contour::test::TestApp;
 
 constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
@@ -131,31 +134,6 @@ constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::Col
     contour::ContourGuiApp& app, std::unique_ptr<contour::platform::Notifier> notifier = nullptr)
 {
     return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize), std::move(notifier));
-}
-
-/// The id of the question @p session shows, as its dialog reads it.
-[[nodiscard]] int shownQuestionId(contour::session::TerminalSession const& session)
-{
-    return session.pendingPermission().value(QStringLiteral("id")).toInt();
-}
-
-/// Answers the question @p session shows, as its dialog would.
-void answerShown(contour::session::TerminalSession& session,
-                 contour::session::PermissionDecision decision,
-                 contour::session::PermissionMemory memory)
-{
-    session.answerPermission(shownQuestionId(session), decision, memory);
-}
-
-/// Counts into @p asks each time @p session shows a question about @p role -- a dialog opening, or the open
-/// one changing what it says. The connection lives with the session, which every caller outlives.
-void countAsks(contour::session::TerminalSession& session, contour::session::GuardedRole role, int& asks)
-{
-    QObject::connect(
-        &session, &contour::session::TerminalSession::pendingPermissionChanged, [&session, role, &asks] {
-            if (session.pendingPermissionAsk() == contour::session::PermissionAsk { role })
-                ++asks;
-        });
 }
 
 /// Writes one finished command as a shell with OSC 133 integration does, and the next prompt below it:
@@ -1328,7 +1306,9 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     // > 512 KB: requires permission; nothing written until granted.
     int permissionRequests = 0;
-    countAsks(*session, contour::session::GuardedRole::BigPaste, permissionRequests);
+    contour::test::countAsks(*session,
+                             contour::session::PermissionAsk { contour::session::GuardedRole::BigPaste },
+                             permissionRequests);
     clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
     session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
     CHECK(permissionRequests == 1);
@@ -1414,7 +1394,8 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
     SECTION("a remembered refusal keeps refusing")
     {
         auto asks = 0;
-        countAsks(*session, contour::session::GuardedRole::BigPaste, asks);
+        contour::test::countAsks(
+            *session, contour::session::PermissionAsk { contour::session::GuardedRole::BigPaste }, asks);
 
         clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
         session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
@@ -5014,7 +4995,8 @@ constexpr auto CaptureWholePageSequence = std::string_view { "\033[>0,t" };
 /// with the session, which every caller outlives.
 void countCaptureAsks(contour::session::TerminalSession& session, int& asks)
 {
-    countAsks(session, contour::session::GuardedRole::CaptureBuffer, asks);
+    contour::test::countAsks(
+        session, contour::session::PermissionAsk { contour::session::GuardedRole::CaptureBuffer }, asks);
 }
 
 } // namespace
@@ -5367,7 +5349,7 @@ TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves it
     auto held = sessionCapturing(testApp.app(), Permission::Ask);
     auto const profile = held->profileName();
     auto asks = 0;
-    countAsks(*held, GuardedRole::CaptureBuffer, asks);
+    contour::test::countAsks(*held, contour::session::PermissionAsk { GuardedRole::CaptureBuffer }, asks);
 
     captureWholePage(*held);
     REQUIRE(asks == 1);
@@ -7502,7 +7484,8 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     auto& written = mockPtyOf(*session).stdinBuffer();
     written.clear();
     auto asked = 0;
-    countAsks(*session, contour::session::GuardedRole::RerunCommand, asked);
+    contour::test::countAsks(
+        *session, contour::session::PermissionAsk { contour::session::GuardedRole::RerunCommand }, asked);
 
     SECTION("asked first, shown what it runs, and run once allowed")
     {

@@ -1157,23 +1157,22 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
 void TerminalSession::publishPendingPermission()
 {
     // An extension's question answered meanwhile through another session's prompt, or gone with a reload of
-    // the extensions, leaves its place in line: it has nothing left to ask.
-    while (_permissionQueue.current() == PermissionAsk { ExtensionConsentAsk {} }
-           && !consentPermissionPrompt())
+    // the extensions, leaves its place in line: it has nothing left to ask. (One at most: the queue holds no
+    // question twice.)
+    if (_permissionQueue.current() == PermissionAsk { ExtensionConsentAsk {} } && !consentPermissionPrompt())
         if (_permissionQueue.withdraw(ExtensionConsentAsk {}) == PromptChange::Due)
             ++_shownQuestionId;
 
     auto const prompt = currentPermissionPrompt();
-    // The question shown, asked again with more to it (a larger capture, another paste, another font), is
-    // another question: a click on what was shown must never grant what was not. So it takes a new id, and an
-    // answer to the old one is ignored.
-    if (prompt && _pendingPermission.value(QStringLiteral("id")).toInt() == _shownQuestionId
-        && permissionPromptMap(*prompt, _shownQuestionId) != _pendingPermission
-        && !_pendingPermission.isEmpty())
-        ++_shownQuestionId;
     auto next = prompt ? permissionPromptMap(*prompt, _shownQuestionId) : QVariantMap {};
     if (next == _pendingPermission)
         return;
+    // The question shown, asked again with more to it (a larger capture, another paste, another font), is
+    // another question: a click on what was shown must never grant what was not. So it takes a new id, and an
+    // answer to the old one is ignored.
+    if (prompt && !_pendingPermission.isEmpty()
+        && _pendingPermission.value(QStringLiteral("id")).toInt() == _shownQuestionId)
+        next.insert(QStringLiteral("id"), ++_shownQuestionId);
     _pendingPermission = std::move(next);
     emit pendingPermissionChanged();
 }

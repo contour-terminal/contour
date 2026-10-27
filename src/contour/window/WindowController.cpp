@@ -1418,17 +1418,14 @@ QString WindowController::toastHost(QString const& band,
                                     int toastHeight) const
 {
     auto const* const session = activeSession();
-    auto const host = placeToast(ToastPlacementInputs {
-        .band = barPresenceNamed(band.toStdString()).value_or(BarPresence::Hidden),
-        .edge = barEdgeNamed(edge.toStdString()).value_or(BarEdge::Top),
-        .bandHeight = bandHeight,
-        .toastHeight = toastHeight,
-        .cursorRow = session != nullptr ? session->cursorLine() : 0,
-        .footer = session != nullptr && session->endReason() != session::EndReason::None ? PaneFooter::Shown
-                                                                                         : PaneFooter::Hidden,
-        .coveredRows = ToastCoveredRows,
-    });
-    return QString::fromUtf8(toastHostName(host));
+    return QString::fromUtf8(placeToastNamed(
+        band.toStdString(),
+        edge.toStdString(),
+        bandHeight,
+        toastHeight,
+        session != nullptr ? session->cursorLine() : 0,
+        session != nullptr && session->endReason() != session::EndReason::None ? PaneFooter::Shown
+                                                                               : PaneFooter::Hidden));
 }
 
 TitleBand WindowController::titleBand() const

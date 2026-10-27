@@ -8,6 +8,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
 
 #include <vtpty/MockPty.hpp>
 
@@ -37,6 +38,7 @@ using contour::config::ExtensionConfig;
 using contour::session::PermissionDecision;
 using contour::session::PermissionMemory;
 using contour::session::TerminalSession;
+using contour::test::answerShown;
 using contour::test::TestApp;
 using vtextension::GrantState;
 
@@ -132,21 +134,11 @@ constexpr auto GoneNotice = std::string_view { "⚠ gone disabled: extension mod
     return text;
 }
 
-/// Answers the question @p session shows, as its dialog would.
-void answerShown(TerminalSession& session, PermissionDecision decision, PermissionMemory memory)
-{
-    session.answerPermission(
-        session.pendingPermission().value(QStringLiteral("id")).toInt(), decision, memory);
-}
-
 /// Counts into @p asks each time @p session shows an extension's question.
 void countConsentAsks(TerminalSession& session, int& asks)
 {
-    QObject::connect(&session, &TerminalSession::pendingPermissionChanged, [&session, &asks] {
-        if (session.pendingPermissionAsk()
-            == contour::session::PermissionAsk { contour::session::ExtensionConsentAsk {} })
-            ++asks;
-    });
+    contour::test::countAsks(
+        session, contour::session::PermissionAsk { contour::session::ExtensionConsentAsk {} }, asks);
 }
 
 /// Asks @p session for permission as an extension's lane does: from a thread of its own.

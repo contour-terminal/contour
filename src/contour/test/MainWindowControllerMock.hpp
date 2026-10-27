@@ -277,15 +277,12 @@ class MainWindowControllerMock: public QAbstractListModel
                                                 int bandHeight,
                                                 int toastHeight) const
     {
-        return QString::fromUtf8(window::toastHostName(window::placeToast(window::ToastPlacementInputs {
-            .band = window::barPresenceNamed(band.toStdString()).value_or(window::BarPresence::Hidden),
-            .edge = window::barEdgeNamed(edge.toStdString()).value_or(window::BarEdge::Top),
-            .bandHeight = bandHeight,
-            .toastHeight = toastHeight,
-            .cursorRow = cursorRow,
-            .footer = window::PaneFooter::Hidden,
-            .coveredRows = window::ToastCoveredRows,
-        })));
+        return QString::fromUtf8(window::placeToastNamed(band.toStdString(),
+                                                         edge.toStdString(),
+                                                         bandHeight,
+                                                         toastHeight,
+                                                         cursorRow,
+                                                         window::PaneFooter::Hidden));
     }
 
     core::platform::ManualClock noticeClock {}; ///< What the notices' toasts are timed by.

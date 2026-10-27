@@ -29,6 +29,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/ScopedApplicationAttribute.hpp>
@@ -786,14 +787,8 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     // allow+remember runs the whole apply-font flow, and the REMEMBERED verdict short-circuits the
     // next request without asking again.
     auto fontAsks = 0;
-    QObject::connect(h.session.get(),
-                     &contour::session::TerminalSession::pendingPermissionChanged,
-                     h.session.get(),
-                     [&fontAsks, session = h.session.get()]() {
-                         if (session->pendingPermissionAsk()
-                             == contour::session::PermissionAsk { contour::session::GuardedRole::ChangeFont })
-                             ++fontAsks;
-                     });
+    contour::test::countAsks(
+        *h.session, contour::session::PermissionAsk { contour::session::GuardedRole::ChangeFont }, fontAsks);
 
     h.session->setFontDef(fontRequest(RequestedFontSize));
     REQUIRE(QTest::qWaitFor([&] { return fontAsks != 0; }));
@@ -811,15 +806,9 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     // gate, so the dialog has to be waited for and answered through it -- answering the executor before
     // the gate arrives would leave the gate to raise a dialog for a request already served.
     auto captureAsks = 0;
-    QObject::connect(
-        h.session.get(),
-        &contour::session::TerminalSession::pendingPermissionChanged,
-        h.session.get(),
-        [&captureAsks, session = h.session.get()]() {
-            if (session->pendingPermissionAsk()
-                == contour::session::PermissionAsk { contour::session::GuardedRole::CaptureBuffer })
-                ++captureAsks;
-        });
+    contour::test::countAsks(*h.session,
+                             contour::session::PermissionAsk { contour::session::GuardedRole::CaptureBuffer },
+                             captureAsks);
 
     // The chunk that ends every answer to a capture request (Screen::replyCaptureBufferEnd), and is the
     // whole of a refusal. Only a verdict on the request writes it.
