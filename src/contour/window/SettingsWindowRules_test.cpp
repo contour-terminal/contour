@@ -82,6 +82,16 @@ TEST_CASE("the Settings window is placed", "[contour][settingswindow][rules]")
         { "a user's own size is kept",
           make(preferred, QRect(100, 100, 800, 500), big, { big }),
           QRect(100, 100, 800, 500) },
+        // m3: a size remembered from a larger screen, or one below today's minimum, is clamped.
+        { "a remembered size larger than its screen",
+          make(preferred, QRect(0, 0, 3000, 2000), big, { big }),
+          QRect(0, 0, 1440, 875) },
+        { "a remembered size below the minimum",
+          make(preferred, QRect(100, 100, 300, 200), big, { big }),
+          QRect(100, 100, 720, 480) },
+        { "a remembered size larger than its screen, inside its frame",
+          make(preferred, QRect(0, 28, 3000, 2000), big, { big }, QMargins(0, 28, 0, 0)),
+          QRect(0, 28, 1440, 847) },
     };
     for (auto const& c: cases)
     {

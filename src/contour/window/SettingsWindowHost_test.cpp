@@ -389,32 +389,51 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
         CHECK(settings.windowStates() == Qt::WindowNoState);
     }
 
-    SECTION("a frame off every screen is pulled onto the screen it opens on")
+    SECTION("a frame mostly off its screen is pulled onto it")
     {
-        remembered.state.settingsWindow = config::SettingsWindowState {
-            .x = 50000, .y = 50000, .width = 900, .height = 700, .screen = {}, .show = {}, .page = {}
-        };
+        // m1: a sliver of it on screen, on a screen whose name is gone: the window comes whole onto the
+        // screen it overlaps, at the size it had.
+        auto const available = QGuiApplication::primaryScreen()->availableGeometry();
+        remembered.state.settingsWindow = config::SettingsWindowState { .x = available.right() - 10,
+                                                                        .y = available.top() + 40,
+                                                                        .width = 740,
+                                                                        .height = 500,
+                                                                        .screen = "a screen unplugged since",
+                                                                        .show = {},
+                                                                        .page = {} };
         auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
                                 config::UiStyle::Native,
                                 &remembered };
         auto& settings = fx.show();
-        CHECK(QGuiApplication::primaryScreen()->availableGeometry().intersects(settings.geometry()));
-        CHECK(settings.geometry() == placedOver(settings, QRect(50000, 50000, 900, 700)));
+        REQUIRE(available.width() >= 740);
+        REQUIRE(available.height() >= 540);
+        CHECK(available.contains(settings.frameGeometry()));
+        CHECK(settings.geometry().size() == QSize(740, 500));
+        CHECK(settings.geometry().top() == available.top() + 40);
     }
 
     SECTION("maximised")
     {
+        auto normalFrame = QRect {};
         {
             auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
                                        config::UiStyle::Native,
                                        &remembered };
             auto& settings = first.show();
             settings.setGeometry(frame);
+            normalFrame = settings.geometry();
+            // The platform reports the new frame asynchronously, as a user's resize is long done before
+            // they maximise.
+            QCoreApplication::processEvents();
             settings.setWindowStates(Qt::WindowMaximized);
+            REQUIRE(settings.geometry() != normalFrame);
             REQUIRE(settings.close());
         }
         REQUIRE(remembered.state.settingsWindow.has_value());
         CHECK(remembered.state.settingsWindow->show == config::WindowShowState::Maximized);
+        // m2: what it remembers is the normal frame, not the maximised one.
+        auto const& normal = *remembered.state.settingsWindow;
+        CHECK(QRect(normal.x, normal.y, normal.width, normal.height) == normalFrame);
 
         auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
                                     config::UiStyle::Native,
