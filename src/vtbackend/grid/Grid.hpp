@@ -1019,10 +1019,10 @@ class Grid
     /// Rotates a ring a column reflow has just rebuilt so that its @p history rows sit above the page,
     /// and gives them the ids just below the page's.
     ///
-    /// The reflow renamed every row and dropped none -- a narrowing that overflows the capacity keeps
-    /// the overflow until the next scroll evicts it, and that scroll counts it -- so unlike
-    /// rotateBuffersLeft() this moves the floor without counting an eviction. The caller's generation
-    /// bump is what tells id holders their ids are gone.
+    /// The reflow renamed every row and dropped none, so unlike rotateBuffersLeft() this moves the floor
+    /// without counting an eviction. A narrowing that overflows a finite capacity is trimmed back to it
+    /// once resize() has applied both dimensions, and that trim's syncStableFloor() counts the rows it
+    /// drops. The caller's generation bump is what tells id holders their ids are gone.
     /// @param history The rebuilt ring's history row count.
     void rekeyRebuiltRing(LineCount history) noexcept
     {

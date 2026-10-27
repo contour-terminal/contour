@@ -2277,6 +2277,31 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
     }
 
     Ensures(_pageSize == newSize);
+    // Reflow can create more physical rows than the finite history capacity allows. Enforce the
+    // bound after BOTH dimensions change: a taller page may still need rows reflow pushed into
+    // history. Cursor placement is already complete, and dropping the oldest history cannot move it.
+    if (auto const* capacity = std::get_if<LineCount>(&_historyLimits.capacity);
+        capacity && columnsChanged && _reflowOnResize)
+    {
+        auto const maxRows = unbox<size_t>(_pageSize.lines + *capacity);
+        if (_lines.size() > maxRows)
+        {
+            // At zero, the ring reads [page][free][history], with the newest history last. Remove
+            // excess slots just after the page, consuming free slots before the oldest history.
+            // Rebuild rather than just lowering _linesUsed: scrolling must not refill excess slots,
+            // and the discarded rows' cell storage and the oversized slot allocation must be released.
+            rezeroBuffers();
+            auto const excess = _lines.size() - maxRows;
+            auto retained = Lines {};
+            retained.reserve(maxRows);
+            for (auto const i: std::views::iota(size_t { 0 }, maxRows))
+                retained.emplace_back(
+                    std::move(_lines.storage()[i < unbox<size_t>(_pageSize.lines) ? i : i + excess]));
+            _lines = std::move(retained);
+            _linesUsed = std::min(_linesUsed, LineCount::cast_from(maxRows));
+            syncStableFloor();
+        }
+    }
     // Any page-size change makes a mirror resync, so the generation bumps either way. Stable ids are
     // the narrower question: growLines/shrinkLines rotate through the ring primitives that carry the
     // id accounting, so a pure LINE-count change leaves every row naming what it named -- which is
