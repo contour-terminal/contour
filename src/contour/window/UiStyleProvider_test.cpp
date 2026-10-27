@@ -1443,6 +1443,39 @@ TEST_CASE("UiStyleProvider: stickyHeaderHost decides as stickyHeaderHostFor does
           == static_cast<int>(StickyHeaderHost::Grid));
 }
 
+TEST_CASE("UiStyleProvider: dropZones and dropPayloads name every window::DropZone and DropPayload for QML",
+          "[contour][uistyle]")
+{
+    using contour::window::DropPayload;
+    using contour::window::DropZone;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        return qmlExpression.evaluate();
+    };
+
+    CHECK(evaluate("chromeStyle.dropZones.none").toInt() == static_cast<int>(DropZone::None));
+    CHECK(evaluate("chromeStyle.dropZones.insertText").toInt() == static_cast<int>(DropZone::InsertText));
+    CHECK(evaluate("chromeStyle.dropZones.passThrough").toInt() == static_cast<int>(DropZone::PassThrough));
+    CHECK(evaluate("chromeStyle.dropZones.splitLeft").toInt() == static_cast<int>(DropZone::SplitLeft));
+    CHECK(evaluate("chromeStyle.dropZones.splitRight").toInt() == static_cast<int>(DropZone::SplitRight));
+    CHECK(evaluate("chromeStyle.dropZones.splitTop").toInt() == static_cast<int>(DropZone::SplitTop));
+    CHECK(evaluate("chromeStyle.dropZones.splitBottom").toInt() == static_cast<int>(DropZone::SplitBottom));
+    CHECK(evaluate("chromeStyle.dropPayloads.none").toInt() == static_cast<int>(DropPayload::None));
+    CHECK(evaluate("chromeStyle.dropPayloads.files").toInt() == static_cast<int>(DropPayload::Files));
+    CHECK(evaluate("chromeStyle.dropPayloads.text").toInt() == static_cast<int>(DropPayload::Text));
+    CHECK(evaluate("chromeStyle.dropPayloads.tab").toInt() == static_cast<int>(DropPayload::Tab));
+
+    // One name per zone and per payload, so a new enumerator needs a QML name too.
+    auto const names = [](QMetaObject const& meta) {
+        return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
+    };
+    CHECK(names(contour::window::ChromeDropZoneNames::staticMetaObject) == contour::window::DropZoneCount);
+    CHECK(names(contour::window::ChromeDropPayloadNames::staticMetaObject)
+          == contour::window::DropPayloadCount);
+}
+
 TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")
 {
     using contour::config::ChromeDensity;
@@ -2255,6 +2288,51 @@ TEST_CASE("UiStyleProvider publishes the command blocks' tokens and the block co
     CHECK(tokenOf(terminal, "size", "scrollTick").toReal() == Catch::Approx(terminal.cellHeight()));
     CHECK(tokenOf(terminal, "space", "blockGutter").toReal() == 0.0);
     CHECK_FALSE(tokenOf(terminal, "layout", "isBlockRail").toBool());
+}
+
+TEST_CASE(
+    "UiStyleProvider: the drop ring and ghost edge read at 3:1, and their label at 4.5:1, on every row, "
+    "appearance and bundled scheme",
+    "[contour][uistyle]")
+{
+    // PaneCard.qml draws the ring around a card and the ghost's edge in the engaged scrollbar thumb's role,
+    // resolved on the card's own fill (colorOn), and sets the ghost's label as a toast: a mark held to 3:1, a
+    // text held to 4.5:1, over every scheme's background.
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::config::MinimumMarkContrast;
+    using contour::config::MinimumTextContrast;
+    using contour::window::UiStyleProvider;
+    using enum ChromeColorRole;
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto const card = contour::platform::toQColor(palette.defaultBackground);
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            auto const style = static_cast<ChromeStyle>(index);
+            CAPTURE(index);
+            auto inputs = contour::window::chromeInputsFor(style, QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const* colors =
+                qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+            REQUIRE(colors != nullptr);
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    auto const mark =
+                        over(provider.colorOn(static_cast<int>(ScrollbarThumbActive), card), card);
+                    CHECK(contrastOf(mark, card) >= MinimumMarkContrast);
+
+                    auto const toast = over(colors->color(ToastFill), card);
+                    CHECK(contrastOf(over(colors->color(ToastText), toast), toast) >= MinimumTextContrast);
+                });
+        }
+    }
 }
 
 TEST_CASE("UiStyleProvider: the overlay's inks read on every row, appearance and bundled scheme",

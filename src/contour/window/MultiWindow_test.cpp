@@ -1810,6 +1810,27 @@ TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][mul
         CHECK(window->dropGhostLabel(99).isEmpty());
     }
 
+    SECTION("the ghost is the half on the zone's side, and a zone that is not a split has none")
+    {
+        constexpr auto Inset = 6.0;
+        auto const rect = [&](DropZone zone) {
+            return window->dropGhostRect(static_cast<int>(zone), PaneWidth, PaneHeight, Inset);
+        };
+        auto const half = contour::window::dropGhostOf(
+            DropZone::SplitRight,
+            contour::window::DropExtent { .width = PaneWidth, .height = PaneHeight },
+            Inset);
+        REQUIRE(half.has_value());
+        CHECK(rect(DropZone::SplitRight) == QRectF { half->x, half->y, half->width, half->height });
+        for (auto const zone:
+             { DropZone::SplitLeft, DropZone::SplitRight, DropZone::SplitTop, DropZone::SplitBottom })
+            CHECK_FALSE(rect(zone).isNull());
+        for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
+            CHECK(rect(zone).isNull());
+        CHECK(window->dropGhostRect(-1, PaneWidth, PaneHeight, Inset).isNull());
+        CHECK(window->dropGhostRect(99, PaneWidth, PaneHeight, Inset).isNull());
+    }
+
     contour::test::closeAllTabs(*window);
 }
 

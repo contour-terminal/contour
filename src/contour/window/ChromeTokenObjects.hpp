@@ -9,6 +9,7 @@
 
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
@@ -1567,6 +1568,60 @@ class ChromeBlockNames: public QObject
     {
         return static_cast<int>(vtbackend::ScrollbarTickStyle::Hollow);
     }
+};
+
+/// The QML names of what a drop over a pane would do (window::DropZone), `chromeStyle.dropZones`, for
+/// the DropArea of a pane card to compare WindowController::dropZoneAt()'s answer against.
+class ChromeDropZoneNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int insertText READ insertText CONSTANT)
+    Q_PROPERTY(int passThrough READ passThrough CONSTANT)
+    Q_PROPERTY(int splitLeft READ splitLeft CONSTANT)
+    Q_PROPERTY(int splitRight READ splitRight CONSTANT)
+    Q_PROPERTY(int splitTop READ splitTop CONSTANT)
+    Q_PROPERTY(int splitBottom READ splitBottom CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeDropZoneNames(QObject* parent);
+
+    /// @return Each window::DropZone as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return of(DropZone::None); }
+    [[nodiscard]] static constexpr int insertText() noexcept { return of(DropZone::InsertText); }
+    [[nodiscard]] static constexpr int passThrough() noexcept { return of(DropZone::PassThrough); }
+    [[nodiscard]] static constexpr int splitLeft() noexcept { return of(DropZone::SplitLeft); }
+    [[nodiscard]] static constexpr int splitRight() noexcept { return of(DropZone::SplitRight); }
+    [[nodiscard]] static constexpr int splitTop() noexcept { return of(DropZone::SplitTop); }
+    [[nodiscard]] static constexpr int splitBottom() noexcept { return of(DropZone::SplitBottom); }
+
+  private:
+    [[nodiscard]] static constexpr int of(DropZone zone) noexcept { return static_cast<int>(zone); }
+};
+
+/// The QML names of what is dragged over a pane (window::DropPayload), `chromeStyle.dropPayloads`, for
+/// WindowController::dropZoneAt()'s `payload`.
+class ChromeDropPayloadNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int files READ files CONSTANT)
+    Q_PROPERTY(int text READ text CONSTANT)
+    Q_PROPERTY(int tab READ tab CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeDropPayloadNames(QObject* parent);
+
+    /// @return Each window::DropPayload as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return of(DropPayload::None); }
+    [[nodiscard]] static constexpr int files() noexcept { return of(DropPayload::Files); }
+    [[nodiscard]] static constexpr int text() noexcept { return of(DropPayload::Text); }
+    [[nodiscard]] static constexpr int tab() noexcept { return of(DropPayload::Tab); }
+
+  private:
+    [[nodiscard]] static constexpr int of(DropPayload payload) noexcept { return static_cast<int>(payload); }
 };
 
 } // namespace contour::window

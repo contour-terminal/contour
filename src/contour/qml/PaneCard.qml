@@ -16,11 +16,17 @@
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
 // fill of its own beneath them would composite a translucent profile twice.
 //
-// Two things here sit over cells, against the spec's "nothing goes over non-blank cells" (§1.5), and both
-// are ruled exceptions, not precedent: the held-modifier reveal's overlay header (D4), which must move
-// nothing, and the reconnecting pill over a grid that is frozen and dimmed anyway. Anything else that would
-// cover cells (Step 3f's sticky header among them) takes room of its own, as the inline header and the
-// ExitedFooter do.
+// Something dragged over the card is taken or left alone by its DropArea, as WindowController.dropZoneAt
+// decides: files and text insert at the prompt, a tab dropped on an edge band splits the pane, and anything
+// else stays unaccepted -- a tab dropped in the middle ends as it did before, torn off into its own window.
+// While a drag it would take hovers the card, a ring around it and, for a split, the half the tab would
+// take say so.
+//
+// Three things here sit over cells, against the spec's "nothing goes over non-blank cells" (§1.5), and all
+// are ruled exceptions, not precedent: the drop ring and ghost, for the length of a drag (Q3); the
+// held-modifier reveal's overlay header (D4), which must move nothing; and the reconnecting pill over a grid
+// that is frozen and dimmed anyway. Anything else that would cover cells (Step 3f's sticky header among them)
+// takes room of its own, as the inline header and the ExitedFooter do.
 import QtQuick
 import QtQuick.Window
 
@@ -245,5 +251,129 @@ Item {
         color: "transparent"
         border.width: chromeStyle.contrast.activeCardRing
         border.color: chromeStyle.accentColor
+    }
+
+    // What dragged over the card would do. A tab rides in the drag's mime data (TabItem's dragProxy); the
+    // controller resolves the payload it names against the model, so nothing here trusts it.
+    DropArea {
+        id: paneDrop
+        objectName: "paneDropArea"
+        anchors.fill: parent
+        z: 4
+
+        /// The mime format a tab drag carries (TabItem.qml's Drag.mimeData, TabStrip.qml's keys).
+        readonly property string tabFormat: "application/x-contour-tab"
+        /// The window's controller (Main.qml's `win`); null while the window is torn down.
+        readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
+        /// What is dragged, as a chromeStyle.dropPayloads value, and the tab JSON when it is a tab.
+        property int payload: chromeStyle.dropPayloads.none
+        property string tabPayload: ""
+        /// What a drop here would do, as a chromeStyle.dropZones value.
+        property int zone: chromeStyle.dropZones.none
+        /// The half of the card a split would give the tab; a null rectangle for any other zone.
+        readonly property rect ghost: controller ? controller.dropGhostRect(zone, card.width, card.height,
+                                                                            chromeStyle.space.s2)
+                                                 : Qt.rect(0, 0, 0, 0)
+        readonly property bool splits: ghost.width > 0
+        /// Whether the card takes the drag as it is now: text and files insert, a tab splits on an edge. The
+        /// middle of a card (PassThrough) and anything it does not understand are left unaccepted.
+        readonly property bool takes: zone === chromeStyle.dropZones.insertText || splits
+
+        function payloadOf(drag) {
+            if (drag.formats.indexOf(tabFormat) >= 0)
+                return chromeStyle.dropPayloads.tab
+            const isFile = (url) => url.toString().indexOf("file:") === 0
+            if (drag.hasUrls && drag.urls.every(isFile))
+                return chromeStyle.dropPayloads.files
+            if (drag.hasUrls || drag.hasText)
+                return chromeStyle.dropPayloads.text
+            return chromeStyle.dropPayloads.none
+        }
+
+        function refresh(drag) {
+            payload = payloadOf(drag)
+            tabPayload = payload === chromeStyle.dropPayloads.tab ? drag.getDataAsString(tabFormat) : ""
+            zone = controller && card.session
+                   ? controller.dropZoneAt(card.session, payload, drag.x, drag.y, card.width, card.height,
+                                           tabPayload)
+                   : chromeStyle.dropZones.none
+        }
+
+        function reset() {
+            payload = chromeStyle.dropPayloads.none
+            tabPayload = ""
+            zone = chromeStyle.dropZones.none
+        }
+
+        // A tab is accepted wherever it lands on the card, so the drag keeps reporting its position into the
+        // edge bands; the middle is turned away at the drop. Anything the card cannot place is refused here.
+        onEntered: (drag) => {
+            refresh(drag)
+            drag.accepted = zone !== chromeStyle.dropZones.none
+        }
+        onPositionChanged: (drag) => refresh(drag)
+        onExited: reset()
+        onDropped: (drop) => {
+            refresh(drop)
+            const dropped = { zone: zone, payload: payload, tabPayload: tabPayload, takes: takes, splits: splits }
+            reset()
+            if (!dropped.takes || !card.session || !controller) {
+                // Not accepted, so the drag ends IgnoreAction: a tab then tears off, as it always did.
+                drop.accepted = false
+                return
+            }
+            if (dropped.splits) {
+                controller.dropTabOnPane(card.session, dropped.zone, dropped.tabPayload)
+                drop.accept(Qt.MoveAction)
+                return
+            }
+            if (dropped.payload === chromeStyle.dropPayloads.files)
+                card.session.insertDroppedUrls(drop.urls)
+            else
+                card.session.insertDroppedText(drop.hasText ? drop.text : drop.urls.join("\n"))
+            drop.accept(Qt.CopyAction)
+        }
+    }
+
+    // The mark of a drop: the ring around the card and the ghost's edge. The one colour the overlay
+    // scrollbar's engaged thumb is, resolved on the card's own fill, which holds 3:1 on every row,
+    // appearance and bundled scheme (UiStyleProvider_test).
+    readonly property color dropMark: chromeStyle.paletteRevision < 0
+                                      ? "transparent"
+                                      : chromeStyle.colorOn(chromeStyle.roles.scrollbarThumbActive, card.fill)
+
+    // The ring says the card will take what hovers it.
+    Rectangle {
+        objectName: "dropRing"
+        anchors.fill: parent
+        z: 4
+        visible: paneDrop.containsDrag && paneDrop.takes
+        radius: card.cornerRadius
+        color: "transparent"
+        border.width: chromeStyle.space.s1
+        border.color: card.dropMark
+    }
+
+    // The ghost shows the half a tab would take, and says what it would do, on a toast's own contrast.
+    Rectangle {
+        objectName: "dropGhost"
+        x: paneDrop.ghost.x
+        y: paneDrop.ghost.y
+        width: paneDrop.ghost.width
+        height: paneDrop.ghost.height
+        z: 4
+        visible: paneDrop.containsDrag && paneDrop.splits
+        radius: card.cornerRadius
+        color: "transparent"
+        border.width: chromeStyle.space.s1
+        border.color: card.dropMark
+
+        Toast {
+            objectName: "dropGhostLabel"
+            anchors.centerIn: parent
+            shown: parent.visible
+            elevation: chromeStyle.elevation.inPane
+            text: paneDrop.controller ? paneDrop.controller.dropGhostLabel(paneDrop.zone) : ""
+        }
     }
 }

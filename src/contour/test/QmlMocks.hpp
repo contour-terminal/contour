@@ -8,9 +8,11 @@
 #include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/PaneState.hpp>
 
+#include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+#include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
@@ -140,6 +142,15 @@ class MockSession: public QObject
 
     /// Every sizeIndicatorSettled() call, in order.
     std::vector<bool> settledSizeIndicators;
+
+    /// Mirrors TerminalSession::insertDroppedUrls(): what a file drop on the pane hands its session.
+    Q_INVOKABLE void insertDroppedUrls(QList<QUrl> const& urls) { droppedUrls.push_back(urls); }
+    /// Mirrors TerminalSession::insertDroppedText(): what a text drop on the pane hands its session.
+    Q_INVOKABLE void insertDroppedText(QString const& text) { droppedTexts.push_back(text); }
+    /// Every insertDroppedUrls() call, in order.
+    std::vector<QList<QUrl>> droppedUrls;
+    /// Every insertDroppedText() call, in order.
+    std::vector<QString> droppedTexts;
     [[nodiscard]] float opacity() const { return _opacity; }
     [[nodiscard]] float dimUnfocused() const { return _dimUnfocused; }
     [[nodiscard]] bool isImageBackground() const { return false; }

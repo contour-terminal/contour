@@ -284,7 +284,9 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _paneStates { this },
     _headerOccupants { this },
     _secureInputs { this },
-    _blocks { this }
+    _blocks { this },
+    _dropZones { this },
+    _dropPayloads { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);

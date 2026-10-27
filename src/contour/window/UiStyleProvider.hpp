@@ -302,6 +302,10 @@ class UiStyleProvider: public QObject
     /// A locked pane's lock as cell text, set between chipOpenGlyph and chipCloseGlyph (`secure` on the
     /// Terminal row); empty on the native rows, which draw the bundled lock icon.
     Q_PROPERTY(QString secureInputCellText READ secureInputCellText CONSTANT)
+    /// The QML names of what a drop over a pane would do (window::DropZone).
+    Q_PROPERTY(QObject* dropZones READ dropZones CONSTANT)
+    /// The QML names of what is dragged over a pane (window::DropPayload).
+    Q_PROPERTY(QObject* dropPayloads READ dropPayloads CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     // }}}
@@ -390,6 +394,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* secureInputs() noexcept { return &_secureInputs; }
     [[nodiscard]] QObject* blocks() noexcept { return &_blocks; }
     [[nodiscard]] QString const& secureInputCellText() const noexcept { return _glyphs.secureInput; }
+    [[nodiscard]] QObject* dropZones() noexcept { return &_dropZones; }
+    [[nodiscard]] QObject* dropPayloads() noexcept { return &_dropPayloads; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
     /// @return The row's pane header height before the density applies, in logical pixels.
@@ -921,6 +927,8 @@ class UiStyleProvider: public QObject
     ChromeHeaderOccupantNames _headerOccupants;
     ChromeSecureInputNames _secureInputs;
     ChromeBlockNames _blocks;
+    ChromeDropZoneNames _dropZones;
+    ChromeDropPayloadNames _dropPayloads;
     int _paletteRevision = 0;
 };
 

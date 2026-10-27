@@ -930,6 +930,15 @@ QString WindowController::dropGhostLabel(int zone) const
                              static_cast<qsizetype>(dropZoneRowOf(static_cast<DropZone>(zone)).label.size()));
 }
 
+QRectF WindowController::dropGhostRect(int zone, qreal width, qreal height, qreal inset) const
+{
+    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return {};
+    auto const ghost =
+        dropGhostOf(static_cast<DropZone>(zone), DropExtent { .width = width, .height = height }, inset);
+    return ghost ? QRectF { ghost->x, ghost->y, ghost->width, ghost->height } : QRectF {};
+}
+
 void WindowController::runTabAction(int row, actions::Action const& action)
 {
     std::visit(core::Overloaded {

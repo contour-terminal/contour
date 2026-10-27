@@ -162,6 +162,19 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
     Q_INVOKABLE void showAbout() { emit aboutRequested(); }
+    /// Mirrors WindowController::dropZoneAt(): nothing is a drop target here.
+    Q_INVOKABLE [[nodiscard]] int dropZoneAt(QObject*, int, qreal, qreal, qreal, qreal, QString const&) const
+    {
+        return 0;
+    }
+    /// Mirrors WindowController::dropTabOnPane(): counted.
+    Q_INVOKABLE void dropTabOnPane(QObject*, int, QString const&) { ++tabDrops; }
+    /// How often a tab was dropped on a pane's split zone.
+    int tabDrops = 0;
+    /// Mirrors WindowController::dropGhostLabel(): no zone has a ghost here.
+    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int) const { return {}; }
+    /// Mirrors WindowController::dropGhostRect(): no zone has a ghost here.
+    Q_INVOKABLE [[nodiscard]] QRectF dropGhostRect(int, qreal, qreal, qreal) const { return {}; }
 
     /// Mirrors WindowController::windowTitle(), through the same remoteWindowTitle().
     Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const

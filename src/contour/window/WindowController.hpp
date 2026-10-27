@@ -338,6 +338,14 @@ class WindowController:
     /// The label of the ghost shown for @p zone ("Tab → split right"); empty for a zone with no ghost.
     /// @param zone A DropZone, as its value.
     Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int zone) const;
+    /// The ghost's rectangle for @p zone: the half of the pane on the zone's side (dropGhostOf()), in the
+    /// pane's coordinates.
+    /// @param zone   A DropZone, as its value.
+    /// @param width  The pane card's width.
+    /// @param height The pane card's height.
+    /// @param inset  How far the ghost sits in from the pane's edges.
+    /// @return The rectangle; a null one for a zone that is not a split.
+    Q_INVOKABLE [[nodiscard]] QRectF dropGhostRect(int zone, qreal width, qreal height, qreal inset) const;
     Q_INVOKABLE void setTabTitle(int index, QString const& title);
     Q_INVOKABLE void resetTabTitle(int index);
     /// Asks the active tab's QML delegate to open its inline title editor (the keyboard entry point

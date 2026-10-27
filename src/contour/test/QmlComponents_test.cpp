@@ -37,6 +37,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
@@ -59,12 +60,14 @@
 #include <QtCore/QDirIterator>
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QMimeData>
 #include <QtCore/QObject>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
+#include <QtGui/QDragEnterEvent>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
@@ -73,6 +76,7 @@
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlExpression>
+#include <QtQml/QQmlProperty>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -4291,6 +4295,46 @@ class MockPaneWindowController: public QObject
     /// Mirrors WindowController::canCloseWindow(): a pane's end never closes the test's window.
     [[nodiscard]] Q_INVOKABLE bool canCloseWindow() const { return _closable; }
 
+    /// Mirrors WindowController::dropZoneAt() through the same pure decision (resolveDropZone), for a tab
+    /// from another tab of a window that @ref split says can split. Records what the pane card asked.
+    [[nodiscard]] Q_INVOKABLE int dropZoneAt(
+        QObject*, int payload, qreal x, qreal y, qreal width, qreal height, QString const& tabPayload)
+    {
+        lastPayload = payload;
+        lastTabPayload = tabPayload;
+        return static_cast<int>(contour::window::resolveDropZone(
+            contour::window::DropZoneInputs { .payload = static_cast<contour::window::DropPayload>(payload),
+                                              .pane = { .width = width, .height = height },
+                                              .at = { .x = x, .y = y },
+                                              .split = split,
+                                              .origin = contour::window::DropOrigin::OtherTab }));
+    }
+    /// Mirrors WindowController::dropTabOnPane(): records the zone.
+    Q_INVOKABLE void dropTabOnPane(QObject*, int zone, QString const& tabPayload)
+    {
+        droppedZones.push_back(zone);
+        droppedTabPayloads.push_back(tabPayload);
+    }
+    /// Mirrors WindowController::dropGhostLabel().
+    [[nodiscard]] Q_INVOKABLE QString dropGhostLabel(int zone) const
+    {
+        auto const label = contour::window::dropZoneRowOf(static_cast<contour::window::DropZone>(zone)).label;
+        return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
+    }
+    /// Mirrors WindowController::dropGhostRect().
+    [[nodiscard]] Q_INVOKABLE QRectF dropGhostRect(int zone, qreal width, qreal height, qreal inset) const
+    {
+        auto const ghost = contour::window::dropGhostOf(
+            static_cast<contour::window::DropZone>(zone), { .width = width, .height = height }, inset);
+        return ghost ? QRectF { ghost->x, ghost->y, ghost->width, ghost->height } : QRectF {};
+    }
+    contour::window::SplitSupport split =
+        contour::window::SplitSupport::Supported; ///< Whether a tab may split.
+    int lastPayload = 0;                          ///< The payload the pane card last asked about.
+    QString lastTabPayload;                       ///< The tab JSON the pane card last asked about.
+    std::vector<int> droppedZones;                ///< Every zone dropTabOnPane() was told, in order.
+    std::vector<QString> droppedTabPayloads;      ///< The tab JSON of each.
+
   private:
     QString _hostLabel = QStringLiteral("home");
     bool _closable = false;
@@ -5209,6 +5253,252 @@ TEST_CASE("pane card: the Terminal row draws a header of one cell row (offscreen
     auto const& actions = PaneTreeHost::partOf(active, "paneHeaderActions");
     CHECK(QTest::qWaitFor([&actions] { return actions.opacity() == 1.0; }));
     CHECK(PaneTreeHost::partOf(inactive, "paneHeaderActions").opacity() == 0.0);
+}
+
+// }}}
+
+// {{{ Step 6.4: dropping on a pane
+
+namespace
+{
+/// A drag the window is sent by hand: the drag-enter, -move, -drop and -leave events a platform's drag
+/// manager would deliver, carrying @ref mime. Exercises the real DropArea of PaneCard.qml, offscreen.
+struct DragSource
+{
+    QQuickWindow& window;
+    QMimeData mime;
+    /// Whether the last enter or move was accepted by a DropArea.
+    bool accepted = false;
+
+    explicit DragSource(QQuickWindow& target): window { target } {}
+
+    static constexpr auto Actions = Qt::CopyAction | Qt::MoveAction;
+
+    void enter(QPointF scene)
+    {
+        auto event = QDragEnterEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        accepted = event.isAccepted();
+    }
+
+    void move(QPointF scene)
+    {
+        auto event = QDragMoveEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        accepted = event.isAccepted();
+    }
+
+    void leave()
+    {
+        auto event = QDragLeaveEvent {};
+        QCoreApplication::sendEvent(&window, &event);
+    }
+
+    /// @return What the drop resolved to: IgnoreAction when no DropArea accepted it.
+    [[nodiscard]] Qt::DropAction drop(QPointF scene)
+    {
+        auto event = QDropEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        return event.isAccepted() ? event.dropAction() : Qt::IgnoreAction;
+    }
+};
+
+constexpr auto TabMime = "application/x-contour-tab";
+constexpr auto TabJson = R"({"windowId":1,"tabIndex":0})";
+
+/// A lone pane card in a window that carries a drop-aware controller.
+struct DropHost
+{
+    PaneTreeHost host;
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    DragSource source;
+
+    DropHost(): host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
+    {
+        leaf.setSession(&session);
+        host.show(leaf, /*visiblePanes*/ 1);
+    }
+
+    [[nodiscard]] MockPaneWindowController& controller() { return host.window.controller(); }
+    [[nodiscard]] QQuickItem& card() const { return host.cardOf(leaf); }
+    [[nodiscard]] QQuickItem& part(char const* name) const { return PaneTreeHost::partOf(card(), name); }
+
+    /// @return The point of the card at @p fx, @p fy (fractions of its size), in window coordinates.
+    [[nodiscard]] QPointF at(qreal fx, qreal fy) const
+    {
+        return card().mapToScene(QPointF { card().width() * fx, card().height() * fy });
+    }
+
+    /// Starts a drag of what @ref source carries over the card at @p fx, @p fy.
+    void dragOver(qreal fx, qreal fy)
+    {
+        source.enter(at(fx, fy));
+        source.move(at(fx, fy));
+    }
+};
+} // namespace
+
+TEST_CASE(
+    "pane card: a tab dragged to an edge shows the ring and the ghost, and drops as a split (offscreen)",
+    "[contour][gui][qml][panecard][drop]")
+{
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+    auto& ring = drop.part("dropRing");
+    auto& ghost = drop.part("dropGhost");
+    CHECK_FALSE(ring.isVisible());
+    CHECK_FALSE(ghost.isVisible());
+
+    drop.dragOver(0.95, 0.5);
+    CHECK(drop.source.accepted);
+    CHECK(QTest::qWaitFor([&] { return ring.isVisible() && ghost.isVisible(); }));
+    // The ghost is the half on the right edge's side, inset from the card, and says what it will do.
+    CHECK(ghost.x() > drop.card().width() / 2);
+    CHECK(ghost.width() < drop.card().width() / 2);
+    CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
+          == QStringLiteral("Tab → split right"));
+    CHECK(drop.controller().lastTabPayload == QString::fromLatin1(TabJson));
+
+    // Both marks are the colour UiStyleProvider_test holds to 3:1 on every scheme: the engaged scrollbar
+    // thumb's role, resolved on the card's own fill.
+    auto const mark =
+        drop.host.style().colorOn(static_cast<int>(contour::config::ChromeColorRole::ScrollbarThumbActive),
+                                  drop.session.backgroundColor());
+    CHECK(QQmlProperty(&ring, "border.color").read().value<QColor>() == mark);
+    CHECK(QQmlProperty(&ghost, "border.color").read().value<QColor>() == mark);
+
+    CHECK(drop.source.drop(drop.at(0.95, 0.5)) == Qt::MoveAction);
+    CHECK(drop.controller().droppedZones
+          == std::vector<int> { static_cast<int>(contour::window::DropZone::SplitRight) });
+    CHECK(drop.controller().droppedTabPayloads == std::vector<QString> { QString::fromLatin1(TabJson) });
+    CHECK(QTest::qWaitFor([&] { return !ring.isVisible() && !ghost.isVisible(); }));
+}
+
+TEST_CASE("pane card: the ghost follows the edge the tab is nearest, and the middle shows none (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
+{
+    using contour::window::DropZone;
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+    drop.dragOver(0.5, 0.5);
+
+    // Each edge, with the zone the controller would answer there and the label the ghost shows.
+    for (auto const& [fx, fy, zone]: { std::tuple { 0.02, 0.5, DropZone::SplitLeft },
+                                       std::tuple { 0.98, 0.5, DropZone::SplitRight },
+                                       std::tuple { 0.5, 0.02, DropZone::SplitTop },
+                                       std::tuple { 0.5, 0.98, DropZone::SplitBottom } })
+    {
+        CAPTURE(fx, fy);
+        drop.source.move(drop.at(fx, fy));
+        auto const& ghost = drop.part("dropGhost");
+        CHECK(QTest::qWaitFor([&] { return ghost.isVisible(); }));
+        CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
+              == drop.controller().dropGhostLabel(static_cast<int>(zone)));
+        drop.source.move(drop.at(0.5, 0.5));
+        CHECK(QTest::qWaitFor([&] { return !ghost.isVisible(); }));
+    }
+    drop.source.leave();
+}
+
+TEST_CASE(
+    "pane card: a tab dropped in the middle, or where the window cannot split, is not accepted (offscreen)",
+    "[contour][gui][qml][panecard][drop]")
+{
+    // Unaccepted, so the drag ends IgnoreAction and the tab tears off into its own window, as before.
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+
+    SECTION("the middle of the card")
+    {
+        drop.dragOver(0.5, 0.5);
+        CHECK_FALSE(drop.part("dropRing").isVisible());
+        CHECK_FALSE(drop.part("dropGhost").isVisible());
+        CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
+    }
+
+    SECTION("an edge of a window that cannot split")
+    {
+        drop.controller().split = contour::window::SplitSupport::Unsupported;
+        drop.dragOver(0.95, 0.5);
+        CHECK_FALSE(drop.part("dropRing").isVisible());
+        CHECK_FALSE(drop.part("dropGhost").isVisible());
+        CHECK(drop.source.drop(drop.at(0.95, 0.5)) == Qt::IgnoreAction);
+    }
+
+    CHECK(drop.controller().droppedZones.empty());
+}
+
+TEST_CASE("pane card: files and text drop into the pane's session, whatever part of the card (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
+{
+    auto drop = DropHost {};
+
+    SECTION("files, as their URLs")
+    {
+        auto const urls = QList<QUrl> { QUrl { QStringLiteral("file:///tmp/a%20b.txt") },
+                                        QUrl { QStringLiteral("file:///tmp/c.txt") } };
+        drop.source.mime.setUrls(urls);
+        drop.dragOver(0.5, 0.5);
+        CHECK(QTest::qWaitFor([&] { return drop.part("dropRing").isVisible(); }));
+        CHECK_FALSE(drop.part("dropGhost").isVisible()); // only a split has a ghost
+        CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::CopyAction);
+        REQUIRE(drop.session.droppedUrls.size() == 1);
+        CHECK(drop.session.droppedUrls.front() == urls);
+        CHECK(drop.session.droppedTexts.empty());
+        CHECK(drop.controller().lastPayload == static_cast<int>(contour::window::DropPayload::Files));
+    }
+
+    SECTION("text")
+    {
+        drop.source.mime.setText(QStringLiteral("echo hi"));
+        drop.dragOver(0.95, 0.5);
+        CHECK(drop.source.drop(drop.at(0.95, 0.5)) == Qt::CopyAction);
+        CHECK(drop.session.droppedTexts == std::vector<QString> { QStringLiteral("echo hi") });
+        CHECK(drop.session.droppedUrls.empty());
+        CHECK(drop.controller().lastPayload == static_cast<int>(contour::window::DropPayload::Text));
+    }
+
+    SECTION("a web link is text, not a file")
+    {
+        drop.source.mime.setUrls({ QUrl { QStringLiteral("https://example.org/") } });
+        drop.dragOver(0.5, 0.5);
+        CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::CopyAction);
+        CHECK(drop.session.droppedUrls.empty());
+        CHECK(drop.session.droppedTexts.size() == 1);
+        CHECK(drop.controller().lastPayload == static_cast<int>(contour::window::DropPayload::Text));
+    }
+
+    CHECK(drop.controller().droppedZones.empty());
+}
+
+TEST_CASE("pane card: a drag the card cannot place is refused (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
+{
+    auto drop = DropHost {};
+    drop.source.mime.setData("application/x-unknown", "x");
+    drop.dragOver(0.5, 0.5);
+    CHECK_FALSE(drop.source.accepted);
+    CHECK_FALSE(drop.part("dropRing").isVisible());
+    CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
+    CHECK(drop.session.droppedTexts.empty());
+    CHECK(drop.session.droppedUrls.empty());
+    CHECK(drop.controller().droppedZones.empty());
+}
+
+TEST_CASE("pane card: the ring and the ghost are gone once the drag leaves (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
+{
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+    drop.dragOver(0.05, 0.5);
+    CHECK(QTest::qWaitFor([&] { return drop.part("dropGhost").isVisible(); }));
+    drop.source.leave();
+    CHECK(QTest::qWaitFor(
+        [&] { return !drop.part("dropRing").isVisible() && !drop.part("dropGhost").isVisible(); }));
 }
 
 // }}}

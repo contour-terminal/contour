@@ -243,4 +243,12 @@ ChromeBlockNames::ChromeBlockNames(QObject* parent): QObject { parent }
 {
 }
 
+ChromeDropZoneNames::ChromeDropZoneNames(QObject* parent): QObject { parent }
+{
+}
+
+ChromeDropPayloadNames::ChromeDropPayloadNames(QObject* parent): QObject { parent }
+{
+}
+
 } // namespace contour::window
