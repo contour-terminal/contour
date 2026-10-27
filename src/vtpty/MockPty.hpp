@@ -6,6 +6,7 @@
 #include <crispy/BufferObject.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -67,6 +68,11 @@ class MockPty: public Pty
 
     [[nodiscard]] InputEcho inputEcho() const noexcept override { return _inputEcho; }
 
+    /// Runs @p observer at the start of every write(), before the bytes are stored, so a test can read what
+    /// the writer had done by the time its bytes left. Runtime state, as for the other test hooks.
+    /// @param observer What to run; empty for nothing.
+    void setWriteObserver(std::function<void()> observer) { _writeObserver = std::move(observer); }
+
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
     [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
 
@@ -99,6 +105,7 @@ class MockPty: public Pty
     PtySlaveDummy _slave;
     std::optional<std::string> _foregroundProcessName; ///< @see setForegroundProcessName
     InputEcho _inputEcho = InputEcho::Unknown;         ///< @see setInputEcho
+    std::function<void()> _writeObserver;              ///< @see setWriteObserver
 };
 
 } // namespace vtpty

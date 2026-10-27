@@ -38,6 +38,8 @@ void MockPty::wakeupReader()
 
 int MockPty::write(std::string_view data)
 {
+    if (_writeObserver)
+        _writeObserver();
     switch (_writeBehavior)
     {
         case PtyWriteBehavior::FailAgain: errno = EAGAIN; return -1;

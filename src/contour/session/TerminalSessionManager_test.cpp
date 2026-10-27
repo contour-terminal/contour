@@ -3121,6 +3121,90 @@ TEST_CASE("TerminalSessionManager: echo restored without output is noticed on th
     CHECK(doubles.record.disables == 1);
 }
 
+TEST_CASE("TerminalSessionManager: a key after a silent echo-off finds secure input already on",
+          "[manager][secureinput]")
+{
+    // Review I2: `printf 'Password: '; stty -echo; read pw` turns echo off after its last output. The first
+    // key must not leave before the lock is noticed.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    auto enablesWhenKeyLeft = -1;
+    auto& pty = contour::test::mockPtyOf(*session);
+    pty.setWriteObserver([&] { enablesWhenKeyLeft = doubles.record.enables; });
+    pty.setInputEcho(vtpty::InputEcho::Hidden); // no output follows
+    typeInto(*session);
+
+    CHECK(enablesWhenKeyLeft == 1);
+}
+
+TEST_CASE("TerminalSessionManager: a local pane polls its echo only within the window after activity",
+          "[manager][secureinput]")
+{
+    // Review I2: no idle wakeups. The poll is armed by output or a key and stops once the pane has been
+    // quiet for InputEchoPollWindow, all on the app's injected clock.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    CHECK_FALSE(session->inputEchoPollArmed());
+
+    promptWith(*session, vtpty::InputEcho::Echoed); // output: the window opens
+    CHECK(session->inputEchoPollArmed());
+
+    // Echo goes off with no output and no key; a tick inside the window notices it.
+    contour::test::mockPtyOf(*session).setInputEcho(vtpty::InputEcho::Hidden);
+    app->steadyClock().advance(contour::window::InputEchoPollInterval);
+    session->pollInputEcho();
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::Locked);
+    CHECK(doubles.record.enables == 1);
+    CHECK(session->inputEchoPollArmed());
+
+    // ... and it going back on, silently, releases secure input at the next tick.
+    contour::test::mockPtyOf(*session).setInputEcho(vtpty::InputEcho::Echoed);
+    app->steadyClock().advance(contour::window::InputEchoPollInterval);
+    session->pollInputEcho();
+    CHECK(doubles.record.disables == 1);
+
+    // Quiet for the whole window: the tick that finds it over stops the poll.
+    app->steadyClock().advance(contour::window::InputEchoPollWindow);
+    session->pollInputEcho();
+    CHECK_FALSE(session->inputEchoPollArmed());
+
+    // A key opens it again.
+    typeInto(*session);
+    CHECK(session->inputEchoPollArmed());
+}
+
+TEST_CASE("TerminalSessionManager: a background pane does not poll its echo", "[manager][secureinput]")
+{
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 1);
+    REQUIRE(background != nullptr);
+    window->activateTab(0);
+    manager.setFocusedWindow(window.id);
+
+    promptWith(*background, vtpty::InputEcho::Echoed);
+    contour::test::mockPtyOf(*background).setInputEcho(vtpty::InputEcho::Hidden);
+    background->pollInputEcho();
+    CHECK(indicatorOf(*background) == contour::window::SecureIndicator::None);
+}
+
 TEST_CASE("TerminalSessionManager: secure_input: off never calls the OS", "[manager][secureinput]")
 {
     auto doubles = SecureInputDoubles {};

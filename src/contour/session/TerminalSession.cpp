@@ -467,6 +467,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _overlayClearanceTimer.setInterval(ScrollbarMarksFrameInterval);
     connect(&_overlayClearanceTimer, &QTimer::timeout, this, &TerminalSession::publishOverlayClearance);
 
+    // The echo poll of a local pane: runs only inside window::InputEchoPollWindow of the pane's last output
+    // or key, so an idle pane wakes nothing. @see noteInputActivity
+    _inputEchoPollTimer.setInterval(window::InputEchoPollInterval);
+    connect(&_inputEchoPollTimer, &QTimer::timeout, this, &TerminalSession::pollInputEcho);
+
     // A device told of its echo by a daemon says so from the reactor thread, with no output to carry it: the
     // lock is re-read on this session's own thread, where the terminal's lock is not held.
     _terminal.device().setInputEchoObserver(
@@ -994,12 +999,35 @@ void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
         // sudo and readpassphrase(3) turn echo off before they print the prompt, so the prompt's own
         // output is when the lock is noticed. Here, on the GUI thread, with no terminal lock held.
         refreshInputEcho();
+        noteInputActivity();
     });
 }
 
 int TerminalSession::secureIndicator() const noexcept
 {
     return static_cast<int>(window::secureIndicatorFor(_app.config().secureInput.value(), _inputEcho));
+}
+
+void TerminalSession::noteInputActivity()
+{
+    // A mirrored pane's program runs on its host, which tells the echo itself (Pty::setInputEchoObserver);
+    // nothing here reads it. Under `secure_input: off` there is no lock to notice.
+    if (_hosting == SessionHosting::Remote
+        || _app.config().secureInput.value() != config::SecureInputMode::Auto)
+        return;
+    _lastInputActivity = _app.terminalClocks().steady.now();
+    if (!_inputEchoPollTimer.isActive())
+        _inputEchoPollTimer.start();
+}
+
+void TerminalSession::pollInputEcho()
+{
+    // Only the pane that has the keys: a background pane's lock is noticed with its next output.
+    if (_manager != nullptr && _manager->isFocusedSession(*this))
+        refreshInputEcho();
+    if (window::inputEchoPollFor(_app.terminalClocks().steady.now(), _lastInputActivity)
+        == window::InputEchoPoll::Idle)
+        _inputEchoPollTimer.stop();
 }
 
 void TerminalSession::refreshInputEcho()
@@ -2373,6 +2401,9 @@ void TerminalSession::pasteFromClipboard(unsigned count, vtbackend::PasteStrip s
 
 void TerminalSession::sendPasteRepeatedly(std::string const& text, unsigned count)
 {
+    // Before the text leaves, as for a key: a paste into a prompt is typing too.
+    refreshInputEcho();
+    noteInputActivity();
     if (count == 1)
     {
         terminal().sendPaste(string_view { text });
@@ -3680,6 +3711,10 @@ void TerminalSession::sendKeyEvent(Key key,
             restart();
         return;
     }
+    // Before the key leaves: a prompt that turned echo off after its last output (stty -echo; read) would
+    // otherwise see this key in clear, with secure input not yet on.
+    refreshInputEcho();
+    noteInputActivity();
     terminal().sendKeyEvent(key, modifiers, eventType, now);
     // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
     // noticed at the next key, once the key's bytes have reached the PTY.
@@ -3748,6 +3783,8 @@ void TerminalSession::sendCharEvent(char32_t value,
     }
     if (ended)
         return;
+    refreshInputEcho(); // before the key leaves, as in sendKeyEvent
+    noteInputActivity();
     terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
     refreshInputEcho(); // as in sendKeyEvent
 }

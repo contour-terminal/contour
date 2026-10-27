@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <optional>
 #include <ranges>
 
 using contour::config::SecureInputMode;
@@ -153,4 +155,17 @@ TEST_CASE("secureInputStateText names what the OS does", "[secureinputpolicy]")
 {
     CHECK(contour::window::secureInputStateText(SecureInputSupport::Native) == "Secure input on");
     CHECK(contour::window::secureInputStateText(SecureInputSupport::None) == "Input hidden");
+}
+
+TEST_CASE("inputEchoPollFor polls only inside the window after the last activity", "[secureinputpolicy]")
+{
+    using contour::window::InputEchoPoll;
+    using contour::window::InputEchoPollWindow;
+    auto const t0 = std::chrono::steady_clock::time_point {} + std::chrono::hours { 1 };
+
+    CHECK(contour::window::inputEchoPollFor(t0, std::nullopt) == InputEchoPoll::Idle);
+    CHECK(contour::window::inputEchoPollFor(t0, t0) == InputEchoPoll::Polling);
+    CHECK(contour::window::inputEchoPollFor(t0 + InputEchoPollWindow - std::chrono::milliseconds { 1 }, t0)
+          == InputEchoPoll::Polling);
+    CHECK(contour::window::inputEchoPollFor(t0 + InputEchoPollWindow, t0) == InputEchoPoll::Idle);
 }

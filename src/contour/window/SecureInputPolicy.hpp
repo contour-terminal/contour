@@ -11,8 +11,10 @@
 #include <vtpty/InputEcho.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace contour::window
@@ -66,6 +68,32 @@ inline constexpr size_t SpotShownCount = static_cast<size_t>(SpotShown::Yes) + 1
     return app == AppActivity::Foreground && secureIndicatorFor(mode, focusedEcho) == SecureIndicator::Locked
                ? platform::SecureInputState::On
                : platform::SecureInputState::Off;
+}
+
+/// How long after the last output or key a local pane's echo state is still polled.
+inline constexpr auto InputEchoPollWindow = std::chrono::seconds { 2 };
+
+/// How often a local pane's echo state is polled inside its window.
+inline constexpr auto InputEchoPollInterval = std::chrono::milliseconds { 100 };
+
+/// Whether a local pane's echo state is polled now.
+enum class InputEchoPoll : uint8_t
+{
+    Idle = 0, ///< No: nothing happened in the pane lately, so nothing is awake for it.
+    Polling,  ///< Yes: output or a key came within InputEchoPollWindow.
+};
+
+/// Whether to poll a local pane's echo state. A program may turn echo off after its prompt, or on again
+/// without printing; only a bounded time after the pane's last activity is that worth waking for.
+/// @param now          The injected steady clock's time.
+/// @param lastActivity When output last reached the pane or a key last went in; none if never.
+/// @return Polling while @p now is inside InputEchoPollWindow of @p lastActivity, else Idle.
+[[nodiscard]] constexpr InputEchoPoll inputEchoPollFor(
+    std::chrono::steady_clock::time_point now,
+    std::optional<std::chrono::steady_clock::time_point> lastActivity) noexcept
+{
+    return lastActivity.has_value() && now - *lastActivity < InputEchoPollWindow ? InputEchoPoll::Polling
+                                                                                 : InputEchoPoll::Idle;
 }
 
 /// Where the lock goes, for one combination of what is on screen.

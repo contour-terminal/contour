@@ -728,6 +728,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// and the OS's secure input is re-decided, so turning the setting off releases it at once. GUI thread.
     void secureInputModeChanged();
 
+    /// @param session A session.
+    /// @return Whether @p session is the one that has the keys. GUI thread.
+    [[nodiscard]] bool isFocusedSession(TerminalSession const& session) const noexcept
+    {
+        return _focusedSession == &session;
+    }
+
     /// @return The OS's secure input as the gate last set it.
     [[nodiscard]] platform::SecureInputState secureInputState() const noexcept
     {

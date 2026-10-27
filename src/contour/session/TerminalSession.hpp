@@ -970,11 +970,24 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return A window::SecureIndicator's value.
     [[nodiscard]] int secureIndicator() const noexcept;
 
+    /// Notes that output reached the pane or a key went in, and starts the echo poll if it is not running:
+    /// a local program may turn echo off after its prompt, or on again without printing, and the poll is
+    /// what tells the lock then. Does nothing for a mirrored pane or under `secure_input: off`. GUI thread.
+    void noteInputActivity();
+
     /// Re-reads what the terminal does with typed text from the device. On a change, announces the lock
     /// (secureIndicatorChanged) and tells the manager, which re-decides the OS's secure input. GUI thread
     /// only, and never under the terminal lock: the device's read takes its own. Called when output was
     /// noticed, after input reached the PTY, on focus-in, and at the session's end.
     void refreshInputEcho();
+
+    /// One tick of the echo poll: re-reads the echo when this is the focused pane, and stops the poll once
+    /// window::InputEchoPollWindow has passed since the last activity. GUI thread; public so a test can tick
+    /// it on the injected clock.
+    void pollInputEcho();
+
+    /// @return Whether the echo poll's timer is running; it is not while the pane has been quiet.
+    [[nodiscard]] bool inputEchoPollArmed() const noexcept { return _inputEchoPollTimer.isActive(); }
 
     /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked
     /// of the device now (vtpty::Pty::foregroundProcessName). GUI thread. One query of the process table per
@@ -2164,6 +2177,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     SessionHosting _hosting;
     /// What the terminal did with typed text when last read. GUI thread. @see refreshInputEcho
     vtpty::InputEcho _inputEcho = vtpty::InputEcho::Unknown;
+    /// When output last reached this pane or a key last went in (the injected steady clock); none before.
+    /// GUI thread. @see noteInputActivity
+    std::optional<std::chrono::steady_clock::time_point> _lastInputActivity;
+    /// Polls the echo while the pane is active. GUI thread. @see noteInputActivity
+    QTimer _inputEchoPollTimer;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
     /// When the resync grace ends -- armed at construction for a mirrored pane, and by each return of the
