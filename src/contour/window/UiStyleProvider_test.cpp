@@ -2145,6 +2145,30 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
         }
 }
 
+TEST_CASE("UiStyleProvider publishes the command blocks' tokens and the block column's form",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "blockActions").toReal() == 22.0);
+    CHECK(tokenOf(mac, "radii", "blockActions").toReal() == 6.0);
+    CHECK(tokenOf(mac, "size", "scrollTick").toReal() == 3.0);
+    CHECK(tokenOf(mac, "size", "scrollTickOutline").toReal() == 1.0);
+    CHECK(tokenOf(mac, "space", "blockGutter").toReal() == 22.0);
+    CHECK(tokenOf(mac, "layout", "isBlockRail").toBool());
+
+    // The Terminal row's are cells: a one-cell button and tick, and no strip, its block column being glyphs.
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "size", "blockActions").toReal() == Catch::Approx(terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "size", "scrollTick").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "space", "blockGutter").toReal() == 0.0);
+    CHECK_FALSE(tokenOf(terminal, "layout", "isBlockRail").toBool());
+}
+
 TEST_CASE("UiStyleProvider: the overlay's inks read on every row, appearance and bundled scheme",
           "[contour][uistyle]")
 {

@@ -166,6 +166,21 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(row.motion.lingerMs) });
     // The secure-input lock's icon edge; the Terminal row sets the lock as cell text instead.
     out.push_back(size.secureInputGlyph);
+    // The command blocks' tokens: the strip and its bar, the mark, the actions button, the chips and the
+    // scrollbar ticks.
+    append({ double(size.rail),
+             double(size.railMark),
+             double(size.blockActions),
+             double(size.foldChip),
+             double(size.foldChipHit),
+             double(size.scrollTick),
+             double(size.scrollTickOutline),
+             double(row.space.blockGutter),
+             double(row.space.railInset),
+             double(row.space.railEnd),
+             double(radii.rail),
+             double(radii.blockActions),
+             double(radii.chip) });
     return out;
 }
 
@@ -212,6 +227,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     // linkPill scrollbar scrollbarInset, radii linkPill scrollbar, motion lingerMs (Fluent and ContourLinux
     // take the macOS extents: they have no board of their own).
     auto const nativeOverlay = std::vector<double> { 22, 8, 4, 11, 4, 600 };
+    // rail railMark blockActions foldChip foldChipHit scrollTick scrollTickOutline, blockGutter railInset
+    // railEnd, radii rail blockActions chip (the canvas's `blocks`; every native row alike).
+    auto const nativeBlocks = std::vector<double> { 3, 13, 22, 20, 24, 3, 1, 22, 8, 2, 2, 6, 10 };
     auto const nativeTail = std::vector<double> { 0,  0,  0, 0,  0,   1,  2,  12, 0, 4, 16, 25, 0, 12, 40,
                                                   35, 10, 0, -1, 1.0, 20, 15, 10, 0, 1, 1,  8,  0, 0 };
     // the find bar: size(7) inset(2) count gap(1) radius(1), mac-find-menu
@@ -234,7 +252,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 },
                    nativeFind,
                    nativeOverlay,
-                   { 11 } }),
+                   { 11 },
+                   nativeBlocks }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -261,7 +280,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 },
                    nativeFind,
                    nativeOverlay,
-                   { 11 } }),
+                   { 11 },
+                   nativeBlocks }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
@@ -288,7 +308,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 },
                    nativeFind,
                    nativeOverlay,
-                   { 11 } }),
+                   { 11 },
+                   nativeBlocks }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -318,7 +339,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    // A one-cell pill and track, set flush, square, and the hold every row shares.
                    { 1, 1, 0, 0, 0, 600 },
                    // No icon: the lock is `[secure]` in cells.
-                   { 0 } }),
+                   { 0 },
+                   // The block column is today's glyph cells: one-cell marks, chips and ticks, no strip.
+                   { 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
@@ -1637,5 +1660,19 @@ TEST_CASE("chromeTokens.theTerminalRowsScrollbarThumbsMark", "[chrometokens]")
         auto const accent = slotIn(colors, SchemeSlot::Accent);
         if (contrastRatio(accent, palette.defaultBackground) >= MinimumMarkContrast)
             CHECK(slotIn(colors, SchemeSlot::ScrollbarThumbActive) == accent);
+    }
+}
+
+TEST_CASE("chromeTokens.blockColumnFormFollowsTheRow", "[chrometokens]")
+{
+    // The native rows draw the block column as a pixel strip; the Terminal row keeps the glyph cells.
+    using namespace contour::config;
+    for (auto const i: std::views::iota(0uz, ChromeTokenRows.size()))
+    {
+        CAPTURE(i);
+        auto const expected = static_cast<ChromeStyle>(i) == ChromeStyle::Terminal
+                                  ? vtbackend::BlockColumnForm::Glyphs
+                                  : vtbackend::BlockColumnForm::Rail;
+        CHECK(ChromeTokenRows[i].layout.blockColumn == expected);
     }
 }

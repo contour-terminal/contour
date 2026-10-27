@@ -7,6 +7,7 @@
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 
 #include <algorithm>
 #include <array>
@@ -451,6 +452,15 @@ struct SizeTokens
     // Keyboard focus.
     int focusRing = 0; ///< Outset of the keyboard focus ring (horizontal units); 0 draws none.
 
+    // The command blocks.
+    int rail = 0;              ///< Width of the block rail's bar (horizontal units).
+    int railMark = 0;          ///< Edge of the rail's mark: the ✗ disc, the ▸ and ✓ boxes (horizontal units).
+    int blockActions = 0;      ///< Edge of the square ⋯ button (horizontal units).
+    int foldChip = 0;          ///< Drawn height of the fold chip, clamped to the row (vertical units).
+    int foldChipHit = 0;       ///< Smallest hit width and height of the fold chip.
+    int scrollTick = 0;        ///< Height of a scrollbar tick (vertical units).
+    int scrollTickOutline = 0; ///< Stroke of a hollow scrollbar tick (horizontal units).
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -484,6 +494,11 @@ struct SpaceTokens
 
     int scrollbarInset = 0; ///< The overlay scrollbar's gap to the pane's edge, inside its hit area.
 
+    // The command blocks.
+    int blockGutter = 0; ///< Width of the strip the rail sits in, after the gutter's cells; 0 has none.
+    int railInset = 0;   ///< The rail bar's left edge within the strip.
+    int railEnd = 0;     ///< What the bar keeps clear of its first row's top and its last row's bottom.
+
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
 
@@ -510,6 +525,10 @@ struct RadiusTokens
 
     int linkPill = 0;  ///< The link pill.
     int scrollbar = 0; ///< The overlay scrollbar's thumb.
+
+    int rail = 0;         ///< The block rail's bar ends.
+    int blockActions = 0; ///< The ⋯ button.
+    int chip = 0;         ///< The status and fold chips.
 
     [[nodiscard]] bool operator==(RadiusTokens const&) const = default;
 };
@@ -626,6 +645,8 @@ struct LayoutTokens
     PaneActionsReveal paneActions = PaneActionsReveal::OnHover; ///< When a pane header shows its actions.
     int paletteTopPercent = 0; ///< The command palette's top edge, in percent of the window's height.
     FindBarHost findBar = FindBarHost::Overlay; ///< Where the find bar sits.
+    /// How the gutter draws the block column: a pixel strip holding the rail, or the glyph cells.
+    vtbackend::BlockColumnForm blockColumn = vtbackend::BlockColumnForm::Glyphs;
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -752,7 +773,10 @@ namespace detail
                              .findBarInset = 8,
                              .findBarInsetRows = 8,
                              .findBarCountGap = 0,
-                             .scrollbarInset = 4 };
+                             .scrollbarInset = 4,
+                             .blockGutter = 22,
+                             .railInset = 8,
+                             .railEnd = 2 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -1097,7 +1121,14 @@ namespace detail
                   .linkPill = 22,
                   .scrollbar = 8,
                   .secureInputGlyph = 11,
-                  .focusRing = 3 },
+                  .focusRing = 3,
+                  .rail = 3,
+                  .railMark = 13,
+                  .blockActions = 22,
+                  .foldChip = 20,
+                  .foldChipHit = 24,
+                  .scrollTick = 3,
+                  .scrollTickOutline = 1 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -1114,7 +1145,10 @@ namespace detail
                    .grabber = 1,
                    .findBar = 8,
                    .linkPill = 11,
-                   .scrollbar = 4 },
+                   .scrollbar = 4,
+                   .rail = 2,
+                   .blockActions = 6,
+                   .chip = 10 },
         .type = { .caption = 10,
                   .footnote = 11,
                   .body = 13,
@@ -1141,7 +1175,8 @@ namespace detail
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
-                    .findBar = FindBarHost::Overlay },
+                    .findBar = FindBarHost::Overlay,
+                    .blockColumn = vtbackend::BlockColumnForm::Rail },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1195,7 +1230,14 @@ namespace detail
                   .linkPill = 22,
                   .scrollbar = 8,
                   .secureInputGlyph = 11,
-                  .focusRing = 2 },
+                  .focusRing = 2,
+                  .rail = 3,
+                  .railMark = 13,
+                  .blockActions = 22,
+                  .foldChip = 20,
+                  .foldChipHit = 24,
+                  .scrollTick = 3,
+                  .scrollTickOutline = 1 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -1212,7 +1254,10 @@ namespace detail
                    .grabber = 1,
                    .findBar = 8,
                    .linkPill = 11,
-                   .scrollbar = 4 },
+                   .scrollbar = 4,
+                   .rail = 2,
+                   .blockActions = 6,
+                   .chip = 10 },
         .type = { .caption = 12,
                   .footnote = 12,
                   .body = 14,
@@ -1236,7 +1281,8 @@ namespace detail
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
-                    .findBar = FindBarHost::Overlay },
+                    .findBar = FindBarHost::Overlay,
+                    .blockColumn = vtbackend::BlockColumnForm::Rail },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1290,7 +1336,14 @@ namespace detail
                   .linkPill = 22,
                   .scrollbar = 8,
                   .secureInputGlyph = 11,
-                  .focusRing = 2 },
+                  .focusRing = 2,
+                  .rail = 3,
+                  .railMark = 13,
+                  .blockActions = 22,
+                  .foldChip = 20,
+                  .foldChipHit = 24,
+                  .scrollTick = 3,
+                  .scrollTickOutline = 1 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -1307,7 +1360,10 @@ namespace detail
                    .grabber = 1,
                    .findBar = 8,
                    .linkPill = 11,
-                   .scrollbar = 4 },
+                   .scrollbar = 4,
+                   .rail = 2,
+                   .blockActions = 6,
+                   .chip = 10 },
         .type = { .caption = 12,
                   .footnote = 12.5,
                   .body = 14,
@@ -1331,7 +1387,8 @@ namespace detail
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
-                    .findBar = FindBarHost::Overlay },
+                    .findBar = FindBarHost::Overlay,
+                    .blockColumn = vtbackend::BlockColumnForm::Rail },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1389,7 +1446,14 @@ namespace detail
                   .linkPill = 1,
                   .scrollbar = 1,
                   .secureInputGlyph = 0,
-                  .focusRing = 0 },
+                  .focusRing = 0,
+                  .rail = 0,
+                  .railMark = 1,
+                  .blockActions = 1,
+                  .foldChip = 1,
+                  .foldChipHit = 1,
+                  .scrollTick = 1,
+                  .scrollTickOutline = 1 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -1404,7 +1468,11 @@ namespace detail
                    .findBarInset = 1,
                    .findBarInsetRows = 1,
                    .findBarCountGap = 1,
-                   .scrollbarInset = 0 },
+                   .scrollbarInset = 0,
+                   // The glyph column takes its cells from gutter.block_column_width: no strip.
+                   .blockGutter = 0,
+                   .railInset = 0,
+                   .railEnd = 0 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
@@ -1420,7 +1488,10 @@ namespace detail
                    .grabber = 0,
                    .findBar = 0,
                    .linkPill = 0,
-                   .scrollbar = 0 },
+                   .scrollbar = 0,
+                   .rail = 0,
+                   .blockActions = 0,
+                   .chip = 0 },
         .type = { .caption = 0,
                   .footnote = 0,
                   .body = 0,
@@ -1457,7 +1528,8 @@ namespace detail
                     .activeTabWeight = ActiveTabWeight::Bold,
                     .paneActions = PaneActionsReveal::OnHoverOrFocus,
                     .paletteTopPercent = 18,
-                    .findBar = FindBarHost::PaneHeaderRow },
+                    .findBar = FindBarHost::PaneHeaderRow,
+                    .blockColumn = vtbackend::BlockColumnForm::Glyphs },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         // The banner's mark in the scheme's warning hue where that reads on the bar, else the bar's ink; the

@@ -86,6 +86,9 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
     Q_PROPERTY(qreal secureInputGlyph READ secureInputGlyph CONSTANT)
     Q_PROPERTY(qreal focusRing READ focusRing CONSTANT)
+    Q_PROPERTY(qreal blockActions READ blockActions CONSTANT)
+    Q_PROPERTY(qreal scrollTick READ scrollTick CONSTANT)
+    Q_PROPERTY(qreal scrollTickOutline READ scrollTickOutline CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -223,6 +226,16 @@ class ChromeSizeTokens: public QObject
     /// @return The keyboard focus ring's outset in logical pixels; 0 draws none.
     [[nodiscard]] qreal focusRing() const noexcept { return _tokens.focusRing * _units.horizontal; }
 
+    /// @return The edge of a command block's square ⋯ button in logical pixels.
+    [[nodiscard]] qreal blockActions() const noexcept { return _tokens.blockActions * _units.horizontal; }
+    /// @return A scrollbar tick's height in logical pixels.
+    [[nodiscard]] qreal scrollTick() const noexcept { return _tokens.scrollTick * _units.vertical; }
+    /// @return A hollow scrollbar tick's stroke in logical pixels.
+    [[nodiscard]] qreal scrollTickOutline() const noexcept
+    {
+        return _tokens.scrollTickOutline * _units.horizontal;
+    }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
@@ -257,6 +270,7 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal findBarInsetRows READ findBarInsetRows CONSTANT)
     Q_PROPERTY(qreal findBarCountGap READ findBarCountGap CONSTANT)
     Q_PROPERTY(qreal scrollbarInset READ scrollbarInset CONSTANT)
+    Q_PROPERTY(qreal blockGutter READ blockGutter CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -323,6 +337,8 @@ class ChromeSpaceTokens: public QObject
     }
     /// @return The overlay scrollbar's gap to the pane's edge, in logical pixels.
     [[nodiscard]] qreal scrollbarInset() const noexcept { return _tokens.scrollbarInset * _units.horizontal; }
+    /// @return The width of the strip the block rail sits in, in logical pixels; 0 where there is none.
+    [[nodiscard]] qreal blockGutter() const noexcept { return _tokens.blockGutter * _units.horizontal; }
 
   private:
     config::SpaceTokens _tokens {};
@@ -349,6 +365,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal findBar READ findBar CONSTANT)
     Q_PROPERTY(qreal linkPill READ linkPill CONSTANT)
     Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
+    Q_PROPERTY(qreal blockActions READ blockActions CONSTANT)
 
   public:
     /// @param tokens The resolved radius group.
@@ -388,6 +405,8 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal linkPill() const noexcept { return _tokens.linkPill * _units.horizontal; }
     /// @return The radius of the overlay scrollbar's thumb.
     [[nodiscard]] qreal scrollbar() const noexcept { return _tokens.scrollbar * _units.horizontal; }
+    /// @return The radius of a command block's ⋯ button.
+    [[nodiscard]] qreal blockActions() const noexcept { return _tokens.blockActions * _units.horizontal; }
 
   private:
     config::RadiusTokens _tokens {};
@@ -711,6 +730,9 @@ class ChromeLayoutTokens: public QObject
     // source of truth as a config::TabShape; the one place the shape is compared, so the tab, the strip and
     // the badge slot cannot disagree on it.
     Q_PROPERTY(bool isPill READ isPill CONSTANT)
+    // A bool for QML (the same carve-out): a read-only predicate over `blockColumn`, which stays the source
+    // of truth as a vtbackend::BlockColumnForm.
+    Q_PROPERTY(bool isBlockRail READ isBlockRail CONSTANT)
     Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
     Q_PROPERTY(int caret READ caret CONSTANT)
     Q_PROPERTY(int secondaryClick READ secondaryClick CONSTANT)
@@ -747,6 +769,11 @@ class ChromeLayoutTokens: public QObject
     [[nodiscard]] static constexpr int pill() noexcept { return static_cast<int>(config::TabShape::Pill); }
     /// @return Whether the tabs are pills in a well (config::TabShape::Pill).
     [[nodiscard]] bool isPill() const noexcept { return _tokens.tabShape == config::TabShape::Pill; }
+    /// @return Whether the block column is a pixel strip holding the rail (vtbackend::BlockColumnForm::Rail).
+    [[nodiscard]] bool isBlockRail() const noexcept
+    {
+        return _tokens.blockColumn == vtbackend::BlockColumnForm::Rail;
+    }
 
     /// @return How the profile menu is reached, a config::ProfileMenuAffordance as its underlying value.
     [[nodiscard]] int profileMenu() const noexcept { return static_cast<int>(_tokens.profileMenu); }

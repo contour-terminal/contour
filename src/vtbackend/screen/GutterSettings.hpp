@@ -122,6 +122,16 @@ inline constexpr int MinBlockColumnWidth = 1;
 /// centred; a fold control two cells wide is as tall as the row already allows.
 inline constexpr int MaxBlockColumnWidth = 2;
 
+/// How the block column is drawn: in cells, or as a pixel strip beside them.
+///
+/// A chrome decision rather than a configuration key: contour's chrome row picks it, and this header holds
+/// it so that both the configuration and the terminal can name it.
+enum class BlockColumnForm : uint8_t
+{
+    Glyphs = 0, ///< The private-use glyph column, in cells after the line numbers.
+    Rail,       ///< A strip of fixed pixel width after the cells, holding the block rail.
+};
+
 /// What hovering a fold does to its column's strokes, beside bringing them to full strength.
 enum class FoldHoverStroke : uint8_t
 {
