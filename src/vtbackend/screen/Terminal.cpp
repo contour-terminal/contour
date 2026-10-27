@@ -4134,6 +4134,22 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     }
 }
 
+namespace
+{
+    /// Draws the cells of @p cells from @p first on as a double-width row draws its own: each cell at twice
+    /// its column, and twice as wide. What cells laid out in the row's own columns come to once drawn.
+    /// @param cells The frame's annotation cells.
+    /// @param first The index of the first cell laid out for the row.
+    void doubleCellsFrom(std::vector<RenderCell>& cells, std::size_t first)
+    {
+        for (auto& cell: std::span(cells).subspan(first))
+        {
+            cell.position.column = cell.position.column * 2;
+            cell.attributes.lineFlags = cell.attributes.lineFlags | LineFlag::DoubleWidth;
+        }
+    }
+} // namespace
+
 void Terminal::fillFoldLabels(RenderBuffer& output,
                               LineOffset baseLine,
                               std::span<FoldLabelPlacement const> placements) const
@@ -4152,11 +4168,11 @@ void Terminal::fillFoldLabels(RenderBuffer& output,
             auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
             if (auto const columns = foldLabelExtent(screenLine,
                                                      placement.textColumns,
-                                                     pageSize().columns,
+                                                     shownColumnsOf(placement.width, pageSize().columns),
                                                      unbox<std::size_t>(placement.labelColumns),
                                                      ColumnCount(1)))
                 output.chips.push_back(RenderChip { .lineOffset = screenLine,
-                                                    .columns = *columns,
+                                                    .columns = drawnColumnsOf(*columns, placement.width),
                                                     .style = PillStyle::Fold,
                                                     .text = placement.label,
                                                     .ink = inks.ink,
@@ -4173,20 +4189,20 @@ void Terminal::fillFoldLabels(RenderBuffer& output,
     for (auto const& placement: placements)
     {
         auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
-        layoutFoldLabel(output.annotations,
-                        screenLine,
-                        placement.textColumns,
-                        pageSize().columns,
-                        placement.label,
-                        attributes);
+        auto const shown = shownColumnsOf(placement.width, pageSize().columns);
+        auto const firstCell = output.annotations.size();
+        layoutFoldLabel(
+            output.annotations, screenLine, placement.textColumns, shown, placement.label, attributes);
+        if (placement.width == LineWidth::Double)
+            doubleCellsFrom(output.annotations, firstCell);
         // The band behind exactly the cells drawn: the extent of a hit no wider than the label.
         if (auto const drawn = foldLabelExtent(screenLine,
                                                placement.textColumns,
-                                               pageSize().columns,
+                                               shown,
                                                unbox<std::size_t>(placement.labelColumns),
                                                ColumnCount(1)))
-            output.chipBands.push_back(
-                RenderChipBand { .lineOffset = screenLine, .columns = *drawn, .fill = fill });
+            output.chipBands.push_back(RenderChipBand {
+                .lineOffset = screenLine, .columns = drawnColumnsOf(*drawn, placement.width), .fill = fill });
     }
 }
 
@@ -4197,10 +4213,11 @@ std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position,
     {
         auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
                                             placement.textColumns,
-                                            pageSize().columns,
+                                            shownColumnsOf(placement.width, pageSize().columns),
                                             unbox<std::size_t>(placement.labelColumns),
                                             minimumHitColumns);
-        if (extent && extent->contains(position))
+        // The pointer is over drawn columns, which a doubled row's cells take two of.
+        if (extent && drawnColumnsOf(*extent, placement.width).contains(position))
             return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
     }
     return std::nullopt;
@@ -4260,18 +4277,19 @@ std::vector<Terminal::FoldLabelPlacement> Terminal::foldLabelPlacements() const
         // last text, clipped at the page's edge.
         auto const& line = grid.lineAt(gridLine);
         auto const runs = blankRunsOf(line, LineOffset(0), pageSize().columns);
-        auto const textEnd =
-            foldChipTextEnd(BlockChipRowFacts { .pageColumns = pageSize().columns,
-                                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
-                                                                    ? line.promptEndOffset()
-                                                                    : ColumnOffset(0),
-                                                .blankRuns = runs },
-                            labelColumns);
+        auto const textEnd = foldChipTextEnd(
+            BlockChipRowFacts { .pageColumns = shownColumnsOf(lineWidthOf(line), pageSize().columns),
+                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
+                                                    ? line.promptEndOffset()
+                                                    : ColumnOffset(0),
+                                .blankRuns = runs },
+            labelColumns);
         placements.push_back(FoldLabelPlacement { .range = range,
                                                   .gridLine = gridLine,
                                                   .textColumns = textEnd.value_or(line.trimmedColumns()),
                                                   .label = std::move(label),
-                                                  .labelColumns = labelColumns });
+                                                  .labelColumns = labelColumns,
+                                                  .width = lineWidthOf(line) });
     }
     return placements;
 }
@@ -4380,7 +4398,6 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
 
     auto const& grid = primaryScreen().grid();
     auto const now = _clocks.wall.now();
-    auto const pageColumns = pageSize().columns;
     auto status = RunningStatus::Hidden;
     auto lastBlock = std::optional<CommandBlockId> {};
 
@@ -4404,7 +4421,10 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
 
         auto const screenRow = _viewport.translateGridToScreenCoordinate(*input);
         auto const& line = grid.lineAt(*input);
-        auto runs = blankRunsOf(line, baseLine + screenRow, pageColumns);
+        // A doubled row shows half the page, in columns that are drawn twice as wide.
+        auto const width = lineWidthOf(line);
+        auto const pageColumns = shownColumnsOf(width, pageSize().columns);
+        auto runs = blankRunsOf(line, baseLine + screenRow, pageSize().columns);
         // A collapsed fold's chip on the row is drawn over blanks too: those are taken.
         for (auto const& label: foldLabels)
             if (label.gridLine == *input)
@@ -4434,7 +4454,7 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
             // Legible over the hovered block's tint as well as over the page.
             auto const inks = pillInks(_colorPalette, style, hoverUnderlayOf(record->id));
             output.chips.push_back(RenderChip { .lineOffset = placement.columns.line,
-                                                .columns = placement.columns,
+                                                .columns = drawnColumnsOf(placement.columns, width),
                                                 .style = style,
                                                 .text = text,
                                                 .ink = inks.ink,
@@ -4444,6 +4464,7 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
         }
 
         auto const colors = blockChipColors(_colorPalette, outcome);
+        auto const firstCell = output.annotations.size();
         layoutRenderText(
             output.annotations,
             text,
@@ -4451,10 +4472,12 @@ RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
                 RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground }),
             CellLocation { .line = placement.columns.line, .column = placement.columns.fromColumn },
             placement.columns.toColumn + ColumnOffset(1));
+        if (width == LineWidth::Double)
+            doubleCellsFrom(output.annotations, firstCell);
         if (colors.band)
             output.chipBands.push_back(RenderChipBand {
                 .lineOffset = placement.columns.line,
-                .columns = placement.columns,
+                .columns = drawnColumnsOf(placement.columns, width),
                 .fill =
                     RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F))) });
     }

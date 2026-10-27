@@ -329,8 +329,43 @@ void appendGutterCells(GutterLayout const& layout,
 
 // {{{ status chip
 
+/// How wide a row's cells are drawn.
+enum class LineWidth : uint8_t
+{
+    Single = 0, ///< One column each.
+    Double,     ///< DECDWL, or a DECDHL half: two columns each, so only half the page's cells are shown.
+};
+
+/// @param line The row.
+/// @return Double for a DECDWL or DECDHL row, otherwise Single.
+[[nodiscard]] LineWidth lineWidthOf(Line const& line) noexcept;
+
+/// How many of a row's columns are shown: the page's, or half of them on a double-width row, whose second
+/// half is never drawn.
+/// @param width How wide the row's cells are drawn.
+/// @param pageColumns The page's width.
+/// @return The columns a chip may be placed in.
+[[nodiscard]] constexpr ColumnCount shownColumnsOf(LineWidth width, ColumnCount pageColumns) noexcept
+{
+    return width == LineWidth::Double ? ColumnCount(unbox<int>(pageColumns) / 2) : pageColumns;
+}
+
+/// The columns @p logical occupies once drawn: each cell of a double-width row takes two columns.
+/// @param logical A range of the row's cells.
+/// @param width How wide the row's cells are drawn.
+/// @return The same range in drawn columns; @p logical itself on a single-width row.
+[[nodiscard]] constexpr ColumnRange drawnColumnsOf(ColumnRange logical, LineWidth width) noexcept
+{
+    if (width == LineWidth::Single)
+        return logical;
+    return ColumnRange { .line = logical.line,
+                         .fromColumn = logical.fromColumn * 2,
+                         .toColumn = (logical.toColumn * 2) + ColumnOffset(1) };
+}
+
 /// The maximal runs of blank cells on @p line, ascending, both ends included: a blank cell is an empty or
-/// space cell on the default background -- what a chip may be drawn over (principle 5).
+/// space cell on the default background -- what a chip may be drawn over (principle 5). On a double-width row
+/// only the shown half of the page is looked at, in the row's own columns.
 /// @param line The row.
 /// @param screenLine The screen row the runs are reported on (ColumnRange::line).
 /// @param pageColumns The page's width; columns past the line's own are blank.

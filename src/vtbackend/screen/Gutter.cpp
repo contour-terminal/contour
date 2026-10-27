@@ -624,8 +624,14 @@ RenderAttributes blockColumnCellAttributes(GutterSegment const& block, RGBColorP
     return attributes;
 }
 
+LineWidth lineWidthOf(Line const& line) noexcept
+{
+    return line.isFlagEnabled(LineFlag::DoubleWidth) ? LineWidth::Double : LineWidth::Single;
+}
+
 std::vector<ColumnRange> blankRunsOf(Line const& line, LineOffset screenLine, ColumnCount pageColumns)
 {
+    pageColumns = shownColumnsOf(lineWidthOf(line), pageColumns);
     auto const defaultBackground = GraphicsAttributes {}.backgroundColor;
     auto const& storage = line.storage();
     // A cell that shows nothing: no codepoint, or a space, on the default background -- and neither the right

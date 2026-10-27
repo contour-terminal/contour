@@ -22,6 +22,8 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -1230,6 +1232,113 @@ TEST_CASE("Gutter.terminal.aStatusChipKeepsClearOfAFoldChip", "[gutter][blockchi
     REQUIRE(buffer.chips.size() == 1);
     CHECK(buffer.chips[0].text == U"3 lines hidden ⌄");
     CHECK(buffer.chips[0].style == PillStyle::Fold);
+}
+
+namespace
+{
+/// A command of @p width characters typed on a doubled row (@p sizeSequence: DECDWL, or a DECDHL half),
+/// printing one line and ending with @p exitCode, then a live prompt. The command row is screen row 0.
+[[nodiscard]] std::string commandOnADoubledRow(std::string_view sizeSequence, int width, int exitCode)
+{
+    return std::format("\033]133;A\033\\{}$ \033]133;B\033\\{}\r\n\033]133;C\033\\boom\r\n{}{}",
+                       sizeSequence,
+                       std::string(static_cast<std::size_t>(width), 'x'),
+                       commandEnd(exitCode),
+                       PromptStart);
+}
+
+constexpr auto DoubledRows = std::array {
+    std::pair { std::string_view { "\033#6" }, std::string_view { "DECDWL" } },
+    std::pair { std::string_view { "\033#3" }, std::string_view { "DECDHL, top half" } },
+    std::pair { std::string_view { "\033#4" }, std::string_view { "DECDHL, bottom half" } },
+};
+} // namespace
+
+TEST_CASE("Gutter.terminal.aChipOnADoubledRowKeepsToTheDrawnColumns", "[gutter][blockchip]")
+{
+    // On a doubled row, cell N is drawn at columns 2N and 2N+1, and only the first half of the page is shown.
+    // A chip placed over the blanks of the whole page would be drawn over the doubled text (m2).
+    auto const [sequence, name] = GENERATE(from_range(DoubledRows));
+    {
+        INFO(name);
+        auto const textColumns = [](MockTerm<>& mc) {
+            return unbox<int>(mc.terminal.primaryScreen().grid().lineAt(LineOffset(0)).trimmedColumns());
+        };
+
+        SECTION("a long command leaves no room: the chip collapses to the rail, or keeps clear of the text")
+        {
+            auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+            mc.terminal.settings().gutter = RailGutter;
+            mc.writeToScreen(commandOnADoubledRow(sequence, 36, 2));
+            auto const chip = chipOnRow(renderOf(mc.terminal), 0);
+            if (chip)
+                CHECK(unbox<int>(chip->columns.fromColumn) >= 2 * textColumns(mc));
+        }
+
+        SECTION("a short command: the chip sits in the shown half, on whole doubled columns")
+        {
+            auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+            mc.terminal.settings().gutter = RailGutter;
+            mc.writeToScreen(commandOnADoubledRow(sequence, 4, 2));
+            auto const chip = chipOnRow(renderOf(mc.terminal), 0);
+            REQUIRE(chip.has_value());
+            CHECK(unbox<int>(chip->columns.fromColumn) >= 2 * textColumns(mc));
+            CHECK(unbox<int>(chip->columns.fromColumn) % 2 == 0);
+            CHECK(unbox<int>(chip->columns.toColumn) % 2 == 1);
+            CHECK(unbox<int>(chip->columns.toColumn) < 80);
+        }
+
+        SECTION("a collapsed fold's chip and its hit are drawn where the text is not")
+        {
+            auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+            mc.terminal.settings().gutter = RailGutter;
+            mc.writeToScreen(commandOnADoubledRow(sequence, 4, 0));
+            REQUIRE(mc.terminal.collapseLastFold());
+            auto const buffer = renderOf(mc.terminal);
+            auto const fold = std::ranges::find(buffer.chips, PillStyle::Fold, &RenderChip::style);
+            REQUIRE(fold != buffer.chips.end());
+            CHECK(unbox<int>(fold->columns.fromColumn) >= 2 * textColumns(mc));
+            CHECK(unbox<int>(fold->columns.fromColumn) % 2 == 0);
+            CHECK(unbox<int>(fold->columns.toColumn) % 2 == 1);
+            auto const hit = [&](ColumnOffset column) {
+                return mc.terminal
+                    .collapsedFoldLabelAt(CellLocation { .line = LineOffset(0), .column = column },
+                                          ColumnCount(1))
+                    .has_value();
+            };
+            CHECK(hit(fold->columns.fromColumn));
+            CHECK(hit(fold->columns.toColumn));
+            CHECK_FALSE(hit(fold->columns.fromColumn - ColumnOffset(1)));
+            // The undoubled position of the same logical column is no hit: it is drawn elsewhere.
+            CHECK_FALSE(hit(ColumnOffset(unbox<int>(fold->columns.fromColumn) / 2)));
+        }
+    }
+}
+
+TEST_CASE("Gutter.terminal.aCellChipOnADoubledRowIsDrawnDoubled", "[gutter][blockchip]")
+{
+    // The Terminal row draws its chip as cells: on a doubled row each is laid out in the row's own columns,
+    // and drawn twice as wide at twice the column, as the row's own cells are.
+    auto const [sequence, name] = GENERATE(from_range(DoubledRows));
+    INFO(name);
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(80) } };
+    mc.terminal.settings().gutter = GutterSettings { .exitStatus = true };
+    mc.writeToScreen(commandOnADoubledRow(sequence, 4, 2));
+
+    auto const buffer = renderOf(mc.terminal);
+    auto const annotation = annotationOnRow(buffer, 0);
+    REQUIRE_FALSE(annotation.columns.empty());
+    auto const textColumns =
+        unbox<int>(mc.terminal.primaryScreen().grid().lineAt(LineOffset(0)).trimmedColumns());
+    for (auto const column: annotation.columns)
+    {
+        CHECK(unbox<int>(column) % 2 == 0);
+        CHECK(unbox<int>(column) >= 2 * textColumns);
+        CHECK(unbox<int>(column) < 80);
+    }
+    for (auto const& cell: buffer.annotations)
+        if (cell.position.line == LineOffset(0))
+            CHECK(cell.attributes.lineFlags.test(LineFlag::DoubleWidth));
 }
 
 TEST_CASE("Gutter.terminal.aHoveredBlockIsTintedAndRinged", "[gutter][blockhover]")

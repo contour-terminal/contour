@@ -5686,6 +5686,8 @@ class Terminal: public IStatusLinePublishTarget
         ColumnCount textColumns; ///< The columns before the chip's lead gap: the command's, not an RPROMPT's.
         std::u32string label;    ///< The label, as collapsedFoldLabel() spells it.
         ColumnCount labelColumns; ///< The columns the chip covers: its cells, or its measured pill.
+        LineWidth width =
+            LineWidth::Single; ///< How wide the row's cells are drawn: a doubled row shows half.
     };
 
     /// The labels of the collapsed folds on display, each where it is drawn.
