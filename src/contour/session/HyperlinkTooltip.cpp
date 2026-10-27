@@ -7,6 +7,8 @@
 
 #include <core/Utils.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <format>
 #include <optional>
 #include <ranges>
@@ -60,13 +62,38 @@ namespace
     /// What separates two parts of a breadcrumb: U+203A between spaces.
     constexpr auto BreadcrumbSeparator = std::string_view { " \u203A " };
 
+    /// Whether @p text is an RFC 3986 scheme: a letter, then letters, digits, "+", "-" or ".".
+    [[nodiscard]] constexpr bool isScheme(std::string_view text) noexcept
+    {
+        auto const isAlpha = [](char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+        };
+        auto const isSchemeChar = [&](char ch) {
+            return isAlpha(ch) || (ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '.';
+        };
+        return !text.empty() && isAlpha(text.front()) && std::ranges::all_of(text, isSchemeChar);
+    }
+
+    /// Whether @p uri is a file:// URL, its scheme spelled in any case (RFC 3986 §3.1).
+    [[nodiscard]] bool isFileUrl(std::string_view uri) noexcept
+    {
+        constexpr auto FileScheme = std::string_view { "file://" };
+        return uri.size() >= FileScheme.size()
+               && std::ranges::equal(uri.substr(0, FileScheme.size()), FileScheme, [](char a, char b) {
+                      return std::tolower(static_cast<unsigned char>(a)) == b;
+                  });
+    }
+
     /// @p uri as a breadcrumb, its host and its non-empty decoded path segments, or nullopt where it has no
-    /// authority to read one from (mailto:, a bare word).
+    /// authority to read one from (mailto:, a bare word). Only a URI that opens with a scheme and "://" has
+    /// one: a "://" anywhere else (a mailto: body, a data: payload) is text, and reading it as an authority
+    /// would show a host the link does not open and hide the scheme that says so.
     [[nodiscard]] std::optional<std::string> breadcrumbOf(std::string_view uri)
     {
         constexpr auto AuthorityMark = std::string_view { "://" };
-        auto const schemeEnd = uri.find(AuthorityMark);
-        if (schemeEnd == std::string_view::npos)
+        auto const schemeEnd = uri.find(':');
+        if (schemeEnd == std::string_view::npos || !isScheme(uri.substr(0, schemeEnd))
+            || uri.substr(schemeEnd, AuthorityMark.size()) != AuthorityMark)
             return std::nullopt;
 
         // The query and the fragment go, then the authority's user info and port.
@@ -152,7 +179,7 @@ std::string linkPillText(std::string_view uri, std::optional<std::string_view> l
     // read as one on this machine.
     if (auto const path = localFilePath(uri, localHost))
         return shown(*path, maxLength);
-    if (uri.starts_with("file://"))
+    if (isFileUrl(uri))
         return shown(uri, maxLength);
     return shown(breadcrumbOf(uri).value_or(std::string { uri }), maxLength);
 }
@@ -188,7 +215,8 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(HoveredLink const& l
             if constexpr (std::is_same_v<Hovered, OscLinkTarget>)
                 return linkPillText(hovered.uri, _localHost(), maxLength);
             else if constexpr (std::is_same_v<Hovered, DetectedLinkText>)
-                return hovered.text;
+                return shown(hovered.text,
+                             maxLength); // formatted already, but shown safe and short all the same
             else
                 return {};
         },

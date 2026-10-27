@@ -206,6 +206,17 @@ TEST_CASE("linkPillText reads a URL as a breadcrumb", "[contour][hyperlink]")
     CHECK(linkPillText("file:///tmp/x.log", std::nullopt, Max) == "file:///tmp/x.log");
     // Anything that is no URL with an authority, as written.
     CHECK(linkPillText("mailto:someone@example.com", LocalHost, Max) == "mailto:someone@example.com");
+    // A "://" that does not follow the scheme is text, not an authority: read as one, these would show a host
+    // the link does not open, and hide the scheme that says what it does.
+    CHECK(linkPillText("mailto:x@y.z?body=https://github.com/contour", LocalHost, Max)
+          == "mailto:x@y.z?body=https://github.com/contour");
+    CHECK(linkPillText("data:text/html,https://example.com/login", LocalHost, Max)
+          == "data:text/html,https://example.com/login");
+    CHECK(linkPillText("://example.com/x", LocalHost, Max) == "://example.com/x");
+    CHECK(linkPillText("1http://example.com/x", LocalHost, Max) == "1http://example.com/x");
+    CHECK(linkPillText("git+ssh://host/repo", LocalHost, Max) == "host \u203A repo");
+    // A file elsewhere keeps its scheme however the scheme is spelled.
+    CHECK(linkPillText("FILE://remote/tmp/x.log", LocalHost, Max) == "FILE://remote/tmp/x.log");
     CHECK(linkPillText("", LocalHost, Max).empty());
 
     // What it holds is shown, not obeyed: U+202E spliced in byte by byte.
@@ -319,6 +330,22 @@ TEST_CASE("HyperlinkHoverTracker carries a detected link's text as it is handed 
           == HoverChange::Unchanged);
     // An OSC 8 link spelled like it is another link.
     CHECK(tracker.update(osc("x.y \u203A a"), cell(1, 4), 64).change == HoverChange::Changed);
+}
+
+TEST_CASE("HyperlinkHoverTracker shows a detected link's text safe and short", "[contour][hyperlink]")
+{
+    // Formatted already, but a path can hold anything a program printed: shown, never obeyed, and capped.
+    auto tracker = HyperlinkHoverTracker { [] { return std::optional<std::string_view> { "fedora" }; } };
+    auto const rightToLeftOverride = std::string { '\xE2', '\x80', '\xAE' };
+    auto const spoofed = tracker.update(
+        contour::session::DetectedLinkText { .text = "/tmp/" + rightToLeftOverride + "txt.exe" },
+        cell(0, 0),
+        64);
+    CHECK(spoofed.text == "/tmp/\xEF\xBF\xBDtxt.exe");
+
+    auto const lengthy = tracker.update(
+        contour::session::DetectedLinkText { .text = "/" + std::string(300, 'x') }, cell(1, 0), 40);
+    CHECK(codepointCount(lengthy.text) == 40);
 }
 
 TEST_CASE("HyperlinkHoverTracker asks where a file:// target is local at each link it enters",

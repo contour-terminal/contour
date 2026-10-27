@@ -173,12 +173,12 @@ TEST_CASE("describeLinkGesture spells the follow gesture as the shortcut column 
     // macOS).
     auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
     CHECK(describeLinkGesture(classic, ShortcutStyle::Text)
-          == "Ctrl+Click (Shift+Ctrl+Click inside applications that use the mouse)");
+          == "Ctrl+Click (Ctrl+Shift+Click inside applications that use the mouse)");
     CHECK(describeLinkGesture(
               contour::test::loadConfigFromYaml(
                   "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"),
               ShortcutStyle::Text)
-          == "Alt+Click (Shift+Alt+Click inside applications that use the mouse)");
+          == "Alt+Click (Alt+Shift+Click inside applications that use the mouse)");
     CHECK(
         describeLinkGesture(contour::test::loadConfigFromYaml(
                                 "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n"),
@@ -217,7 +217,7 @@ TEST_CASE("Shortcut.indexAndLinkGestureFollowStyle", "[command]")
     CHECK(index.at("CreateNewTab") == "⌃⇧T");
     auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
     CHECK(describeLinkGesture(classic, ShortcutStyle::MacGlyphs)
-          == "⌃Click (⇧⌃Click inside applications that use the mouse)");
+          == "⌃Click (⌃⇧Click inside applications that use the mouse)");
 #ifdef __APPLE__
     // The Native2026 defaults follow links with Command on macOS.
     CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
@@ -258,7 +258,12 @@ TEST_CASE("linkOpenHint names the configured gesture", "[contour][palette]")
     CHECK(linkOpenHint(Modifiers { Modifier::Super }, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs)
           == "⇧⌘-click to open");
     CHECK(linkOpenHint(Modifiers { Modifier::Control }, Modifiers { Modifier::Shift }, ShortcutStyle::Text)
-          == "Shift+Ctrl+Click to open");
+          == "Ctrl+Shift+Click to open");
+    // One set: the follow and bypass modifiers read in the table's order, and one held by both reads once.
+    CHECK(linkOpenHint(Modifiers { Modifier::Control, Modifier::Shift },
+                       Modifiers { Modifier::Shift },
+                       ShortcutStyle::Text)
+          == "Ctrl+Shift+Click to open");
     // No binding follows links: no hint at all.
     CHECK(linkOpenHint(std::nullopt, Modifiers {}, ShortcutStyle::Text).empty());
     CHECK(linkOpenHint(std::nullopt, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs).empty());
