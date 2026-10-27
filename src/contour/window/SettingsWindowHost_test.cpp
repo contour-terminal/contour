@@ -56,10 +56,11 @@ struct HostFixture: ControllerFixture
 {
     QQmlEngine engine;
     test::IncubationDriver incubation;
-    int factoryCalls = 0;                 ///< How often the host asked for its window to be built.
-    int configurationEdits = 0;           ///< How often the host was asked to open contour.yml in an editor.
-    test::InMemoryGuiStateStore ownState; ///< What the host remembers, unless the case shares another's.
-    config::GuiStateStore& state;         ///< What the host remembers across closes and restarts.
+    int factoryCalls = 0;       ///< How often the host asked for its window to be built.
+    int configurationEdits = 0; ///< How often the host was asked to open contour.yml in an editor.
+    std::vector<std::string> openedInNewTab; ///< The profiles the host was asked to open in a tab.
+    test::InMemoryGuiStateStore ownState;    ///< What the host remembers, unless the case shares another's.
+    config::GuiStateStore& state;            ///< What the host remembers across closes and restarts.
     SettingsWindowHost host;
 
     /// @param conventions The conventions the host presents the window with.
@@ -79,7 +80,8 @@ struct HostFixture: ControllerFixture
                },
                state,
                window::SettingsPreview::SessionFactory {},
-               [this] { ++configurationEdits; } }
+               [this] { ++configurationEdits; },
+               [this](std::string const& profile) { openedInNewTab.push_back(profile); } }
     {
         test::installChromeStyle(engine, style);
         engine.setIncubationController(&incubation);
@@ -186,6 +188,16 @@ TEST_CASE("the Settings window opens contour.yml in the editor it was given",
     CHECK(fx.configurationEdits == 1);
     fx.host.editConfigurationFile();
     CHECK(fx.configurationEdits == 2);
+}
+
+TEST_CASE("the Settings window opens a profile in a tab through the seam it was given",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    auto fx = HostFixture {};
+    REQUIRE(fx.openedInNewTab.empty());
+    fx.host.openProfileInNewTab("main");
+    fx.host.openProfileInNewTab("work");
+    CHECK(fx.openedInNewTab == std::vector<std::string> { "main", "work" });
 }
 
 TEST_CASE("the Settings window comes back in front", "[contour][gui][qml][settingswindow][host]")
@@ -676,6 +688,7 @@ TEST_CASE("a Settings window factory that fails leaves no window",
         remembered,
         window::SettingsPreview::SessionFactory {},
         [] {},
+        [](std::string const&) {},
     };
 
     auto const shown = host.show(nullptr);
@@ -699,7 +712,8 @@ TEST_CASE("a Settings window host has a preview exactly when it can make its ses
             },
             remembered,
             std::move(factory),
-            [] {});
+            [] {},
+            [](std::string const&) {});
     };
 
     CHECK(hostWith({})->preview() == nullptr);

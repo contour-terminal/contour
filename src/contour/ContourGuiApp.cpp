@@ -3005,6 +3005,12 @@ window::SettingsWindowHost& ContourGuiApp::settingsWindow()
                     errorLog()("Could not open the configuration file \"{}\": {}.",
                                _config.configFile.string(),
                                platform::describe(opened.error()));
+            },
+            [this](std::string const& profileName) {
+                // A command of the app's own, as the menu bar's: the tab opens in the window the app would
+                // run one in, and without a window says so.
+                runMenuBarAction(actions::CreateNewTab { .profileName = profileName },
+                                 command::ActionScope::Application);
             });
     return *_settingsWindow;
 }

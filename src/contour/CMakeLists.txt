@@ -453,6 +453,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsGroupsPage.qml
         qml/SettingsSectionPage.qml
         qml/ProfilePage.qml
+        qml/SettingsPreview.qml
         qml/SettingsWindow.qml
         qml/ConfirmDialog.qml
         qml/DaemonDriftBadge.qml

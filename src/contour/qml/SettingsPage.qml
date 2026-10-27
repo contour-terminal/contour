@@ -369,7 +369,14 @@ Rectangle {
         id: profilePage
         ProfilePage {
             controller: root.controller
+            preview: root.host ? root.host.preview : null
+            profileName: root._profileName
             onSubpageRequested: kind => root.openPage("profile:" + root._profileName + ":" + kind)
+            onDuplicateRequested: {
+                root.controller.duplicate(root._profileName);
+                root.showEditedProfile();
+            }
+            onOpenInNewTabRequested: if (root.host) root.host.openProfileInNewTab(root._profileName)
         }
     }
 

@@ -12,11 +12,13 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
 #include <contour/test/SettingsFixtures.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
@@ -213,6 +215,13 @@ class TestWindow
     return *item;
 }
 
+/// Whether the page under test is given a preview terminal.
+enum class PreviewSource : uint8_t
+{
+    None = 0,  ///< No factory: `host.preview` is null, as in the snapshot scene.
+    Recording, ///< A factory that records the profile it is asked to run and makes no session.
+};
+
 /// The real SettingsPage.qml inside the real Settings window, over a SettingsController, with every delegate
 /// it makes incubated.
 struct SettingsPageView
@@ -220,23 +229,36 @@ struct SettingsPageView
     QQmlEngine engine;
     IncubationDriver incubation;
     contour::test::InMemoryGuiStateStore state; ///< What the window remembers: nothing, until it closes.
+    std::vector<std::string> previewed;         ///< The profiles the recording preview was asked to run.
     window::SettingsWindowHost host;
     QPointer<QObject> page;
-    int configurationEdits = 0; ///< How often "Edit contour.yml…" asked for the editor.
+    int configurationEdits = 0;              ///< How often "Edit contour.yml…" asked for the editor.
+    std::vector<std::string> openedInNewTab; ///< The profiles "Open in new tab" asked for.
 
     /// @param controller The controller the page binds to. It must outlive the page, which holds a bare
     ///                   pointer to it.
     /// @param setup      The chrome the page is drawn with.
+    /// @param preview    Whether the host has a preview terminal.
     explicit SettingsPageView(
         window::SettingsController* controller,
-        contour::test::ChromeSetup const& setup = rowSetup(config::ChromeStyle::ContourLinux)):
+        contour::test::ChromeSetup const& setup = rowSetup(config::ChromeStyle::ContourLinux),
+        PreviewSource preview = PreviewSource::None):
         host { *controller,
                window::settingsWindowConventionsFor(config::HostPlatform::Other),
                [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); },
                state,
-               window::SettingsPreview::SessionFactory {},
-               [this] { ++configurationEdits; } }
+               preview == PreviewSource::Recording
+                   ? window::SettingsPreview::SessionFactory { [this](config::Config const& /*config*/,
+                                                                      std::string const& profile) {
+                         previewed.push_back(profile);
+                         return std::unique_ptr<session::TerminalSession> {};
+                     } }
+                   : window::SettingsPreview::SessionFactory {},
+               [this] { ++configurationEdits; },
+               [this](std::string const& profile) { openedInNewTab.push_back(profile); } }
     {
+        // The preview is a terminal display; the test engine has no real one.
+        qmlRegisterType<contour::test::StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
         contour::test::installChromeStyle(engine, setup);
         engine.setIncubationController(&incubation);
         REQUIRE(host.show(nullptr).has_value());
@@ -260,11 +282,14 @@ struct PageFixture: ControllerFixture, SettingsPageView
     /// @param yaml       The contour.yml the page edits.
     /// @param writeStore Where the page writes; null writes the side files beside that contour.yml.
     /// @param setup      The chrome the page is drawn with.
+    /// @param preview    Whether the host has a preview terminal.
     explicit PageFixture(
         std::string_view yaml,
         std::shared_ptr<config::GuiConfigStore> writeStore = nullptr,
-        contour::test::ChromeSetup const& setup = rowSetup(config::ChromeStyle::ContourLinux)):
-        ControllerFixture { yaml, std::move(writeStore) }, SettingsPageView { controller.get(), setup }
+        contour::test::ChromeSetup const& setup = rowSetup(config::ChromeStyle::ContourLinux),
+        PreviewSource preview = PreviewSource::None):
+        ControllerFixture { yaml, std::move(writeStore) },
+        SettingsPageView { controller.get(), setup, preview }
     {
     }
 
@@ -1047,6 +1072,101 @@ TEST_CASE("a profile page opens the pages of what is not a scalar", "[contour][g
         CHECK(fx.byName("profileRow:New Profile")->property("isSelected").toBool());
     }
     CHECK_FALSE(fx.open(profile + ":nonsense"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a profile page opens on a live preview of the profile", "[contour][gui][qml][settings][preview]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row), PreviewSource::Recording);
+    REQUIRE(fx.previewed.empty());
+
+    REQUIRE(fx.open("profile:main"));
+
+    // Opening the page asks the preview to show the profile.
+    REQUIRE_FALSE(fx.previewed.empty());
+    CHECK(fx.previewed.back() == "main");
+
+    // The hero is the style's token high, and its caption is the preview's.
+    auto const* hero = fx.byName("settingsPreview");
+    REQUIRE(hero != nullptr);
+    CHECK(hero->isVisible());
+    auto const* style = fx.engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
+    auto const previewHeight =
+        style->property("settings").value<QObject*>()->property("previewHeight").toReal();
+    CHECK(previewHeight > 0);
+    CHECK(hero->height() == previewHeight);
+    auto const* caption = fx.byName("settingsPreviewCaption");
+    REQUIRE(caption != nullptr);
+    REQUIRE_FALSE(fx.host.preview()->caption().isEmpty());
+    CHECK(caption->property("text").toString() == fx.host.preview()->caption());
+
+    // Nothing in it takes the keyboard, and a screen reader hears it as a picture named by its caption.
+    CHECK_FALSE(hero->property("enabled").toBool());
+    CHECK_FALSE(hero->property("activeFocusOnTab").toBool());
+    auto const* accessible = QAccessible::queryAccessibleInterface(const_cast<QQuickItem*>(hero));
+    REQUIRE(accessible != nullptr);
+    CHECK(accessible->role() == QAccessible::Graphic);
+    CHECK(accessible->text(QAccessible::Name) == fx.host.preview()->caption());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Fluent's profile page offers Duplicate and Open in new tab beside the preview",
+          "[contour][gui][qml][settings][preview]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx =
+        PageFixture(OneProfile, nullptr, rowSetup(config::ChromeStyle::Fluent), PreviewSource::Recording);
+    REQUIRE(fx.open("profile:main"));
+
+    auto const* open = fx.byName("previewOpenInNewTabButton");
+    REQUIRE(open != nullptr);
+    CHECK(open->isVisible());
+    CHECK(open->property("text").toString() == "Open in new tab");
+    clickButton(const_cast<QQuickItem*>(open));
+    CHECK(fx.openedInNewTab == std::vector<std::string> { "main" });
+
+    // Duplicate works on a read-only profile too: it is how one is made editable.
+    auto const* duplicate = fx.byName("previewDuplicateButton");
+    REQUIRE(duplicate != nullptr);
+    CHECK(duplicate->property("text").toString() == "Duplicate");
+    clickButton(const_cast<QQuickItem*>(duplicate));
+    fx.settle();
+    CHECK(fx.controller->editingProfile() == "main copy");
+    CHECK(fx.page->property("currentPage").toString() == "profile:main copy");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the other rows' profile pages have no such buttons", "[contour][gui][qml][settings][preview]")
+{
+    auto const row = GENERATE(
+        config::ChromeStyle::MacOS, config::ChromeStyle::ContourLinux, config::ChromeStyle::Terminal);
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row), PreviewSource::Recording);
+    REQUIRE(fx.open("profile:main"));
+    for (auto const* name: { "previewOpenInNewTabButton", "previewDuplicateButton" })
+    {
+        auto const* button = fx.byName(QString::fromLatin1(name));
+        REQUIRE(button != nullptr);
+        CHECK_FALSE(button->isVisible());
+    }
+}
+
+TEST_CASE("a profile page without a preview terminal still shows the frame, silently",
+          "[contour][gui][qml][settings][preview]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    REQUIRE(fx.host.preview() == nullptr);
+
+    REQUIRE(fx.open("profile:main"));
+
+    auto const* hero = fx.byName("settingsPreview");
+    REQUIRE(hero != nullptr);
+    CHECK(hero->isVisible());
+    CHECK(hero->height() > 0);
+    CHECK(fx.byName("settingsPreviewCaption")->property("text").toString().isEmpty());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

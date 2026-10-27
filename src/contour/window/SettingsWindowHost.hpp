@@ -81,6 +81,9 @@ class SettingsWindowHost final: public QObject
     /// @param previewFactory Makes the preview terminal's session; null: the host has no `preview`.
     /// @param editConfiguration Opens contour.yml in the OS's editor: what the sidebar's "Edit contour.yml…"
     ///                    row runs. Called on the GUI thread.
+    /// @param openInNewTab Opens a tab running the named profile in the terminal window the app would use for
+    ///                    a command of its own: what a profile page's "Open in new tab" runs. Called on the
+    ///                    GUI thread.
     /// @param parent      Qt ownership.
     SettingsWindowHost(SettingsController& controller,
                        SettingsWindowConventions conventions,
@@ -88,6 +91,7 @@ class SettingsWindowHost final: public QObject
                        config::GuiStateStore& state,
                        SettingsPreview::SessionFactory previewFactory,
                        std::function<void()> editConfiguration,
+                       std::function<void(std::string const&)> openInNewTab,
                        QObject* parent = nullptr);
     ~SettingsWindowHost() override;
 
@@ -131,6 +135,11 @@ class SettingsWindowHost final: public QObject
     /// hand-maintained one, which Settings never writes.
     Q_INVOKABLE void editConfigurationFile();
 
+    /// Opens a tab running profile @p name, as a profile page's "Open in new tab" asks: runs the injected
+    /// `openInNewTab`.
+    /// @param name The profile to run.
+    Q_INVOKABLE void openProfileInNewTab(QString const& name);
+
     /// @return The window, or null before the first successful show.
     [[nodiscard]] QQuickWindow* window() const noexcept { return _window.get(); }
 
@@ -162,6 +171,7 @@ class SettingsWindowHost final: public QObject
     SettingsWindowFactory _factory;
     config::GuiStateStore& _state;
     std::function<void()> _editConfiguration;
+    std::function<void(std::string const&)> _openInNewTab;
     std::unique_ptr<SettingsPreview> _preview; ///< Null without a preview session factory.
     /// What the run before left, read once at construction; consumed by the first show.
     std::optional<config::SettingsWindowState> _remembered;

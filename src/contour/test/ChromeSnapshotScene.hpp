@@ -1019,7 +1019,8 @@ class ChromeSnapshotScene
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); },
             _settingsState,
             window::SettingsPreview::SessionFactory {}, // the snapshot scene has no preview session
-            [] {});
+            [] {},
+            [](std::string const&) {});
     }
 
     /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it. Waits

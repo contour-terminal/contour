@@ -14,9 +14,20 @@ SettingsGroupsPage {
 
     /// The SettingsController.
     property var controller: null
+    /// The window's SettingsPreview, whose terminal the hero shows; null where the host has none.
+    property var preview: null
+    /// The profile the page shows.
+    property string profileName: ""
 
     /// A sub-page was asked to open: "schemes", "links" or "statusline".
     signal subpageRequested(string kind)
+    /// The hero's Duplicate was asked for.
+    signal duplicateRequested()
+    /// The hero's Open in new tab was asked for.
+    signal openInNewTabRequested()
+
+    // Only where the style's header is a breadcrumb (Fluent) does the hero carry its buttons.
+    readonly property bool _heroButtons: chromeStyle.settingsTraits.header === chromeStyle.settingsTraits.breadcrumb
 
     /// The sub-pages of a profile: the kind in the page id, and what its row reads.
     readonly property var subpages: [
@@ -35,6 +46,30 @@ SettingsGroupsPage {
     onCommitted: (key, value) => root.controller.commitProfileField(key, value)
 
     header: [
+        SettingsPreview {
+            Layout.fillWidth: true
+            preview: root.preview
+            profileName: root.profileName
+
+            trailing: [
+                Button {
+                    objectName: "previewDuplicateButton"
+                    visible: root._heroButtons
+                    text: qsTr("Duplicate")
+                    font: chromeStyle.type.footnote
+                    Accessible.name: text
+                    onClicked: root.duplicateRequested()
+                },
+                Button {
+                    objectName: "previewOpenInNewTabButton"
+                    visible: root._heroButtons
+                    text: qsTr("Open in new tab")
+                    font: chromeStyle.type.footnote
+                    Accessible.name: text
+                    onClicked: root.openInNewTabRequested()
+                }
+            ]
+        },
         SettingsGroup {
             objectName: "profileSubpagesGroup"
             Layout.fillWidth: true

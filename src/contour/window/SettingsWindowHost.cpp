@@ -54,6 +54,7 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
                                        config::GuiStateStore& state,
                                        SettingsPreview::SessionFactory previewFactory,
                                        std::function<void()> editConfiguration,
+                                       std::function<void(std::string const&)> openInNewTab,
                                        QObject* parent):
     QObject(parent),
     _controller { controller },
@@ -61,6 +62,7 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
     _factory { std::move(factory) },
     _state { state },
     _editConfiguration { std::move(editConfiguration) },
+    _openInNewTab { std::move(openInNewTab) },
     _preview { previewFactory ? std::make_unique<SettingsPreview>(controller, std::move(previewFactory))
                               : nullptr },
     _remembered { rememberedIn(state) },
@@ -72,6 +74,12 @@ void SettingsWindowHost::editConfigurationFile()
 {
     if (_editConfiguration)
         _editConfiguration();
+}
+
+void SettingsWindowHost::openProfileInNewTab(QString const& name)
+{
+    if (_openInNewTab)
+        _openInNewTab(name.toStdString());
 }
 
 void SettingsWindowHost::setLastPage(QString const& page)
