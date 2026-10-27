@@ -2774,6 +2774,19 @@ std::expected<void, SettingsError> SettingsController::resetGlobalField(QString 
     return stageGlobalDraft();
 }
 
+std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::string_view key,
+                                                                           std::string_view value)
+{
+    if (auto const writable = globalDraftWritable(); !writable)
+        return writable;
+    _globalDraft.globalOverrides[std::string { key }] = std::string { value };
+    if (auto const staged = stageGlobalDraft(); !staged)
+        return staged;
+    auto flushed = _session->flush();
+    emit changesChanged();
+    return flushed;
+}
+
 void SettingsController::commitGlobalField(QString const& key, QVariant const& value)
 {
     report(setGlobalField(key, value));

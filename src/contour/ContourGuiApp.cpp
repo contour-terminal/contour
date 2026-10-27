@@ -2515,14 +2515,17 @@ int ContourGuiApp::terminalGuiAction()
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
         context->setContextProperty("daemonDrift", &_daemonDrift);
-        // The new-defaults banner's decision, over the files beside contour.yml: "Use New" writes
-        // settings.yml and reloads, "Keep Mine" remembers the answer in the GUI state file.
+        // The new-defaults banner's decision: "Use New" writes settings.yml through the one Settings save
+        // model, which reloads; "Keep Mine" remembers the answer in the GUI state file beside contour.yml.
         auto const configDir = _config.configFile.parent_path();
         _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
             [this]() -> config::Config const& { return _config; },
-            std::make_shared<config::FileGuiConfigStore>(_fileSystem, configDir),
-            std::make_shared<config::FileGuiStateStore>(configDir),
-            [this] { return _sessionManager.reloadAllSessions(); });
+            [this](std::string_view key, std::string_view value) {
+                return settingsController()
+                    .writeGlobalOverride(key, value)
+                    .transform_error([](config::SettingsError const& error) { return error.message; });
+            },
+            std::make_shared<config::FileGuiStateStore>(configDir));
         context->setContextProperty("newDefaults", _newDefaultsNotice.get());
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
@@ -2932,6 +2935,7 @@ window::SettingsController& ContourGuiApp::settingsController()
     // directory, a debounce timer, and a reload of every session after Settings wrote a side file. That
     // reload runs onConfigurationReloaded(), the one refresh of the page after a save as after a hand edit.
     if (!_settingsController)
+    {
         _settingsController = std::make_unique<window::SettingsController>(
             [this]() -> config::Config const& { return _config; },
             window::SettingsControllerServices {
@@ -2949,6 +2953,12 @@ window::SettingsController& ContourGuiApp::settingsController()
                 .scheduler = std::make_shared<window::QtSaveScheduler>(),
             },
             _colorPreference);
+        // A change committed within the debounce before quitting is written, not lost with the timer.
+        QObject::connect(QCoreApplication::instance(),
+                         &QCoreApplication::aboutToQuit,
+                         _settingsController.get(),
+                         &window::SettingsController::flushPendingChanges);
+    }
     return *_settingsController;
 }
 

@@ -313,6 +313,15 @@ class SettingsController: public QObject
     /// Clears a global override in the settings.yml draft, so the setting falls back to contour.yml or the
     /// default, and stages it.
     [[nodiscard]] std::expected<void, config::SettingsError> resetGlobalField(QString const& key);
+    /// Records the app's own override @p key = @p value in the settings.yml draft and writes it now, with
+    /// whatever else is staged: the new-defaults banner's "Use New", which goes through this one save model
+    /// so that Settings never reads the app's own write as a change made outside it.
+    /// @param key   The settings.yml key.
+    /// @param value Its YAML scalar.
+    /// @return Nothing, or why it was refused (Locked, ReadOnly for an unparsable settings.yml) or did not
+    ///         write or reload.
+    [[nodiscard]] std::expected<void, config::SettingsError> writeGlobalOverride(std::string_view key,
+                                                                                 std::string_view value);
     /// The page's commit of a global field: setGlobalField, a failure reported through errorOccurred.
     Q_INVOKABLE void commitGlobalField(QString const& key, QVariant const& value);
     /// The page's Reset of a global field: resetGlobalField, a failure reported through errorOccurred.

@@ -13,6 +13,8 @@
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
@@ -21,6 +23,8 @@
 #include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QMetaObject>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QWindow>
 
@@ -493,4 +497,91 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
     // A card's header and inset are part of it, so a split leaf's window grows by more than the gap.
     CHECK(expected.leafHeader > 0);
     CHECK(expected.rootInset > 0);
+}
+
+namespace
+{
+/// The font size session @p session draws in.
+[[nodiscard]] double fontSizeOf(contour::session::TerminalSession const* session)
+{
+    REQUIRE(session != nullptr);
+    return session->profile().fonts.value().size.pt;
+}
+
+/// A configured app whose profile `main` is a GUI side file and whose `other` is defined in contour.yml.
+/// @param testApp The app.
+void writeSideFileProfiles(contour::test::ConfiguredTestApp& testApp)
+{
+    contour::test::writeConfigFile(testApp.configFile(),
+                                   "default_profile: main\n"
+                                   "profiles:\n"
+                                   "    other:\n"
+                                   "        shell: /bin/sh\n");
+    auto const profiles = testApp.configFile().parent_path() / "profiles";
+    std::filesystem::create_directories(profiles);
+    contour::test::writeConfigFile(profiles / "main.yml", "shell: /bin/sh\nfont:\n    size: 12\n");
+    REQUIRE(testApp.manager().reloadAllSessions().has_value());
+    REQUIRE(testApp.app().config().profileOrigins.at("main") == contour::config::SettingsOrigin::SideFile);
+}
+} // namespace
+
+TEST_CASE("a Settings commit reaches the panes of every window using that profile",
+          "[contour][settings][liveapply]")
+{
+    // Review Focus 4: one commit, every pane on that profile in every window; another profile's pane keeps
+    // what it had.
+    auto testApp =
+        contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    writeSideFileProfiles(testApp);
+    auto& manager = testApp.manager();
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    contour::test::ScopedController const third { manager };
+    first->createNewTab(QStringLiteral("main"));
+    second->createNewTab(QStringLiteral("main"));
+    third->createNewTab(QStringLiteral("other"));
+    auto const otherBefore = fontSizeOf(third->activeSession());
+    REQUIRE(fontSizeOf(first->activeSession()) != 17.0);
+
+    auto& settings = testApp.app().settingsController();
+    settings.editProfile(QStringLiteral("main"));
+    REQUIRE_FALSE(settings.editingReadOnly());
+    settings.commitProfileField(QStringLiteral("font_size"), 17.0);
+    settings.flushPendingChanges();
+
+    CHECK(fontSizeOf(first->activeSession()) == 17.0);
+    CHECK(fontSizeOf(second->activeSession()) == 17.0);
+    CHECK(fontSizeOf(third->activeSession()) == otherBefore);
+
+    contour::test::closeAllTabs(*first);
+    contour::test::closeAllTabs(*second);
+    contour::test::closeAllTabs(*third);
+}
+
+TEST_CASE("quitting flushes a pending Settings edit", "[contour][settings][liveapply]")
+{
+    auto testApp =
+        contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    writeSideFileProfiles(testApp);
+    auto& settings = testApp.app().settingsController();
+    settings.editProfile(QStringLiteral("main"));
+    // Every kind of side file at once, none of them written yet: nothing may be lost with the timer.
+    settings.commitProfileField(QStringLiteral("font_size"), 19.0);
+    settings.commitGlobalField(QStringLiteral("reflow_on_resize"), false);
+    settings.duplicateScheme(QStringLiteral("default"));
+    settings.commitSchemeColor(QStringLiteral("background"), QStringLiteral("#102030"));
+    REQUIRE(settings.hasChanges());
+    auto const scheme = settings.editingScheme().toStdString();
+
+    REQUIRE(QMetaObject::invokeMethod(QCoreApplication::instance(), "aboutToQuit", Qt::DirectConnection));
+
+    auto const& config = testApp.app().config();
+    auto const* main = config.findProfile("main");
+    REQUIRE(main != nullptr);
+    CHECK(main->fonts.value().size.pt == 19.0);
+    CHECK(config.reflowOnResize.value() == false);
+    auto const written = contour::config::loadColorSchemeFile(
+        testApp.configFile().parent_path() / "colorschemes" / contour::config::sideFileName(scheme));
+    REQUIRE(written.has_value());
+    CHECK(written->defaultBackground == vtbackend::RGBColor { 0x10, 0x20, 0x30 });
 }

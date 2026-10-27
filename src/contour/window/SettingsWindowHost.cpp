@@ -52,6 +52,12 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
         if (!built)
             return std::unexpected { built.error() };
         _window = std::move(*built);
+        // However the window goes -- the page's Close, the shortcut, the title bar's button -- what is staged
+        // is written then, not 300 ms later, when the app may be gone.
+        connect(_window.get(), &QWindow::visibleChanged, this, [this](bool visible) {
+            if (!visible)
+                _controller.flushPendingChanges();
+        });
     }
 
     auto& window = *_window;
@@ -120,6 +126,7 @@ void SettingsWindowHost::place(QScreen* anchor, std::optional<QRect> previous)
 
 void SettingsWindowHost::closeSettings()
 {
+    _controller.flushPendingChanges();
     if (_window)
         _window->close();
 }

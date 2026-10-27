@@ -4,6 +4,8 @@
 // shown, hidden and shown again as the app's entry points will ask for it.
 
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
@@ -60,7 +62,7 @@ struct HostFixture: ControllerFixture
     explicit HostFixture(window::SettingsWindowConventions conventions =
                              window::settingsWindowConventionsFor(config::HostPlatform::Other),
                          config::UiStyle style = config::UiStyle::Native):
-        ControllerFixture { OneProfile, nullptr },
+        ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} },
         host { *controller, conventions, [this](SettingsWindowHost& self) {
                   ++factoryCalls;
                   return window::loadSettingsWindow(engine, self);
@@ -329,6 +331,32 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("closing Settings flushes a pending edit", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    fx.show();
+    REQUIRE(fx.store->write(config::profileFile("work"), config::emitProfileYaml(*fx.cfg.findProfile("main")))
+                .has_value());
+    fx.reload();
+    fx.controller->editProfile("work");
+    fx.controller->commitProfileField("font_size", 21.0);
+    REQUIRE(fx.scheduler->pendingDelay().has_value());
+
+    SECTION("through the page's Close button and the Close shortcut")
+    {
+        fx.host.closeSettings();
+    }
+    SECTION("through the title bar's close button")
+    {
+        REQUIRE(fx.host.window()->close());
+    }
+
+    CHECK_FALSE(fx.scheduler->pendingDelay().has_value());
+    CHECK(fx.cfg.findProfile("work")->fonts.value().size.pt == 21.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("a Settings window closed maximised reopens maximised at its maximised frame",
           "[contour][gui][qml][settingswindow][host]")
 {
@@ -424,7 +452,7 @@ TEST_CASE("the Settings window keeps the app alive", "[contour][gui][qml][settin
 TEST_CASE("a Settings window factory that fails leaves no window",
           "[contour][gui][qml][settingswindow][host]")
 {
-    auto fx = ControllerFixture { OneProfile, nullptr };
+    auto fx = ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} };
     auto host = SettingsWindowHost {
         *fx.controller,
         window::settingsWindowConventionsFor(config::HostPlatform::Other),

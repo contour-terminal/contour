@@ -100,8 +100,9 @@ class SettingsWindowHost final: public QObject
     [[nodiscard]] std::expected<void, SettingsWindowError> show(QScreen* anchor);
 
     /// Closes the window as its title bar's close button does: the page's Close button and the Close
-    /// shortcut. The window object, its page and the draft survive; only the platform window goes, so Qt's
-    /// quit-on-last-window rule sees the close. A no-op before the first show.
+    /// shortcut. What Settings has staged is written first, as it is whenever the window hides. The window
+    /// object, its page and the draft survive; only the platform window goes, so Qt's quit-on-last-window
+    /// rule sees the close. The close is a no-op before the first show.
     Q_INVOKABLE void closeSettings();
 
     /// @return The window, or null before the first successful show.

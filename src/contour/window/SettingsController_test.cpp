@@ -370,6 +370,36 @@ TEST_CASE("SettingsController: two global commits before the flush both land", "
     CHECK(fx.cfg.guiManagedSettings.defaultProfile == std::optional<std::string> { "main" });
 }
 
+TEST_CASE("SettingsController: the app's own override goes through the one save model", "[settings]")
+{
+    // F20: the new-defaults banner's "Use New" writes settings.yml through this session. A global change
+    // still pending lands with it, and a later flush does not take the app's own write for one made outside.
+    auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
+    fx.commitGlobal("snap_to_rows", true);
+    REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false).has_value());
+
+    REQUIRE(fx.controller->writeGlobalOverride(config::DefaultsEditionKey, "native2026").has_value());
+
+    CHECK(fx.scheduler->pendingDelay() == std::nullopt); // written now, not after the debounce
+    CHECK(fx.cfg.guiManagedSettings.globalOverrides.at(std::string { config::DefaultsEditionKey })
+          == "native2026");
+    CHECK(fx.cfg.reflowOnResize.value() == false);
+    CHECK(fx.cfg.snapToRows.value() == true);
+
+    fx.commitGlobal("snap_to_rows", false);
+    CHECK(fx.cfg.snapToRows.value() == false);
+    CHECK(fx.errors.isEmpty());
+
+    SECTION("not under gui_config_locked")
+    {
+        auto locked = Fixture("default_profile: main\ngui_config_locked: true\n");
+        auto const refused = locked.controller->writeGlobalOverride(config::DefaultsEditionKey, "native2026");
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().kind == config::SettingsErrorKind::Locked);
+        CHECK_FALSE(locked.fileContent("settings.yml").has_value());
+    }
+}
+
 TEST_CASE("SettingsController: a global row shows the committed value before the flush", "[settings]")
 {
     auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");

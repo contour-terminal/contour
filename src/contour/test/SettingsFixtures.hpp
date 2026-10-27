@@ -9,6 +9,7 @@
 #include <contour/test/ManualSaveScheduler.hpp>
 #include <contour/window/SettingsController.hpp>
 
+#include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <QtCore/QObject>
@@ -19,6 +20,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -42,9 +44,36 @@ struct ControllerFixture
     std::unique_ptr<window::SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
 
+    /// Makes the store the controller writes through, over the configuration directory.
+    using StoreFactory = std::function<std::shared_ptr<config::GuiConfigStore>(std::filesystem::path const&)>;
+
     /// @param yaml       The contour.yml the controller edits.
     /// @param writeStore Where the controller writes; null writes the side files beside that contour.yml.
-    ControllerFixture(std::string_view yaml, std::shared_ptr<config::GuiConfigStore> writeStore)
+    ControllerFixture(std::string_view yaml, std::shared_ptr<config::GuiConfigStore> writeStore):
+        ControllerFixture { yaml,
+                            [this, writeStore = std::move(writeStore)](std::filesystem::path const& directory)
+                                -> std::shared_ptr<config::GuiConfigStore> {
+                                if (writeStore)
+                                    return writeStore;
+                                return std::make_shared<config::FileGuiConfigStore>(fileSystem, directory);
+                            } }
+    {
+    }
+
+    /// @param yaml  The contour.yml the controller edits.
+    /// @param files The file system the side files are written through, beside that contour.yml: a
+    ///              FaultyFileSystem for a directory the user cannot write. Borrowed: it outlives the
+    ///              fixture.
+    ControllerFixture(std::string_view yaml, core::platform::FileSystem const& files):
+        ControllerFixture { yaml, [&files](std::filesystem::path const& directory) {
+                               return std::make_shared<config::FileGuiConfigStore>(files, directory);
+                           } }
+    {
+    }
+
+    /// @param yaml      The contour.yml the controller edits.
+    /// @param makeStore Makes the store the controller writes through.
+    ControllerFixture(std::string_view yaml, StoreFactory const& makeStore)
     {
         configDir = std::filesystem::path(dir.path().toStdU16String());
         configPath = configDir / "contour.yml";
@@ -53,17 +82,14 @@ struct ControllerFixture
             out << yaml;
         }
         config::loadConfigFromFile(cfg, configPath);
-        store = writeStore ? std::move(writeStore)
-                           : std::make_shared<config::FileGuiConfigStore>(fileSystem, configDir);
+        store = makeStore(configDir);
         controller = std::make_unique<window::SettingsController>(
             [this]() -> config::Config const& { return cfg; },
             window::SettingsControllerServices {
                 .store = store,
                 // As the app's: reload, and refresh the page from what was reloaded.
                 .reload = [this]() -> std::expected<void, std::string> {
-                    cfg = config::Config {};
-                    config::loadConfigFromFile(cfg, configPath);
-                    controller->refresh();
+                    reload();
                     return {};
                 },
                 .gpuInventory = nullptr,
@@ -73,6 +99,14 @@ struct ControllerFixture
         QObject::connect(controller.get(),
                          &window::SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });
+    }
+
+    /// Reloads contour.yml and its side files from disk and refreshes the controller, as a reload does.
+    void reload()
+    {
+        cfg = config::Config {};
+        config::loadConfigFromFile(cfg, configPath);
+        controller->refresh();
     }
 };
 

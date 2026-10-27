@@ -48,6 +48,7 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
+#include <vthost/testing/FaultyFileSystem.hpp>
 
 using namespace contour;
 using contour::test::ControllerFixture;
@@ -1096,18 +1097,20 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("SettingsController: an unwritable directory rolls the control back", "[settings]")
+namespace
 {
-    // Review Focus 3: the write fails with the OS's reason, and the row shows the value still in effect.
-    auto fx = ControllerFixture(OneProfile, std::make_shared<UnwritableStore>());
+/// Opens a side-file profile `work`, a copy of `main`, on @p fx's controller, and commits a font size the
+/// write of which then fails; asserts what the page shows afterwards.
+/// @param fx     The fixture, whose store cannot write.
+/// @param reason What the failure must name.
+void checkUnwritableRollsBack(ControllerFixture& fx, QString const& reason)
+{
     {
         std::filesystem::create_directories(fx.configDir / "profiles");
         auto out = std::ofstream(fx.configDir / "profiles" / "work.yml");
         out << config::emitProfileYaml(*fx.cfg.findProfile("main"));
     }
-    fx.cfg = config::Config {};
-    config::loadConfigFromFile(fx.cfg, fx.configPath);
-    fx.controller->refresh();
+    fx.reload();
     fx.controller->editProfile("work");
     REQUIRE_FALSE(fx.controller->editingReadOnly());
     auto const fontSize = [&fx] {
@@ -1125,10 +1128,35 @@ TEST_CASE("SettingsController: an unwritable directory rolls the control back", 
     fx.scheduler->fire();
 
     REQUIRE(fx.errors.size() == qsizetype { 1 });
-    CHECK(fx.errors.front().contains(QString::fromUtf8(UnwritableStore::Reason)));
+    CHECK(fx.errors.front().contains(reason));
     CHECK(fx.errors.front().contains("profiles/work.yml"));
     CHECK(fontSize() == inEffect);
     CHECK_FALSE(fx.controller->hasChanges());
+}
+} // namespace
+
+TEST_CASE("SettingsController: an unwritable directory rolls the control back", "[settings]")
+{
+    // Review Focus 3: the write fails with the OS's reason, and the row shows the value still in effect.
+    SECTION("a store that refuses every write")
+    {
+        auto fx = ControllerFixture(OneProfile, std::make_shared<UnwritableStore>());
+        checkUnwritableRollsBack(fx, QString::fromUtf8(UnwritableStore::Reason));
+    }
+
+    SECTION("a file system that refuses the replace, through the durable write")
+    {
+        auto const files = vthost::testing::FaultyFileSystem {
+            [](vthost::testing::FaultOp op, std::filesystem::path const&) {
+                return op == vthost::testing::FaultOp::Rename;
+            },
+        };
+        auto fx = ControllerFixture(OneProfile, files);
+        checkUnwritableRollsBack(fx, QStringLiteral("Permission denied"));
+        // The refused write left no temporary behind.
+        auto const listed = files.listDirectory(fx.configDir / "profiles");
+        CHECK((!listed || listed->empty()));
+    }
 }
 
 TEST_CASE("SettingRow shows what is wrong with its value under it", "[contour][gui][qml][settings][links]")

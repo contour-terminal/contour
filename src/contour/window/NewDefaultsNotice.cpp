@@ -11,15 +11,13 @@ namespace contour::window
 {
 
 NewDefaultsNotice::NewDefaultsNotice(std::function<config::Config const&()> currentConfig,
-                                     std::shared_ptr<config::GuiConfigStore> settings,
+                                     RecordOverride recordOverride,
                                      std::shared_ptr<config::GuiStateStore> state,
-                                     std::function<std::expected<void, std::string>()> reload,
                                      QObject* parent):
     QObject(parent),
     _config { std::move(currentConfig) },
-    _settings { std::move(settings) },
+    _recordOverride { std::move(recordOverride) },
     _state { std::move(state) },
-    _reload { std::move(reload) },
     _offer { offerFor(_config()) },
     _dismissed { dismissedIn(*_state, {}) }
 {
@@ -34,12 +32,8 @@ std::expected<void, std::string> NewDefaultsNotice::switchToNewDefaults()
 {
     if (auto const blocker = settingsWriteBlocker(_config()))
         return std::unexpected { std::string { *blocker } };
-    // A copy of what settings.yml holds now, so the switch keeps every other setting the GUI recorded.
-    auto settings = _config().guiManagedSettings;
-    settings.globalOverrides[std::string { config::DefaultsEditionKey }] =
-        std::string { config::configEnumToken(config::DefaultsEdition::Native2026) };
-    return _settings->write(config::guiSettingsFile(), config::emitGuiSettingsYaml(settings))
-        .and_then([this] { return _reload(); });
+    return _recordOverride(config::DefaultsEditionKey,
+                           config::configEnumToken(config::DefaultsEdition::Native2026));
 }
 
 void NewDefaultsNotice::useNew()
