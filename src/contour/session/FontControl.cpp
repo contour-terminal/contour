@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/SizeIndicator.hpp>
@@ -160,28 +161,34 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
                           oldPageSize,
                           fit.pageSize);
 
-    auto const resized = [&] {
+    // fit.pageSize is already clamped (see above), so resizeToFit()'s direct comparison decides the
+    // early-out.
+    resizeToFit(session, fit.pageSize, viewSize);
+}
+
+void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, ImageSize viewSize)
+{
+    auto& terminal = session.terminal();
+    {
         // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is
         // echoed and parses, taking the lock again. The lock holds the report back and sends it once it is
         // released.
         auto const _ = std::scoped_lock { terminal };
-
-        // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
-        if (fit.pageSize == terminal.totalPageSize())
+        if (totalPageSize == terminal.totalPageSize())
         {
-            display::displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
-            return false;
+            display::displayLog()("No resize necessary. New size is same as old size of {}.", totalPageSize);
+            return;
         }
 
-        terminal.resizeScreen(fit.pageSize, viewSize);
+        terminal.resizeScreen(totalPageSize, viewSize);
         terminal.clearSelection();
-        return true;
-    }();
+    }
 
-    // Once per change, not per dimension, and only after resizeScreen(): the indicator reads the new main
-    // page. Outside the lock, since the signal it raises wakes QML that reads back into the session.
-    if (resized)
-        session.requestSizeIndicator(SizeIndicatorKind::PageSize);
+    // Once per change, not per dimension. Posted: the indicator is GUI-thread state, and this runs on the
+    // render thread when createRenderer() fits a window that lost its render target. Dispatched outside the
+    // lock, it reads the newest main page; postToObject drops it if the session is gone by then.
+    platform::postToObject(&session,
+                           [&session]() { session.requestSizeIndicator(SizeIndicatorKind::PageSize); });
 }
 
 } // namespace contour::session

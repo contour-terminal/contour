@@ -92,6 +92,14 @@ class TerminalSession;
                                                           vtbackend::ImageSize cellSize,
                                                           double scale);
 
+/// Resizes @p session's terminal to @p totalPageSize under its lock, and, when the page changed, asks for the
+/// size indicator. The request is posted to the session's thread, so it reads the main page as it is when it
+/// runs, outside the lock: this is reached from the render thread too (TerminalDisplay::createRenderer()).
+/// @param session The session whose terminal to resize.
+/// @param totalPageSize The new page, status line included.
+/// @param viewSize What the child is told the pixel size is.
+void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, vtbackend::ImageSize viewSize);
+
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,

@@ -571,10 +571,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// What the size indicator says, as the last request let through set it. GUI thread.
     [[nodiscard]] QString sizeIndicatorText() const { return _sizeIndicatorText; }
 
-    /// Raises the size indicator for @p event, unless the session is in its first second or the profile
-    /// turned it off (@see sizeIndicatorGate). A font zoom's text survives the page resize it causes while
-    /// its burst lasts (@see nextSizeIndicatorKind). Emits sizeIndicatorRequested. GUI thread, outside the
-    /// terminal lock.
+    /// Raises the size indicator for @p event, unless the session has no display to draw it (then no burst
+    /// opens), is in its first second, or the profile turned it off (@see sizeIndicatorGate). A font zoom's
+    /// text survives the page resize it causes while its burst lasts (@see nextSizeIndicatorKind). Emits
+    /// sizeIndicatorRequested. GUI thread, outside the terminal lock.
     /// @param event What changed: the page, or the font size.
     void requestSizeIndicator(SizeIndicatorKind event);
 

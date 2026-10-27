@@ -1656,6 +1656,11 @@ float TerminalSession::uptime() const noexcept
 
 void TerminalSession::requestSizeIndicator(SizeIndicatorKind event)
 {
+    // No display draws the pill, so none would ever settle it: a burst opened here would outlive the pane's
+    // next display and make its first resize read as the old zoom.
+    if (_display == nullptr)
+        return;
+
     // The profile's YAML boolean, converted here at the boundary.
     auto const setting =
         profile().sizeIndicatorOnResize.value() ? SizeIndicatorSetting::On : SizeIndicatorSetting::Off;
@@ -6679,11 +6684,11 @@ void TerminalSession::emitProfileDerivedPropertiesChanged()
     for (auto const notify: Notifiers)
         (this->*notify)();
 
-    // Announced only if it moved: the visibility is decided from the profile, among other things.
-    refreshScrollbarVisibility();
-
-    // scrollbar.marks and the scrollbar's position are profile state too, read by the ticks' refresh.
-    requestScrollbarMarksRefresh();
+    // scrollbar.marks and the scrollbar's position are profile state too, read by the ticks' refresh -- and
+    // so is which marks hold an overlay bar. Run now rather than requested, so the visibility it re-announces
+    // (only if it moved) is decided from the new profile's marks, not the old one's for a frame. GUI thread,
+    // outside the terminal lock, as the refresh requires.
+    refreshScrollbarMarks();
 }
 
 namespace
@@ -7006,7 +7011,7 @@ void TerminalSession::setFontSize(text::FontSize size)
     if (_display == nullptr)
     {
         _profile.fonts.value().size = size;
-        requestSizeIndicator(SizeIndicatorKind::FontSize);
+        requestSizeIndicator(SizeIndicatorKind::FontSize); // shows nothing without a display
         return;
     }
 
@@ -7020,7 +7025,8 @@ void TerminalSession::setFontSize(text::FontSize size)
         return;
 
     _profile.fonts.value().size = size;
-    // Here alone, after the size is persisted, so each zoom action raises it once.
+    // Here alone, after the size is persisted, so a zoom action asks for FontSize once. The resize the zoom
+    // causes asks for PageSize as well (session::resizeToFit, posted); the burst keeps saying the points.
     requestSizeIndicator(SizeIndicatorKind::FontSize);
 }
 
