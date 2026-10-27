@@ -318,6 +318,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The controller; it lives as long as the app's Qt objects.
     [[nodiscard]] window::SettingsController& settingsController();
 
+    /// The GUI state beside contour.yml, over the app's file system, created on first use.
+    /// @return The store; it lives as long as the app.
+    [[nodiscard]] std::shared_ptr<config::GuiStateStore> const& guiState();
+
     /// The app's one Settings window host, created on first use over settingsController() and this
     /// host's conventions. The window itself is built on its first show.
     /// @return The host; it lives as long as the app's Qt objects.
@@ -1093,6 +1097,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Whether to offer the newest defaults, handed to QML as the `newDefaults` context property. Built
     /// with the engine, and declared before it for the same borrowed-pointer reason as above.
+    /// What the GUI remembers beside contour.yml (gui-state.yml), shared by the new-defaults banner and the
+    /// Settings window; created on first use by guiState(). Declared before both, which borrow it.
+    std::shared_ptr<config::GuiStateStore> _guiState;
     std::unique_ptr<window::NewDefaultsNotice> _newDefaultsNotice;
 
     /// What the window controls are and where they go, handed to QML as the `windowControls` context

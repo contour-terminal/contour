@@ -1,36 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/GuiStateStore.hpp>
-#include <contour/test/TempDir.hpp>
 
-#include <core/Utils.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <fstream>
+#include <expected>
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using contour::config::FileGuiStateStore;
 using contour::config::GuiState;
 using contour::config::GuiStateError;
 using contour::config::GuiStateFileName;
 using contour::config::NewDefaultsOffer;
+using contour::config::SettingsWindowState;
+using contour::config::WindowShowState;
 
 namespace
 {
-/// Writes @p content as the GUI state file in @p dir.
-void writeStateFile(std::filesystem::path const& dir, std::string_view content)
+/// The configuration directory of these tests.
+[[nodiscard]] std::filesystem::path configDir()
 {
-    auto out = std::ofstream { dir / GuiStateFileName, std::ios::binary };
-    out << content;
+    return std::filesystem::path { "/config" };
+}
+
+/// The GUI state file of these tests.
+[[nodiscard]] std::filesystem::path stateFile()
+{
+    return configDir() / GuiStateFileName;
+}
+
+/// The backup of the GUI state file.
+[[nodiscard]] std::filesystem::path backupFile()
+{
+    auto backup = stateFile();
+    backup += contour::config::GuiStateBackupSuffix;
+    return backup;
+}
+
+/// Writes @p content as the GUI state file on @p fileSystem.
+void writeStateFile(core::platform::FileSystem const& fileSystem, std::string_view content)
+{
+    REQUIRE(fileSystem.writeFile(stateFile(), content).has_value());
 }
 } // namespace
 
 TEST_CASE("GuiStateStore: a missing file is the empty state", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
-    auto const store = FileGuiStateStore { dir.path() };
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto const store = FileGuiStateStore { fileSystem, configDir() };
     auto const loaded = store.load();
     REQUIRE(loaded.has_value());
     CHECK(*loaded == GuiState {});
@@ -38,66 +60,135 @@ TEST_CASE("GuiStateStore: a missing file is the empty state", "[config][guistate
 
 TEST_CASE("GuiStateStore: what is saved loads back", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
-    auto store = FileGuiStateStore { dir.path() };
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
     auto const state = GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig,
-                                                       NewDefaultsOffer::SettingsOverride } };
+                                                       NewDefaultsOffer::SettingsOverride },
+                                  .settingsWindow = std::nullopt };
     REQUIRE(store.save(state).has_value());
-    CHECK(std::filesystem::exists(dir.path() / GuiStateFileName));
-    auto const loaded = FileGuiStateStore { dir.path() }.load();
+    CHECK(fileSystem.exists(stateFile()));
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
     REQUIRE(loaded.has_value());
     CHECK(*loaded == state);
 }
 
 TEST_CASE("GuiStateStore: offers that are not a list are malformed", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
-    writeStateFile(dir.path(), "dismissed_new_defaults: 7\n");
-    auto const loaded = FileGuiStateStore { dir.path() }.load();
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_new_defaults: 7\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
     REQUIRE_FALSE(loaded.has_value());
     CHECK(loaded.error() == GuiStateError::Malformed);
 }
 
 TEST_CASE("GuiStateStore: an unknown token is skipped, not an error", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
-    writeStateFile(dir.path(), "dismissed_new_defaults: [from_the_future, settings_override]\n");
-    auto const loaded = FileGuiStateStore { dir.path() }.load();
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_new_defaults: [from_the_future, settings_override]\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
     REQUIRE(loaded.has_value());
-    CHECK(*loaded == GuiState { .dismissedOffers = { NewDefaultsOffer::SettingsOverride } });
+    CHECK(*loaded
+          == GuiState { .dismissedOffers = { NewDefaultsOffer::SettingsOverride },
+                        .settingsWindow = std::nullopt });
 }
 
 TEST_CASE("GuiStateStore: saving over a malformed file backs it up first", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
     auto const malformed = std::string_view { "dismissed_new_defaults: 7\n" };
-    writeStateFile(dir.path(), malformed);
-    auto store = FileGuiStateStore { dir.path() };
-    REQUIRE(store.save(GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig } }).has_value());
-    auto backup = dir.path() / GuiStateFileName;
-    backup += contour::config::GuiStateBackupSuffix;
-    CHECK(core::readFileAsString(backup) == malformed);
+    writeStateFile(fileSystem, malformed);
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    auto const state =
+        GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig }, .settingsWindow = std::nullopt };
+    REQUIRE(store.save(state).has_value());
+    CHECK(fileSystem.readFile(backupFile())
+          == std::expected<std::string, std::string> { std::string { malformed } });
     auto const loaded = store.load();
     REQUIRE(loaded.has_value());
-    CHECK(*loaded == GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig } });
+    CHECK(*loaded == state);
 }
 
 TEST_CASE("GuiStateStore: a save keeps the tokens and keys this release does not know", "[config][guistate]")
 {
-    auto const dir = contour::test::TempDir {};
-    REQUIRE(dir.isValid());
-    writeStateFile(dir.path(), "dismissed_new_defaults: [from_the_future]\nwindow_hint: wide\n");
-    auto store = FileGuiStateStore { dir.path() };
-    REQUIRE(store.save(GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig } }).has_value());
-    auto const written = core::readFileAsString(dir.path() / GuiStateFileName);
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_new_defaults: [from_the_future]\nwindow_hint: wide\n");
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    REQUIRE(store
+                .save(GuiState { .dismissedOffers = { NewDefaultsOffer::ExistingConfig },
+                                 .settingsWindow = std::nullopt })
+                .has_value());
+    auto const written = fileSystem.readFile(stateFile()).value_or(std::string {});
     INFO(written);
     CHECK(written.contains("[existing_config, from_the_future]"));
     CHECK(written.contains("window_hint: wide"));
-    auto backup = dir.path() / GuiStateFileName;
-    backup += contour::config::GuiStateBackupSuffix;
-    CHECK_FALSE(std::filesystem::exists(backup));
+    CHECK_FALSE(fileSystem.exists(backupFile()));
+}
+
+TEST_CASE("GuiStateStore: the Settings window's frame and page round-trip", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    auto store = FileGuiStateStore { fileSystem, configDir() };
+    auto const state = GuiState {
+        .dismissedOffers = { NewDefaultsOffer::ExistingConfig },
+        .settingsWindow = SettingsWindowState { .x = 300,
+                                                .y = -20,
+                                                .width = 900,
+                                                .height = 700,
+                                                .screen = "DELL U2720Q",
+                                                .show = WindowShowState::Maximized,
+                                                .page = "section:appearance" },
+    };
+    REQUIRE(store.save(state).has_value());
+    auto const written = fileSystem.readFile(stateFile()).value_or(std::string {});
+    INFO(written);
+    CHECK(written.contains("settings_window:"));
+    CHECK(written.contains("maximized"));
+
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == state);
+
+    // A save without it drops it: the state is what was saved.
+    REQUIRE(store.save(GuiState { .dismissedOffers = {}, .settingsWindow = std::nullopt }).has_value());
+    CHECK_FALSE(store.load()->settingsWindow.has_value());
+}
+
+TEST_CASE("GuiStateStore: a file without the Settings window loads without it", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_new_defaults: [existing_config]\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->settingsWindow == std::nullopt);
+}
+
+TEST_CASE("GuiStateStore: an unknown show word loads as Normal", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem,
+                   "settings_window:\n"
+                   "    x: 10\n    y: 20\n    width: 800\n    height: 600\n"
+                   "    screen: eDP-1\n    show: sideways\n    page: globals\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->settingsWindow.has_value());
+    CHECK(loaded->settingsWindow->show == WindowShowState::Normal);
+    CHECK(*loaded->settingsWindow
+          == SettingsWindowState { .x = 10,
+                                   .y = 20,
+                                   .width = 800,
+                                   .height = 600,
+                                   .screen = "eDP-1",
+                                   .show = WindowShowState::Normal,
+                                   .page = "globals" });
+}
+
+TEST_CASE("GuiStateStore: a Settings window entry that is not a map is ignored", "[config][guistate]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    writeStateFile(fileSystem, "dismissed_new_defaults: [existing_config]\nsettings_window: 7\n");
+    auto const loaded = FileGuiStateStore { fileSystem, configDir() }.load();
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->settingsWindow == std::nullopt);
+    CHECK(loaded->dismissedOffers == std::vector { NewDefaultsOffer::ExistingConfig });
 }

@@ -48,7 +48,11 @@ void NewDefaultsNotice::keepMine()
         return;
     auto dismissed = dismissedIn(*_state, _dismissed);
     dismissed.push_back(_offer);
-    if (auto const saved = _state->save(config::GuiState { .dismissedOffers = dismissed }); !saved)
+    // The rest of what the GUI remembers -- the Settings window's frame -- is kept; an unreadable state
+    // keeps nothing, as before.
+    auto state = _state->load().value_or(config::GuiState {});
+    state.dismissedOffers = dismissed;
+    if (auto const saved = _state->save(state); !saved)
         errorLog()("Could not remember declining the new defaults: {}", config::describe(saved.error()));
     // Hidden for this run either way: the user answered.
     apply(_offer, std::move(dismissed));

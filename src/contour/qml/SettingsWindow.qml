@@ -32,11 +32,20 @@ ThemedWindow
 
     SettingsPage
     {
+        id: settingsPage
         objectName: "settingsPage"
         anchors.fill: parent
         focus: true
         controller: settingsWindow.host ? settingsWindow.host.controller : null
         windowController: settingsWindow.host
+
+        // The page the host remembers across restarts: opened on it, and told of every change. A page the
+        // page does not know -- one an older or newer release named -- leaves it on its first page.
+        Component.onCompleted: {
+            if (settingsWindow.host && settingsPage.pages.indexOf(settingsWindow.host.lastPage) >= 0)
+                settingsPage.editorMode = settingsWindow.host.lastPage
+        }
+        onEditorModeChanged: if (settingsWindow.host) settingsWindow.host.lastPage = settingsPage.editorMode
     }
 
     Shortcut

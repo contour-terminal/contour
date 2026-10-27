@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiStateStore.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 
 #include <QtCore/QTemporaryDir>
@@ -24,17 +25,17 @@ using contour::window::NewDefaultsNotice;
 
 namespace
 {
-/// A configuration directory for the GUI state, the Config in effect, and an override recorder that, as the
-/// Settings save model does, writes settings.yml and reloads -- switching the Config to the newest edition.
+/// The GUI state, the Config in effect, and an override recorder that, as the Settings save model does,
+/// writes settings.yml and reloads -- switching the Config to the newest edition.
 struct NoticeFixture
 {
-    QTemporaryDir dir;
-    std::filesystem::path configDir = std::filesystem::path(dir.path().toStdU16String());
+    std::shared_ptr<contour::test::InMemoryGuiStateStore> state =
+        std::make_shared<contour::test::InMemoryGuiStateStore>();
     contour::config::Config config = contour::config::Config { .defaultsEdition = DefaultsEdition::Classic };
     std::vector<std::pair<std::string, std::string>> recorded; ///< Every override recorded, in order.
     std::expected<void, std::string> reloadResult {};
 
-    /// @return A notice over this directory's GUI state, reading `config`.
+    /// @return A notice over this GUI state, reading `config`.
     [[nodiscard]] std::unique_ptr<NewDefaultsNotice> makeNotice()
     {
         return std::make_unique<NewDefaultsNotice>(
@@ -48,7 +49,7 @@ struct NoticeFixture
                     };
                 return reloadResult;
             },
-            std::make_shared<contour::config::FileGuiStateStore>(configDir));
+            state);
     }
 };
 
@@ -62,7 +63,6 @@ struct NoticeFixture
 TEST_CASE("NewDefaultsNotice: Use New records the newest edition", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     auto notice = fixture.makeNotice();
     REQUIRE(notice->offered());
 
@@ -77,7 +77,6 @@ TEST_CASE("NewDefaultsNotice: Use New records the newest edition", "[contour][ne
 TEST_CASE("NewDefaultsNotice: Keep Mine is remembered", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     auto notice = fixture.makeNotice();
     REQUIRE(notice->offered());
     notice->keepMine();
@@ -89,7 +88,6 @@ TEST_CASE("NewDefaultsNotice: Keep Mine is remembered", "[contour][newdefaults]"
 TEST_CASE("NewDefaultsNotice: a Reset Config is offered again after Keep Mine", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     auto notice = fixture.makeNotice();
     notice->keepMine();
     REQUIRE_FALSE(notice->offered());
@@ -108,7 +106,6 @@ TEST_CASE("NewDefaultsNotice: a Reset Config is offered again after Keep Mine", 
 TEST_CASE("NewDefaultsNotice: a failed reload is returned and leaves the offer", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     fixture.reloadResult = std::unexpected { std::string { "broken" } };
     auto notice = fixture.makeNotice();
     auto const switched = notice->switchToNewDefaults();
@@ -120,7 +117,6 @@ TEST_CASE("NewDefaultsNotice: a failed reload is returned and leaves the offer",
 TEST_CASE("NewDefaultsNotice: an explicit classic is never offered", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     fixture.config.defaultsEditionSources =
         DefaultsEditionSources { .mainFile = DefaultsEdition::Classic, .settingsFile = std::nullopt };
     CHECK_FALSE(fixture.makeNotice()->offered());
@@ -129,7 +125,6 @@ TEST_CASE("NewDefaultsNotice: an explicit classic is never offered", "[contour][
 TEST_CASE("NewDefaultsNotice: nothing is offered under gui_config_locked", "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     fixture.config.guiConfigLocked = true;
     auto notice = fixture.makeNotice();
     CHECK_FALSE(notice->offered());
@@ -148,7 +143,6 @@ TEST_CASE("NewDefaultsNotice: nothing is offered over a settings.yml that does n
           "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     fixture.config.guiSettingsFileHealth = contour::config::GuiSettingsFileHealth::Unparsable;
     auto notice = fixture.makeNotice();
     CHECK_FALSE(notice->offered());
@@ -184,7 +178,6 @@ TEST_CASE("NewDefaultsNotice: Keep Mine over a broken state store still hides th
           "[contour][newdefaults]")
 {
     auto fixture = NoticeFixture {};
-    REQUIRE(fixture.dir.isValid());
     auto const store = std::make_shared<BrokenGuiStateStore>();
     auto notice = NewDefaultsNotice {
         [&fixture]() -> contour::config::Config const& { return fixture.config; },
@@ -198,6 +191,26 @@ TEST_CASE("NewDefaultsNotice: Keep Mine over a broken state store still hides th
     // The store still cannot be read: the dismissal held in memory stands.
     notice.refresh();
     CHECK_FALSE(notice.offered());
+}
+
+TEST_CASE("NewDefaultsNotice: Keep Mine keeps the rest of the GUI state", "[contour][newdefaults]")
+{
+    // The Settings window's frame is in the same state: an answer to the banner must not forget it.
+    auto fixture = NoticeFixture {};
+    auto const store = std::make_shared<contour::test::InMemoryGuiStateStore>();
+    auto const frame = contour::config::SettingsWindowState {
+        .x = 1, .y = 2, .width = 900, .height = 700, .screen = "eDP-1", .show = {}, .page = "globals"
+    };
+    store->state.settingsWindow = frame;
+    auto notice = NewDefaultsNotice {
+        [&fixture]() -> contour::config::Config const& { return fixture.config; },
+        [](std::string_view, std::string_view) { return std::expected<void, std::string> {}; },
+        store,
+    };
+    REQUIRE(notice.offered());
+    notice.keepMine();
+    CHECK(store->state.settingsWindow == frame);
+    CHECK(store->state.dismissedOffers == std::vector { contour::config::NewDefaultsOffer::ExistingConfig });
 }
 
 TEST_CASE("Config: a settings.yml that does not parse is recorded", "[config][newdefaults]")

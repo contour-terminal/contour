@@ -17,6 +17,7 @@
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/SizeIndicator.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/ManualSaveScheduler.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/PopupWaits.hpp>
@@ -1015,7 +1016,8 @@ class ChromeSnapshotScene
         return std::make_unique<window::SettingsWindowHost>(
             *_settings,
             window::settingsWindowConventionsFor(variantHost(_variant)),
-            [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); });
+            [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); },
+            _settingsState);
     }
 
     /// Posts a copy's toast through the window's notices, as a copy does: Main.qml places and shows it. Waits
@@ -1300,6 +1302,7 @@ class ChromeSnapshotScene
     std::unique_ptr<window::CommandPaletteModel> _paletteModel;
     core::platform::NativeFileSystem _settingsFiles; ///< What the Settings controller's store writes through.
     QTemporaryDir _settingsDir;
+    InMemoryGuiStateStore _settingsState; ///< What the Settings window remembers: nothing, in a snapshot.
     std::unique_ptr<window::SettingsController> _settings;
     MockMainController _controller;
     MockNewDefaultsNotice _newDefaults;

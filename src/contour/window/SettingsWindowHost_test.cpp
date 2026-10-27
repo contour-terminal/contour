@@ -7,6 +7,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -34,6 +35,7 @@
 #include <format>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -54,19 +56,27 @@ struct HostFixture: ControllerFixture
 {
     QQmlEngine engine;
     test::IncubationDriver incubation;
-    int factoryCalls = 0; ///< How often the host asked for its window to be built.
+    int factoryCalls = 0;                 ///< How often the host asked for its window to be built.
+    test::InMemoryGuiStateStore ownState; ///< What the host remembers, unless the case shares another's.
+    config::GuiStateStore& state;         ///< What the host remembers across closes and restarts.
     SettingsWindowHost host;
 
     /// @param conventions The conventions the host presents the window with.
     /// @param style       The chrome style the engine's tokens resolve.
+    /// @param remembered  What the host remembers; null for a store of its own.
     explicit HostFixture(window::SettingsWindowConventions conventions =
                              window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                         config::UiStyle style = config::UiStyle::Native):
+                         config::UiStyle style = config::UiStyle::Native,
+                         config::GuiStateStore* remembered = nullptr):
         ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} },
-        host { *controller, conventions, [this](SettingsWindowHost& self) {
-                  ++factoryCalls;
-                  return window::loadSettingsWindow(engine, self);
-              } }
+        state { remembered != nullptr ? *remembered : ownState },
+        host { *controller,
+               conventions,
+               [this](SettingsWindowHost& self) {
+                   ++factoryCalls;
+                   return window::loadSettingsWindow(engine, self);
+               },
+               state }
     {
         test::installChromeStyle(engine, style);
         engine.setIncubationController(&incubation);
@@ -331,6 +341,103 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+namespace
+{
+/// Where the Settings window opens over @p previous, as SettingsWindowHost::show() computes it on the primary
+/// screen.
+[[nodiscard]] QRect placedOver(QQuickWindow const& settings, QRect previous)
+{
+    auto const anchor = QGuiApplication::primaryScreen()->availableGeometry();
+    auto screens = std::vector<QRect> {};
+    for (auto const* screen: QGuiApplication::screens())
+        screens.push_back(screen->availableGeometry());
+    return window::settingsWindowGeometry({ .preferred = preferredSizeOf(settings).toSize(),
+                                            .minimum = settings.minimumSize(),
+                                            .previous = previous,
+                                            .anchor = anchor,
+                                            .screens = screens,
+                                            .frame = settings.frameMargins() });
+}
+} // namespace
+
+TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const frame = QRect(300, 200, 900, 700);
+
+    SECTION("its frame and its page")
+    {
+        {
+            auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                       config::UiStyle::Native,
+                                       &remembered };
+            auto& settings = first.show();
+            settings.setGeometry(frame);
+            first.host.setLastPage(QStringLiteral("section:appearance"));
+            first.host.closeSettings();
+        }
+        REQUIRE(remembered.state.settingsWindow.has_value());
+        CHECK(remembered.state.settingsWindow->page == "section:appearance");
+
+        auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                    config::UiStyle::Native,
+                                    &remembered };
+        CHECK(second.host.lastPage() == QStringLiteral("section:appearance"));
+        auto& settings = second.show();
+        CHECK(settings.geometry() == placedOver(settings, frame));
+        CHECK(settings.windowStates() == Qt::WindowNoState);
+    }
+
+    SECTION("a frame off every screen is pulled onto the screen it opens on")
+    {
+        remembered.state.settingsWindow = config::SettingsWindowState {
+            .x = 50000, .y = 50000, .width = 900, .height = 700, .screen = {}, .show = {}, .page = {}
+        };
+        auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                config::UiStyle::Native,
+                                &remembered };
+        auto& settings = fx.show();
+        CHECK(QGuiApplication::primaryScreen()->availableGeometry().intersects(settings.geometry()));
+        CHECK(settings.geometry() == placedOver(settings, QRect(50000, 50000, 900, 700)));
+    }
+
+    SECTION("maximised")
+    {
+        {
+            auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                       config::UiStyle::Native,
+                                       &remembered };
+            auto& settings = first.show();
+            settings.setGeometry(frame);
+            settings.setWindowStates(Qt::WindowMaximized);
+            REQUIRE(settings.close());
+        }
+        REQUIRE(remembered.state.settingsWindow.has_value());
+        CHECK(remembered.state.settingsWindow->show == config::WindowShowState::Maximized);
+
+        auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                    config::UiStyle::Native,
+                                    &remembered };
+        auto& settings = second.show();
+        CHECK(settings.windowStates() == Qt::WindowMaximized);
+    }
+
+    SECTION("what else the state holds is kept")
+    {
+        remembered.state.dismissedOffers = { config::NewDefaultsOffer::ExistingConfig };
+        auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                config::UiStyle::Native,
+                                &remembered };
+        fx.show();
+        fx.host.closeSettings();
+        CHECK(remembered.state.dismissedOffers == std::vector { config::NewDefaultsOffer::ExistingConfig });
+        CHECK(remembered.state.settingsWindow.has_value());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("closing Settings flushes a pending edit", "[contour][gui][qml][settingswindow][host]")
 {
     contour::test::QmlMessageCapture const warnings;
@@ -453,12 +560,14 @@ TEST_CASE("a Settings window factory that fails leaves no window",
           "[contour][gui][qml][settingswindow][host]")
 {
     auto fx = ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} };
+    auto remembered = test::InMemoryGuiStateStore {};
     auto host = SettingsWindowHost {
         *fx.controller,
         window::settingsWindowConventionsFor(config::HostPlatform::Other),
         [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
             return std::unexpected { SettingsWindowError::LoadFailed };
-        }
+        },
+        remembered,
     };
 
     auto const shown = host.show(nullptr);

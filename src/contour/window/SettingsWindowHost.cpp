@@ -12,23 +12,72 @@
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace contour::window
 {
 
+namespace
+{
+    /// What @p state remembers of the Settings window; none when it cannot be read, which is logged.
+    [[nodiscard]] std::optional<config::SettingsWindowState> rememberedIn(config::GuiStateStore const& state)
+    {
+        auto loaded = state.load();
+        if (!loaded)
+        {
+            errorLog()("Could not read the GUI state: {}", config::describe(loaded.error()));
+            return std::nullopt;
+        }
+        return std::move(loaded->settingsWindow);
+    }
+
+    /// The screen named @p name; null when there is none by that name.
+    [[nodiscard]] QScreen* screenNamed(std::string const& name)
+    {
+        if (name.empty())
+            return nullptr;
+        auto const screens = QGuiApplication::screens();
+        auto const found = std::ranges::find_if(
+            screens, [&name](QScreen const* screen) { return screen->name().toStdString() == name; });
+        return found != screens.end() ? *found : nullptr;
+    }
+} // namespace
+
 SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
                                        SettingsWindowConventions conventions,
                                        SettingsWindowFactory factory,
+                                       config::GuiStateStore& state,
                                        QObject* parent):
-    QObject(parent), _controller { controller }, _conventions { conventions }, _factory { std::move(factory) }
+    QObject(parent),
+    _controller { controller },
+    _conventions { conventions },
+    _factory { std::move(factory) },
+    _state { state },
+    _remembered { rememberedIn(state) },
+    _lastPage { _remembered ? QString::fromStdString(_remembered->page) : QString {} }
 {
 }
 
-SettingsWindowHost::~SettingsWindowHost() = default;
+void SettingsWindowHost::setLastPage(QString const& page)
+{
+    if (_lastPage == page)
+        return;
+    _lastPage = page;
+    emit lastPageChanged();
+}
+
+SettingsWindowHost::~SettingsWindowHost()
+{
+    // A window destroyed with its host is no close: it neither writes nor remembers, and its last signals must
+    // not reach a host half torn down.
+    if (_window)
+        _window->disconnect(this);
+}
 
 QString SettingsWindowHost::title() const
 {
@@ -42,8 +91,10 @@ Qt::WindowFlags SettingsWindowHost::windowFlags() const noexcept
 
 std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* anchor)
 {
-    // Where a window built by an earlier show was left; a window this show builds has no such place.
+    // Where a window built by an earlier show was left; a window this show builds has the place the run
+    // before left it at, if any.
     auto previous = std::optional<QRect> {};
+    auto restoreMaximized = false;
     if (_window)
         previous = _window->geometry();
     else
@@ -53,11 +104,21 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
             return std::unexpected { built.error() };
         _window = std::move(*built);
         // However the window goes -- the page's Close, the shortcut, the title bar's button -- what is staged
-        // is written then, not 300 ms later, when the app may be gone.
+        // is written then, not 300 ms later, when the app may be gone, and where it was is remembered.
         connect(_window.get(), &QWindow::visibleChanged, this, [this](bool visible) {
             if (!visible)
-                _controller.flushPendingChanges();
+                onHidden();
         });
+        for (auto const signal:
+             { &QWindow::xChanged, &QWindow::yChanged, &QWindow::widthChanged, &QWindow::heightChanged })
+            connect(_window.get(), signal, this, &SettingsWindowHost::trackNormalGeometry);
+        if (auto const remembered = std::exchange(_remembered, std::nullopt))
+        {
+            previous = QRect(remembered->x, remembered->y, remembered->width, remembered->height);
+            if (auto* const screen = screenNamed(remembered->screen))
+                anchor = screen;
+            restoreMaximized = remembered->show == config::WindowShowState::Maximized;
+        }
     }
 
     auto& window = *_window;
@@ -70,6 +131,9 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
         // A maximised or full-screen window keeps its geometry, and with it the screen it closed on.
         if (settingsWindowReopenFor(window.windowStates()) == SettingsWindowReopen::Place)
             place(anchor, previous);
+        // Placed at its normal frame first, so that leaving the maximised state returns to it.
+        if (restoreMaximized)
+            window.setWindowStates(Qt::WindowMaximized);
         // Not show(), which is showNormal() on the desktop: a window closed maximised reopens maximised.
         window.setVisible(true);
     }
@@ -122,6 +186,35 @@ void SettingsWindowHost::place(QScreen* anchor, std::optional<QRect> previous)
         window.setGeometry(geometry);
     else
         window.resize(geometry.size());
+}
+
+void SettingsWindowHost::trackNormalGeometry()
+{
+    if (_window && (_window->windowStates() & (Qt::WindowMaximized | Qt::WindowFullScreen)) == 0)
+        _normalGeometry = _window->geometry();
+}
+
+void SettingsWindowHost::onHidden()
+{
+    _controller.flushPendingChanges();
+    if (!_window)
+        return;
+
+    auto& window = *_window;
+    auto const maximized = (window.windowStates() & Qt::WindowMaximized) != 0;
+    auto const frame = maximized ? _normalGeometry.value_or(window.geometry()) : window.geometry();
+    auto state = _state.load().value_or(config::GuiState {});
+    state.settingsWindow = config::SettingsWindowState {
+        .x = frame.x(),
+        .y = frame.y(),
+        .width = frame.width(),
+        .height = frame.height(),
+        .screen = window.screen() != nullptr ? window.screen()->name().toStdString() : std::string {},
+        .show = maximized ? config::WindowShowState::Maximized : config::WindowShowState::Normal,
+        .page = _lastPage.toStdString(),
+    };
+    if (auto const saved = _state.save(state); !saved)
+        errorLog()("Could not remember the Settings window: {}", config::describe(saved.error()));
 }
 
 void SettingsWindowHost::closeSettings()

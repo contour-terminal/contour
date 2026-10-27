@@ -1,25 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
 
+#include <core/platform/FileSystem.hpp>
+
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace contour::config
 {
 
-/// What the GUI remembers about the user's answers, as opposed to what they configured.
+/// How a window was shown when it closed.
+enum class WindowShowState : uint8_t
+{
+    Normal = 0, ///< At its own frame.
+    Maximized,  ///< Maximised; its frame is the one it returns to.
+};
+
+namespace detail
+{
+    /// The show states as the GUI state file spells them. Once shipped, a token is fixed.
+    inline constexpr auto WindowShowStateTable = std::array {
+        ConfigEnumInfo<WindowShowState> { WindowShowState::Normal, "normal", "Normal" },
+        ConfigEnumInfo<WindowShowState> { WindowShowState::Maximized, "maximized", "Maximized" },
+    };
+} // namespace detail
+
+template <>
+constexpr std::span<ConfigEnumInfo<WindowShowState> const> configEnumValues() noexcept
+{
+    return detail::WindowShowStateTable;
+}
+
+/// Where the Settings window was, and what it showed, when it last closed (`settings_window:`).
+struct SettingsWindowState
+{
+    int x = 0;                                      ///< The frame's left edge, in the virtual desktop.
+    int y = 0;                                      ///< The frame's top edge.
+    int width = 0;                                  ///< The frame's width.
+    int height = 0;                                 ///< The frame's height.
+    std::string screen {};                          ///< The name of the screen it was on; empty: unknown.
+    WindowShowState show = WindowShowState::Normal; ///< Whether it was maximised.
+    std::string page {};                            ///< The page it showed; empty: the first one.
+
+    [[nodiscard]] bool operator==(SettingsWindowState const&) const = default;
+};
+
+/// What the GUI remembers about the user's answers and its windows, as opposed to what they configured.
 ///
 /// Kept out of `settings.yml` on purpose: that file holds settings, which a reload re-applies, while
-/// this holds history, such as an offer the user declined, which no setting expresses.
+/// this holds history, such as an offer the user declined or where a window was, which no setting expresses.
 struct GuiState
 {
     /// The new-defaults offers the user answered "Keep Mine" to, in the order they did.
     std::vector<NewDefaultsOffer> dismissedOffers {};
+
+    /// The Settings window as it last closed; none before it ever did.
+    std::optional<SettingsWindowState> settingsWindow {};
 
     [[nodiscard]] bool operator==(GuiState const&) const = default;
 };
@@ -71,23 +117,27 @@ inline constexpr std::string_view GuiStateFileName = "gui-state.yml";
 /// What is appended to GuiStateFileName for the copy of a file that could not be read back.
 inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
 
-/// The production GuiStateStore: GuiStateFileName in the configuration directory, written atomically
-/// (see contour::config::atomicWriteFile).
+/// The production GuiStateStore: GuiStateFileName in the configuration directory, read and written through
+/// the injected file system, durably (see contour::config::writeFileDurably).
 ///
-/// The file reads `dismissed_new_defaults: [existing_config]`. A token no offer answers to is skipped,
-/// so a file written by a newer release still loads, and a save keeps those tokens and any other keys.
+/// The file reads `dismissed_new_defaults: [existing_config]` and `settings_window: { x, y, width, height,
+/// screen, show: normal|maximized, page }`. A token no offer answers to is skipped, so a file written by a
+/// newer release still loads, and a save keeps those tokens and any other keys. A `settings_window` that is
+/// not a map is no state; an unknown `show` word is `normal`.
 /// Saving over a file that does not load first copies it to `gui-state.yml.bak` (GuiStateBackupSuffix),
 /// and saves nothing when that copy fails.
 class FileGuiStateStore final: public GuiStateStore
 {
   public:
-    /// @param configDir The directory holding `contour.yml`.
-    explicit FileGuiStateStore(std::filesystem::path const& configDir);
+    /// @param fileSystem The file system the state lives on. Borrowed: it outlives the store.
+    /// @param configDir  The directory holding `contour.yml`.
+    FileGuiStateStore(core::platform::FileSystem const& fileSystem, std::filesystem::path const& configDir);
 
     [[nodiscard]] std::expected<GuiState, GuiStateError> load() const override;
     [[nodiscard]] std::expected<void, GuiStateError> save(GuiState const& state) override;
 
   private:
+    core::platform::FileSystem const& _fileSystem;
     std::filesystem::path _file;
 };
 

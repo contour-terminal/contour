@@ -2517,7 +2517,6 @@ int ContourGuiApp::terminalGuiAction()
         context->setContextProperty("daemonDrift", &_daemonDrift);
         // The new-defaults banner's decision: "Use New" writes settings.yml through the one Settings save
         // model, which reloads; "Keep Mine" remembers the answer in the GUI state file beside contour.yml.
-        auto const configDir = _config.configFile.parent_path();
         _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
             [this]() -> config::Config const& { return _config; },
             [this](std::string_view key, std::string_view value) {
@@ -2525,7 +2524,7 @@ int ContourGuiApp::terminalGuiAction()
                     .writeGlobalOverride(key, value)
                     .transform_error([](config::SettingsError const& error) { return error.message; });
             },
-            std::make_shared<config::FileGuiStateStore>(configDir));
+            guiState());
         context->setContextProperty("newDefaults", _newDefaultsNotice.get());
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
@@ -2973,13 +2972,22 @@ window::SettingsWindowFactory ContourGuiApp::engineSettingsWindowFactory()
     };
 }
 
+std::shared_ptr<config::GuiStateStore> const& ContourGuiApp::guiState()
+{
+    if (!_guiState)
+        _guiState =
+            std::make_shared<config::FileGuiStateStore>(_fileSystem, _config.configFile.parent_path());
+    return _guiState;
+}
+
 window::SettingsWindowHost& ContourGuiApp::settingsWindow()
 {
     if (!_settingsWindow)
         _settingsWindow =
             std::make_unique<window::SettingsWindowHost>(settingsController(),
                                                          window::settingsWindowConventionsFor(_hostPlatform),
-                                                         _settingsWindowFactory);
+                                                         _settingsWindowFactory,
+                                                         *guiState());
     return *_settingsWindow;
 }
 

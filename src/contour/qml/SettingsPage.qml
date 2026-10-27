@@ -28,6 +28,8 @@ Rectangle {
     // click telling them what they already came here to do. Global settings is the one pane that
     // always exists — a fresh install has no GUI-owned profile or colour scheme to show instead.
     property string editorMode: "globals"
+    // Every page editorMode names, for a host that remembers the last one.
+    readonly property var pages: ["globals", "keybindings", "profile", "scheme"]
 
     // Why the controller last refused what the page asked of it -- a value the configuration would reject,
     // a name already taken, a file it could not write -- kept until the next change it saves, or until the

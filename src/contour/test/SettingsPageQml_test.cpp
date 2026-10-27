@@ -10,6 +10,7 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -146,6 +147,7 @@ struct SettingsPageView
 {
     QQmlEngine engine;
     IncubationDriver incubation;
+    contour::test::InMemoryGuiStateStore state; ///< What the window remembers: nothing, until it closes.
     window::SettingsWindowHost host;
     QPointer<QObject> page;
 
@@ -154,7 +156,8 @@ struct SettingsPageView
     explicit SettingsPageView(window::SettingsController* controller):
         host { *controller,
                window::settingsWindowConventionsFor(config::HostPlatform::Other),
-               [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); } }
+               [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); },
+               state }
     {
         contour::test::installChromeStyle(engine);
         engine.setIncubationController(&incubation);
