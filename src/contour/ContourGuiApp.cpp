@@ -1886,7 +1886,7 @@ window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre)
     // No provider yet: an empty band is its bare-band token, the Pill rows' band their title-bar token; the
     // Flat rows' is their measured strip, which nobody has measured, so 0 leaves the band to its own height.
     auto const density = _config.chromeDensity.value();
-    auto const row = config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density);
+    auto const row = resolvedChromeTokens();
     auto const height = [&] {
         if (centre == window::BarCentre::Empty)
             return static_cast<double>(row.size.bareBand);
@@ -1906,10 +1906,17 @@ window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inpu
     if (_chromeStyleHost)
         return _chromeStyleHost->provider().titleBandOf(inputs);
     // No provider yet: the row as the provider would resolve it.
-    auto const density = _config.chromeDensity.value();
-    auto const shape =
-        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density).layout.tabShape;
-    return window::resolveTitleBand(window::TitleBandRow { .shape = shape, .density = density }, inputs);
+    return window::resolveTitleBand(window::TitleBandRow { .shape = resolvedChromeTokens().layout.tabShape,
+                                                           .density = _config.chromeDensity.value() },
+                                    inputs);
+}
+
+config::ChromeTokenRow ContourGuiApp::resolvedChromeTokens() const
+{
+    return config::resolveChromeTokens(_chromeStyle,
+                                       accessibilityPreferences(),
+                                       _config.chromeDensity.value(),
+                                       platformAppearance().materials);
 }
 
 window::ChromeInputs ContourGuiApp::chromeInputs() const
@@ -1934,20 +1941,14 @@ vtworkspace::SplitChrome ContourGuiApp::splitChrome(double devicePixelRatio) con
         return window::splitChromeOf(
             provider.resolvedRow(), provider.units().horizontal, provider.units().vertical, devicePixelRatio);
     }
-    return window::splitChromeOf(
-        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), _config.chromeDensity.value()),
-        1.0,
-        1.0,
-        devicePixelRatio);
+    return window::splitChromeOf(resolvedChromeTokens(), 1.0, 1.0, devicePixelRatio);
 }
 
 std::chrono::milliseconds ContourGuiApp::headerRevealDelay() const
 {
-    auto const milliseconds =
-        _chromeStyleHost ? _chromeStyleHost->provider().resolvedRow().motion.headerRevealMs
-                         : config::resolveChromeTokens(
-                               _chromeStyle, accessibilityPreferences(), _config.chromeDensity.value())
-                               .motion.headerRevealMs;
+    auto const milliseconds = _chromeStyleHost
+                                  ? _chromeStyleHost->provider().resolvedRow().motion.headerRevealMs
+                                  : resolvedChromeTokens().motion.headerRevealMs;
     return std::chrono::milliseconds { milliseconds };
 }
 

@@ -3,6 +3,7 @@
 
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeDensity.hpp>
+#include <contour/config/MaterialSupport.hpp>
 #include <contour/config/UiStyle.hpp>
 
 #include <vtbackend/core/BlockPill.hpp>
@@ -32,6 +33,13 @@ enum class Material : uint8_t
 
 /// Number of @c Material enumerators, derived from the last one.
 inline constexpr size_t MaterialCount = static_cast<size_t>(Material::Solid) + 1;
+
+/// Which kind of window asks for the operating system's material: it picks the material's variant.
+enum class BackdropKind : uint8_t
+{
+    Tabbed = 0, //!< A tabbed terminal window: Mica Alt on Windows.
+    Main,       //!< A single-content window (Settings): Mica on Windows.
+};
 
 /// What the operating system draws behind the title band.
 enum class BandBackdrop : uint8_t
@@ -2044,16 +2052,20 @@ inline constexpr std::array<ChromeTokenRow, detail::ChromeStyleCount> ChromeToke
 static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
               "Every ChromeStyle needs exactly one 1a token row.");
 
-/// Resolves a style's token row against the chrome density and the user's accessibility preferences.
+/// Resolves a style's token row against the chrome density, the user's accessibility preferences and what
+/// the operating system can draw.
 /// @param row The chrome style whose row to take.
 /// @param preferences The accessibility choices to apply on top of it.
 /// @param density The density whose extents to take: @c Minimal copies the row's @c minimal sub-row over
 ///                the pane extents, before the accessibility steps.
+/// @param materials Whether the OS draws the row's materials: @c Unsupported turns them Solid, as Reduced
+///                  transparency does; @c Unknown changes nothing.
 /// @return The adjusted row.
 [[nodiscard]] constexpr ChromeTokenRow resolveChromeTokens(
     ChromeStyle row,
     AccessibilityPreferences preferences,
-    ChromeDensity density = ChromeDensity::Comfortable) noexcept
+    ChromeDensity density = ChromeDensity::Comfortable,
+    MaterialSupport materials = MaterialSupport::Unknown) noexcept
 {
     auto tokens = ChromeTokenRows[static_cast<size_t>(row)];
 
@@ -2077,7 +2089,8 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
         tokens.motion.popoverScalePercent = 100;
     }
 
-    if (preferences.transparency == TransparencyPreference::Reduced)
+    if (preferences.transparency == TransparencyPreference::Reduced
+        || materials == MaterialSupport::Unsupported)
     {
         for (auto* material: { &tokens.material.titleBand, &tokens.material.popover })
             if (*material == Material::Glass || *material == Material::Mica)

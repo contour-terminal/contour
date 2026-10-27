@@ -713,6 +713,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void runMenuBarAction(actions::Action const& action, command::ActionScope scope);
 
   private:
+    /// The configured row resolved as the provider would resolve it, for the paths that run before a
+    /// provider exists: against the configured density, the accessibility preferences and the OS's material
+    /// support.
+    /// @return The resolved row.
+    [[nodiscard]] config::ChromeTokenRow resolvedChromeTokens() const;
+
     /// Logs, once per binding, each input mapping whose chord the macOS menu bar takes from the terminal
     /// (see window::menuOwnedBindings()), so a binding that never runs does not go unexplained. For a load
     /// and a reload of the configuration, under a global menu bar.

@@ -70,6 +70,7 @@ namespace
                                                                               toChannel(srgb.blueComponent) } },
                 .windowCornerRadius = std::nullopt,
                 .scrollBars = preferredScrollBars(),
+                .materials = config::MaterialSupport::Unknown,
             };
         }
 

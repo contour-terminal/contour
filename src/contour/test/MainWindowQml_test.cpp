@@ -2389,18 +2389,33 @@ TEST_CASE("a pinned full-screen band below the menu bar leaves the traffic light
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Fluent and ContourLinux bands keep today's colour (offscreen)",
+TEST_CASE("the ContourLinux band keeps today's colour (offscreen)", "[contour][gui][qml][mainwindow][band]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
+    showWindow(*root);
+    CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Fluent band is cleared over Mica, and tinted without it (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    using contour::config::TransparencyPreference;
+    for (auto const transparency: { TransparencyPreference::Allowed, TransparencyPreference::Reduced })
     {
-        INFO("row: " << contour::config::chromeStyleName(row));
+        auto const reduced = transparency == TransparencyPreference::Reduced;
+        INFO("reduced transparency: " << reduced);
         QQmlEngine engine;
         MockMainController controller { MainWindowScene { .tabCount = 3 } };
         contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        auto setup = rowSetup(ChromeStyle::Fluent);
+        setup.accessibility.transparency = transparency;
+        auto root = loadMainWindow(engine, controller, warnings, setup);
         showWindow(*root);
-        CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+        CHECK(bandBackgroundOf(*root).alpha() == (reduced ? 255 : 0));
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
 }

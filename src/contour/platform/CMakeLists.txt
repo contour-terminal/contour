@@ -51,6 +51,7 @@ add_library(contour_platform STATIC
     QtInvoke.hpp
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
+    SystemBackdrop.hpp
     TaskbarProgressRouter.hpp
     TaskbarProgressSink.cpp TaskbarProgressSink.hpp
     LauncherProgress.hpp LauncherProgressSink.cpp

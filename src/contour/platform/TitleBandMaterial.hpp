@@ -20,6 +20,9 @@ namespace contour::platform
 struct TitleBandRequest
 {
     config::BandBackdrop backdrop = config::BandBackdrop::Client; ///< The OS's material, or nothing.
+    /// Which window asks, which picks the material's variant (Mica Alt or Mica); macOS has one and ignores
+    /// it.
+    config::BackdropKind kind = config::BackdropKind::Tabbed;
     config::TitleBarGrowth growth =
         config::TitleBarGrowth::None;                  ///< Whether the title bar grows to the band.
     Qt::ColorScheme scheme = Qt::ColorScheme::Unknown; ///< The appearance; Unknown follows the app.

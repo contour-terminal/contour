@@ -79,6 +79,19 @@ inline constexpr auto TitleBandSurfaceRows = std::array {
                           .surface = { .backdrop = config::BandBackdrop::Client,
                                        .fill = config::BandFill::Tint,
                                        .growth = config::TitleBarGrowth::CompactToolbar } },
+    // Windows 11's Mica behind the joined tabs: the band is cleared over the DWM backdrop, and the panes stay
+    // opaque (R-k). Solid -- no Mica below 22H2 (MaterialSupport::Unsupported), or Reduced transparency, or a
+    // window whose material failed -- is the tint over the client's own paint.
+    TitleBandSurfaceRow { .style = config::ChromeStyle::Fluent,
+                          .material = config::Material::Mica,
+                          .surface = { .backdrop = config::BandBackdrop::NativeMaterial,
+                                       .fill = config::BandFill::Clear,
+                                       .growth = config::TitleBarGrowth::None } },
+    TitleBandSurfaceRow { .style = config::ChromeStyle::Fluent,
+                          .material = config::Material::Solid,
+                          .surface = { .backdrop = config::BandBackdrop::Client,
+                                       .fill = config::BandFill::Tint,
+                                       .growth = config::TitleBarGrowth::None } },
 };
 
 /// Minimal's bare band (R-f): an empty band painted in the terminal background, so the window reads

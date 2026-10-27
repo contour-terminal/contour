@@ -56,11 +56,30 @@ TEST_CASE("surface.macRows", "[titlebandsurface]")
                                 .growth = TitleBarGrowth::CompactToolbar });
 }
 
+TEST_CASE("surface.fluentRows", "[titlebandsurface]")
+{
+    // Mica: the band is cleared over the native backdrop; Solid (no Mica, or Reduced transparency): tinted.
+    CHECK(surfaceOf(ChromeStyle::Fluent, Material::Mica, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface { .backdrop = BandBackdrop::NativeMaterial,
+                                .fill = BandFill::Clear,
+                                .growth = TitleBarGrowth::None });
+    CHECK(surfaceOf(ChromeStyle::Fluent, Material::Solid, WindowFrame::ClientBand, WindowMode::Windowed)
+          == TitleBandSurface {
+              .backdrop = BandBackdrop::Client, .fill = BandFill::Tint, .growth = TitleBarGrowth::None });
+    // No material behind terminal text in full screen.
+    CHECK(surfaceOf(ChromeStyle::Fluent, Material::Mica, WindowFrame::ClientBand, WindowMode::FullScreen)
+          == TitleBandSurface {
+              .backdrop = BandBackdrop::Client, .fill = BandFill::Tint, .growth = TitleBarGrowth::None });
+    CHECK(surfaceOf(ChromeStyle::Fluent, Material::Mica, WindowFrame::NativeFrame, WindowMode::Windowed)
+          == TitleBandSurface {});
+}
+
 TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
 {
     for (auto const style: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
     {
-        if (static_cast<ChromeStyle>(style) == ChromeStyle::MacOS)
+        if (static_cast<ChromeStyle>(style) == ChromeStyle::MacOS
+            || static_cast<ChromeStyle>(style) == ChromeStyle::Fluent)
             continue;
         for (auto const material: std::views::iota(size_t { 0 }, contour::config::MaterialCount))
             for (auto const frame: std::views::iota(size_t { 0 }, WindowFrameCount))
@@ -130,8 +149,10 @@ TEST_CASE("surface.minimalBareBandIsTheBackground", "[titlebandsurface]")
     CHECK(full.backdrop == BandBackdrop::Client);
     CHECK(full.fill == BandFill::Background);
 
-    // A row the table does not name keeps today's band, and a native frame has none.
-    CHECK(bare(BarCentre::Empty, WindowMode::Windowed, ChromeStyle::Fluent) == TitleBandSurface {});
+    // The Fluent row's bare band is the same; a row the table does not name keeps today's band, and a
+    // native frame has none.
+    CHECK(bare(BarCentre::Empty, WindowMode::Windowed, ChromeStyle::Fluent) == BareBandSurface);
+    CHECK(bare(BarCentre::Empty, WindowMode::Windowed, ChromeStyle::ContourLinux) == TitleBandSurface {});
     CHECK(resolveTitleBandSurface(TitleBandSurfaceInputs { .style = ChromeStyle::MacOS,
                                                            .material = Material::Solid,
                                                            .frame = WindowFrame::NativeFrame,

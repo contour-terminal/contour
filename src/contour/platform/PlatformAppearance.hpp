@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/MaterialSupport.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -20,6 +21,8 @@ struct PlatformAppearance
     /// The system's scroller style, if it publishes one: Overlay where scroll bars show only while
     /// scrolling, Always where they always show. Resolved against a profile's `scrollbar.mode`.
     std::optional<config::ScrollBarMode> scrollBars {};
+    /// Whether the OS draws the chrome's materials; Unknown where it does not say (every OS but Windows).
+    config::MaterialSupport materials = config::MaterialSupport::Unknown;
 
     [[nodiscard]] bool operator==(PlatformAppearance const&) const = default;
 };

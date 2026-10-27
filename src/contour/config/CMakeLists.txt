@@ -25,6 +25,7 @@ add_library(contour_config STATIC
     HostUrl.cpp HostUrl.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp
+    MaterialSupport.hpp
     ModifierNames.hpp
     NewDefaultsOffer.hpp
     OptionAsAlt.hpp

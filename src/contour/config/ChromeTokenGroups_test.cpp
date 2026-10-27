@@ -1170,6 +1170,49 @@ TEST_CASE("chromeTokens.noticeCard", "[chrometokens]")
     }
 }
 
+TEST_CASE("chromeTokens.unsupportedMaterialIsSolid", "[chrometokens]")
+{
+    using namespace contour::config;
+    constexpr auto Comfortable = ChromeDensity::Comfortable;
+    // Without OS support for its backdrop, the Fluent band's Mica is Solid, as under Reduced transparency.
+    CHECK(resolveChromeTokens(ChromeStyle::Fluent, {}, Comfortable, MaterialSupport::Unsupported)
+              .material.titleBand
+          == Material::Solid);
+    for (auto const materials: { MaterialSupport::Supported, MaterialSupport::Unknown })
+        CHECK(resolveChromeTokens(ChromeStyle::Fluent, {}, Comfortable, materials).material.titleBand
+              == Material::Mica);
+    // Both slots: the macOS popover's Glass too.
+    CHECK(resolveChromeTokens(ChromeStyle::MacOS, {}, Comfortable).material.popover == Material::Glass);
+    CHECK(resolveChromeTokens(ChromeStyle::MacOS, {}, Comfortable, MaterialSupport::Unsupported)
+              .material.popover
+          == Material::Solid);
+    // A row without a material keeps none.
+    CHECK(resolveChromeTokens(ChromeStyle::Terminal, {}, Comfortable, MaterialSupport::Unsupported)
+              .material.titleBand
+          == Material::None);
+}
+
+TEST_CASE("chromeTokens.defaultMaterialSupportIsUnknown", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const index: allStyles())
+        for (auto const transparency: { TransparencyPreference::Allowed, TransparencyPreference::Reduced })
+        {
+            CAPTURE(index, static_cast<int>(transparency));
+            auto const style = static_cast<ChromeStyle>(index);
+            auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Full,
+                                                                .transparency = transparency,
+                                                                .contrast = ContrastPreference::Standard };
+            auto const defaulted = resolveChromeTokens(style, preferences, ChromeDensity::Comfortable);
+            auto const unknown =
+                resolveChromeTokens(style, preferences, ChromeDensity::Comfortable, MaterialSupport::Unknown);
+            CHECK(defaulted.material == unknown.material);
+            CHECK(numbersOf(defaulted) == numbersOf(unknown));
+            CHECK(defaulted.layout == unknown.layout);
+            CHECK(defaulted.colors == unknown.colors);
+        }
+}
+
 TEST_CASE("chromeTokens.minimalSubRow", "[chrometokens]")
 {
     using namespace contour::config;

@@ -260,7 +260,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _fonts { chromeFontsFor(_tokens, _inputs.font) },
     _metrics { chromeMetricsFor(_tokens, _inputs.font) },
     _glyphs { chromeGlyphsFor(_tokens) },
-    _groups { config::resolveChromeTokens(_inputs.row, _inputs.accessibility, _inputs.density) },
+    _groups { config::resolveChromeTokens(
+        _inputs.row, _inputs.accessibility, _inputs.density, _inputs.appearance.materials) },
     // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
     // legacy one land on the same grid.
     _units { .horizontal = _metrics.widthQuantum,

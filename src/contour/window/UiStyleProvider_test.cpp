@@ -1820,6 +1820,22 @@ TEST_CASE("UiStyleProvider: a joined tab's label reads on every joined row, appe
     }
 }
 
+TEST_CASE("UiStyleProvider: an unsupported material resolves the band solid", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MaterialSupport;
+    using contour::window::UiStyleProvider;
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::Fluent, QGuiApplication::font());
+    auto const supported = UiStyleProvider(inputs);
+    CHECK(tokenOf(supported, "material", "titleBand").toInt()
+          == tokenOf(supported, "material", "mica").toInt());
+
+    inputs.appearance.materials = MaterialSupport::Unsupported;
+    auto const unsupported = UiStyleProvider(inputs);
+    CHECK(tokenOf(unsupported, "material", "titleBand").toInt()
+          == tokenOf(unsupported, "material", "solid").toInt());
+}
+
 TEST_CASE("UiStyleProvider: the pane dim is the kit's token", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;
@@ -1950,8 +1966,8 @@ TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uis
             // A native frame has no band of ours: the palette, as today.
             CHECK(mac.bandFill(1, 0, tabs) == paletteWindow());
 
-            // Linux and Windows unchanged: every frame and mode paints the palette window colour.
-            for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+            // Linux unchanged: every frame and mode paints the palette window colour.
+            for (auto const row: { ChromeStyle::ContourLinux, ChromeStyle::Terminal })
             {
                 CAPTURE(contour::config::chromeStyleName(row));
                 auto const provider = UiStyleProvider(bandInputs(row, pass.background));
@@ -1959,6 +1975,16 @@ TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uis
                     for (auto const mode: std::views::iota(0, static_cast<int>(WindowModeCount)))
                         CHECK(provider.bandFill(frame, mode, tabs) == paletteWindow());
             }
+
+            // Windows: the band is cleared over Mica, the tint without it, and the palette under a native
+            // frame.
+            auto const fluent = UiStyleProvider(bandInputs(ChromeStyle::Fluent, pass.background));
+            CHECK(fluent.bandFill(0, 0, tabs).alpha() == 0);
+            CHECK(fluent.bandFill(0, 1, tabs) == tint);
+            CHECK(fluent.bandFill(1, 0, tabs) == paletteWindow());
+            auto solidInputs = bandInputs(ChromeStyle::Fluent, pass.background);
+            solidInputs.appearance.materials = contour::config::MaterialSupport::Unsupported;
+            CHECK(UiStyleProvider(solidInputs).bandFill(0, 0, tabs) == tint);
 
             // Out of range, or a centre titleBand() never names: the palette window colour.
             CHECK(mac.bandFill(7, 9, tabs) == paletteWindow());
