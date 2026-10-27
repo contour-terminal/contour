@@ -1998,6 +1998,23 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
         return;
     auto const sourceId = source->id();
 
+    // A daemon owns the layout: it is asked to graft the tab, and its re-push reconciles the merge in. A
+    // merge issued BY the reconciler itself (while realizing that re-push) is the local half of one the
+    // daemon already made, and falls through to be made here.
+    if (_sessionFactory.hosting() == SessionHosting::Remote)
+    {
+        auto const* const sourceLeaf = source->rootPane()->firstLeaf();
+        auto* const targetTab = _model->findTab(target);
+        auto const* const targetLeaf = targetTab != nullptr ? targetTab->rootPane()->findPane(leaf) : nullptr;
+        auto* const tabSession = sourceLeaf != nullptr ? sessionForId(sourceLeaf->session()) : nullptr;
+        auto* const targetSession = targetLeaf != nullptr ? sessionForId(targetLeaf->session()) : nullptr;
+        if (tabSession != nullptr && targetSession != nullptr
+            && _sessionFactory.requestRemoteTabMerge(
+                   &tabSession->terminal().device(), &targetSession->terminal().device(), side)
+                   == RemoteRouting::Routed)
+            return;
+    }
+
     // The merge's own events look sessions up by their tab (focus follows the grafted active pane), so
     // the index names the target before they fire; a refused merge puts it back.
     auto sessions = std::vector<vtworkspace::SessionId> {};

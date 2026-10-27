@@ -51,6 +51,11 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().hosting();
     }
 
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return active().tabMergeSupport();
+    }
+
     [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
     {
         return active().createNotifier();
@@ -67,6 +72,13 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
                                           contour::session::RemoteSpawn const& spawn) override
     {
         return active().requestRemoteSplit(actingPty, vertical, spawn);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
+                                                                        vtpty::Pty const* targetPty,
+                                                                        vtworkspace::SplitSide side) override
+    {
+        return active().requestRemoteTabMerge(tabPty, targetPty, side);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override

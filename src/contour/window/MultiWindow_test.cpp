@@ -1813,7 +1813,8 @@ TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][mul
     contour::test::closeAllTabs(*window);
 }
 
-TEST_CASE("WindowController: a daemon-hosted window offers no split", "[contour][multiwindow][drop]")
+TEST_CASE("WindowController: a daemon-hosted window offers no split unless its daemon merges tabs",
+          "[contour][multiwindow][drop]")
 {
     // Review Focus 4: a split made here would be undone by the daemon's next layout push, so a tab is
     // left alone at every band; files still insert.
@@ -1835,6 +1836,35 @@ TEST_CASE("WindowController: a daemon-hosted window offers no split", "[contour]
 
     // And performing a split drop anyway changes nothing.
     window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+    CHECK(window->count() == 2);
+    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+
+    factory->reportedHosting = contour::session::SessionHosting::Local;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE(
+    "WindowController: a daemon that merges tabs gets the drop, and the tab stays until its layout arrives",
+    "[contour][multiwindow][drop]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    factory->reportedTabMergeSupport = contour::session::TabMergeSupport::Supported;
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
+    CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
+
+    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+    REQUIRE(factory->requestedTabMerges.size() == 1);
+    CHECK(factory->requestedTabMerges.front().side == vtworkspace::SplitSide::Right);
     CHECK(window->count() == 2);
     CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
 

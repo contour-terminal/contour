@@ -27,8 +27,9 @@ inline constexpr size_t DropPayloadCount = static_cast<size_t>(DropPayload::Tab)
 /// Whether the window can split a pane for a dropped tab.
 enum class SplitSupport : uint8_t
 {
-    Unsupported = 0, //!< The window's sessions are hosted elsewhere: the protocol has no way to merge.
-    Supported,       //!< The window's sessions are hosted here.
+    Unsupported =
+        0,     //!< The window's session host cannot merge a tab (a daemon without Capability::TabMerge).
+    Supported, //!< The window's session host merges a tab: in-process, or a daemon that serves it.
 };
 
 /// Where a dragged tab comes from, relative to the pane it hovers.

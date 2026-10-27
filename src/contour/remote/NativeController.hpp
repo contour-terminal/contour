@@ -306,6 +306,17 @@ class NativeController final: public QObject, public contour::session::SessionFa
         return true;
     }
 
+    /// SessionFactory: whether the daemon serves proto::MergeTabIntoSplit (Capability::TabMerge shared).
+    /// Unsupported before the handshake and against an older daemon: a tab dropped on a pane then tears off.
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override;
+
+    /// SessionFactory: a tab dropped on a pane's edge is merged into the split by the daemon, which moves its
+    /// sessions and re-pushes the layout. Local when either pty is not bound to a daemon session, or the
+    /// daemon does not serve the merge.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
+                                                                        vtpty::Pty const* targetPty,
+                                                                        vtworkspace::SplitSide side) override;
+
     /// SessionFactory: the user moved a divider, so the daemon's model — what a re-attaching client
     /// rebuilds from — is told the new ratio. @see proto::ResizeSplit.
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override;

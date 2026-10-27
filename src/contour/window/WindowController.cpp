@@ -844,13 +844,13 @@ namespace
                          .row = tabIndex.toInt() };
     }
 
-    /// Whether a tab can be merged into a split in a window whose sessions are hosted as @p hosting.
-    [[nodiscard]] constexpr SplitSupport splitSupportFor(session::SessionHosting hosting) noexcept
+    /// Whether a tab can be merged into a split, as the window's session factory reports it.
+    [[nodiscard]] constexpr SplitSupport splitSupportFor(session::TabMergeSupport support) noexcept
     {
-        switch (hosting)
+        switch (support)
         {
-            case session::SessionHosting::Local: return SplitSupport::Supported;
-            case session::SessionHosting::Remote: return SplitSupport::Unsupported;
+            case session::TabMergeSupport::Supported: return SplitSupport::Supported;
+            case session::TabMergeSupport::Unsupported: return SplitSupport::Unsupported;
         }
         return SplitSupport::Unsupported;
     }
@@ -871,7 +871,6 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
     auto inputs = DropZoneInputs { .payload = static_cast<DropPayload>(payload),
                                    .pane = DropExtent { .width = width, .height = height },
                                    .at = DropPoint { .x = x, .y = y },
-                                   .split = splitSupportFor(_manager.sessionHosting()),
                                    .origin = DropOrigin::OtherTab };
 
     switch (inputs.payload)
@@ -889,6 +888,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
             auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
             if (source == nullptr)
                 return none;
+            inputs.split = splitSupportFor(_manager.tabMergeSupport(drag->window, _windowId));
             if (std::get<1>(_manager.model().findSessionLeaf(pane->modelSessionId())) == source)
                 inputs.origin = DropOrigin::OwnTab;
             break;
@@ -904,7 +904,7 @@ void WindowController::dropTabOnPane(session::TerminalSession const* pane,
     if (pane == nullptr || zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
         return;
     auto const side = dropZoneRowOf(static_cast<DropZone>(zone)).side;
-    if (!side || splitSupportFor(_manager.sessionHosting()) != SplitSupport::Supported)
+    if (!side)
         return;
 
     // Re-resolved here, not trusted from the caller: the payload names a window and a row, which may be
@@ -914,7 +914,9 @@ void WindowController::dropTabOnPane(session::TerminalSession const* pane,
     auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
     auto const [targetWindow, targetTab, leaf] = _manager.model().findSessionLeaf(pane->modelSessionId());
     if (source == nullptr || targetWindow == nullptr || targetTab == nullptr || leaf == nullptr
-        || targetTab == source)
+        || targetTab == source
+        || splitSupportFor(_manager.tabMergeSupport(drag->window, targetWindow->id()))
+               != SplitSupport::Supported)
         return;
     _manager.mergeTabIntoSplit(
         drag->window, drag->row, targetWindow->id(), targetTab->id(), leaf->id(), *side);

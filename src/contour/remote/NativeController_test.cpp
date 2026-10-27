@@ -1379,6 +1379,94 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     ac->stop();
 }
 
+// A tab dropped on a pane's edge is merged into the split BY THE DAEMON: it moves the tab's sessions into the
+// target tab and re-pushes its layout, and the reconciler grafts the same tab here. Nothing is spawned or
+// closed, so both sessions keep running on the daemon.
+TEST_CASE("attach merges a tab into a split on the daemon, and the sessions live on",
+          "[attach][controller][merge][daemon]")
+{
+    auto daemon = DaemonFixture {};
+    auto const target = daemon.seedSession("target");
+    auto const dragged = daemon.seedSession("dragged");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 2; }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto& manager = app.manager();
+    auto* const localWindow = manager.model().window(win.id);
+    REQUIRE(localWindow->tabCount() == 2);
+    REQUIRE(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Supported);
+
+    // The tabs in the daemon's order: [target, dragged]; drop the second on the first's right edge.
+    auto* const targetTab = localWindow->tabAt(0);
+    manager.mergeTabIntoSplit(
+        win.id, 1, win.id, targetTab->id(), targetTab->rootPane()->id(), vtworkspace::SplitSide::Right);
+
+    // Authored on the daemon, not made here: nothing moved until its layout arrives.
+    CHECK(localWindow->tabCount() == 2);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 1; }));
+    contour::remote::applyRemoteLayout(manager, win.id, *ac);
+
+    REQUIRE(localWindow->tabCount() == 1);
+    auto* const merged = localWindow->tabAt(0);
+    CHECK(merged->paneCount() == 2);
+    CHECK(merged->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+    REQUIRE(manager.sessionsOfTab(merged).size() == 2);
+    // And on the daemon both sessions are still running, in one tab.
+    CHECK(daemon.onDaemon([&] { return daemon.host->terminal(target) != nullptr; }));
+    CHECK(daemon.onDaemon([&] { return daemon.host->terminal(dragged) != nullptr; }));
+    CHECK(daemon.onDaemon([&] {
+        return std::get<1>(daemon.host->model().findSessionLeaf(target))
+               == std::get<1>(daemon.host->model().findSessionLeaf(dragged));
+    }));
+
+    ac->stop();
+}
+
+TEST_CASE("a tab dropped against a daemon without TabMerge is not offered a split",
+          "[attach][controller][merge][compat][daemon]")
+{
+    using vthost::proto::Capability;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("one");
+    std::ignore = daemon.seedSession("two");
+    daemon.whileDisconnected([&] {
+        daemon.services.handshake.capabilities = vthost::proto::CapabilitySet::of(
+            { Capability::ExtensionPermissions, Capability::InitialClientArea, Capability::AttachIntent });
+    });
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 2; }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto& manager = app.manager();
+
+    REQUIRE(ac->negotiated().has_value());
+    CHECK_FALSE(ac->negotiated()->shared.contains(Capability::TabMerge));
+    // The tab is left to tear off, as it was before the verb existed: the window offers no split and the
+    // controller routes nothing.
+    CHECK(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Unsupported);
+    auto* const first = manager.model().window(win.id)->tabAt(0);
+    auto* const second = manager.model().window(win.id)->tabAt(1);
+    auto const* const firstPty = &manager.sessionsOfTab(first).front()->terminal().device();
+    auto const* const secondPty = &manager.sessionsOfTab(second).front()->terminal().device();
+    CHECK(ac->requestRemoteTabMerge(secondPty, firstPty, vtworkspace::SplitSide::Right)
+          == contour::session::RemoteRouting::Local);
+
+    ac->stop();
+}
+
 // A ratio only the CLIENT knows is a ratio the user loses: a re-attaching client rebuilds every tab
 // from the daemon's LayoutState, so a divider the daemon never heard about comes back at the ratio
 // the split was CREATED with. This is the whole point of proto::ResizeSplit — the drag has to reach

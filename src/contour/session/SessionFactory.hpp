@@ -24,6 +24,7 @@
 #include <string_view>
 
 #include <vthost/client/TabPresentation.hpp>
+#include <vtworkspace/Primitives.hpp>
 
 class QObject;
 
@@ -71,6 +72,20 @@ enum class SessionHosting : uint8_t
     Local = 0, ///< On this machine: a new session runs its profile's shell, or the command it is given.
     Remote,    ///< On a daemon or a tmux server (attach mode): a new pane is bound to a session the
                ///< remote end hosts, and a command given for it is dropped.
+};
+
+/// Whether a whole tab can be merged into a split of a pane in a window this factory hosts.
+enum class TabMergeSupport : uint8_t
+{
+    Unsupported = 0, ///< No: the tab is left to tear off. A remote end's model would undo a local merge.
+    Supported,       ///< Yes, here or on the remote end.
+};
+
+/// Whether a request was handed to the remote end, which then owns the change.
+enum class RemoteRouting : uint8_t
+{
+    Local = 0, ///< Not routed: the caller performs the change itself.
+    Routed,    ///< Routed: the remote end's layout re-push reconciles the change in.
 };
 
 /// What a session authored on the remote end runs, as this client asks for it (SessionFactory's
@@ -156,6 +171,15 @@ class SessionFactory
     /// @return Local for a factory that spawns here (the default); Remote for an attach-mode one.
     [[nodiscard]] virtual SessionHosting hosting() const noexcept { return SessionHosting::Local; }
 
+    /// Whether a tab can be merged into a split of a pane here: a local factory merges in-process, an attach
+    /// factory only when its remote end serves the merge (a remote end's model would undo a local one).
+    /// @return Supported for a local factory (the default); Unsupported for a remote one that does not
+    ///         override this.
+    [[nodiscard]] virtual TabMergeSupport tabMergeSupport() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? TabMergeSupport::Supported : TabMergeSupport::Unsupported;
+    }
+
     /// The notifier a new session raises its notifications through.
     ///
     /// A seam rather than a choice: production takes the one the platform offers, and a test hands in
@@ -211,6 +235,21 @@ class SessionFactory
                                                   RemoteSpawn const& /*spawn*/)
     {
         return false;
+    }
+
+    /// Attach mode: authors the merge of a whole tab into a split on the DAEMON -- the tab holding
+    /// @p tabPty is grafted beside the pane backed by @p targetPty -- rather than merging locally. The
+    /// daemon moves the tab's sessions (none is spawned or closed) and its layout re-push reconciles the
+    /// result in. A local factory returns Local so the manager merges itself.
+    /// @param tabPty    A pty backing any pane of the tab to merge.
+    /// @param targetPty The pty of the pane to split.
+    /// @param side      The side of the target pane the tab goes on.
+    /// @return Routed if handed to the daemon; Local for a local factory.
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(vtpty::Pty const* /*tabPty*/,
+                                                              vtpty::Pty const* /*targetPty*/,
+                                                              vtworkspace::SplitSide /*side*/)
+    {
+        return RemoteRouting::Local;
     }
 
     /// Attach mode: reports that the user moved the divider of the split separating the panes backed

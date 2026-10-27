@@ -7,6 +7,7 @@
 #include <core/Utils.hpp>
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <ranges>
 #include <tuple>
@@ -94,6 +95,77 @@ namespace
             if (auto op = findNewSplit(second, controller))
                 return op;
         return std::nullopt;
+    }
+
+    /// Every side a grafted tab can go on.
+    constexpr auto AllSplitSides = std::array { vtworkspace::SplitSide::Left,
+                                                vtworkspace::SplitSide::Right,
+                                                vtworkspace::SplitSide::Top,
+                                                vtworkspace::SplitSide::Bottom };
+
+    /// One local merge to perform to catch up with a daemon-side MergeTabIntoSplit: graft the whole tab
+    /// @c source beside the pane @c leaf of @c target, on @c side.
+    struct MergeOp
+    {
+        vtworkspace::Tab const* source = nullptr;
+        vtworkspace::Tab const* target = nullptr;
+        vtworkspace::PaneId leaf {};
+        vtworkspace::SplitSide side = vtworkspace::SplitSide::Left;
+    };
+
+    /// Finds ONE not-yet-reproduced merge in @p node: a split holding a leaf beside a subtree whose sessions
+    /// are, all of them and no others, one OTHER local tab's -- the shape a daemon merge leaves, since
+    /// it moves a tab's sessions without spawning or closing any. Recurses, for nested merges.
+    ///
+    /// Without this the sessions the merge moved are already claimed here, so neither the realizer (no
+    /// unclaimed leaf) nor findNewSplit (no unclaimed second child) would see anything to do, and the local
+    /// tabs would stay as they were while the daemon's layout is another shape.
+    [[nodiscard]] std::optional<MergeOp> findNewMerge(
+        std::unordered_map<uint64_t, contour::session::TerminalSession*> const& remoteToLocalSession,
+        vtworkspace::SessionModel const& model,
+        vthost::proto::WirePane const& node)
+    {
+        if (!node.isSplit())
+            return std::nullopt;
+        auto const tabOf = [&](uint64_t remote) -> vtworkspace::Tab const* {
+            auto const it = remoteToLocalSession.find(remote);
+            return it != remoteToLocalSession.end()
+                       ? std::get<1>(model.findSessionLeaf(it->second->modelSessionId()))
+                       : nullptr;
+        };
+        auto const pairOf = [&](vthost::proto::WirePane const& leaf,
+                                vthost::proto::WirePane const& grafted,
+                                vtworkspace::GraftOrder order) -> std::optional<MergeOp> {
+            if (leaf.isSplit())
+                return std::nullopt;
+            auto const* const target = tabOf(leaf.session);
+            auto sessions = std::unordered_set<uint64_t> {};
+            collectSessions(grafted, sessions);
+            auto const* const source = tabOf(*sessions.begin());
+            if (target == nullptr || source == nullptr || source == target
+                || std::cmp_not_equal(source->paneCount(), sessions.size())
+                || !std::ranges::all_of(sessions, [&](uint64_t remote) { return tabOf(remote) == source; }))
+                return std::nullopt;
+            // The side whose split axis is the node's and whose graft order is the subtree's.
+            auto const side = std::ranges::find_if(AllSplitSides, [&](vtworkspace::SplitSide candidate) {
+                return std::to_underlying(vtworkspace::splitStateOf(candidate)) == node.split
+                       && vtworkspace::graftOrderOf(candidate) == order;
+            });
+            if (side == AllSplitSides.end())
+                return std::nullopt;
+            auto const [window, leafTab, leafPane] =
+                model.findSessionLeaf(remoteToLocalSession.at(leaf.session)->modelSessionId());
+            return MergeOp { .source = source, .target = target, .leaf = leafPane->id(), .side = *side };
+        };
+        auto const& first = node.children[0];
+        auto const& second = node.children[1];
+        if (auto op = pairOf(first, second, vtworkspace::GraftOrder::GraftSecond))
+            return op;
+        if (auto op = pairOf(second, first, vtworkspace::GraftOrder::GraftFirst))
+            return op;
+        if (auto op = findNewMerge(remoteToLocalSession, model, first))
+            return op;
+        return findNewMerge(remoteToLocalSession, model, second);
     }
 
     /// Maps each remote session to its local TerminalSession, by matching the pane's
@@ -243,6 +315,27 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
     // on every layout push, so a tab/split authored on the daemon — here or by
     // another client — appears without rebuilding what is already shown.
     controller.setRealizingLayout(true);
+
+    // Merges first: a tab the daemon grafted into a split of another keeps its sessions, all of them
+    // already claimed here, so the passes below would find nothing to realize and leave the local tabs as
+    // they were. The manager makes the merge locally because the controller, realizing, does not route it.
+    for (auto const& wireTab: layout->tabs)
+        while (auto const op =
+                   findNewMerge(remoteToLocal(manager, window, controller), manager.model(), wireTab.root))
+        {
+            auto const* const win = manager.model().window(window);
+            if (win == nullptr)
+                break;
+            auto const tabs = std::views::iota(0, win->tabCount());
+            auto const row = std::ranges::find_if(tabs, [&](int i) { return win->tabAt(i) == op->source; });
+            if (row == tabs.end())
+                break;
+            auto const tabCount = win->tabCount();
+            manager.mergeTabIntoSplit(window, *row, window, op->target->id(), op->leaf, op->side);
+            if (win->tabCount() >= tabCount)
+                break; // refused: the next push tries again
+        }
+
     for (auto const& wireTab: layout->tabs)
     {
         if (!anyLeafClaimed(wireTab.root, controller))

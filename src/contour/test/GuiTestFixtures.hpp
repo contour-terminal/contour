@@ -120,6 +120,23 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         return reportedHosting;
     }
 
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return reportedTabMergeSupport.value_or(SessionFactory::tabMergeSupport());
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
+                                                                        vtpty::Pty const* targetPty,
+                                                                        vtworkspace::SplitSide side) override
+    {
+        requestedTabMerges.push_back(
+            TabMergeRequest { .tabPty = tabPty, .targetPty = targetPty, .side = side });
+        return reportedHosting == contour::session::SessionHosting::Remote
+                       && tabMergeSupport() == contour::session::TabMergeSupport::Supported
+                   ? contour::session::RemoteRouting::Routed
+                   : contour::session::RemoteRouting::Local;
+    }
+
     [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
     {
         return makeNotifier ? makeNotifier() : nullptr;
@@ -178,6 +195,18 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// The ptys of the ended panes the returned layout still names: bindForReconnect() binds exactly these.
     std::vector<vtpty::Pty const*> namedForReconnect;
 
+    /// What tabMergeSupport() reports instead of what the hosting implies: Supported stands in for a daemon
+    /// that serves the merge, Unsupported for one that does not.
+    std::optional<contour::session::TabMergeSupport> reportedTabMergeSupport = std::nullopt;
+    /// One requestRemoteTabMerge() call.
+    struct TabMergeRequest
+    {
+        vtpty::Pty const* tabPty = nullptr;
+        vtpty::Pty const* targetPty = nullptr;
+        vtworkspace::SplitSide side = vtworkspace::SplitSide::Left;
+    };
+    /// Every request requestRemoteTabMerge() was asked about, in order.
+    std::vector<TabMergeRequest> requestedTabMerges;
     /// What hosting() reports: Remote stands in for an attach-mode factory, which runs no command here.
     contour::session::SessionHosting reportedHosting = contour::session::SessionHosting::Local;
     /// How createNotifier() makes each session's notifier: makeTestNotifier() unless a test says
@@ -264,6 +293,18 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
     [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
     {
         return _factory->hosting();
+    }
+
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return _factory->tabMergeSupport();
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
+                                                                        vtpty::Pty const* targetPty,
+                                                                        vtworkspace::SplitSide side) override
+    {
+        return _factory->requestRemoteTabMerge(tabPty, targetPty, side);
     }
 
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,

@@ -96,7 +96,9 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // configuration. TabEdits because the user's changes to a tab's presentation are reported
             // (reportTabPresentation). ProgramStatus because the mirrors take the OSC 7501 records the daemon
             // pushes, for the tab strip to show. InputEcho because a pane at a password prompt is locked, and
-            // turns secure keyboard entry on, only when the daemon says its terminal hides typing.
+            // turns secure keyboard entry on, only when the daemon says its terminal hides typing. TabMerge
+            // so that a tab dropped on a pane's edge is merged into the split by the daemon
+            // (requestRemoteTabMerge) instead of torn off.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -106,7 +108,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::ProfileByName,
                                                    vthost::proto::Capability::TabEdits,
                                                    vthost::proto::Capability::ProgramStatus,
-                                                   vthost::proto::Capability::InputEcho }),
+                                                   vthost::proto::Capability::InputEcho,
+                                                   vthost::proto::Capability::TabMerge }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = _attachSettings.transform([](auto const& s) {
@@ -645,6 +648,33 @@ void NativeController::requestSplitPane(vtpty::Pty const* actingPty,
             NativeClient& client) mutable {
             client.splitPane(session, orientation, ratio, std::move(profile));
         });
+}
+
+contour::session::TabMergeSupport NativeController::tabMergeSupport() const noexcept
+{
+    auto const agreed = negotiated();
+    return agreed && agreed->shared.contains(vthost::proto::Capability::TabMerge)
+               ? contour::session::TabMergeSupport::Supported
+               : contour::session::TabMergeSupport::Unsupported;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteTabMerge(vtpty::Pty const* tabPty,
+                                                                        vtpty::Pty const* targetPty,
+                                                                        vtworkspace::SplitSide side)
+{
+    // A merge the reconciler itself applies came FROM the daemon; asking for it again would loop.
+    if (isRealizingLayout())
+        return contour::session::RemoteRouting::Local;
+    auto const tabSession = sessionForPty(tabPty);
+    auto const targetSession = sessionForPty(targetPty);
+    if (!tabSession || !targetSession || tabMergeSupport() == contour::session::TabMergeSupport::Unsupported)
+        return contour::session::RemoteRouting::Local;
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, tab = *tabSession, target = *targetSession, side] {
+        if (_client != nullptr)
+            std::ignore = _client->mergeTabIntoSplit(tab, target, side);
+    });
+    return contour::session::RemoteRouting::Routed;
 }
 
 void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio)

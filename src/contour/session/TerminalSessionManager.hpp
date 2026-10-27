@@ -485,6 +485,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// in window @p to, on @p side, keeping every session (none is closed or re-created). The sessions
     /// are re-pointed at @p target, the grafted active pane gets focus, and a source window this empties
     /// is closed. Drives dropping a dragged tab on the edge of a pane.
+    ///
+    /// On a daemon-hosted window the merge is authored on the daemon (SessionFactory::requestRemoteTabMerge)
+    /// and its layout re-push reconciles it in; nothing changes here until then. Callers ask
+    /// tabMergeSupport() first.
     /// @param from      The source window's id.
     /// @param fromIndex The tab's row in @p from.
     /// @param to        The destination window's id.
@@ -497,9 +501,19 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                            vtworkspace::TabId target,
                            vtworkspace::PaneId leaf,
                            vtworkspace::SplitSide side);
-    /// Where the sessions this manager's factory makes run: whether a tab can be merged into a split here
-    /// (only where they are hosted locally; a remote end's model would undo it).
-    [[nodiscard]] SessionHosting sessionHosting() const noexcept { return _sessionFactory.hosting(); }
+    /// Whether a tab of window @p from can be merged into a split of window @p to: where the sessions are
+    /// hosted locally, or on a daemon that serves the merge (a remote end that does not would undo a local
+    /// one). A daemon's layout is pushed per window and a client reconciles one window at a time, so a merge
+    /// there stays within one window.
+    /// @param from The window holding the dragged tab.
+    /// @param to   The window holding the pane to split.
+    [[nodiscard]] TabMergeSupport tabMergeSupport(vtworkspace::WindowId from,
+                                                  vtworkspace::WindowId to) const noexcept
+    {
+        if (_sessionFactory.hosting() == SessionHosting::Remote && from != to)
+            return TabMergeSupport::Unsupported;
+        return _sessionFactory.tabMergeSupport();
+    }
     /// Tears the tab at row @p fromIndex of window @p from into a brand-new OS window. The new window
     /// is spawned (on @p targetScreen if given) and adopts the tab as its sole tab; if that empties the
     /// source window, it is closed. Drives dropping a dragged tab onto empty desktop.

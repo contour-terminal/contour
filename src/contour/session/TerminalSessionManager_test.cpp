@@ -3904,4 +3904,67 @@ TEST_CASE("TerminalSessionManager: a refused merge leaves every session where it
     window->closeTabAtIndex(0);
 }
 
+TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of the daemon, not made here",
+          "[manager][merge]")
+{
+    using contour::session::TabMergeSupport;
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab(); // [t0 (dragged), t1]
+    auto* const model = &manager.model();
+    auto* const dragged = model->window(window.id)->tabAt(0);
+    auto* const target = model->window(window.id)->tabAt(1);
+    auto const draggedSession = dragged->rootPane()->session();
+    auto const targetSession = target->rootPane()->session();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+
+    SECTION("a daemon that serves the merge is asked, with both panes' ptys and the side")
+    {
+        factory->reportedTabMergeSupport = TabMergeSupport::Supported;
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, target->id(), target->rootPane()->id(), vtworkspace::SplitSide::Top);
+
+        REQUIRE(factory->requestedTabMerges.size() == 1);
+        auto const& request = factory->requestedTabMerges.front();
+        CHECK(request.tabPty == &manager.sessionForId(draggedSession)->terminal().device());
+        CHECK(request.targetPty == &manager.sessionForId(targetSession)->terminal().device());
+        CHECK(request.side == vtworkspace::SplitSide::Top);
+        // The daemon's layout re-push is what changes the local tree: nothing moved here.
+        CHECK(window->count() == 2);
+        CHECK(target->paneCount() == 1);
+        CHECK(std::get<1>(model->findSessionLeaf(draggedSession)) == dragged);
+    }
+
+    SECTION("a request the factory does not route, as the reconciler's own, is merged here")
+    {
+        factory->reportedTabMergeSupport = TabMergeSupport::Unsupported;
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, target->id(), target->rootPane()->id(), vtworkspace::SplitSide::Top);
+
+        CHECK(window->count() == 1);
+        CHECK(target->paneCount() == 2);
+        CHECK(std::get<1>(model->findSessionLeaf(draggedSession)) == target);
+    }
+
+    SECTION("a daemon's merge stays within one window")
+    {
+        factory->reportedTabMergeSupport = TabMergeSupport::Supported;
+        CHECK(manager.tabMergeSupport(window.id, window.id) == TabMergeSupport::Supported);
+        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WindowId { window.id.value + 1 })
+              == TabMergeSupport::Unsupported);
+        factory->reportedHosting = contour::session::SessionHosting::Local;
+        CHECK(manager.tabMergeSupport(window.id, vtworkspace::WindowId { window.id.value + 1 })
+              == TabMergeSupport::Supported);
+        factory->reportedHosting = contour::session::SessionHosting::Remote;
+    }
+
+    factory->reportedHosting = contour::session::SessionHosting::Local;
+    window->closeTabAtIndex(0);
+    window->closeTabAtIndex(0);
+}
+
 // }}}
