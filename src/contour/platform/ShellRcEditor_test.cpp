@@ -581,11 +581,25 @@ TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's li
           == RcState::Partial);
     // The user's own unterminated last line is not ours.
     CHECK(rcStateOf(ShellKind::Zsh, "export A=1\nexport B=2") == RcState::Absent);
+    // Not even when it opens with the same guard: only Contour's own continuation makes it Contour's.
+    CHECK(rcStateOf(ShellKind::Zsh, "if [ \"$TERM_PROGRAM\" = contour ]; then echo hi") == RcState::Absent);
+    CHECK(rcStateOf(ShellKind::Bash, "x\nif [ \"$TERM_PROGRAM\" = contour ]; then echo hi")
+          == RcState::Absent);
+    CHECK(rcStateOf(ShellKind::Fish, "if test \"$TERM_PROGRAM\" = contour; echo hi") == RcState::Absent);
     CHECK(rcStateOf(ShellKind::Zsh, "export A=1\n") == RcState::Absent);
     // A whole line, with or without its line ending, is Installed.
     auto const line = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
     CHECK(rcStateOf(ShellKind::Zsh, line) == RcState::Installed);
     CHECK(rcStateOf(ShellKind::Zsh, line + "\n") == RcState::Installed);
+}
+
+TEST_CASE("ShellRow: the line Contour appends is its guard followed by its continuation", "[shellrc]")
+{
+    for (auto const& row: contour::config::ShellRows)
+    {
+        auto const line = contour::window::shellRcLine(row.kind, "/usr/bin/contour").value();
+        CHECK(line.starts_with(std::string(row.guard) + std::string(row.continuation)));
+    }
 }
 
 TEST_CASE("ShellRcEditor: a file edited between the read and the write is refused", "[shellrc]")

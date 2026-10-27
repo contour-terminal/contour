@@ -54,6 +54,7 @@ struct ShellRow
     std::string_view name {}; ///< As `contour generate integration shell <name>` spells it.
     RcSyntax syntax = RcSyntax::Posix;
     std::string_view guard {}; ///< Opens the appended line: runs the rest only in a shell Contour started.
+    std::string_view continuation {}; ///< What follows the guard in Contour's line, up to the quoted path.
     RcBase base = RcBase::Home;
     std::string_view rcFile {};      ///< Relative to @c base.
     std::string_view rcFileMacOS {}; ///< Relative to @c base, on macOS.
@@ -65,6 +66,7 @@ inline constexpr auto ShellRows = std::array {
                .name = "bash",
                .syntax = RcSyntax::Posix,
                .guard = R"(if [ "$TERM_PROGRAM" = contour ]; then )",
+               .continuation = "eval \"$('",
                .base = RcBase::Home,
                .rcFile = ".bashrc",
                .rcFileMacOS = ".bash_profile" },
@@ -72,6 +74,7 @@ inline constexpr auto ShellRows = std::array {
                .name = "zsh",
                .syntax = RcSyntax::Posix,
                .guard = R"(if [ "$TERM_PROGRAM" = contour ]; then )",
+               .continuation = "eval \"$('",
                .base = RcBase::ZDotDir,
                .rcFile = ".zshrc",
                .rcFileMacOS = ".zshrc" },
@@ -79,6 +82,7 @@ inline constexpr auto ShellRows = std::array {
                .name = "fish",
                .syntax = RcSyntax::Fish,
                .guard = R"(if test "$TERM_PROGRAM" = contour; )",
+               .continuation = "'",
                .base = RcBase::XdgConfig,
                .rcFile = "fish/config.fish",
                .rcFileMacOS = "fish/config.fish" },

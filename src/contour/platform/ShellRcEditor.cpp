@@ -160,8 +160,14 @@ namespace
         auto const lastLine = trimmed(content.substr(content.find_last_of('\n') + 1));
         if (lastLine.empty() || lastLine.ends_with(config::ShellRcMarker))
             return false;
-        // A cut anywhere in the guard, or after it: the guard is a prefix of the line, or the line of it.
-        return row.guard.starts_with(lastLine) || lastLine.starts_with(row.guard);
+        // A cut anywhere in the guard is the guard's prefix. Past it the guard alone proves nothing, since a
+        // user may open a line of their own the same way: Contour's continuation must follow (or be cut).
+        if (row.guard.starts_with(lastLine))
+            return true;
+        if (!lastLine.starts_with(row.guard))
+            return false;
+        auto const rest = lastLine.substr(row.guard.size());
+        return row.continuation.starts_with(rest) || rest.starts_with(row.continuation);
     }
 } // namespace
 

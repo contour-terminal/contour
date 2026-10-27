@@ -149,8 +149,9 @@ class NullShellRcEditor final: public IShellRcEditor
 /// @param shell The shell the file is for.
 /// @param content The file's bytes.
 /// @return Partial when the last line has no line ending and is the beginning of Contour's line (the
-///         shell's config::ShellRow::guard) without its config::ShellRcMarker, which is what an append
-///         cut short by a full disk leaves behind; a user's own unterminated last line is never that.
+///         shell's config::ShellRow::guard, then its config::ShellRow::continuation) without its
+///         config::ShellRcMarker, which is what an append cut short by a full disk leaves behind; a user's
+///         own unterminated last line is never that, not even one that opens with the same guard.
 ///         Else Installed when the file holds config::ShellRcMarker, or a line that is not a comment and
 ///         either runs `generate integration shell <name>` or sources `shell-integration.<name>`;
 ///         else Absent.
