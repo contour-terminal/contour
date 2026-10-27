@@ -77,10 +77,12 @@ TEST_CASE("paneActivityOf compares the foreground to the shell", "[chromekeys]")
     CHECK(paneActivityOf("/bin/zsh", std::nullopt) == PaneActivity::Unknown);
 }
 
-TEST_CASE("closeConfirmationFor asks only about a known running program", "[chromekeys]")
+TEST_CASE("closeConfirmationFor asks unless every pane is known to be idle", "[chromekeys]")
 {
     using enum PaneActivity;
     CHECK(closeConfirmationFor(std::array { Idle, Running }) == CloseConfirmation::Ask);
-    CHECK(closeConfirmationFor(std::array { Idle, Unknown }) == CloseConfirmation::None);
+    CHECK(closeConfirmationFor(std::array { Idle, Unknown }) == CloseConfirmation::Ask);
+    CHECK(closeConfirmationFor(std::array { Unknown }) == CloseConfirmation::Ask);
+    CHECK(closeConfirmationFor(std::array { Idle, Idle }) == CloseConfirmation::None);
     CHECK(closeConfirmationFor(std::array<PaneActivity, 0> {}) == CloseConfirmation::None);
 }

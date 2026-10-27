@@ -130,7 +130,7 @@ enum class PaneActivity : uint8_t
 {
     Idle = 0, ///< The foreground process is the pane's shell.
     Running,  ///< A program other than the shell is in the foreground.
-    Unknown,  ///< No answer (a remote pane, Windows): never worth asking about.
+    Unknown,  ///< No answer (a remote pane, Windows): cannot be told idle, so closing asks.
 };
 
 namespace detail
@@ -164,16 +164,18 @@ namespace detail
 enum class CloseConfirmation : uint8_t
 {
     None = 0, ///< Close at once.
-    Ask,      ///< Ask: a program is still running.
+    Ask,      ///< Ask: a program is running, or none can be ruled out.
 };
 
 /// Whether closing a tab holding @p panes should ask.
 /// @param panes The activity of every pane of the tab.
-/// @return Ask when any pane is Running; None otherwise (Unknown does not ask).
+/// @return None only when every pane is known to be Idle; Ask otherwise. A pane whose program cannot be
+///         known (every pane under daemon hosting) fails toward keeping work: it may be running vim.
 [[nodiscard]] constexpr CloseConfirmation closeConfirmationFor(std::span<PaneActivity const> panes) noexcept
 {
-    return std::ranges::contains(panes, PaneActivity::Running) ? CloseConfirmation::Ask
-                                                               : CloseConfirmation::None;
+    return std::ranges::all_of(panes, [](PaneActivity activity) { return activity == PaneActivity::Idle; })
+               ? CloseConfirmation::None
+               : CloseConfirmation::Ask;
 }
 
 } // namespace contour::window

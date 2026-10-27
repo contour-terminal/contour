@@ -180,7 +180,9 @@ TEST_CASE("Backspace on an idle tab closes it at once", "[windowcontroller][chro
     REQUIRE(f.area() == ChromeArea::Tabs);
     REQUIRE(controller.count() == 3);
 
-    // A MockPty names no foreground process: the pane's activity is Unknown, which never asks.
+    // The foreground process is the pane's shell, so the pane is known to be idle.
+    f.factory->createdPtys[2]->setForegroundProcessName(
+        controller.activeSession()->profile().shell.value().program);
     CHECK(f.chromeKey(Qt::Key_Backspace));
 
     // The model prunes the tab asynchronously, through the session's exit watcher, which headless sessions
@@ -190,6 +192,24 @@ TEST_CASE("Backspace on an idle tab closes it at once", "[windowcontroller][chro
     CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
     CHECK_FALSE(f.factory->createdPtys[1]->isClosed());
     CHECK(asked.isEmpty());
+}
+
+TEST_CASE("Backspace on a tab whose program cannot be known asks first", "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    auto asked =
+        QSignalSpy { &controller, &contour::window::WindowController::closeTabConfirmationRequested };
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(f.area() == ChromeArea::Tabs);
+    REQUIRE(f.factory->createdPtys.size() == 3);
+
+    // A MockPty names no foreground process, as a daemon-hosted pane does: Unknown fails toward asking.
+    CHECK(f.chromeKey(Qt::Key_Backspace));
+
+    CHECK(asked.count() == 1);
+    CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
+    CHECK(f.area() == ChromeArea::Tabs);
 }
 
 TEST_CASE("Backspace on a tab running a program asks first", "[windowcontroller][chromefocus]")
