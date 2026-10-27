@@ -115,6 +115,18 @@ TEST_CASE("the seeded divider is one dim row that a resize cuts instead of wrapp
     }
 }
 
+TEST_CASE("on a one-line page the divider that scrolls into the history is the row left unwrappable",
+          "[vthost][snapshot][seed]")
+{
+    auto fresh = vtbackend::MockTerm<> { PageSize { LineCount(1), ColumnCount(40) }, LineCount(200) };
+    seedRestoredHistory(fresh.terminal, proto::Delta {}, DividerOn);
+
+    auto const& grid = fresh.terminal.primaryScreen().grid();
+    CHECK(grid.lineText(LineOffset(-1)).starts_with("──── Restored"));
+    CHECK_FALSE(grid.lineAt(LineOffset(-1)).wrappable());
+    CHECK(grid.lineAt(LineOffset(0)).wrappable());
+}
+
 TEST_CASE("seeded rows sit in the history above a blank page", "[vthost][snapshot][seed]")
 {
     auto const history = capturedRows(30);

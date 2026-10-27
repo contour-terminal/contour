@@ -146,9 +146,14 @@ void seedRestoredHistory(vtbackend::Terminal& terminal,
     // the page, so it needs no autowrap switching and leaves the profile's DECAWM as it was.
     auto const columns = terminal.pageSize().columns;
     auto const row = cutToCells(restoredDivider(divider, columns), unbox<size_t>(columns));
-    terminal.writeToScreen(std::format("\033[H\033[2m{}\033[m\r\n", row));
-    auto const guard = std::lock_guard { terminal };
-    terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).setWrappable(false);
+    terminal.writeToScreen(std::format("\033[H\033[2m{}\033[m", row));
+    {
+        // Before the line feed: on a one-line page it scrolls the divider into the history, and the flag
+        // must travel with that row rather than land on the blank one that replaces it.
+        auto const guard = std::lock_guard { terminal };
+        terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).setWrappable(false);
+    }
+    terminal.writeToScreen("\r\n");
 }
 
 std::string restoredDividerText(RestoreDivider const& divider)
