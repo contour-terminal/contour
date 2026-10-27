@@ -389,7 +389,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  SessionHosting hosting):
     _manager { manager },
     _id { createSessionId() },
-    _startTime { steady_clock::now() },
+    _startTime { app.terminalClocks().steady.now() },
     _config { app.config() },
     _profileName { resolveProfileName(_config, profileName, app.profileName()) },
     _profileOverride { profileName.empty() ? std::optional<std::string> {} : std::optional { profileName } },
@@ -1639,6 +1639,51 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
     }
 }
 
+int TerminalSession::getUptime() const noexcept
+{
+    auto const diff =
+        std::chrono::duration_cast<std::chrono::seconds>(_app.terminalClocks().steady.now() - _startTime);
+    return static_cast<int>(diff.count());
+}
+
+float TerminalSession::uptime() const noexcept
+{
+    using namespace std::chrono;
+    auto const uptimeMsecs =
+        duration_cast<milliseconds>(_app.terminalClocks().steady.now() - _startTime).count();
+    return static_cast<float>(uptimeMsecs) / 1000.0f;
+}
+
+void TerminalSession::requestSizeIndicator(SizeIndicatorKind event)
+{
+    // The profile's YAML boolean, converted here at the boundary.
+    auto const setting =
+        profile().sizeIndicatorOnResize.value() ? SizeIndicatorSetting::On : SizeIndicatorSetting::Off;
+    if (sizeIndicatorGate(_app.terminalClocks().steady.now() - _startTime, setting)
+        == SizeIndicatorGate::Quiet)
+        return;
+
+    _sizeIndicatorKind = nextSizeIndicatorKind(_sizeIndicatorBurst, _sizeIndicatorKind, event);
+    _sizeIndicatorBurst = SizeIndicatorBurst::Showing;
+    // The main page: the status line is not part of the size a program sees.
+    _sizeIndicatorText = QString::fromStdString(session::sizeIndicatorText(
+        _sizeIndicatorKind, _terminal.mainPageSize(), profile().fonts.value().size.pt));
+    emit sizeIndicatorRequested();
+}
+
+void TerminalSession::sizeIndicatorSettled(bool paneActive)
+{
+    if (std::exchange(_sizeIndicatorBurst, SizeIndicatorBurst::Idle) == SizeIndicatorBurst::Idle)
+        return;
+    if (!paneActive)
+        return;
+
+    // The settled size, which a burst of changes may have moved past what the pill said first.
+    announce(QString::fromStdString(sizeIndicatorAnnouncement(
+                 _sizeIndicatorKind, _terminal.mainPageSize(), profile().fonts.value().size.pt)),
+             QAccessible::AnnouncementPoliteness::Polite);
+}
+
 void TerminalSession::applySystemScrollBars(std::optional<config::ScrollBarMode> system)
 {
     _systemScrollBars = system;
@@ -2140,7 +2185,7 @@ void TerminalSession::handleDeviceClosedLocked()
     if (!_terminal.device().isClosed())
         _terminal.device().close();
 
-    auto const now = steady_clock::now();
+    auto const now = _app.terminalClocks().steady.now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
     auto const exitStatus = sessionExitStatusOf(_terminal.device());
@@ -6961,6 +7006,7 @@ void TerminalSession::setFontSize(text::FontSize size)
     if (_display == nullptr)
     {
         _profile.fonts.value().size = size;
+        requestSizeIndicator(SizeIndicatorKind::FontSize);
         return;
     }
 
@@ -6974,6 +7020,8 @@ void TerminalSession::setFontSize(text::FontSize size)
         return;
 
     _profile.fonts.value().size = size;
+    // Here alone, after the size is persisted, so each zoom action raises it once.
+    requestSizeIndicator(SizeIndicatorKind::FontSize);
 }
 
 void TerminalSession::applyReloadedConfig(config::Config const& config, string const& profileName)

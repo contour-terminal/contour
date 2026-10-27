@@ -24,6 +24,7 @@
 #include <contour/session/ScrollbarVisibility.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/session/SizeIndicator.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -216,6 +217,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QColor backgroundColor READ getBackgroundColor NOTIFY backgroundColorChanged)
     Q_PROPERTY(bool isScrollbarRight READ getIsScrollbarRight NOTIFY isScrollbarRightChanged)
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
+    // What the size indicator says: "100 × 30" or "13 pt". Its signal fires on every request the gate lets
+    // through, so the pill restarts its hold.
+    Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText NOTIFY sizeIndicatorRequested)
     Q_PROPERTY(int fontSize READ getFontSize)
     Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
@@ -283,12 +287,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
   public:
     // {{{ Model property helper
 
-    int getUptime() const noexcept
-    {
-        auto const now = std::chrono::steady_clock::now();
-        auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
-        return static_cast<int>(diff.count());
-    }
+    /// @return Whole seconds since the session started, by the app's injected steady clock.
+    int getUptime() const noexcept;
 
     /// What the hyperlink tooltip should say, or empty for "show nothing".
     [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
@@ -567,6 +567,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         }
         return false;
     }
+
+    /// What the size indicator says, as the last request let through set it. GUI thread.
+    [[nodiscard]] QString sizeIndicatorText() const { return _sizeIndicatorText; }
+
+    /// Raises the size indicator for @p event, unless the session is in its first second or the profile
+    /// turned it off (@see sizeIndicatorGate). A font zoom's text survives the page resize it causes while
+    /// its burst lasts (@see nextSizeIndicatorKind). Emits sizeIndicatorRequested. GUI thread, outside the
+    /// terminal lock.
+    /// @param event What changed: the page, or the font size.
+    void requestSizeIndicator(SizeIndicatorKind event);
+
+    /// Ends the size indicator's burst, once its pill has been still for its hold, and announces the settled
+    /// size, Polite, when @p paneActive. Does nothing outside a burst, so a burst is announced once.
+    /// @param paneActive Whether the pane is the active one: only it is announced. A `bool` because QML
+    ///        calls this (the documented Q_INVOKABLE carve-out).
+    Q_INVOKABLE void sizeIndicatorSettled(bool paneActive);
 
     bool getIsScrollbarRight() const noexcept
     {
@@ -1524,14 +1540,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::chrono::steady_clock::time_point startTime() const noexcept { return _startTime; }
 
-    float uptime() const noexcept
-    {
-        using namespace std::chrono;
-        auto const now = steady_clock::now();
-        auto const uptimeMsecs = duration_cast<milliseconds>(now - _startTime).count();
-        auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
-        return uptimeSecs;
-    }
+    /// @return Seconds since the session started, by the app's injected steady clock.
+    float uptime() const noexcept;
 
     /// The permission the active profile configures for @p role.
     ///
@@ -1644,6 +1654,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void backgroundColorChanged();
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
+    /// The size indicator is to show, or to restart its hold, with sizeIndicatorText().
+    void sizeIndicatorRequested();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell(float volume);
@@ -2080,6 +2092,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     TerminalSessionManager* _manager;
     int _id;
     vtworkspace::SessionId _modelSessionId {};
+    /// When the session started, read from the app's injected steady clock (TerminalClocks::steady), which
+    /// every reader of it reads too.
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
@@ -2371,6 +2385,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The visibility isScrollbarVisibleChanged last announced. Hidden to begin with: a new session has no
     /// history. GUI thread only.
     ScrollbarVisibility _announcedScrollbarVisibility = ScrollbarVisibility::Hidden;
+
+    /// Whether the size indicator shows, from its first request until sizeIndicatorSettled(). GUI thread.
+    SizeIndicatorBurst _sizeIndicatorBurst = SizeIndicatorBurst::Idle;
+
+    /// What the size indicator reports during its burst. GUI thread.
+    SizeIndicatorKind _sizeIndicatorKind = SizeIndicatorKind::PageSize;
+
+    /// What the size indicator says. GUI thread.
+    QString _sizeIndicatorText;
 
     /// The key the published ticks were built from; nullopt before the first refresh. GUI thread only.
     std::optional<ScrollbarMarksKey> _scrollbarMarksKey;

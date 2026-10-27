@@ -22,6 +22,7 @@
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionInput.hpp>
+#include <contour/session/SizeIndicator.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
@@ -12538,5 +12539,158 @@ TEST_CASE("TerminalSession: position hidden and the alternate screen stay hidden
         CHECK(session->getIsScrollbarVisible());
         CHECK(changes.count() == 2);
     }
+}
+// }}}
+
+// {{{ Size indicator
+namespace
+{
+
+/// The time a session waits before its first size indicator, plus a moment.
+constexpr auto PastSizeIndicatorQuiet =
+    std::chrono::duration_cast<std::chrono::milliseconds>(contour::session::SizeIndicatorStartupQuiet)
+    + std::chrono::milliseconds { 1 };
+
+/// What the pill says for @p session's main page.
+[[nodiscard]] QString pageTextOf(contour::session::TerminalSession const& session)
+{
+    return QString::fromStdString(
+        std::format("{} × {}", session.pageColumnsCount(), session.pageLineCount()));
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: the size indicator stays quiet for the first second",
+          "[contour][session][sizeindicator]")
+{
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto requests = QSignalSpy(session.get(), &contour::session::TerminalSession::sizeIndicatorRequested);
+
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    CHECK(requests.count() == 0);
+
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    CHECK(requests.count() == 1);
+    CHECK(session->sizeIndicatorText() == pageTextOf(*session));
+}
+
+TEST_CASE("TerminalSession: the size indicator reads the new main page after a resize",
+          "[contour][session][sizeindicator]")
+{
+    // applyResize() requests it after resizeScreen() has run, so the text is the page the resize made -- and
+    // the MAIN page, which the indicator status line is no part of.
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    REQUIRE(session->terminal().statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    auto const total =
+        vtbackend::PageSize { .lines = vtbackend::LineCount(31), .columns = vtbackend::ColumnCount(100) };
+    session->terminal().resizeScreen(total);
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+
+    CHECK(session->pageColumnsCount() == unbox(total.columns));
+    CHECK(session->pageLineCount() < unbox(total.lines));
+    CHECK(session->sizeIndicatorText() == pageTextOf(*session));
+}
+
+TEST_CASE("TerminalSession: a font zoom reads in points and keeps its text through its resize",
+          "[contour][session][sizeindicator]")
+{
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    auto requests = QSignalSpy(session.get(), &contour::session::TerminalSession::sizeIndicatorRequested);
+
+    auto const before = session->profile().fonts.value().size.pt;
+    REQUIRE((*session)(contour::actions::IncreaseFontSize {}));
+    auto const points = session->profile().fonts.value().size.pt;
+    REQUIRE(points > before);
+    auto const pointsText = QString::fromStdString(std::format("{} pt", points));
+    // One request per zoom: the action goes through setFontSize(), which alone raises it.
+    CHECK(requests.count() == 1);
+    CHECK(session->sizeIndicatorText() == pointsText);
+
+    // The page resize the zoom causes keeps saying the size in points.
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    CHECK(session->sizeIndicatorText() == pointsText);
+
+    // Once the pill has settled, a resize reads as the page again.
+    session->sizeIndicatorSettled(true);
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    CHECK(session->sizeIndicatorText() == pageTextOf(*session));
+}
+
+TEST_CASE("TerminalSession: only the active pane is announced, once per burst",
+          "[contour][session][sizeindicator]")
+{
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto active = makeDisplaylessSession(testApp.app());
+    auto inactive = makeDisplaylessSession(testApp.app());
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    auto activeAnnouncer = std::make_unique<RecordingAnnouncer>();
+    auto inactiveAnnouncer = std::make_unique<RecordingAnnouncer>();
+    auto* const activeSaid = activeAnnouncer.get();
+    auto* const inactiveSaid = inactiveAnnouncer.get();
+    active->setAnnouncer(std::move(activeAnnouncer));
+    inactive->setAnnouncer(std::move(inactiveAnnouncer));
+
+    for ([[maybe_unused]] auto const step: std::views::iota(0, 3))
+    {
+        active->requestSizeIndicator(SizeIndicatorKind::PageSize);
+        inactive->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    }
+    CHECK(activeSaid->said.empty());
+
+    active->sizeIndicatorSettled(true);
+    inactive->sizeIndicatorSettled(false);
+    REQUIRE(activeSaid->said.size() == 1);
+    CHECK(inactiveSaid->said.empty());
+    CHECK(activeSaid->said.front().message
+          == QString::fromStdString(
+              std::format("{} columns, {} rows", active->pageColumnsCount(), active->pageLineCount())));
+    CHECK(activeSaid->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
+
+    // A burst is announced once: settling again says nothing more.
+    active->sizeIndicatorSettled(true);
+    CHECK(activeSaid->said.size() == 1);
+
+    SECTION("a zoom says its size in points")
+    {
+        REQUIRE((*active)(contour::actions::IncreaseFontSize {}));
+        active->sizeIndicatorSettled(true);
+        REQUIRE(activeSaid->said.size() == 2);
+        CHECK(activeSaid->said.back().message
+              == QString::fromStdString(std::format("{} points", active->profile().fonts.value().size.pt)));
+    }
+}
+
+TEST_CASE("TerminalSession: size_indicator_on_resize: false raises nothing",
+          "[contour][session][sizeindicator]")
+{
+    using contour::session::SizeIndicatorKind;
+    TestApp testApp;
+    auto session = makeSessionWithProfile(
+        testApp.app(), registerProfile(testApp.app(), "quiet", [](contour::config::TerminalProfile& p) {
+            p.sizeIndicatorOnResize = false;
+        }));
+    // Past the startup quiet, so only the setting can be what keeps it quiet.
+    testApp.steadyClock().advance(PastSizeIndicatorQuiet);
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* const said = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+    auto requests = QSignalSpy(session.get(), &contour::session::TerminalSession::sizeIndicatorRequested);
+
+    session->requestSizeIndicator(SizeIndicatorKind::PageSize);
+    REQUIRE((*session)(contour::actions::IncreaseFontSize {}));
+    session->sizeIndicatorSettled(true);
+    CHECK(requests.count() == 0);
+    CHECK(said->said.empty());
 }
 // }}}

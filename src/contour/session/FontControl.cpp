@@ -3,6 +3,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/Logging.hpp>
+#include <contour/session/SizeIndicator.hpp>
 #include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/screen/Terminal.hpp>
@@ -159,19 +160,28 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
                           oldPageSize,
                           fit.pageSize);
 
-    // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is echoed
-    // and parses, taking the lock again. The lock holds the report back and sends it once it is released.
-    auto const _ = std::scoped_lock { terminal };
+    auto const resized = [&] {
+        // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is
+        // echoed and parses, taking the lock again. The lock holds the report back and sends it once it is
+        // released.
+        auto const _ = std::scoped_lock { terminal };
 
-    // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
-    if (fit.pageSize == terminal.totalPageSize())
-    {
-        display::displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
-        return;
-    }
+        // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
+        if (fit.pageSize == terminal.totalPageSize())
+        {
+            display::displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
+            return false;
+        }
 
-    terminal.resizeScreen(fit.pageSize, viewSize);
-    terminal.clearSelection();
+        terminal.resizeScreen(fit.pageSize, viewSize);
+        terminal.clearSelection();
+        return true;
+    }();
+
+    // Once per change, not per dimension, and only after resizeScreen(): the indicator reads the new main
+    // page. Outside the lock, since the signal it raises wakes QML that reads back into the session.
+    if (resized)
+        session.requestSizeIndicator(SizeIndicatorKind::PageSize);
 }
 
 } // namespace contour::session
