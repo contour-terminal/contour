@@ -322,7 +322,9 @@ class WindowController:
     /// an area that is not shown. Entering the tab well focuses the active tab; entering the toolbar, its
     /// first item; reaching the terminal is leaveChrome().
     /// @param action Where focus goes.
-    void moveChromeFocus(window::ChromeFocusAction action);
+    /// @return Moved when focus changed area; Stayed when there was nowhere else to go, so the key that asked
+    ///         can still be the terminal's.
+    window::FocusMove moveChromeFocus(window::ChromeFocusAction action);
     /// Reports what the chrome shows, as QML knows it. If the focused area is no longer shown, focus
     /// returns to the terminal.
     /// Booleans are the carve-out for a QML-facing Q_INVOKABLE (AGENT.md, enum class over bool).

@@ -6439,20 +6439,17 @@ bool TerminalSession::operator()(actions::ZoomWindow)
 
 bool TerminalSession::operator()(actions::FocusNextArea)
 {
-    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Next);
-    return true;
+    return _manager->moveChromeFocus(*this, window::ChromeFocusAction::Next) == window::FocusMove::Moved;
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousArea)
 {
-    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Previous);
-    return true;
+    return _manager->moveChromeFocus(*this, window::ChromeFocusAction::Previous) == window::FocusMove::Moved;
 }
 
 bool TerminalSession::operator()(actions::FocusToolbar)
 {
-    _manager->moveChromeFocus(*this, window::ChromeFocusAction::Toolbar);
-    return true;
+    return _manager->moveChromeFocus(*this, window::ChromeFocusAction::Toolbar) == window::FocusMove::Moved;
 }
 
 bool TerminalSession::operator()(actions::MoveTabTo event)

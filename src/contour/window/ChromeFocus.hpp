@@ -50,6 +50,13 @@ enum class ChromeFocusAction : uint8_t
     Toolbar,  ///< The toolbar, wherever focus is now.
 };
 
+/// Whether a request to move focus moved it.
+enum class FocusMove : uint8_t
+{
+    Stayed = 0, ///< Focus is where it was: the area asked for is absent or already holds it.
+    Moved,      ///< Focus is now in another area.
+};
+
 /// Whether @p area is shown.
 /// @param area The area to ask about.
 /// @param presence What the window shows.

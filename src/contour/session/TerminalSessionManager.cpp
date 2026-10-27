@@ -1068,10 +1068,12 @@ void TerminalSessionManager::zoomWindow(TerminalSession* acting)
         controller->toggleMaximized();
 }
 
-void TerminalSessionManager::moveChromeFocus(TerminalSession const& session, window::ChromeFocusAction action)
+window::FocusMove TerminalSessionManager::moveChromeFocus(TerminalSession const& session,
+                                                          window::ChromeFocusAction action)
 {
     if (auto* controller = controllerHostingSession(&session); controller != nullptr)
-        controller->moveChromeFocus(action);
+        return controller->moveChromeFocus(action);
+    return window::FocusMove::Stayed;
 }
 
 void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)

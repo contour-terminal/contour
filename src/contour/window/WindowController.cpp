@@ -978,19 +978,39 @@ namespace
         return window::ChromeKeyModifier::Other;
     }
 
-    /// The number of function keys a focus chord can be bound to (F1..F12).
-    inline constexpr auto ChordFunctionKeyCount = 12;
-    static_assert(static_cast<int>(vtbackend::Key::F12) - static_cast<int>(vtbackend::Key::F1)
-                      == ChordFunctionKeyCount - 1,
-                  "the function keys must be contiguous for the Qt mapping below");
+    /// The Qt key codes of the printable ASCII characters equal their codepoints (upper case for letters).
+    inline constexpr auto PrintableAsciiBegin = 0x20;
+    inline constexpr auto PrintableAsciiEnd = 0x80;
 
-    /// The terminal key for a function key of Qt's numbering, which the focus chords are bound to.
-    [[nodiscard]] std::optional<vtbackend::Key> functionKeyOf(int qtKey) noexcept
+    /// The focus action each action of the key bindings is.
+    struct ChromeFocusRow
     {
-        auto const offset = qtKey - static_cast<int>(Qt::Key_F1);
-        if (offset < 0 || offset >= ChordFunctionKeyCount)
-            return std::nullopt;
-        return static_cast<vtbackend::Key>(static_cast<int>(vtbackend::Key::F1) + offset);
+        actions::Action action;
+        window::ChromeFocusAction focus;
+    };
+
+    /// @return The rows the focus chords are matched against, in order.
+    [[nodiscard]] std::array<ChromeFocusRow, 3> const& chromeFocusRows()
+    {
+        static auto const rows = std::array {
+            ChromeFocusRow { .action = actions::FocusNextArea {}, .focus = window::ChromeFocusAction::Next },
+            ChromeFocusRow { .action = actions::FocusPreviousArea {},
+                             .focus = window::ChromeFocusAction::Previous },
+            ChromeFocusRow { .action = actions::FocusToolbar {},
+                             .focus = window::ChromeFocusAction::Toolbar },
+        };
+        return rows;
+    }
+
+    /// The first of @p bound that is a focus action.
+    [[nodiscard]] std::optional<window::ChromeFocusAction> focusActionOf(
+        std::vector<actions::Action> const& bound)
+    {
+        for (auto const& action: bound)
+            for (auto const& row: chromeFocusRows())
+                if (action.index() == row.action.index())
+                    return row.focus;
+        return std::nullopt;
     }
 } // namespace
 
@@ -1007,9 +1027,13 @@ void WindowController::enterChromeArea(window::ChromeArea area)
     emit chromeFocusChanged();
 }
 
-void WindowController::moveChromeFocus(window::ChromeFocusAction action)
+window::FocusMove WindowController::moveChromeFocus(window::ChromeFocusAction action)
 {
-    enterChromeArea(window::chromeFocusTarget(action, _chromeArea, _chromePresence));
+    auto const target = window::chromeFocusTarget(action, _chromeArea, _chromePresence);
+    if (target == _chromeArea)
+        return window::FocusMove::Stayed;
+    enterChromeArea(target);
+    return window::FocusMove::Moved;
 }
 
 bool WindowController::dropChromeFocus()
@@ -1066,25 +1090,34 @@ std::optional<window::ChromeFocusAction> WindowController::chromeFocusActionFor(
     int qtKey, Qt::KeyboardModifiers modifiers) const
 {
     auto const* session = activeSession();
-    auto const key = functionKeyOf(qtKey);
-    if (session == nullptr || !key)
+    if (session == nullptr)
         return std::nullopt;
 
     // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
-    auto const chord = input::makeModifiers(modifiers).chord;
-    auto const* bound = config::apply(session->config().inputMappings.value().keyMappings, *key, chord, 0);
-    if (bound == nullptr)
-        return std::nullopt;
-    for (auto const& action: *bound)
+    constexpr auto NoModes = uint8_t { 0 };
+    auto const& mappings = session->config().inputMappings.value();
+    auto chord = input::makeModifiers(modifiers).chord;
+
+    // A key a binding can name, as the terminal keys it: a named key, Shift+Tab's Backtab, or a character.
+    auto const named =
+        qtKey == Qt::Key_Backtab ? std::optional { vtbackend::Key::Tab } : input::namedKeyOf(qtKey);
+    if (named)
     {
-        if (std::holds_alternative<actions::FocusNextArea>(action))
-            return window::ChromeFocusAction::Next;
-        if (std::holds_alternative<actions::FocusPreviousArea>(action))
-            return window::ChromeFocusAction::Previous;
-        if (std::holds_alternative<actions::FocusToolbar>(action))
-            return window::ChromeFocusAction::Toolbar;
+        if (qtKey == Qt::Key_Backtab)
+            chord.enable(vtbackend::Modifier::Shift);
+        if (auto const* bound = config::apply(mappings.keyMappings, *named, chord, NoModes))
+            return focusActionOf(*bound);
+        return std::nullopt;
     }
-    return std::nullopt;
+    if (qtKey < PrintableAsciiBegin || qtKey >= PrintableAsciiEnd)
+        return std::nullopt;
+    // As TerminalSession matches a character: letters folded, and under Shift the unshifted key as well.
+    auto const folded = config::foldedBindingCodepoint(static_cast<char32_t>(qtKey));
+    auto const* bound = config::apply(mappings.charMappings, folded, chord, NoModes);
+    if (bound == nullptr && chord.test(vtbackend::Modifier::Shift))
+        if (auto const base = input::unshiftedCodepoint(folded); base != folded)
+            bound = config::apply(mappings.charMappings, base, chord, NoModes);
+    return bound != nullptr ? focusActionOf(*bound) : std::nullopt;
 }
 
 bool WindowController::chromeKey(int qtKey, int qtModifiers)

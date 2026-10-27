@@ -24,14 +24,35 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <optional>
 #include <ranges>
 
 using contour::input::makeModifiers;
 using contour::input::makeMouseButton;
+
+TEST_CASE("namedKeyOf names the keys that are terminal keys and no character", "[contour][input]")
+{
+    using contour::input::namedKeyOf;
+    using contour::input::NamedKeyRows;
+
+    // Every row answers for its own Qt key, and no Qt key is listed twice.
+    for (auto const& row: NamedKeyRows)
+    {
+        REQUIRE(namedKeyOf(row.qt) == std::optional { row.key });
+        CHECK(std::ranges::count(NamedKeyRows, row.qt, &contour::input::NamedKeyRow::qt) == 1);
+    }
+
+    CHECK(namedKeyOf(Qt::Key_F6) == std::optional { vtbackend::Key::F6 });
+    CHECK(namedKeyOf(Qt::Key_Home) == std::optional { vtbackend::Key::Home });
+    // A character key is matched by the char mappings, not by name.
+    CHECK_FALSE(namedKeyOf(Qt::Key_A).has_value());
+    CHECK_FALSE(namedKeyOf(Qt::Key_Space).has_value());
+}
 
 TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[session][input]")
 {

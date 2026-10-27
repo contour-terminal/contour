@@ -38,11 +38,14 @@ struct ChromeFixture
     std::unique_ptr<contour::test::TestApp> app;
     std::unique_ptr<contour::test::ScopedController> window;
 
-    ChromeFixture():
+    /// @param extraBindings Adds bindings to the Native2026 defaults before the sessions copy the config.
+    explicit ChromeFixture(void (*extraBindings)(contour::config::InputMappings&) = nullptr):
         app(makeApp(factory)), window(std::make_unique<contour::test::ScopedController>(app->manager()))
     {
         app->app().config().inputMappings.value() =
             contour::config::defaultInputMappings(contour::config::DefaultsEdition::Native2026);
+        if (extraBindings != nullptr)
+            extraBindings(app->app().config().inputMappings.value());
         [[maybe_unused]] auto const tabs = contour::test::createSessionTabs(app->manager(), **window, 3);
         (*window)->setChromePresence(true, ToolbarItems);
     }
@@ -353,6 +356,59 @@ TEST_CASE("a confirmed close reaches the tab that was asked about, not the row i
         CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
         CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
     }
+}
+
+TEST_CASE("a rebound focus chord, on a key that is not F1..F12, cycles from inside the chrome",
+          "[windowcontroller][chromefocus]")
+{
+    using contour::config::CharInputMapping;
+    using contour::config::KeyInputMapping;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+
+    auto const f = ChromeFixture { [](contour::config::InputMappings& mappings) {
+        // A named key that is not a function key, a shifted Tab, and a character: none of them F1..F12.
+        mappings.keyMappings.push_back(KeyInputMapping { .modes {},
+                                                         .modifiers = Modifiers { Modifier::Alt },
+                                                         .input = vtbackend::Key::Home,
+                                                         .binding = { contour::actions::FocusNextArea {} } });
+        mappings.keyMappings.push_back(
+            KeyInputMapping { .modes {},
+                              .modifiers = Modifiers { Modifier::Alt, Modifier::Shift },
+                              .input = vtbackend::Key::Tab,
+                              .binding = { contour::actions::FocusPreviousArea {} } });
+        mappings.charMappings.push_back(
+            CharInputMapping { .modes {},
+                               .modifiers = Modifiers { Modifier::Alt },
+                               .input = U'J',
+                               .binding = { contour::actions::FocusToolbar {} } });
+    } };
+    auto& controller = f.controller();
+
+    // From inside the tab well, each chord is a focus action and the chrome consumes it.
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(f.area() == ChromeArea::Tabs);
+    CHECK(f.chromeKey(Qt::Key_Home, Qt::AltModifier));
+    CHECK(f.area() == ChromeArea::Toolbar);
+    CHECK(f.chromeKey(Qt::Key_Backtab, Qt::AltModifier | Qt::ShiftModifier));
+    CHECK(f.area() == ChromeArea::Tabs);
+    CHECK(f.chromeKey(Qt::Key_J, Qt::AltModifier));
+    CHECK(f.area() == ChromeArea::Toolbar);
+
+    // A chord bound to nothing is not the chrome's to take.
+    CHECK_FALSE(f.chromeKey(Qt::Key_K, Qt::AltModifier));
+}
+
+TEST_CASE("Ctrl+F6 reaches the program when the window shows no chrome", "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    f.controller().setChromePresence(false, 0);
+
+    f.pressOnSession(vtbackend::Key::F6, vtbackend::Modifiers { vtbackend::Modifier::Control });
+
+    // Nowhere to move focus to: the key is the terminal's, as an unbound one is.
+    CHECK(f.area() == ChromeArea::Terminal);
+    CHECK(contour::test::mockPtyOf(*f.controller().activeSession()).stdinBuffer() == "\x1b[17;5~");
 }
 
 TEST_CASE("a bare F6 is written to the PTY", "[windowcontroller][chromefocus]")
