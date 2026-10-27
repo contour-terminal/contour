@@ -5776,3 +5776,87 @@ TEST_CASE("Terminal looks a printed path up in the filesystem it was given", "[t
     REQUIRE(matches.size() == 1);
     CHECK(matches[0].matchedText == core::pathToUtf8(file.lexically_normal()));
 }
+
+// {{{ Overlay clearance
+TEST_CASE("Terminal.overlayClearance.blankRuns", "[terminal][overlayclearance]")
+{
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    mc.writeToScreen("hello");
+    auto const clearance = mc.terminal.overlayClearance();
+    CHECK(clearance.columns == 20);
+    CHECK(clearance.trailingBlankColumns == std::vector { 15, 20, 20, 20 });
+}
+
+TEST_CASE("Terminal.overlayClearance.aColouredSpaceIsNotBlank", "[terminal][overlayclearance]")
+{
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("a row of spaces on a coloured background")
+    {
+        mc.writeToScreen("\r\n\033[44m" + std::string(20, ' ') + "\033[m");
+        auto const clearance = mc.terminal.overlayClearance();
+        REQUIRE(clearance.trailingBlankColumns.size() == 4);
+        CHECK(clearance.trailingBlankColumns[1] == 0);
+        CHECK(clearance.trailingBlankColumns[0] == 20);
+    }
+
+    SECTION("a full-screen program's coloured clear")
+    {
+        mc.writeToScreen("\033[44m\033[2J");
+        CHECK(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 0, 0, 0, 0 });
+    }
+}
+
+TEST_CASE("Terminal.overlayClearance.avoidsTheCursorAndTheLivePrompt", "[terminal][overlayclearance]")
+{
+    SECTION("the cursor's row")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+        mc.writeToScreen("$ https://x.y");
+        CHECK(mc.terminal.overlayClearance().avoidRows == std::vector { 0 });
+    }
+
+    SECTION("a live prompt over two rows, the cursor on its second")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+        mc.writeToScreen("out 0\r\nout 1\r\n\033]133;A\033\\user@host:~/work\r\n$ ");
+        REQUIRE(mc.terminal.livePromptSpan().has_value());
+        CHECK(mc.terminal.overlayClearance().avoidRows == std::vector { 2, 3 });
+    }
+
+    SECTION("a cursor scrolled off the page is avoided nowhere")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(20) };
+        for (auto const i: std::views::iota(0, 10))
+            mc.writeToScreen(std::format("line {}\r\n", i));
+        mc.writeToScreen("$ ");
+        REQUIRE(mc.terminal.overlayClearance().avoidRows == std::vector { 3 });
+        REQUIRE(mc.terminal.viewport().scrollUp(LineCount(4)));
+        CHECK(mc.terminal.overlayClearance().avoidRows.empty());
+    }
+}
+
+TEST_CASE("Terminal.overlayClearance.theStatusLineIsNeverBlank", "[terminal][overlayclearance]")
+{
+    // The rows count from the display's first drawn row, status line included: its text is drawn chrome, so
+    // its entry is 0 and an overlay never lands on it.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen("hello");
+
+    SECTION("at the bottom")
+    {
+        auto const clearance = mc.terminal.overlayClearance();
+        CHECK(clearance.trailingBlankColumns == std::vector { 15, 20, 20, 0 });
+        CHECK(clearance.avoidRows == std::vector { 0 });
+    }
+
+    SECTION("at the top, the page's rows below it")
+    {
+        mc.terminal.settings().statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
+        auto const clearance = mc.terminal.overlayClearance();
+        CHECK(clearance.trailingBlankColumns == std::vector { 0, 15, 20, 20 });
+        CHECK(clearance.avoidRows == std::vector { 1 });
+    }
+}
+// }}}

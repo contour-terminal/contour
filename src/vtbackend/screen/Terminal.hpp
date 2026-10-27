@@ -28,6 +28,7 @@
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
+#include <vtbackend/screen/OverlayClearance.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
 #include <vtbackend/screen/SearchQuery.hpp>
 #include <vtbackend/screen/SearchTallyWalk.hpp>
@@ -2946,6 +2947,17 @@ class Terminal: public IStatusLinePublishTarget
     ///
     /// @return The span, or why there is no live prompt.
     [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
+
+    /// Where an overlay over the page on display may go: each drawn row's blank run at its right end, and the
+    /// rows of the live prompt and the cursor, which it must not cover (@see OverlayClearance).
+    ///
+    /// The rows are the drawn ones, status line included, counted from the first; a status line's row is
+    /// never blank. A row a collapsed fold stands in for is read as the row standing in its place, as the
+    /// render pass draws it.
+    ///
+    /// Does NOT take the lock -- the caller holds it. Not noexcept: the fold projection is built lazily.
+    /// @return The clearance of the page on display.
+    [[nodiscard]] OverlayClearance overlayClearance() const;
 
     /// When the cursor first reached @p line, by the wall clock this terminal was given.
     ///

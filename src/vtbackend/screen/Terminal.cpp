@@ -4909,6 +4909,57 @@ std::expected<LivePromptSpan, PromptRegionError> Terminal::livePromptSpan() cons
     return primaryScreen().livePromptSpan();
 }
 
+OverlayClearance Terminal::overlayClearance() const
+{
+    auto const pageLines = unbox<int>(pageSize().lines);
+    auto const columns = unbox<int>(pageSize().columns);
+    auto const mainTop = unbox<int>(mainPageTopRow());
+    auto const drawnRows = pageLines + unbox<int>(statusLineHeight());
+
+    // Every drawn row starts as not blank, so the status line's row stays at 0: its text is drawn chrome.
+    auto clearance =
+        OverlayClearance { .columns = columns,
+                           .trailingBlankColumns = std::vector<int>(static_cast<size_t>(drawnRows), 0),
+                           .avoidRows = {} };
+
+    auto const& grid = displayedPage().grid();
+    auto const firstLine = -unbox<int>(grid.historyLineCount());
+    for (auto const row: std::views::iota(0, pageLines))
+    {
+        // Through the projection, so a row a collapsed fold stands in for reads as the row drawn there. Past
+        // the history's end the page shows no line, which is blank.
+        auto const line = viewport().translateScreenToGridLine(LineOffset(row));
+        auto const blank = unbox<int>(line) < firstLine || unbox<int>(line) >= pageLines
+                               ? columns
+                               : columns - unbox<int>(grid.lineAt(line).trimmedColumns());
+        auto const drawnRow = mainTop + row;
+        clearance.trailingBlankColumns[static_cast<size_t>(drawnRow)] = blank;
+    }
+
+    // A grid line, if it is drawn on the page, as a drawn row.
+    auto const avoid = [&](LineOffset line) {
+        if (!viewport().isLineVisible(line))
+            return;
+        auto const row = unbox<int>(viewport().translateGridToScreenCoordinate(line));
+        if (row >= 0 && row < pageLines)
+            clearance.avoidRows.push_back(mainTop + row);
+    };
+
+    // The live prompt is the primary screen's, and only where that screen is on display.
+    if (_displayedPage == PageIndex(0))
+        if (auto const prompt = livePromptSpan())
+            for (auto const line:
+                 std::views::iota(unbox<int>(prompt->firstLine), unbox<int>(prompt->lastLine) + 1))
+                avoid(LineOffset(line));
+    if (_cursorPage == _displayedPage && _activeStatusDisplay == ActiveStatusDisplay::Main)
+        avoid(currentScreen().cursor().position.line);
+
+    std::ranges::sort(clearance.avoidRows);
+    auto const duplicates = std::ranges::unique(clearance.avoidRows);
+    clearance.avoidRows.erase(duplicates.begin(), duplicates.end());
+    return clearance;
+}
+
 string Terminal::extractLastMarkRange() const
 {
     // -1 because we always want to start extracting one line above the cursor by default.

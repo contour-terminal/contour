@@ -121,6 +121,7 @@ set(vtbackend_HEADERS
     core/StickyHeaderKind.hpp
     screen/StatusLineCommandCache.hpp
     screen/StatusLineExtensions.hpp
+    screen/OverlayClearance.hpp
     screen/Terminal.hpp
     screen/TerminalClocks.hpp
     screen/TerminalTestFixtures.hpp
