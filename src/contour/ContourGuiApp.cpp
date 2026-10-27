@@ -2952,13 +2952,16 @@ window::SettingsController& ContourGuiApp::settingsController()
                 .scheduler = std::make_shared<window::QtSaveScheduler>(),
             },
             _colorPreference);
-        // A change committed within the debounce before quitting is written, not lost with the timer.
-        QObject::connect(QCoreApplication::instance(),
-                         &QCoreApplication::aboutToQuit,
-                         _settingsController.get(),
-                         &window::SettingsController::flushPendingChanges);
+        QObject::connect(
+            QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ContourGuiApp::flushForQuit);
     }
     return *_settingsController;
+}
+
+void ContourGuiApp::flushForQuit()
+{
+    if (_settingsController)
+        _settingsController->flushPendingChanges();
 }
 
 window::SettingsWindowFactory ContourGuiApp::engineSettingsWindowFactory()

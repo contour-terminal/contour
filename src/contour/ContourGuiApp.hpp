@@ -318,6 +318,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The controller; it lives as long as the app's Qt objects.
     [[nodiscard]] window::SettingsController& settingsController();
 
+    /// What the app does as the application quits (connected to QCoreApplication::aboutToQuit): a Settings
+    /// change committed within the debounce is written, not lost with the timer. Public so a test can
+    /// run it without emitting the real signal, which every other listener of the process would receive.
+    void flushForQuit();
+
     /// The GUI state beside contour.yml, over the app's file system, created on first use.
     /// @return The store; it lives as long as the app.
     [[nodiscard]] std::shared_ptr<config::GuiStateStore> const& guiState();

@@ -580,7 +580,7 @@ TEST_CASE("quitting flushes a pending Settings edit", "[contour][settings][livea
     REQUIRE(settings.hasChanges());
     auto const scheme = settings.editingScheme().toStdString();
 
-    REQUIRE(QMetaObject::invokeMethod(QCoreApplication::instance(), "aboutToQuit", Qt::DirectConnection));
+    testApp.app().flushForQuit();
 
     auto const& config = testApp.app().config();
     auto const* main = config.findProfile("main");
