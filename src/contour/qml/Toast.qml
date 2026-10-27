@@ -39,14 +39,16 @@ Control {
     /// link pill cuts a long target in its middle, where both its host and its last segment survive.
     property int textElide: Text.ElideNone
 
+    // Each label's width is rounded up, as the row lays its items out on whole pixels: a toast given the sum
+    // of the fractional widths would cut its message by a fraction of a pixel, and so by a whole word.
     /// The message's own width, uncut.
-    readonly property real textImplicitWidth: textLabel.implicitWidth
+    readonly property real textImplicitWidth: Math.ceil(textLabel.implicitWidth)
     /// What everything but the message takes: the insets, the glyph and the detail with their gaps. Summed
     /// from the labels' own widths, so it is known before the row has been laid out (an unshown toast is
     /// never polished, and its implicitWidth lags until it is).
     readonly property real restImplicitWidth: leftPadding + rightPadding
-                                              + (root.glyph.length > 0 ? glyphLabel.implicitWidth + spacing : 0)
-                                              + (root.detail.length > 0 ? spacing + detailLabel.implicitWidth : 0)
+                                              + (root.glyph.length > 0 ? Math.ceil(glyphLabel.implicitWidth) + spacing : 0)
+                                              + (root.detail.length > 0 ? spacing + Math.ceil(detailLabel.implicitWidth) : 0)
 
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel

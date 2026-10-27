@@ -6970,6 +6970,11 @@ TEST_CASE("link pill: a single pane's pill sits top right over blank cells (offs
     auto* detail = pill->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
     REQUIRE(detail != nullptr);
     CHECK(detail->property("text").toString() == QStringLiteral("⌘-click to open"));
+    // Room enough: the whole target, not cut.
+    auto* text = pill->findChild<QQuickItem*>(QStringLiteral("toastText"));
+    REQUIRE(text != nullptr);
+    CHECK_FALSE(text->property("truncated").toBool());
+    CHECK(text->width() >= text->property("implicitWidth").toReal());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
