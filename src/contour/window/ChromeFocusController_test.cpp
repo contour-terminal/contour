@@ -57,6 +57,13 @@ struct ChromeFixture
 
     [[nodiscard]] contour::window::WindowController& controller() const { return **window; }
 
+    /// Closes the tab @p tab in the model at once, as the daemon does when a tab ends (closeTabAtIndex()
+    /// waits for the session's exit watcher, which headless sessions never start).
+    void closeNow(vtworkspace::TabId tab) const
+    {
+        app->manager().model().closeTab(controller().windowId(), tab);
+    }
+
     [[nodiscard]] ChromeArea area() const { return static_cast<ChromeArea>(controller().chromeFocusArea()); }
 
     /// Presses @p key with @p modifiers on the active session, as the terminal receives it.
@@ -117,10 +124,14 @@ TEST_CASE("keys move, activate and reorder in the tab well", "[windowcontroller]
     // Alt+Left reorders the focused tab and keeps focus on it.
     controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
     REQUIRE(controller.focusedTabIndex() == 2);
+    REQUIRE(f.tabs.tabs.size() == 3);
     CHECK(f.chromeKey(Qt::Key_Left, Qt::AltModifier));
     CHECK(f.area() == ChromeArea::Tabs);
     CHECK(controller.focusedTabIndex() == 1);
     CHECK(controller.activeTabIndex() == 1);
+    // The tab that moved is the one the keyboard is still on, and the one it left behind took its row.
+    CHECK(controller.focusedTab() == f.tabs.tabs[2]);
+    CHECK(f.app->manager().model().window(controller.windowId())->indexOf(f.tabs.tabs[1]) == 2);
 }
 
 TEST_CASE("the focus stays on its tab when another tab is reordered or closed",
@@ -145,21 +156,56 @@ TEST_CASE("the focus stays on its tab when another tab is reordered or closed",
         CHECK(f.area() == ChromeArea::Tabs);
         CHECK(controller.focusedTabIndex() == 2);
     }
+}
+
+/// Five tabs with the keyboard on the third: tabs on both sides of it, so a close before it must shift the
+/// row and a close after it must not, and no clamp to the last row can hide a missed shift.
+TEST_CASE("the focus stays on its tab when the tabs around it close", "[windowcontroller][chromefocus]")
+{
+    constexpr auto Tabs = 5;
+    constexpr auto Focused = 2;
+    auto const f = ChromeFixture { nullptr, Tabs };
+    auto& controller = f.controller();
+    REQUIRE(f.tabs.tabs.size() == Tabs);
+    controller.activateTab(Focused);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == Focused);
+
+    SECTION("a tab before it closes")
+    {
+        f.closeNow(f.tabs.tabs[0]);
+        CHECK(controller.count() == Tabs - 1);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == Focused - 1);
+        CHECK(controller.focusedTab() == f.tabs.tabs[Focused]);
+    }
 
     SECTION("a tab after it closes")
     {
-        controller.closeTabsToRight(1);
-        CHECK(controller.count() == 2);
+        f.closeNow(f.tabs.tabs[Tabs - 1]);
+        CHECK(controller.count() == Tabs - 1);
         CHECK(f.area() == ChromeArea::Tabs);
-        CHECK(controller.focusedTabIndex() == 1);
+        CHECK(controller.focusedTabIndex() == Focused);
+        CHECK(controller.focusedTab() == f.tabs.tabs[Focused]);
     }
 
-    SECTION("the tabs around it close")
+    SECTION("the tabs before it close one by one")
     {
-        controller.closeOtherTabs(1);
+        f.closeNow(f.tabs.tabs[0]);
+        f.closeNow(f.tabs.tabs[1]);
+        CHECK(controller.count() == Tabs - 2);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == 0);
+        CHECK(controller.focusedTab() == f.tabs.tabs[Focused]);
+    }
+
+    SECTION("every other tab closes")
+    {
+        controller.closeOtherTabs(Focused);
         CHECK(controller.count() == 1);
         CHECK(f.area() == ChromeArea::Tabs);
         CHECK(controller.focusedTabIndex() == 0);
+        CHECK(controller.focusedTab() == f.tabs.tabs[Focused]);
     }
 }
 
