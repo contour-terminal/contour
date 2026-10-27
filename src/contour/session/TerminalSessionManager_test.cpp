@@ -3186,8 +3186,9 @@ TEST_CASE("TerminalSessionManager: echo restored without output is noticed on th
 TEST_CASE("TerminalSessionManager: a key after a silent echo-off finds secure input already on",
           "[manager][secureinput]")
 {
-    // Review I2: `printf 'Password: '; stty -echo; read pw` turns echo off after its last output. The first
-    // key must not leave before the lock is noticed.
+    // Review I2: `printf 'Password: '; stty -echo; read pw` turns echo off after its last output. The lock
+    // is noticed before the first key is handed on; that key itself has already been seen by the OS, so
+    // secure input protects the keys after it.
     auto doubles = SecureInputDoubles {};
     auto app = makeSecureInputApp(doubles);
     auto& manager = app->manager();
@@ -3204,6 +3205,29 @@ TEST_CASE("TerminalSessionManager: a key after a silent echo-off finds secure in
     typeInto(*session);
 
     CHECK(enablesWhenKeyLeft == 1);
+}
+
+TEST_CASE("TerminalSessionManager: a selection paste re-reads the echo and opens the poll window",
+          "[manager][secureinput]")
+{
+    // Review M3: a middle-click paste answers a prompt like a key does, so it takes the same echo re-read
+    // before it and the same quiet-window poll after it.
+    auto doubles = SecureInputDoubles {};
+    auto app = makeSecureInputApp(doubles);
+    auto& manager = app->manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.setFocusedWindow(window.id);
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    CHECK_FALSE(session->inputEchoPollArmed());
+
+    contour::test::mockPtyOf(*session).setInputEcho(vtpty::InputEcho::Hidden); // no output follows
+    CHECK((*session)(contour::actions::PasteSelection {}));
+
+    CHECK(indicatorOf(*session) == contour::window::SecureIndicator::LockedSecured);
+    CHECK(doubles.record.enables == 1);
+    CHECK(session->inputEchoPollArmed());
 }
 
 TEST_CASE("TerminalSessionManager: a local pane polls its echo only within the window after activity",

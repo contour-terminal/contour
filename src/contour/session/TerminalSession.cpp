@@ -3717,8 +3717,9 @@ void TerminalSession::sendKeyEvent(Key key,
             restart();
         return;
     }
-    // Before the key leaves: a prompt that turned echo off after its last output (stty -echo; read) would
-    // otherwise see this key in clear, with secure input not yet on.
+    // Before the key leaves: a prompt that turned echo off after its last output (stty -echo; read) is
+    // noticed here. This key has already been shown to the OS (event taps saw it before Qt did), so secure
+    // input protects the keys after it, not this one; it also releases a stale lock before the key goes in.
     refreshInputEcho();
     noteInputActivity();
     terminal().sendKeyEvent(key, modifiers, eventType, now);
@@ -5831,6 +5832,10 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
     if (QClipboard const* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = normalizeCrlf(clipboard->text(QClipboard::Selection));
+
+        // Before the text leaves, as for a key and PasteClipboard: a paste into a prompt is typing too.
+        refreshInputEcho();
+        noteInputActivity();
 
         // Locked around the terminal calls only -- the clipboard read above is Qt's and must not run
         // with the terminal lock held. What is sent is flushed once the lock is released. See ViNormalMode
