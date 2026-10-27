@@ -863,10 +863,13 @@ void TerminalSession::bell()
 
 void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 {
+    // The terminal thread, possibly under the state lock: the visibility is GUI-thread state, so its
+    // announcement is posted. Ahead of the display check, so a pane without one still announces it.
+    platform::postToObject(this, [this]() { refreshScrollbarVisibility(); });
+
     if (!_display)
         return;
 
-    emit isScrollbarVisibleChanged();
     requestScrollbarMarksRefresh(); // the alternate screen shows no ticks
     // Re-check _display at dispatch: a tab switch or split collapse may have detached it (via
     // TerminalDisplay::setSession -> detachDisplay) between this post and the GUI thread running it.
@@ -1639,6 +1642,7 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
 void TerminalSession::applySystemScrollBars(std::optional<config::ScrollBarMode> system)
 {
     _systemScrollBars = system;
+    refreshScrollbarVisibility();
 }
 
 void TerminalSession::applyMotionPreference(config::MotionPreference motion)
@@ -3461,7 +3465,11 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
     // show a different wrong answer. Browsers likewise drop a tooltip on scroll. Posted, because output that
     // scrolls a scrolled-back viewport reports the move from the parser thread, and the hover state is the
     // GUI thread's. postToObject targets `this`, so Qt drops the call if the session dies first.
-    platform::postToObject(this, [this]() { clearHovers(); });
+    // An overlay scrollbar shows while scrolled back, so the visibility is re-announced on the same thread.
+    platform::postToObject(this, [this]() {
+        clearHovers();
+        refreshScrollbarVisibility();
+    });
     // The current match's viewport rows move with the scroll. Posted for the same reason, and because this
     // runs with the terminal's state mutex held: reading the match takes it. At most one post in flight.
     if (!_searchFocusedRowsPostPending.test_and_set(std::memory_order_acq_rel))
@@ -4253,6 +4261,31 @@ void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollabl
         return;
 
     emit historyLineCountChanged(unbox(scrollable));
+    refreshScrollbarVisibility(); // no history hides the bar
+}
+
+ScrollbarVisibilityInputs TerminalSession::scrollbarVisibilityInputs() const noexcept
+{
+    auto const& scrollbar = _profile.scrollbar.value();
+    return ScrollbarVisibilityInputs {
+        .position = scrollbar.position,
+        .mode = config::resolveScrollBarMode(scrollbar.mode, _systemScrollBars),
+        // The page on display: with DECPCCM reset the cursor may write to another page, under nobody's view.
+        .screen = _terminal.displayedScreenType(),
+        // Converted from the YAML boolean here, at the boundary.
+        .altScreen =
+            scrollbar.hideScrollbarInAltScreen ? AltScreenScrollbar::Hidden : AltScreenScrollbar::Shown,
+        .historyLines = _lastHistoryLineCount,
+        .scrollOffset = scrollOffset(),
+        .marksAbove = _marksAbove,
+    };
+}
+
+void TerminalSession::refreshScrollbarVisibility()
+{
+    auto const visibility = resolveScrollbarVisibility(scrollbarVisibilityInputs());
+    if (std::exchange(_announcedScrollbarVisibility, visibility) != visibility)
+        emit isScrollbarVisibleChanged();
 }
 
 void TerminalSession::setScrollbarMarkTrackPixels(int pixels)
@@ -4293,6 +4326,8 @@ void TerminalSession::refreshScrollbarMarks()
 
     auto scrollable = vtbackend::LineCount(0);
     auto previousKey = std::optional<ScrollbarMarksKey> {};
+    auto keyMoved = false;
+    auto marksAboveMoved = false;
     auto inputs = core::locked(_terminal, [&]() -> std::optional<std::vector<vtbackend::ScrollbarMarkInput>> {
         // The terminal says when the marks may have moved, whatever moved them; the rest of the key is the
         // scrollbar's own.
@@ -4309,20 +4344,38 @@ void TerminalSession::refreshScrollbarMarks()
             .sources = sources,
             .colors = scrollbarMarkColorsOf(_terminal.colorPalette()),
         };
-        if (_scrollbarMarksKey == key)
+        // Which held marks are above the bottom does not depend on the track, so it is recomputed whenever
+        // the marks or the rows moved, before QML has published a track as much as after.
+        auto const aboveKey = MarksAboveKey {
+            .marksRevision = marksRevision,
+            .firstVisibleRow = unbox<int64_t>(scrollable),
+            .sources = sources,
+        };
+        marksAboveMoved = std::exchange(_marksAboveKey, aboveKey) != aboveKey;
+        keyMoved = _scrollbarMarksKey != key;
+        if (!keyMoved && !marksAboveMoved)
             return std::nullopt;
-        previousKey = std::exchange(_scrollbarMarksKey, key);
-        _scrollbarTicksGeneration = _terminal.primaryScreen().grid().stableIdGeneration();
+        if (keyMoved)
+        {
+            previousKey = std::exchange(_scrollbarMarksKey, key);
+            _scrollbarTicksGeneration = _terminal.primaryScreen().grid().stableIdGeneration();
+        }
 
-        // Nothing would survive the bucketing, so the marks are not copied out only to be dropped.
-        if (key.sources.none() || key.trackPixels <= 0)
+        // Nothing would survive the bucketing or hold the bar, so the marks are not copied out only to be
+        // dropped.
+        if (key.sources.none() || (key.trackPixels <= 0 && !marksAboveMoved))
             return std::vector<vtbackend::ScrollbarMarkInput> {};
         return _terminal.scrollbarMarkInputs();
     });
 
-    // Outside the lock, as announceScrollableLineCount() requires.
+    if (inputs && marksAboveMoved)
+        _marksAbove = vtbackend::marksAbove(*inputs, unbox<int64_t>(scrollable), sources);
+
+    // Outside the lock, as announceScrollableLineCount() requires; it re-announces the visibility when the
+    // history moved, and the call below when only the marks did.
     announceScrollableLineCount(scrollable);
-    if (!inputs)
+    refreshScrollbarVisibility();
+    if (!inputs || !keyMoved)
         return;
 
     // Outside the lock: bucketing reads nothing the parser thread writes, and the signal below wakes QML
@@ -6572,19 +6625,17 @@ void TerminalSession::emitProfileDerivedPropertiesChanged()
     // SessionChrome.qml re-read the now-current profile. Emitting one whose value did not actually change
     // therefore costs a binding re-evaluation and nothing else.
     static constexpr auto Notifiers = std::array {
-        &TerminalSession::opacityChanged,
-        &TerminalSession::dimUnfocusedChanged,
-        &TerminalSession::pathToBackgroundChanged,
-        &TerminalSession::opacityBackgroundChanged,
-        &TerminalSession::isImageBackgroundChanged,
-        &TerminalSession::isBlurBackgroundChanged,
-        &TerminalSession::backgroundColorChanged,
-        &TerminalSession::isScrollbarRightChanged,
-        &TerminalSession::isScrollbarVisibleChanged,
+        &TerminalSession::opacityChanged,           &TerminalSession::dimUnfocusedChanged,
+        &TerminalSession::pathToBackgroundChanged,  &TerminalSession::opacityBackgroundChanged,
+        &TerminalSession::isImageBackgroundChanged, &TerminalSession::isBlurBackgroundChanged,
+        &TerminalSession::backgroundColorChanged,   &TerminalSession::isScrollbarRightChanged,
     };
 
     for (auto const notify: Notifiers)
         (this->*notify)();
+
+    // Announced only if it moved: the visibility is decided from the profile, among other things.
+    refreshScrollbarVisibility();
 
     // scrollbar.marks and the scrollbar's position are profile state too, read by the ticks' refresh.
     requestScrollbarMarksRefresh();

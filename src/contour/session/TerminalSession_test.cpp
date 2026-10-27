@@ -6707,6 +6707,9 @@ TEST_CASE("TerminalSession tells the surface of the page on display and not of t
     TestApp testApp;
     auto held = makeSessionWithSurface(testApp.app());
     auto& surface = *held.surface;
+    // History to scroll through, published as the frame timer would: without any, no bar shows at all.
+    writeFiller(held->terminal(), 60);
+    held->refreshScrollbarMarks();
     REQUIRE(held->getIsScrollbarVisible());
     surface.bufferChanges.clear();
 
@@ -10876,6 +10879,10 @@ TEST_CASE("TerminalSession: the default scrollbar is on the right, and hides ove
     auto held = makeSessionWithSurface(testApp.app());
 
     CHECK(held->getIsScrollbarRight());
+    // Nothing to scroll through yet: no bar.
+    CHECK_FALSE(held->getIsScrollbarVisible());
+    writeFiller(held->terminal(), 60);
+    held->refreshScrollbarMarks();
     CHECK(held->getIsScrollbarVisible());
 
     // hide_in_alt_screen keeps its default, so vim or htop keep their last column.
@@ -12301,3 +12308,235 @@ TEST_CASE("TerminalSession: CopyHyperlink tells its window", "[contour][session]
 
     contour::test::closeAllTabs(*controller);
 }
+
+// {{{ Scrollbar visibility
+namespace
+{
+
+/// Registers a profile that shows the scrollbar on the right under @p mode, drawing every kind of mark.
+/// @param mutate Applied to the scrollbar section last, for a case that needs more than the mode.
+std::string registerScrollbarModeProfile(
+    contour::ContourGuiApp& app,
+    std::string const& name,
+    contour::config::ScrollBarModePreference mode,
+    std::function<void(contour::config::ScrollBarConfig&)> const& mutate = [](auto&) {})
+{
+    return registerProfile(app, name, [mode, &mutate](contour::config::TerminalProfile& p) {
+        auto scrollbar = p.scrollbar.value();
+        scrollbar.position = contour::config::ScrollBarPosition::Right;
+        scrollbar.mode = mode;
+        scrollbar.marks = vtbackend::AllScrollbarMarkSources;
+        mutate(scrollbar);
+        p.scrollbar = scrollbar;
+    });
+}
+
+/// Publishes what the scrollbar is decided from -- the history, the marks -- as the frame timer would.
+void publishScrollbarInputs(contour::session::TerminalSession& session)
+{
+    session.refreshScrollbarMarks();
+    QCoreApplication::processEvents();
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: the overlay scrollbar hides at the bottom and shows when scrolled back",
+          "[contour][session][scrollbar]")
+{
+    using contour::config::ScrollBarModePreference;
+    TestApp testApp;
+    auto session = makeSessionWithProfile(
+        testApp.app(),
+        registerScrollbarModeProfile(testApp.app(), "overlay", ScrollBarModePreference::Overlay));
+
+    // No history at all: nothing to scroll through.
+    publishScrollbarInputs(*session);
+    CHECK_FALSE(session->getIsScrollbarVisible());
+
+    writeFiller(session->terminal(), 60);
+    publishScrollbarInputs(*session);
+    REQUIRE(session->historyLineCount() > 5);
+    CHECK_FALSE(session->getIsScrollbarVisible());
+
+    auto changes = QSignalSpy(session.get(), &contour::session::TerminalSession::isScrollbarVisibleChanged);
+    session->setScrollOffset(5);
+    QCoreApplication::processEvents();
+    CHECK(session->getIsScrollbarVisible());
+    CHECK(changes.count() == 1);
+
+    session->setScrollOffset(0);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(session->getIsScrollbarVisible());
+    CHECK(changes.count() == 2);
+}
+
+TEST_CASE("TerminalSession: a failed command above the viewport keeps the overlay scrollbar",
+          "[contour][session][scrollbar]")
+{
+    using contour::config::ScrollBarModePreference;
+    TestApp testApp;
+
+    // Overlay, a command with @p exitCode and a page of output below it, published as the frame timer would.
+    auto const visibleAtTheBottomAfter = [&](int exitCode,
+                                             vtbackend::ScrollbarMarkSources marks,
+                                             int trackPixels) {
+        auto session = makeSessionWithProfile(
+            testApp.app(),
+            registerScrollbarModeProfile(
+                testApp.app(), "overlay", ScrollBarModePreference::Overlay, [marks](auto& scrollbar) {
+                    scrollbar.marks = marks;
+                }));
+        session->terminal().writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), exitCode));
+        writeFiller(session->terminal(), 60);
+        session->setScrollbarMarkTrackPixels(trackPixels);
+        publishScrollbarInputs(*session);
+        REQUIRE(session->historyLineCount() > 0);
+        REQUIRE(session->scrollOffset() == 0);
+        return session->getIsScrollbarVisible();
+    };
+
+    CHECK(visibleAtTheBottomAfter(2, vtbackend::AllScrollbarMarkSources, 200));
+    // A success leaves a Command mark, which holds nothing.
+    CHECK_FALSE(visibleAtTheBottomAfter(0, vtbackend::AllScrollbarMarkSources, 200));
+    // A failure the bar does not draw holds nothing either.
+    CHECK_FALSE(visibleAtTheBottomAfter(2, vtbackend::ScrollbarMarkSources {}, 200));
+    // Before QML has published a track, the failure still holds the bar: it is what makes the track appear.
+    CHECK(visibleAtTheBottomAfter(2, vtbackend::AllScrollbarMarkSources, 0));
+}
+
+TEST_CASE("TerminalSession: the system's scroller style switches the mode live",
+          "[contour][session][scrollbar]")
+{
+    using contour::config::ScrollBarMode;
+    using contour::config::ScrollBarModePreference;
+
+    // Every change goes through the switched appearance fake, as the OS reports it: the app hands it to the
+    // manager, which hands it to every session.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto const styled = [](std::optional<ScrollBarMode> scrollBars) {
+        return contour::platform::PlatformAppearance { .accent = std::nullopt,
+                                                       .windowCornerRadius = std::nullopt,
+                                                       .scrollBars = scrollBars };
+    };
+
+    // A session the manager hosts under the default profile, made @p mode, with a page of history published.
+    auto const hostedSession = [](contour::test::TestApp& app,
+                                  contour::test::ScopedController const& win,
+                                  ScrollBarModePreference mode) {
+        registerScrollbarModeProfile(app.app(), app.app().profileName(), mode);
+        auto* session = app.manager().createSession(win.id);
+        REQUIRE(session != nullptr);
+        writeFiller(session->terminal(), 60);
+        publishScrollbarInputs(*session);
+        return session;
+    };
+
+    SECTION("a system profile follows each style the OS reports, in every session")
+    {
+        auto const testApp = makeMotionTestApp(accessibility, appearance);
+        contour::test::ScopedController const win { testApp->manager() };
+        auto* first = hostedSession(*testApp, win, ScrollBarModePreference::System);
+        auto* second = hostedSession(*testApp, win, ScrollBarModePreference::System);
+        // No style published yet, which is Overlay.
+        CHECK_FALSE(first->getIsScrollbarVisible());
+        CHECK_FALSE(second->getIsScrollbarVisible());
+
+        auto changes = QSignalSpy(first, &contour::session::TerminalSession::isScrollbarVisibleChanged);
+        appearance.set(styled(ScrollBarMode::Always));
+        CHECK(first->getIsScrollbarVisible());
+        CHECK(second->getIsScrollbarVisible());
+        CHECK(changes.count() == 1);
+
+        // An appearance change that leaves the style be (an accent change, say) announces nothing.
+        appearance.set(styled(ScrollBarMode::Always));
+        CHECK(changes.count() == 1);
+
+        appearance.set(styled(ScrollBarMode::Overlay));
+        CHECK_FALSE(first->getIsScrollbarVisible());
+        CHECK_FALSE(second->getIsScrollbarVisible());
+        appearance.set(styled(std::nullopt));
+        CHECK_FALSE(first->getIsScrollbarVisible());
+        CHECK(changes.count() == 2);
+    }
+
+    SECTION("an always profile ignores the system")
+    {
+        auto const testApp = makeMotionTestApp(accessibility, appearance);
+        contour::test::ScopedController const win { testApp->manager() };
+        auto* session = hostedSession(*testApp, win, ScrollBarModePreference::Always);
+        appearance.set(styled(ScrollBarMode::Overlay));
+        CHECK(session->getIsScrollbarVisible());
+    }
+
+    SECTION("a session reads the style it is born under")
+    {
+        // Published before the app exists, so only the session's constructor can have read it.
+        appearance.appearance = styled(ScrollBarMode::Always);
+        auto const testApp = makeMotionTestApp(accessibility, appearance);
+        contour::test::ScopedController const win { testApp->manager() };
+        auto* session = hostedSession(*testApp, win, ScrollBarModePreference::System);
+        CHECK(session->getIsScrollbarVisible());
+
+        // And one born after a change reads the new style.
+        appearance.set(styled(ScrollBarMode::Overlay));
+        auto* later = hostedSession(*testApp, win, ScrollBarModePreference::System);
+        CHECK_FALSE(later->getIsScrollbarVisible());
+    }
+
+    SECTION("a Classic session is shown at the bottom, as before")
+    {
+        TestApp testApp;
+        auto session = makeDisplaylessSession(testApp.app());
+        REQUIRE(session->profile().scrollbar.value().mode == ScrollBarModePreference::Always);
+        writeFiller(session->terminal(), 60);
+        publishScrollbarInputs(*session);
+        CHECK(session->getIsScrollbarVisible());
+    }
+}
+
+TEST_CASE("TerminalSession: position hidden and the alternate screen stay hidden",
+          "[contour][session][scrollbar]")
+{
+    using contour::config::ScrollBarModePreference;
+    TestApp testApp;
+
+    SECTION("position: Hidden, even under always")
+    {
+        auto session = makeSessionWithProfile(
+            testApp.app(),
+            registerScrollbarModeProfile(
+                testApp.app(), "hidden", ScrollBarModePreference::Always, [](auto& scrollbar) {
+                    scrollbar.position = contour::config::ScrollBarPosition::Hidden;
+                }));
+        writeFiller(session->terminal(), 60);
+        publishScrollbarInputs(*session);
+        CHECK_FALSE(session->getIsScrollbarVisible());
+    }
+
+    SECTION("the alternate screen under hide_in_alt_screen, without a display")
+    {
+        auto session = makeSessionWithProfile(
+            testApp.app(),
+            registerScrollbarModeProfile(
+                testApp.app(), "alt", ScrollBarModePreference::Always, [](auto& scrollbar) {
+                    scrollbar.hideScrollbarInAltScreen = true;
+                }));
+        writeFiller(session->terminal(), 60);
+        publishScrollbarInputs(*session);
+        REQUIRE(session->getIsScrollbarVisible());
+
+        auto changes =
+            QSignalSpy(session.get(), &contour::session::TerminalSession::isScrollbarVisibleChanged);
+        session->terminal().writeToScreen("\033[?1049h");
+        QCoreApplication::processEvents();
+        CHECK_FALSE(session->getIsScrollbarVisible());
+        CHECK(changes.count() == 1);
+
+        session->terminal().writeToScreen("\033[?1049l");
+        QCoreApplication::processEvents();
+        CHECK(session->getIsScrollbarVisible());
+        CHECK(changes.count() == 2);
+    }
+}
+// }}}

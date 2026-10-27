@@ -21,6 +21,7 @@
 #include <contour/session/Permission.hpp>
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/PermissionQueue.hpp>
+#include <contour/session/ScrollbarVisibility.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -572,17 +573,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return profile().scrollbar.value().position == config::ScrollBarPosition::Right;
     }
 
+    /// Whether the scrollbar is drawn, decided by resolveScrollbarVisibility() and computed on every read, so
+    /// it is right whether or not the change was announced yet (@see refreshScrollbarVisibility). GUI thread.
     bool getIsScrollbarVisible() const noexcept
     {
-        if (profile().scrollbar.value().position == config::ScrollBarPosition::Hidden)
-            return false;
-
-        // The page on display: with DECPCCM reset the cursor may write to another page, under nobody's view.
-        if ((_terminal.displayedScreenType() == vtbackend::ScreenType::Alternate)
-            && profile().scrollbar.value().hideScrollbarInAltScreen)
-            return false;
-
-        return true;
+        return resolveScrollbarVisibility(scrollbarVisibilityInputs()) == ScrollbarVisibility::Shown;
     }
 
     /// Accumulates a wheel event towards whole-cell scroll steps.
@@ -1140,8 +1135,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void applyMotionPreference(config::MotionPreference motion);
 
     /// Records the system's scroller style, which a `scrollbar.mode: system` profile resolves against
-    /// (@see config::resolveScrollBarMode). Live reconfiguration, as applyMotionPreference() is: the user
-    /// switches the style, or plugs in a mouse, while the session runs. GUI thread.
+    /// (@see config::resolveScrollBarMode), and announces the scrollbar's visibility if that moved it. Live
+    /// reconfiguration, as applyMotionPreference() is: the user switches the style, or plugs in a mouse,
+    /// while the session runs. GUI thread.
     /// @param system The system's scroller style, or nullopt where the platform publishes none.
     void applySystemScrollBars(std::optional<config::ScrollBarMode> system);
 
@@ -1790,6 +1786,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param scrollable The scrollable line count, computed by the caller under the terminal lock.
     void announceScrollableLineCount(vtbackend::LineCount scrollable);
 
+    /// What the scrollbar's visibility is decided from: the profile, the system's scroller style, the screen
+    /// on display, the published history count, the scroll offset and the published marks above. GUI thread.
+    [[nodiscard]] ScrollbarVisibilityInputs scrollbarVisibilityInputs() const noexcept;
+
+    /// Emits isScrollbarVisibleChanged when the visibility moved since it was last announced. GUI thread
+    /// only: a change raised on the terminal thread posts it (bufferChanged()).
+    void refreshScrollbarVisibility();
+
     /// Arranges for refreshScrollbarMarks() to run on the GUI thread within a frame.
     ///
     /// Callable from either thread, the terminal lock held or not: it neither locks nor computes, only
@@ -2345,6 +2349,28 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// The track's height in logical pixels, as the QML last reported it. GUI thread only.
     int _scrollbarMarkTrackPixels = 0;
+
+    /// What marksAbove() was last computed from. Apart from ScrollbarMarksKey, because it does not depend on
+    /// the track: the marks hold the bar before QML has published one. GUI thread only.
+    struct MarksAboveKey
+    {
+        uint64_t marksRevision = 0;                 ///< Terminal::scrollbarMarksRevision()
+        int64_t firstVisibleRow = 0;                ///< The viewport's top at the bottom: the scrollable rows
+        vtbackend::ScrollbarMarkSources sources {}; ///< The kinds drawn
+
+        [[nodiscard]] bool operator==(MarksAboveKey const&) const noexcept = default;
+    };
+
+    /// The key _marksAbove was computed from; nullopt before the first refresh. GUI thread only.
+    std::optional<MarksAboveKey> _marksAboveKey;
+
+    /// Whether a mark that holds an overlay scrollbar is above the bottom of the scrollback, as
+    /// refreshScrollbarMarks() last computed it. GUI thread only.
+    vtbackend::MarksAbove _marksAbove = vtbackend::MarksAbove::None;
+
+    /// The visibility isScrollbarVisibleChanged last announced. Hidden to begin with: a new session has no
+    /// history. GUI thread only.
+    ScrollbarVisibility _announcedScrollbarVisibility = ScrollbarVisibility::Hidden;
 
     /// The key the published ticks were built from; nullopt before the first refresh. GUI thread only.
     std::optional<ScrollbarMarksKey> _scrollbarMarksKey;
