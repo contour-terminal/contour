@@ -4515,6 +4515,31 @@ TEST_CASE("TerminalSession: searchFocusedRows names the current match's rows", "
     CHECK(rowsChanged.count() == 2);
 }
 
+TEST_CASE("TerminalSession: searchFocusedRows counts the rows a collapsed fold above the match hides",
+          "[contour][session][search][folding]")
+{
+    // The rows are the ones the user sees: a folded command's output above the match takes no rows, so the
+    // match shows that many rows higher than its grid line says.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("ls", numberedOutput(5)));
+    terminal.writeToScreen("needle\r\n");
+    REQUIRE(terminal.foldRanges().size() == 1);
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    auto const unfolded = session->searchFocusedRows()[QStringLiteral("first")].toInt();
+
+    terminal.foldState().collapse(terminal.foldRanges().front().headStableId);
+    REQUIRE(terminal.hiddenLineCount() > vtbackend::LineCount(0));
+    session->refreshSearchFocusedRows();
+
+    auto const rows = session->searchFocusedRows();
+    REQUIRE_FALSE(rows.isEmpty());
+    CHECK(rows[QStringLiteral("first")].toInt() == unfolded - unbox<int>(terminal.hiddenLineCount()));
+    CHECK(rows[QStringLiteral("last")].toInt() == rows[QStringLiteral("first")].toInt());
+}
+
 TEST_CASE("TerminalSession: output scrolling a match from another thread refreshes its rows",
           "[contour][session][search][threading]")
 {

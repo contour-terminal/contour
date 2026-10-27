@@ -3202,11 +3202,12 @@ void TerminalSession::refreshSearchFocusedRowsLocked()
     auto rows = QVariantMap {};
     if (auto const match = _terminal.focusedSearchMatch())
     {
-        // Grid lines to viewport rows: a line scrolled back by the offset shows that many rows lower.
-        auto const offset = unbox<int>(_terminal.viewport().scrollOffset());
+        // Grid lines to the rows the user sees: through the viewport, which counts the scroll offset and the
+        // rows a collapsed fold above the match hides.
+        auto const& viewport = _terminal.viewport();
         auto const lastRow = unbox<int>(_terminal.pageSize().lines) - 1;
-        auto const first = unbox<int>(match->first.line) + offset;
-        auto const last = unbox<int>(match->second.line) + offset;
+        auto const first = unbox<int>(viewport.translateGridToScreenCoordinate(match->first.line));
+        auto const last = unbox<int>(viewport.translateGridToScreenCoordinate(match->second.line));
         if (last >= 0 && first <= lastRow)
         {
             rows.insert(QStringLiteral("first"), std::max(first, 0));
