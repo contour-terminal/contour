@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ScrollBarMode.hpp>
+
 #include <vtbackend/core/Color.hpp>
 
 #include <functional>
@@ -15,6 +17,9 @@ struct PlatformAppearance
 {
     std::optional<vtbackend::RGBColor> accent {}; ///< The system accent colour in sRGB, if published.
     std::optional<int> windowCornerRadius {}; ///< The system window corner radius in pixels, if published.
+    /// The system's scroller style, if it publishes one: Overlay where scroll bars show only while
+    /// scrolling, Always where they always show. Resolved against a profile's `scrollbar.mode`.
+    std::optional<config::ScrollBarMode> scrollBars {};
 
     [[nodiscard]] bool operator==(PlatformAppearance const&) const = default;
 };

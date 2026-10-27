@@ -40,6 +40,13 @@ namespace
                                  channel(srgb.blueComponent) };
 }
 
+/// The scroller style the backend should report for what AppKit prefers now.
+[[nodiscard]] contour::config::ScrollBarMode expectedScrollBars()
+{
+    return NSScroller.preferredScrollerStyle == NSScrollerStyleOverlay ? contour::config::ScrollBarMode::Overlay
+                                                                        : contour::config::ScrollBarMode::Always;
+}
+
 } // namespace
 
 TEST_CASE("Cocoa accessibility source reads the NSWorkspace flags", "[appearance-source][cocoa]")
@@ -95,5 +102,28 @@ TEST_CASE("Cocoa appearance reads the accent and reports system colour changes",
 
     appearance.reset();
     [NSNotificationCenter.defaultCenter postNotificationName:NSSystemColorsDidChangeNotification object:nil];
+    CHECK(received.size() == 1);
+}
+
+TEST_CASE("Cocoa appearance reads the scroller style and reports its change", "[appearance-source][cocoa]")
+{
+    auto const current = contour::platform::makePlatformAppearance({})->current();
+    REQUIRE(current.scrollBars.has_value());
+    CHECK(*current.scrollBars == expectedScrollBars());
+
+    auto received = std::vector<PlatformAppearance> {};
+    auto appearance =
+        contour::platform::makePlatformAppearance([&](PlatformAppearance next) { received.push_back(next); });
+    CHECK(received.empty());
+    // Posted with no object and no userInfo, as AppKit posts it when a mouse is plugged in or removed.
+    [NSNotificationCenter.defaultCenter postNotificationName:NSPreferredScrollerStyleDidChangeNotification
+                                                      object:nil];
+    REQUIRE(received.size() == 1);
+    CHECK(received.front() == appearance->current());
+
+    // The destructor removes this observer too.
+    appearance.reset();
+    [NSNotificationCenter.defaultCenter postNotificationName:NSPreferredScrollerStyleDidChangeNotification
+                                                      object:nil];
     CHECK(received.size() == 1);
 }

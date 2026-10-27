@@ -18,22 +18,23 @@ namespace
         return static_cast<uint8_t>(std::lround(std::clamp(value, CGFloat { 0 }, CGFloat { 1 }) * 255.0));
     }
 
-    /// Reads the system accent colour and observes the system colour change notification.
+    /// The scroller style AppKit prefers now: Overlay for NSScrollerStyleOverlay, Always for the legacy one.
+    /// @pre Called on the main thread.
+    [[nodiscard]] config::ScrollBarMode preferredScrollBars()
+    {
+        return NSScroller.preferredScrollerStyle == NSScrollerStyleOverlay ? config::ScrollBarMode::Overlay
+                                                                            : config::ScrollBarMode::Always;
+    }
+
+    /// Reads the system accent colour and scroller style, and observes the notifications that change them.
     class CocoaPlatformAppearance final: public IPlatformAppearance
     {
       public:
         explicit CocoaPlatformAppearance(PlatformAppearanceChanged onChange):
             _onChange { std::move(onChange) },
-            // Posted on the main thread, so with queue:nil the block runs on the GUI thread. The block
-            // captures `this`; the destructor removes the observer before it dangles.
-            _observer { [NSNotificationCenter.defaultCenter
-                addObserverForName:NSSystemColorsDidChangeNotification
-                            object:nil
-                             queue:nil
-                        usingBlock:^(NSNotification*) {
-                          if (_onChange)
-                              _onChange(current());
-                        }] }
+            _colorsObserver { observe(NSSystemColorsDidChangeNotification) },
+            // "Show scroll bars: Automatically" flips the style when a mouse is plugged in or removed.
+            _scrollerObserver { observe(NSPreferredScrollerStyleDidChangeNotification) }
         {
         }
 
@@ -42,7 +43,11 @@ namespace
         CocoaPlatformAppearance(CocoaPlatformAppearance&&) = delete;
         CocoaPlatformAppearance& operator=(CocoaPlatformAppearance&&) = delete;
 
-        ~CocoaPlatformAppearance() override { [NSNotificationCenter.defaultCenter removeObserver:_observer]; }
+        ~CocoaPlatformAppearance() override
+        {
+            [NSNotificationCenter.defaultCenter removeObserver:_colorsObserver];
+            [NSNotificationCenter.defaultCenter removeObserver:_scrollerObserver];
+        }
 
         [[nodiscard]] PlatformAppearance current() const override
         {
@@ -57,20 +62,36 @@ namespace
                 [NSApp.effectiveAppearance performAsCurrentDrawingAppearance:resolve];
             else
                 resolve();
-            if (srgb == nil)
-                return PlatformAppearance { .accent = std::nullopt, .windowCornerRadius = std::nullopt };
             // macOS publishes no window corner radius; the style's row carries the measured constant.
             return PlatformAppearance {
-                .accent = vtbackend::RGBColor { toChannel(srgb.redComponent),
-                                                toChannel(srgb.greenComponent),
-                                                toChannel(srgb.blueComponent) },
+                .accent = srgb == nil ? std::nullopt
+                                      : std::optional { vtbackend::RGBColor { toChannel(srgb.redComponent),
+                                                                              toChannel(srgb.greenComponent),
+                                                                              toChannel(srgb.blueComponent) } },
                 .windowCornerRadius = std::nullopt,
+                .scrollBars = preferredScrollBars(),
             };
         }
 
       private:
+        /// Observes @p name, reporting current() through the change callback.
+        /// @return The observation token, to remove in the destructor.
+        id<NSObject> observe(NSNotificationName name)
+        {
+            // Posted on the main thread, so with queue:nil the block runs on the GUI thread. The block
+            // captures `this`; the destructor removes the observer before it dangles.
+            return [NSNotificationCenter.defaultCenter addObserverForName:name
+                                                                   object:nil
+                                                                    queue:nil
+                                                               usingBlock:^(NSNotification*) {
+                                                                 if (_onChange)
+                                                                     _onChange(current());
+                                                               }];
+        }
+
         PlatformAppearanceChanged _onChange;
-        id<NSObject> __strong _observer = nil; ///< ARC keeps the observation token until removal.
+        id<NSObject> __strong _colorsObserver = nil;   ///< ARC keeps the observation token until removal.
+        id<NSObject> __strong _scrollerObserver = nil; ///< Likewise, for the scroller style.
     };
 } // namespace
 

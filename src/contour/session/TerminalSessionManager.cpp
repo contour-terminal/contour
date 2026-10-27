@@ -1262,6 +1262,12 @@ void TerminalSessionManager::updateMotionPreference(config::MotionPreference mot
         session->applyMotionPreference(motion);
 }
 
+void TerminalSessionManager::updateSystemScrollBars(std::optional<config::ScrollBarMode> system)
+{
+    for (auto* session: _sessionsById | std::views::values)
+        session->applySystemScrollBars(system);
+}
+
 void TerminalSessionManager::refreshChromeDependents()
 {
     for (auto* controller: _controllersByWindow | std::views::values)

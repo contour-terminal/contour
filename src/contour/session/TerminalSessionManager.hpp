@@ -3,6 +3,7 @@
 #include <contour/command/CommandHistory.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/config/ScrollBarMode.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/SessionVisibility.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
@@ -567,6 +568,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Applies the OS motion preference to every session's terminal.
     /// @param motion The OS motion preference.
     void updateMotionPreference(config::MotionPreference motion);
+
+    /// Hands the system's scroller style to every session, so each overlay scrollbar follows it live.
+    /// GUI thread.
+    /// @param system The system's scroller style, or nullopt where the platform publishes none.
+    void updateSystemScrollBars(std::optional<config::ScrollBarMode> system);
 
     /// What every window derives from the chrome's configuration, refreshed after it changed (a reload, an
     /// OS appearance or accessibility change): which pane headers show, and so which sessions follow the

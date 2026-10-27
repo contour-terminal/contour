@@ -21,6 +21,8 @@ TEST_CASE("The null sources report the defaults", "[appearance-source]")
 {
     CHECK(contour::platform::NullAccessibilityPreferenceSource {}.current() == AccessibilityPreferences {});
     CHECK(contour::platform::NullPlatformAppearance {}.current() == PlatformAppearance {});
+    // A platform that publishes no scroller style leaves the scrollbar to the profile's mode.
+    CHECK_FALSE(contour::platform::NullPlatformAppearance {}.current().scrollBars.has_value());
 }
 
 TEST_CASE("nullAppearanceServices builds silent default sources", "[appearance-source]")
@@ -64,8 +66,9 @@ TEST_CASE("appearanceServicesWith drives sources from the switches", "[appearanc
     auto const appearance =
         services.appearance([&](PlatformAppearance next) { appearances.push_back(next); });
     REQUIRE(appearance != nullptr);
-    auto const accented =
-        PlatformAppearance { .accent = vtbackend::RGBColor { 0x0A, 0x84, 0xFF }, .windowCornerRadius = 10 };
+    auto const accented = PlatformAppearance { .accent = vtbackend::RGBColor { 0x0A, 0x84, 0xFF },
+                                               .windowCornerRadius = 10,
+                                               .scrollBars = contour::config::ScrollBarMode::Always };
     appearanceSwitch.set(accented);
     CHECK(appearance->current() == accented);
     REQUIRE(appearances.size() == 1);
@@ -87,7 +90,9 @@ TEST_CASE("A destroyed switched source no longer receives changes", "[appearance
     accessibilitySwitch.set({ .motion = MotionPreference::Reduced,
                               .transparency = TransparencyPreference::Allowed,
                               .contrast = ContrastPreference::Standard });
-    appearanceSwitch.set({ .accent = vtbackend::RGBColor { 0x0A, 0x84, 0xFF }, .windowCornerRadius = 10 });
+    appearanceSwitch.set({ .accent = vtbackend::RGBColor { 0x0A, 0x84, 0xFF },
+                           .windowCornerRadius = 10,
+                           .scrollBars = contour::config::ScrollBarMode::Overlay });
     CHECK(accessibilityCalls == 0);
     CHECK(appearanceCalls == 0);
     CHECK_FALSE(accessibilitySwitch.notify);

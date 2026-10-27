@@ -1998,9 +1998,11 @@ void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPrefe
     sessionsManager().updateMotionPreference(preferences.motion);
 }
 
-void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance /*appearance*/)
+void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance appearance)
 {
     refreshChromeStyle();
+    // Every overlay scrollbar follows the system's scroller style live.
+    sessionsManager().updateSystemScrollBars(appearance.scrollBars);
 }
 
 int ContourGuiApp::checkConfig()

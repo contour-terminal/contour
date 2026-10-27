@@ -404,6 +404,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
+    _systemScrollBars { app.platformAppearance().scrollBars },
     _localIdentity { app.hostIdentity() },
     _accumulatedPixelScroll {},
     _accumulatedAngleScroll {},
@@ -1633,6 +1634,11 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
 
         emit backgroundColorChanged();
     }
+}
+
+void TerminalSession::applySystemScrollBars(std::optional<config::ScrollBarMode> system)
+{
+    _systemScrollBars = system;
 }
 
 void TerminalSession::applyMotionPreference(config::MotionPreference motion)

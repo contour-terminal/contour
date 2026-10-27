@@ -4,6 +4,7 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ScrollBarMode.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/MouseMapping.hpp>
@@ -1138,6 +1139,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param motion The OS motion preference.
     void applyMotionPreference(config::MotionPreference motion);
 
+    /// Records the system's scroller style, which a `scrollbar.mode: system` profile resolves against
+    /// (@see config::resolveScrollBarMode). Live reconfiguration, as applyMotionPreference() is: the user
+    /// switches the style, or plugs in a mouse, while the session runs. GUI thread.
+    /// @param system The system's scroller style, or nullopt where the platform publishes none.
+    void applySystemScrollBars(std::optional<config::ScrollBarMode> system);
+
     // vtbackend::Events
     //
     void requestCaptureBuffer(vtbackend::LineCount lines, vtbackend::CaptureLineMode mode) override;
@@ -2090,6 +2097,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
+    /// The system's scroller style: read from the app when the session is made, then as
+    /// applySystemScrollBars() reports it; nullopt where the platform publishes none. GUI thread.
+    std::optional<config::ScrollBarMode> _systemScrollBars;
     /// This machine's identity, as the app read it once (ContourGuiApp::hostIdentity): neither half changes
     /// while the process runs, and both are asked on the parser thread and on the GUI thread under the
     /// terminal lock. A copy rather than a reference into the app, which a session may outlive at exit.
