@@ -39,6 +39,15 @@ Control {
     /// link pill cuts a long target in its middle, where both its host and its last segment survive.
     property int textElide: Text.ElideNone
 
+    /// The message's own width, uncut.
+    readonly property real textImplicitWidth: textLabel.implicitWidth
+    /// What everything but the message takes: the insets, the glyph and the detail with their gaps. Summed
+    /// from the labels' own widths, so it is known before the row has been laid out (an unshown toast is
+    /// never polished, and its implicitWidth lags until it is).
+    readonly property real restImplicitWidth: leftPadding + rightPadding
+                                              + (root.glyph.length > 0 ? glyphLabel.implicitWidth + spacing : 0)
+                                              + (root.detail.length > 0 ? spacing + detailLabel.implicitWidth : 0)
+
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel
 
@@ -87,6 +96,7 @@ Control {
         spacing: root.spacing
 
         Label {
+            id: glyphLabel
             objectName: "toastGlyph"
             visible: root.glyph.length > 0
             Layout.alignment: Qt.AlignVCenter
@@ -97,6 +107,7 @@ Control {
         }
 
         Label {
+            id: textLabel
             objectName: "toastText"
             Layout.alignment: Qt.AlignVCenter
             // Its implicit width stays the whole text's, which is what a host places the toast by; only a
@@ -113,6 +124,7 @@ Control {
         }
 
         Label {
+            id: detailLabel
             objectName: "toastDetail"
             visible: root.detail.length > 0
             Layout.alignment: Qt.AlignVCenter

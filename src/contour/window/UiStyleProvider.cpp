@@ -593,9 +593,11 @@ namespace
 
 QVariantMap UiStyleProvider::linkPillPlacement(int host,
                                                int findBar,
+                                               qreal headerWidth,
                                                qreal paneWidth,
                                                qreal paneHeight,
                                                qreal pillWidth,
+                                               qreal pillMinimumWidth,
                                                qreal pillHeight,
                                                QVariantMap const& clearance) const
 {
@@ -609,7 +611,9 @@ QVariantMap UiStyleProvider::linkPillPlacement(int host,
         .paneWidth = paneWidth,
         .paneHeight = paneHeight,
         .pillWidth = pillWidth,
+        .pillMinimumWidth = pillMinimumWidth,
         .pillHeight = pillHeight,
+        .headerSlotWidth = headerWidth,
         .insetTop = _space.s4(),
         .insetRight = _space.s5(),
         .grid = LinkPillGrid { .marginLeft = clearance.value(QStringLiteral("marginLeft")).toReal(),

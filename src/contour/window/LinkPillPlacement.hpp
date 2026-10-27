@@ -82,10 +82,13 @@ struct LinkPillInputs
     double paneWidth = 0;                              ///< The pane's width.
     double paneHeight = 0;                             ///< The pane's height.
     double pillWidth = 0;                              ///< The pill's natural width.
-    double pillHeight = 0;                             ///< The pill's height.
-    double insetTop = 0;                               ///< Its gap to the pane's top and bottom.
-    double insetRight = 0;                             ///< Its gap to the pane's right edge.
-    LinkPillGrid grid {};                              ///< The cells it may cover.
+    /// The narrowest the pill may be cut to: its hint and a little of the target, the rest elided.
+    double pillMinimumWidth = 0;
+    double pillHeight = 0;      ///< The pill's height.
+    double headerSlotWidth = 0; ///< The width of the header's trailing slot, for LinkPillHost::PaneHeader.
+    double insetTop = 0;        ///< Its gap to the pane's top and bottom.
+    double insetRight = 0;      ///< Its gap to the pane's right edge.
+    LinkPillGrid grid {};       ///< The cells it may cover.
 };
 
 /// Where the pill goes and how wide it is.
@@ -136,7 +139,9 @@ namespace detail
 
 /// Where the link pill goes (spec R-g), so that it only ever covers blank cells and never the prompt.
 ///
-/// In order: no pill, nowhere. In a pane header, its trailing area, unless the find bar holds the top.
+/// In order: no pill, nowhere. In a pane header, its trailing area -- cut to the slot's width -- unless the
+/// find bar holds the top or the slot is narrower than the pill's minimum width; then the pill keeps to the
+/// grid, as it does without a header, rather than squeezed to nothing over the header's actions.
 /// Otherwise at the grid's top right when every cell under it is blank and none is on an avoided row, unless
 /// the find bar holds the top; else at the bottom right under the same test, unless the find bar holds the
 /// bottom; else nowhere. So the pill and the find bar never overlap. The pill is shrunk to the
@@ -147,8 +152,12 @@ namespace detail
 {
     if (in.pillWidth <= 0 || in.pillHeight <= 0)
         return {};
-    if (in.host == LinkPillHost::PaneHeader && in.findBar != FindBarPresence::Top)
-        return { .anchor = LinkPillAnchor::HeaderTrailing, .x = 0, .y = 0, .width = in.pillWidth };
+    if (in.host == LinkPillHost::PaneHeader && in.findBar != FindBarPresence::Top
+        && in.headerSlotWidth >= in.pillMinimumWidth)
+        return { .anchor = LinkPillAnchor::HeaderTrailing,
+                 .x = in.headerSlotWidth - std::min(in.pillWidth, in.headerSlotWidth),
+                 .y = 0,
+                 .width = std::min(in.pillWidth, in.headerSlotWidth) };
 
     auto const width = std::min(in.pillWidth, in.paneWidth - (2 * in.insetRight));
     if (width <= 0 || in.grid.cellWidth <= 0 || in.grid.cellHeight <= 0)

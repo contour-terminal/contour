@@ -353,9 +353,11 @@ class UiStyleProvider: public QObject
     /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
     /// @param host       A window::LinkPillHost.
     /// @param findBar    A window::FindBarPresence (findBarPresence()).
+    /// @param headerWidth The width of the pane header's trailing slot; ignored without a header host.
     /// @param paneWidth  The pane's width in logical pixels.
     /// @param paneHeight The pane's height in logical pixels.
     /// @param pillWidth  The pill's natural width.
+    /// @param pillMinimumWidth The narrowest the pill may be cut to.
     /// @param pillHeight The pill's height.
     /// @param clearance  The session's overlay clearance: `marginLeft`, `marginTop`, `cellWidth`,
     /// `cellHeight`,
@@ -363,9 +365,11 @@ class UiStyleProvider: public QObject
     /// @return `{ anchor, x, y, width }`, the anchor as its name (window::linkPillAnchorName).
     [[nodiscard]] Q_INVOKABLE QVariantMap linkPillPlacement(int host,
                                                             int findBar,
+                                                            qreal headerWidth,
                                                             qreal paneWidth,
                                                             qreal paneHeight,
                                                             qreal pillWidth,
+                                                            qreal pillMinimumWidth,
                                                             qreal pillHeight,
                                                             QVariantMap const& clearance) const;
 

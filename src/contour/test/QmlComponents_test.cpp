@@ -2411,6 +2411,20 @@ TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens
     QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
     REQUIRE(QTest::qWaitFor([&] { return !host.bar->property("pressed").toBool(); }));
 
+    // Hovered, without a press, it engages too. The offscreen platform enables no hover effects of its own,
+    // so the bar is asked to take hover as a desktop style would have it do.
+    auto const away =
+        QPoint(static_cast<int>(host.paneWidth / 2), static_cast<int>(host.chrome->height() / 2));
+    QTest::mouseMove(window, away);
+    REQUIRE(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == resting; }));
+    host.bar->setProperty("hoverEnabled", true);
+    QTest::mouseMove(window, centreOf(*handle));
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->property("hovered").toBool(); }));
+    CHECK(host.bar->property("engaged").toBool());
+    CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == active; }));
+    QTest::mouseMove(window, away);
+    REQUIRE(QTest::qWaitFor([&] { return !host.bar->property("engaged").toBool(); }));
+
     // Over a light pane the thumb is dark.
     auto light = std::make_unique<MockSession>(QColor(0xFA, 0xFA, 0xF8));
     light->setScrollbarVisible(true);
@@ -2419,8 +2433,8 @@ TEST_CASE("SessionChrome scrollbar takes its extents and colours from the tokens
     QCoreApplication::processEvents();
     auto const lightThumb = colorOnPane(engine, ChromeColorRole::ScrollbarThumb, QColor(0xFA, 0xFA, 0xF8));
     CHECK(lightThumb.lightnessF() < 0.5);
-    if (!host.bar->property("engaged").toBool())
-        CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == lightThumb; }));
+    REQUIRE_FALSE(host.bar->property("engaged").toBool()); // the pointer rests away from the bar
+    CHECK(QTest::qWaitFor([&] { return handle->property("color").value<QColor>() == lightThumb; }));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -2486,6 +2500,27 @@ TEST_CASE("SessionChrome: the Terminal row draws the bar as a column of its thum
     for (auto const* glyph: glyphs)
         CHECK(glyph->property("text").toString() == QStringLiteral("┃"));
     CHECK(handle->property("color").value<QColor>().alpha() == 0);
+
+    // The glyphs take the scheme's thumb ink, and its active ink while the thumb is pressed.
+    auto* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    auto const resting = colors->property("scrollbarThumb").value<QColor>();
+    auto const pressed = colors->property("scrollbarThumbActive").value<QColor>();
+    REQUIRE(resting != pressed);
+    auto const inkOfAll = [&](QColor const& ink) {
+        return std::ranges::all_of(
+            glyphs, [&](QQuickItem const* glyph) { return glyph->property("color").value<QColor>() == ink; });
+    };
+    CHECK(QTest::qWaitFor([&] { return inkOfAll(resting); }));
+    // Faded in, over motion.standard, before a press can reach it.
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->opacity() == 1.0; }));
+    auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+    REQUIRE(window != nullptr);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
+    REQUIRE(QTest::qWaitFor([&] { return host.bar->property("pressed").toBool(); }));
+    CHECK(QTest::qWaitFor([&] { return inkOfAll(pressed); }));
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, centreOf(*handle));
+    CHECK(QTest::qWaitFor([&] { return inkOfAll(resting); }));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -7013,6 +7048,103 @@ TEST_CASE("link pill: a split's pill sits in the pane header (offscreen)",
     CHECK(QTest::qWaitFor([&] { return !pill->property("shown").toBool(); }));
     CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toInt()
           == static_cast<int>(contour::window::HeaderTrailingOccupant::None));
+    // The header's actions come back once the pill has left.
+    CHECK(QTest::qWaitFor([&] { return actions.isVisible(); }));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: a hiding pill fades where it stood (offscreen)", "[contour][gui][qml][linkpill]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = LinkPillScene {};
+    scene.show();
+    auto* pill = scene.pill;
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() == 1.0; }));
+    auto* const parent = pill->parentItem();
+    auto const where = QRectF(pill->x(), pill->y(), pill->width(), pill->height());
+    REQUIRE(where.width() > 0.0);
+
+    scene.show(false);
+    // Mid-fade: still where it was, at its width, under the same parent -- not at the grid's corner.
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() > 0.0 && pill->opacity() < 1.0; }));
+    CHECK(pill->parentItem() == parent);
+    CHECK(QRectF(pill->x(), pill->y(), pill->width(), pill->height()) == where);
+
+    // Faded out, it takes up the hidden placement.
+    REQUIRE(QTest::qWaitFor([&] { return pill->opacity() == 0.0; }));
+    CHECK(pill->property("placement").toMap().value(QStringLiteral("anchor")).toString()
+          == QStringLiteral("hidden"));
+    CHECK_FALSE(pill->isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// A target far wider than any header slot, so a pill in one is cut.
+[[nodiscard]] QString longLinkTarget()
+{
+    return QStringLiteral(
+        "github.com › contour-terminal › contour › issues › 2175 › comments › a-very-long-anchor-name");
+}
+} // namespace
+
+TEST_CASE("link pill: a narrow header slot cuts the target in its middle (offscreen)",
+          "[contour][gui][qml][linkpill][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOverlayClearance(linkClearance(40, 18, 40));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto& slot = PaneTreeHost::partOf(card, "paneHeaderLinkSlot");
+    auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
+    REQUIRE(pill != nullptr);
+    panes.leftSession.setLinkTarget(longLinkTarget(), QStringLiteral("Ctrl+Click to open"), true);
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool() && pill->parentItem() == &slot; }));
+    REQUIRE(pill->property("naturalWidth").toReal() > slot.width());
+    // Inside the slot, flush with its trailing edge, its target cut.
+    CHECK(pill->x() >= 0.0);
+    CHECK(pill->x() + pill->width() == Catch::Approx(slot.width()));
+    auto* text = pill->findChild<QQuickItem*>(QStringLiteral("toastText"));
+    REQUIRE(text != nullptr);
+    CHECK(QTest::qWaitFor([&] { return text->property("truncated").toBool(); }));
+    CHECK(text->property("elide").toInt() == Qt::ElideMiddle);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: a header slot too narrow for the pill sends it to the grid (offscreen)",
+          "[contour][gui][qml][linkpill][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOverlayClearance(linkClearance(40, 18, 40));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto& slot = PaneTreeHost::partOf(card, "paneHeaderLinkSlot");
+    auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
+    REQUIRE(pill != nullptr);
+    // A hint wider than the slot: the pill could show none of the target there.
+    auto const hint =
+        QStringLiteral("Ctrl+Click to open this link in the browser, as the follow binding says");
+    panes.leftSession.setLinkTarget(longLinkTarget(), hint, true);
+    REQUIRE(QTest::qWaitFor([&] {
+        return pill->property("livePlacement").toMap().value(QStringLiteral("anchor")).toString()
+               != QStringLiteral("hidden");
+    }));
+    REQUIRE(pill->property("minimumWidth").toReal() > slot.width());
+    CHECK(pill->parentItem() != &slot);
+    CHECK(pill->property("inHeader").toBool() == false);
+    // The header keeps its actions.
+    CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toInt()
+          == static_cast<int>(contour::window::HeaderTrailingOccupant::None));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -11358,6 +11490,34 @@ struct SizeIndicatorScene
     [[nodiscard]] int linger() { return static_cast<int>(chromeToken(engine, "motion", "linger")); }
 };
 } // namespace
+
+TEST_CASE("size indicator: a pane rebound to another session drops the held pill unsettled (offscreen)",
+          "[contour][gui][qml][sizeindicator]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = SizeIndicatorScene { { 600 }, 0 };
+    auto& leaving = *scene.sessions.front();
+    auto* pill = scene.pill(0);
+    auto* pane = scene.panes.front();
+    auto* hold = pane->findChild<QObject*>(QStringLiteral("sizeIndicatorHold"));
+    REQUIRE(hold != nullptr);
+    leaving.requestSizeIndicator(QStringLiteral("100 × 30"));
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
+    REQUIRE(hold->property("running").toBool());
+
+    auto coming = MockSession {};
+    pane->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&coming)));
+    CHECK_FALSE(pane->property("sizeIndicatorHeld").toBool());
+    CHECK_FALSE(hold->property("running").toBool());
+    CHECK_FALSE(pill->property("shown").toBool());
+    // Neither session is told the pill settled: the leaving one's burst ended with it, the coming one had
+    // none.
+    QTest::qWait(scene.linger() * 2);
+    CHECK(leaving.settledSizeIndicators.empty());
+    CHECK(coming.settledSizeIndicators.empty());
+    pane->setProperty("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 
 TEST_CASE(
     "size indicator: a resize shows the pill centred on its pane and settles after the hold (offscreen)",

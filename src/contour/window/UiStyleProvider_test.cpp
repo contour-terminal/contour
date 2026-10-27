@@ -2005,15 +2005,15 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     };
     auto const grid = static_cast<int>(contour::window::LinkPillHost::Grid);
     auto const closed = static_cast<int>(contour::window::FindBarPresence::Closed);
-    auto const placed = mac.linkPillPlacement(grid, closed, 800, 400, 300, 22, clearance);
+    auto const placed = mac.linkPillPlacement(grid, closed, 0, 800, 400, 300, 300, 22, clearance);
     CHECK(placed.value(QStringLiteral("anchor")).toString() == QStringLiteral("topRight"));
     CHECK(placed.value(QStringLiteral("x")).toReal() == 490.0);
     CHECK(placed.value(QStringLiteral("y")).toReal() == 8.0);
     CHECK(placed.value(QStringLiteral("width")).toReal() == 300.0);
 
     // The insets are the row's s4 and s5, and a host or find bar out of range answers nothing.
-    CHECK(mac.linkPillPlacement(-1, closed, 800, 400, 300, 22, clearance).isEmpty());
-    CHECK(mac.linkPillPlacement(grid, 99, 800, 400, 300, 22, clearance).isEmpty());
+    CHECK(mac.linkPillPlacement(-1, closed, 0, 800, 400, 300, 300, 22, clearance).isEmpty());
+    CHECK(mac.linkPillPlacement(grid, 99, 0, 800, 400, 300, 300, 22, clearance).isEmpty());
 
     // The find bar's presence is read from its placement's anchor name: closed, or the places it holds.
     using contour::window::FindBarPresence;
@@ -2022,21 +2022,23 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     CHECK(mac.findBarPresence(QStringLiteral("headerRow")) == static_cast<int>(FindBarPresence::Top));
     CHECK(mac.findBarPresence(QStringLiteral("bottomRight")) == static_cast<int>(FindBarPresence::Bottom));
     CHECK(mac.linkPillPlacement(
-                 grid, mac.findBarPresence(QStringLiteral("nowhere")), 800, 400, 300, 22, clearance)
+                 grid, mac.findBarPresence(QStringLiteral("nowhere")), 0, 800, 400, 300, 300, 22, clearance)
               .isEmpty());
     // A bar at the top sends the pill to the bottom right; a bar at the bottom leaves it the top.
     CHECK(mac.linkPillPlacement(
-                 grid, mac.findBarPresence(QStringLiteral("topRight")), 800, 400, 300, 22, clearance)
+                 grid, mac.findBarPresence(QStringLiteral("topRight")), 0, 800, 400, 300, 300, 22, clearance)
               .value(QStringLiteral("anchor"))
           == QStringLiteral("bottomRight"));
-    CHECK(mac.linkPillPlacement(
-                 grid, mac.findBarPresence(QStringLiteral("bottomRight")), 800, 400, 300, 22, clearance)
-              .value(QStringLiteral("anchor"))
-          == QStringLiteral("topRight"));
+    CHECK(
+        mac.linkPillPlacement(
+               grid, mac.findBarPresence(QStringLiteral("bottomRight")), 0, 800, 400, 300, 300, 22, clearance)
+            .value(QStringLiteral("anchor"))
+        == QStringLiteral("topRight"));
 
     // The prompt on the top row sends it to the bottom right.
     clearance.insert(QStringLiteral("avoidRows"), QVariantList { 0 });
-    CHECK(mac.linkPillPlacement(grid, closed, 800, 400, 300, 22, clearance).value(QStringLiteral("anchor"))
+    CHECK(mac.linkPillPlacement(grid, closed, 0, 800, 400, 300, 300, 22, clearance)
+              .value(QStringLiteral("anchor"))
           == QStringLiteral("bottomRight"));
 
     auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));

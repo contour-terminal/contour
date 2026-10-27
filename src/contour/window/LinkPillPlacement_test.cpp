@@ -36,7 +36,9 @@ struct Base
                                 .paneWidth = 800,
                                 .paneHeight = 400,
                                 .pillWidth = 300,
+                                .pillMinimumWidth = 120,
                                 .pillHeight = 22,
+                                .headerSlotWidth = 400,
                                 .insetTop = 8,
                                 .insetRight = 10,
                                 .grid = { .marginLeft = 0,
@@ -103,8 +105,24 @@ TEST_CASE("linkPill.inThePaneHeader", "[linkpill]")
     base.trailingBlank.assign(Rows, 0);
     auto inputs = base.inputs();
     inputs.host = LinkPillHost::PaneHeader;
+    // Flush with the slot's trailing edge.
     CHECK(placeLinkPill(inputs)
-          == LinkPillPlacement { .anchor = LinkPillAnchor::HeaderTrailing, .x = 0, .y = 0, .width = 300 });
+          == LinkPillPlacement { .anchor = LinkPillAnchor::HeaderTrailing, .x = 100, .y = 0, .width = 300 });
+}
+
+TEST_CASE("linkPill.aNarrowHeaderSlotCutsThePillOrSendsItToTheGrid", "[linkpill]")
+{
+    // A slot narrower than the pill cuts it to the slot, flush with its trailing edge; one narrower than the
+    // pill's minimum keeps it in the grid rather than squeezed over the header's actions.
+    auto inputs = Base {}.inputs();
+    inputs.host = LinkPillHost::PaneHeader;
+    inputs.headerSlotWidth = 200;
+    CHECK(placeLinkPill(inputs)
+          == LinkPillPlacement { .anchor = LinkPillAnchor::HeaderTrailing, .x = 0, .y = 0, .width = 200 });
+    inputs.headerSlotWidth = 120;
+    CHECK(placeLinkPill(inputs).anchor == LinkPillAnchor::HeaderTrailing);
+    inputs.headerSlotWidth = 119;
+    CHECK(placeLinkPill(inputs) == TopRight);
 }
 
 TEST_CASE("linkPill.theFindBarOwnsTheHeaderAndTheTopRight", "[linkpill]")

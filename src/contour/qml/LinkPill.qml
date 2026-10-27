@@ -35,23 +35,41 @@ Toast {
     readonly property bool hasTarget: session !== null && session !== undefined
                                       && session.linkTargetText !== undefined
     readonly property bool wanted: hasTarget && session.linkTargetShown
-    readonly property bool inHeader: placement.anchor === "headerTrailing"
+    readonly property bool inHeader: placement.anchor === "headerTrailing" && headerSlot !== null
+    /// The narrowest the pill is cut to: its hint, its insets, and one pill-height of the target, the rest of
+    /// which is elided in its middle. A header slot narrower than this sends the pill to the grid.
+    readonly property real minimumWidth: restImplicitWidth + extent
+    /// Its whole width, the target uncut: known before the pill has ever been laid out.
+    readonly property real naturalWidth: restImplicitWidth + textImplicitWidth
 
-    // Placed by its whole width (implicitWidth is the uncut text's), so cutting the text cannot move it. Re-read
-    // as the clearance's revision moves: the page under a shown pill changed.
-    readonly property var placement: {
-        if (!pill.wanted || pill.gridItem === null)
+    // Where the pill would go now. Placed by its whole width (naturalWidth, the uncut text's), so cutting
+    // the text cannot move it. Re-read as the clearance's revision moves: the page under a shown pill changed.
+    readonly property var livePlacement: {
+        if (!pill.wanted || !pill.session || pill.gridItem === null)
             return { anchor: "hidden", x: 0, y: 0, width: 0 }
         var revision = pill.session.overlayClearanceRevision
         var host = pill.headerPresent > 0 && pill.headerSlot !== null ? 1 : 0
-        return chromeStyle.linkPillPlacement(host, pill.findBar, pill.gridItem.width, pill.gridItem.height,
-                                             pill.implicitWidth, pill.extent, pill.session.overlayClearance())
+        return chromeStyle.linkPillPlacement(host, pill.findBar, host > 0 ? pill.headerSlot.width : 0,
+                                             pill.gridItem.width, pill.gridItem.height, pill.naturalWidth,
+                                             pill.minimumWidth, pill.extent, pill.session.overlayClearance())
     }
 
+    // Where the pill is drawn: the live placement while it shows, and the last shown one while it fades out,
+    // so a hiding pill fades where it stood rather than at the grid's corner, at no width, over the
+    // application's cells. Taken up again once it is fully faded.
+    property var placement: ({ anchor: "hidden", x: 0, y: 0, width: 0 })
+    function followPlacement() {
+        if (pill.livePlacement.anchor !== "hidden" || pill.opacity === 0)
+            pill.placement = pill.livePlacement
+    }
+    onLivePlacementChanged: pill.followPlacement()
+    onOpacityChanged: pill.followPlacement()
+    Component.onCompleted: pill.followPlacement()
+
     parent: pill.inHeader ? pill.headerSlot : pill.gridHost
-    x: pill.inHeader ? parent.width - width : pill.placement.x
+    x: pill.placement.x
     y: pill.inHeader ? (parent.height - height) / 2 : pill.placement.y
-    width: pill.inHeader ? Math.min(pill.implicitWidth, pill.headerSlot.width) : pill.placement.width
+    width: pill.placement.width
     z: 20
 
     extent: chromeStyle.size.linkPill
@@ -60,9 +78,11 @@ Toast {
     spacing: chromeStyle.space.s3
     textElide: Text.ElideMiddle
     elevation: chromeStyle.elevation.inPane
+    // Opaque on a translucent profile too (ruling A5): the pill sits outside the pane's opacity, and its
+    // legibility comes before matching the pane's translucency.
     text: pill.hasTarget ? pill.session.linkTargetText : ""
     detail: pill.hasTarget ? pill.session.linkTargetHint : ""
-    shown: pill.wanted && pill.placement.anchor !== "hidden"
+    shown: pill.wanted && pill.livePlacement.anchor !== "hidden"
     // Present only while it is (or is fading) on screen, so a hidden pill takes no press and is no
     // accessible object.
     visible: opacity > 0

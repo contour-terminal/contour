@@ -212,6 +212,8 @@ ContourTerminal {
         }
         // An in-pane pill casts no hard shadow on the Terminal row: only a real popover does.
         elevation: chromeStyle.elevation.inPane
+        // Opaque on a translucent profile too (ruling A5): it sits outside the pane's opacity, and its
+        // legibility comes before matching the pane's translucency.
         // The session announces the settled size itself, once.
         Accessible.ignored: true
     }
