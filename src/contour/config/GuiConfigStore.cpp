@@ -68,6 +68,12 @@ std::filesystem::path relativePathOf(SideFile const& file)
     return std::filesystem::path { location.directory } / sideFileName(file.name);
 }
 
+std::string displayPathOf(SideFile const& file)
+{
+    auto const spelled = relativePathOf(file).generic_u8string();
+    return std::string { spelled.begin(), spelled.end() };
+}
+
 FileGuiConfigStore::FileGuiConfigStore(core::platform::FileSystem const& fileSystem,
                                        std::filesystem::path configDir):
     _fileSystem { fileSystem }, _configDir { std::move(configDir) }

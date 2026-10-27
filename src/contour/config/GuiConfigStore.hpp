@@ -49,6 +49,12 @@ struct SideFile
 /// @return Its path relative to the configuration directory.
 [[nodiscard]] std::filesystem::path relativePathOf(SideFile const& file);
 
+/// @p file's relative path as a message spells it, in UTF-8 with forward slashes on every platform:
+/// `profiles/main.yml`.
+/// @param file The side file.
+/// @return The path, for a sentence the page shows.
+[[nodiscard]] std::string displayPathOf(SideFile const& file);
+
 /// Persistence for the GUI-managed configuration side files — the write-side counterpart to the
 /// loader's side-file merge (see mergeGuiManagedSideFiles in Config.cpp). The settings page creates
 /// and edits its own `profiles/<name>.yml` and `colorschemes/<name>.yml`, plus the global

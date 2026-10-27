@@ -29,6 +29,7 @@ add_library(contour_config STATIC
     NewDefaultsOffer.hpp
     ScrollBarMode.hpp
     SecureInputMode.hpp
+    SettingsEditSession.cpp SettingsEditSession.hpp
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
