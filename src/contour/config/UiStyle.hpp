@@ -233,6 +233,17 @@ struct UiStyleTokens
     /// the bundled icon.
     std::string_view secureInputText {};
 
+    // The Settings window's controls, as cells on the Terminal row (tui); empty where they are shapes.
+    std::string_view switchOnGlyph {};    ///< A switch that is on.
+    std::string_view switchOffGlyph {};   ///< A switch that is off.
+    std::string_view segmentOnGlyph {};   ///< The chosen segment of a segmented control.
+    std::string_view segmentOffGlyph {};  ///< An unchosen segment.
+    std::string_view sliderFillGlyph {};  ///< A slider's track up to its knob.
+    std::string_view sliderKnobGlyph {};  ///< A slider's knob.
+    std::string_view sliderTrackGlyph {}; ///< A slider's track beyond its knob.
+    std::string_view stepperGlyph {};     ///< A stepper's pair of arrows, up then down.
+    std::string_view colorWellGlyph {};   ///< A colour well, drawn in the colour it holds.
+
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
     std::string_view newTabGlyph;  ///< The "new tab" button.
@@ -423,6 +434,15 @@ namespace detail
         .findNextGlyph = "▾",
         .scrollThumbGlyph = "",
         .secureInputText = "",
+        .switchOnGlyph = "",
+        .switchOffGlyph = "",
+        .segmentOnGlyph = "",
+        .segmentOffGlyph = "",
+        .sliderFillGlyph = "",
+        .sliderKnobGlyph = "",
+        .sliderTrackGlyph = "",
+        .stepperGlyph = "",
+        .colorWellGlyph = "",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",
@@ -508,6 +528,17 @@ namespace detail
         .findNextGlyph = "↓",
         .scrollThumbGlyph = "┃",
         .secureInputText = "secure",
+        // The tui board's controls: a checkbox for a switch, a radio for a segment, a heavy bar with a dot
+        // for a slider, the up and down triangles for a stepper, and two full blocks for a colour.
+        .switchOnGlyph = "[x]",
+        .switchOffGlyph = "[ ]",
+        .segmentOnGlyph = "(•)",
+        .segmentOffGlyph = "( )",
+        .sliderFillGlyph = "━",
+        .sliderKnobGlyph = "●",
+        .sliderTrackGlyph = "─",
+        .stepperGlyph = "▴▾",
+        .colorWellGlyph = "██",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",

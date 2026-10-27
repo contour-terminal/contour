@@ -208,6 +208,15 @@ namespace
             .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
             .findNext = QString::fromUtf8(tokens.findNextGlyph),
             .secureInput = QString::fromUtf8(tokens.secureInputText),
+            .switchOn = QString::fromUtf8(tokens.switchOnGlyph),
+            .switchOff = QString::fromUtf8(tokens.switchOffGlyph),
+            .segmentOn = QString::fromUtf8(tokens.segmentOnGlyph),
+            .segmentOff = QString::fromUtf8(tokens.segmentOffGlyph),
+            .sliderFill = QString::fromUtf8(tokens.sliderFillGlyph),
+            .sliderKnob = QString::fromUtf8(tokens.sliderKnobGlyph),
+            .sliderTrack = QString::fromUtf8(tokens.sliderTrackGlyph),
+            .stepper = QString::fromUtf8(tokens.stepperGlyph),
+            .colorWell = QString::fromUtf8(tokens.colorWellGlyph),
         };
     }
 
@@ -266,6 +275,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _tui { _groups.tui, this },
     _layout { _groups.layout, this },
     _tint { _groups.tint, this },
+    _settings { _groups.settings, _units, this },
+    _settingsTraits { _groups.layout.settings, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
     _paneRoles { this },
     _badgeKinds { this },

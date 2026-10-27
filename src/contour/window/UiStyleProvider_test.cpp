@@ -2359,3 +2359,95 @@ TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header a
     // Not vacuous: some hues fall short somewhere and take the black or white fallback.
     CHECK(fellBack > 0);
 }
+
+TEST_CASE("UiStyleProvider publishes the Settings window's tokens per row", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "settings", "row").toReal() == 44.0);
+    CHECK(tokenOf(mac, "settings", "switchWidth").toReal() == 32.0);
+    CHECK(tokenOf(mac, "settings", "labelType").toReal() == 13.0);
+    CHECK(tokenOf(mac, "settings", "disabledOpacity").toReal() == Catch::Approx(0.35));
+    CHECK(tokenOf(mac, "layout", "settings").toInt() == tokenOf(mac, "layout", "insetGrouped").toInt());
+    CHECK(tokenOf(mac, "settingsTraits", "header").toInt()
+          == tokenOf(mac, "settingsTraits", "toolbar").toInt());
+    CHECK(tokenOf(mac, "settingsTraits", "stepper").toInt()
+          == tokenOf(mac, "settingsTraits", "stacked").toInt());
+    // The native rows draw shapes: no glyph for any control.
+    for (auto const* glyph: { "switchOnGlyph",
+                              "switchOffGlyph",
+                              "segmentOnGlyph",
+                              "segmentOffGlyph",
+                              "sliderFillGlyph",
+                              "sliderKnobGlyph",
+                              "sliderTrackGlyph",
+                              "stepperGlyph",
+                              "colorWellGlyph" })
+    {
+        CAPTURE(glyph);
+        CHECK(mac.property(glyph).toString().isEmpty());
+    }
+
+    auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
+    CHECK(tokenOf(fluent, "layout", "settings").toInt() == tokenOf(fluent, "layout", "cards").toInt());
+    CHECK(tokenOf(fluent, "settingsTraits", "rows").toInt()
+          == tokenOf(fluent, "settingsTraits", "separateCards").toInt());
+    CHECK(tokenOf(fluent, "settingsTraits", "stepper").toInt()
+          == tokenOf(fluent, "settingsTraits", "inlineArrows").toInt());
+    CHECK(tokenOf(fluent, "settings", "slider").toReal() == 180.0);
+
+    auto const linux = UiStyleProvider(chromeInputsFor(ChromeStyle::ContourLinux, font));
+    CHECK(tokenOf(linux, "layout", "settings").toInt() == tokenOf(linux, "layout", "boxedList").toInt());
+    CHECK(tokenOf(linux, "settingsTraits", "header").toInt()
+          == tokenOf(linux, "settingsTraits", "splitHeaderBar").toInt());
+    CHECK(tokenOf(linux, "settingsTraits", "stepper").toInt()
+          == tokenOf(linux, "settingsTraits", "sideBySide").toInt());
+
+    // The Terminal row counts cells: a row is one cell high, a switch three cells wide and one high.
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "settings", "row").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "settings", "rowWithHelp").toReal() == Catch::Approx(2 * terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "settings", "switchWidth").toReal()
+          == Catch::Approx(3 * terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "settings", "sidebarWidth").toReal()
+          == Catch::Approx(24 * terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "layout", "settings").toInt() == tokenOf(terminal, "layout", "cells").toInt());
+    CHECK(terminal.property("switchOnGlyph").toString() == QStringLiteral("[x]"));
+    CHECK(terminal.property("switchOffGlyph").toString() == QStringLiteral("[ ]"));
+    CHECK(terminal.property("segmentOnGlyph").toString() == QStringLiteral("(•)"));
+    CHECK(terminal.property("segmentOffGlyph").toString() == QStringLiteral("( )"));
+    CHECK(terminal.property("sliderFillGlyph").toString() == QStringLiteral("━"));
+    CHECK(terminal.property("sliderKnobGlyph").toString() == QStringLiteral("●"));
+    CHECK(terminal.property("sliderTrackGlyph").toString() == QStringLiteral("─"));
+    CHECK(terminal.property("stepperGlyph").toString() == QStringLiteral("▴▾"));
+    CHECK(terminal.property("colorWellGlyph").toString() == QStringLiteral("██"));
+
+    // Every Settings colour role is published by name on `chromeStyle.colors`, and reads a colour.
+    auto* const colors = terminal.property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    for (auto const* role: { "settingsSidebarFill",
+                             "settingsPageFill",
+                             "settingsGroupFill",
+                             "settingsSeparator",
+                             "settingsLabel",
+                             "settingsHelp",
+                             "settingsSelectionFill",
+                             "settingsSelectionText",
+                             "settingsModified",
+                             "settingsIconTile",
+                             "settingsIconGlyph",
+                             "switchOnFill",
+                             "switchOffFill",
+                             "switchKnob",
+                             "controlFill",
+                             "controlText",
+                             "previewFrame" })
+    {
+        CAPTURE(role);
+        CHECK(colors->property(role).isValid());
+    }
+}

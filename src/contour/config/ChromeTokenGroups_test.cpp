@@ -1662,8 +1662,8 @@ TEST_CASE("chromeTokens.theSearchTickMarksOnTheTrack", "[chrometokens]")
             {
                 CAPTURE(dark);
                 // As the resolver computes it: a whole percentage.
-                auto const alpha =
-                    static_cast<float>((dark ? pair.dark : pair.light) * source.alphaPercent / 100) / 100.0f;
+                auto const wholePercent = (dark ? pair.dark : pair.light) * source.alphaPercent / 100;
+                auto const alpha = static_cast<float>(wholePercent) / 100.0f;
                 // The tint the fallback leaves room for covers every track the rows draw.
                 CHECK(alpha <= vtbackend::ScrollbarTrackMaxTint);
                 auto const ink = dark ? RGBColor { 0xFF, 0xFF, 0xFF } : RGBColor { 0x00, 0x00, 0x00 };
@@ -1755,3 +1755,427 @@ TEST_CASE("chromeTokens.blockChipsAreTheCanvasPills", "[chrometokens]")
         CHECK(row.size.railMark == 13);
     }
 }
+
+// {{{ The Settings window's tokens (Step 4b, Task 8)
+
+namespace
+{
+/// One row of the Settings token table (the plan's Global Constraints): the layout, the traits and every
+/// extent, written out as the board has them so the header's own tables cannot agree with themselves.
+struct SettingsTokenRow
+{
+    contour::config::ChromeStyle style = contour::config::ChromeStyle::MacOS;
+    contour::config::SettingsLayout layout = contour::config::SettingsLayout::InsetGrouped;
+    contour::config::SettingsTokens tokens {};
+};
+
+[[nodiscard]] auto settingsTokenRows()
+{
+    using namespace contour::config;
+    return std::array {
+        SettingsTokenRow { .style = ChromeStyle::MacOS,
+                           .layout = SettingsLayout::InsetGrouped,
+                           .tokens = { .sidebarWidth = 230,
+                                       .sidebarRow = 28,
+                                       .iconTile = 20,
+                                       .iconGlyph = 12,
+                                       .searchField = 28,
+                                       .headerBar = 52,
+                                       .listMaxWidth = 640,
+                                       .groupRadius = 10,
+                                       .row = 44,
+                                       .rowWithHelp = 52,
+                                       .rowPadding = 14,
+                                       .cardGap = 0,
+                                       .groupGap = 16,
+                                       .groupTitleGap = 6,
+                                       .control = 22,
+                                       .switchWidth = 32,
+                                       .switchHeight = 19,
+                                       .slider = 160,
+                                       .stepperField = 72,
+                                       .colorWell = 22,
+                                       .previewHeight = 104,
+                                       .previewWidth = 0,
+                                       .previewRadius = 10,
+                                       .disabledPercent = 35,
+                                       .labelType = 13,
+                                       .helpType = 11,
+                                       .groupTitleType = 13,
+                                       .pageTitleType = 15 } },
+        SettingsTokenRow { .style = ChromeStyle::Fluent,
+                           .layout = SettingsLayout::Cards,
+                           .tokens = { .sidebarWidth = 290,
+                                       .sidebarRow = 36,
+                                       .iconTile = 0,
+                                       .iconGlyph = 16,
+                                       .searchField = 32,
+                                       .headerBar = 64,
+                                       .listMaxWidth = 0,
+                                       .groupRadius = 4,
+                                       .row = 68,
+                                       .rowWithHelp = 68,
+                                       .rowPadding = 16,
+                                       .cardGap = 4,
+                                       .groupGap = 20,
+                                       .groupTitleGap = 6,
+                                       .control = 32,
+                                       .switchWidth = 40,
+                                       .switchHeight = 20,
+                                       .slider = 180,
+                                       .stepperField = 120,
+                                       .colorWell = 32,
+                                       .previewHeight = 128,
+                                       .previewWidth = 360,
+                                       .previewRadius = 6,
+                                       .disabledPercent = 35,
+                                       .labelType = 14,
+                                       .helpType = 12,
+                                       .groupTitleType = 14,
+                                       .pageTitleType = 28 } },
+        SettingsTokenRow { .style = ChromeStyle::ContourLinux,
+                           .layout = SettingsLayout::BoxedList,
+                           .tokens = { .sidebarWidth = 270,
+                                       .sidebarRow = 38,
+                                       .iconTile = 0,
+                                       .iconGlyph = 16,
+                                       .searchField = 34,
+                                       .headerBar = 46,
+                                       .listMaxWidth = 640,
+                                       .groupRadius = 12,
+                                       .row = 52,
+                                       .rowWithHelp = 60,
+                                       .rowPadding = 14,
+                                       .cardGap = 0,
+                                       .groupGap = 22,
+                                       .groupTitleGap = 10,
+                                       .control = 34,
+                                       .switchWidth = 40,
+                                       .switchHeight = 22,
+                                       .slider = 160,
+                                       .stepperField = 72,
+                                       .colorWell = 34,
+                                       .previewHeight = 120,
+                                       .previewWidth = 0,
+                                       .previewRadius = 12,
+                                       .disabledPercent = 35,
+                                       .labelType = 14,
+                                       .helpType = 12.5,
+                                       .groupTitleType = 14,
+                                       .pageTitleType = 15 } },
+        SettingsTokenRow { .style = ChromeStyle::Terminal,
+                           .layout = SettingsLayout::Cells,
+                           .tokens = { .sidebarWidth = 24,
+                                       .sidebarRow = 1,
+                                       .iconTile = 0,
+                                       .iconGlyph = 1,
+                                       .searchField = 1,
+                                       .headerBar = 1,
+                                       .listMaxWidth = 80,
+                                       .groupRadius = 0,
+                                       .row = 1,
+                                       .rowWithHelp = 2,
+                                       .rowPadding = 1,
+                                       .cardGap = 0,
+                                       .groupGap = 1,
+                                       .groupTitleGap = 0,
+                                       .control = 1,
+                                       .switchWidth = 3,
+                                       .switchHeight = 1,
+                                       .slider = 11,
+                                       .stepperField = 6,
+                                       .colorWell = 2,
+                                       .previewHeight = 6,
+                                       .previewWidth = 0,
+                                       .previewRadius = 0,
+                                       .disabledPercent = 35,
+                                       .labelType = 0,
+                                       .helpType = 0,
+                                       .groupTitleType = 0,
+                                       .pageTitleType = 0 } },
+    };
+}
+} // namespace
+
+TEST_CASE("chromeTokens.settingsTokensPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const rows = settingsTokenRows();
+    // Every row has its line in the table.
+    CHECK(rows.size() == contour::config::detail::ChromeStyleCount);
+    for (auto const& expected: rows)
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const row = resolveChromeTokens(expected.style, {});
+        CHECK(row.settings == expected.tokens);
+        CHECK(row.layout.settings == expected.layout);
+    }
+}
+
+TEST_CASE("chromeTokens.settingsLayoutTraits", "[chrometokens]")
+{
+    using namespace contour::config;
+    struct TraitRow
+    {
+        SettingsLayout layout = SettingsLayout::InsetGrouped;
+        SettingsLayoutTraits traits {};
+    };
+    auto const rows = std::array {
+        TraitRow { .layout = SettingsLayout::InsetGrouped,
+                   .traits = { .header = SettingsHeader::Toolbar,
+                               .rows = SettingsRowShape::Grouped,
+                               .stepper = StepperArrangement::Stacked } },
+        // Fluent's stepper is one field with both arrows inside it (preflight F10, ruling Q5).
+        TraitRow { .layout = SettingsLayout::Cards,
+                   .traits = { .header = SettingsHeader::Breadcrumb,
+                               .rows = SettingsRowShape::SeparateCards,
+                               .stepper = StepperArrangement::Inline } },
+        TraitRow { .layout = SettingsLayout::BoxedList,
+                   .traits = { .header = SettingsHeader::SplitHeaderBar,
+                               .rows = SettingsRowShape::Grouped,
+                               .stepper = StepperArrangement::SideBySide } },
+        TraitRow { .layout = SettingsLayout::Cells,
+                   .traits = { .header = SettingsHeader::Toolbar,
+                               .rows = SettingsRowShape::Grouped,
+                               .stepper = StepperArrangement::Stacked } },
+    };
+    CHECK(rows.size() == SettingsLayoutCount);
+    for (auto const& row: rows)
+    {
+        CAPTURE(static_cast<int>(row.layout));
+        CHECK(settingsLayoutTraits(row.layout) == row.traits);
+    }
+}
+
+TEST_CASE("chromeTokens.settingsColourRolesPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    using contour::config::detail::fill;
+    using contour::config::detail::label;
+    using contour::config::detail::noColor;
+    using contour::config::detail::schemeColor;
+    using contour::config::detail::schemeOnBar;
+    using contour::config::detail::separator;
+    using contour::config::detail::sourceOf;
+    using contour::config::detail::statusMarkSource;
+    using contour::config::detail::surface;
+    using enum ChromeColorRole;
+
+    struct SettingsColorRow
+    {
+        ChromeColorRole role = SettingsSidebarFill;
+        ChromeColorSource native {};
+        ChromeColorSource terminal {};
+    };
+    auto const white = ChromeColorSource { .kind = ColorSourceKind::Fixed, .rgb = 0xFFFFFF };
+    auto const rows = std::array {
+        SettingsColorRow {
+            .role = SettingsSidebarFill, .native = surface(2), .terminal = schemeColor(SchemeSlot::Bar) },
+        SettingsColorRow { .role = SettingsPageFill,
+                           .native = sourceOf(ColorSourceKind::PaletteWindow),
+                           .terminal = schemeColor(SchemeSlot::Bar) },
+        SettingsColorRow {
+            .role = SettingsGroupFill, .native = surface(1), .terminal = schemeColor(SchemeSlot::Bar) },
+        SettingsColorRow { .role = SettingsSeparator,
+                           .native = separator(),
+                           .terminal = schemeColor(SchemeSlot::Secondary) },
+        SettingsColorRow { .role = SettingsLabel,
+                           .native = sourceOf(ColorSourceKind::PaletteWindowText),
+                           .terminal = schemeColor(SchemeSlot::BarInk) },
+        SettingsColorRow {
+            .role = SettingsHelp, .native = label(2), .terminal = schemeOnBar(SchemeSlot::Secondary) },
+        SettingsColorRow { .role = SettingsSelectionFill,
+                           .native = sourceOf(ColorSourceKind::PaletteHighlight),
+                           .terminal = schemeColor(SchemeSlot::BarSelection) },
+        SettingsColorRow { .role = SettingsSelectionText,
+                           .native = sourceOf(ColorSourceKind::PaletteHighlightedText),
+                           .terminal = schemeColor(SchemeSlot::BarSelectionText) },
+        SettingsColorRow {
+            .role = SettingsModified, .native = label(1), .terminal = schemeOnBar(SchemeSlot::Accent) },
+        SettingsColorRow { .role = SettingsIconTile, .native = fill(3), .terminal = noColor() },
+        SettingsColorRow {
+            .role = SettingsIconGlyph, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
+        SettingsColorRow { .role = SwitchOnFill,
+                           .native = statusMarkSource(StatusColorRole::Running),
+                           .terminal = schemeOnBar(SchemeSlot::Accent) },
+        SettingsColorRow {
+            .role = SwitchOffFill, .native = label(3, 95), .terminal = schemeOnBar(SchemeSlot::Secondary) },
+        SettingsColorRow { .role = SwitchKnob, .native = white, .terminal = schemeColor(SchemeSlot::BarInk) },
+        SettingsColorRow {
+            .role = ControlFill, .native = fill(4), .terminal = schemeColor(SchemeSlot::Background) },
+        SettingsColorRow {
+            .role = ControlText, .native = label(1), .terminal = schemeColor(SchemeSlot::PaneInk) },
+        SettingsColorRow {
+            .role = PreviewFrame, .native = separator(), .terminal = schemeOnBar(SchemeSlot::Secondary) },
+    };
+    // Every Settings role has a row here.
+    CHECK(rows.size() == SettingsColorRoleEnd - SettingsColorRoleBegin);
+
+    for (auto const index: allStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const& row: rows)
+        {
+            CAPTURE(static_cast<int>(row.role));
+            auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
+            CHECK(resolveChromeTokens(style, {}).colors[static_cast<size_t>(row.role)] == expected);
+        }
+    }
+}
+
+namespace
+{
+/// The native rows' Settings text inks against what they sit on, in both appearances: the kit's label over
+/// the kit's surfaces and over the OS window colour. The OS window colour and its text are the platform's
+/// own, so a stand-in pair of typical values (a light and a dark window, black and white ink) stands for
+/// them; the kit's roles are the ones this row table decides.
+struct NativeGround
+{
+    RGBColor color;
+    bool dark = false;
+};
+
+/// @return One colour of @p source over @p ground, composited, where it is one a native row reads on a
+/// ground; the OS window text is the stand-in ink.
+[[nodiscard]] RGBColor nativeInkOver(contour::config::ChromeColorSource const& source, NativeGround ground)
+{
+    using contour::config::ColorSourceKind;
+    auto const ink = ground.dark ? 0xFFFFFF_rgb : 0x000000_rgb;
+    auto const wash = [&](contour::config::AlphaPair pair, int percent) {
+        auto const alpha = (ground.dark ? pair.dark : pair.light) * percent / 100;
+        return mixColor(ground.color, ink, static_cast<float>(alpha) / 100.0f);
+    };
+    switch (source.kind)
+    {
+        case ColorSourceKind::Label:
+            return wash(contour::config::LabelAlphas.at(static_cast<size_t>(source.level - 1)),
+                        source.alphaPercent);
+        case ColorSourceKind::Fill:
+            return wash(contour::config::FillAlphas.at(static_cast<size_t>(source.level - 1)),
+                        source.alphaPercent);
+        case ColorSourceKind::PaletteWindowText: return ink;
+        case ColorSourceKind::Fixed: return RGBColor(source.rgb);
+        default: break;
+    }
+    FAIL("a source kind the native Settings contrast test does not resolve: "
+         << static_cast<int>(source.kind));
+    return ground.color;
+}
+} // namespace
+
+TEST_CASE("chromeTokens.settingsTextReadsOnTheNativeRows", "[chrometokens]")
+{
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    // Grounds a Settings text sits on: the kit's surfaces (sidebar, group), and a typical OS window.
+    auto const grounds = std::array {
+        NativeGround { .color = RGBColor(SurfaceColors[0].light), .dark = false },
+        NativeGround { .color = RGBColor(SurfaceColors[1].light), .dark = false },
+        NativeGround { .color = 0xECECEC_rgb, .dark = false },
+        NativeGround { .color = RGBColor(SurfaceColors[0].dark), .dark = true },
+        NativeGround { .color = RGBColor(SurfaceColors[1].dark), .dark = true },
+        NativeGround { .color = 0x1E1E1E_rgb, .dark = true },
+    };
+    auto const inks = std::array { SettingsLabel, SettingsHelp, SettingsModified, SettingsIconGlyph };
+    auto const preferences = std::array {
+        AccessibilityPreferences {},
+        AccessibilityPreferences { .motion = MotionPreference::Full,
+                                   .transparency = TransparencyPreference::Allowed,
+                                   .contrast = ContrastPreference::Increased },
+    };
+    for (auto const style: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        for (auto const& preference: preferences)
+        {
+            auto const row = resolveChromeTokens(style, preference);
+            for (auto const& ground: grounds)
+            {
+                CAPTURE(static_cast<int>(style), ground.dark);
+                for (auto const role: inks)
+                {
+                    CAPTURE(static_cast<int>(role));
+                    auto const ink = nativeInkOver(row.colors[static_cast<size_t>(role)], ground);
+                    CHECK(contrastRatio(ink, ground.color) >= MinimumTextContrast);
+                }
+                // A control's text on its own wash over the group.
+                auto const& controlFill = row.colors[static_cast<size_t>(ControlFill)];
+                auto const control = nativeInkOver(controlFill, ground);
+                // The text is a label over the wash, which is the ground it sits on.
+                auto const onWash = NativeGround { .color = control, .dark = ground.dark };
+                CHECK(contrastRatio(nativeInkOver(row.colors[static_cast<size_t>(ControlText)], onWash),
+                                    control)
+                      >= MinimumTextContrast);
+                // The unlit switch and its knob are marks: each stands off what it sits on at 3:1.
+                auto const off = nativeInkOver(row.colors[static_cast<size_t>(SwitchOffFill)], ground);
+                auto const knob = nativeInkOver(row.colors[static_cast<size_t>(SwitchKnob)], ground);
+                CHECK(contrastRatio(off, ground.color) >= MinimumMarkContrast);
+                CHECK(contrastRatio(knob, off) >= MinimumMarkContrast);
+            }
+            // The selected sidebar row and a lit switch are the OS's own pair and accent: sources the
+            // palette decides, so what the row owns is that they are the ones named above.
+            CHECK(row.colors[static_cast<size_t>(SettingsSelectionFill)].kind
+                  == ColorSourceKind::PaletteHighlight);
+            CHECK(row.colors[static_cast<size_t>(SettingsSelectionText)].kind
+                  == ColorSourceKind::PaletteHighlightedText);
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.settingsTextReadsOnTheTerminalRow", "[chrometokens]")
+{
+    // The Terminal row's Settings inks against their grounds, on every bundled scheme (contour-dark and
+    // contour-light among them), with and without the increased-contrast preference.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    struct Pair
+    {
+        ChromeColorRole ink = SettingsLabel;
+        ChromeColorRole ground = SettingsPageFill;
+    };
+    auto const pairs = std::array {
+        Pair { SettingsLabel, SettingsPageFill },
+        Pair { SettingsLabel, SettingsGroupFill },
+        Pair { SettingsLabel, SettingsSidebarFill },
+        Pair { SettingsHelp, SettingsPageFill },
+        Pair { SettingsHelp, SettingsGroupFill },
+        Pair { SettingsModified, SettingsPageFill },
+        Pair { SettingsModified, SettingsGroupFill },
+        Pair { SettingsSelectionText, SettingsSelectionFill },
+        Pair { SettingsIconGlyph, SettingsSidebarFill },
+        Pair { SwitchOnFill, SettingsGroupFill },
+        Pair { SwitchOffFill, SettingsGroupFill },
+        Pair { ControlText, ControlFill },
+    };
+    auto const preferences = std::array {
+        AccessibilityPreferences {},
+        AccessibilityPreferences { .motion = MotionPreference::Full,
+                                   .transparency = TransparencyPreference::Allowed,
+                                   .contrast = ContrastPreference::Increased },
+    };
+    for (auto const& preference: preferences)
+    {
+        auto const row = resolveChromeTokens(ChromeStyle::Terminal, preference);
+        for (auto const name: defaultColorPaletteNames())
+        {
+            INFO("scheme: " << name);
+            auto palette = ColorPalette {};
+            REQUIRE(defaultColorPalettes(name, palette));
+            auto const colors = chromeSchemeColorsOf(palette);
+            for (auto const& pair: pairs)
+            {
+                CAPTURE(static_cast<int>(pair.ink), static_cast<int>(pair.ground));
+                auto const& ink = row.colors[static_cast<size_t>(pair.ink)];
+                auto const& ground = row.colors[static_cast<size_t>(pair.ground)];
+                REQUIRE(ground.kind == ColorSourceKind::Scheme);
+                REQUIRE((ink.kind == ColorSourceKind::Scheme || ink.kind == ColorSourceKind::SchemeOnBar));
+                auto const inkColor = ink.kind == ColorSourceKind::SchemeOnBar
+                                          ? legibleOnBar(colors, ink.slot)
+                                          : slotIn(colors, ink.slot);
+                CHECK(contrastRatio(inkColor, slotIn(colors, ground.slot)) >= MinimumTextContrast);
+            }
+        }
+    }
+}
+
+// }}}

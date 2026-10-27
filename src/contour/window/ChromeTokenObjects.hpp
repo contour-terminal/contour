@@ -719,6 +719,179 @@ class ChromeTintTokens: public QObject
     config::TintTokens _tokens {};
 };
 
+/// The Settings window's extents and type, `chromeStyle.settings`. Widths, edges and radii are in
+/// horizontal units, heights and gaps in vertical ones; a type size is in logical pixels, 0 for the chrome
+/// font's own.
+class ChromeSettingsTokens: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(qreal sidebarWidth READ sidebarWidth CONSTANT)
+    Q_PROPERTY(qreal sidebarRow READ sidebarRow CONSTANT)
+    Q_PROPERTY(qreal iconTile READ iconTile CONSTANT)
+    Q_PROPERTY(qreal iconGlyph READ iconGlyph CONSTANT)
+    Q_PROPERTY(qreal searchField READ searchField CONSTANT)
+    Q_PROPERTY(qreal headerBar READ headerBar CONSTANT)
+    Q_PROPERTY(qreal listMaxWidth READ listMaxWidth CONSTANT)
+    Q_PROPERTY(qreal groupRadius READ groupRadius CONSTANT)
+    Q_PROPERTY(qreal row READ row CONSTANT)
+    Q_PROPERTY(qreal rowWithHelp READ rowWithHelp CONSTANT)
+    Q_PROPERTY(qreal rowPadding READ rowPadding CONSTANT)
+    Q_PROPERTY(qreal cardGap READ cardGap CONSTANT)
+    Q_PROPERTY(qreal groupGap READ groupGap CONSTANT)
+    Q_PROPERTY(qreal groupTitleGap READ groupTitleGap CONSTANT)
+    Q_PROPERTY(qreal control READ control CONSTANT)
+    Q_PROPERTY(qreal switchWidth READ switchWidth CONSTANT)
+    Q_PROPERTY(qreal switchHeight READ switchHeight CONSTANT)
+    Q_PROPERTY(qreal slider READ slider CONSTANT)
+    Q_PROPERTY(qreal stepperField READ stepperField CONSTANT)
+    Q_PROPERTY(qreal colorWell READ colorWell CONSTANT)
+    Q_PROPERTY(qreal previewHeight READ previewHeight CONSTANT)
+    Q_PROPERTY(qreal previewWidth READ previewWidth CONSTANT)
+    Q_PROPERTY(qreal previewRadius READ previewRadius CONSTANT)
+    Q_PROPERTY(qreal disabledOpacity READ disabledOpacity CONSTANT)
+    Q_PROPERTY(qreal labelType READ labelType CONSTANT)
+    Q_PROPERTY(qreal helpType READ helpType CONSTANT)
+    Q_PROPERTY(qreal groupTitleType READ groupTitleType CONSTANT)
+    Q_PROPERTY(qreal pageTitleType READ pageTitleType CONSTANT)
+
+  public:
+    /// @param tokens The resolved Settings group.
+    /// @param units  What one unit of an extent is.
+    /// @param parent Qt ownership.
+    ChromeSettingsTokens(config::SettingsTokens tokens, ChromeUnits units, QObject* parent);
+
+    /// @return The sidebar's width.
+    [[nodiscard]] qreal sidebarWidth() const noexcept { return _tokens.sidebarWidth * _units.horizontal; }
+    /// @return A sidebar row's height.
+    [[nodiscard]] qreal sidebarRow() const noexcept { return _tokens.sidebarRow * _units.vertical; }
+    /// @return The tile behind a sidebar icon, its edge; 0 draws none.
+    [[nodiscard]] qreal iconTile() const noexcept { return _tokens.iconTile * _units.horizontal; }
+    /// @return A sidebar icon's edge.
+    [[nodiscard]] qreal iconGlyph() const noexcept { return _tokens.iconGlyph * _units.horizontal; }
+    /// @return The search field's height.
+    [[nodiscard]] qreal searchField() const noexcept { return _tokens.searchField * _units.vertical; }
+    /// @return The page header's height.
+    [[nodiscard]] qreal headerBar() const noexcept { return _tokens.headerBar * _units.vertical; }
+    /// @return The widest the list of groups grows; 0 fills the page.
+    [[nodiscard]] qreal listMaxWidth() const noexcept { return _tokens.listMaxWidth * _units.horizontal; }
+    /// @return A group's corner radius.
+    [[nodiscard]] qreal groupRadius() const noexcept { return _tokens.groupRadius * _units.horizontal; }
+    /// @return A row's height.
+    [[nodiscard]] qreal row() const noexcept { return _tokens.row * _units.vertical; }
+    /// @return A row's height when it carries a help line.
+    [[nodiscard]] qreal rowWithHelp() const noexcept { return _tokens.rowWithHelp * _units.vertical; }
+    /// @return A row's horizontal padding.
+    [[nodiscard]] qreal rowPadding() const noexcept { return _tokens.rowPadding * _units.horizontal; }
+    /// @return The gap between the rows of one group.
+    [[nodiscard]] qreal cardGap() const noexcept { return _tokens.cardGap * _units.vertical; }
+    /// @return The gap between groups.
+    [[nodiscard]] qreal groupGap() const noexcept { return _tokens.groupGap * _units.vertical; }
+    /// @return The gap from a group's title to its list.
+    [[nodiscard]] qreal groupTitleGap() const noexcept { return _tokens.groupTitleGap * _units.vertical; }
+    /// @return A pop-up, button or field's height.
+    [[nodiscard]] qreal control() const noexcept { return _tokens.control * _units.vertical; }
+    /// @return A switch's width.
+    [[nodiscard]] qreal switchWidth() const noexcept { return _tokens.switchWidth * _units.horizontal; }
+    /// @return A switch's height.
+    [[nodiscard]] qreal switchHeight() const noexcept { return _tokens.switchHeight * _units.vertical; }
+    /// @return A slider's track width.
+    [[nodiscard]] qreal slider() const noexcept { return _tokens.slider * _units.horizontal; }
+    /// @return A stepper's value field width.
+    [[nodiscard]] qreal stepperField() const noexcept { return _tokens.stepperField * _units.horizontal; }
+    /// @return A colour well's edge.
+    [[nodiscard]] qreal colorWell() const noexcept { return _tokens.colorWell * _units.horizontal; }
+    /// @return The live preview's height.
+    [[nodiscard]] qreal previewHeight() const noexcept { return _tokens.previewHeight * _units.vertical; }
+    /// @return The live preview's width; 0 fills the page.
+    [[nodiscard]] qreal previewWidth() const noexcept { return _tokens.previewWidth * _units.horizontal; }
+    /// @return The live preview's corner radius.
+    [[nodiscard]] qreal previewRadius() const noexcept { return _tokens.previewRadius * _units.horizontal; }
+    /// @return The opacity of a row's label and control where it cannot be edited, 0 to 1.
+    [[nodiscard]] qreal disabledOpacity() const noexcept { return _tokens.disabledPercent / 100.0; }
+    /// @return A row's label size in logical pixels; 0 is the chrome font's own.
+    [[nodiscard]] qreal labelType() const noexcept { return _tokens.labelType; }
+    /// @return A row's help line size in logical pixels; 0 is the chrome font's own.
+    [[nodiscard]] qreal helpType() const noexcept { return _tokens.helpType; }
+    /// @return A group's title size in logical pixels; 0 is the chrome font's own.
+    [[nodiscard]] qreal groupTitleType() const noexcept { return _tokens.groupTitleType; }
+    /// @return A page's title size in logical pixels; 0 is the chrome font's own.
+    [[nodiscard]] qreal pageTitleType() const noexcept { return _tokens.pageTitleType; }
+
+  private:
+    config::SettingsTokens _tokens {};
+    ChromeUnits _units {};
+};
+
+/// What the Settings layout stands for, `chromeStyle.settingsTraits`: the traits as ints, and the QML names
+/// of their enumerators, so a page compares a trait to a name and never to a bare number.
+class ChromeSettingsTraits: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int header READ header CONSTANT)
+    Q_PROPERTY(int toolbar READ toolbar CONSTANT)
+    Q_PROPERTY(int breadcrumb READ breadcrumb CONSTANT)
+    Q_PROPERTY(int splitHeaderBar READ splitHeaderBar CONSTANT)
+    Q_PROPERTY(int rows READ rows CONSTANT)
+    Q_PROPERTY(int grouped READ grouped CONSTANT)
+    Q_PROPERTY(int separateCards READ separateCards CONSTANT)
+    Q_PROPERTY(int stepper READ stepper CONSTANT)
+    Q_PROPERTY(int stacked READ stacked CONSTANT)
+    Q_PROPERTY(int sideBySide READ sideBySide CONSTANT)
+    Q_PROPERTY(int inlineArrows READ inlineArrows CONSTANT)
+
+  public:
+    /// @param layout The row's Settings layout, whose traits these are.
+    /// @param parent Qt ownership.
+    ChromeSettingsTraits(config::SettingsLayout layout, QObject* parent);
+
+    /// @return Where a page's title sits, a config::SettingsHeader as its underlying value.
+    [[nodiscard]] int header() const noexcept { return static_cast<int>(_traits.header); }
+    /// @return The QML names of config::SettingsHeader's enumerators.
+    [[nodiscard]] static constexpr int toolbar() noexcept
+    {
+        return static_cast<int>(config::SettingsHeader::Toolbar);
+    }
+    [[nodiscard]] static constexpr int breadcrumb() noexcept
+    {
+        return static_cast<int>(config::SettingsHeader::Breadcrumb);
+    }
+    [[nodiscard]] static constexpr int splitHeaderBar() noexcept
+    {
+        return static_cast<int>(config::SettingsHeader::SplitHeaderBar);
+    }
+
+    /// @return How a page's rows are shaped, a config::SettingsRowShape as its underlying value.
+    [[nodiscard]] int rows() const noexcept { return static_cast<int>(_traits.rows); }
+    /// @return The QML names of config::SettingsRowShape's enumerators.
+    [[nodiscard]] static constexpr int grouped() noexcept
+    {
+        return static_cast<int>(config::SettingsRowShape::Grouped);
+    }
+    [[nodiscard]] static constexpr int separateCards() noexcept
+    {
+        return static_cast<int>(config::SettingsRowShape::SeparateCards);
+    }
+
+    /// @return How a stepper's arrows sit, a config::StepperArrangement as its underlying value.
+    [[nodiscard]] int stepper() const noexcept { return static_cast<int>(_traits.stepper); }
+    /// @return The QML names of config::StepperArrangement's enumerators.
+    [[nodiscard]] static constexpr int stacked() noexcept
+    {
+        return static_cast<int>(config::StepperArrangement::Stacked);
+    }
+    [[nodiscard]] static constexpr int sideBySide() noexcept
+    {
+        return static_cast<int>(config::StepperArrangement::SideBySide);
+    }
+    [[nodiscard]] static constexpr int inlineArrows() noexcept
+    {
+        return static_cast<int>(config::StepperArrangement::Inline);
+    }
+
+  private:
+    config::SettingsLayoutTraits _traits {};
+};
+
 /// Per-style layout choices, `chromeStyle.layout`.
 class ChromeLayoutTokens: public QObject
 {
@@ -746,6 +919,11 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int onHover READ onHover CONSTANT)
     Q_PROPERTY(int onHoverOrFocus READ onHoverOrFocus CONSTANT)
     Q_PROPERTY(int paletteTopPercent READ paletteTopPercent CONSTANT)
+    Q_PROPERTY(int settings READ settings CONSTANT)
+    Q_PROPERTY(int insetGrouped READ insetGrouped CONSTANT)
+    Q_PROPERTY(int cards READ cards CONSTANT)
+    Q_PROPERTY(int boxedList READ boxedList CONSTANT)
+    Q_PROPERTY(int cells READ cells CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -817,6 +995,26 @@ class ChromeLayoutTokens: public QObject
     /// @return The command palette's top edge, in percent of the window's height.
     [[nodiscard]] int paletteTopPercent() const noexcept { return _tokens.paletteTopPercent; }
 
+    /// @return How the Settings window is laid out, a config::SettingsLayout as its underlying value.
+    [[nodiscard]] int settings() const noexcept { return static_cast<int>(_tokens.settings); }
+    /// @return The QML names of config::SettingsLayout's enumerators.
+    [[nodiscard]] static constexpr int insetGrouped() noexcept
+    {
+        return static_cast<int>(config::SettingsLayout::InsetGrouped);
+    }
+    [[nodiscard]] static constexpr int cards() noexcept
+    {
+        return static_cast<int>(config::SettingsLayout::Cards);
+    }
+    [[nodiscard]] static constexpr int boxedList() noexcept
+    {
+        return static_cast<int>(config::SettingsLayout::BoxedList);
+    }
+    [[nodiscard]] static constexpr int cells() noexcept
+    {
+        return static_cast<int>(config::SettingsLayout::Cells);
+    }
+
   private:
     config::LayoutTokens _tokens {};
 };
@@ -875,6 +1073,23 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor scrollbarTrack READ scrollbarTrack NOTIFY changed)
     Q_PROPERTY(QColor focusRing READ focusRing NOTIFY changed)
     Q_PROPERTY(QColor focusFill READ focusFill NOTIFY changed)
+    Q_PROPERTY(QColor settingsSidebarFill READ settingsSidebarFill NOTIFY changed)
+    Q_PROPERTY(QColor settingsPageFill READ settingsPageFill NOTIFY changed)
+    Q_PROPERTY(QColor settingsGroupFill READ settingsGroupFill NOTIFY changed)
+    Q_PROPERTY(QColor settingsSeparator READ settingsSeparator NOTIFY changed)
+    Q_PROPERTY(QColor settingsLabel READ settingsLabel NOTIFY changed)
+    Q_PROPERTY(QColor settingsHelp READ settingsHelp NOTIFY changed)
+    Q_PROPERTY(QColor settingsSelectionFill READ settingsSelectionFill NOTIFY changed)
+    Q_PROPERTY(QColor settingsSelectionText READ settingsSelectionText NOTIFY changed)
+    Q_PROPERTY(QColor settingsModified READ settingsModified NOTIFY changed)
+    Q_PROPERTY(QColor settingsIconTile READ settingsIconTile NOTIFY changed)
+    Q_PROPERTY(QColor settingsIconGlyph READ settingsIconGlyph NOTIFY changed)
+    Q_PROPERTY(QColor switchOnFill READ switchOnFill NOTIFY changed)
+    Q_PROPERTY(QColor switchOffFill READ switchOffFill NOTIFY changed)
+    Q_PROPERTY(QColor switchKnob READ switchKnob NOTIFY changed)
+    Q_PROPERTY(QColor controlFill READ controlFill NOTIFY changed)
+    Q_PROPERTY(QColor controlText READ controlText NOTIFY changed)
+    Q_PROPERTY(QColor previewFrame READ previewFrame NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -982,6 +1197,43 @@ class ChromeColorTokens: public QObject
     /// The keyboard focus ring and, on the Terminal row, the focused item's fill.
     [[nodiscard]] QColor focusRing() const { return color(config::ChromeColorRole::FocusRing); }
     [[nodiscard]] QColor focusFill() const { return color(config::ChromeColorRole::FocusFill); }
+
+    /// The Settings window's roles, by the palette's tone.
+    [[nodiscard]] QColor settingsSidebarFill() const
+    {
+        return color(config::ChromeColorRole::SettingsSidebarFill);
+    }
+    [[nodiscard]] QColor settingsPageFill() const { return color(config::ChromeColorRole::SettingsPageFill); }
+    [[nodiscard]] QColor settingsGroupFill() const
+    {
+        return color(config::ChromeColorRole::SettingsGroupFill);
+    }
+    [[nodiscard]] QColor settingsSeparator() const
+    {
+        return color(config::ChromeColorRole::SettingsSeparator);
+    }
+    [[nodiscard]] QColor settingsLabel() const { return color(config::ChromeColorRole::SettingsLabel); }
+    [[nodiscard]] QColor settingsHelp() const { return color(config::ChromeColorRole::SettingsHelp); }
+    [[nodiscard]] QColor settingsSelectionFill() const
+    {
+        return color(config::ChromeColorRole::SettingsSelectionFill);
+    }
+    [[nodiscard]] QColor settingsSelectionText() const
+    {
+        return color(config::ChromeColorRole::SettingsSelectionText);
+    }
+    [[nodiscard]] QColor settingsModified() const { return color(config::ChromeColorRole::SettingsModified); }
+    [[nodiscard]] QColor settingsIconTile() const { return color(config::ChromeColorRole::SettingsIconTile); }
+    [[nodiscard]] QColor settingsIconGlyph() const
+    {
+        return color(config::ChromeColorRole::SettingsIconGlyph);
+    }
+    [[nodiscard]] QColor switchOnFill() const { return color(config::ChromeColorRole::SwitchOnFill); }
+    [[nodiscard]] QColor switchOffFill() const { return color(config::ChromeColorRole::SwitchOffFill); }
+    [[nodiscard]] QColor switchKnob() const { return color(config::ChromeColorRole::SwitchKnob); }
+    [[nodiscard]] QColor controlFill() const { return color(config::ChromeColorRole::ControlFill); }
+    [[nodiscard]] QColor controlText() const { return color(config::ChromeColorRole::ControlText); }
+    [[nodiscard]] QColor previewFrame() const { return color(config::ChromeColorRole::PreviewFrame); }
 
   signals:
     /// Every role may have changed colour.

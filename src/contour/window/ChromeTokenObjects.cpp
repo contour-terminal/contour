@@ -125,6 +125,16 @@ ChromeLayoutTokens::ChromeLayoutTokens(config::LayoutTokens tokens, QObject* par
 {
 }
 
+ChromeSettingsTokens::ChromeSettingsTokens(config::SettingsTokens tokens, ChromeUnits units, QObject* parent):
+    QObject { parent }, _tokens { tokens }, _units { units }
+{
+}
+
+ChromeSettingsTraits::ChromeSettingsTraits(config::SettingsLayout layout, QObject* parent):
+    QObject { parent }, _traits { config::settingsLayoutTraits(layout) }
+{
+}
+
 ChromeColorTokens::ChromeColorTokens(Sources sources,
                                      config::ChromeSchemeColors scheme,
                                      int separatorPercent,

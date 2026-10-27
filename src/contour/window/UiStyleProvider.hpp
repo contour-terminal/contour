@@ -100,6 +100,15 @@ struct ChromeGlyphs
     QString findPrevious;    ///< The find bar's previous-match button.
     QString findNext;        ///< The find bar's next-match button.
     QString secureInput;     ///< A locked pane's lock as cell text; empty where the lock is the icon.
+    QString switchOn;        ///< A switch that is on. Empty where it is a shape.
+    QString switchOff;       ///< A switch that is off. Empty where it is a shape.
+    QString segmentOn;       ///< The chosen segment of a segmented control. Empty where it is a shape.
+    QString segmentOff;      ///< An unchosen segment. Empty where it is a shape.
+    QString sliderFill;      ///< A slider's track up to its knob. Empty where it is a shape.
+    QString sliderKnob;      ///< A slider's knob. Empty where it is a shape.
+    QString sliderTrack;     ///< A slider's track beyond its knob. Empty where it is a shape.
+    QString stepper;         ///< A stepper's pair of arrows. Empty where it is a shape.
+    QString colorWell;       ///< A colour well. Empty where it is a shape.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -227,6 +236,9 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* tui READ tui CONSTANT)
     Q_PROPERTY(QObject* layout READ layout CONSTANT)
     Q_PROPERTY(QObject* tint READ tint CONSTANT)
+    /// The Settings window's extents and type, and the traits of its layout.
+    Q_PROPERTY(QObject* settings READ settings CONSTANT)
+    Q_PROPERTY(QObject* settingsTraits READ settingsTraits CONSTANT)
     /// The chrome colour roles. The object is CONSTANT; its own properties notify.
     Q_PROPERTY(QObject* colors READ colors CONSTANT)
 
@@ -262,6 +274,15 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString findPreviousGlyph READ findPreviousGlyph CONSTANT)
     Q_PROPERTY(QString findNextGlyph READ findNextGlyph CONSTANT)
     Q_PROPERTY(QString scrollThumbGlyph READ scrollThumbGlyph CONSTANT)
+    Q_PROPERTY(QString switchOnGlyph READ switchOnGlyph CONSTANT)
+    Q_PROPERTY(QString switchOffGlyph READ switchOffGlyph CONSTANT)
+    Q_PROPERTY(QString segmentOnGlyph READ segmentOnGlyph CONSTANT)
+    Q_PROPERTY(QString segmentOffGlyph READ segmentOffGlyph CONSTANT)
+    Q_PROPERTY(QString sliderFillGlyph READ sliderFillGlyph CONSTANT)
+    Q_PROPERTY(QString sliderKnobGlyph READ sliderKnobGlyph CONSTANT)
+    Q_PROPERTY(QString sliderTrackGlyph READ sliderTrackGlyph CONSTANT)
+    Q_PROPERTY(QString stepperGlyph READ stepperGlyph CONSTANT)
+    Q_PROPERTY(QString colorWellGlyph READ colorWellGlyph CONSTANT)
     /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
     Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
     /// The QML names of the pane colour roles, for colorOn().
@@ -339,6 +360,26 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& findNextGlyph() const noexcept { return _glyphs.findNext; }
     /// @return The overlay scrollbar's thumb glyph: "┃" on the Terminal row, empty on the native ones.
     [[nodiscard]] QString const& scrollThumbGlyph() const noexcept { return _glyphs.scrollThumb; }
+
+    // The Settings controls' glyphs: the Terminal row's cells, empty on the native rows, which draw shapes.
+    /// @return A switch that is on. Empty where it is a shape.
+    [[nodiscard]] QString const& switchOnGlyph() const noexcept { return _glyphs.switchOn; }
+    /// @return A switch that is off. Empty where it is a shape.
+    [[nodiscard]] QString const& switchOffGlyph() const noexcept { return _glyphs.switchOff; }
+    /// @return The chosen segment of a segmented control. Empty where it is a shape.
+    [[nodiscard]] QString const& segmentOnGlyph() const noexcept { return _glyphs.segmentOn; }
+    /// @return An unchosen segment. Empty where it is a shape.
+    [[nodiscard]] QString const& segmentOffGlyph() const noexcept { return _glyphs.segmentOff; }
+    /// @return A slider's track up to its knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderFillGlyph() const noexcept { return _glyphs.sliderFill; }
+    /// @return A slider's knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderKnobGlyph() const noexcept { return _glyphs.sliderKnob; }
+    /// @return A slider's track beyond its knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderTrackGlyph() const noexcept { return _glyphs.sliderTrack; }
+    /// @return A stepper's pair of arrows. Empty where it is a shape.
+    [[nodiscard]] QString const& stepperGlyph() const noexcept { return _glyphs.stepper; }
+    /// @return A colour well. Empty where it is a shape.
+    [[nodiscard]] QString const& colorWellGlyph() const noexcept { return _glyphs.colorWell; }
     /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionNames() const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
@@ -780,6 +821,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* tui() noexcept { return &_tui; }
     [[nodiscard]] QObject* layout() noexcept { return &_layout; }
     [[nodiscard]] QObject* tint() noexcept { return &_tint; }
+    [[nodiscard]] QObject* settings() noexcept { return &_settings; }
+    [[nodiscard]] QObject* settingsTraits() noexcept { return &_settingsTraits; }
     [[nodiscard]] QObject* colors() noexcept { return &_colors; }
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
@@ -868,6 +911,8 @@ class UiStyleProvider: public QObject
     ChromeTuiTokens _tui;
     ChromeLayoutTokens _layout;
     ChromeTintTokens _tint;
+    ChromeSettingsTokens _settings;
+    ChromeSettingsTraits _settingsTraits;
     ChromeColorTokens _colors;
     ChromePaneRoleNames _paneRoles;
     ChromeBadgeKindNames _badgeKinds;

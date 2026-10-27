@@ -185,6 +185,25 @@ enum class ChromeColorRole : uint8_t
     /// The fill of the focused item on the Terminal row (a cell run cannot draw an outset); none on the
     /// native rows, which ring it.
     FocusFill,
+
+    // The Settings window.
+    SettingsSidebarFill,   //!< The sidebar's fill.
+    SettingsPageFill,      //!< The page the groups sit on.
+    SettingsGroupFill,     //!< A group's (or a card's) fill.
+    SettingsSeparator,     //!< The rule between rows, and below the page header.
+    SettingsLabel,         //!< A row's label.
+    SettingsHelp,          //!< A row's help line, and a group's title.
+    SettingsSelectionFill, //!< The selected sidebar row's fill.
+    SettingsSelectionText, //!< The selected sidebar row's label and glyph.
+    SettingsModified,      //!< The "Modified" mark beside an overridden value.
+    SettingsIconTile,      //!< The tile behind a sidebar icon.
+    SettingsIconGlyph,     //!< A sidebar icon.
+    SwitchOnFill,          //!< A switch's track while on.
+    SwitchOffFill,         //!< A switch's track while off.
+    SwitchKnob,            //!< A switch's knob.
+    ControlFill,           //!< A pop-up, button or field's fill.
+    ControlText,           //!< A pop-up, button or field's text.
+    PreviewFrame,          //!< The edge of the live preview.
 };
 
 /// Where a chrome colour comes from.
@@ -284,7 +303,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FocusFill) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PreviewFrame) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -315,6 +334,11 @@ inline constexpr size_t OverlayColorRoleEnd = static_cast<size_t>(ChromeColorRol
 inline constexpr size_t FocusColorRoleBegin = static_cast<size_t>(ChromeColorRole::FocusRing);
 /// One past the last keyboard focus colour role.
 inline constexpr size_t FocusColorRoleEnd = static_cast<size_t>(ChromeColorRole::FocusFill) + 1;
+
+/// The first Settings window colour role.
+inline constexpr size_t SettingsColorRoleBegin = static_cast<size_t>(ChromeColorRole::SettingsSidebarFill);
+/// One past the last Settings window colour role.
+inline constexpr size_t SettingsColorRoleEnd = static_cast<size_t>(ChromeColorRole::PreviewFrame) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -634,6 +658,114 @@ struct TintTokens
     [[nodiscard]] bool operator==(TintTokens const&) const = default;
 };
 
+/// How the Settings window is laid out; the row's @c layout.settings.
+enum class SettingsLayout : uint8_t
+{
+    InsetGrouped = 0, //!< Rows grouped in one inset card per group, a toolbar above (macOS).
+    Cards,            //!< One card per row, a breadcrumb above (Fluent).
+    BoxedList,        //!< Boxed lists under a split header bar (ContourLinux).
+    Cells,            //!< Rows of cells, a toolbar of cells above (the Terminal style).
+};
+
+/// Where a page's title sits.
+enum class SettingsHeader : uint8_t
+{
+    Toolbar = 0,    //!< A centred title in the window's toolbar.
+    Breadcrumb,     //!< A large title with the section as a breadcrumb.
+    SplitHeaderBar, //!< A header bar over the page, split from the sidebar's own.
+};
+
+/// How a page's rows are shaped.
+enum class SettingsRowShape : uint8_t
+{
+    Grouped = 0,   //!< The rows of a group share one card, divided by separators.
+    SeparateCards, //!< Each row is a card of its own, with a gap between.
+};
+
+/// How a stepper's arrows sit by its value field.
+enum class StepperArrangement : uint8_t
+{
+    Stacked = 0, //!< A column of two arrows beside the field.
+    SideBySide,  //!< A minus and a plus either side of the field.
+    Inline,      //!< Both arrows inside the field's right end.
+};
+
+/// The choices a @c SettingsLayout stands for, so QML and C++ read a trait rather than compare layouts.
+struct SettingsLayoutTraits
+{
+    SettingsHeader header = SettingsHeader::Toolbar;          ///< Where the page title sits.
+    SettingsRowShape rows = SettingsRowShape::Grouped;        ///< How the rows are shaped.
+    StepperArrangement stepper = StepperArrangement::Stacked; ///< How a stepper's arrows sit.
+
+    [[nodiscard]] bool operator==(SettingsLayoutTraits const&) const = default;
+};
+
+/// The traits of each @c SettingsLayout, indexed by it.
+inline constexpr std::array SettingsLayoutTraitsTable {
+    SettingsLayoutTraits { .header = SettingsHeader::Toolbar,
+                           .rows = SettingsRowShape::Grouped,
+                           .stepper = StepperArrangement::Stacked }, // InsetGrouped
+    SettingsLayoutTraits { .header = SettingsHeader::Breadcrumb,
+                           .rows = SettingsRowShape::SeparateCards,
+                           .stepper = StepperArrangement::Inline }, // Cards
+    SettingsLayoutTraits { .header = SettingsHeader::SplitHeaderBar,
+                           .rows = SettingsRowShape::Grouped,
+                           .stepper = StepperArrangement::SideBySide }, // BoxedList
+    SettingsLayoutTraits { .header = SettingsHeader::Toolbar,
+                           .rows = SettingsRowShape::Grouped,
+                           .stepper = StepperArrangement::Stacked }, // Cells
+};
+
+/// Number of @c SettingsLayout enumerators, derived from the last one.
+inline constexpr size_t SettingsLayoutCount = static_cast<size_t>(SettingsLayout::Cells) + 1;
+
+static_assert(SettingsLayoutTraitsTable.size() == SettingsLayoutCount,
+              "Every SettingsLayout needs exactly one row of traits.");
+
+/// @param layout A Settings layout.
+/// @return The choices it stands for.
+[[nodiscard]] constexpr SettingsLayoutTraits settingsLayoutTraits(SettingsLayout layout) noexcept
+{
+    return SettingsLayoutTraitsTable[static_cast<size_t>(layout)];
+}
+
+/// The Settings window's extents, in the units of the row (points; cells on the Terminal row), and its type
+/// sizes in points (0: the chrome font's own). The window's own four extents are @c SizeTokens::settings*.
+struct SettingsTokens
+{
+    int sidebarWidth = 0;  ///< The sidebar's width.
+    int sidebarRow = 0;    ///< A sidebar row's height.
+    int iconTile = 0;      ///< The tile behind a sidebar icon, its edge; 0: no tile.
+    int iconGlyph = 0;     ///< A sidebar icon's edge.
+    int searchField = 0;   ///< The search field's height.
+    int headerBar = 0;     ///< The page header's height.
+    int listMaxWidth = 0;  ///< The widest the list of groups grows; 0: it fills the page.
+    int groupRadius = 0;   ///< A group's (or a card's) corner radius.
+    int row = 0;           ///< A row's height.
+    int rowWithHelp = 0;   ///< A row's height when it carries a help line.
+    int rowPadding = 0;    ///< A row's horizontal padding.
+    int cardGap = 0;       ///< The gap between the rows of one group.
+    int groupGap = 0;      ///< The gap between groups.
+    int groupTitleGap = 0; ///< The gap from a group's title to its list.
+    int control = 0;       ///< A pop-up, button or field's height.
+    int switchWidth = 0;   ///< A switch's width.
+    int switchHeight = 0;  ///< A switch's height.
+    int slider = 0;        ///< A slider's track width.
+    int stepperField = 0;  ///< A stepper's value field width.
+    int colorWell = 0;     ///< A colour well's edge.
+    int previewHeight = 0; ///< The live preview's height.
+    int previewWidth = 0;  ///< The live preview's width; 0: it fills the page.
+    int previewRadius = 0; ///< The live preview's corner radius.
+    /// How much of a row's label and control remain where it cannot be edited, in percent.
+    int disabledPercent = 0;
+    double labelType = 0.0;      ///< A row's label.
+    double helpType = 0.0;       ///< A row's help line.
+    double groupTitleType = 0.0; ///< A group's title.
+    double pageTitleType = 0.0;  ///< A page's title.
+
+    [[nodiscard]] bool operator==(SettingsTokens const&) const = default;
+};
+
 /// Layout choices that differ per style.
 struct LayoutTokens
 {
@@ -648,6 +780,7 @@ struct LayoutTokens
     FindBarHost findBar = FindBarHost::Overlay; ///< Where the find bar sits.
     /// How the gutter draws the block column: a pixel strip holding the rail, or the glyph cells.
     vtbackend::BlockColumnForm blockColumn = vtbackend::BlockColumnForm::Glyphs;
+    SettingsLayout settings = SettingsLayout::InsetGrouped; ///< How the Settings window is laid out.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -721,6 +854,7 @@ struct ChromeTokenRow
     DimTokens dim {};                ///< How strongly an unfocused pane dims.
     MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
     BlockChipTokens blockChips {};   ///< The native rows' block chips and rail marks.
+    SettingsTokens settings {};      ///< The Settings window's extents and type.
 };
 
 /// The WCAG AA ratio chrome text must reach against what it sits on: the terminal's own, one entity, so a
@@ -1084,6 +1218,37 @@ namespace detail
                             .level = 0 }, // FocusRing
         // The ring leaves the item's own fill alone.
         noColor(), // FocusFill
+        // The Settings window: the kit's secondary surface for the sidebar and its elevated one for a group,
+        // on the OS's own window colour; the sidebar's selection is the OS's selected-row pair.
+        surface(2),                                        // SettingsSidebarFill
+        sourceOf(ColorSourceKind::PaletteWindow),          // SettingsPageFill
+        surface(1),                                        // SettingsGroupFill
+        separator(),                                       // SettingsSeparator
+        sourceOf(ColorSourceKind::PaletteWindowText),      // SettingsLabel
+        label(2),                                          // SettingsHelp
+        sourceOf(ColorSourceKind::PaletteHighlight),       // SettingsSelectionFill
+        sourceOf(ColorSourceKind::PaletteHighlightedText), // SettingsSelectionText
+        // The primary label, not the accent: macOS's blue reads 4.0:1 on a white group, under the 4.5:1 a
+        // word needs (as FindToggleOnText, above).
+        label(1), // SettingsModified
+        // A neutral tile with a secondary glyph, so one table serves the rows that draw the tile and those
+        // that draw the glyph on the group.
+        fill(3),  // SettingsIconTile
+        label(2), // SettingsIconGlyph
+        // A lit switch is a mark in the accent; an unlit one, the tertiary label at 95 % of its alpha, which
+        // stands off the group at 3:1 on either chrome, with a white knob that stands off it in turn (the
+        // full alpha leaves the knob 2.99:1 on the dark elevated surface).
+        statusMarkSource(StatusColorRole::Running), // SwitchOnFill
+        label(3, 95),                               // SwitchOffFill
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 }, // SwitchKnob
+        fill(4),                          // ControlFill
+        label(1),                         // ControlText
+        separator(),                      // PreviewFrame
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -1118,6 +1283,129 @@ namespace detail
         statusMarkSource(StatusColorRole::Success),
         statusMarkSource(StatusColorRole::Running),
     };
+
+    /// How much of a row's label and control remain where it cannot be edited (preflight F16).
+    inline constexpr int SettingsDisabledPercent = 35;
+
+    /// The Settings window on the macOS row (mac-settings).
+    inline constexpr SettingsTokens MacSettings { .sidebarWidth = 230,
+                                                  .sidebarRow = 28,
+                                                  .iconTile = 20,
+                                                  .iconGlyph = 12,
+                                                  .searchField = 28,
+                                                  .headerBar = 52,
+                                                  .listMaxWidth = 640,
+                                                  .groupRadius = 10,
+                                                  .row = 44,
+                                                  .rowWithHelp = 52,
+                                                  .rowPadding = 14,
+                                                  .cardGap = 0,
+                                                  .groupGap = 16,
+                                                  .groupTitleGap = 6,
+                                                  .control = 22,
+                                                  .switchWidth = 32,
+                                                  .switchHeight = 19,
+                                                  .slider = 160,
+                                                  .stepperField = 72,
+                                                  .colorWell = 22,
+                                                  .previewHeight = 104,
+                                                  .previewWidth = 0,
+                                                  .previewRadius = 10,
+                                                  .disabledPercent = SettingsDisabledPercent,
+                                                  .labelType = 13,
+                                                  .helpType = 11,
+                                                  .groupTitleType = 13,
+                                                  .pageTitleType = 15 };
+
+    /// The Settings window on the Fluent row (win-settings).
+    inline constexpr SettingsTokens FluentSettings { .sidebarWidth = 290,
+                                                     .sidebarRow = 36,
+                                                     .iconTile = 0,
+                                                     .iconGlyph = 16,
+                                                     .searchField = 32,
+                                                     .headerBar = 64,
+                                                     .listMaxWidth = 0,
+                                                     .groupRadius = 4,
+                                                     .row = 68,
+                                                     .rowWithHelp = 68,
+                                                     .rowPadding = 16,
+                                                     .cardGap = 4,
+                                                     .groupGap = 20,
+                                                     .groupTitleGap = 6,
+                                                     .control = 32,
+                                                     .switchWidth = 40,
+                                                     .switchHeight = 20,
+                                                     .slider = 180,
+                                                     .stepperField = 120,
+                                                     .colorWell = 32,
+                                                     .previewHeight = 128,
+                                                     .previewWidth = 360,
+                                                     .previewRadius = 6,
+                                                     .disabledPercent = SettingsDisabledPercent,
+                                                     .labelType = 14,
+                                                     .helpType = 12,
+                                                     .groupTitleType = 14,
+                                                     .pageTitleType = 28 };
+
+    /// The Settings window on the ContourLinux row (linux-settings).
+    inline constexpr SettingsTokens LinuxSettings { .sidebarWidth = 270,
+                                                    .sidebarRow = 38,
+                                                    .iconTile = 0,
+                                                    .iconGlyph = 16,
+                                                    .searchField = 34,
+                                                    .headerBar = 46,
+                                                    .listMaxWidth = 640,
+                                                    .groupRadius = 12,
+                                                    .row = 52,
+                                                    .rowWithHelp = 60,
+                                                    .rowPadding = 14,
+                                                    .cardGap = 0,
+                                                    .groupGap = 22,
+                                                    .groupTitleGap = 10,
+                                                    .control = 34,
+                                                    .switchWidth = 40,
+                                                    .switchHeight = 22,
+                                                    .slider = 160,
+                                                    .stepperField = 72,
+                                                    .colorWell = 34,
+                                                    .previewHeight = 120,
+                                                    .previewWidth = 0,
+                                                    .previewRadius = 12,
+                                                    .disabledPercent = SettingsDisabledPercent,
+                                                    .labelType = 14,
+                                                    .helpType = 12.5,
+                                                    .groupTitleType = 14,
+                                                    .pageTitleType = 15 };
+
+    /// The Settings window on the Terminal row (tui), in cells; the type is the cell font's own.
+    inline constexpr SettingsTokens TerminalSettings { .sidebarWidth = 24,
+                                                       .sidebarRow = 1,
+                                                       .iconTile = 0,
+                                                       .iconGlyph = 1,
+                                                       .searchField = 1,
+                                                       .headerBar = 1,
+                                                       .listMaxWidth = 80,
+                                                       .groupRadius = 0,
+                                                       .row = 1,
+                                                       .rowWithHelp = 2,
+                                                       .rowPadding = 1,
+                                                       .cardGap = 0,
+                                                       .groupGap = 1,
+                                                       .groupTitleGap = 0,
+                                                       .control = 1,
+                                                       .switchWidth = 3,
+                                                       .switchHeight = 1,
+                                                       .slider = 11,
+                                                       .stepperField = 6,
+                                                       .colorWell = 2,
+                                                       .previewHeight = 6,
+                                                       .previewWidth = 0,
+                                                       .previewRadius = 0,
+                                                       .disabledPercent = SettingsDisabledPercent,
+                                                       .labelType = 0,
+                                                       .helpType = 0,
+                                                       .groupTitleType = 0,
+                                                       .pageTitleType = 0 };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,
@@ -1220,13 +1508,15 @@ namespace detail
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
                     .findBar = FindBarHost::Overlay,
-                    .blockColumn = vtbackend::BlockColumnForm::Rail },
+                    .blockColumn = vtbackend::BlockColumnForm::Rail,
+                    .settings = SettingsLayout::InsetGrouped },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
+        .settings = MacSettings,
     };
 
     inline constexpr ChromeTokenRow FluentRow {
@@ -1327,13 +1617,15 @@ namespace detail
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
                     .findBar = FindBarHost::Overlay,
-                    .blockColumn = vtbackend::BlockColumnForm::Rail },
+                    .blockColumn = vtbackend::BlockColumnForm::Rail,
+                    .settings = SettingsLayout::Cards },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
+        .settings = FluentSettings,
     };
 
     inline constexpr ChromeTokenRow LinuxRow {
@@ -1434,13 +1726,15 @@ namespace detail
                     .paneActions = PaneActionsReveal::OnHover,
                     .paletteTopPercent = 18,
                     .findBar = FindBarHost::Overlay,
-                    .blockColumn = vtbackend::BlockColumnForm::Rail },
+                    .blockColumn = vtbackend::BlockColumnForm::Rail,
+                    .settings = SettingsLayout::BoxedList },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
         .blockChips = NativeBlockChips,
+        .settings = LinuxSettings,
     };
 
     inline constexpr ElevationLevel TerminalShadow {
@@ -1576,7 +1870,8 @@ namespace detail
                     .paneActions = PaneActionsReveal::OnHoverOrFocus,
                     .paletteTopPercent = 18,
                     .findBar = FindBarHost::PaneHeaderRow,
-                    .blockColumn = vtbackend::BlockColumnForm::Glyphs },
+                    .blockColumn = vtbackend::BlockColumnForm::Glyphs,
+                    .settings = SettingsLayout::Cells },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         // The banner's mark in the scheme's warning hue where that reads on the bar, else the bar's ink; the
@@ -1644,8 +1939,32 @@ namespace detail
                     detail::noColor(),                             // ScrollbarTrack
                     // Cells cannot draw an outset: the focused item is a run of selection-coloured cells,
                     // the selection that also stands off the bar (BarSelection).
-                    detail::noColor(),                       // FocusRing
-                    schemeColor(SchemeSlot::BarSelection) }, // FocusFill
+                    detail::noColor(),                     // FocusRing
+                    schemeColor(SchemeSlot::BarSelection), // FocusFill
+                    // The Settings window is a bar-coloured block, like the command palette: every text on it
+                    // is the bar's own ink (which reads on any scheme), or ANSI 8 and the accent where they
+                    // read on the bar, else that ink. A scheme's foreground on its background does not:
+                    // one-dark's ends are 3.5:1 apart. A selected sidebar row must also stand off the bar
+                    // (BarSelection).
+                    schemeColor(SchemeSlot::Bar),              // SettingsSidebarFill
+                    schemeColor(SchemeSlot::Bar),              // SettingsPageFill
+                    schemeColor(SchemeSlot::Bar),              // SettingsGroupFill
+                    schemeColor(SchemeSlot::Secondary),        // SettingsSeparator
+                    schemeColor(SchemeSlot::BarInk),           // SettingsLabel
+                    schemeOnBar(SchemeSlot::Secondary),        // SettingsHelp
+                    schemeColor(SchemeSlot::BarSelection),     // SettingsSelectionFill
+                    schemeColor(SchemeSlot::BarSelectionText), // SettingsSelectionText
+                    schemeOnBar(SchemeSlot::Accent),           // SettingsModified
+                    detail::noColor(),                         // SettingsIconTile
+                    schemeColor(SchemeSlot::BarInk),           // SettingsIconGlyph
+                    // A lit switch's "[x]" in the accent where it reads on the bar, an unlit one's "[ ]" in
+                    // ANSI 8 likewise; a field is the pane's own cells, with the pane's ink.
+                    schemeOnBar(SchemeSlot::Accent),      // SwitchOnFill
+                    schemeOnBar(SchemeSlot::Secondary),   // SwitchOffFill
+                    schemeColor(SchemeSlot::BarInk),      // SwitchKnob
+                    schemeColor(SchemeSlot::Background),  // ControlFill
+                    schemeColor(SchemeSlot::PaneInk),     // ControlText
+                    schemeOnBar(SchemeSlot::Secondary) }, // PreviewFrame
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
@@ -1658,6 +1977,7 @@ namespace detail
                      .splitHit = 1,
                      .paneInset = 0,
                      .paneCardRadius = 0 },
+        .settings = TerminalSettings,
     };
 } // namespace detail
 
