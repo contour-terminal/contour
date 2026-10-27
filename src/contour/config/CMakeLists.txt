@@ -27,6 +27,7 @@ add_library(contour_config STATIC
     LayoutStore.cpp LayoutStore.hpp
     ModifierNames.hpp
     NewDefaultsOffer.hpp
+    ScrollBarMode.hpp
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp

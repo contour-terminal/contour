@@ -12,6 +12,7 @@
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/HostUrl.hpp>
+#include <contour/config/ScrollBarMode.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
@@ -99,13 +100,6 @@
 
 namespace contour::config
 {
-
-enum class ScrollBarPosition : uint8_t
-{
-    Hidden,
-    Left,
-    Right
-};
 
 /// The unit Contour reports pixel sizes to applications in.
 ///
@@ -599,6 +593,11 @@ struct ScrollBarConfig
     /// (SessionChrome.qml): it takes no column from the page, shows only while there is history to scroll
     /// through, and stays off the alternate screen while @ref hideScrollbarInAltScreen is on.
     ScrollBarPosition position { ScrollBarPosition::Right };
+
+    /// How the bar behaves at the bottom of the scrollback (`scrollbar.mode`): the system's scroller style,
+    /// or a mode that overrides it (@see resolveScrollBarMode). The profile seeds it from its edition
+    /// (EditionDefaults::scrollBarMode); a ScrollBarConfig built on its own follows the system.
+    ScrollBarModePreference mode { ScrollBarModePreference::System };
     bool hideScrollbarInAltScreen { true };
 
     /// Which marks the scrollbar draws as ticks (`scrollbar.marks`: a YAML list of `failures`, `commands`,
@@ -1069,6 +1068,11 @@ struct EditionDefaults
     vtbackend::Modifier followHyperlinkModifier; ///< The modifier a click opens a link with.
     GuiTheme theme;                              ///< Which palette the window chrome follows.
     ChromeDensity chromeDensity;                 ///< How much room the window chrome takes.
+    /// Whether hovering a link shows its target without the follow modifier held
+    /// (`hyperlink_hover_tooltip`). A `bool` because the YAML key it seeds is one: Config's documented
+    /// carve-out; the session converts it at the boundary.
+    bool hyperlinkHoverTooltip;
+    ScrollBarModePreference scrollBarMode; ///< The profile's `scrollbar.mode`.
 };
 
 namespace detail
@@ -1118,6 +1122,8 @@ namespace detail
             .followHyperlinkModifier = vtbackend::Modifier::Control,
             .theme = GuiTheme::System,
             .chromeDensity = ChromeDensity::Comfortable,
+            .hyperlinkHoverTooltip = true,
+            .scrollBarMode = ScrollBarModePreference::Always,
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1138,6 +1144,8 @@ namespace detail
             .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
             .theme = GuiTheme::Terminal,
             .chromeDensity = ChromeDensity::Comfortable,
+            .hyperlinkHoverTooltip = false,
+            .scrollBarMode = ScrollBarModePreference::System,
         },
     };
 
@@ -1235,7 +1243,8 @@ struct TerminalProfile
     ConfigEntry<WindowMargins, documentation::Margins> margins { editionDefaults(defaultsEdition).margins };
     ConfigEntry<HistoryConfig, documentation::History> history { HistoryConfig {
         .maxHistoryLineCount = editionDefaults(defaultsEdition).scrollback } };
-    ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
+    ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar { ScrollBarConfig {
+        .mode = editionDefaults(defaultsEdition).scrollBarMode } };
     ConfigEntry<StickyHeaderConfig, documentation::StickyHeader> stickyHeader {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
@@ -1793,7 +1802,9 @@ struct Config
     ConfigEntry<bool, documentation::RememberWindowPosition> rememberWindowPosition { false };
 #endif
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
-    ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
+    ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip {
+        editionDefaults(defaultsEdition).hyperlinkHoverTooltip
+    };
 
     /// How long an OSC 9;4 progress indicator survives without an update. Zero disables expiry, which
     /// is the sequence's own behaviour: the indicator persists until the application clears it.
@@ -2850,7 +2861,7 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig const& v)
     {
-        return format(doc, v.position, v.hideScrollbarInAltScreen, format(v.marks));
+        return format(doc, v.position, v.mode, v.hideScrollbarInAltScreen, format(v.marks));
     }
 
     /// `scrollbar.marks` as the YAML flow list the reader accepts, spelled from the same token table.

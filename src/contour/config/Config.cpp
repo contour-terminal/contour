@@ -2989,6 +2989,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     if (child)
     {
         loadFromEntry(child, "position", where.position);
+        loadFromEntry(child, "mode", where.mode);
         loadFromEntry(child, "hide_in_alt_screen", where.hideScrollbarInAltScreen);
         loadFromEntry(child, "marks", where.marks);
     }

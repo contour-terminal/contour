@@ -251,7 +251,8 @@ constexpr StringLiteral AccessibilityCaretReportingConfig {
 };
 
 constexpr StringLiteral HyperlinkHoverTooltipConfig {
-    "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
+    "{comment} Whether hovering a link shows its target without holding the follow modifier. While the\n"
+    "{comment} modifier is held the target always shows.\n"
     "hyperlink_hover_tooltip: {}\n"
     "\n"
 };
@@ -540,6 +541,9 @@ constexpr StringLiteral ScrollbarConfig {
     "    {comment} only: a contour.yml written by an earlier version keeps Hidden, so set Right there\n"
     "    {comment} to see the marks.\n"
     "    position: {}\n"
+    "    {comment} system follows the operating system's scroll bar setting; overlay hides the bar at the\n"
+    "    {comment} bottom of the scrollback; always shows it while there is scrollback.\n"
+    "    mode: {}\n"
     "    {comment} whether or not to hide the scrollbar when in alt-screen.\n"
     "    hide_in_alt_screen: {}\n"
     "    {comment} Which marks the scrollbar shows as ticks; clicking one scrolls its line to the top.\n"
@@ -2405,9 +2409,10 @@ constexpr StringLiteral AccessibilityCaretReportingWeb {
 
 constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
-    "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
-    "target, so it can be read before it is followed. A local `file://` target is shown as a plain "
-    "path.\n"
+    "Whether hovering a link ([OSC 8](../vt-extensions/index.md) or detected) shows its target without "
+    "holding the follow modifier. While the modifier is held the target always shows. A local `file://` "
+    "target is shown as a plain path. Defaults to `false`; a configuration written before the 2026 "
+    "defaults keeps `true`.\n"
     "\n"
 };
 
@@ -2783,6 +2788,7 @@ constexpr StringLiteral ScrollbarWeb {
     "  profile_name:\n"
     "    scrollbar:\n"
     "      position: Right\n"
+    "      mode: system\n"
     "      hide_in_alt_screen: true\n"
     "      marks: [failures, commands, user_marks]\n"
     "```\n"
@@ -2792,6 +2798,11 @@ constexpr StringLiteral ScrollbarWeb {
     "`position: Right` there to see the marks. Hidden turns the scrollbar, and with it the command marks, "
     "off. The scrollbar floats over the edge of the terminal, takes no column from it, and is shown only "
     "while there is history to scroll through. <br/>\n"
+    ":octicons-horizontal-rule-16: ==mode== `system` follows the operating system's scroll bar setting; "
+    "`overlay` hides the bar at the bottom of the scrollback, unless a failed or running command or a "
+    "user mark is above the view; `always` shows it while there is scrollback. Defaults to `system`; a "
+    "configuration written before the 2026 defaults keeps `always`. Where the system publishes no "
+    "setting, `system` means `overlay`. <br/>\n"
     ":octicons-horizontal-rule-16: ==hide_in_alt_screen== This boolean option determines whether the "
     "scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the "
     "scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the "

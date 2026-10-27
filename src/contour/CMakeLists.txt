@@ -1197,6 +1197,7 @@ if(CONTOUR_TESTING)
         config/LayoutBuilder_test.cpp
         config/NewDefaultsOffer_test.cpp
         config/PtyReadBufferSize_test.cpp
+        config/ScrollBarMode_test.cpp
         config/TabBarMode_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp

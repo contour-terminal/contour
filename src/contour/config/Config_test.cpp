@@ -1383,6 +1383,88 @@ profiles:
     CHECK(hiddenProfile->scrollbar.value().position == ScrollBarPosition::Hidden);
 }
 
+TEST_CASE("Config: scrollbar.mode reads system, overlay and always, and keeps the default on anything else",
+          "[config]")
+{
+    using contour::config::ScrollBarModePreference;
+
+    // The profile's scrollbar.mode after loading a contour.yml that opens with @p header and whose scrollbar
+    // block carries @p modeLine. Read the way the application reads it, so the file's edition applies.
+    auto const modeAfter = [](std::string_view header, std::string_view modeLine) {
+        QTemporaryDir dir;
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir,
+                                                                            std::format(R"({}
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        scrollbar:
+            position: Right
+            {}
+)",
+                                                                                        header,
+                                                                                        modeLine)));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        return profile->scrollbar.value().mode;
+    };
+
+    SECTION("every token loads, in any case")
+    {
+        for (auto const& info: contour::config::configEnumValues<ScrollBarModePreference>())
+        {
+            INFO("token " << info.token);
+            CHECK(modeAfter("", std::format("mode: {}", info.token)) == info.value);
+            CHECK(modeAfter("defaults_edition: native2026", std::format("mode: {}", info.token))
+                  == info.value);
+        }
+        CHECK(modeAfter("", "mode: Overlay") == ScrollBarModePreference::Overlay);
+    }
+
+    SECTION("an unknown word keeps the edition's default, and is reported by its key path")
+    {
+        auto const editions = std::array {
+            std::pair { "", ScrollBarModePreference::Always },
+            std::pair { "defaults_edition: native2026", ScrollBarModePreference::System },
+        };
+        for (auto const& [header, expected]: editions)
+        {
+            auto capture = core::log::ScopedCapture { "error" };
+            INFO("header '" << header << "'");
+            CHECK(modeAfter(header, "mode: sideways") == expected);
+            CHECK(modeAfter(header, "") == expected);
+            INFO("captured error log:\n" << capture.text());
+            CHECK(capture.contains("sideways"));
+            CHECK(capture.contains("profiles.main.scrollbar.mode"));
+        }
+    }
+
+    SECTION("the generated config spells the mode out, and every mode round-trips through the writer")
+    {
+        auto const generated = YAML::Load(contour::config::defaultConfigString());
+        auto const defaults = contour::config::Config {};
+        auto const mode = generated["profiles"][defaults.defaultProfileName.value()]["scrollbar"]["mode"];
+        REQUIRE(mode.IsScalar());
+        CHECK(contour::config::configEnumFromToken<ScrollBarModePreference>(mode.as<std::string>())
+              == defaults.profile().scrollbar.value().mode);
+
+        for (auto const& info: contour::config::configEnumValues<ScrollBarModePreference>())
+        {
+            INFO("mode " << info.token);
+            QTemporaryDir dir;
+            auto const source = loadFromYaml(dir, "default_profile: main\n");
+            auto profile = *source.findProfile("main");
+            profile.scrollbar.value().mode = info.value;
+            writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
+
+            auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+            auto const* roundTripped = reloaded.findProfile("roundtrip");
+            REQUIRE(roundTripped != nullptr);
+            CHECK(roundTripped->scrollbar.value().mode == info.value);
+        }
+    }
+}
+
 TEST_CASE("Config: folding loads from YAML and reaches the emulation settings", "[config]")
 {
     QTemporaryDir dir;
@@ -4025,6 +4107,8 @@ struct ExpectedEditionDefaults
     contour::config::TabBarVisibility tabBarVisibility;
     vtbackend::Modifier followHyperlinkModifier;
     contour::config::GuiTheme theme;
+    bool hyperlinkHoverTooltip; ///< `hyperlink_hover_tooltip`, a YAML boolean.
+    contour::config::ScrollBarModePreference scrollBarMode;
 };
 
 /// Every value the releases before the 2026 redesign shipped.
@@ -4058,6 +4142,8 @@ constexpr auto ClassicExpectation = ExpectedEditionDefaults {
     .tabBarVisibility = contour::config::TabBarVisibility::Always,
     .followHyperlinkModifier = vtbackend::Modifier::Control,
     .theme = contour::config::GuiTheme::System,
+    .hyperlinkHoverTooltip = true,
+    .scrollBarMode = contour::config::ScrollBarModePreference::Always,
 };
 
 /// Every first-launch value of the 2026 redesign.
@@ -4097,6 +4183,8 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .followHyperlinkModifier = vtbackend::Modifier::Control,
 #endif
     .theme = contour::config::GuiTheme::Terminal,
+    .hyperlinkHoverTooltip = false,
+    .scrollBarMode = contour::config::ScrollBarModePreference::System,
 };
 
 /// The palette a built-in scheme name resolves to.
@@ -4139,6 +4227,7 @@ void checkProfileDefaults(contour::config::TerminalProfile const& profile,
     CHECK(profile.modeInsert.value().cursor.cursorDisplay == vtbackend::CursorDisplay::Steady);
     CHECK(profile.screenTransitionDuration.value() == expected.screenTransitionDuration);
     CHECK(profile.tabLabel.value() == "{WindowTitle}");
+    CHECK(profile.scrollbar.value().mode == expected.scrollBarMode);
 
     auto const& colors = profile.colors.value();
     if (expected.darkColorScheme == expected.lightColorScheme)
@@ -4169,6 +4258,7 @@ void checkEditionDefaults(contour::config::Config const& config, ExpectedEdition
     CHECK(config.defaultsEdition == expected.edition);
     CHECK(config.tabBarVisibility.value() == expected.tabBarVisibility);
     CHECK(config.theme.value() == expected.theme);
+    CHECK(config.hyperlinkHoverTooltip.value() == expected.hyperlinkHoverTooltip);
 
     auto const& mice = config.inputMappings.value().mouseMappings;
     auto const follow = std::ranges::find_if(mice, [](auto const& mapping) {
