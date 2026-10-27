@@ -2517,7 +2517,15 @@ TEST_CASE("NativeController.reconnect.afterARefusal", "[attach][controller][reco
     CHECK(controller.connectionState() == ConnectionState::Failed); // a first connect is not retried
     CHECK_FALSE(controller.failure().empty());
 
+    // The reactor has recorded the failure, but the GUI has not yet handled connectionClosed: its stop() has
+    // not run, and a reconnect now would start a run that the stale handler then stops.
     daemon.serveAgain([&] { daemon.services = {}; });
+    auto const early = controller.reconnect();
+    REQUIRE_FALSE(early.has_value());
+    CHECK(early.error() == ReconnectError::AlreadyConnected);
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+
+    controller.stop(); // what the GUI's connectionClosed handler does
     auto const started = controller.reconnect();
     REQUIRE(started.has_value());
     CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));

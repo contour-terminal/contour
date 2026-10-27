@@ -485,7 +485,9 @@ std::expected<void, contour::session::ReconnectError> NativeController::reconnec
     using contour::session::ReconnectError;
     if (!_connectStartedAt)
         return std::unexpected(ReconnectError::NotAttached);
-    if (isConnecting())
+    // Only once stop() has run: a run that failed is Failed before the GUI handles its connectionClosed, and
+    // a new run started in that gap would be stopped by the old run's handler.
+    if (!isStopped())
         return std::unexpected(ReconnectError::AlreadyConnected);
     {
         // The windows this client showed, as a reconnect inside one run resumes them; a client that follows

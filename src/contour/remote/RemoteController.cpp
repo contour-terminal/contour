@@ -57,6 +57,12 @@ bool RemoteController::isConnected() const
     return _state == State::Ready && !_stopped;
 }
 
+bool RemoteController::isStopped() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _stopped;
+}
+
 bool RemoteController::isConnecting() const
 {
     auto const lock = std::lock_guard { _mutex };

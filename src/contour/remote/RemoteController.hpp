@@ -232,6 +232,10 @@ class RemoteController
     ///         and not stopped. Safe from any thread.
     [[nodiscard]] bool isConnecting() const;
 
+    /// @return Whether stop() has ended the run and no restartConnecting() has begun another. Safe from any
+    ///         thread.
+    [[nodiscard]] bool isStopped() const;
+
     /// @return Whether the connection is up: the handshake completed, and neither the remote end nor a
     ///         stop() has ended it since. Safe from any thread; a request sent on a true answer can still
     ///         meet a connection that ends before it is written.

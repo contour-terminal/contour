@@ -112,7 +112,8 @@ struct InterruptionSink
 enum class ReconnectError : uint8_t
 {
     NotAttached = 0,  ///< The factory is not attached to a daemon: there was no connection to seek again.
-    AlreadyConnected, ///< A connection is up, or being sought by the supervisor that runs now.
+    AlreadyConnected, ///< A connection is up, being sought by the supervisor that runs now, or ended but not
+                      ///< yet stopped.
 };
 
 /// A short reason for @p error, for the footer's "Could not reconnect: {}." and logs.
