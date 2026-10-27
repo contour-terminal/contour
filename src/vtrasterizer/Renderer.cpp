@@ -40,7 +40,12 @@ namespace vtrasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper)
+    /// How thick the input method preedit's underline is, in points.
+    constexpr auto PreeditUnderlinePoints = 1.0;
+
+    /// Loads the font-derived fields of @p gm.
+    /// @param dpi The font's DPI, which the lengths given in points are drawn at.
+    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper, text::DPI dpi)
     {
         auto const m = textShaper.metrics(font);
 
@@ -55,6 +60,8 @@ namespace
         gm.baseline = m.lineHeight - m.ascender;
         gm.underline.position = gm.baseline + m.underlinePosition;
         gm.underline.thickness = m.underlineThickness;
+        // A vertical length, so the vertical DPI.
+        gm.preeditUnderlineThickness = pointsToPixels(PreeditUnderlinePoints, dpi.y);
 
         rendererLog()("Loading grid metrics {}", gm);
     }
@@ -62,7 +69,8 @@ namespace
     GridMetrics loadGridMetrics(text::FontKey font,
                                 vtbackend::PageSize pageSize,
                                 PageMargin pageMargin,
-                                text::Shaper& textShaper)
+                                text::Shaper& textShaper,
+                                text::DPI dpi)
     {
         auto gm = GridMetrics {};
 
@@ -74,7 +82,7 @@ namespace
         // until it runs this is what every consumer of gridMetrics() maps through.
         gm.pageMargin = pageMargin;
 
-        loadGridMetricsFromFont(font, gm, textShaper);
+        loadGridMetricsFromFont(font, gm, textShaper, dpi);
 
         return gm;
     }
@@ -161,7 +169,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
-    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, pageMargin, *_textShaper) },
+    _gridMetrics { loadGridMetrics(
+        _fonts.regular, pageSize, pageMargin, *_textShaper, _fontDescriptions.dpi) },
     _publishedMetrics { _gridMetrics },
     _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },
@@ -517,7 +526,7 @@ void Renderer::updateFontMetrics()
     // Update only the font-derived fields (cellSize, baseline, underline) in place. Page geometry
     // (pageSize, pageMargin, cellMargin) is owned by the geometry path, not the font, so leave it
     // untouched — this is what lets callers avoid manually saving/restoring it around a font rebuild.
-    loadGridMetricsFromFont(_fonts.regular, _gridMetrics, *_textShaper);
+    loadGridMetricsFromFont(_fonts.regular, _gridMetrics, *_textShaper, _fontDescriptions.dpi);
 
     if (_renderTarget)
         configureTextureAtlas();
@@ -649,6 +658,7 @@ void Renderer::publishFontMetricsAndDescriptions()
         _publishedMetrics.cellSize = _gridMetrics.cellSize;
         _publishedMetrics.baseline = _gridMetrics.baseline;
         _publishedMetrics.underline = _gridMetrics.underline;
+        _publishedMetrics.preeditUnderlineThickness = _gridMetrics.preeditUnderlineThickness;
         _publishedMetrics.cellMargin = _gridMetrics.cellMargin;
         _publishedFontDescriptions = _fontDescriptions;
         // Keep the lock-free cell-size mirror in lockstep with _publishedMetrics.cellSize so the two

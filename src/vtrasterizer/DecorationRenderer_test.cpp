@@ -249,7 +249,7 @@ using Rendered = std::vector<std::string>;
 /// The decorations that are supposed to live below the baseline, in the cell's descender region.
 constexpr auto UnderlineFamily = std::array {
     Decorator::Underline,       Decorator::DoubleUnderline, Decorator::CurlyUnderline,
-    Decorator::DottedUnderline, Decorator::DashedUnderline,
+    Decorator::DottedUnderline, Decorator::DashedUnderline, Decorator::PreeditUnderline,
 };
 
 } // namespace
@@ -566,4 +566,70 @@ TEST_CASE("DecorationRenderer.aLinkCellIsDrawnWithTheProfilesDecorator", "[decor
               == std::vector {
                   Decorator::CrossedOut, Decorator::CrossedOut, Decorator::Framed, Decorator::Framed });
     }
+}
+
+TEST_CASE("DecorationRenderer.preeditUnderlineIsOnePointWhateverTheFontSays", "[decoration]")
+{
+    // A font with a heavy underline: the preedit's line keeps its own thickness, placed where the
+    // font's underline is.
+    auto gridMetrics =
+        gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 4);
+    gridMetrics.preeditUnderlineThickness = 2;
+    auto probe = DecorationProbe { gridMetrics };
+    auto const rows = bitmapRows(probe.upload(Decorator::PreeditUnderline));
+    for (auto const& row: rows)
+        UNSCOPED_INFO(row);
+
+    CHECK(inkedRows(rows) == 2);
+    CHECK(topmostInkOffset(rows) == NimbusUnderlinePosition);
+    CHECK(bottommostInkOffset(rows) == NimbusUnderlinePosition - 1);
+    CHECK(
+        std::ranges::all_of(rows, [](auto const& row) { return !row.contains('#') || !row.contains('.'); }));
+}
+
+TEST_CASE("DecorationRenderer.thePreeditFlagMapsToThePreeditUnderline", "[decoration]")
+{
+    auto probe =
+        DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, 1) };
+    auto cell = vtbackend::RenderCell {};
+    cell.width = 1;
+    cell.attributes.flags = vtbackend::CellFlags { vtbackend::CellFlag::InputMethodPreedit };
+    CHECK(probe.decorationsDrawnFor(cell) == std::vector { Decorator::PreeditUnderline });
+}
+
+TEST_CASE("DecorationRenderer.everyDecoratorAndDottedPhaseHasATileOfItsOwn", "[decoration]")
+{
+    // Each decorator's tile and each further phase of the dotted underline is uploaded to a direct-mapped
+    // slot of its own; two sharing one would draw one in place of the other.
+    auto probe =
+        DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, 1) };
+    auto locations = std::vector<std::pair<int, int>> {};
+    for (auto const decoration: eachElement<Decorator>())
+    {
+        auto const& tile = probe.upload(decoration).location;
+        locations.emplace_back(tile.x.value, tile.y.value);
+    }
+    auto const phases =
+        dottedUnderlineGeometry(unbox<int>(NimbusCellSize.width), NimbusUnderlinePosition, 1).phaseCount;
+    for (auto const phase: std::views::iota(1, phases))
+    {
+        auto const& tile = probe.uploadDottedPhase(phase).location;
+        locations.emplace_back(tile.x.value, tile.y.value);
+    }
+    REQUIRE(phases > 1);
+
+    std::ranges::sort(locations);
+    CHECK(std::ranges::adjacent_find(locations) == locations.end());
+}
+
+TEST_CASE("DecorationRenderer.thePreeditUnderlineIsNoConfigurationValue", "[decoration]")
+{
+    // Internal: no configuration token parses to it, and it is printed under a name of its own rather than
+    // as the underline it is not.
+    for (auto const& [token, decorator]: DecoratorNames)
+        CHECK(decorator != Decorator::PreeditUnderline);
+    for (auto const& [token, decorator]: DecoratorAliases)
+        CHECK(decorator != Decorator::PreeditUnderline);
+    CHECK_FALSE(toDecorator("preedit-underline").has_value());
+    CHECK(std::format("{}", Decorator::PreeditUnderline) == "preedit-underline");
 }

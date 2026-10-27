@@ -38,7 +38,17 @@ enum class Decorator : uint8_t
     /// Puts a circle-shape around into the cell (and ideally around the glyph)
     /// TODO: How would that look like with double-width characters?
     Encircle,
+    /// The thin line under the text an input method is composing: one point thick, where the font's
+    /// underline is. Internal -- drawn for CellFlag::InputMethodPreedit, never named in a configuration.
+    PreeditUnderline,
 };
+
+/// The last enumerator of Decorator, written beside it so that the two change together.
+///
+/// What std::numeric_limits<Decorator>::max() reports, and so what counts the renderer's direct-mapped tile
+/// slots: one per decorator, then the dotted underline's further phases. An enumerator left past it gets no
+/// slot of its own and draws whichever tile sits where its slot would be.
+inline constexpr auto LastDecorator = Decorator::PreeditUnderline;
 
 /// Every decorator paired with the token that names it in a configuration file.
 ///
@@ -56,6 +66,14 @@ inline constexpr auto DecoratorNames = std::array {
     std::pair { std::string_view { "crossed-out" }, Decorator::CrossedOut },
     std::pair { std::string_view { "framed" }, Decorator::Framed },
     std::pair { std::string_view { "encircle" }, Decorator::Encircle },
+};
+
+/// The decorators no configuration names, with the name the formatter prints them by.
+///
+/// Kept out of @ref DecoratorNames, which is the configuration's vocabulary: a row there would let a
+/// hyperlink decoration ask for it, and put it in the settings page's option list.
+inline constexpr auto InternalDecoratorNames = std::array {
+    std::pair { std::string_view { "preedit-underline" }, Decorator::PreeditUnderline },
 };
 
 /// Further spellings of a decorator that a configuration file accepts but never prints.
@@ -95,7 +113,7 @@ struct std::numeric_limits<vtrasterizer::Decorator>
 {
     using Decorator = vtrasterizer::Decorator;
     constexpr static Decorator min() noexcept { return Decorator::Underline; }
-    constexpr static Decorator max() noexcept { return Decorator::Encircle; }
+    constexpr static Decorator max() noexcept { return vtrasterizer::LastDecorator; }
     constexpr static size_t count() noexcept
     {
         return static_cast<size_t>(max()) - static_cast<size_t>(min()) + 1;
@@ -110,6 +128,9 @@ struct std::formatter<vtrasterizer::Decorator>: formatter<std::string_view>
         // Looked up by value rather than indexed by the enumerator, so the table's order is free to
         // differ from the enumeration's without renaming anything.
         for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+            if (decorator == value)
+                return formatter<std::string_view>::format(token, ctx);
+        for (auto const& [token, decorator]: vtrasterizer::InternalDecoratorNames)
             if (decorator == value)
                 return formatter<std::string_view>::format(token, ctx);
         return formatter<std::string_view>::format("underline", ctx);

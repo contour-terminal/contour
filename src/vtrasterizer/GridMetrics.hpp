@@ -6,11 +6,25 @@
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 
 namespace vtrasterizer
 {
+
+/// How many device pixels a length in typographic points covers, at least one.
+/// @param points The length, in points (1/72 inch); not negative.
+/// @param dpi    The device's resolution, in dots per inch; not negative. Zero still yields one pixel.
+/// @return `max(1, round(points * dpi / 72))`.
+[[nodiscard]] constexpr int pointsToPixels(double points, double dpi) noexcept
+{
+    constexpr auto PointsPerInch = 72.0;
+    // Rounded half up by hand: std::lround is not constexpr in every standard library this builds with.
+    auto const exact = points * dpi / PointsPerInch;
+    auto const whole = static_cast<int>(exact);
+    return std::max(1, exact - whole >= 0.5 ? whole + 1 : whole);
+}
 
 /**
  * Uniform cell margin for the grid view.
@@ -48,6 +62,10 @@ struct GridMetrics
         int position = 1;  // center underline position relative to cell bottom
         int thickness = 1; // underline thickness
     } underline {};
+
+    /// How thick the input method preedit's underline is drawn, in pixels: one point at the font's DPI,
+    /// whatever the font says its own underline is. @see pointsToPixels
+    int preeditUnderlineThickness = 1;
 
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.
     PageMargin pageMargin {};
@@ -123,15 +141,17 @@ struct std::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
     auto format(vtrasterizer::GridMetrics const& v, auto& ctx) const
     {
         return formatter<std::string>::format(
-            std::format(
-                "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
-                v.pageSize,
-                v.cellSize,
-                v.baseline,
-                v.underline.position,
-                v.underline.thickness,
-                v.pageMargin.left,
-                v.pageMargin.bottom),
+            std::format("(pageSize={}, cellSize={}, baseline={}, underline={}@{}, preeditUnderline={}, "
+                        "margin=(left={}, "
+                        "bottom={}))",
+                        v.pageSize,
+                        v.cellSize,
+                        v.baseline,
+                        v.underline.position,
+                        v.underline.thickness,
+                        v.preeditUnderlineThickness,
+                        v.pageMargin.left,
+                        v.pageMargin.bottom),
             ctx);
     }
 };

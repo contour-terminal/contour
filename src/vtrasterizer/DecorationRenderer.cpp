@@ -43,6 +43,7 @@ namespace
         pair { vtbackend::CellFlag::CrossedOut, Decorator::CrossedOut },
         pair { vtbackend::CellFlag::Framed, Decorator::Framed },
         pair { vtbackend::CellFlag::Encircled, Decorator::Encircle },
+        pair { vtbackend::CellFlag::InputMethodPreedit, Decorator::PreeditUnderline },
     };
 
     /// The direct-mapping index of the dotted underline's tile for @p phase.
@@ -182,24 +183,29 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                               FRAGMENT_SELECTOR_GLYPH_ALPHA);
     };
 
+    // A solid stroke @p thickness rows high whose top row is the underline position: the straight
+    // underline, and the preedit's line with a thickness of its own.
+    auto const straightStroke = [&](unsigned thickness) {
+        auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness)));
+        auto const height = vtbackend::Height(y0 + thickness);
+        auto const imageSize = ImageSize { width, height };
+        return create(imageSize, [&]() -> atlas::Buffer {
+            auto image = atlas::Buffer(imageSize.area(), 0);
+            for (unsigned y = 1; y <= thickness; ++y)
+                for (auto x: core::times(unbox(width)))
+                    image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
+            return image;
+        });
+    };
+
     switch (decoration)
     {
         case Decorator::Encircle:
             // TODO (default to Underline for now)
             [[fallthrough]];
-        case Decorator::Underline: {
-            auto const thickness = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness)));
-            auto const height = vtbackend::Height(y0 + thickness);
-            auto const imageSize = ImageSize { width, height };
-            return create(imageSize, [&]() -> atlas::Buffer {
-                auto image = atlas::Buffer(imageSize.area(), 0);
-                for (unsigned y = 1; y <= thickness; ++y)
-                    for (auto x: core::times(unbox(width)))
-                        image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
-                return image;
-            });
-        }
+        case Decorator::Underline: return straightStroke(max(1u, unsigned(ceil(underlineThickness() / 2.0))));
+        case Decorator::PreeditUnderline:
+            return straightStroke(static_cast<unsigned>(max(1, _gridMetrics.preeditUnderlineThickness)));
         case Decorator::DoubleUnderline: {
             // Two thirds of the underline's thickness per stroke. The parentheses used to close
             // after ceil(), so this truncated instead of rounding up and an even thickness lost a
