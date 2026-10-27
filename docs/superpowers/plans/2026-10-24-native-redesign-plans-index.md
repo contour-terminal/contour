@@ -45,12 +45,13 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-27, Step 3b done (the find bar: regular expressions and whole words, a count walked in
-steps off the terminal's lock, search yellow, placement under the pane header, ⌘F/⌘G/⇧⌘G/⌘E on macOS). Its ledger,
-with every ruling, the task reviews, the final review and its fix wave, is
-`docs/superpowers/ledgers/2026-10-25-native-redesign-step-3b.md`. Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
-1d), 4a, 2, 3a, 3b and 3d. Step 3c runs in a parallel worktree, 3e in the main checkout; 3f follows. Carry into
-3e's rebase: colour-role families count End − Begin, and the link pill reads the find bar's real presence.
+Last update: 2026-10-27, Step 3c done (notices and permissions: a NoticeModel with toasts announced only while
+`accessibility_announcements` allows, guarded roles that take a permission decision and its memory as enums, a
+permission dialog whose every answer names the question it answers, Allow held for half a second after a question
+changes, extension and control consent queued one at a time, the Save Layout sheet). Its ledger, with every ruling,
+the task reviews, the final review and its fix wave, is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3c.md`.
+Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c, 1d), 4a, 2, 3a, 3b, 3c and 3d. 3e runs in the main checkout; 3f
+follows. Carry into 3e's rebase: the Terminal row's ToastText and ToastHint take 3c's Toast/ToastInk pair.
 
 ## Rules for every step
 
@@ -85,7 +86,7 @@ with every ruling, the task reviews, the final review and its fix wave, is
 | 2 | Pane cards, headers, gap and hit area, densities, pane states | 1d | 3.6 | `2026-10-25-native-redesign-step-2.md` (done) |
 | 3a | Status line placeholders, flags, role colours, collapse, final template | 2 | 3.7 | `2026-10-25-native-redesign-step-3a.md` (done) |
 | 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-3b.md` (done) |
-| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-3c.md` (written) |
+| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-3c.md` (done) |
 | 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-3d.md` (done) |
 | 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (written) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
