@@ -2165,7 +2165,13 @@ void TerminalSessionManager::rebindDisconnected()
                 // Left set, the binding would hand the ended pane's remote session to the next one made.
                 _sessionFactory.cancelReconnectBinding();
             }
-    _reconnectRun = ReconnectRun::Idle;
+    // The daemon pushes one layout per window and each arrives in its own turn: the run stays up for the
+    // windows still to come, and ends once no pane is left to take back (or on reconnectFailed()).
+    auto const isLost = [](auto const* session) {
+        return session != nullptr && session->endReason() == EndReason::Disconnected;
+    };
+    if (std::ranges::none_of(_sessionsById | std::views::values, isLost))
+        _reconnectRun = ReconnectRun::Idle;
 }
 
 void TerminalSessionManager::reconnectFailed(std::string_view reason)

@@ -2825,6 +2825,46 @@ TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[mana
     CHECK(newLeft->getPaneState() == static_cast<int>(PaneState::Live));
 }
 
+TEST_CASE("TerminalSessionManager: Reconnect takes back the panes of every window, layout by layout",
+          "[manager][paneend][reconnect]")
+{
+    using contour::session::EndReason;
+    // Two daemon windows: the daemon pushes one layout per window, and each reaches the GUI in its own turn.
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    auto const second = contour::test::ScopedController { manager };
+    auto* const other = manager.createSession(second.id);
+    REQUIRE(other != nullptr);
+    auto const otherLeaf = leafOf(manager, second.id, *other)->id();
+    other->noteTransportLost();
+    other->terminal().device().close();
+    other->onClosed();
+    REQUIRE(other->endReason() == EndReason::Disconnected);
+
+    // The first window's layout is the only one that has arrived.
+    lost.factory->namedForReconnect = { &lost.left->terminal().device(), &lost.right->terminal().device() };
+    auto const otherDevice = &other->terminal().device();
+    lost.left->runFooterAction();
+    REQUIRE(lost.factory->reconnects == 1);
+
+    manager.rebindDisconnected();
+    CHECK(sessionOfLeaf(manager, lost.window.id, lost.leftLeaf)->endReason() == EndReason::None);
+    CHECK(manager.sessionForId(other->modelSessionId()) == other);
+
+    // Then the second window's layout arrives: its pane comes back in the same run.
+    lost.factory->namedForReconnect = { otherDevice };
+    manager.rebindDisconnected();
+    auto* const newOther = sessionOfLeaf(manager, second.id, otherLeaf);
+    REQUIRE(newOther != nullptr);
+    CHECK(newOther->endReason() == EndReason::None);
+
+    // Nothing is left to take back, so the run is over: a late failure is nobody's to report.
+    manager.reconnectFailed("the connection closed");
+    CHECK(newOther->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+
+    contour::test::closeAllTabs(*second);
+}
+
 TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the reason",
           "[manager][paneend][reconnect]")
 {

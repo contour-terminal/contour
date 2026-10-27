@@ -536,7 +536,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// The daemon is back and has pushed its layout: every Disconnected pane whose remote session that layout
     /// still names mirrors it again, in place (its PaneId, the active pane and a zoom unchanged); one it does
-    /// not name keeps its footer. Ends a Reconnect that is running.
+    /// not name keeps its footer. Called for every layout the daemon pushes (one per window): a Reconnect
+    /// that is running ends once no Disconnected pane is left, or in reconnectFailed().
     void rebindDisconnected();
 
     /// The reconnect that was running ended for good without bringing the daemon back: the Disconnected
