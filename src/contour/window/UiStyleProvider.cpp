@@ -223,6 +223,12 @@ namespace
 
 } // namespace
 
+platform::PlatformAppearance chromeAppearanceOf(platform::PlatformAppearance appearance)
+{
+    appearance.scrollBars = std::nullopt;
+    return appearance;
+}
+
 ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
 {
     return ChromeInputs { .row = row,
@@ -677,9 +683,15 @@ QColor UiStyleProvider::colorOn(int role, QColor const& background) const
 {
     if (!inRange(role, config::ChromeColorRoleCount))
         return { Qt::transparent };
-    auto const tone = toneOf(platform::toRGBColor(background));
-    return _colors.resolve(_groups.colors[static_cast<size_t>(role)],
-                           tone == ChromeTone::Dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+    auto const ground = platform::toRGBColor(background);
+    auto const& source = _groups.colors[static_cast<size_t>(role)];
+    // A scheme mark (the Terminal row's scrollbar thumb) is chosen against this pane's background, not the
+    // default profile's.
+    if (source.kind == config::ColorSourceKind::Scheme)
+        return platform::atOpacity(platform::toQColor(config::markOn(_inputs.scheme, source.slot, ground)),
+                                   source.alphaPercent);
+    return _colors.resolve(
+        source, toneOf(ground) == ChromeTone::Dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
 }
 
 qreal UiStyleProvider::paneCardContentInset(qreal devicePixelRatio) const

@@ -4304,6 +4304,9 @@ void TerminalSession::publishOverlayClearance()
 {
     // Cleared first, so output arriving from here on asks for the next frame's.
     _overlayClearancePostPending.clear(std::memory_order_release);
+    // The output that changed the page may also have changed whether a click follows the link -- an
+    // application starting to take the mouse under a still pointer -- so the pill is re-decided with it.
+    refreshLinkTarget(_linkTarget.text);
     ++_overlayClearanceRevision;
     emit overlayClearanceChanged();
 }

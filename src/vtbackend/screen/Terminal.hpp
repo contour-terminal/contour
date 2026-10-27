@@ -2958,7 +2958,8 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
 
     /// Where an overlay over the page on display may go: each drawn row's blank run at its right end, and the
-    /// rows of the live prompt and the cursor, which it must not cover (@see OverlayClearance).
+    /// rows of the live prompt, the cursor and a sticky command header drawn over the page's top row, which
+    /// it must not cover (@see OverlayClearance).
     ///
     /// The rows are the drawn ones, status line included, counted from the first; a status line's row is
     /// never blank. A row a collapsed fold stands in for is read as the row standing in its place, as the

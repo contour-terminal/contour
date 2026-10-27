@@ -643,6 +643,26 @@ TEST_CASE("ChromeStyleHost republishes chromeStyle and keeps the old provider al
     CHECK(capture.messages().isEmpty());
 }
 
+TEST_CASE("ChromeStyleHost: a scroller-style flip rebuilds no provider", "[contour][chromehost][qml]")
+{
+    // The scroller style is a session's (the overlay scrollbar's mode); the chrome reads none of it.
+    using contour::config::ScrollBarMode;
+    auto engine = QQmlEngine();
+    auto inputs =
+        contour::window::chromeInputsFor(contour::config::ChromeStyle::MacOS, QGuiApplication::font());
+    auto appearance = contour::platform::PlatformAppearance {};
+    appearance.scrollBars = ScrollBarMode::Overlay;
+    inputs.appearance = contour::window::chromeAppearanceOf(appearance);
+    auto host = contour::window::ChromeStyleHost(*engine.rootContext(), inputs);
+    auto const* const provider = &host.provider();
+
+    appearance.scrollBars = ScrollBarMode::Always;
+    inputs.appearance = contour::window::chromeAppearanceOf(appearance);
+    host.update(inputs);
+    CHECK(&host.provider() == provider);
+    CHECK_FALSE(contour::window::chromeAppearanceOf(appearance).scrollBars.has_value());
+}
+
 namespace
 {
 
@@ -2057,6 +2077,17 @@ TEST_CASE("UiStyleProvider publishes the overlay tokens and places the link pill
     CHECK(tokenOf(terminal, "size", "scrollbar").toReal() == Catch::Approx(terminal.widthQuantum()));
     CHECK(tokenOf(terminal, "motion", "linger").toInt() == 600);
     CHECK(terminal.property("scrollThumbGlyph").toString() == QStringLiteral("┃"));
+    // The Terminal row's thumb is chosen against the pane it is drawn on: a light pane under the dark
+    // default and a dark one alike get a thumb that stands off them at 3:1.
+    for (auto const ground: { QColor(0xFA, 0xFA, 0xF8), QColor(0x1C, 0x1E, 0x24) })
+        for (auto const role: { contour::config::ChromeColorRole::ScrollbarThumb,
+                                contour::config::ChromeColorRole::ScrollbarThumbActive })
+        {
+            auto const thumb = terminal.colorOn(static_cast<int>(role), ground);
+            CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(thumb),
+                                           contour::platform::toRGBColor(ground))
+                  >= contour::config::MinimumMarkContrast);
+        }
 }
 
 TEST_CASE("UiStyleProvider: the overlay's inks read on every row, appearance and bundled scheme",

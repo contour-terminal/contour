@@ -13025,6 +13025,19 @@ TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again
         CHECK(session->overlayClearanceRevision() == settled + 1);
     }
 
+    SECTION("an application that starts taking the mouse under a still pointer hides it within a frame")
+    {
+        // htop starting while the pointer rests on a link: no move comes, yet a click would now go to the
+        // application, so the pill inviting one is re-decided with the clearance.
+        session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
+        REQUIRE(session->linkTargetShown());
+        auto targets = QSignalSpy(session.session.get(), &TerminalSession::linkTargetChanged);
+        std::thread { [&] { session->terminal().writeToScreen("\033[?1000h"); } }.join();
+        REQUIRE(changes.wait(1000));
+        CHECK_FALSE(session->linkTargetShown());
+        CHECK(targets.count() == 1);
+    }
+
     SECTION("while it does not: nothing is asked")
     {
         REQUIRE_FALSE(session->linkTargetShown());

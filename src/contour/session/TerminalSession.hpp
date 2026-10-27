@@ -528,8 +528,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// thread, the lock held or not: it only posts, at most one post in flight.
     void requestOverlayClearanceRefresh();
 
-    /// Bumps overlayClearanceRevision and emits overlayClearanceChanged: the frame timer's half of
-    /// requestOverlayClearanceRefresh(). GUI thread.
+    /// Re-decides the link pill (refreshLinkTarget()), then bumps overlayClearanceRevision and emits
+    /// overlayClearanceChanged: the frame timer's half of requestOverlayClearanceRefresh(). GUI thread.
     void publishOverlayClearance();
 
   public:

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <variant>
 
 namespace contour::config
@@ -257,6 +258,20 @@ inline constexpr std::array ScrollbarThumbActiveFallbacks {
     SchemeSlot::Accent,
     SchemeSlot::Foreground,
     SchemeSlot::PaneInk,
+};
+
+/// A slot that is a mark against the pane, and the slots it is chosen from (detail::firstMarkOn).
+struct SchemeMarkChain
+{
+    SchemeSlot slot;                        ///< The mark slot.
+    std::span<SchemeSlot const> candidates; ///< What it is chosen from, in order; the last always marks.
+};
+
+/// The mark slots: chosen against the default profile's background in chromeSchemeColorsOf(), and against a
+/// pane's own by markOn().
+inline constexpr std::array SchemeMarkChains {
+    SchemeMarkChain { .slot = SchemeSlot::ScrollbarThumb, .candidates = ScrollbarThumbFallbacks },
+    SchemeMarkChain { .slot = SchemeSlot::ScrollbarThumbActive, .candidates = ScrollbarThumbActiveFallbacks },
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
@@ -1656,12 +1671,10 @@ namespace detail
     /// @param candidates The slots to try, in order; not empty.
     /// @param ground     What the mark is drawn on.
     /// @return The chosen colour.
-    template <size_t N>
-    [[nodiscard]] vtbackend::RGBColor firstMarkOn(ChromeSchemeColors const& colors,
-                                                  std::array<SchemeSlot, N> const& candidates,
-                                                  vtbackend::RGBColor ground)
+    [[nodiscard]] inline vtbackend::RGBColor firstMarkOn(ChromeSchemeColors const& colors,
+                                                         std::span<SchemeSlot const> candidates,
+                                                         vtbackend::RGBColor ground)
     {
-        static_assert(N > 0);
         for (auto const slot: candidates)
         {
             auto const color = colors.bySlot[static_cast<size_t>(slot)];
@@ -1736,10 +1749,9 @@ namespace detail
     // The overlays drawn on the pane itself: marks that stand off its background, and the hint on the toast.
     auto const background = palette.defaultBackground;
     colors.bySlot[static_cast<size_t>(SchemeSlot::PaneInk)] = vtbackend::legibleInkOn(palette, background);
-    colors.bySlot[static_cast<size_t>(SchemeSlot::ScrollbarThumb)] =
-        detail::firstMarkOn(colors, ScrollbarThumbFallbacks, background);
-    colors.bySlot[static_cast<size_t>(SchemeSlot::ScrollbarThumbActive)] =
-        detail::firstMarkOn(colors, ScrollbarThumbActiveFallbacks, background);
+    for (auto const& chain: SchemeMarkChains)
+        colors.bySlot[static_cast<size_t>(chain.slot)] =
+            detail::firstMarkOn(colors, chain.candidates, background);
     colors.bySlot[static_cast<size_t>(SchemeSlot::ToastHint)] =
         vtbackend::legibleInkOn(palette, palette.defaultForeground);
     return colors;
@@ -1760,6 +1772,35 @@ namespace detail
     if (vtbackend::contrastRatio(color, bar) >= MinimumTextContrast)
         return color;
     return colors.bySlot[static_cast<size_t>(SchemeSlot::BarInk)];
+}
+
+/// The colour of @p slot drawn on @p ground: a pane whose profile's background is not the default profile's.
+///
+/// A mark slot (SchemeMarkChains) is chosen again from its chain against @p ground, so a light-profile pane
+/// under a dark default keeps a thumb that stands off it at 3:1; the chain's last resort, the pane's ink,
+/// reads as the scheme's (@c PaneInk) where it marks on @p ground, else as black or white, whichever stands
+/// off it more. Any other slot is the scheme's own.
+/// @param colors The scheme's chrome slots.
+/// @param slot   The slot.
+/// @param ground The pane's background.
+/// @return The colour.
+[[nodiscard]] inline vtbackend::RGBColor markOn(ChromeSchemeColors const& colors,
+                                                SchemeSlot slot,
+                                                vtbackend::RGBColor ground) noexcept
+{
+    auto const marks = [&](vtbackend::RGBColor color) {
+        return vtbackend::contrastRatio(color, ground) >= MinimumMarkContrast;
+    };
+    auto const chain = std::ranges::find(SchemeMarkChains, slot, &SchemeMarkChain::slot);
+    auto const own = colors.bySlot[static_cast<size_t>(slot)];
+    if (chain == SchemeMarkChains.end() || marks(own))
+        return own;
+    for (auto const candidate: chain->candidates)
+        if (auto const color = colors.bySlot[static_cast<size_t>(candidate)]; marks(color))
+            return color;
+    constexpr auto Black = vtbackend::RGBColor { 0x00, 0x00, 0x00 };
+    constexpr auto White = vtbackend::RGBColor { 0xFF, 0xFF, 0xFF };
+    return vtbackend::contrastRatio(Black, ground) >= vtbackend::contrastRatio(White, ground) ? Black : White;
 }
 
 /// @p color moved by @p points HSL lightness points (out of 100), keeping its hue and saturation.

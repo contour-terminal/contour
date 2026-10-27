@@ -36,6 +36,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SplitChrome.hpp>
@@ -7098,6 +7099,22 @@ TEST_CASE("link pill: a header pill whose slot goes shows nowhere rather than ov
     REQUIRE(pill->isVisible()); // still fading
     PaneTreeHost::terminalOf(card).setProperty("headerLinkSlot", QVariant::fromValue<QQuickItem*>(nullptr));
     CHECK_FALSE(pill->isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: a placement the provider refuses shows no pill (offscreen)",
+          "[contour][gui][qml][linkpill]")
+{
+    // An input out of range answers an empty map, whose anchor is undefined: that is no place, not a pill of
+    // undefined width at the grid's corner.
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = LinkPillScene {};
+    scene.pill->setProperty("findBar", static_cast<int>(contour::window::FindBarPresenceCount));
+    scene.show();
+    QCoreApplication::processEvents();
+    CHECK_FALSE(scene.pill->property("shown").toBool());
+    CHECK(scene.pill->property("livePlacement").toMap().value(QStringLiteral("anchor")).toString()
+          == QStringLiteral("hidden"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

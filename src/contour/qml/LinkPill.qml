@@ -52,9 +52,11 @@ Toast {
             return { anchor: "hidden", x: 0, y: 0, width: 0 }
         var revision = pill.session.overlayClearanceRevision
         var host = pill.headerPresent > 0 && pill.headerSlot !== null ? 1 : 0
-        return chromeStyle.linkPillPlacement(host, pill.findBar, host > 0 ? pill.headerSlot.width : 0,
-                                             pill.gridItem.width, pill.gridItem.height, pill.naturalWidth,
-                                             pill.minimumWidth, pill.extent, pill.session.overlayClearance())
+        var placed = chromeStyle.linkPillPlacement(host, pill.findBar, host > 0 ? pill.headerSlot.width : 0,
+                                                   pill.gridItem.width, pill.gridItem.height, pill.naturalWidth,
+                                                   pill.minimumWidth, pill.extent, pill.session.overlayClearance())
+        // An input the provider refuses answers an empty map: no place.
+        return placed.anchor !== undefined ? placed : { anchor: "hidden", x: 0, y: 0, width: 0 }
     }
 
     // Where the pill is drawn: the live placement while it shows, and the last shown one while it fades out,

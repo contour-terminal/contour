@@ -116,6 +116,13 @@ struct ChromeInputs
     [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
 };
 
+/// What of the OS's published look the chrome reads: @p appearance without the scroller style, which is a
+/// session's (the overlay scrollbar's mode), not the chrome tokens'. So a scroller-style flip -- a mouse
+/// plugged in -- rebuilds no UiStyleProvider (ChromeStyleHost::update compares the inputs).
+/// @param appearance What the OS publishes.
+/// @return @p appearance with @c scrollBars cleared.
+[[nodiscard]] platform::PlatformAppearance chromeAppearanceOf(platform::PlatformAppearance appearance);
+
 /// The inputs for @p row and @p font with nothing else set: default accessibility, no platform
 /// appearance, and the default terminal palette's scheme.
 /// @param row  The chrome token row.
@@ -404,8 +411,9 @@ class UiStyleProvider: public QObject
     ///
     /// The kit's @c Fill, @c Label, @c Surface and @c Separator sources take their light or dark half by
     /// @p background's tone (window::toneOf) rather than the palette window's, so a light-profile pane
-    /// under a dark chrome keeps a legible header; every other kind resolves as @c colors does, which
-    /// reads the palette, so a binding over it also reads @ref paletteRevision.
+    /// under a dark chrome keeps a legible header. A @c Scheme source's mark slot (the Terminal row's
+    /// scrollbar thumb) is chosen against @p background too (config::markOn). Every other kind resolves as @c
+    /// colors does, which reads the palette, so a binding over it also reads @ref paletteRevision.
     /// @param role       A config::ChromeColorRole as its underlying value (see @c roles).
     /// @param background The pane's own background.
     /// @return The colour; transparent for a role outside the table.

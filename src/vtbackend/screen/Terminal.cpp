@@ -4953,6 +4953,10 @@ OverlayClearance Terminal::overlayClearance() const
                 avoid(LineOffset(line));
     if (_cursorPage == _displayedPage && _activeStatusDisplay == ActiveStatusDisplay::Main)
         avoid(currentScreen().cursor().position.line);
+    // The sticky command header, where this frame draws one, covers the page's top row with its command and
+    // its chip, whatever the grid row under it holds.
+    if (stickyHeaderFor(stickyHeaderInput().input))
+        clearance.avoidRows.push_back(mainTop);
 
     std::ranges::sort(clearance.avoidRows);
     auto const duplicates = std::ranges::unique(clearance.avoidRows);

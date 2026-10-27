@@ -182,21 +182,17 @@ Item {
         readonly property bool hasScrollback: vbar.size < 1.0
 
         // The Terminal row draws the thumb as a column of a glyph (one per cell row); the native rows as a
-        // rounded shape. Hovered or dragged, the thumb takes its active colour and the track shows.
+        // rounded shape. Hovered or dragged, the thumb takes its active colour (and on the native rows the
+        // track shows).
         readonly property bool glyphThumb: chromeStyle.scrollThumbGlyph !== ""
         readonly property bool engaged: vbar.hovered || vbar.pressed
-        // The native thumb resolves on the pane's own background (colorOn), so a light profile under a dark
-        // chrome keeps a legible one; the Terminal row's is the scheme's, chrome-wide.
+        // Resolved on the pane's own background (colorOn) on every row, so a light profile under a dark
+        // default keeps a thumb that stands off it.
         readonly property color paneBackground: chrome.session ? chrome.session.backgroundColor : "transparent"
-        readonly property color thumbColor: {
-            if (chromeStyle.paletteRevision < 0)
-                return "transparent"
-            if (vbar.glyphThumb)
-                return vbar.pressed ? chromeStyle.colors.scrollbarThumbActive : chromeStyle.colors.scrollbarThumb
-            return chromeStyle.colorOn(vbar.engaged ? chromeStyle.roles.scrollbarThumbActive
-                                                    : chromeStyle.roles.scrollbarThumb,
-                                       vbar.paneBackground)
-        }
+        readonly property color thumbColor: chromeStyle.paletteRevision < 0 ? "transparent"
+            : chromeStyle.colorOn(vbar.engaged ? chromeStyle.roles.scrollbarThumbActive
+                                               : chromeStyle.roles.scrollbarThumb,
+                                  vbar.paneBackground)
 
         contentItem: Rectangle {
             id: thumb

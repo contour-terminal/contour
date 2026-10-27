@@ -1120,3 +1120,21 @@ TEST_CASE("StickyHeader.terminal.aCrossfadeSnapshotLeavesTheDrawnBlock", "[stick
 
     CHECK(mc.terminal.stickyHeaderBlock() == id);
 }
+
+TEST_CASE("StickyHeader.terminal.anOverlayKeepsOffTheHeadersRow", "[stickyheader][overlayclearance]")
+{
+    // Scrolled back into a block, the header is drawn over the page's top row: an overlay placed by the
+    // clearance must not take that row for blank, whatever the grid row under the header holds.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    startCommand(mc, "make");
+    printLines(mc, "out", 20);
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+    REQUIRE(drawFrame(mc.terminal).stickyHeader.has_value());
+    auto const headerRow = unbox<int>(mc.terminal.mainPageTopRow());
+    CHECK(std::ranges::contains(mc.terminal.overlayClearance().avoidRows, headerRow));
+
+    // Back at the live output the header is gone (Scrolled mode), and so is the row's reservation.
+    REQUIRE(mc.terminal.viewport().scrollToBottom());
+    REQUIRE_FALSE(drawFrame(mc.terminal).stickyHeader.has_value());
+    CHECK_FALSE(std::ranges::contains(mc.terminal.overlayClearance().avoidRows, headerRow));
+}

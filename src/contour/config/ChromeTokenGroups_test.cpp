@@ -1522,6 +1522,35 @@ TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
     }
 }
 
+TEST_CASE("chromeTokens.theTerminalRowsThumbMarksOnEveryPane", "[chrometokens]")
+{
+    // A pane's profile may name another scheme than the default profile's: the thumb, chosen from the
+    // default's slots, still stands off that pane's background at 3:1 -- for every pair of bundled schemes.
+    using namespace contour::config;
+    auto const schemeOf = [](std::string_view name) {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        return palette;
+    };
+    for (auto const defaultName: defaultColorPaletteNames())
+    {
+        auto const colors = chromeSchemeColorsOf(schemeOf(defaultName));
+        for (auto const paneName: defaultColorPaletteNames())
+        {
+            INFO("default: " << defaultName << ", pane: " << paneName);
+            auto const ground = schemeOf(paneName).defaultBackground;
+            for (auto const& chain: SchemeMarkChains)
+                CHECK(contrastRatio(markOn(colors, chain.slot, ground), ground) >= MinimumMarkContrast);
+            // Not a mark: the scheme's own, on whatever ground.
+            CHECK(markOn(colors, SchemeSlot::Accent, ground) == slotIn(colors, SchemeSlot::Accent));
+        }
+        // On the default's own background, the slot as chromeSchemeColorsOf() chose it.
+        for (auto const& chain: SchemeMarkChains)
+            CHECK(markOn(colors, chain.slot, schemeOf(defaultName).defaultBackground)
+                  == slotIn(colors, chain.slot));
+    }
+}
+
 TEST_CASE("chromeTokens.theTerminalRowsScrollbarThumbsMark", "[chrometokens]")
 {
     // The Terminal row's thumb is a column of "┃" on the pane: at rest and engaged, it stands off the pane's

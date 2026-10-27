@@ -1855,7 +1855,7 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
         .row = _chromeStyle,
         .font = window::resolveChromeFont(_config, _chromeStyle, profileName()),
         .accessibility = accessibilityPreferences(),
-        .appearance = platformAppearance(),
+        .appearance = window::chromeAppearanceOf(platformAppearance()),
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
         .density = _config.chromeDensity.value(),
     };
