@@ -508,6 +508,15 @@ namespace
     return session->profile().fonts.value().size.pt;
 }
 
+/// A configured app on this machine's file system: Settings writes its side files through the app's file
+/// system, and the configuration loader reads them back from the disk.
+[[nodiscard]] contour::test::ConfiguredTestApp configuredWithTheDisk()
+{
+    return contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>(),
+                                              contour::platform::nullAppearanceServices(),
+                                              contour::test::TestApp::SessionFiles::ThisMachine };
+}
+
 /// A configured app whose profile `main` is a GUI side file and whose `other` is defined in contour.yml.
 /// @param testApp The app.
 void writeSideFileProfiles(contour::test::ConfiguredTestApp& testApp)
@@ -530,8 +539,7 @@ TEST_CASE("a Settings commit reaches the panes of every window using that profil
 {
     // Review Focus 4: one commit, every pane on that profile in every window; another profile's pane keeps
     // what it had.
-    auto testApp =
-        contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto testApp = configuredWithTheDisk();
     writeSideFileProfiles(testApp);
     auto& manager = testApp.manager();
     contour::test::ScopedController const first { manager };
@@ -560,8 +568,7 @@ TEST_CASE("a Settings commit reaches the panes of every window using that profil
 
 TEST_CASE("quitting flushes a pending Settings edit", "[contour][settings][liveapply]")
 {
-    auto testApp =
-        contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto testApp = configuredWithTheDisk();
     writeSideFileProfiles(testApp);
     auto& settings = testApp.app().settingsController();
     settings.editProfile(QStringLiteral("main"));

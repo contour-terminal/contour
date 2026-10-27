@@ -860,23 +860,27 @@ class TestApp
 };
 
 /// A TestApp whose configuration is a file of its own, in a directory that lives as long as the app: what a
-/// test that reloads the configuration from disk needs. Its file system is this machine's, as the
-/// configuration loader's is: Settings writes its side files through the app's file system, and the loader
-/// reads them back from the disk.
+/// test that reloads the configuration from disk needs. Its sessions look up paths in the fixture's own
+/// in-memory file system unless the test chooses this machine's: what a test of Settings needs, because
+/// Settings writes its side files through the app's file system, and the configuration loader reads them back
+/// from the disk.
 class ConfiguredTestApp
 {
   public:
     /// @param factory Optional PTY factory override, as TestApp takes it.
     /// @param appearance The OS accessibility and appearance sources, as TestApp takes them.
-    explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
-                               contour::platform::AppearanceServices const& appearance =
-                                   contour::platform::nullAppearanceServices()):
+    /// @param files      Where the app's sessions look up paths, and Settings writes its side files.
+    explicit ConfiguredTestApp(
+        std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
+        contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
+        TestApp::SessionFiles files = TestApp::SessionFiles::Fixture):
         _testApp { std::move(factory),
                    nullptr,
                    nullptr,
                    nullptr,
                    TestApp::testHostIdentity(),
-                   &core::platform::NativeFileSystem::instance(),
+                   files == TestApp::SessionFiles::ThisMachine ? &core::platform::NativeFileSystem::instance()
+                                                               : nullptr,
                    {},
                    nullptr,
                    appearance },

@@ -1225,7 +1225,10 @@ TEST_CASE("SettingsPage follows a configuration reload while it is open", "[cont
     // change, and drop it.
     contour::test::QmlMessageCapture const warnings;
 
-    auto testApp = contour::test::ConfiguredTestApp {};
+    // This machine's file system: Settings writes the override that the loader then reads from the disk.
+    auto testApp = contour::test::ConfiguredTestApp { nullptr,
+                                                      contour::platform::nullAppearanceServices(),
+                                                      contour::test::TestApp::SessionFiles::ThisMachine };
     auto const writeConfig = [&testApp](int lineNumberWidth) {
         auto out = std::ofstream(testApp.configFile());
         out << std::format("default_profile: main\n"
