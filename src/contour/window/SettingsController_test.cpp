@@ -80,6 +80,14 @@ class FakeGpuInventory final: public display::IGpuInventory
     [[nodiscard]] std::vector<display::GpuCandidate> list() const override { return gpus; }
 };
 
+/// A font source that lists whatever the test put in it.
+class FakeFontFamilySource final: public platform::IFontFamilySource
+{
+  public:
+    std::vector<std::string> families;
+    [[nodiscard]] std::vector<std::string> monospaceFamilies() const override { return families; }
+};
+
 /// A hybrid laptop: an integrated and a discrete GPU.
 [[nodiscard]] std::shared_ptr<FakeGpuInventory> hybridGpus()
 {
@@ -111,6 +119,7 @@ struct Fixture
     std::shared_ptr<test::ManualSaveScheduler> scheduler = std::make_shared<test::ManualSaveScheduler>();
     int reloads = 0; ///< How many times Settings reloaded the configuration.
     std::shared_ptr<display::IGpuInventory const> gpuInventory;
+    std::shared_ptr<platform::IFontFamilySource const> fontFamilies; ///< Null: the bundled family alone.
     vtbackend::ColorPreference colorPreference = vtbackend::ColorPreference::Dark;
     std::unique_ptr<SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
@@ -143,6 +152,7 @@ struct Fixture
                                                          return {};
                                                      },
                                                      .gpuInventory = gpuInventory,
+                                                     .fontFamilies = fontFamilies,
                                                      .scheduler = scheduler,
                                                  },
                                                  colorPreference);
@@ -3566,3 +3576,20 @@ TEST_CASE("SettingsController: an open profile follows a reload of a hand edit",
 }
 
 // }}}
+
+TEST_CASE("settings: the font picker lists the injected families, and the bundled one alone without a source",
+          "[settings][fonts]")
+{
+    auto fx = Fixture(BasicConfig);
+    CHECK(fx.controller->fontFamilies()
+          == QStringList {
+              QString::fromUtf8(platform::BundledMonospaceFamily.data(),
+                                static_cast<qsizetype>(platform::BundledMonospaceFamily.size())) });
+
+    auto source = std::make_shared<FakeFontFamilySource>();
+    source->families = { "JetBrains Mono", "Iosevka" };
+    fx.fontFamilies = source;
+    fx.restartController();
+    fx.controller->refresh();
+    CHECK(fx.controller->fontFamilies() == QStringList { "JetBrains Mono", "Iosevka" });
+}

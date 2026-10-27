@@ -469,6 +469,13 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SecureInputPill.qml
         qml/ElevationShadow.qml
         qml/KitDialog.qml
+        qml/KitSwitch.qml
+        qml/KitSegmented.qml
+        qml/KitStepper.qml
+        qml/KitSlider.qml
+        qml/KitPopUp.qml
+        qml/KitColorWell.qml
+        qml/KitFontPicker.qml
         qml/PermissionDialog.qml
     )
 
@@ -815,6 +822,7 @@ if(CONTOUR_FRONTEND_GUI)
             remote/RemoteController_test.cpp
             platform/AppearanceSources_test.cpp
             platform/AudioNote_test.cpp
+            platform/FontFamilySource_test.cpp
             platform/GuiTheme_test.cpp
             platform/MultimediaEnvironment_test.cpp
             test/BenignQtMessages_test.cpp

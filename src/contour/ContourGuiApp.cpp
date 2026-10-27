@@ -19,6 +19,7 @@
 #include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/FontFamilySource.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/MultimediaEnvironment.hpp>
 #include <contour/platform/Notifier.hpp>
@@ -2949,6 +2950,7 @@ window::SettingsController& ContourGuiApp::settingsController()
                     return reloaded;
                 },
                 .gpuInventory = _gpuInventory,
+                .fontFamilies = std::make_shared<platform::QtFontFamilySource>(),
                 .scheduler = std::make_shared<window::QtSaveScheduler>(),
             },
             _colorPreference);

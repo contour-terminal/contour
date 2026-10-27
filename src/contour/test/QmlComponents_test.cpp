@@ -12509,3 +12509,752 @@ TEST_CASE("pane card: a pane at a password prompt shows the lock and says so in 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+// {{{ The Settings kit's controls
+namespace
+{
+/// A kit control under test: its QML item, parented into a shown window, with the chrome installed.
+struct KitControl
+{
+    QQuickWindow window;
+    std::unique_ptr<QObject> root;
+
+    /// Loads the kit control @p type from the module with @p initialProperties and shows it.
+    KitControl(QQmlEngine& engine, char const* type, QVariantMap const& initialProperties)
+    {
+        QQmlComponent component(
+            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/%1.qml").arg(QString::fromLatin1(type))));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        INFO("component errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        root.reset(component.createWithInitialProperties(initialProperties));
+        REQUIRE(root != nullptr);
+        window.resize(KitWindowEdge, KitWindowEdge);
+        window.show();
+        item()->setParentItem(window.contentItem());
+        item()->forceActiveFocus();
+        QCoreApplication::processEvents();
+    }
+
+    /// The control as an item.
+    [[nodiscard]] QQuickItem* item() const { return qobject_cast<QQuickItem*>(root.get()); }
+
+    /// Presses and releases @p key in the window.
+    void key(Qt::Key key)
+    {
+        QTest::keyClick(&window, key);
+        QCoreApplication::processEvents();
+    }
+
+    /// Every item beneath the control named @p name, in the visual tree, left to right and top to bottom.
+    [[nodiscard]] std::vector<QQuickItem*> parts(char const* name) const
+    {
+        auto found = std::vector<QQuickItem*> {};
+        auto pending = std::vector<QQuickItem*> { item() };
+        while (!pending.empty())
+        {
+            auto* current = pending.back();
+            pending.pop_back();
+            for (auto* child: current->childItems())
+            {
+                if (child->objectName() == QLatin1String(name))
+                    found.push_back(child);
+                pending.push_back(child);
+            }
+        }
+        std::ranges::sort(found, [](QQuickItem const* a, QQuickItem const* b) {
+            auto const left = a->mapToScene({ 0, 0 });
+            auto const right = b->mapToScene({ 0, 0 });
+            return std::tuple { left.y(), left.x() } < std::tuple { right.y(), right.x() };
+        });
+        return found;
+    }
+
+    /// The one item named @p name.
+    [[nodiscard]] QQuickItem* part(char const* name) const
+    {
+        auto const found = parts(name);
+        INFO("part: " << name);
+        REQUIRE(found.size() == 1);
+        return found.front();
+    }
+
+    static constexpr int KitWindowEdge = 400;
+};
+
+/// The rows the contrast test visits: the three native rows, then every bundled colour scheme on the Terminal
+/// row.
+[[nodiscard]] std::vector<std::string_view> kitRowNames()
+{
+    auto names = std::vector<std::string_view> { "macos", "fluent", "linux" };
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+        names.push_back(name);
+    return names;
+}
+
+/// The rows the kit controls are drawn on: the shape row the brief names, and the cell row.
+[[nodiscard]] contour::test::ChromeSetup kitRowSetup(contour::config::ChromeStyle row)
+{
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = row;
+    return setup;
+}
+
+} // namespace
+
+TEST_CASE("KitSwitch: the style's extent, Space and Return toggle, a non-editable one does not (offscreen)",
+          "[contour][gui][qml][kit][switch]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine, "KitSwitch", { { "name", QStringLiteral("Reflow") } });
+    auto* item = kit.item();
+    CHECK(item->width() == chromeToken(engine, "settings", "switchWidth"));
+    CHECK(item->height() == chromeToken(engine, "settings", "switchHeight"));
+    if (row == ChromeStyle::MacOS)
+    {
+        CHECK(item->width() == 32);
+        CHECK(item->height() == 19);
+    }
+
+    QSignalSpy const toggled(item, SIGNAL(toggled(bool)));
+    kit.key(Qt::Key_Space);
+    REQUIRE(toggled.count() == 1);
+    CHECK(toggled.at(0).at(0).toBool());
+    kit.key(Qt::Key_Return);
+    REQUIRE(toggled.count() == 2);
+    CHECK(toggled.at(1).at(0).toBool()); // `checked` is the caller's: still off, so the ask is still "on"
+
+    item->setProperty("checked", true);
+    kit.key(Qt::Key_Space);
+    REQUIRE(toggled.count() == 3);
+    CHECK_FALSE(toggled.at(2).at(0).toBool());
+
+    SECTION("not editable: disabled, dimmed, deaf")
+    {
+        item->setProperty("editable", false);
+        item->forceActiveFocus();
+        kit.key(Qt::Key_Space);
+        CHECK(toggled.count() == 3);
+        CHECK_FALSE(item->isEnabled());
+        CHECK(item->opacity() == Catch::Approx(chromeToken(engine, "settings", "disabledOpacity")));
+    }
+
+    SECTION("the Terminal row draws the glyph of the state")
+    {
+        auto const glyph = kit.parts("switchGlyph");
+        if (row == ChromeStyle::Terminal)
+        {
+            REQUIRE(glyph.size() == 1);
+            CHECK(glyph.front()->property("text").toString() == QStringLiteral("[x]"));
+            item->setProperty("checked", false);
+            CHECK(glyph.front()->property("text").toString() == QStringLiteral("[ ]"));
+        }
+        else
+        {
+            CHECK_FALSE(glyph.front()->isVisible());
+        }
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitSwitch: the knob does not animate under Reduce Motion (offscreen)",
+          "[contour][gui][qml][kit][switch]")
+{
+    using contour::config::MotionPreference;
+    auto const motion = GENERATE(MotionPreference::Full, MotionPreference::Reduced);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = kitRowSetup(contour::config::ChromeStyle::MacOS);
+    setup.accessibility.motion = motion;
+    contour::test::installChromeStyle(engine, setup);
+
+    auto kit = KitControl(engine, "KitSwitch", { { "name", QStringLiteral("Reflow") } });
+    auto* knob = kit.part("switchKnob");
+    auto const off = knob->x();
+    kit.item()->setProperty("checked", true);
+    auto const target = kit.item()->width() - knob->width() - (off);
+    if (motion == MotionPreference::Reduced)
+    {
+        // The knob is where it ends at once.
+        CHECK(knob->x() == target);
+    }
+    else
+    {
+        // The knob is on its way: still at the start, and then there.
+        CHECK(knob->x() != target);
+        CHECK(QTest::qWaitFor([&] { return knob->x() == target; }, contour::test::PopupSettleMs));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE(
+    "KitSegmented: the arrows pick the neighbour, the Terminal row marks the chosen segment (offscreen)",
+    "[contour][gui][qml][kit][segmented]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine,
+                          "KitSegmented",
+                          { { "options", QStringList { "Off", "Left", "Right", "Both" } },
+                            { "labels", QStringList { "Off", "Left", "Right", "Both" } },
+                            { "value", QStringLiteral("Off") },
+                            { "name", QStringLiteral("Use Option as Meta") } });
+    auto* item = kit.item();
+    QSignalSpy const picked(item, SIGNAL(picked(QString)));
+
+    kit.key(Qt::Key_Right);
+    REQUIRE(picked.count() == 1);
+    CHECK(picked.at(0).at(0).toString() == QStringLiteral("Left"));
+    kit.key(Qt::Key_Left); // at the start: nothing before "Off"
+    CHECK(picked.count() == 1);
+
+    item->setProperty("value", QStringLiteral("Both"));
+    kit.key(Qt::Key_Right); // at the end
+    CHECK(picked.count() == 1);
+    kit.key(Qt::Key_Left);
+    REQUIRE(picked.count() == 2);
+    CHECK(picked.at(1).at(0).toString() == QStringLiteral("Right"));
+
+    auto const labels = kit.parts("segmentLabel");
+    REQUIRE(labels.size() == 4);
+    item->setProperty("value", QStringLiteral("Left"));
+    if (row == ChromeStyle::Terminal)
+    {
+        CHECK(labels[1]->property("text").toString().startsWith(QStringLiteral("(•)")));
+        CHECK(labels[0]->property("text").toString().startsWith(QStringLiteral("( )")));
+        CHECK(labels[3]->property("text").toString().startsWith(QStringLiteral("( )")));
+    }
+    else
+    {
+        CHECK(labels[1]->property("text").toString() == QStringLiteral("Left"));
+    }
+
+    SECTION("not editable: deaf")
+    {
+        item->setProperty("editable", false);
+        kit.key(Qt::Key_Right);
+        CHECK(picked.count() == 2);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitStepper: the arrows and the keys step, the range holds, typing commits (offscreen)",
+          "[contour][gui][qml][kit][stepper]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine,
+                          "KitStepper",
+                          { { "value", 12.0 },
+                            { "from", 6.0 },
+                            { "to", 13.0 },
+                            { "stepSize", 0.5 },
+                            { "decimals", 1 },
+                            { "unitText", QStringLiteral("pt") },
+                            { "name", QStringLiteral("Font size") } });
+    auto* item = kit.item();
+    QSignalSpy const committed(item, SIGNAL(committed(qreal)));
+    auto* field = kit.part("stepperField");
+    CHECK(field->property("text").toString() == QStringLiteral("12.0"));
+
+    kit.key(Qt::Key_Up);
+    REQUIRE(committed.count() == 1);
+    CHECK(committed.at(0).at(0).toReal() == 12.5);
+
+    item->setProperty("value", 13.0);
+    kit.key(Qt::Key_Up); // at `to`
+    CHECK(committed.count() == 1);
+    kit.key(Qt::Key_Down);
+    REQUIRE(committed.count() == 2);
+    CHECK(committed.at(1).at(0).toReal() == 12.5);
+
+    SECTION("the arrows press like the keys")
+    {
+        item->setProperty("value", 12.0);
+        auto* up = kit.part("stepperUp");
+        QTest::mouseClick(&kit.window,
+                          Qt::LeftButton,
+                          Qt::NoModifier,
+                          up->mapToScene({ up->width() / 2, up->height() / 2 }).toPoint());
+        QCoreApplication::processEvents();
+        REQUIRE(committed.count() == 3);
+        CHECK(committed.at(2).at(0).toReal() == 12.5);
+    }
+
+    SECTION("a typed number commits on Return, held to the range")
+    {
+        item->setProperty("value", 12.0);
+        field->setProperty("text", QStringLiteral("99"));
+        field->forceActiveFocus();
+        kit.key(Qt::Key_Return);
+        REQUIRE(committed.count() == 3);
+        CHECK(committed.at(2).at(0).toReal() == 13.0);
+        CHECK(field->property("text").toString() == QStringLiteral("12.0")); // the caller's value again
+    }
+
+    SECTION("text that is no number puts the value back")
+    {
+        field->setProperty("text", QStringLiteral("twelve"));
+        field->forceActiveFocus();
+        kit.key(Qt::Key_Return);
+        CHECK(committed.count() == 2);
+        CHECK(field->property("text").toString() == QStringLiteral("13.0"));
+    }
+
+    SECTION("not editable: deaf")
+    {
+        item->setProperty("editable", false);
+        kit.key(Qt::Key_Up);
+        CHECK(committed.count() == 2);
+        CHECK_FALSE(item->isEnabled());
+    }
+
+    if (row == ChromeStyle::Terminal)
+    {
+        auto const up = kit.parts("stepperUp");
+        REQUIRE(up.size() == 1);
+        auto* glyph = up.front()->childItems().front();
+        CHECK(glyph->property("text").toString() == QStringLiteral("▴"));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitSlider: it shows the formatted value, and a key step commits at once (offscreen)",
+          "[contour][gui][qml][kit][slider]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine,
+                          "KitSlider",
+                          { { "value", 0.15 },
+                            { "from", 0.0 },
+                            { "to", 1.0 },
+                            { "stepSize", 0.01 },
+                            { "displayFactor", 100.0 },
+                            { "unitText", QStringLiteral("%") },
+                            { "name", QStringLiteral("Dim inactive panes") } });
+    auto* item = kit.item();
+    CHECK(kit.part("sliderValue")->property("text").toString() == QStringLiteral("15 %"));
+
+    QSignalSpy const committed(item, SIGNAL(committed(qreal)));
+    kit.key(Qt::Key_Right);
+    REQUIRE(committed.count() == 1);
+    CHECK(committed.at(0).at(0).toReal() == Catch::Approx(0.16));
+    kit.key(Qt::Key_Down);
+    REQUIRE(committed.count() == 2);
+    CHECK(committed.at(1).at(0).toReal() == Catch::Approx(0.14));
+
+    item->setProperty("value", 1.0);
+    kit.key(Qt::Key_Up); // at `to`
+    CHECK(committed.count() == 2);
+
+    SECTION("the Terminal row draws the track in cells")
+    {
+        item->setProperty("value", 0.4);
+        auto* glyphs = kit.part("sliderGlyphs");
+        if (row == ChromeStyle::Terminal)
+        {
+            CHECK(glyphs->property("text").toString() == QStringLiteral("━━━━●──────"));
+        }
+        else
+        {
+            CHECK_FALSE(glyphs->isVisible());
+        }
+    }
+
+    SECTION("a release asks once, for where the knob was let go")
+    {
+        auto* track = kit.part("sliderTrack");
+        item->setProperty("value", 0.0);
+        auto const at = [&](qreal share) {
+            return track->mapToScene({ track->width() * share, track->height() / 2 }).toPoint();
+        };
+        QTest::mousePress(&kit.window, Qt::LeftButton, Qt::NoModifier, at(0.5));
+        QTest::mouseMove(&kit.window, at(0.75));
+        CHECK(committed.count() == 2);
+        QTest::mouseRelease(&kit.window, Qt::LeftButton, Qt::NoModifier, at(0.75));
+        REQUIRE(committed.count() == 3);
+        CHECK(committed.at(2).at(0).toReal() == Catch::Approx(0.75).margin(0.02));
+    }
+
+    SECTION("not editable: deaf")
+    {
+        item->setProperty("value", 0.5);
+        item->setProperty("editable", false);
+        kit.key(Qt::Key_Right);
+        CHECK(committed.count() == 2);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitColorWell: only #rgb and #rrggbb commit, anything else puts the old hex back (offscreen)",
+          "[contour][gui][qml][kit][colorwell]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine,
+                          "KitColorWell",
+                          { { "hex", QStringLiteral("#112233") },
+                            { "readout", QStringLiteral("7.1 : 1") },
+                            { "name", QStringLiteral("Tab colour") } });
+    auto* item = kit.item();
+    QSignalSpy const committed(item, SIGNAL(committed(QString)));
+    auto* field = kit.part("colorHexField");
+    CHECK(field->property("text").toString() == QStringLiteral("#112233"));
+    CHECK(kit.part("colorReadout")->property("text").toString() == QStringLiteral("7.1 : 1"));
+
+    auto const type = [&](QString const& text) {
+        field->setProperty("text", text);
+        field->forceActiveFocus();
+        kit.key(Qt::Key_Return);
+    };
+
+    type(QStringLiteral("#12345"));
+    CHECK(committed.count() == 0);
+    CHECK(field->property("text").toString() == QStringLiteral("#112233"));
+
+    type(QStringLiteral("123456"));
+    CHECK(committed.count() == 0);
+
+    type(QStringLiteral("#123456"));
+    REQUIRE(committed.count() == 1);
+    CHECK(committed.at(0).at(0).toString() == QStringLiteral("#123456"));
+
+    type(QStringLiteral("#ABC"));
+    REQUIRE(committed.count() == 2);
+    CHECK(committed.at(1).at(0).toString() == QStringLiteral("#aabbcc"));
+
+    type(QStringLiteral("#112233")); // what it already is
+    CHECK(committed.count() == 2);
+
+    SECTION("the swatch is the colour")
+    {
+        if (row == ChromeStyle::Terminal)
+            CHECK(kit.part("colorWellGlyph")->property("color").value<QColor>() == QColor(0x11, 0x22, 0x33));
+        else
+            CHECK(kit.part("colorWellSwatch")->property("color").value<QColor>() == QColor(0x11, 0x22, 0x33));
+    }
+
+    SECTION("not editable: deaf")
+    {
+        item->setProperty("editable", false);
+        CHECK_FALSE(item->isEnabled());
+        CHECK_FALSE(field->isEnabled());
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitFontPicker: the search narrows the families, Escape closes the list (offscreen)",
+          "[contour][gui][qml][kit][fontpicker]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(row));
+
+    auto kit = KitControl(engine,
+                          "KitFontPicker",
+                          { { "family", QStringLiteral("Iosevka") },
+                            { "families", QStringList { "JetBrains Mono", "Iosevka", "Fira Code" } },
+                            { "name", QStringLiteral("Font family") } });
+    auto* item = kit.item();
+    QSignalSpy const picked(item, SIGNAL(picked(QString)));
+    CHECK(kit.part("popUpCaption")->property("text").toString() == QStringLiteral("Iosevka"));
+
+    auto* popup = item->findChild<QObject*>(QStringLiteral("popUpPopup"));
+    REQUIRE(popup != nullptr);
+    CHECK_FALSE(popup->property("visible").toBool());
+    REQUIRE(QMetaObject::invokeMethod(item, "open"));
+    contour::test::waitForPopupOpened(*popup);
+
+    auto* search = popup->findChild<QObject*>(QStringLiteral("popUpSearch"));
+    auto* list = popup->findChild<QQuickItem*>(QStringLiteral("popUpList"));
+    REQUIRE(search != nullptr);
+    REQUIRE(list != nullptr);
+    CHECK(list->property("count").toInt() == 3);
+
+    search->setProperty("text", QStringLiteral("jet"));
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("count").toInt() == 1);
+    auto const labels = [&] {
+        auto found = QStringList {};
+        for (auto* child: list->property("contentItem").value<QQuickItem*>()->childItems())
+            if (child->objectName() == QLatin1String("popUpRow"))
+                found << child->findChild<QObject*>(QStringLiteral("popUpRowLabel"))
+                             ->property("text")
+                             .toString();
+        return found;
+    }();
+    CHECK(labels == QStringList { "JetBrains Mono" });
+
+    SECTION("Return chooses the row the search left")
+    {
+        search->setProperty("focus", true);
+        kit.key(Qt::Key_Return);
+        REQUIRE(picked.count() == 1);
+        CHECK(picked.at(0).at(0).toString() == QStringLiteral("JetBrains Mono"));
+        contour::test::waitForPopupClosed(*popup);
+    }
+
+    SECTION("Escape closes it without choosing")
+    {
+        kit.key(Qt::Key_Escape);
+        contour::test::waitForPopupClosed(*popup);
+        CHECK(picked.count() == 0);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitPopUp: it shows the chosen label, the labels stand for the values, a pick asks (offscreen)",
+          "[contour][gui][qml][kit][popup]")
+{
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(contour::config::ChromeStyle::MacOS));
+
+    auto kit = KitControl(engine,
+                          "KitPopUp",
+                          { { "options", QStringList { "auto", "vulkan", "metal" } },
+                            { "labels", QStringList { "Automatic", "Vulkan", "Metal" } },
+                            { "value", QStringLiteral("vulkan") },
+                            { "name", QStringLiteral("Renderer") } });
+    auto* item = kit.item();
+    QSignalSpy const picked(item, SIGNAL(picked(QString)));
+    CHECK(kit.part("popUpCaption")->property("text").toString() == QStringLiteral("Vulkan"));
+
+    auto* popup = item->findChild<QObject*>(QStringLiteral("popUpPopup"));
+    REQUIRE(popup != nullptr);
+    kit.key(Qt::Key_Down); // opens
+    contour::test::waitForPopupOpened(*popup);
+    auto* list = popup->findChild<QQuickItem*>(QStringLiteral("popUpList"));
+    REQUIRE(list != nullptr);
+    CHECK(list->property("count").toInt() == 3);
+    CHECK(list->property("currentIndex").toInt() == 1); // the chosen row
+    kit.key(Qt::Key_Down);
+    kit.key(Qt::Key_Return);
+    REQUIRE(picked.count() == 1);
+    CHECK(picked.at(0).at(0).toString() == QStringLiteral("metal"));
+    contour::test::waitForPopupClosed(*popup);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// @p top painted over @p bottom.
+[[nodiscard]] QColor kitOver(QColor top, QColor bottom)
+{
+    auto const alpha = top.alphaF();
+    return QColor::fromRgbF(top.redF() * alpha + bottom.redF() * (1 - alpha),
+                            top.greenF() * alpha + bottom.greenF() * (1 - alpha),
+                            top.blueF() * alpha + bottom.blueF() * (1 - alpha));
+}
+
+/// The contrast ratio of @p ink over @p ground.
+[[nodiscard]] double kitContrast(QColor ink, QColor ground)
+{
+    return vtbackend::contrastRatio(contour::platform::toRGBColor(kitOver(ink, ground)),
+                                    contour::platform::toRGBColor(ground));
+}
+
+/// What a chrome token colour @p name is, as the application palette paints it now.
+[[nodiscard]] QColor kitToken(QQmlEngine& engine, char const* name)
+{
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    return colors->property(name).value<QColor>();
+}
+} // namespace
+
+TEST_CASE("kit controls: every ink reads on what it sits on, on every row, scheme and appearance (offscreen)",
+          "[contour][gui][qml][kit][contrast]")
+{
+    using contour::config::ChromeStyle;
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    // The three native rows once; the Terminal row once for every bundled scheme.
+    auto const rowName = GENERATE(from_range(kitRowNames()));
+    INFO("appearance: " << appearanceName(appearance) << ", row: " << rowName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = contour::test::defaultChromeSetup();
+    if (rowName == "macos")
+        setup.row = ChromeStyle::MacOS;
+    else if (rowName == "fluent")
+        setup.row = ChromeStyle::Fluent;
+    else if (rowName == "linux")
+        setup.row = ChromeStyle::ContourLinux;
+    else
+        setup = terminalRowSetup(rowName);
+    contour::test::installChromeStyle(engine, setup);
+    auto const isTerminal = setup.row == ChromeStyle::Terminal;
+
+    // What the controls are laid on: the group's fill over the page's over the window.
+    auto const window = QGuiApplication::palette().color(QPalette::Window);
+    auto const ground =
+        kitOver(kitToken(engine, "settingsGroupFill"), kitOver(kitToken(engine, "settingsPageFill"), window));
+    auto const controlFill = kitOver(kitToken(engine, "controlFill"), ground);
+    auto const colorOf = [](QObject const* object) {
+        return object->property("color").value<QColor>();
+    };
+    auto const borderOf = [](QObject const* object) {
+        return object->property("border").value<QObject*>()->property("color").value<QColor>();
+    };
+    constexpr auto TextContrast = 4.5;
+    constexpr auto MarkContrast = 3.0;
+
+    SECTION("switch")
+    {
+        for (auto const checked: { false, true })
+        {
+            auto kit =
+                KitControl(engine, "KitSwitch", { { "checked", checked }, { "name", QStringLiteral("x") } });
+            if (isTerminal)
+            {
+                CHECK(kitContrast(colorOf(kit.part("switchGlyph")), ground) >= TextContrast);
+            }
+            else
+            {
+                auto const track = kitOver(colorOf(kit.part("switchTrack")), ground);
+                CHECK(kitContrast(track, ground) >= MarkContrast);
+                CHECK(kitContrast(colorOf(kit.part("switchKnob")), track) >= MarkContrast);
+                CHECK(kitContrast(borderOf(kit.part("switchFocusRing")), ground) >= MarkContrast);
+            }
+        }
+    }
+
+    SECTION("segmented")
+    {
+        auto kit = KitControl(engine,
+                              "KitSegmented",
+                              { { "options", QStringList { "a", "b" } },
+                                { "value", QStringLiteral("a") },
+                                { "name", QStringLiteral("x") } });
+        auto const segments = kit.parts("segment");
+        auto const labels = kit.parts("segmentLabel");
+        REQUIRE(segments.size() == 2);
+        REQUIRE(labels.size() == 2);
+        // The chosen segment sits on the selection (the shape rows), the other on the control's fill. On the
+        // native rows the selection is the OS's own highlight pair, whose contrast is the OS's (ruling of
+        // Task 8), so only the Terminal row's, which the scheme decides, is held to 4.5: its chosen label
+        // is lit only while focused, and then reads like the selection does.
+        if (isTerminal)
+            CHECK(kitContrast(colorOf(labels[0]), controlFill) >= TextContrast);
+        CHECK(kitContrast(colorOf(labels[1]), controlFill) >= TextContrast);
+        // The ring around the whole control, on the group.
+        CHECK(kitContrast(borderOf(kit.item()->property("background").value<QObject*>()), ground)
+              >= MarkContrast);
+    }
+
+    SECTION("stepper, colour well and pop-up fields")
+    {
+        auto stepper = KitControl(
+            engine, "KitStepper", { { "name", QStringLiteral("x") }, { "unitText", QStringLiteral("pt") } });
+        CHECK(kitContrast(colorOf(stepper.part("stepperField")), controlFill) >= TextContrast);
+        CHECK(kitContrast(colorOf(stepper.part("stepperUnit")), ground) >= TextContrast);
+        for (auto* arrow: stepper.parts("stepperUp"))
+        {
+            auto const inlineArrows = stepper.item()->property("_inline").toBool();
+            CHECK(kitContrast(colorOf(arrow->childItems().front()), inlineArrows ? controlFill : ground)
+                  >= TextContrast);
+        }
+
+        auto well = KitControl(engine,
+                               "KitColorWell",
+                               { { "hex", QStringLiteral("#336699") },
+                                 { "readout", QStringLiteral("5 : 1") },
+                                 { "name", QStringLiteral("x") } });
+        CHECK(kitContrast(colorOf(well.part("colorHexField")), controlFill) >= TextContrast);
+        CHECK(kitContrast(colorOf(well.part("colorReadout")), ground) >= TextContrast);
+
+        auto popUp = KitControl(engine,
+                                "KitPopUp",
+                                { { "options", QStringList { "a" } },
+                                  { "value", QStringLiteral("a") },
+                                  { "name", QStringLiteral("x") } });
+        CHECK(kitContrast(colorOf(popUp.part("popUpCaption")), controlFill) >= TextContrast);
+    }
+
+    SECTION("slider")
+    {
+        auto kit = KitControl(engine, "KitSlider", { { "value", 0.5 }, { "name", QStringLiteral("x") } });
+        CHECK(kitContrast(colorOf(kit.part("sliderValue")), ground) >= TextContrast);
+        if (isTerminal)
+        {
+            CHECK(kitContrast(colorOf(kit.part("sliderGlyphs")), ground) >= TextContrast);
+        }
+        else
+        {
+            auto const rail = kitOver(colorOf(kit.part("sliderRail")), ground);
+            auto const fill = kitOver(colorOf(kit.part("sliderFill")), ground);
+            CHECK(kitContrast(rail, ground) >= MarkContrast);
+            CHECK(kitContrast(fill, ground) >= MarkContrast);
+            CHECK(kitContrast(colorOf(kit.part("sliderKnob")), fill) >= MarkContrast);
+            CHECK(kitContrast(colorOf(kit.part("sliderKnob")), rail) >= MarkContrast);
+        }
+    }
+
+    SECTION("pop-up rows")
+    {
+        auto kit = KitControl(engine,
+                              "KitPopUp",
+                              { { "options", QStringList { "a", "b" } },
+                                { "value", QStringLiteral("a") },
+                                { "name", QStringLiteral("x") } });
+        auto* popup = kit.item()->findChild<QObject*>(QStringLiteral("popUpPopup"));
+        REQUIRE(popup != nullptr);
+        REQUIRE(QMetaObject::invokeMethod(kit.item(), "open"));
+        contour::test::waitForPopupOpened(*popup);
+        auto* background = popup->property("background").value<QQuickItem*>();
+        REQUIRE(background != nullptr);
+        auto const surface = colorOf(background);
+        // The popup lives in the window's overlay, which is not under the control's own item.
+        auto const* list = popup->findChild<QQuickItem*>(QStringLiteral("popUpList"));
+        REQUIRE(list != nullptr);
+        auto const rowsOf = [&] {
+            auto rows = std::vector<QQuickItem*> {};
+            for (auto* row: list->property("contentItem").value<QQuickItem*>()->childItems())
+                if (row->objectName() == QLatin1String("popUpRow"))
+                    rows.push_back(row);
+            return rows;
+        };
+        // The list builds its rows when it is polished, which is after it opens.
+        REQUIRE(QTest::qWaitFor([&] { return rowsOf().size() == 2; }, contour::test::PopupSettleMs));
+        for (auto* row: rowsOf())
+        {
+            auto* label = row->findChild<QObject*>(QStringLiteral("popUpRowLabel"));
+            REQUIRE(label != nullptr);
+            auto const rowFill = row->property("color").value<QColor>();
+            auto const under = rowFill.alpha() == 0 ? surface : kitOver(rowFill, surface);
+            // The current row is the selection: the OS's highlight pair on the native rows (see above).
+            if (isTerminal || !row->property("isCurrent").toBool())
+                CHECK(kitContrast(colorOf(label), under) >= TextContrast);
+        }
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}

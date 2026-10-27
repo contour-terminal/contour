@@ -5,6 +5,7 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/SettingsEditSession.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/platform/FontFamilySource.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
@@ -33,6 +34,9 @@ struct SettingsControllerServices
     std::function<std::expected<void, std::string>()> reload {};
     /// The machine's GPUs for the "Rendering GPU" row; null lists none.
     std::shared_ptr<display::IGpuInventory const> gpuInventory {};
+    /// The monospace families the font picker lists; null lists the bundled one alone
+    /// (platform::NullFontFamilySource).
+    std::shared_ptr<platform::IFontFamilySource const> fontFamilies {};
     /// Runs the debounced save: a QtSaveScheduler in the app, a hand-fired one in tests.
     std::shared_ptr<config::SaveScheduler> scheduler {};
 };
@@ -97,6 +101,9 @@ class SettingsController: public QObject
     /// { kind: "profile", name, origin, editable, isDefault, tabColor ("#rrggbb", or empty for none) }, then
     /// { kind: "edit", title: "Edit contour.yml…" }.
     Q_PROPERTY(QVariantList sidebar READ sidebar NOTIFY changed)
+
+    /// The monospace font families the font picker lists, the bundled one first; listed by refresh().
+    Q_PROPERTY(QStringList fontFamilies READ fontFamilies NOTIFY changed)
 
     /// Whether this Settings session changed anything "Revert Changes" can put back. A QML-facing bool.
     Q_PROPERTY(bool hasChanges READ hasChanges NOTIFY changesChanged)
@@ -187,6 +194,7 @@ class SettingsController: public QObject
     [[nodiscard]] bool hasChanges() const noexcept;
     [[nodiscard]] QVariantList sections() const;
     [[nodiscard]] QVariantList sidebar() const;
+    [[nodiscard]] QStringList fontFamilies() const { return _fontFamilies; }
 
     /// The rows @p query finds, as matchSettings() orders them: the open profile's fields, then the globals.
     /// @param query What was typed into the search field.
@@ -493,6 +501,7 @@ class SettingsController: public QObject
     SettingsControllerServices _services;
     vtbackend::ColorPreference _appearance;   ///< Which scheme of a light/dark profile the previews use.
     std::vector<display::GpuCandidate> _gpus; ///< Listed by refresh(), not on every property read.
+    QStringList _fontFamilies;                ///< Listed by refresh(), not on every property read.
     /// Forwards to _services.scheduler, telling the page after each debounced flush. Declared before
     /// _session, which borrows it.
     std::unique_ptr<config::SaveScheduler> _scheduler;

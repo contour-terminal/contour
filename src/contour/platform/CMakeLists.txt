@@ -26,6 +26,7 @@ add_library(contour_platform STATIC
     ColorConversion.hpp
     ExternalLauncher.cpp ExternalLauncher.hpp
     FinishNotification.hpp
+    FontFamilySource.cpp FontFamilySource.hpp
     NotificationOccasion.hpp
     SessionVisibility.hpp
     # These translation units are wholly inside `#ifdef __linux__`, so they compile to nothing

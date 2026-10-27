@@ -798,6 +798,11 @@ void SettingsController::refresh()
     _previewPaletteCache.reset(); // a scheme written, renamed or deleted, or the configuration reloaded
     auto const& cfg = _config();
     _gpus = _services.gpuInventory ? _services.gpuInventory->list() : std::vector<display::GpuCandidate> {};
+    _fontFamilies.clear();
+    for (auto const& family: (_services.fontFamilies ? _services.fontFamilies
+                                                     : std::make_shared<platform::NullFontFamilySource>())
+                                 ->monospaceFamilies())
+        _fontFamilies.push_back(QString::fromStdString(family));
     _linkGesture =
         QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
 

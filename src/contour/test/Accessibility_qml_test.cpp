@@ -35,6 +35,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -654,5 +655,76 @@ TEST_CASE("accessibility: the block's ⋯ button and the sticky header's jump li
     REQUIRE(jump != nullptr);
     CHECK(jump->property("role").toInt() == QAccessible::Button);
     CHECK(jump->property("name").toString() == QStringLiteral("Jump to Command ↑"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: every kit control declares a role and a name", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    struct Case
+    {
+        QString type;
+        QVariantMap properties;
+        QAccessible::Role role;
+    };
+    auto const cases = std::array {
+        Case { QStringLiteral("KitSwitch"), {}, QAccessible::CheckBox },
+        Case { QStringLiteral("KitSegmented"),
+               { { "options", QStringList { "a", "b" } } },
+               QAccessible::Grouping },
+        Case { QStringLiteral("KitStepper"), {}, QAccessible::SpinBox },
+        Case { QStringLiteral("KitSlider"), {}, QAccessible::Slider },
+        Case { QStringLiteral("KitPopUp"), {}, QAccessible::ComboBox },
+        Case { QStringLiteral("KitColorWell"),
+               { { "hex", QStringLiteral("#112233") } },
+               QAccessible::EditableText },
+        Case { QStringLiteral("KitFontPicker"), {}, QAccessible::ComboBox },
+    };
+    for (auto const& testCase: cases)
+    {
+        INFO("control: " << testCase.type.toStdString());
+        auto properties = testCase.properties;
+        properties.insert(QStringLiteral("name"), QStringLiteral("Some setting"));
+        properties.insert(QStringLiteral("description"), QStringLiteral("What it does"));
+        auto root = loadComponent(
+            engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/%1.qml").arg(testCase.type), properties);
+        auto* attached = accessibleAttachedOf(root.get());
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == testCase.role);
+        CHECK(attached->property("name").toString() == QStringLiteral("Some setting"));
+        CHECK(attached->property("description").toString() == QStringLiteral("What it does"));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a segmented control's segments are radio buttons in a named group",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto root = loadComponent(engine,
+                              QStringLiteral("qrc:/qt/qml/Contour/Ui/KitSegmented.qml"),
+                              { { "options", QStringList { "off", "left" } },
+                                { "labels", QStringList { "Off", "Left" } },
+                                { "value", QStringLiteral("left") },
+                                { "name", QStringLiteral("Use Option as Meta") } });
+    auto segments = partsNamed(*root, QStringLiteral("segment"));
+    // Left to right: the visual tree's order is the Repeater's, but say so rather than rely on it.
+    std::ranges::sort(segments, [](QQuickItem const* a, QQuickItem const* b) { return a->x() < b->x(); });
+    REQUIRE(segments.size() == 2);
+    auto const names = std::array { QStringLiteral("Off"), QStringLiteral("Left") };
+    for (auto const index: std::views::iota(size_t { 0 }, segments.size()))
+    {
+        auto* attached = accessibleAttachedOf(segments[index]);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == QAccessible::RadioButton);
+        CHECK(attached->property("name").toString() == names[index]);
+        CHECK(attached->property("checked").toBool() == (index == 1));
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
