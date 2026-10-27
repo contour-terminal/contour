@@ -114,6 +114,11 @@ enum class SearchSyntax : uint8_t
 };
 
 /// Where a match may begin and end relative to the words around it.
+///
+/// A search segment's end counts as a word boundary: a long logical line is cut into segments (a regex's
+/// every RegexSegmentCells cells), and a word the cut runs through reads as two whole words, one on each
+/// side, the way a line's end does. The cut falls at fixed rows, so this is rare, and the same for every
+/// reader.
 enum class SearchWordBoundary : uint8_t
 {
     Any = 0,   //!< Anywhere, inside a word too.
