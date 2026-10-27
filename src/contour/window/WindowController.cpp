@@ -18,7 +18,9 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneState.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -35,6 +37,8 @@
 
 #include <core/Overloaded.hpp>
 
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
@@ -43,10 +47,12 @@
 #include <QtQml/QQmlEngine>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <vtworkspace/Pane.hpp>
@@ -805,6 +811,121 @@ void WindowController::tearOffTab(int index)
     // Open the new window on this window's current screen (the best pre-show DPR predictor), matching
     // how spawning a new terminal picks the spawning window's screen.
     _manager.tearOffTabToNewWindow(_windowId, index, _osWindow != nullptr ? _osWindow->screen() : nullptr);
+}
+
+namespace
+{
+    /// A tab drag's payload, as `TabItem.qml` writes it: the window the tab is in and its row.
+    struct TabDrag
+    {
+        vtworkspace::WindowId window;
+        int row = 0;
+    };
+
+    /// Reads the `application/x-contour-tab` JSON of a drag. It is data from whichever process started the
+    /// drag, so nothing is assumed: a missing, non-integral or out-of-range field reads as no drag.
+    [[nodiscard]] std::optional<TabDrag> parseTabDrag(QString const& json)
+    {
+        auto const document = QJsonDocument::fromJson(json.toUtf8());
+        if (!document.isObject())
+            return std::nullopt;
+        auto const object = document.object();
+        auto const windowId = object.value("windowId");
+        auto const tabIndex = object.value("tabIndex");
+        auto const isWhole = [](QJsonValue const& value, double max) {
+            return value.isDouble() && value.toDouble() >= 0.0 && value.toDouble() <= max
+                   && value.toDouble() == std::floor(value.toDouble());
+        };
+        // A window id is a small sequential integer, exact in a double up to 2^53.
+        constexpr auto MaxExactInteger = 9007199254740992.0;
+        if (!isWhole(windowId, MaxExactInteger) || !isWhole(tabIndex, std::numeric_limits<int>::max()))
+            return std::nullopt;
+        return TabDrag { .window = vtworkspace::WindowId { static_cast<uint64_t>(windowId.toDouble()) },
+                         .row = tabIndex.toInt() };
+    }
+
+    /// Whether a tab can be merged into a split in a window whose sessions are hosted as @p hosting.
+    [[nodiscard]] constexpr SplitSupport splitSupportFor(session::SessionHosting hosting) noexcept
+    {
+        switch (hosting)
+        {
+            case session::SessionHosting::Local: return SplitSupport::Supported;
+            case session::SessionHosting::Remote: return SplitSupport::Unsupported;
+        }
+        return SplitSupport::Unsupported;
+    }
+} // namespace
+
+int WindowController::dropZoneAt(session::TerminalSession const* pane,
+                                 int payload,
+                                 qreal x,
+                                 qreal y,
+                                 qreal width,
+                                 qreal height,
+                                 QString const& tabPayload) const
+{
+    auto const none = static_cast<int>(DropZone::None);
+    if (pane == nullptr || payload < 0 || std::cmp_greater_equal(payload, DropPayloadCount))
+        return none;
+
+    auto inputs = DropZoneInputs { .payload = static_cast<DropPayload>(payload),
+                                   .pane = DropExtent { .width = width, .height = height },
+                                   .at = DropPoint { .x = x, .y = y },
+                                   .split = splitSupportFor(_manager.sessionHosting()),
+                                   .origin = DropOrigin::OtherTab };
+
+    switch (inputs.payload)
+    {
+        case DropPayload::None: break;
+        case DropPayload::Files:
+        case DropPayload::Text:
+            // Typed into a pane that has ended, text would be swallowed -- or kept for the restart.
+            if (pane->paneState() == PaneState::Ended)
+                return none;
+            break;
+        case DropPayload::Tab: {
+            auto const drag = parseTabDrag(tabPayload);
+            auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
+            auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
+            if (source == nullptr)
+                return none;
+            if (std::get<1>(_manager.model().findSessionLeaf(pane->modelSessionId())) == source)
+                inputs.origin = DropOrigin::OwnTab;
+            break;
+        }
+    }
+    return static_cast<int>(resolveDropZone(inputs));
+}
+
+void WindowController::dropTabOnPane(session::TerminalSession const* pane,
+                                     int zone,
+                                     QString const& tabPayload)
+{
+    if (pane == nullptr || zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return;
+    auto const side = dropZoneRowOf(static_cast<DropZone>(zone)).side;
+    if (!side || splitSupportFor(_manager.sessionHosting()) != SplitSupport::Supported)
+        return;
+
+    // Re-resolved here, not trusted from the caller: the payload names a window and a row, which may be
+    // anything by now.
+    auto const drag = parseTabDrag(tabPayload);
+    auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
+    auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
+    auto const [targetWindow, targetTab, leaf] = _manager.model().findSessionLeaf(pane->modelSessionId());
+    if (source == nullptr || targetWindow == nullptr || targetTab == nullptr || leaf == nullptr
+        || targetTab == source)
+        return;
+    _manager.mergeTabIntoSplit(
+        drag->window, drag->row, targetWindow->id(), targetTab->id(), leaf->id(), *side);
+}
+
+QString WindowController::dropGhostLabel(int zone) const
+{
+    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return {};
+    return QString::fromUtf8(dropZoneRowOf(static_cast<DropZone>(zone)).label.data(),
+                             static_cast<qsizetype>(dropZoneRowOf(static_cast<DropZone>(zone)).label.size()));
 }
 
 void WindowController::runTabAction(int row, actions::Action const& action)

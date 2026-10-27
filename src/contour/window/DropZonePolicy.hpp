@@ -21,6 +21,9 @@ enum class DropPayload : uint8_t
     Tab,      //!< A tab (`application/x-contour-tab`).
 };
 
+/// Number of @c DropPayload enumerators, derived from the last one.
+inline constexpr size_t DropPayloadCount = static_cast<size_t>(DropPayload::Tab) + 1;
+
 /// Whether the window can split a pane for a dropped tab.
 enum class SplitSupport : uint8_t
 {

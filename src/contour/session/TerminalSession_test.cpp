@@ -14332,3 +14332,184 @@ TEST_CASE("TerminalSession: an abandoned block raises no finish notice",
 }
 
 // }}}
+
+// {{{ Drops onto a pane
+
+namespace
+{
+/// A session over a MockPty whose foreground process is @p foreground, its application having enabled
+/// bracketed paste when @p bracketed.
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeDropSession(TestApp& testApp,
+                                                                                 std::string_view foreground,
+                                                                                 bool bracketed)
+{
+    auto session = makeDisplaylessSession(testApp.app());
+    mockPtyOf(*session).setForegroundProcessName(std::string { foreground });
+    if (bracketed)
+        session->terminal().writeToScreen("\033[?2004h");
+    mockPtyOf(*session).stdinBuffer().clear();
+    return session;
+}
+} // namespace
+
+TEST_CASE("TerminalSession: a dropped path arrives as a paste", "[contour][session][drop]")
+{
+    // Review Focus 1: the text is a paste, never keystrokes a Return could be among.
+    TestApp testApp;
+    auto const file = QList<QUrl> { QUrl(QStringLiteral("file:///Users/me/My%20Report.pdf")) };
+
+    SECTION("bracketed when the application asked for it")
+    {
+        auto session = makeDropSession(testApp, "zsh", true);
+        session->insertDroppedUrls(file);
+        CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~/Users/me/My\\ Report.pdf \033[201~");
+    }
+
+    SECTION("plain otherwise, and without a Return")
+    {
+        auto session = makeDropSession(testApp, "zsh", false);
+        session->insertDroppedUrls(file);
+        CHECK(mockPtyOf(*session).stdinBuffer() == "/Users/me/My\\ Report.pdf ");
+    }
+
+    SECTION("several files are one paste")
+    {
+        auto session = makeDropSession(testApp, "zsh", true);
+        session->insertDroppedUrls(
+            { QUrl(QStringLiteral("file:///tmp/a")), QUrl(QStringLiteral("file:///tmp/b c")) });
+        CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~/tmp/a /tmp/b\\ c \033[201~");
+    }
+}
+
+TEST_CASE("TerminalSession: dropped paths are quoted for the shell in front", "[contour][session][drop]")
+{
+    TestApp testApp;
+    auto const file = QList<QUrl> { QUrl(QStringLiteral("file:///tmp/it's%20here.txt")) };
+
+    SECTION("PowerShell takes single quotes")
+    {
+        auto session = makeDropSession(testApp, "pwsh", false);
+        session->insertDroppedUrls(file);
+        CHECK(mockPtyOf(*session).stdinBuffer() == "'/tmp/it''s here.txt' ");
+    }
+
+    SECTION("a program that is no shell gets POSIX escapes, as vim's :e reads them")
+    {
+        auto session = makeDropSession(testApp, "vim", false);
+        session->insertDroppedUrls(file);
+        CHECK(mockPtyOf(*session).stdinBuffer() == "/tmp/it\\'s\\ here.txt ");
+    }
+
+    SECTION("a pane with no foreground process to ask (a daemon's) follows the profile's shell")
+    {
+        auto const profile = registerProfile(
+            testApp.app(), "pwsh-profile", [](auto& p) { p.shell.value().program = "pwsh -NoLogo"; });
+        auto session = std::make_unique<contour::session::TerminalSession>(
+            &testApp.app().sessionsManager(),
+            std::make_unique<vtpty::MockPty>(TestPageSize),
+            testApp.app(),
+            profile,
+            std::nullopt,
+            std::nullopt,
+            contour::test::makeTestNotifier(),
+            contour::session::SessionRole::Shell,
+            contour::session::SessionHosting::Remote);
+        mockPtyOf(*session).setForegroundProcessName(std::string { "zsh" }); // not asked: it is not ours
+        session->insertDroppedUrls(file);
+        CHECK(mockPtyOf(*session).stdinBuffer() == "'/tmp/it''s here.txt' ");
+    }
+}
+
+TEST_CASE("TerminalSession: a file name that could run something refuses the whole drop",
+          "[contour][session][drop]")
+{
+    TestApp testApp;
+    auto session = makeDropSession(testApp, "zsh", true);
+
+    // %0A is a newline: typed, it would press Return after whatever came before it.
+    session->insertDroppedUrls(
+        { QUrl(QStringLiteral("file:///tmp/fine")), QUrl(QStringLiteral("file:///tmp/x%0Arm%20-rf%20~")) });
+    CHECK(mockPtyOf(*session).stdinBuffer().empty()); // not even the name that was fine
+
+    session->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/esc%1B%5B31m")) });
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    // The same names under cmd refuse for what cmd cannot quote.
+    mockPtyOf(*session).setForegroundProcessName(std::string { "cmd.exe" });
+    session->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/%25PATH%25")) });
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: dropped web links and text are pasted as text", "[contour][session][drop]")
+{
+    TestApp testApp;
+
+    SECTION("a web link")
+    {
+        auto session = makeDropSession(testApp, "zsh", true);
+        session->insertDroppedUrls({ QUrl(QStringLiteral("https://example.com/a?b=1&c=2")) });
+        CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~https://example.com/a?b=1&c=2 \033[201~");
+    }
+
+    SECTION("text")
+    {
+        auto session = makeDropSession(testApp, "zsh", true);
+        session->insertDroppedText(QStringLiteral("echo hi"));
+        CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~echo hi\033[201~");
+    }
+
+    SECTION("empty text is nothing")
+    {
+        auto session = makeDropSession(testApp, "zsh", true);
+        session->insertDroppedText({});
+        session->insertDroppedUrls({});
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+}
+
+TEST_CASE("TerminalSession: a dropped text over the soft limit asks first", "[contour][session][drop]")
+{
+    TestApp testApp;
+    auto session = makeDropSession(testApp, "zsh", true);
+    auto permissionRequests = 0;
+    contour::test::countAsks(*session,
+                             contour::session::PermissionAsk { contour::session::GuardedRole::BigPaste },
+                             permissionRequests);
+
+    session->insertDroppedText(QString((1024 * 512) + 1, QChar('y')));
+    CHECK(permissionRequests == 1);
+    CHECK(mockPtyOf(*session).stdinBuffer().empty()); // held for the verdict
+
+    session->applyPendingPaste(PermissionDecision::Allow, PermissionMemory::Once);
+    CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
+
+    // And above the hard limit it is refused outright.
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->insertDroppedText(QString((1024 * 1024) + 1, QChar('z')));
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+}
+
+TEST_CASE("TerminalSession: an ended pane takes no drop", "[contour][session][drop]")
+{
+    // Typed into an ended pane, a path would be swallowed or kept for whatever Restart starts, and a Return
+    // after it would run it.
+    TestApp testApp;
+    auto session =
+        makeSessionWith(testApp.app(),
+                        std::make_unique<contour::test::ConfigurableStartPty>(
+                            TestPageSize, contour::test::ConfigurableStartPty::StartBehavior::Fail));
+    session->start();
+    REQUIRE(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::StartFailed));
+
+    // What a live pane does with a drop this big is ask first; an ended one does not even get that far.
+    auto permissionRequests = 0;
+    contour::test::countAsks(*session,
+                             contour::session::PermissionAsk { contour::session::GuardedRole::BigPaste },
+                             permissionRequests);
+    session->insertDroppedText(QString((1024 * 512) + 1, QChar('y')));
+    session->insertDroppedUrls(
+        { QUrl(QStringLiteral("https://example.com/") + QString((1024 * 512) + 1, QChar('y'))) });
+    CHECK(permissionRequests == 0);
+}
+
+// }}}

@@ -3,6 +3,7 @@
 
 #include <contour/config/LayoutStore.hpp>
 #include <contour/session/PastePreview.hpp>
+#include <contour/window/DroppedText.hpp>
 
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
@@ -31,6 +32,7 @@ enum class NoticeKind : uint8_t
     LayoutSaveFailed,   ///< Save Layout could not.
     RestoreSummary,     ///< What a restore brought back.
     ConfigReloadFailed, ///< The configuration file could not be loaded.
+    DropRefused,        ///< A drop onto a pane was refused, and nothing was typed.
 };
 
 /// Where a notice is shown.
@@ -96,6 +98,12 @@ inline constexpr auto NoticeRows = std::array {
                 .duration = std::chrono::milliseconds { 0 },
                 .action = NoticeAction::OpenConfigFile,
                 .actionText = "Show in Editor" },
+    NoticeRow { .kind = NoticeKind::DropRefused,
+                .surface = NoticeSurface::Toast,
+                .glyph = "!",
+                .duration = std::chrono::milliseconds { 4000 },
+                .action = NoticeAction::None,
+                .actionText = "" },
 };
 
 static_assert(
@@ -106,7 +114,7 @@ static_assert(
         return true;
     }(),
     "NoticeRows must list every notice kind in enumerator order");
-static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::ConfigReloadFailed) + 1U,
+static_assert(NoticeRows.size() == std::to_underlying(NoticeKind::DropRefused) + 1U,
               "NoticeRows must have a row for every notice kind");
 
 /// The row of @p kind.
@@ -190,6 +198,34 @@ namespace detail
     return std::format("Contour could not reload its configuration: {}", detail::shownText(error));
 }
 
+/// A row of the drop-refusal table: why dropped paths gave no text, and what the toast says.
+struct DropRefusalRow
+{
+    DropTextError error;   ///< Why nothing was typed.
+    std::string_view text; ///< What the toast says; empty where nothing is shown.
+};
+
+/// One row per @c DropTextError, in enumerator order. "No paths" is no refusal worth a toast: there was
+/// nothing to type.
+inline constexpr auto DropRefusalRows = std::array {
+    DropRefusalRow { .error = DropTextError::NoPaths, .text = "" },
+    DropRefusalRow { .error = DropTextError::ControlCharacter,
+                     .text = "Not inserted: a file name holds a control character." },
+    DropRefusalRow { .error = DropTextError::Unquotable,
+                     .text = "Not inserted: a file name holds a character cmd cannot quote." },
+};
+
+static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::Unquotable) + 1U,
+              "DropRefusalRows must have a row for every drop error");
+
+/// What the toast for a refused drop says.
+/// @param error Why the drop was refused.
+/// @return The text; empty when @p error needs no toast.
+[[nodiscard]] constexpr std::string_view dropRefusedText(DropTextError error) noexcept
+{
+    return DropRefusalRows[std::to_underlying(error)].text;
+}
+
 /// Whether the pointer rests on the toast.
 enum class ToastHover : uint8_t
 {
@@ -207,7 +243,7 @@ enum class NoticeChange : uint8_t
 /// The most toasts that wait behind the one shown. No drop is needed to keep to it: a waiting toast of a kind
 /// already waiting replaces it, and one of the shown kind replaces the shown one, so at most one per other
 /// toast kind waits -- which the assertion below holds the table to.
-inline constexpr std::size_t NoticeWaitingLimit = 4;
+inline constexpr std::size_t NoticeWaitingLimit = 5;
 
 /// How many notice kinds show as a toast.
 inline constexpr auto ToastKindCount =

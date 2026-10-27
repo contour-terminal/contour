@@ -130,6 +130,9 @@ TEST_CASE("droppedText.quotingFollowsTheForegroundProcess", "[droppedtext]")
     CHECK(shellQuotingFor("C:\\Windows\\System32\\cmd.exe") == ShellQuoting::Cmd);
     CHECK(shellQuotingFor("CMD.EXE") == ShellQuoting::Cmd);
     CHECK(shellQuotingFor("/usr/local/bin/pwsh") == ShellQuoting::PowerShell);
+    CHECK(shellQuotingFor("pwsh -NoLogo") == ShellQuoting::PowerShell);
+    CHECK(shellQuotingFor(R"(C:\Program Files\PowerShell\7\pwsh.exe -NoLogo)") == ShellQuoting::PowerShell);
+    CHECK(shellQuotingFor("/bin/bash -l") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("vim") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("zsh") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("ssh") == ShellQuoting::Posix);

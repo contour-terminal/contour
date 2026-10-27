@@ -303,6 +303,41 @@ class WindowController:
     /// Tears the tab at @p index of THIS window out into a brand-new OS window (drop on empty desktop).
     /// @param index The tab's row in this window.
     Q_INVOKABLE void tearOffTab(int index);
+    /// What dropping something over a pane would do, for the DropArea of a pane card to show and to act on.
+    /// Decided by resolveDropZone() from what this window can do and what is dragged.
+    ///
+    /// Files and text insert into the pane unless its session has ended (typed text would be swallowed, or
+    /// worse, restart it); a tab splits the pane only from another tab, only on a pane's outer edges, and
+    /// only where the window's sessions are hosted here; anywhere else a tab is left alone (PassThrough:
+    /// not accepted, so the drag ends as it does today).
+    /// @param pane         The pane's TerminalSession; null resolves to DropZone::None.
+    /// @param payload     What is dragged, as a DropPayload; out of range resolves to DropZone::None.
+    /// @param x           The pointer's distance from the pane's left edge.
+    /// @param y           The pointer's distance from the pane's top edge.
+    /// @param width       The pane card's width.
+    /// @param height      The pane card's height.
+    /// @param tabPayload  The drag's `application/x-contour-tab` JSON (`windowId`, `tabIndex`); read only
+    ///                    for a tab. It comes from whatever started the drag, so it is resolved against
+    ///                    the model and an unknown window or row resolves to DropZone::None.
+    /// @return A DropZone, as its value.
+    Q_INVOKABLE [[nodiscard]] int dropZoneAt(session::TerminalSession const* pane,
+                                             int payload,
+                                             qreal x,
+                                             qreal y,
+                                             qreal width,
+                                             qreal height,
+                                             QString const& tabPayload) const;
+    /// Performs the drop of a tab on a pane: for a split zone, merges the dragged tab into the pane's tab on
+    /// that side. Anything else changes nothing. Everything is decided again here, not taken from the QML
+    /// caller: the tab is re-resolved from @p tabPayload, and it must come from another tab and the window
+    /// must be able to split.
+    /// @param pane         The pane's TerminalSession.
+    /// @param zone        The zone dropZoneAt() answered, as its value.
+    /// @param tabPayload  The drag's `application/x-contour-tab` JSON.
+    Q_INVOKABLE void dropTabOnPane(session::TerminalSession const* pane, int zone, QString const& tabPayload);
+    /// The label of the ghost shown for @p zone ("Tab → split right"); empty for a zone with no ghost.
+    /// @param zone A DropZone, as its value.
+    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int zone) const;
     Q_INVOKABLE void setTabTitle(int index, QString const& title);
     Q_INVOKABLE void resetTabTitle(int index);
     /// Asks the active tab's QML delegate to open its inline title editor (the keyboard entry point

@@ -27,6 +27,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SizeIndicator.hpp>
 #include <contour/window/ChromeKeys.hpp>
+#include <contour/window/DroppedText.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
@@ -50,8 +51,10 @@
 #include <core/Flags.hpp>
 
 #include <QtCore/QAbstractItemModel>
+#include <QtCore/QList>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantMap>
 #include <QtQml/QJSValue>
@@ -800,6 +803,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// were published; the refresh that change scheduled replaces the tick anyway.
     /// @param targetLine A tick's targetLine.
     Q_INVOKABLE void scrollToScrollbarMark(qint64 targetLine);
+    /// Types dropped URLs at this pane's prompt, as one paste. Local files become their paths, escaped for
+    /// the shell the pane runs (the foreground process's, or the profile's shell where that is not known:
+    /// a pane hosted on a daemon); other URLs are pasted as text. A name that cannot be typed safely (a
+    /// control character, or under cmd a `%` or `"`) refuses the WHOLE drop and the window says so. A
+    /// pane whose session has ended takes nothing. Goes through the paste path of a clipboard paste:
+    /// bracketed when the application asked for it, and with its size limits.
+    /// @param urls What was dropped.
+    Q_INVOKABLE void insertDroppedUrls(QList<QUrl> const& urls);
+    /// Types dropped text at this pane's prompt, as one paste (see insertDroppedUrls()).
+    /// @param text What was dropped.
+    Q_INVOKABLE void insertDroppedText(QString const& text);
 
     /// Publishes the scrollbar's travel (announceScrollableLineCount()), and rebuilds the ticks if anything
     /// they depend on moved, and announces them.
@@ -1850,6 +1864,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// lines"; copying nothing posts nothing. Copy-on-select and a program's own clipboard writes do not come
     /// here.
     void copyExplicitly(std::string_view text);
+
+    /// Pastes @p text -- the clipboard's, or what was dropped -- as one paste, repeated @p count times:
+    /// refused above PasteHardLimitBytes (the window says so), held for the user's answer above
+    /// PasteAskLimitBytes, otherwise sent now.
+    /// @param text The text, as read.
+    /// @param count How many times to paste it.
+    /// @param strip Whether whitespace runs become single spaces.
+    void pasteText(QString const& text, unsigned count, vtbackend::PasteStrip strip);
+
+    /// The quoting for the shell this pane runs: the foreground process's, or, where that is not known (a
+    /// pane hosted on a daemon), the profile's shell program.
+    [[nodiscard]] window::ShellQuoting dropQuoting() const;
 
     /// Sends @p text to the application as one paste, repeated @p count times.
     void sendPasteRepeatedly(std::string const& text, unsigned count);

@@ -45,6 +45,23 @@ TEST_CASE("NoticeRows: one per kind, in order, every banner with an action", "[n
     }
 }
 
+TEST_CASE("NoticeQueue: a refused drop is a short toast with a mark", "[notices]")
+{
+    auto const& row = noticeRow(NoticeKind::DropRefused);
+    CHECK(row.surface == NoticeSurface::Toast);
+    CHECK(row.glyph == "!");
+    CHECK(row.duration == 4000ms);
+    CHECK(row.action == contour::window::NoticeAction::None);
+
+    // Every drop error that is a refusal has words; they are all safe to show on one row.
+    for (auto const& refusal: contour::window::DropRefusalRows)
+        if (refusal.error != contour::window::DropTextError::NoPaths)
+        {
+            CHECK_FALSE(refusal.text.empty());
+            CHECK_FALSE(refusal.text.contains('\n'));
+        }
+}
+
 TEST_CASE("Notice texts", "[notices]")
 {
     using namespace contour::window;
@@ -56,6 +73,9 @@ TEST_CASE("Notice texts", "[notices]")
     CHECK(layoutSaveFailedNoticeText("dev", contour::config::LayoutSaveError::WriteFailed)
           == std::format("Layout “dev” was not saved: {}.",
                          contour::config::describe(contour::config::LayoutSaveError::WriteFailed)));
+    CHECK(dropRefusedText(DropTextError::ControlCharacter)
+          == "Not inserted: a file name holds a control character.");
+    CHECK(dropRefusedText(DropTextError::NoPaths).empty());
     CHECK(restoreSummaryText(2, 7) == "Restored 2 windows, 7 tabs");
     CHECK(restoreSummaryText(1, 1) == "Restored 1 window, 1 tab");
     CHECK(configReloadFailedNoticeText("bad key") == "Contour could not reload its configuration: bad key");

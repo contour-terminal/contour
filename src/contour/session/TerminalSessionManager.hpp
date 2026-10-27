@@ -497,6 +497,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                            vtworkspace::TabId target,
                            vtworkspace::PaneId leaf,
                            vtworkspace::SplitSide side);
+    /// Where the sessions this manager's factory makes run: whether a tab can be merged into a split here
+    /// (only where they are hosted locally; a remote end's model would undo it).
+    [[nodiscard]] SessionHosting sessionHosting() const noexcept { return _sessionFactory.hosting(); }
     /// Tears the tab at row @p fromIndex of window @p from into a brand-new OS window. The new window
     /// is spawned (on @p targetScreen if given) and adopts the tab as its sole tab; if that empties the
     /// source window, it is closed. Drives dropping a dragged tab onto empty desktop.

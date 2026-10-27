@@ -11,10 +11,12 @@
 // untouched.
 
 #include <contour/ContourGuiApp.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtpty/MockPty.hpp>
@@ -1699,3 +1701,251 @@ TEST_CASE("WindowController: minimised state, restoring it, and the attention re
         CHECK(alerts.count() == 1);
     }
 }
+
+// {{{ Drops onto a pane
+
+namespace
+{
+using contour::window::DropPayload;
+using contour::window::DropZone;
+
+/// A pane card's extent in the tests below.
+constexpr auto PaneWidth = 1000.0;
+constexpr auto PaneHeight = 500.0;
+
+/// The `application/x-contour-tab` payload TabItem.qml writes for the tab at @p row of window @p window.
+[[nodiscard]] QString tabPayload(vtworkspace::WindowId window, int row)
+{
+    return QString::fromStdString(std::format(R"({{"windowId":{},"tabIndex":{}}})", window.value, row));
+}
+
+/// What @p controller says a drop of @p payload at (@p x, @p y) over @p session's pane does.
+[[nodiscard]] DropZone zoneAt(contour::window::WindowController const& controller,
+                              contour::session::TerminalSession* session,
+                              DropPayload payload,
+                              double x,
+                              double y,
+                              QString const& tab = {})
+{
+    return static_cast<DropZone>(
+        controller.dropZoneAt(session, static_cast<int>(payload), x, y, PaneWidth, PaneHeight, tab));
+}
+} // namespace
+
+TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const dragged = window->activeSession();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    REQUIRE(dragged != pane);
+    auto const fromOtherTab = tabPayload(window.id, 0);
+    auto const fromOwnTab = tabPayload(window.id, 1);
+
+    SECTION("a tab from another tab splits on the outer edges and is left alone elsewhere")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 50, 250, fromOtherTab) == DropZone::SplitLeft);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 20, fromOtherTab) == DropZone::SplitTop);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 480, fromOtherTab) == DropZone::SplitBottom);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
+    }
+
+    SECTION("a tab from the pane's own tab is never split")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOwnTab) == DropZone::PassThrough);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOwnTab) == DropZone::PassThrough);
+    }
+
+    SECTION("files and text insert anywhere over the pane")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 500, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*window, pane, DropPayload::Text, 50, 20) == DropZone::InsertText);
+    }
+
+    SECTION("a payload that names no tab of this process is no drop")
+    {
+        // Review: the JSON comes from whatever started the drag.
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(vtworkspace::WindowId { 9999 }, 0))
+              == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, 7)) == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, -1)) == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, QStringLiteral("not json"))
+              == DropZone::None);
+        CHECK(
+            zoneAt(
+                *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":"1","tabIndex":0})"))
+            == DropZone::None);
+        CHECK(
+            zoneAt(
+                *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":1.5,"tabIndex":0})"))
+            == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250) == DropZone::None);
+    }
+
+    SECTION("no session, and nothing out of range, is a target")
+    {
+        CHECK(window->dropZoneAt(
+                  nullptr, static_cast<int>(DropPayload::Files), 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(window->dropZoneAt(pane, -1, 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(window->dropZoneAt(pane, 99, 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 1500, 250) == DropZone::None);
+    }
+
+    SECTION("the ghost's label is the zone's row")
+    {
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitRight))
+              == QStringLiteral("Tab → split right"));
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitTop))
+              == QStringLiteral("Tab → split up"));
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::InsertText)).isEmpty());
+        CHECK(window->dropGhostLabel(-1).isEmpty());
+        CHECK(window->dropGhostLabel(99).isEmpty());
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a daemon-hosted window offers no split", "[contour][multiwindow][drop]")
+{
+    // Review Focus 4: a split made here would be undone by the daemon's next layout push, so a tab is
+    // left alone at every band; files still insert.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    for (auto const [x, y]:
+         { std::pair { 950.0, 250.0 }, { 50.0, 250.0 }, { 500.0, 20.0 }, { 500.0, 480.0 }, { 500.0, 250.0 } })
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, x, y, fromOtherTab) == DropZone::PassThrough);
+    CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
+
+    // And performing a split drop anyway changes nothing.
+    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+    CHECK(window->count() == 2);
+    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+
+    factory->reportedHosting = contour::session::SessionHosting::Local;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: dropTabOnPane merges on a split zone and changes nothing otherwise",
+          "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const dragged = window->activeSession();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    auto const draggedId = dragged->modelSessionId();
+    auto const paneId = pane->modelSessionId();
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    SECTION("a split zone grafts the dragged tab on that side")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+        REQUIRE(window->count() == 1);
+        auto const* const tab = manager.model().window(window.id)->activeTab();
+        REQUIRE(tab != nullptr);
+        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+        CHECK(tab->rootPane()->first()->session() == paneId);
+        CHECK(tab->rootPane()->second()->session() == draggedId);
+    }
+
+    SECTION("the zone names the side")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitTop), fromOtherTab);
+        auto const* const tab = manager.model().window(window.id)->activeTab();
+        REQUIRE(tab != nullptr);
+        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
+        CHECK(tab->rootPane()->first()->session() == draggedId);
+    }
+
+    SECTION("a zone that is not a split changes nothing")
+    {
+        for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
+            window->dropTabOnPane(pane, static_cast<int>(zone), fromOtherTab);
+        window->dropTabOnPane(pane, -1, fromOtherTab);
+        window->dropTabOnPane(pane, 99, fromOtherTab);
+        CHECK(window->count() == 2);
+    }
+
+    SECTION("the pane's own tab, and a forged window or row, change nothing")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 1));
+        window->dropTabOnPane(
+            pane, static_cast<int>(DropZone::SplitRight), tabPayload(vtworkspace::WindowId { 9999 }, 0));
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 7));
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), QStringLiteral("{}"));
+        window->dropTabOnPane(nullptr, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+        CHECK(window->count() == 2);
+        CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a pane that has ended takes no files", "[contour][multiwindow][drop]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const live = window->activeSession();
+
+    // The next tab's session fails to start, which ends the pane where it stands.
+    factory->makePty = [](vtbackend::PageSize size) {
+        return std::make_unique<contour::test::ConfigurableStartPty>(
+            size, contour::test::ConfigurableStartPty::StartBehavior::Fail);
+    };
+    window->createNewTab();
+    auto* const ended = window->activeSession();
+    REQUIRE(ended != nullptr);
+    ended->start(); // a display would have started it
+    REQUIRE(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::StartFailed));
+
+    CHECK(zoneAt(*window, live, DropPayload::Files, 500, 250) == DropZone::InsertText);
+    CHECK(zoneAt(*window, ended, DropPayload::Files, 500, 250) == DropZone::None);
+    CHECK(zoneAt(*window, ended, DropPayload::Text, 500, 250) == DropZone::None);
+    // A tab may still split an ended pane: nothing is typed to it.
+    CHECK(zoneAt(*window, ended, DropPayload::Tab, 950, 250, tabPayload(window.id, 0))
+          == DropZone::SplitRight);
+
+    factory->makePty = nullptr;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a refused drop tells the window", "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    REQUIRE(window->notices().toastText().isEmpty());
+
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/a%0Ab")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a file name holds a control character."));
+
+    contour::test::closeAllTabs(*window);
+}
+
+// }}}

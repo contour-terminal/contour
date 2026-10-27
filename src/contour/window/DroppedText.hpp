@@ -54,14 +54,16 @@ namespace detail
 
 /// Picks the quoting for the shell whose foreground process is @p foregroundProcess.
 ///
-/// Only the base name counts (a path in either separator style), and a trailing `.exe` is ignored, in
-/// any case.
+/// Only the base name counts (a path in either separator style), its arguments are ignored, and a
+/// trailing `.exe` is ignored, in any case.
 /// @param foregroundProcess The foreground process's name or path; may be empty.
 /// @return The quoting of the matching row; @c ShellQuoting::Posix when none matches.
 [[nodiscard]] constexpr ShellQuoting shellQuotingFor(std::string_view foregroundProcess) noexcept
 {
     if (auto const slash = foregroundProcess.find_last_of("/\\"); slash != std::string_view::npos)
         foregroundProcess.remove_prefix(slash + 1);
+    // A configured shell is a command line ("pwsh -NoLogo"): the program is its first word.
+    foregroundProcess = foregroundProcess.substr(0, foregroundProcess.find(' '));
     constexpr auto Exe = std::string_view { ".exe" };
     if (foregroundProcess.size() >= Exe.size()
         && detail::equalsIgnoringCase(foregroundProcess.substr(foregroundProcess.size() - Exe.size()), Exe))

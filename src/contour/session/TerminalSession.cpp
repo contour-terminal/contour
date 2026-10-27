@@ -2556,49 +2556,103 @@ void TerminalSession::pasteFromClipboard(unsigned count, vtbackend::PasteStrip s
         // Read the clipboard ONCE: text() is a synchronous round-trip to whichever process owns the
         // clipboard and drags the entire payload across, so the guards, the immediate path and the
         // deferred one all work from this one copy.
-        auto const text = clipboard->text(QClipboard::Clipboard);
-
-        // The hard limit: refused, never asked about, and the window says so.
-        if (std::cmp_greater(text.size(), PasteHardLimitBytes))
-        {
-            sessionLog()("Clipboard contains huge text. Ignoring.");
-            if (_manager != nullptr)
-                _manager->postNotice(
-                    window::Notice { .kind = window::NoticeKind::PasteTooLarge,
-                                     .text = window::pasteTooLargeNoticeText(PasteHardLimitBytes) },
-                    this);
-            return;
-        }
-
-        // Normalize before the soft limit, not after: what the user is asked to approve, and what is
-        // measured, must be the bytes that would actually reach the application.
-        auto pasteText = stripIf(normalizeCrlf(text), strip);
-
-        // Over the soft limit, the user is asked first.
-        if (pasteText.size() > PasteAskLimitBytes)
-        {
-            auto preview = makePastePreview(pasteText);
-            _pendingBigPaste = BigPasteRequest { .text = std::move(pasteText),
-                                                 .count = count,
-                                                 .preview = std::move(preview) };
-            sessionLog()("Clipboard contains huge text. Requesting permission.");
-            // BigPaste is the one guarded role with no configuration field, so the gate resolves it as
-            // Ask; what it adds over a bare emit is the remembered per-session answer, which only
-            // requestPermission() ever reads. No post() here, unlike requestCaptureBuffer(): both entry
-            // points (the PasteClipboard action and Vi's paste commands) are GUI-thread input paths, as
-            // the QClipboard dereference above already requires.
-            requestPermission(configuredPermissionFor(GuardedRole::BigPaste), GuardedRole::BigPaste);
-            return;
-        }
-
-        sessionLog()("Size of text: {}", pasteText.size());
-        if (pasteText.empty())
-            sessionLog()("Clipboard does not contain text.");
-        else
-            sendPasteRepeatedly(pasteText, count);
+        pasteText(clipboard->text(QClipboard::Clipboard), count, strip);
     }
     else
         sessionLog()("Could not access clipboard.");
+}
+
+void TerminalSession::pasteText(QString const& text, unsigned count, vtbackend::PasteStrip strip)
+{
+    // The hard limit: refused, never asked about, and the window says so.
+    if (std::cmp_greater(text.size(), PasteHardLimitBytes))
+    {
+        sessionLog()("Pasted text is huge. Ignoring.");
+        if (_manager != nullptr)
+            _manager->postNotice(
+                window::Notice { .kind = window::NoticeKind::PasteTooLarge,
+                                 .text = window::pasteTooLargeNoticeText(PasteHardLimitBytes) },
+                this);
+        return;
+    }
+
+    // Normalize before the soft limit, not after: what the user is asked to approve, and what is
+    // measured, must be the bytes that would actually reach the application.
+    auto normalized = stripIf(normalizeCrlf(text), strip);
+
+    // Over the soft limit, the user is asked first.
+    if (normalized.size() > PasteAskLimitBytes)
+    {
+        auto preview = makePastePreview(normalized);
+        _pendingBigPaste =
+            BigPasteRequest { .text = std::move(normalized), .count = count, .preview = std::move(preview) };
+        sessionLog()("Pasted text is huge. Requesting permission.");
+        // BigPaste is the one guarded role with no configuration field, so the gate resolves it as
+        // Ask; what it adds over a bare emit is the remembered per-session answer, which only
+        // requestPermission() ever reads. No post() here, unlike requestCaptureBuffer(): every entry
+        // point (the PasteClipboard action, Vi's paste commands, a drop) is a GUI-thread input path, as
+        // the QClipboard dereference of pasteFromClipboard() already requires.
+        requestPermission(configuredPermissionFor(GuardedRole::BigPaste), GuardedRole::BigPaste);
+        return;
+    }
+
+    sessionLog()("Size of text: {}", normalized.size());
+    if (normalized.empty())
+        sessionLog()("Nothing to paste.");
+    else
+        sendPasteRepeatedly(normalized, count);
+}
+
+window::ShellQuoting TerminalSession::dropQuoting() const
+{
+    // A pane hosted on a daemon has no foreground process to ask; its shell is the profile's.
+    auto const foreground = foregroundProcessName();
+    return window::shellQuotingFor(foreground.empty() ? profile().shell.value().program : foreground);
+}
+
+void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)
+{
+    // A pane whose session ended has nothing to type to: text would be swallowed, or kept and typed into
+    // whatever Restart starts.
+    if (paneState() == window::PaneState::Ended)
+        return;
+
+    auto paths = std::vector<std::string> {};
+    auto others = std::vector<std::string> {};
+    for (auto const& url: urls)
+        if (url.isLocalFile())
+            paths.push_back(url.toLocalFile().toStdString());
+        else
+            others.push_back(url.toString(QUrl::FullyEncoded).toStdString());
+
+    auto text = std::string {};
+    if (!paths.empty())
+    {
+        auto const typed = window::droppedPathsText(paths, dropQuoting());
+        if (!typed)
+        {
+            // Nothing is typed, not even the names that were fine: one that is not is one that would run.
+            sessionLog()("Dropped paths refused.");
+            if (auto const reason = window::dropRefusedText(typed.error());
+                !reason.empty() && _manager != nullptr)
+                _manager->postNotice(window::Notice { .kind = window::NoticeKind::DropRefused,
+                                                      .text = std::string { reason } },
+                                     this);
+            return;
+        }
+        text = *typed;
+    }
+    for (auto const& other: others)
+        text += other + ' ';
+
+    pasteText(QString::fromStdString(text), 1, vtbackend::PasteStrip::Keep);
+}
+
+void TerminalSession::insertDroppedText(QString const& text)
+{
+    if (paneState() == window::PaneState::Ended)
+        return;
+    pasteText(text, 1, vtbackend::PasteStrip::Keep);
 }
 
 void TerminalSession::sendPasteRepeatedly(std::string const& text, unsigned count)
