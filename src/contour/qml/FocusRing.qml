@@ -20,6 +20,9 @@ Rectangle {
     property real reach: chromeStyle.size.focusRing
     /// The host's corner radius; the ring's is that plus its reach.
     property real hostRadius: 0
+    /// The opaque colour the ring is drawn over, for a ring inside its host (reach 0) whose fill the row's
+    /// ring colour was not chosen against; transparent for a ring outside the host, over the window.
+    property color ground: "transparent"
 
     // A ring is not an item of its own: the host has already told assistive technology it has focus.
     Accessible.ignored: true
@@ -29,6 +32,10 @@ Rectangle {
     anchors.margins: -root.reach
     radius: root.hostRadius + root.reach
     border.width: chromeStyle.size.focusRing
-    border.color: chromeStyle.colors.focusRing
+    // Over a fill of its own the ring keeps its hue only where that reaches 3:1 there, else it is the fill's ink
+    // (statusMarkOn, as the row's ring colour is on the window).
+    border.color: root.ground.a > 0 && chromeStyle.colors.focusRing.a > 0
+                  ? chromeStyle.statusMarkOn(chromeStyle.statusRunning, root.ground)
+                  : chromeStyle.colors.focusRing
     color: chromeStyle.colors.focusFill
 }

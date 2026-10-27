@@ -3592,6 +3592,51 @@ TEST_CASE("moving a tab with the keyboard keeps the chrome focus, and Escape giv
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a Flat tab's ring reaches 3:1 on the tab's own fill (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus][contrast]")
+{
+    struct Fill
+    {
+        char const* name;
+        TabDecor decor; ///< Plain: row 0 has no colour; EveryBadge: row 0 wears one.
+        int activeTab;  ///< 0 draws row 0 active (OS accent or the active coloured fill), 1 at rest.
+    };
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+        for (auto const appearance: contour::test::snapshot::SnapshotAppearances)
+            for (auto const& fill: { Fill { "active, accent", TabDecor::Plain, 0 },
+                                     Fill { "active, coloured", TabDecor::EveryBadge, 0 },
+                                     Fill { "at rest, coloured", TabDecor::EveryBadge, 1 } })
+            {
+                INFO("row: " << contour::config::chromeStyleName(row)
+                             << " appearance: " << contour::test::snapshot::appearanceName(appearance)
+                             << " fill: " << fill.name);
+                auto const scoped = contour::test::ScopedChromeAppearance { appearance };
+                QQmlEngine engine;
+                MockMainController controller { MainWindowScene {
+                    .tabCount = 2, .decor = fill.decor, .activeTab = fill.activeTab } };
+                contour::test::QmlMessageCapture warnings;
+                auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+                showWindow(*root);
+                activated(*root);
+
+                controller.focusTabWell(0);
+                auto const tabs = tabDelegates(*root);
+                REQUIRE(QTest::qWaitFor([&] { return tabs[0]->hasActiveFocus(); }, 1000));
+
+                // The ring is drawn inside the tab, over the fill the tab paints on the window.
+                auto const window =
+                    evaluateIn(*tabs[0], QStringLiteral("systemPalette.window")).value<QColor>();
+                auto const painted =
+                    over(part(*tabs[0], QStringLiteral("tabBackground")).property("color").value<QColor>(),
+                         window);
+                auto& ring = part(*tabs[0], QStringLiteral("focusRing"));
+                auto const ringColor =
+                    ring.property("border").value<QObject*>()->property("color").value<QColor>();
+                CHECK(contrastOf(ringColor, painted) >= contour::config::MinimumMarkContrast);
+                CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+            }
+}
+
 TEST_CASE("closing another tab does not take the focus out of the chrome (offscreen)",
           "[contour][gui][qml][mainwindow][chromefocus]")
 {

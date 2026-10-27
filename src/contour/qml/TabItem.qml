@@ -263,6 +263,8 @@ Item {
         shown: root.keyboardFocused
         reach: root.pill ? chromeStyle.size.focusRing : 0
         hostRadius: background.radius
+        // Inside the tab the ring lies over its fill, which a Flat tab's own colour or the OS accent sets.
+        ground: root.pill ? "transparent" : Qt.tint(systemPalette.window, root.effectiveBackground)
     }
 
     // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's
