@@ -225,6 +225,13 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                .swatches = 0,
                .name = {},
                .role = -1 },
+        // A detail is part of the name: the link pill's hint says how to open the target it names.
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("example.com") },
+                                                  { "detail", QStringLiteral("Ctrl+Click to open") } },
+               .swatches = 0,
+               .name = QStringLiteral("example.com, Ctrl+Click to open"),
+               .role = -1 },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
                .initialProperties = QVariantMap { { "heading", QStringLiteral("Close this tab?") } },
                .swatches = 0,

@@ -167,44 +167,45 @@ ContourTerminal {
         }
     }
 
-    // Cell-dimensions popup shown briefly on resize (mirrors the former single-pane Terminal.qml popup).
-    // It is inherently per-pane: each pane resizes independently, driven by its own session's
-    // line/column-count signals wired in onSessionChanged below.
-    Rectangle {
-        id: sizeWidget
+    // The size indicator: "100 × 30" after a resize, "13 pt" after a zoom, as a Toast pill centred on this
+    // pane -- each pane of a split its own. The session decides when it is raised and what it says
+    // (requestSizeIndicator); the pane holds it for motion.linger after the last request, then tells the
+    // session it settled, which announces it for the active pane alone. Above the unfocused dim, so a resized
+    // inactive pane still reads its size; a pane too narrow for the pill shows none.
+    property bool sizeIndicatorHeld: false
+
+    Toast {
+        id: sizeIndicator
+        objectName: "sizeIndicator"
         anchors.centerIn: parent
-        border.width: 1
-        border.color: "black"
-        property int margin: 10
-        color: "white"
-        visible: false
-        focus: false
         z: 20
-        Timer {
-            id: sizeWidgetTimer
-            interval: 1000
-            running: false
-            onTriggered: sizeWidget.visible = false
+        readonly property bool fits: implicitWidth <= pane.width - 2 * chromeStyle.space.s4
+        shown: pane.sizeIndicatorHeld && fits
+        text: pane.session && pane.session.sizeIndicatorText !== undefined ? pane.session.sizeIndicatorText : ""
+        // Tabular digits, so "99 × 30" and "100 × 30" keep their digits in place as a drag goes by.
+        textFont: {
+            var body = chromeStyle.type.body
+            var spec = { family: body.family, weight: Font.DemiBold, features: { "tnum": 1 } }
+            if (body.pixelSize > 0)
+                spec.pixelSize = body.pixelSize
+            else
+                spec.pointSize = body.pointSize
+            return Qt.font(spec)
         }
-        Text {
-            id: sizeWidgetText
-            anchors.centerIn: parent
-            text: pane.session
-                ? "Size: " + pane.session.pageColumnsCount.toString() + " x " + pane.session.pageLineCount.toString()
-                : ""
-        }
+        // An in-pane pill casts no hard shadow on the Terminal row: only a real popover does.
+        elevation: chromeStyle.elevation.e2.blur > 0 ? chromeStyle.elevation.e2 : chromeStyle.elevation.e0
+        // The session announces the settled size itself, once.
+        Accessible.ignored: true
     }
 
-    function updateSizeWidget() {
-        if (!pane.session)
-            return;
-        if (pane.session.upTime > 1.0 && pane.session.showResizeIndicator) {
-            sizeWidgetText.text = "Size: " + pane.session.pageColumnsCount.toString()
-                + " x " + pane.session.pageLineCount.toString();
-            sizeWidget.width = sizeWidgetText.contentWidth + sizeWidget.margin;
-            sizeWidget.height = sizeWidgetText.contentHeight;
-            sizeWidget.visible = true;
-            sizeWidgetTimer.running = true;
+    Timer {
+        id: sizeIndicatorHold
+        objectName: "sizeIndicatorHold"
+        interval: chromeStyle.motion.linger
+        onTriggered: {
+            pane.sizeIndicatorHeld = false
+            if (pane.session && pane.session.sizeIndicatorSettled !== undefined)
+                pane.session.sizeIndicatorSettled(pane.paneActive)
         }
     }
 
@@ -273,16 +274,17 @@ ContourTerminal {
         onTapped: pane.activated()
     }
 
-    // Show the cell-dimensions popup on page-size changes (resize). Use a Connections object rather than
-    // imperative session.lineCountChanged.connect(updateSizeWidget) in onSessionChanged: the imperative
-    // form re-connects on every session rebind (a split rebinds this pane's session repeatedly) WITHOUT
-    // disconnecting the old one, so stale handlers accumulate and fire on a torn-down pane during teardown
-    // — where even `pane` (the root id) resolves to null, throwing "Cannot read property 'session' of null".
-    // Connections re-targets atomically and is torn down with the pane, so no stale handler survives.
+    // Every request the session lets through shows the pill and restarts its hold. A Connections object
+    // rather than an imperative connect() in onSessionChanged: the imperative form re-connects on every
+    // session rebind (a split rebinds this pane's session repeatedly) WITHOUT disconnecting the old one, so
+    // stale handlers accumulate and fire on a torn-down pane during teardown. Connections re-targets
+    // atomically and is torn down with the pane.
     Connections {
         target: pane.session
         ignoreUnknownSignals: true
-        function onLineCountChanged() { pane.updateSizeWidget(); }
-        function onColumnsCountChanged() { pane.updateSizeWidget(); }
+        function onSizeIndicatorRequested() {
+            pane.sizeIndicatorHeld = true
+            sizeIndicatorHold.restart()
+        }
     }
 }

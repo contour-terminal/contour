@@ -15,6 +15,8 @@ Control {
 
     /// The message.
     property string text
+    /// A second, quieter text after the message (the link pill's hint). Empty: none.
+    property string detail
     /// The optional leading glyph. Empty: none.
     property string glyph
     /// Whether the toast is showing. QML-facing, so a host binds it directly.
@@ -25,14 +27,23 @@ Control {
     /// in its own surface may lower it.
     property var elevation: chromeStyle.elevation.e2
 
+    /// Its height: the toast's by default; a pill of another extent (the link pill) sets its own.
+    property real extent: chromeStyle.size.toast
+    /// Its corner radius.
+    property real cornerRadius: chromeStyle.radii.toast
+    /// Its leading and trailing padding.
+    property real inset: chromeStyle.space.s7
+    /// The font both texts are set in.
+    property font textFont: chromeStyle.type.footnote
+
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel
 
     // Bound explicitly: the active style's Control may supply no implicit sizes (ContourTui has none).
-    height: chromeStyle.size.toast
-    implicitHeight: chromeStyle.size.toast
-    leftPadding: chromeStyle.space.s7
-    rightPadding: chromeStyle.space.s7
+    height: root.extent
+    implicitHeight: root.extent
+    leftPadding: root.inset
+    rightPadding: root.inset
     implicitWidth: implicitContentWidth + leftPadding + rightPadding
 
     opacity: shown ? 1 : 0
@@ -52,11 +63,11 @@ Control {
     }
 
     Accessible.role: Accessible.AlertMessage
-    Accessible.name: root.text
+    Accessible.name: root.detail.length > 0 ? root.text + ", " + root.detail : root.text
 
     background: Rectangle {
         color: chromeStyle.colors.toastFill
-        radius: chromeStyle.radii.toast
+        radius: root.cornerRadius
 
         // The elevation (ElevationShadow): soft where there is blur, a hard offset copy on the Terminal row.
         ElevationShadow {
@@ -75,7 +86,7 @@ Control {
             visible: root.glyph.length > 0
             Layout.alignment: Qt.AlignVCenter
             text: root.glyph
-            font: chromeStyle.type.footnote
+            font: root.textFont
             color: root.glyphColor
             Accessible.ignored: true
         }
@@ -84,10 +95,22 @@ Control {
             objectName: "toastText"
             Layout.alignment: Qt.AlignVCenter
             text: root.text
-            // What a toast says can quote a name or an error a program or a file supplied: text, never markup.
+            // What a toast says can quote a name or an error a program or a file supplied, or a link's target an
+            // application chose: text, never markup.
             textFormat: Text.PlainText
-            font: chromeStyle.type.footnote
+            font: root.textFont
             color: chromeStyle.colors.toastText
+        }
+
+        Label {
+            objectName: "toastDetail"
+            visible: root.detail.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            text: root.detail
+            textFormat: Text.PlainText
+            font: root.textFont
+            color: chromeStyle.colors.toastTextSecondary
+            Accessible.ignored: true
         }
     }
 }

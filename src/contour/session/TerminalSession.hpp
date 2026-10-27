@@ -205,7 +205,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int id READ id)
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
-    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator)
     Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
     Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
@@ -222,7 +221,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // through, so the pill restarts its hold.
     Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText NOTIFY sizeIndicatorRequested)
     Q_PROPERTY(int fontSize READ getFontSize)
-    Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
     // The link under the pointer, for the link pill: what it opens (linkPillText()), how a click opens it
     // (linkOpenHint()), and whether the pill shows (linkPillVisibility(); a bool, the QML carve-out). One
@@ -672,8 +670,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// The main page's columns, read without the terminal lock. @see vtbackend::Terminal::mainPageSize()
     int pageColumnsCount() const noexcept { return unbox(_terminal.mainPageSize().columns); }
-
-    bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
     /// How far the scrollbar can scroll up, in rows the user can actually reach.
     ///

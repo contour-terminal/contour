@@ -8916,6 +8916,42 @@ TEST_CASE("Toast: a pill of the toast tokens (offscreen)", "[contour][gui][qml][
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("Toast: a host sets its extent, radius and detail (offscreen)", "[contour][gui][qml][kit][toast]")
+{
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto plain = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    auto* plainDetail = plain->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
+    REQUIRE(plainDetail != nullptr);
+    CHECK_FALSE(plainDetail->isVisible());
+
+    auto toast = createToast(engine,
+                             QVariantMap { { "text", QStringLiteral("<b>x</b>") },
+                                           { "detail", QStringLiteral("<i>open</i>") },
+                                           { "extent", 22.0 },
+                                           { "cornerRadius", 11.0 } });
+    auto* item = qobject_cast<QQuickItem*>(toast.get());
+    REQUIRE(item != nullptr);
+    auto* background = item->property("background").value<QQuickItem*>();
+    auto* text = item->findChild<QQuickItem*>(QStringLiteral("toastText"));
+    auto* detail = item->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
+    REQUIRE(background != nullptr);
+    REQUIRE(text != nullptr);
+    REQUIRE(detail != nullptr);
+    CHECK(item->height() == 22.0);
+    CHECK(background->property("radius").toReal() == 11.0);
+    CHECK(detail->isVisible());
+    CHECK(detail->property("text").toString() == QStringLiteral("<i>open</i>"));
+    // What an application chose is shown as written, never as markup.
+    for (auto const* label: { text, detail })
+        CHECK(label->property("textFormat").toInt() == Qt::PlainText);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("Toast: the Terminal row is a one-row inverse strip (offscreen)", "[contour][gui][qml][kit][toast]")
 {
     QQmlEngine engine;
@@ -10969,3 +11005,189 @@ TEST_CASE("Save Layout: on the Terminal row a taken name's message wraps rather 
 // }}}
 
 #include <QmlComponents_test.moc>
+
+// {{{ Size indicator
+namespace
+{
+/// Panes side by side in an offscreen window, each on its own MockSession: the first @p activeIndex is
+/// active, and each is as wide as @p widths says.
+struct SizeIndicatorScene
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    std::vector<std::unique_ptr<MockSession>> sessions;
+    std::unique_ptr<QObject> window;
+    std::vector<QQuickItem*> panes;
+
+    SizeIndicatorScene(std::vector<int> const& widths,
+                       size_t activeIndex,
+                       contour::test::ChromeSetup const& setup = macRowSetup())
+    {
+        qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, setup);
+        auto source = QByteArray("import QtQuick\nimport QtQuick.Window\nimport Contour.Ui\n"
+                                 "Window {\n  width: 900; height: 300; visible: true\n  Row {\n");
+        for (auto const index: std::views::iota(size_t { 0 }, widths.size()))
+        {
+            sessions.push_back(std::make_unique<MockSession>());
+            auto const name = QStringLiteral("session%1").arg(index);
+            engine.rootContext()->setContextProperty(name, sessions.back().get());
+            source += QStringLiteral(
+                          "    TerminalPane { objectName: \"pane%1\"; width: %2; height: 300; session: %3;"
+                          " paneActive: %4 }\n")
+                          .arg(index)
+                          .arg(widths[index])
+                          .arg(name)
+                          .arg(index == activeIndex ? QStringLiteral("true") : QStringLiteral("false"))
+                          .toUtf8();
+        }
+        source += "  }\n}\n";
+        QQmlComponent component(&engine);
+        component.setData(source, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SizeIndicatorScene.qml")));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        INFO("component errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        window.reset(component.create());
+        REQUIRE(window != nullptr);
+        for (auto const index: std::views::iota(size_t { 0 }, widths.size()))
+        {
+            auto* pane = window->findChild<QQuickItem*>(QStringLiteral("pane%1").arg(index));
+            REQUIRE(pane != nullptr);
+            panes.push_back(pane);
+        }
+        QCoreApplication::processEvents();
+    }
+
+    [[nodiscard]] static contour::test::ChromeSetup macRowSetup()
+    {
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = contour::config::ChromeStyle::MacOS;
+        return setup;
+    }
+
+    /// Pane @p index's pill.
+    [[nodiscard]] QQuickItem* pill(size_t index) const
+    {
+        auto* found = panes.at(index)->findChild<QQuickItem*>(QStringLiteral("sizeIndicator"));
+        REQUIRE(found != nullptr);
+        return found;
+    }
+
+    /// The hold every pill keeps after the last request, in milliseconds.
+    [[nodiscard]] int linger() { return static_cast<int>(chromeToken(engine, "motion", "linger")); }
+};
+} // namespace
+
+TEST_CASE(
+    "size indicator: a resize shows the pill centred on its pane and settles after the hold (offscreen)",
+    "[contour][gui][qml][sizeindicator]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = SizeIndicatorScene { { 600 }, 0 };
+    auto& session = *scene.sessions.front();
+    auto* pill = scene.pill(0);
+    auto* pane = scene.panes.front();
+    CHECK_FALSE(pill->property("shown").toBool());
+
+    session.requestSizeIndicator(QStringLiteral("100 × 30"));
+    QCoreApplication::processEvents();
+    CHECK(pill->property("shown").toBool());
+    CHECK(pill->property("text").toString() == QStringLiteral("100 × 30"));
+    CHECK(pill->x() + (pill->width() / 2) == Catch::Approx(pane->width() / 2).margin(1));
+    CHECK(pill->height() == chromeToken(scene.engine, "size", "toast"));
+    auto* background = pill->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("radius").toReal() == chromeToken(scene.engine, "radii", "toast"));
+    auto const font = pill->property("textFont").value<QFont>();
+    CHECK(font.weight() == QFont::DemiBold);
+    CHECK(font.featureValue(QFont::Tag("tnum")) == 1);
+    // Above the unfocused dim.
+    CHECK(pill->z() > pane->findChild<QQuickItem*>(QStringLiteral("dimOverlay"))->z());
+    // The session announces the settled size itself: the pill is no accessible object of its own.
+    auto const attached = std::ranges::find_if(
+        pill->children(), [](QObject const* child) { return child->inherits("QQuickAccessibleAttached"); });
+    REQUIRE(attached != pill->children().end());
+    CHECK((*attached)->property("ignored").toBool());
+
+    // A second request within the hold restarts it: two thirds of a hold after it, a hold and a third after
+    // the first, the pill still shows; one settle, after the last.
+    QTest::qWait(scene.linger() * 2 / 3);
+    session.requestSizeIndicator(QStringLiteral("101 × 30"));
+    QTest::qWait(scene.linger() * 2 / 3);
+    CHECK(pill->property("shown").toBool());
+    CHECK(session.settledSizeIndicators.empty());
+
+    CHECK(QTest::qWaitFor([&] { return !pill->property("shown").toBool(); }, scene.linger() * 4));
+    CHECK(session.settledSizeIndicators == std::vector { true });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("size indicator: every pane of a split shows its own (offscreen)",
+          "[contour][gui][qml][sizeindicator]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = SizeIndicatorScene { { 300, 280, 260, 60 }, 1 };
+    auto const texts = std::array { QStringLiteral("37 × 30"),
+                                    QStringLiteral("34 × 30"),
+                                    QStringLiteral("32 × 30"),
+                                    QStringLiteral("6 × 30") };
+    for (auto const index: std::views::iota(size_t { 0 }, texts.size()))
+        scene.sessions[index]->requestSizeIndicator(texts[index]);
+    // The pills' rows lay out on the window's next polish, and only then know how wide they are.
+    auto const padded = [](QQuickItem const* pill) {
+        return pill->implicitWidth()
+               > pill->property("leftPadding").toReal() + pill->property("rightPadding").toReal();
+    };
+    REQUIRE(QTest::qWaitFor([&] {
+        return std::ranges::all_of(scene.panes, [&](auto const* pane) {
+            return padded(pane->template findChild<QQuickItem*>(QStringLiteral("sizeIndicator")));
+        });
+    }));
+
+    for (auto const index: std::views::iota(size_t { 0 }, size_t { 3 }))
+    {
+        INFO("pane " << index);
+        auto* pill = scene.pill(index);
+        CHECK(pill->property("shown").toBool());
+        CHECK(pill->property("text").toString() == texts[index]);
+        // centerIn snaps to whole pixels, so an odd width sits half a pixel off.
+        CHECK(pill->x() + (pill->width() / 2) == Catch::Approx(scene.panes[index]->width() / 2).margin(1));
+    }
+    // Too narrow for the pill: none.
+    CHECK_FALSE(scene.pill(3)->property("shown").toBool());
+
+    CHECK(QTest::qWaitFor(
+        [&] {
+            return std::ranges::all_of(scene.sessions,
+                                       [](auto const& s) { return !s->settledSizeIndicators.empty(); });
+        },
+        scene.linger() * 4));
+    for (auto const index: std::views::iota(size_t { 0 }, scene.sessions.size()))
+    {
+        INFO("pane " << index);
+        CHECK(scene.sessions[index]->settledSizeIndicators == std::vector { index == 1 });
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("size indicator: the Terminal row draws it as one inverse row (offscreen)",
+          "[contour][gui][qml][sizeindicator]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto scene = SizeIndicatorScene { { 600 }, 0, setup };
+    scene.sessions.front()->requestSizeIndicator(QStringLiteral("100 × 30"));
+    QCoreApplication::processEvents();
+
+    auto* pill = scene.pill(0);
+    auto* style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    CHECK(pill->height() == style->property("cellHeight").toReal());
+    CHECK(pill->property("background").value<QQuickItem*>()->property("radius").toReal() == 0.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}

@@ -37,8 +37,9 @@ class MockSession: public QObject
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
     Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
-    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator CONSTANT)
-    Q_PROPERTY(int upTime READ upTime CONSTANT)
+    // Mirrors TerminalSession's size indicator: its text, the request that shows it, and the settle QML
+    // calls.
+    Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText NOTIFY sizeIndicatorRequested)
     Q_PROPERTY(float opacity READ opacity NOTIFY opacityChanged)
     Q_PROPERTY(float dimUnfocused READ dimUnfocused NOTIFY dimUnfocusedChanged)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
@@ -119,8 +120,21 @@ class MockSession: public QObject
     }
     [[nodiscard]] int pageColumnsCount() const { return _columns; }
     [[nodiscard]] int historyLineCount() const { return _historyLineCount; }
-    [[nodiscard]] bool showResizeIndicator() const { return true; }
-    [[nodiscard]] int upTime() const { return 5; } // > 1.0 so the resize popup path is exercised
+    [[nodiscard]] QString sizeIndicatorText() const { return _sizeIndicatorText; }
+
+    /// Raises the size indicator with @p text, as TerminalSession::requestSizeIndicator() does once its gate
+    /// lets a request through.
+    void requestSizeIndicator(QString text)
+    {
+        _sizeIndicatorText = std::move(text);
+        emit sizeIndicatorRequested();
+    }
+
+    /// Records each settle, by whether the pane was active. A bool, as the QML-facing call takes it.
+    Q_INVOKABLE void sizeIndicatorSettled(bool paneActive) { settledSizeIndicators.push_back(paneActive); }
+
+    /// Every sizeIndicatorSettled() call, in order.
+    std::vector<bool> settledSizeIndicators;
     [[nodiscard]] float opacity() const { return _opacity; }
     [[nodiscard]] float dimUnfocused() const { return _dimUnfocused; }
     [[nodiscard]] bool isImageBackground() const { return false; }
@@ -445,6 +459,7 @@ class MockSession: public QObject
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
     void hyperlinkHoverChanged();
+    void sizeIndicatorRequested();
     void linkTargetChanged();
     void overlayClearanceChanged();
     void commandBlockHoverChanged();
@@ -480,6 +495,7 @@ class MockSession: public QObject
     bool _scrollbarVisible = false;
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+    QString _sizeIndicatorText;
     QString _linkTargetText;
     QString _linkTargetHint;
     bool _linkTargetShown = false;

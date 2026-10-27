@@ -95,8 +95,7 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(int pageLineCount READ pageLineCount CONSTANT)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount CONSTANT)
     Q_PROPERTY(int historyLineCount READ historyLineCount CONSTANT)
-    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator CONSTANT)
-    Q_PROPERTY(int upTime READ upTime CONSTANT)
+    Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText CONSTANT)
     Q_PROPERTY(float opacity READ opacity CONSTANT)
     Q_PROPERTY(float dimUnfocused READ dimUnfocused CONSTANT)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
@@ -121,8 +120,9 @@ class RoutingMockSession: public QObject
     [[nodiscard]] int pageLineCount() const { return 25; }
     [[nodiscard]] int pageColumnsCount() const { return 80; }
     [[nodiscard]] int historyLineCount() const { return 0; }
-    [[nodiscard]] bool showResizeIndicator() const { return false; }
-    [[nodiscard]] int upTime() const { return 5; }
+    [[nodiscard]] QString sizeIndicatorText() const { return {}; }
+    /// What the pane calls once its size indicator settled; nothing to record here.
+    Q_INVOKABLE void sizeIndicatorSettled(bool /*paneActive*/) {}
     [[nodiscard]] float opacity() const { return 1.0F; }
     [[nodiscard]] float dimUnfocused() const { return 0.0F; }
     [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
