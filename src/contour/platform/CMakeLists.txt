@@ -20,6 +20,7 @@ add_library(contour_platform STATIC
     AudioNote.hpp
     MenuBarIntegration.cpp MenuBarIntegration.hpp
     MultimediaEnvironment.hpp
+    NativeCaptionButtons.cpp NativeCaptionButtons.hpp
     NativeMenuPresenter.cpp NativeMenuPresenter.hpp
     BlurBehind.cpp BlurBehind.hpp
     Clipboard.cpp Clipboard.hpp

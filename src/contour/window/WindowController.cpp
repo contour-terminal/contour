@@ -7,6 +7,7 @@
 #include <contour/command/TitleBarContextMenu.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -143,7 +144,10 @@ NoticeAnnouncerFactory qtNoticeAnnouncer()
     };
 }
 
-WindowController::~WindowController() = default;
+WindowController::~WindowController()
+{
+    detachCaption();
+}
 
 void WindowController::openCommandPalette()
 {
@@ -1601,7 +1605,7 @@ platform::WindowDecoration WindowController::decoration() const noexcept
 
 platform::FramePolicy WindowController::framePolicy() const noexcept
 {
-    return framePolicyFor(platform::currentFramePlatform(), decoration());
+    return framePolicyFor(_manager.app().framePlatform(), decoration());
 }
 
 bool WindowController::needsFramelessHint() const noexcept
@@ -1644,7 +1648,7 @@ void WindowController::setTitleBarVisible(bool visible)
     if (_osWindow != nullptr)
     {
         auto const target = visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
-        auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
+        auto const policy = framePolicyFor(_manager.app().framePlatform(), target);
         _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
         _nativeFrame->apply(*_osWindow, target);
     }
@@ -1660,6 +1664,9 @@ void WindowController::setTitleBarVisible(bool visible)
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
     refreshTitleBand();
+    // The OS draws its own caption buttons on the server frame; on the kept client frame ours are handed
+    // over.
+    refreshCaptionAttachment();
 
     // Which decoration is showing decides whether we publish a shadow at all: with the native frame
     // the window manager draws its own, and a second would stack on it. If setFlag() above recreated
@@ -1880,6 +1887,80 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
     // Publishes the band's request now, so Main.qml's `flags` carry its hints before the first frame; with no
     // platform window yet, nothing is applied until the first expose.
     refreshTitleBand();
+    refreshCaptionAttachment();
+}
+
+void WindowController::setCaptionButtonRect(
+    QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height)
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, _captionLayout.buttons.size()))
+        return;
+    _captionLayout.buttons[static_cast<size_t>(kind)] =
+        platform::LogicalRect { .x = x, .y = y, .width = width, .height = height };
+    _captionOwners[static_cast<size_t>(kind)] = owner;
+}
+
+void WindowController::clearCaptionButtonRect(QObject* owner, int kind)
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, _captionLayout.buttons.size()))
+        return;
+    if (_captionOwners[static_cast<size_t>(kind)] != owner)
+        return;
+    _captionLayout.buttons[static_cast<size_t>(kind)].reset();
+    _captionOwners[static_cast<size_t>(kind)] = nullptr;
+}
+
+platform::CaptionBinding WindowController::captionBinding()
+{
+    return platform::CaptionBinding {
+        // Logical throughout: the rectangles are the scene's, and the adapter converts the message's
+        // physical point with the window's current ratio, so a scale change moves nothing here. The
+        // resize border is ResizeBorder.qml's, a constant of the window geometry.
+        .layout =
+            [this] {
+                auto layout = _captionLayout;
+                layout.windowWidth = _osWindow != nullptr ? _osWindow->width() : 0;
+                layout.resizeBorder = geometry::ResizeBorderThickness;
+                return layout;
+            },
+        .visual = [this](platform::CaptionButtonVisual visual) { setNativeMaximizeVisual(visual); },
+        // The same show-mode protocol the QML button goes through.
+        .toggleMaximize = [this] { toggleMaximized(); },
+    };
+}
+
+void WindowController::refreshCaptionAttachment()
+{
+    QWindow* const wanted =
+        _osWindow != nullptr && framePolicy().shadow == platform::FrameShadowStrategy::NativeFrameKept
+            ? _osWindow
+            : nullptr;
+    if (_captionWindow.data() == wanted)
+        return;
+    detachCaption();
+    if (wanted == nullptr)
+        return;
+    _captionWindow = wanted;
+    _manager.app().captionButtons().attach(*wanted, captionBinding());
+}
+
+void WindowController::detachCaption()
+{
+    auto* const window = _captionWindow.data();
+    if (window == nullptr)
+        return;
+    _captionWindow.clear();
+    _manager.app().captionButtons().detach(*window);
+    // Nothing drives the button any more, so it rests.
+    setNativeMaximizeVisual(platform::CaptionButtonVisual::Rest);
+}
+
+void WindowController::setNativeMaximizeVisual(platform::CaptionButtonVisual visual)
+{
+    if (visual == _nativeMaximizeVisual)
+        return;
+    _nativeMaximizeVisual = visual;
+    emit nativeMaximizeVisualChanged();
 }
 
 void WindowController::refreshWindowShadow()
@@ -2235,6 +2316,8 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                     _windowShadow.reset();
                     // The next platform window wears nothing yet: its first expose dresses it again.
                     _appliedTitleBand.reset();
+                    // Nor answers for its caption buttons: the adapter looks a window up by its handle.
+                    detachCaption();
                 }
                 break;
 
@@ -2256,6 +2339,7 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                     platform::applyRowResizeHints(*_osWindow, rowResizeGrid());
                 }
                 refreshWindowShadow();
+                refreshCaptionAttachment();
                 // After the frame, so the material's settings win; before the inset's emit, which the
                 // toolbar it may attach moves.
                 refreshTitleBand();

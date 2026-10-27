@@ -4,6 +4,8 @@
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
+#include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/NoticeModel.hpp>
@@ -22,9 +24,12 @@
 #include <QtGui/QColor>
 
 #include <array>
+#include <cstddef>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace contour::test
@@ -136,6 +141,10 @@ class MainWindowControllerMock: public QAbstractListModel
         qreal titleBandRevealTop READ titleBandRevealTop WRITE setTitleBandRevealTop NOTIFY titleBandChanged)
     // Mirrors WindowController's notices: a real NoticeModel, on a clock the test moves, saying nothing.
     Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
+    // Mirrors WindowController's maximise button as the OS drives it; a test sets it with
+    // setNativeMaximizeVisual().
+    Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
+    Q_PROPERTY(bool nativeMaximizePressed READ nativeMaximizePressed NOTIFY nativeMaximizeVisualChanged)
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -308,6 +317,52 @@ class MainWindowControllerMock: public QAbstractListModel
     int cursorRow = window::ToastCoveredRows;   ///< The active pane's cursor row toastHost() reads.
     // }}}
 
+    // {{{ The caption buttons the OS drives
+    /// Mirrors WindowController::setCaptionButtonRect(): records the rectangle; out-of-range kinds ignored.
+    Q_INVOKABLE void setCaptionButtonRect(int kind, qreal x, qreal y, qreal width, qreal height)
+    {
+        if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
+            return;
+        captionRects[static_cast<size_t>(kind)] =
+            platform::LogicalRect { .x = x, .y = y, .width = width, .height = height };
+    }
+
+    /// Mirrors WindowController::clearCaptionButtonRect(): forgets the rectangle and records the call.
+    Q_INVOKABLE void clearCaptionButtonRect(int kind)
+    {
+        clearedCaptionKinds.push_back(kind);
+        if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
+            return;
+        captionRects[static_cast<size_t>(kind)].reset();
+    }
+
+    /// Mirrors WindowController::nativeMaximizeHovered().
+    [[nodiscard]] bool nativeMaximizeHovered() const noexcept
+    {
+        return _nativeMaximizeVisual != platform::CaptionButtonVisual::Rest;
+    }
+
+    /// Mirrors WindowController::nativeMaximizePressed().
+    [[nodiscard]] bool nativeMaximizePressed() const noexcept
+    {
+        return _nativeMaximizeVisual == platform::CaptionButtonVisual::Pressed;
+    }
+
+    /// What the caption adapter reports, as WindowController's binding would hear it.
+    /// @param visual How the maximise button looks now.
+    void setNativeMaximizeVisual(platform::CaptionButtonVisual visual)
+    {
+        if (_nativeMaximizeVisual == visual)
+            return;
+        _nativeMaximizeVisual = visual;
+        emit nativeMaximizeVisualChanged();
+    }
+
+    /// The rectangles WindowControls.qml last reported, by config::WindowControlKind.
+    std::array<std::optional<platform::LogicalRect>, config::WindowControlCount> captionRects {};
+    std::vector<int> clearedCaptionKinds {}; ///< Every clearCaptionButtonRect() kind, in order.
+    // }}}
+
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
     int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
@@ -330,6 +385,7 @@ class MainWindowControllerMock: public QAbstractListModel
     void visiblePaneCountChanged();
     void headerRevealChanged();
     void titleBandChanged();
+    void nativeMaximizeVisualChanged();
 
   private:
     QVariantList _tabContextMenuModel {};
@@ -339,6 +395,8 @@ class MainWindowControllerMock: public QAbstractListModel
     int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
     qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.
     qreal _titleBandRevealTop = 0; ///< @see titleBandRevealTop; 0 = the window's top.
+    /// @see setNativeMaximizeVisual.
+    platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
     platform::NullAnnouncer _noticeAnnouncer;
     window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
 };

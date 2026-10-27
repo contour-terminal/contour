@@ -447,6 +447,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     _titleBandMaterial(appearanceServices.titleBand()),
     _secureInput(appearanceServices.secureInput()),
+    _captionButtons(appearanceServices.caption()),
+    _framePlatform(appearanceServices.framePlatform),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -457,7 +459,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_taskbarProgressSink,
                     *_secureInput),
     _gpuInventory { display::makePlatformGpuInventory() },
-    _hostPlatform(config::detectHostPlatform(env)),
+    _hostPlatform(appearanceServices.hostPlatform.value_or(config::detectHostPlatform(env))),
     _shellHostPlatform(shellIntegration.host.value_or(_hostPlatform)),
     _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
     _guiState(std::move(shellIntegration.state)),
@@ -1865,6 +1867,11 @@ platform::INativeMenuPresenter& ContourGuiApp::nativeMenuPresenter() noexcept
 platform::ITitleBandMaterial& ContourGuiApp::titleBandMaterial() noexcept
 {
     return *_titleBandMaterial;
+}
+
+platform::INativeCaptionButtons& ContourGuiApp::captionButtons() noexcept
+{
+    return *_captionButtons;
 }
 
 config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept

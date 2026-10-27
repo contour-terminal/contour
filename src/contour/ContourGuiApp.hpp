@@ -655,6 +655,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The injected title-band material; the null one where the platform draws none.
     [[nodiscard]] platform::ITitleBandMaterial& titleBandMaterial() noexcept;
 
+    /// @return The injected caption adapter; the null one where the platform hands no button to the OS.
+    [[nodiscard]] platform::INativeCaptionButtons& captionButtons() noexcept;
+
+    /// @return The platform whose frame policy the windows follow: the build's own unless the appearance
+    ///         services injected another.
+    [[nodiscard]] platform::FramePlatform framePlatform() const noexcept { return _framePlatform; }
+
     /// @return How the resolved chrome style presents menus.
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
 
@@ -1016,6 +1023,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // The OS's secure keyboard entry, built from the appearance services. Declared before _sessionManager,
     // whose gate calls it and turns it off as the manager is destroyed: so it is destroyed after the gate.
     std::unique_ptr<platform::ISecureInput> _secureInput;
+    // The adapter that hands each client-drawn window's maximise button to the OS, built from the appearance
+    // services. Declared before _sessionManager for the reason _titleBandMaterial is: the window controllers
+    // detach from it as they go.
+    std::unique_ptr<platform::INativeCaptionButtons> _captionButtons;
+    // The platform whose frame policy the windows follow, from the appearance services. Declared before
+    // _sessionManager, whose window controllers read it.
+    platform::FramePlatform _framePlatform = platform::currentFramePlatform();
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
@@ -1132,7 +1146,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// when returning to System, and lets @c followLiveBackground skip a repaint that changes nothing.
     std::optional<Qt::ColorScheme> _appliedGuiScheme = std::nullopt;
 
-    // The host this process runs on, detected once from the environment at construction. Declared before
+    // The host this process runs on, detected once from the environment at construction unless the appearance
+    // services injected one. Declared before
     // the chrome row, which is resolved from it.
     config::HostPlatform _hostPlatform = config::HostPlatform::Other;
     /// The host the shell-integration offer, its editor and Settings' Install rows decide on.

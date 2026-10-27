@@ -869,6 +869,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/TaskbarProgressRouter_test.cpp
             platform/LauncherProgress_test.cpp
             platform/LauncherProgressSink_test.cpp
+            platform/NativeCaptionButtons_test.cpp
             platform/NativeWindowFrame_test.cpp
             window/WindowPositionStore_test.cpp
             window/AppMenuBar_test.cpp
@@ -970,6 +971,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/SettingsWindowHost_test.cpp
             window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp
+            window/CaptionController_test.cpp
             window/TitleBandController_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowMenus_test.cpp

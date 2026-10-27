@@ -8,6 +8,7 @@
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/MenuBarIntegration.hpp>
+#include <contour/platform/NativeCaptionButtons.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
@@ -15,6 +16,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -135,9 +137,43 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
     TitleBandRecord& _record;
 };
 
+/// What a RecordingCaptionButtons was asked.
+struct CaptionRecord
+{
+    std::vector<QWindow*> attached {};                  ///< Every window attached, in order.
+    std::vector<QWindow*> detached {};                  ///< Every window detached, in order.
+    std::optional<platform::CaptionBinding> binding {}; ///< The binding of the last attach.
+};
+
+/// A caption adapter that records into a CaptionRecord instead of reaching the OS.
+class RecordingCaptionButtons final: public platform::INativeCaptionButtons
+{
+  public:
+    /// @param record Where to record; it must outlive this adapter.
+    explicit RecordingCaptionButtons(CaptionRecord& record): _record { record } {}
+
+    /// Appends @p window to the record and keeps @p binding.
+    void attach(QWindow& window, platform::CaptionBinding binding) override
+    {
+        _record.attached.push_back(&window);
+        _record.binding = std::move(binding);
+    }
+
+    /// Appends @p window to the record and drops the binding.
+    void detach(QWindow& window) override
+    {
+        _record.detached.push_back(&window);
+        _record.binding.reset();
+    }
+
+  private:
+    CaptionRecord& _record;
+};
+
 /// Services whose factories attach to the given switches: each stores the callback it is handed into
 /// its switch and returns a source that reads that switch. Menus get the null presenter, the menu
-/// bar the null integration, the title band the null material, and secure input the null one.
+/// bar the null integration, the title band the null material, secure input the null one, and the caption the
+/// null adapter; the frame platform is the build's own and the host is detected.
 /// @param accessibility The accessibility switch; it must outlive the services and their sources.
 /// @param appearance The appearance switch; it must outlive the services and their sources.
 /// @return The services.
@@ -171,6 +207,12 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
         .secureInput = []() -> std::unique_ptr<platform::ISecureInput> {
             return std::make_unique<platform::NullSecureInput>();
         },
+        // The null adapter, so a fixture-built app never answers a window's non-client messages.
+        .caption = []() -> std::unique_ptr<platform::INativeCaptionButtons> {
+            return std::make_unique<platform::NullNativeCaptionButtons>();
+        },
+        .framePlatform = platform::currentFramePlatform(),
+        .hostPlatform = std::nullopt,
     };
 }
 
@@ -204,6 +246,25 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
     auto services = appearanceServicesWith(accessibility, appearance);
     services.secureInput = [&secureInput]() -> std::unique_ptr<platform::ISecureInput> {
         return std::make_unique<RecordingSecureInput>(secureInput);
+    };
+    return services;
+}
+
+/// The services of appearanceServicesWith(AccessibilitySwitch&, AppearanceSwitch&, TitleBandRecord&), with a
+/// caption adapter that records into @p caption.
+/// @param accessibility The accessibility switch; it must outlive the services and their sources.
+/// @param appearance The appearance switch; it must outlive the services and their sources.
+/// @param titleBand The title-band record; it must outlive the services and their material.
+/// @param caption The caption record; it must outlive the services and their adapter.
+/// @return The services.
+[[nodiscard]] inline platform::AppearanceServices appearanceServicesWith(AccessibilitySwitch& accessibility,
+                                                                         AppearanceSwitch& appearance,
+                                                                         TitleBandRecord& titleBand,
+                                                                         CaptionRecord& caption)
+{
+    auto services = appearanceServicesWith(accessibility, appearance, titleBand);
+    services.caption = [&caption]() -> std::unique_ptr<platform::INativeCaptionButtons> {
+        return std::make_unique<RecordingCaptionButtons>(caption);
     };
     return services;
 }

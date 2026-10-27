@@ -7,6 +7,8 @@
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/Announcer.hpp>
+#include <contour/platform/CaptionHitTest.hpp>
+#include <contour/platform/NativeCaptionButtons.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/platform/WindowResizeGrid.hpp>
@@ -34,6 +36,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QtQml>
@@ -168,6 +171,10 @@ class WindowController:
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(qreal titleBandRevealTop READ titleBandRevealTop NOTIFY titleBandChanged)
     Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground NOTIFY titleBandChanged)
+    // How the maximise button looks while the OS drives it (Snap Layouts): two QML-facing predicates rather
+    // than the enum's number, so WindowControls.qml names no enumerator value.
+    Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
+    Q_PROPERTY(bool nativeMaximizePressed READ nativeMaximizePressed NOTIFY nativeMaximizeVisualChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -718,6 +725,50 @@ class WindowController:
     [[nodiscard]] qreal nativeControlsInset() const noexcept;
     // }}}
 
+    // {{{ The caption buttons the OS drives (Snap Layouts)
+
+    /// Records where a caption button sits in the scene, for the caption adapter's hit test.
+    /// @param owner  The control reporting it; only the control that reported a kind last may clear it.
+    /// @param kind   int(config::WindowControlKind); an out-of-range kind is ignored.
+    /// @param x      The button's leading edge, in the window's logical pixels.
+    /// @param y      Its top edge.
+    /// @param width  Its width.
+    /// @param height Its height.
+    Q_INVOKABLE void setCaptionButtonRect(
+        QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height);
+
+    /// Forgets a caption button, which is no longer shown -- unless another control reported it since: a
+    /// change of side builds the new controls before the old ones are gone.
+    /// @param owner The control that no longer shows it.
+    /// @param kind  int(config::WindowControlKind); an out-of-range kind is ignored.
+    Q_INVOKABLE void clearCaptionButtonRect(QObject* owner, int kind);
+
+    /// @return How the maximise button looks while the OS drives it; Rest until the adapter says otherwise.
+    [[nodiscard]] platform::CaptionButtonVisual nativeMaximizeVisual() const noexcept
+    {
+        return _nativeMaximizeVisual;
+    }
+
+    /// @return Whether the OS reports the pointer over the maximise button (hovered or pressed). A
+    ///         QML-facing predicate: the carve-out for Q_PROPERTY booleans.
+    [[nodiscard]] bool nativeMaximizeHovered() const noexcept
+    {
+        return _nativeMaximizeVisual != platform::CaptionButtonVisual::Rest;
+    }
+
+    /// @return Whether the OS reports the maximise button pressed. A QML-facing predicate, as above.
+    [[nodiscard]] bool nativeMaximizePressed() const noexcept
+    {
+        return _nativeMaximizeVisual == platform::CaptionButtonVisual::Pressed;
+    }
+
+    /// What this window lends the caption adapter: the adapter's seam, public so a test drives it on any OS.
+    /// The layout carries the reported rectangles, the OS window's logical width and the resize border's
+    /// thickness; the visual updates nativeMaximizeVisual(); the toggle maximises or restores.
+    /// @return The binding; its callbacks capture this controller.
+    [[nodiscard]] platform::CaptionBinding captionBinding();
+    // }}}
+
     // {{{ The title band's material and geometry
 
     /// Re-decides the title band: applies its request through the app's title-band material when the
@@ -1075,6 +1126,8 @@ class WindowController:
     void nativeControlsInsetChanged();
     /// The band's published geometry or request changed (@see refreshTitleBand).
     void titleBandChanged();
+    /// The OS changed how the maximise button looks (@see nativeMaximizeVisual).
+    void nativeMaximizeVisualChanged();
     void tabBarPositionChanged();
     void tabBarVisibilityChanged();
     void tabBarShouldShowChanged();
@@ -1237,6 +1290,16 @@ class WindowController:
 
     /// The frame policy for this window's platform and current decoration.
     [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
+
+    /// Attaches the bound OS window to the app's caption adapter while its frame is the kept Windows frame
+    /// (FrameShadowStrategy::NativeFrameKept), and detaches it otherwise. Cheap to repeat. GUI thread.
+    void refreshCaptionAttachment();
+
+    /// Detaches the bound OS window from the caption adapter, if attached, and rests the button. GUI thread.
+    void detachCaption();
+
+    /// Stores @p visual and emits nativeMaximizeVisualChanged() when it differs. GUI thread.
+    void setNativeMaximizeVisual(platform::CaptionButtonVisual visual);
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
@@ -1452,6 +1515,16 @@ class WindowController:
     // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
     // every call site can apply the policy unconditionally rather than guarding on the platform.
     std::unique_ptr<platform::NativeWindowFrame> _nativeFrame;
+
+    // The OS window attached to the app's caption adapter, if any. A QPointer, so a window destroyed while
+    // attached is not detached through a dangling reference (the adapter forgets a destroyed window itself).
+    QPointer<QWindow> _captionWindow;
+    // The caption buttons' scene rectangles, as WindowControls.qml reports them (logical pixels).
+    platform::CaptionLayout _captionLayout {};
+    // The control that reported each of them last, by WindowControlKind: the only one whose clear counts.
+    std::array<QPointer<QObject>, config::WindowControlCount> _captionOwners {};
+    // How the maximise button looks while the OS drives it.
+    platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
 
     // The title band request last applied to this window's platform window, if any; forgotten when the
     // decoration changes, so the next refresh applies again.
