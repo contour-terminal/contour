@@ -32,7 +32,8 @@ Item {
     /// The card's corner radius: the header's top corners take it, its bottom edge stays square.
     property real cornerRadius: 0
     // Whether the find bar has taken this row (the Terminal row's, SearchBar's headerRow anchor): the name
-    // stays, and the directory and the buttons give the bar their room. A bool, the QML carve-out.
+    // stays, and the directory and the buttons give the bar their room. A bool by the QML-facing carve-out:
+    // the predicate SearchBar.occupiesHeaderRow relayed through TerminalPane, decided there, not here.
     property bool findActive: false
     // Where the find bar goes when it takes this row: after the name, to the trailing edge.
     readonly property alias findSlot: findSlotItem

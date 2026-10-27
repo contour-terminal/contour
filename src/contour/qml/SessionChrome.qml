@@ -41,6 +41,8 @@ Item {
     // TerminalPane): where the Terminal row's find bar goes. None outside a card.
     property Item headerFindSlot: null
     property int headerPresent: 0
+    // A bool by the QML-facing carve-out: it relays SearchBar.occupiesHeaderRow, a predicate derived from
+    // the placement's named anchor, up to TerminalPane; it decides nothing itself.
     readonly property bool findInHeaderRow: searchBar.occupiesHeaderRow
 
     // Whether the scrollbar is moving to follow the session's viewport (@see updateScrollBarPosition): a move

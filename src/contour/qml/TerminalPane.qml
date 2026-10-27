@@ -61,6 +61,8 @@ ContourTerminal {
     // for the find bar (SessionChrome's SearchBar); and whether the bar sits in that header row now.
     property Item headerFindSlot: null
     property int headerPresent: 0
+    // A bool by the QML-facing carve-out: it relays SearchBar.occupiesHeaderRow, a predicate derived from
+    // the placement's named anchor, up to PaneCard's header; it decides nothing itself.
     readonly property bool findInHeaderRow: chrome.findInHeaderRow
 
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which

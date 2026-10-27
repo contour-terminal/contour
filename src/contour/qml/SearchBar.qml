@@ -70,6 +70,9 @@ Popup {
 
     // The Terminal row's bar takes the pane header's row where the pane has one: the header's own fill
     // behind it, no grid row spent on it.
+    // Both stay bool (AGENT.md's QML-facing carve-out): each is a predicate the reader asks of the bar --
+    // is it in the header row? -- derived from placement.anchor, which is where the named outcome lives;
+    // PaneHeader reads occupiesHeaderRow through SessionChrome and TerminalPane to give the bar its row.
     readonly property bool _inHeaderRow: root.placement.anchor === "headerRow" && root.headerSlot !== null
     readonly property bool occupiesHeaderRow: root._inHeaderRow && root.visible
 
