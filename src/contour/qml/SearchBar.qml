@@ -93,9 +93,12 @@ Popup {
     // Mandatory, not decorative: `ui_style` defaults to Native, which pins Fusion -- a Qt style whose
     // control files are not ours to edit -- so a background left to the style would be unshadowed and
     // differently shaped from every other popup here. See PopupSurface.qml.
+    // Lifted by e2, the design's level for a floating bar: a soft shadow on the native rows, a hard
+    // one-cell offset copy on the Terminal row (ElevationShadow).
     background: PopupSurface {
         objectName: "searchBarBackground"
         radius: chromeStyle.radii.findBar
+        elevation: chromeStyle.elevation.e2
         visible: !root._inHeaderRow
     }
 

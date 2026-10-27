@@ -8297,6 +8297,13 @@ TEST_CASE("The find bar sits at its pane's top right with the design's extents (
     auto* background = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarBackground"));
     REQUIRE(background != nullptr);
     CHECK(background->property("radius").toReal() == 8.0);
+    // Lifted by e2: its soft shadow, in place of the style's popup shadow.
+    auto const* elevation = providerOf(engine).property("elevation").value<QObject*>();
+    REQUIRE(elevation != nullptr);
+    CHECK(background->property("elevation").value<QObject*>() == elevation->property("e2").value<QObject*>());
+    auto* soft = background->findChild<QQuickItem*>(QStringLiteral("elevationSoftShadow"));
+    REQUIRE(soft != nullptr);
+    CHECK(soft->isVisible());
     for (auto* toggle: searchToggleButtons(*host.bar))
     {
         REQUIRE(toggle != nullptr);
@@ -8458,6 +8465,16 @@ TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[conto
     auto* background = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarBackground"));
     REQUIRE(background != nullptr);
     CHECK(background->property("radius").toReal() == 0.0);
+    // Lifted by e2, which is a hard offset copy here, a cell's worth down and across.
+    auto const* e2 = style->property("elevation").value<QObject*>()->property("e2").value<QObject*>();
+    REQUIRE(e2 != nullptr);
+    CHECK(background->property("elevation").value<QObject*>() == e2);
+    auto* hard = background->findChild<QQuickItem*>(QStringLiteral("elevationHardShadow"));
+    REQUIRE(hard != nullptr);
+    CHECK(hard->isVisible());
+    CHECK(hard->x() == e2->property("offsetX").toReal());
+    CHECK(hard->y() == e2->property("offsetY").toReal());
+    CHECK(hard->y() > 0.0);
 
     auto const buttons = searchToggleButtons(*host.bar);
     auto const texts = std::array { QStringLiteral("[Aa]"), QStringLiteral("[.*]"), QStringLiteral("[ab]") };
