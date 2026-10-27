@@ -75,6 +75,12 @@ TEST_CASE("paneActivityOf compares the foreground to the shell", "[chromekeys]")
     CHECK(paneActivityOf("/bin/zsh", std::string { "-zsh" }) == PaneActivity::Idle);
     CHECK(paneActivityOf("/bin/zsh", std::string { "make" }) == PaneActivity::Running);
     CHECK(paneActivityOf("/bin/zsh", std::nullopt) == PaneActivity::Unknown);
+    // A shell written with its arguments is still the shell.
+    CHECK(paneActivityOf("bash -l", std::string { "bash" }) == PaneActivity::Idle);
+    CHECK(paneActivityOf("/usr/bin/bash --login -i", std::string { "-bash" }) == PaneActivity::Idle);
+    CHECK(paneActivityOf("/usr/bin/bash --login -i", std::string { "make" }) == PaneActivity::Running);
+    CHECK(paneActivityOf("C:/Program Files/Git/bin/bash.exe", std::string { "bash.exe" })
+          == PaneActivity::Idle);
 }
 
 TEST_CASE("closeConfirmationFor asks unless every pane is known to be idle", "[chromekeys]")

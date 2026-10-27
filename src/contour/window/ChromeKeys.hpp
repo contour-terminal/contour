@@ -147,7 +147,7 @@ namespace detail
 } // namespace detail
 
 /// Classifies a pane from its foreground process.
-/// @param shellProgram The profile's shell program (a path or a name).
+/// @param shellProgram The profile's shell program: a path or a name, possibly with arguments ("bash -l").
 /// @param foreground The pane's foreground process name; nullopt when it cannot be known.
 /// @return Unknown without a name, Idle when it is the shell (base name, login '-' removed), else Running.
 [[nodiscard]] inline PaneActivity paneActivityOf(std::string_view shellProgram,
@@ -155,7 +155,11 @@ namespace detail
 {
     if (!foreground)
         return PaneActivity::Unknown;
-    return detail::programBaseName(*foreground) == detail::programBaseName(shellProgram)
+    auto const name = detail::programBaseName(*foreground);
+    // The whole string first: a path may hold a space ("C:/Program Files/Git/bin/bash.exe"). Then its first
+    // word, for a program written with its arguments.
+    auto const program = shellProgram.substr(0, shellProgram.find(' '));
+    return name == detail::programBaseName(shellProgram) || name == detail::programBaseName(program)
                ? PaneActivity::Idle
                : PaneActivity::Running;
 }
