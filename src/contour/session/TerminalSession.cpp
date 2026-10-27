@@ -3976,6 +3976,11 @@ config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
     return actions;
 }
 
+int TerminalSession::executeBoundActions(config::ActionList const& actions)
+{
+    return executeAllActions(actions);
+}
+
 bool TerminalSession::willRun(config::ActionList const& actions) const
 {
     return _allowKeyMappings || config::containsAction<actions::ToggleAllKeyMaps>(actions);

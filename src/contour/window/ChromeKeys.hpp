@@ -20,6 +20,8 @@ enum class ChromeKey : uint8_t
     Other = 0,
     Left,
     Right,
+    Up,
+    Down,
     Home,
     End,
     Return,
@@ -27,6 +29,7 @@ enum class ChromeKey : uint8_t
     Backspace,
     Delete,
     Escape,
+    Tab, ///< Tab and, with Shift, Shift+Tab (Qt's Backtab).
 };
 
 /// The modifier state a chrome key arrives with.
@@ -34,6 +37,7 @@ enum class ChromeKeyModifier : uint8_t
 {
     None = 0,
     Alt,   ///< Alt (Option on macOS) alone.
+    Shift, ///< Shift alone.
     Other, ///< Any other modifier combination: the chrome leaves such keys alone.
 };
 
@@ -83,6 +87,25 @@ inline constexpr std::array ChromeKeyRows {
     ChromeKeyRow { ChromeArea::Toolbar, ChromeKey::Space, ChromeKeyModifier::None, ChromeCommand::Activate },
     ChromeKeyRow { ChromeArea::Toolbar, ChromeKey::Escape, ChromeKeyModifier::None, ChromeCommand::Leave },
 };
+
+/// The keys the chrome takes for itself while it has focus, whether or not its area has a row for them:
+/// they are never an application binding there. Every other chord (the command palette, a new tab, a user
+/// binding) keeps working from inside the chrome.
+inline constexpr std::array ChromeConsumedKeys {
+    ChromeKey::Left,      ChromeKey::Right,  ChromeKey::Up,     ChromeKey::Down,
+    ChromeKey::Home,      ChromeKey::End,    ChromeKey::Return, ChromeKey::Space,
+    ChromeKey::Backspace, ChromeKey::Delete, ChromeKey::Escape, ChromeKey::Tab,
+};
+
+/// Whether the chrome takes a key for itself.
+/// @param key The key.
+/// @param modifier The modifier state it arrived with.
+/// @return True for a key of ChromeConsumedKeys with no modifier, or with Alt or Shift alone; a chord with
+///         Ctrl, Meta or more than one modifier is the application's.
+[[nodiscard]] constexpr bool chromeConsumes(ChromeKey key, ChromeKeyModifier modifier) noexcept
+{
+    return modifier != ChromeKeyModifier::Other && std::ranges::contains(ChromeConsumedKeys, key);
+}
 
 /// What @p key does in @p area.
 /// @param area The focused chrome area.

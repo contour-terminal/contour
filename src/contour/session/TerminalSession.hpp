@@ -999,7 +999,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Whether a program other than the shell is in front of this session's shell, which decides if closing
     /// its tab asks first. GUI thread; one query of the process table.
-    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process; closing a
+    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process; closing
+    /// a
     ///         tab asks about such a pane, since it may be running anything.
     [[nodiscard]] window::PaneActivity paneActivity() const;
 
@@ -1763,6 +1764,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param config The reloaded configuration.
     /// @param profileName The profile to run under: the session's own, unless it is switching.
     void applyReloadedConfig(config::Config const& config, std::string const& profileName);
+
+    /// Runs the actions of a binding the window matched for a key the chrome had focus for: what a press of
+    /// the chord does in the terminal, minus the PTY. GUI thread.
+    /// @param actions The bound actions.
+    /// @return How many actions ran.
+    [[nodiscard]] int executeBoundActions(config::ActionList const& actions);
 
   public slots:
     void onHighlightUpdate();

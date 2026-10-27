@@ -950,6 +950,8 @@ namespace
     inline constexpr auto QtChromeKeyRows = std::array {
         QtChromeKeyRow { .qt = Qt::Key_Left, .key = window::ChromeKey::Left },
         QtChromeKeyRow { .qt = Qt::Key_Right, .key = window::ChromeKey::Right },
+        QtChromeKeyRow { .qt = Qt::Key_Up, .key = window::ChromeKey::Up },
+        QtChromeKeyRow { .qt = Qt::Key_Down, .key = window::ChromeKey::Down },
         QtChromeKeyRow { .qt = Qt::Key_Home, .key = window::ChromeKey::Home },
         QtChromeKeyRow { .qt = Qt::Key_End, .key = window::ChromeKey::End },
         QtChromeKeyRow { .qt = Qt::Key_Return, .key = window::ChromeKey::Return },
@@ -958,6 +960,8 @@ namespace
         QtChromeKeyRow { .qt = Qt::Key_Backspace, .key = window::ChromeKey::Backspace },
         QtChromeKeyRow { .qt = Qt::Key_Delete, .key = window::ChromeKey::Delete },
         QtChromeKeyRow { .qt = Qt::Key_Escape, .key = window::ChromeKey::Escape },
+        QtChromeKeyRow { .qt = Qt::Key_Tab, .key = window::ChromeKey::Tab },
+        QtChromeKeyRow { .qt = Qt::Key_Backtab, .key = window::ChromeKey::Tab },
     };
 
     [[nodiscard]] window::ChromeKey chromeKeyOf(int qtKey) noexcept
@@ -975,6 +979,8 @@ namespace
             return window::ChromeKeyModifier::None;
         if (modifiers == Qt::AltModifier)
             return window::ChromeKeyModifier::Alt;
+        if (modifiers == Qt::ShiftModifier)
+            return window::ChromeKeyModifier::Shift;
         return window::ChromeKeyModifier::Other;
     }
 
@@ -1086,12 +1092,12 @@ void WindowController::clampChromeFocus()
     emit chromeFocusChanged();
 }
 
-std::optional<window::ChromeFocusAction> WindowController::chromeFocusActionFor(
-    int qtKey, Qt::KeyboardModifiers modifiers) const
+std::vector<actions::Action> const* WindowController::boundActionsFor(int qtKey,
+                                                                      Qt::KeyboardModifiers modifiers) const
 {
     auto const* session = activeSession();
     if (session == nullptr)
-        return std::nullopt;
+        return nullptr;
 
     // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
     constexpr auto NoModes = uint8_t { 0 };
@@ -1105,33 +1111,42 @@ std::optional<window::ChromeFocusAction> WindowController::chromeFocusActionFor(
     {
         if (qtKey == Qt::Key_Backtab)
             chord.enable(vtbackend::Modifier::Shift);
-        if (auto const* bound = config::apply(mappings.keyMappings, *named, chord, NoModes))
-            return focusActionOf(*bound);
-        return std::nullopt;
+        return config::apply(mappings.keyMappings, *named, chord, NoModes);
     }
     if (qtKey < PrintableAsciiBegin || qtKey >= PrintableAsciiEnd)
-        return std::nullopt;
+        return nullptr;
     // As TerminalSession matches a character: letters folded, and under Shift the unshifted key as well.
     auto const folded = config::foldedBindingCodepoint(static_cast<char32_t>(qtKey));
     auto const* bound = config::apply(mappings.charMappings, folded, chord, NoModes);
     if (bound == nullptr && chord.test(vtbackend::Modifier::Shift))
         if (auto const base = input::unshiftedCodepoint(folded); base != folded)
             bound = config::apply(mappings.charMappings, base, chord, NoModes);
-    return bound != nullptr ? focusActionOf(*bound) : std::nullopt;
+    return bound;
 }
 
 bool WindowController::chromeKey(int qtKey, int qtModifiers)
 {
     auto const modifiers = Qt::KeyboardModifiers { qtModifiers };
-    if (auto const action = chromeFocusActionFor(qtKey, modifiers))
-    {
-        moveChromeFocus(*action);
-        return true;
-    }
+    auto const* bound = boundActionsFor(qtKey, modifiers);
+    if (bound != nullptr)
+        if (auto const action = focusActionOf(*bound))
+        {
+            moveChromeFocus(*action);
+            return true;
+        }
     if (_chromeArea == window::ChromeArea::Terminal)
         return false;
-    return runChromeCommand(
-        window::chromeCommandFor(_chromeArea, chromeKeyOf(qtKey), chromeModifierOf(modifiers)));
+    auto const key = chromeKeyOf(qtKey);
+    auto const modifier = chromeModifierOf(modifiers);
+    if (window::chromeConsumes(key, modifier))
+        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier));
+    // Every other chord is the application's, as in the terminal: bound actions run, plain typing does not
+    // reach the shell.
+    if (bound == nullptr)
+        return false;
+    // A copy: an action may close the tab, and with it the session whose configuration holds the list.
+    auto const actions = *bound;
+    return activeSession()->executeBoundActions(actions) > 0;
 }
 
 bool WindowController::runChromeCommand(window::ChromeCommand command)

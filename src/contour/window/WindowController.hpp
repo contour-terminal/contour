@@ -333,8 +333,10 @@ class WindowController:
     Q_INVOKABLE void setChromePresence(bool tabsShown, int toolbarItems);
     /// Offers a key press in the chrome. The key is first matched against the active session's key
     /// bindings for the three focus actions (so Ctrl+F6 cycles from inside the chrome too, and a rebound
-    /// chord follows); otherwise it is looked up in ChromeKeyRows for the focused area. A toolbar item is
-    /// pressed by QML itself, so Return and Space there are left unhandled.
+    /// chord follows). A key in ChromeConsumedKeys is looked up in ChromeKeyRows for the focused area. Any
+    /// other chord runs its binding, so the command palette or a new tab work from inside the chrome, while
+    /// plain typing reaches nothing. A toolbar item is pressed by QML itself, so Return and Space there are
+    /// left unhandled.
     /// @param qtKey The Qt::Key of the event.
     /// @param qtModifiers The event's Qt::KeyboardModifiers.
     /// @return Whether the key was handled, so QML should accept the event (a QML-facing carve-out).
@@ -1211,9 +1213,10 @@ class WindowController:
     void clampChromeFocus();
     /// Runs @p command on the focused area. @return Whether it was handled.
     [[nodiscard]] bool runChromeCommand(window::ChromeCommand command);
-    /// The focus action the active session's key bindings give a key press, if any.
-    [[nodiscard]] std::optional<window::ChromeFocusAction> chromeFocusActionFor(
-        int qtKey, Qt::KeyboardModifiers modifiers) const;
+    /// The actions the active session's key bindings give a key press while the chrome has focus.
+    /// @return The bound actions; nullptr when nothing is bound or there is no active session.
+    [[nodiscard]] std::vector<actions::Action> const* boundActionsFor(int qtKey,
+                                                                      Qt::KeyboardModifiers modifiers) const;
     /// Closes the tab at @p row, asking first unless every pane is known to be idle (a pane whose program
     /// cannot be known asks too: window::closeConfirmationFor).
     void closeTabAskingIfBusy(int row);

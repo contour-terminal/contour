@@ -57,6 +57,32 @@ TEST_CASE("the terminal answers no chrome key", "[chromekeys]")
             CHECK(chromeCommandFor(ChromeArea::Terminal, key, modifier) == ChromeCommand::None);
 }
 
+TEST_CASE("the chrome consumes arrows, Return, Space, Escape, Backspace and Tab, and nothing with Ctrl",
+          "[chromekeys]")
+{
+    for (auto const key: { ChromeKey::Left,
+                           ChromeKey::Right,
+                           ChromeKey::Up,
+                           ChromeKey::Down,
+                           ChromeKey::Return,
+                           ChromeKey::Space,
+                           ChromeKey::Escape,
+                           ChromeKey::Backspace,
+                           ChromeKey::Tab })
+    {
+        CHECK(chromeConsumes(key, None));
+        CHECK(chromeConsumes(key, Shift));
+        CHECK_FALSE(chromeConsumes(key, Other));
+    }
+    CHECK_FALSE(chromeConsumes(ChromeKey::Other, None));
+}
+
+TEST_CASE("every key a chrome area answers is consumed", "[chromekeys]")
+{
+    for (auto const& row: ChromeKeyRows)
+        CHECK(chromeConsumes(row.key, row.modifier));
+}
+
 TEST_CASE("focusedIndexAfter clamps and never wraps", "[chromekeys]")
 {
     CHECK(focusedIndexAfter(ChromeCommand::FocusPrevious, 0, 3) == 0);

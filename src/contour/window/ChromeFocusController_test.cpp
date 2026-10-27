@@ -420,3 +420,52 @@ TEST_CASE("a bare F6 is written to the PTY", "[windowcontroller][chromefocus]")
     CHECK(contour::test::mockPtyOf(*f.controller().activeSession()).stdinBuffer() == "\x1b[17~");
     CHECK(f.area() == ChromeArea::Terminal);
 }
+
+TEST_CASE("an application binding works while the chrome has focus", "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    auto palette = QSignalSpy { &controller, &contour::window::WindowController::commandPaletteRequested };
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(f.area() == ChromeArea::Tabs);
+
+    SECTION("Ctrl+Shift+P opens the command palette, and the chrome keeps its focus")
+    {
+        CHECK(f.chromeKey(Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier));
+        CHECK(palette.count() == 1);
+        CHECK(f.area() == ChromeArea::Tabs);
+    }
+
+    SECTION("an arrow key is the chrome's and opens nothing")
+    {
+        CHECK(f.chromeKey(Qt::Key_Right));
+        CHECK(palette.count() == 0);
+    }
+
+    SECTION("plain typing is neither handled nor bound")
+    {
+        CHECK_FALSE(f.chromeKey(Qt::Key_P));
+        CHECK(palette.count() == 0);
+    }
+}
+
+TEST_CASE("a chord on a key the chrome consumes still runs a binding that names it with Ctrl",
+          "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture { [](contour::config::InputMappings& mappings) {
+        using contour::config::KeyInputMapping;
+        using vtbackend::Modifier;
+        using vtbackend::Modifiers;
+        mappings.keyMappings.push_back(
+            KeyInputMapping { .modes {},
+                              .modifiers = Modifiers { Modifier::Control },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { contour::actions::OpenCommandPalette {} } });
+    } };
+    auto palette =
+        QSignalSpy { &f.controller(), &contour::window::WindowController::commandPaletteRequested };
+    f.controller().moveChromeFocus(contour::window::ChromeFocusAction::Next);
+
+    CHECK(f.chromeKey(Qt::Key_Right, Qt::ControlModifier));
+    CHECK(palette.count() == 1);
+}

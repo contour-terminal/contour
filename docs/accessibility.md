@@ -75,9 +75,11 @@ nowhere to go, and Ctrl+F6 reaches the program like any other key. Closing a tab
 foreground program is not its shell, and also when Contour cannot tell (every pane of a daemon-hosted
 window), because closing the tab would end whatever runs in it.
 
-While the chrome has focus, only those three chords and the keys in the table are taken. Every other
-binding, such as the command palette or opening a new tab, does nothing until you press Escape to return to
-the terminal.
+While the chrome has focus, every key binding keeps working, such as the command palette, opening a new tab
+or one of your own, except the keys the chrome takes for itself: the arrow keys, Home, End, Return, Space,
+Escape, Backspace, Delete and Tab, with no modifier or with Shift or Alt alone. A chord with Ctrl on one of
+those keys is still yours. Plain typing is not sent to the shell until you press Escape to return to the
+terminal.
 
 ## Things that are only announced
 
