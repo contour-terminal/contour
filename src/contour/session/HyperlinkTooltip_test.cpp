@@ -217,6 +217,9 @@ TEST_CASE("linkPillText reads a URL as a breadcrumb", "[contour][hyperlink]")
     CHECK(linkPillText("git+ssh://host/repo", LocalHost, Max) == "host \u203A repo");
     // A file elsewhere keeps its scheme however the scheme is spelled.
     CHECK(linkPillText("FILE://remote/tmp/x.log", LocalHost, Max) == "FILE://remote/tmp/x.log");
+    // And a local one is its path however its scheme is spelled.
+    CHECK(linkPillText("FILE:///home/user/my%20file.txt", LocalHost, Max) == "/home/user/my file.txt");
+    CHECK(linkPillText("File://fedora/tmp/x.log", LocalHost, Max) == "/tmp/x.log");
     CHECK(linkPillText("", LocalHost, Max).empty());
 
     // What it holds is shown, not obeyed: U+202E spliced in byte by byte.

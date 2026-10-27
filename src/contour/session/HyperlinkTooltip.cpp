@@ -46,6 +46,18 @@ namespace
         return offsets;
     }
 
+    /// How a file:// URL begins, in the lower case vtbackend::parseFileUrl reads.
+    constexpr auto FileScheme = std::string_view { "file://" };
+
+    /// Whether @p uri is a file:// URL, its scheme spelled in any case (RFC 3986 §3.1).
+    [[nodiscard]] bool isFileUrl(std::string_view uri) noexcept
+    {
+        return uri.size() >= FileScheme.size()
+               && std::ranges::equal(uri.substr(0, FileScheme.size()), FileScheme, [](char a, char b) {
+                      return std::tolower(static_cast<unsigned char>(a)) == b;
+                  });
+    }
+
     /// The path a file:// URI names on THIS host, decoded for reading, or nullopt when it names anything
     /// else -- or when no file:// URI names a path here (@p localHost nullopt). A truncated or malformed
     /// escape is left as written rather than dropped: showing the user what the application actually sent
@@ -53,10 +65,12 @@ namespace
     [[nodiscard]] std::optional<std::string> localFilePath(std::string_view uri,
                                                            std::optional<std::string_view> localHost)
     {
-        if (!uri.starts_with("file://") || !localHost)
+        if (!isFileUrl(uri) || !localHost)
             return std::nullopt;
 
-        return vtbackend::localPathOfFileUrl(std::string { uri }, *localHost);
+        // The scheme is case-insensitive (RFC 3986 §3.1); the URL reader expects it in lower case.
+        return vtbackend::localPathOfFileUrl(
+            std::string { FileScheme } + std::string { uri.substr(FileScheme.size()) }, *localHost);
     }
 
     /// What separates two parts of a breadcrumb: U+203A between spaces.
@@ -72,16 +86,6 @@ namespace
             return isAlpha(ch) || (ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '.';
         };
         return !text.empty() && isAlpha(text.front()) && std::ranges::all_of(text, isSchemeChar);
-    }
-
-    /// Whether @p uri is a file:// URL, its scheme spelled in any case (RFC 3986 §3.1).
-    [[nodiscard]] bool isFileUrl(std::string_view uri) noexcept
-    {
-        constexpr auto FileScheme = std::string_view { "file://" };
-        return uri.size() >= FileScheme.size()
-               && std::ranges::equal(uri.substr(0, FileScheme.size()), FileScheme, [](char a, char b) {
-                      return std::tolower(static_cast<unsigned char>(a)) == b;
-                  });
     }
 
     /// @p uri as a breadcrumb, its host and its non-empty decoded path segments, or nullopt where it has no
