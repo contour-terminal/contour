@@ -27,10 +27,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -165,6 +168,9 @@ class MockMainController: public MainWindowControllerMock
     /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
     explicit MockMainController(MainWindowScene scene = {}):
         _scene { std::move(scene) },
+        _tabs { std::ranges::to<std::vector<int>>(std::views::iota(0, _scene.tabCount)) },
+        _nextTabId { _scene.tabCount },
+        _activeTabId { _scene.activeTab >= 0 && _scene.activeTab < _scene.tabCount ? _scene.activeTab : -1 },
         _tabBarPosition { static_cast<int>(_scene.tabBarPosition) },
         _tabBarShouldShow { config::isTabBarShown(_scene.tabBarVisibility, _scene.tabCount) },
         _titleBarVisible { _scene.frame == snapshot::SnapshotFrame::NativeFrame },
@@ -183,11 +189,19 @@ class MockMainController: public MainWindowControllerMock
     /// @return The drift model Main.qml reads as `daemonDrift` when the scene drifted.
     [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
 
-    [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
+    [[nodiscard]] int activeTabIndex() const noexcept { return rowOf(_activeTabId); }
     /// @return The focused window::ChromeArea as its underlying value.
     [[nodiscard]] int chromeFocusArea() const noexcept { return static_cast<int>(_chromeArea); }
     /// @return The focused tab's row while the tab well has focus, else -1.
-    [[nodiscard]] int focusedTabIndex() const noexcept { return _focusedTab; }
+    [[nodiscard]] int focusedTabIndex() const noexcept { return rowOf(_focusedTabId); }
+    /// @return The identity of the focused tab while the tab well has focus, else -1. Rows move under it;
+    /// this does not.
+    [[nodiscard]] int focusedTabId() const noexcept { return _focusedTabId; }
+    /// @return The identity of the tab on row @p row, or -1 when there is none.
+    [[nodiscard]] int tabIdAt(int row) const noexcept
+    {
+        return row >= 0 && std::cmp_less(row, _tabs.size()) ? _tabs[static_cast<std::size_t>(row)] : -1;
+    }
     /// @return The focused toolbar item's index while the toolbar has focus, else -1.
     [[nodiscard]] int focusedToolbarIndex() const noexcept { return _focusedToolbar; }
     /// Puts keyboard focus in the tab well, on tab @p tab, as the controller does for Ctrl+F6.
@@ -195,7 +209,7 @@ class MockMainController: public MainWindowControllerMock
     void focusTabWell(int tab)
     {
         _chromeArea = window::ChromeArea::Tabs;
-        _focusedTab = tab;
+        _focusedTabId = tabIdAt(tab);
         _focusedToolbar = -1;
         emit chromeFocusChanged();
     }
@@ -204,7 +218,7 @@ class MockMainController: public MainWindowControllerMock
     void focusToolbarItem(int item)
     {
         _chromeArea = window::ChromeArea::Toolbar;
-        _focusedTab = -1;
+        _focusedTabId = -1;
         _focusedToolbar = item;
         emit chromeFocusChanged();
     }
@@ -213,7 +227,7 @@ class MockMainController: public MainWindowControllerMock
     {
         calls << QStringLiteral("leaveChrome");
         _chromeArea = window::ChromeArea::Terminal;
-        _focusedTab = -1;
+        _focusedTabId = -1;
         _focusedToolbar = -1;
         emit chromeFocusChanged();
     }
@@ -235,15 +249,11 @@ class MockMainController: public MainWindowControllerMock
             auto const alt = (qtModifiers & Qt::AltModifier) != 0;
             if (alt && (qtKey == Qt::Key_Left || qtKey == Qt::Key_Right))
             {
-                auto const target = _focusedTab + (qtKey == Qt::Key_Left ? -1 : 1);
-                if (target < 0 || target >= _scene.tabCount)
-                    return true;
-                moveTab(_focusedTab, target);
-                if (_chromeArea == window::ChromeArea::Tabs) // as the controller checks again after a move
-                {
-                    _focusedTab = target;
-                    emit chromeFocusChanged();
-                }
+                // The focus is on the tab, so it goes with it: nothing is written here, as in the controller.
+                auto const row = focusedTabIndex();
+                auto const target = row + (qtKey == Qt::Key_Left ? -1 : 1);
+                if (target >= 0 && std::cmp_less(target, _tabs.size()))
+                    moveTab(row, target);
                 return true;
             }
             if (qtKey == Qt::Key_Escape)
@@ -259,12 +269,41 @@ class MockMainController: public MainWindowControllerMock
     /// Mirrors WindowController::activateTab(): makes tab @p index the active one.
     void setActiveTab(int index)
     {
-        if (_scene.activeTab == index)
+        auto const id = tabIdAt(index);
+        if (id < 0 || _activeTabId == id)
             return;
-        _scene.activeTab = index;
-        emit dataChanged(
-            this->index(0), this->index(_scene.tabCount - 1), { static_cast<int>(Roles::IsActiveRole) });
-        emit activeTabIndexChanged();
+        _activeTabId = id;
+        emitActiveRoleChanged();
+        announceActivation();
+    }
+    /// What a tab arriving in this window does to the rows, as the model announces an insert.
+    enum class TabActivation : std::uint8_t
+    {
+        Keep,    ///< The active tab stays; the strip only gains a row.
+        Activate ///< The new tab becomes the active one, as a tab moved in from another window does.
+    };
+    /// Mirrors WindowController::onTabAboutToBeAdded()/onTabAdded(): a new tab takes row @p row.
+    /// @param row        Where the tab goes.
+    /// @param activation Whether the model activates it.
+    /// @return The identity of the new tab.
+    int insertTab(int row, TabActivation activation)
+    {
+        auto const at = std::clamp(row, 0, static_cast<int>(_tabs.size()));
+        auto const id = _nextTabId++;
+        beginInsertRows(QModelIndex(), at, at);
+        _tabs.insert(_tabs.begin() + at, id);
+        endInsertRows();
+        if (_chromeArea == window::ChromeArea::Tabs)
+            emit chromeFocusChanged(); // the focused tab may have moved down a row
+        if (activation == TabActivation::Activate)
+        {
+            _activeTabId = id;
+            emitActiveRoleChanged();
+            announceActivation();
+        }
+        else
+            emitActiveRoleChanged();
+        return id;
     }
     [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
     void setHostingNotice(QString notice)
@@ -448,8 +487,19 @@ class MockMainController: public MainWindowControllerMock
     /// the active row, as WindowController::onTabMoved() does.
     Q_INVOKABLE void moveTab(int from, int to)
     {
-        if (_scene.activeTab == from)
-            _scene.activeTab = to;
+        auto const count = static_cast<int>(_tabs.size());
+        if (from < 0 || from >= count || to < 0 || to >= count || from == to)
+            return;
+        // The rows move, then the focus is announced, then the active row: the controller's order, which
+        // the strip's delegates see (onTabAboutToBeMoved(), onTabMoved()).
+        beginMoveRows(QModelIndex(), from, from, QModelIndex(), to > from ? to + 1 : to);
+        auto const id = _tabs[static_cast<std::size_t>(from)];
+        _tabs.erase(_tabs.begin() + from);
+        _tabs.insert(_tabs.begin() + to, id);
+        endMoveRows();
+        if (_chromeArea == window::ChromeArea::Tabs)
+            emit chromeFocusChanged();
+        emitActiveRoleChanged();
         emit activeTabIndexChanged();
     }
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
@@ -493,16 +543,40 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE void closeTabAtIndex(int index)
     {
         calls << QStringLiteral("closeTabAtIndex:%1").arg(index);
+        auto const id = tabIdAt(index);
+        if (id < 0)
+            return;
+        // The focus ends only when its own tab goes, after the row is gone (onTabAboutToBeRemoved(),
+        // onTabClosed()).
+        auto const endsFocus = _chromeArea == window::ChromeArea::Tabs && _focusedTabId == id;
+        beginRemoveRows(QModelIndex(), index, index);
+        _tabs.erase(_tabs.begin() + index);
+        if (_activeTabId == id)
+            _activeTabId =
+                _tabs.empty() ? -1 : _tabs[std::min(static_cast<std::size_t>(index), _tabs.size() - 1)];
+        endRemoveRows();
+        if (endsFocus)
+        {
+            _chromeArea = window::ChromeArea::Terminal;
+            _focusedTabId = -1;
+            emit chromeFocusChanged();
+        }
+        else if (_chromeArea == window::ChromeArea::Tabs)
+            emit chromeFocusChanged(); // the focused tab may have moved up a row
+        emitActiveRoleChanged();
         emit activeTabIndexChanged();
     }
     Q_INVOKABLE void closeOtherTabs(int) {}
     Q_INVOKABLE void closeTabsToRight(int) {}
 
     // {{{ QAbstractListModel (feeds the TabStrip delegates)
-    [[nodiscard]] int rowCount(QModelIndex const& = QModelIndex()) const override { return _scene.tabCount; }
+    [[nodiscard]] int rowCount(QModelIndex const& = QModelIndex()) const override
+    {
+        return static_cast<int>(_tabs.size());
+    }
     [[nodiscard]] QVariant data(QModelIndex const& index, int role) const override
     {
-        if (index.row() < 0 || index.row() >= _scene.tabCount)
+        if (index.row() < 0 || index.row() >= static_cast<int>(_tabs.size()))
             return {};
         auto const badge = decorBadge(index.row());
         switch (static_cast<Roles>(role))
@@ -510,9 +584,9 @@ class MockMainController: public MainWindowControllerMock
             case Roles::TitleRole: return title(index.row());
             case Roles::RawTitleRole: return QString();
             case Roles::ColorRole: return color(index.row());
-            case Roles::IsActiveRole: return index.row() == _scene.activeTab;
+            case Roles::IsActiveRole: return index.row() == activeTabIndex();
             case Roles::PaneCountRole: return 1;
-            case Roles::SessionIdRole: return index.row();
+            case Roles::SessionIdRole: return tabIdAt(index.row());
             case Roles::ZoomedRole: return false;
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
@@ -585,7 +659,7 @@ class MockMainController: public MainWindowControllerMock
     {
         if (_scene.decor == snapshot::TabDecor::LongTitle && row == 0)
             return { DecorLongTitleLength, QChar(u'w') };
-        return QStringLiteral("Tab %1").arg(row + 1);
+        return QStringLiteral("Tab %1").arg(tabIdAt(row) + 1);
     }
 
     /// The colour of row @p row: DecorTabColor on row 0 under EveryBadge, else none (transparent).
@@ -617,10 +691,41 @@ class MockMainController: public MainWindowControllerMock
         return DecorBadges[slot];
     }
 
+    /// @return The row of the tab @p id, or -1 when it is not in the strip.
+    [[nodiscard]] int rowOf(int id) const noexcept
+    {
+        auto const found = std::ranges::find(_tabs, id);
+        return id >= 0 && found != _tabs.end() ? static_cast<int>(found - _tabs.begin()) : -1;
+    }
+
+    /// Re-reads the IsActiveRole of every row, as the controller does when the active tab changes.
+    void emitActiveRoleChanged()
+    {
+        if (!_tabs.empty())
+            emit dataChanged(index(0),
+                             index(static_cast<int>(_tabs.size()) - 1),
+                             { static_cast<int>(Roles::IsActiveRole) });
+    }
+
+    /// The announcements of a real activation, in WindowController::onActiveTabChanged()'s order: a keyboard
+    /// in the tab well goes to the activated tab, then the active row is announced.
+    void announceActivation()
+    {
+        if (_chromeArea == window::ChromeArea::Tabs && _focusedTabId != _activeTabId)
+        {
+            _focusedTabId = _activeTabId;
+            emit chromeFocusChanged();
+        }
+        emit activeTabIndexChanged();
+    }
+
     MainWindowScene _scene;
+    std::vector<int> _tabs; ///< The strip's rows, by tab identity; ids are minted once and never reused.
+    int _nextTabId;
+    int _activeTabId;
     int _chromeHeight = 0;
     window::ChromeArea _chromeArea = window::ChromeArea::Terminal;
-    int _focusedTab = -1;
+    int _focusedTabId = -1; ///< The focused tab's identity, -1 outside the tab well.
     int _focusedToolbar = -1;
     int _tabBarPosition;                    // seeded from the scene; 0 = Top, 1 = Bottom
     bool _tabBarShouldShow;                 // seeded from the scene's tab-bar visibility

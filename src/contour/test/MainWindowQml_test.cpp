@@ -3602,7 +3602,7 @@ TEST_CASE("moving a tab with the keyboard keeps the chrome focus, and Escape giv
     CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Tabs));
     CHECK(controller.focusedTabIndex() == 1);
     CHECK(controller.calls.filter(QStringLiteral("leaveChrome")).isEmpty());
-    REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+    REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[1]->hasActiveFocus(); }, 1000));
     CHECK(ringedTabs(*root) == std::vector<int> { 1 });
 
     // So it can move again, and Escape ends the chrome focus.
@@ -3691,6 +3691,73 @@ TEST_CASE("closing another tab does not take the focus out of the chrome (offscr
     CHECK(controller.focusedTabIndex() == 0);
     CHECK(tabs[0]->hasActiveFocus());
     CHECK(ringedTabs(*root) == std::vector<int> { 0 });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the keyboard stays on its tab when rows move around it (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    auto scene = palette.scene();
+    scene.tabCount = 3;
+    MockMainController controller { scene };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    [[maybe_unused]] auto& window = activeMainWindow(*root);
+
+    controller.focusTabWell(2);
+    auto const focusedId = controller.focusedTabId();
+    REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[2]->hasActiveFocus(); }, 1000));
+
+    SECTION("a tab is inserted before it")
+    {
+        controller.insertTab(0, MockMainController::TabActivation::Keep);
+        QCoreApplication::processEvents();
+
+        // The focus names the same tab, now on row 3, and the item holding the keyboard is that tab's.
+        CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Tabs));
+        CHECK(controller.focusedTabId() == focusedId);
+        CHECK(controller.focusedTabIndex() == 3);
+        REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[3]->hasActiveFocus(); }, 1000));
+        CHECK(ringedTabs(*root) == std::vector<int> { 3 });
+    }
+
+    SECTION("a tab moves in from another window and is activated")
+    {
+        // The model activates a tab it takes in, which moves the keyboard to it.
+        auto const incoming = controller.insertTab(0, MockMainController::TabActivation::Activate);
+        QCoreApplication::processEvents();
+
+        CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Tabs));
+        CHECK(controller.focusedTabId() == incoming);
+        CHECK(controller.focusedTabIndex() == 0);
+        REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[0]->hasActiveFocus(); }, 1000));
+        CHECK(ringedTabs(*root) == std::vector<int> { 0 });
+    }
+
+    SECTION("a tab is activated from outside the tab well")
+    {
+        controller.setActiveTab(1);
+        QCoreApplication::processEvents();
+
+        CHECK(controller.focusedTabIndex() == 1);
+        REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[1]->hasActiveFocus(); }, 1000));
+        CHECK(ringedTabs(*root) == std::vector<int> { 1 });
+    }
+
+    SECTION("a tab before it closes")
+    {
+        controller.closeTabAtIndex(0);
+        QCoreApplication::processEvents();
+
+        CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Tabs));
+        CHECK(controller.focusedTabId() == focusedId);
+        CHECK(controller.focusedTabIndex() == 1);
+        REQUIRE(QTest::qWaitFor([&] { return tabDelegates(*root)[1]->hasActiveFocus(); }, 1000));
+        CHECK(ringedTabs(*root) == std::vector<int> { 1 });
+    }
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
