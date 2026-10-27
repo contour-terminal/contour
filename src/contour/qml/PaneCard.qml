@@ -94,6 +94,9 @@ Item {
             headerFindSlot: header.findSlot
             headerPresent: card.headerInline ? 1 : 0
             overlayHost: paneOverlays
+            // The header's trailing area hosts the link pill only while the header is inline: Minimal's header
+            // revealed over the grid covers cells, so the pill keeps to the grid then.
+            headerLinkSlot: header.linkPillSlot
         }
     }
 
@@ -170,7 +173,9 @@ Item {
         node: card.node
         policy: card.policy
         cornerRadius: card.cornerRadius
-        findActive: terminal.findInHeaderRow
+        // The find bar takes the trailing area before the link pill: while the bar is in this row, the pill is
+        // placed elsewhere (window::placeLinkPill).
+        trailingOccupant: terminal.findInHeaderRow ? "find" : terminal.linkPillInHeader ? "linkPill" : "none"
         // A hidden header button drops the keyboard focus; typing goes back to this pane's grid.
         onFocusReleased: terminal.forceActiveFocus()
     }

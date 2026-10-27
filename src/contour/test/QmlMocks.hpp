@@ -52,9 +52,6 @@ class MockSession: public QObject
     Q_PROPERTY(bool isBlurBackground READ isBlurBackground CONSTANT)
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
     Q_PROPERTY(QString pathToBackground READ pathToBackground CONSTANT)
-    // Mirrors TerminalSession's hyperlink tooltip pair. Both change together, so one signal serves them.
-    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
-    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
     // Mirrors TerminalSession's link target, for the link pill: its text, its hint and whether it shows
     // change together; the clearance's revision moves on its own.
     Q_PROPERTY(QString linkTargetText READ linkTargetText NOTIFY linkTargetChanged)
@@ -145,8 +142,6 @@ class MockSession: public QObject
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return _scrollbarRight; }
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
-    [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
-    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const { return _hyperlinkTooltipAnchor; }
     [[nodiscard]] QString linkTargetText() const { return _linkTargetText; }
     [[nodiscard]] QString linkTargetHint() const { return _linkTargetHint; }
     [[nodiscard]] bool linkTargetShown() const { return _linkTargetShown; }
@@ -171,14 +166,6 @@ class MockSession: public QObject
     }
     [[nodiscard]] QRectF commandBlockTooltipAnchor() const { return _commandBlockTooltipAnchor; }
     Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const { return _commandBlockTooltipText; }
-
-    /// Publishes a hovered hyperlink, the way TerminalSession does on a real cell transition.
-    void setHyperlinkHover(QString text, QRectF anchor)
-    {
-        _hyperlinkTooltipText = std::move(text);
-        _hyperlinkTooltipAnchor = anchor;
-        emit hyperlinkHoverChanged();
-    }
 
     /// Publishes a hovered command block, the way TerminalSession does when the pointer reaches one.
     void setCommandBlockHover(QString text, QRectF anchor)
@@ -458,7 +445,6 @@ class MockSession: public QObject
     void historyLineCountChanged();
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
-    void hyperlinkHoverChanged();
     void sizeIndicatorRequested();
     void linkTargetChanged();
     void overlayClearanceChanged();
@@ -493,8 +479,6 @@ class MockSession: public QObject
     int _historyLineCount = 0;
     bool _scrollbarRight = true;
     bool _scrollbarVisible = false;
-    QString _hyperlinkTooltipText;
-    QRectF _hyperlinkTooltipAnchor;
     QString _sizeIndicatorText;
     QString _linkTargetText;
     QString _linkTargetHint;

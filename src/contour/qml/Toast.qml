@@ -35,6 +35,9 @@ Control {
     property real inset: chromeStyle.space.s7
     /// The font both texts are set in.
     property font textFont: chromeStyle.type.footnote
+    /// How the text is cut where the toast is given less width than it asks for: not at all by default; the
+    /// link pill cuts a long target in its middle, where both its host and its last segment survive.
+    property int textElide: Text.ElideNone
 
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel
@@ -45,6 +48,8 @@ Control {
     leftPadding: root.inset
     rightPadding: root.inset
     implicitWidth: implicitContentWidth + leftPadding + rightPadding
+    // The gap between its glyph, its text and its detail (Control's own spacing): s5, or a host's.
+    spacing: chromeStyle.space.s5
 
     opacity: shown ? 1 : 0
     // Gone once it has faded out: a host keeps it in the scene for good (Main.qml, over the band's reveal
@@ -79,7 +84,7 @@ Control {
     }
 
     contentItem: RowLayout {
-        spacing: chromeStyle.space.s5
+        spacing: root.spacing
 
         Label {
             objectName: "toastGlyph"
@@ -94,6 +99,11 @@ Control {
         Label {
             objectName: "toastText"
             Layout.alignment: Qt.AlignVCenter
+            // Its implicit width stays the whole text's, which is what a host places the toast by; only a
+            // width given from outside makes it cut.
+            Layout.fillWidth: root.textElide !== Text.ElideNone
+            Layout.minimumWidth: 0
+            elide: root.textElide
             text: root.text
             // What a toast says can quote a name or an error a program or a file supplied, or a link's target an
             // application chose: text, never markup.

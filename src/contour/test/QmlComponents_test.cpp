@@ -2218,17 +2218,20 @@ struct ChromeHost
 /// every split / tab switch / teardown performs can be driven from the test. Passing the session as an
 /// initial property instead would defeat the purpose: a session that is non-null on the first binding
 /// pass never armed the anchor latch these cases guard.
-[[nodiscard]] ChromeHost createChromeInWindow(QQmlEngine& engine)
+[[nodiscard]] ChromeHost createChromeInWindow(QQmlEngine& engine, QSize size = QSize { 400, 300 })
 {
     QQmlComponent component(&engine);
-    component.setData(QByteArrayLiteral("import QtQuick\n"
-                                        "import QtQuick.Window\n"
-                                        "import Contour.Ui\n"
-                                        "Window {\n"
-                                        "  width: 400; height: 300; visible: true\n"
-                                        "  property alias chrome: chromeItem\n"
-                                        "  SessionChrome { id: chromeItem; session: null }\n"
-                                        "}\n"),
+    component.setData(QStringLiteral("import QtQuick\n"
+                                     "import QtQuick.Window\n"
+                                     "import Contour.Ui\n"
+                                     "Window {\n"
+                                     "  width: %1; height: %2; visible: true\n"
+                                     "  property alias chrome: chromeItem\n"
+                                     "  SessionChrome { id: chromeItem; session: null }\n"
+                                     "}\n")
+                          .arg(size.width())
+                          .arg(size.height())
+                          .toUtf8(),
                       QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ScrollBarWrapper.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
@@ -6879,71 +6882,159 @@ TEST_CASE("Under Reduce Motion the palette only fades (offscreen)", "[contour][g
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link under the pointer",
-          "[contour][gui][qml][hyperlink]")
+// {{{ Link pill
+namespace
+{
+/// A clearance of @p rows rows of @p columns cells of 8 × 20 at the pane's top left, each with @p blank blank
+/// cells at its right end, avoiding @p avoid.
+[[nodiscard]] QVariantMap linkClearance(int columns, int rows, int blank, QVariantList avoid = {})
+{
+    return QVariantMap { { QStringLiteral("marginLeft"), 0.0 },
+                         { QStringLiteral("marginTop"), 0.0 },
+                         { QStringLiteral("cellWidth"), 8.0 },
+                         { QStringLiteral("cellHeight"), 20.0 },
+                         { QStringLiteral("columns"), columns },
+                         { QStringLiteral("trailingBlank"), QVariantList(rows, QVariant(blank)) },
+                         { QStringLiteral("avoidRows"), avoid } };
+}
+
+/// An 800 × 400 SessionChrome on @p row, its session naming a link target the follow modifier shows.
+struct LinkPillScene
 {
     QQmlEngine engine;
     MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine);
+    std::unique_ptr<MockSession> session = std::make_unique<MockSession>();
+    ChromeHost host;
+    QQuickItem* pill {};
+
+    explicit LinkPillScene(contour::config::ChromeStyle row = contour::config::ChromeStyle::MacOS)
+    {
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        contour::test::installChromeStyle(engine, setup);
+        host = createChromeInWindow(engine, QSize { 800, 400 });
+        session->setOverlayClearance(linkClearance(100, 20, 100));
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+        QCoreApplication::processEvents();
+        pill = host.chrome->findChild<QQuickItem*>(QStringLiteral("linkPill"));
+        REQUIRE(pill != nullptr);
+    }
+
+    /// Shows the target with the hint, and waits until the pill has faded in.
+    void show(bool shown = true)
+    {
+        session->setLinkTarget(
+            QStringLiteral("github.com › contour-terminal"), QStringLiteral("⌘-click to open"), shown);
+        QCoreApplication::processEvents();
+    }
+};
+} // namespace
+
+TEST_CASE("link pill: there is no hyperlink tooltip any more (offscreen)", "[contour][gui][qml][linkpill]")
+{
+    auto scene = LinkPillScene {};
+    CHECK(scene.host.chrome->findChild<QQuickItem*>(QStringLiteral("hyperlinkTooltip")) == nullptr);
+}
+
+TEST_CASE("link pill: a single pane's pill sits top right over blank cells (offscreen)",
+          "[contour][gui][qml][linkpill]")
+{
     contour::test::QmlMessageCapture const warnings;
-
-    auto host = createChromeInWindow(engine);
-    auto session = createScrollableSession();
-    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
-    QCoreApplication::processEvents();
-
-    auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("hyperlinkTooltip"));
-    REQUIRE(tip != nullptr);
-
-    // Nothing hovered: nothing to say. The tooltip's own text is the gate, so an empty one can never
-    // pop an empty box.
-    CHECK(tip->property("tipText").toString().isEmpty());
-
-    SECTION("a hovered link publishes its text and is placed at its anchor")
-    {
-        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
-        QCoreApplication::processEvents();
-
-        CHECK(tip->property("tipText").toString() == "https://example.com/");
-        CHECK(tip->x() == Catch::Approx(120));
-        // Well below the top edge, so it goes ABOVE the cell -- the anchor's own y.
-        CHECK(tip->property("showAbove").toBool());
-        CHECK(tip->y() == Catch::Approx(80));
-    }
-
-    SECTION("a link on the top row is placed below it, where there is room")
-    {
-        session->setHyperlinkHover("https://example.com/", QRectF(10, 0, 8, 16));
-        QCoreApplication::processEvents();
-
-        CHECK_FALSE(tip->property("showAbove").toBool());
-        CHECK(tip->y() == Catch::Approx(16)); // just under the cell
-    }
-
-    SECTION("a link at the right edge is clamped into the pane")
-    {
-        // Without the clamp the tooltip hangs off the pane, which is the popup-placement trap this
-        // codebase has already been bitten by once.
-        session->setHyperlinkHover("https://example.com/", QRectF(host.chrome->width() + 50, 40, 8, 16));
-        QCoreApplication::processEvents();
-
-        CHECK(tip->x() <= host.chrome->width());
-    }
-
-    SECTION("leaving the link withdraws the tooltip")
-    {
-        session->setHyperlinkHover("https://example.com/", QRectF(120, 80, 8, 16));
-        QCoreApplication::processEvents();
-        REQUIRE_FALSE(tip->property("tipText").toString().isEmpty());
-
-        session->setHyperlinkHover(QString(), QRectF());
-        QCoreApplication::processEvents();
-        CHECK(tip->property("tipText").toString().isEmpty());
-    }
-
+    auto scene = LinkPillScene {};
+    scene.show();
+    auto* pill = scene.pill;
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool() && pill->isVisible(); }));
+    CHECK(pill->y() == chromeToken(scene.engine, "space", "s4"));
+    CHECK(pill->x() + pill->width()
+          == Catch::Approx(scene.host.chrome->width() - chromeToken(scene.engine, "space", "s5")));
+    CHECK(pill->height() == chromeToken(scene.engine, "size", "linkPill"));
+    CHECK(pill->property("background").value<QQuickItem*>()->property("radius").toReal()
+          == chromeToken(scene.engine, "radii", "linkPill"));
+    auto* detail = pill->findChild<QQuickItem*>(QStringLiteral("toastDetail"));
+    REQUIRE(detail != nullptr);
+    CHECK(detail->property("text").toString() == QStringLiteral("⌘-click to open"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+TEST_CASE("link pill: it moves off a prompt row and hides over a full-screen app (offscreen)",
+          "[contour][gui][qml][linkpill]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = LinkPillScene {};
+    scene.session->setOverlayClearance(linkClearance(100, 20, 100, QVariantList { 0 }));
+    scene.show();
+    auto* pill = scene.pill;
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
+    CHECK(pill->y() > scene.host.chrome->height() / 2);
+
+    // A full-screen program paints every cell: nowhere to go.
+    scene.session->setOverlayClearance(linkClearance(100, 20, 0));
+    QCoreApplication::processEvents();
+    CHECK_FALSE(pill->property("shown").toBool());
+    CHECK(QTest::qWaitFor([&] { return !pill->isVisible(); }));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: not shown means not visible (offscreen)", "[contour][gui][qml][linkpill]")
+{
+    auto scene = LinkPillScene {};
+    scene.show(false);
+    QTest::qWait(static_cast<int>(chromeToken(scene.engine, "motion", "standard")) * 2);
+    CHECK_FALSE(scene.pill->property("shown").toBool());
+    CHECK_FALSE(scene.pill->isVisible());
+}
+
+TEST_CASE("link pill: the Terminal row draws it in cells (offscreen)", "[contour][gui][qml][linkpill]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto scene = LinkPillScene { contour::config::ChromeStyle::Terminal };
+    scene.show();
+    REQUIRE(QTest::qWaitFor([&] { return scene.pill->property("shown").toBool(); }));
+    auto* style =
+        scene.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    CHECK(scene.pill->height() == style->property("cellHeight").toReal());
+    CHECK(scene.pill->property("background").value<QQuickItem*>()->property("radius").toReal() == 0.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("link pill: a split's pill sits in the pane header (offscreen)",
+          "[contour][gui][qml][linkpill][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOverlayClearance(linkClearance(40, 18, 40));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& terminal = PaneTreeHost::partOf(card, "paneCardOverlays"); // laid exactly over the grid
+    auto const geometry = QRectF(terminal.x(), terminal.y(), terminal.width(), terminal.height());
+    auto* slot = card.findChild<QQuickItem*>(QStringLiteral("paneHeaderLinkSlot"));
+    REQUIRE(slot != nullptr);
+    auto* pill = card.findChild<QQuickItem*>(QStringLiteral("linkPill"));
+    REQUIRE(pill != nullptr);
+    auto const& actions = PaneTreeHost::partOf(card, "paneHeaderActions");
+
+    panes.leftSession.setLinkTarget(
+        QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), true);
+    REQUIRE(QTest::qWaitFor([&] { return pill->property("shown").toBool(); }));
+    CHECK(pill->parentItem() == slot);
+    CHECK(pill->x() + pill->width() == Catch::Approx(slot->width()));
+    CHECK(QTest::qWaitFor([&] { return !actions.isVisible(); }));
+    CHECK(QRectF(terminal.x(), terminal.y(), terminal.width(), terminal.height()) == geometry);
+
+    panes.leftSession.setLinkTarget(
+        QStringLiteral("github.com › contour-terminal"), QStringLiteral("Ctrl+Click to open"), false);
+    CHECK(QTest::qWaitFor([&] { return !pill->property("shown").toBool(); }));
+    CHECK(card.findChild<QQuickItem*>(QStringLiteral("paneHeader"))->property("trailingOccupant").toString()
+          == QStringLiteral("none"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
 
 TEST_CASE("SessionChrome shows the command block tooltip only while a block is hovered",
           "[contour][gui][qml][gutter]")
@@ -11250,7 +11341,9 @@ TEST_CASE(
     CHECK(font.weight() == QFont::DemiBold);
     CHECK(font.featureValue(QFont::Tag("tnum")) == 1);
     // Above the unfocused dim.
-    CHECK(pill->z() > pane->findChild<QQuickItem*>(QStringLiteral("dimOverlay"))->z());
+    // In the pane's overlay layer, which sits above the dim.
+    REQUIRE(pill->parentItem() == pane->findChild<QQuickItem*>(QStringLiteral("paneOverlay")));
+    CHECK(pill->parentItem()->z() > pane->findChild<QQuickItem*>(QStringLiteral("dimOverlay"))->z());
     // The session announces the settled size itself: the pill is no accessible object of its own.
     auto const attached = std::ranges::find_if(
         pill->children(), [](QObject const* child) { return child->inherits("QQuickAccessibleAttached"); });

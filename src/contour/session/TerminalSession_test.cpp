@@ -12831,8 +12831,6 @@ TEST_CASE("TerminalSession: the target pill shows while the follow modifier is h
     session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
     CHECK(session->linkTargetText() == pageBreadcrumb());
     CHECK_FALSE(session->linkTargetShown());
-    // The tooltip SessionChrome draws until the pill replaces it says nothing either.
-    CHECK(session->hyperlinkTooltipText().isEmpty());
 
     auto changes = QSignalSpy(session.session.get(), &TerminalSession::linkTargetChanged);
     sendControl(*session, vtbackend::KeyboardEventType::Press);
@@ -12841,12 +12839,10 @@ TEST_CASE("TerminalSession: the target pill shows while the follow modifier is h
           == contour::command::linkOpenHint(vtbackend::Modifiers { vtbackend::Modifier::Control },
                                             vtbackend::Modifiers {},
                                             contour::command::platformShortcutStyle()));
-    CHECK(session->hyperlinkTooltipText() == pageBreadcrumb());
     CHECK(changes.count() == 1);
 
     sendControl(*session, vtbackend::KeyboardEventType::Release);
     CHECK_FALSE(session->linkTargetShown());
-    CHECK(session->hyperlinkTooltipText().isEmpty());
     CHECK(changes.count() == 2);
 }
 

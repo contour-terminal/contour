@@ -52,7 +52,7 @@ Item {
 
     // The scrollbar's tick marks (`scrollbar.marks`): one { position, kind, targetLine } per tick, top
     // first, and one colour per kind. Guarded against `undefined`, not merely against a null session, for
-    // the reason hyperlinkTip gives: other tests bind a mock session that carries no marks at all. Each
+    // the reason LinkPill gives: other tests bind a mock session that carries no marks at all. Each
     // list is read from the session once: every read converts the whole of it to JavaScript.
     readonly property var scrollbarMarks: {
         let marks = chrome.session ? chrome.session.scrollbarMarks : undefined;
@@ -63,46 +63,29 @@ Item {
         return colors !== undefined ? colors : [];
     }
 
-    // OSC 8 hyperlink tooltip. A plain Item carrying an attached ToolTip rather than a Popup of its
-    // own, so it follows the same idiom TabItem.qml uses and inherits the app palette for free.
-    //
-    // Placed above the anchor cell where there is room and below it otherwise, and clamped to the
-    // chrome's width: a link near the right edge would otherwise hang the tooltip off the pane.
-    // Bound rather than assigned on a signal, because C++ already pushes only on a real transition --
-    // moving within one link announces nothing, so the show delay is not restarted per cell.
-    Item {
-        id: hyperlinkTip
-        objectName: "hyperlinkTooltip"
+    /// Where the pane's own overlays (the link pill) sit over the grid: an item its host lays exactly over this
+    /// chrome, above the pane's dim and outside any fade. Null: this chrome.
+    property Item overlayHost: null
+    /// The pane header's link pill slot, where the pane shows an inline header; null where it shows none.
+    property Item headerLinkSlot: null
+    /// Whether the link pill sits in the pane header (QML-facing): the header hides what it would cover.
+    readonly property bool linkPillInHeader: linkPill.inHeader && linkPill.shown
 
-        // Guarded against `undefined`, not merely against a null session: other tests bind this
-        // component to a MOCK session that has no tooltip properties at all, and assigning undefined to
-        // a typed property is a QML warning the run-wide diagnostic gate fails the suite on.
-        readonly property rect anchorRect: (chrome.session && chrome.session.hyperlinkTooltipAnchor !== undefined)
-                                           ? chrome.session.hyperlinkTooltipAnchor
-                                           : Qt.rect(0, 0, 0, 0)
-        readonly property string tipText: (chrome.session && chrome.session.hyperlinkTooltipText !== undefined)
-                                          ? chrome.session.hyperlinkTooltipText
-                                          : ""
-        readonly property bool showAbove: anchorRect.y > height + 8
-
-        width: 1
-        height: 1
-        x: Math.max(0, Math.min(anchorRect.x, chrome.width - 1))
-        y: showAbove ? anchorRect.y : anchorRect.y + anchorRect.height
-
-        ToolTip.text: hyperlinkTip.tipText
-        // Withheld while the window is inactive: a tooltip left standing over an unfocused window is
-        // the pointer describing something the user is no longer looking at.
-        ToolTip.visible: hyperlinkTip.tipText !== ""
-                         && chrome.Window.window !== null
-                         && chrome.Window.window.active
-        ToolTip.delay: 600
+    // The link under the pointer: its target and how to open it, over blank cells or in the pane header. It
+    // replaces the hover tooltip.
+    LinkPill {
+        id: linkPill
+        session: chrome.session
+        gridItem: chrome
+        gridHost: chrome.overlayHost ? chrome.overlayHost : chrome
+        headerSlot: chrome.headerLinkSlot
+        headerPresent: chrome.headerPresent
     }
 
     // The gutter's block-column tooltip: how the hovered command ended, how long it took, when and where it
     // ran, and what it was. The anchor is a NOTIFY property; the text is read through the session's
     // commandBlockTooltip() each time that property's signal fires, so a hover that never happens formats
-    // nothing. Guarded against mock sessions without the members, as hyperlinkTip is.
+    // nothing. Guarded against mock sessions without the members, as LinkPill is.
     Item {
         id: blockTip
         objectName: "commandBlockTooltip"

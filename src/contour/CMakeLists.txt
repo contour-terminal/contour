@@ -447,6 +447,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ColorSlotField.qml
         qml/Banner.qml
         qml/Toast.qml
+        qml/LinkPill.qml
         qml/ElevationShadow.qml
         qml/KitDialog.qml
         qml/PermissionDialog.qml

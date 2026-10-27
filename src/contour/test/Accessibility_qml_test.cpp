@@ -214,7 +214,17 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         QString name {};          ///< The name it must announce; any non-empty one when empty.
         int role = -1;            ///< The QAccessible::Role it must declare; any when -1.
     };
+    // The link pill names the session's link target and how to open it.
+    auto linkSession = contour::test::MockSession {};
+    linkSession.setLinkTarget(QStringLiteral("example.com"), QStringLiteral("Ctrl+Click to open"), true);
+
     auto const cases = std::array {
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPill.qml"),
+               .initialProperties =
+                   QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&linkSession)) } },
+               .swatches = 0,
+               .name = QStringLiteral("example.com, Ctrl+Click to open"),
+               .role = QAccessible::ToolTip },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
                .initialProperties = QVariantMap { { "text", QStringLiteral("Contour has new defaults") } },
                .swatches = 0,

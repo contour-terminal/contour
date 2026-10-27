@@ -230,10 +230,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
     // Bumped while the pill shows and the page changes under it, so QML asks overlayClearance() again.
     Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
-    // The hover tooltip, which SessionChrome.qml draws until the link pill replaces it: the link target while
-    // the pill would show, else empty. Both change together, so one signal serves them.
-    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
-    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
     // The command block under the pointer in the gutter's block column; an empty anchor means no tooltip.
     // The text is read through commandBlockTooltip() whenever the anchor's signal fires.
     Q_PROPERTY(
@@ -296,10 +292,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return Whole seconds since the session started, by the app's injected steady clock.
     int getUptime() const noexcept;
-
-    /// What the hyperlink tooltip should say, or empty for "show nothing": the link target while the pill
-    /// would show (linkTargetShown()). GUI thread.
-    [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
 
     /// What the link under the pointer opens, as the pill says it (linkPillText()); empty over none. GUI
     /// thread.
@@ -477,12 +469,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   public:
     // }}}
-
-    /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
-    ///
-    /// The ENTRY cell, so the tooltip stays put while the pointer traces the link rather than sliding
-    /// along with it.
-    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const noexcept { return _hyperlinkTooltipAnchor; }
 
     /// The gutter cell the hovered command block was entered at, in the display's item-local logical
     /// coordinates; empty while no block is hovered. The ENTRY cell, so the tooltip stays put while the
@@ -1666,7 +1652,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void paneProgramStatusChanged();
     /// @see getForegroundProcessName
     void foregroundProcessNameChanged();
-    void hyperlinkHoverChanged();
     /// The link target's text, hint or visibility changed.
     void linkTargetChanged();
     /// The page under a shown link pill changed: re-read overlayClearance().
@@ -2197,8 +2182,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
-    QString _hyperlinkTooltipText;
-    QRectF _hyperlinkTooltipAnchor;
 
     /// What the link pill says and whether it shows. GUI thread.
     struct LinkTarget

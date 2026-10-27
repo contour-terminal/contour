@@ -174,17 +174,28 @@ ContourTerminal {
     // inactive pane still reads its size; a pane too narrow for the pill shows none.
     property bool sizeIndicatorHeld: false
 
-    /// Where the pane's own overlay (the size indicator) is drawn: an item its host lays exactly over this pane
-    /// but outside any fade the host applies to it (PaneCard's inactive-card fade on the Terminal row), so the
-    /// pill reads at full strength. Null: the pane itself.
+    /// Where the pane's own overlays (the size indicator, the link pill) are drawn: an item its host lays
+    /// exactly over this pane but outside any fade the host applies to it (PaneCard's inactive-card fade on the
+    /// Terminal row), so the pills read at full strength. Null: the pane's own overlay layer, above its dim.
     property Item overlayHost: null
+    /// The pane header's link pill slot, where the pane shows an inline header (PaneCard); null where none.
+    property Item headerLinkSlot: null
+    /// Whether the link pill sits in the pane header (QML-facing): the header hides what the pill covers.
+    readonly property bool linkPillInHeader: chrome.linkPillInHeader
+
+    // The pane's own overlay layer, above the unfocused dim, where its pills sit when no host gives them one.
+    Item {
+        id: paneOverlay
+        objectName: "paneOverlay"
+        anchors.fill: parent
+        z: 20
+    }
 
     Toast {
         id: sizeIndicator
         objectName: "sizeIndicator"
-        parent: pane.overlayHost ? pane.overlayHost : pane
+        parent: pane.overlayHost ? pane.overlayHost : paneOverlay
         anchors.centerIn: parent
-        z: 20
         // Only once its row has laid out does the pill know its width; until then it does not fit anywhere.
         readonly property bool fits: implicitContentWidth > 0 && implicitWidth <= pane.width - 2 * chromeStyle.space.s4
         shown: pane.sizeIndicatorHeld && fits
@@ -230,7 +241,9 @@ ContourTerminal {
         id: chrome
         session: pane.session
         displayItem: pane
+        overlayHost: pane.overlayHost ? pane.overlayHost : paneOverlay
         headerFindSlot: pane.headerFindSlot
+        headerLinkSlot: pane.headerLinkSlot
         headerPresent: pane.headerPresent
     }
 

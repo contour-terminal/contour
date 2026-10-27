@@ -4249,13 +4249,6 @@ void TerminalSession::updateHyperlinkHover(HoveredLink const& link, vtbackend::C
     if (change.change == HoverChange::Unchanged)
         return;
 
-    // The anchor is only meaningful while something is shown, and computing it needs a display.
-    if (!change.text.empty() && _display != nullptr)
-        _hyperlinkTooltipAnchor = geometry::cellRectangle(_display->gridMetrics().pageMargin,
-                                                          _display->cellSize(),
-                                                          change.anchor,
-                                                          1,
-                                                          _display->devicePixelRatio());
     refreshLinkTarget(QString::fromStdString(change.text));
 }
 
@@ -4295,12 +4288,6 @@ void TerminalSession::refreshLinkTarget(QString text)
     _linkTarget = std::move(next);
     _linkTargetVisibility.store(_linkTarget.visibility, std::memory_order_relaxed);
     emit linkTargetChanged();
-
-    // The tooltip SessionChrome.qml draws until the link pill replaces it: the target while the pill would
-    // show.
-    auto const tooltip = linkTargetShown() ? _linkTarget.text : QString {};
-    if (std::exchange(_hyperlinkTooltipText, tooltip) != tooltip)
-        emit hyperlinkHoverChanged();
 }
 
 void TerminalSession::requestOverlayClearanceRefresh()

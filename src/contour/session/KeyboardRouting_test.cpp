@@ -96,6 +96,10 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount CONSTANT)
     Q_PROPERTY(int historyLineCount READ historyLineCount CONSTANT)
     Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText CONSTANT)
+    Q_PROPERTY(QString linkTargetText READ linkTargetText CONSTANT)
+    Q_PROPERTY(QString linkTargetHint READ linkTargetHint CONSTANT)
+    Q_PROPERTY(bool linkTargetShown READ linkTargetShown CONSTANT)
+    Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision CONSTANT)
     Q_PROPERTY(float opacity READ opacity CONSTANT)
     Q_PROPERTY(float dimUnfocused READ dimUnfocused CONSTANT)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
@@ -121,6 +125,11 @@ class RoutingMockSession: public QObject
     [[nodiscard]] int pageColumnsCount() const { return 80; }
     [[nodiscard]] int historyLineCount() const { return 0; }
     [[nodiscard]] QString sizeIndicatorText() const { return {}; }
+    [[nodiscard]] QString linkTargetText() const { return {}; }
+    [[nodiscard]] QString linkTargetHint() const { return {}; }
+    [[nodiscard]] bool linkTargetShown() const { return false; } // a bool, as its QML property is
+    [[nodiscard]] int overlayClearanceRevision() const { return 0; }
+    Q_INVOKABLE [[nodiscard]] QVariantMap overlayClearance() const { return {}; }
     /// What the pane calls once its size indicator settled; nothing to record here.
     Q_INVOKABLE void sizeIndicatorSettled(bool /*paneActive*/) {}
     [[nodiscard]] float opacity() const { return 1.0F; }
