@@ -999,7 +999,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Whether a program other than the shell is in front of this session's shell, which decides if closing
     /// its tab asks first. GUI thread; one query of the process table.
-    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process.
+    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process; closing a
+    ///         tab asks about such a pane, since it may be running anything.
     [[nodiscard]] window::PaneActivity paneActivity() const;
 
     config::Config const& config() const noexcept { return _config; }

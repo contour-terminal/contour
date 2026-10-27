@@ -122,7 +122,7 @@ keep it current. The page is kept with `/status-board` (the `contour-workflows` 
    area, or a click in the terminal, returns focus there and hides the ring; keys typed while the ring shows never
    reach the shell. Pinned in Task 3 and Task 4 ("a pointer press shows no ring").
 4. **⌫ on a tab running a build.** Expected: a dialog asks first; Cancel keeps the tab and the focus; an idle shell's
-   tab closes at once; a pane whose program cannot be known (a remote pane) does not ask. Pinned in Task 3
+   tab closes at once; a pane whose program cannot be known asks too (the ledger's override of Q3: under daemon hosting every pane is Unknown). Pinned in Task 3
    (`closeConfirmationFor`) and Task 4 (the dialog).
 5. **Two bindings on one chord.** Today the defaults bind Ctrl+C in Select|Insert to both `CopySelection` and
    `CancelSelection` (`Config.hpp:1561-1578`), and Ctrl+V likewise (`:1579-1596`); `config::apply()` returns the first
@@ -157,7 +157,7 @@ Those marked **(owner)** are repeated under *Owner decisions*; the run proceeds 
   move, Return and Space press, Escape returns. Entering Tabs focuses the active tab; entering Toolbar its first item.
 - **R-f. "Asks if a process runs" (owner, 2).** A pane is `Running` when its foreground process is known and is not its
   shell (`vtpty::Process::foregroundProcessName()`, compared with the profile shell's base name, a leading `-` of a
-  login shell removed); `Unknown` (a remote pane, Windows, no answer) does not ask.
+  login shell removed); `Unknown` (a remote pane, Windows, no answer) asks too: it cannot be told idle, and under the default daemon hosting every pane is Unknown (override of Q3, see the ledger).
 - **R-g. The ring shows only for keyboard focus.** The controller sets `chromeFocusArea` only from the three actions and
   from keys inside the chrome; any pointer press clears it. QML draws the ring when an item has `activeFocus` and its
   area is the controller's `chromeFocusArea`, so no Qt focus-reason API is needed.

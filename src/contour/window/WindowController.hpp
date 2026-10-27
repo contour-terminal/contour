@@ -987,11 +987,11 @@ class WindowController:
     void tabBarShouldShowChanged();
     /// The chrome focus moved: the area, the focused tab or the focused toolbar item changed.
     void chromeFocusChanged();
-    /// Closing the tab at @p row would end a running program, so the window asks first; QML shows the
+    /// Closing the tab at @p row may end a running program, so the window asks first; QML shows the
     /// dialog and calls confirmCloseTab() on "Close".
     /// @param row The tab's row.
     /// @param tabLabel The tab's resolved label.
-    /// @param program The running program's name.
+    /// @param program The running program's name; empty when no pane could name one.
     void closeTabConfirmationRequested(int row, QString const& tabLabel, QString const& program);
     void activeSessionChanged();
     void chromeHeightChanged();
@@ -1203,7 +1203,8 @@ class WindowController:
     /// The focus action the active session's key bindings give a key press, if any.
     [[nodiscard]] std::optional<window::ChromeFocusAction> chromeFocusActionFor(
         int qtKey, Qt::KeyboardModifiers modifiers) const;
-    /// Closes the tab at @p row, asking first when a program runs in one of its panes.
+    /// Closes the tab at @p row, asking first unless every pane is known to be idle (a pane whose program
+    /// cannot be known asks too: window::closeConfirmationFor).
     void closeTabAskingIfBusy(int row);
 
     window::ChromeArea _chromeArea = window::ChromeArea::Terminal;

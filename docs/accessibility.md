@@ -46,6 +46,33 @@ The tab bar is exposed as a tab list whose tabs announce themselves as you switc
 window and tab buttons say what they do rather than naming the glyph they are drawn with, and every
 field on the settings page carries its own label.
 
+## Keyboard access to the window chrome
+
+With `defaults_edition: native2026`, **Ctrl+F6** moves keyboard focus out of the terminal and into the
+window's chrome, and on through it: the terminal, then the tab bar, then the toolbar (the host chip, the
+daemon version chip and the new-tab button), then back to the terminal. **Ctrl+Shift+F6** walks the other
+way. On macOS **Ctrl+F5** goes straight to the toolbar and Ctrl+F6 moves between the areas. An area that is
+not shown, such as a tab bar hidden by `tab_bar_visibility`, is skipped.
+
+A ring marks the item that has focus: a 3 pt outline in the accent on macOS and 2 pt on Windows and Linux,
+and a run of selection-coloured cells under `ui_style: terminal`. It appears for keyboard focus only, so
+clicking a tab never draws it.
+
+| Where | Key | What it does |
+|-------|-----|--------------|
+| Tab bar | Left, Right | Move to the previous or next tab; Home and End jump to the first or last |
+| Tab bar | Return, Space | Activate the tab |
+| Tab bar | Backspace, Delete | Close the tab; Contour asks first when a program may still be running in it |
+| Tab bar | Alt+Left, Alt+Right | Move the tab left or right |
+| Toolbar | Left, Right | Move to the previous or next item |
+| Toolbar | Return, Space | Press the item |
+| Either | Escape | Return to the terminal |
+
+A bare **F6** is never taken: it reaches the shell, so `mc`, `vim` and `htop` keep it. The three actions,
+`FocusNextArea`, `FocusPreviousArea` and `FocusToolbar`, can be bound to other chords. Closing a tab asks
+whenever its foreground program is not its shell, and also when Contour cannot tell (every pane of a
+daemon-hosted window), because closing the tab would end whatever runs in it.
+
 ## Things that are only announced
 
 Some of what a terminal does has no representation in the accessibility tree at all — nothing's state
