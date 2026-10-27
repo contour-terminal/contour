@@ -1197,6 +1197,7 @@ if(CONTOUR_TESTING)
     add_executable(contour_test
         test/core_test_main.cpp
         config/Actions_test.cpp
+        config/BindingCollisions_test.cpp
         config/ChromeTokenGroups_test.cpp
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp

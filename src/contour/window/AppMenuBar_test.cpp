@@ -264,6 +264,18 @@ input_mapping:
     CHECK(window::menuOwnedBindings(mappings, command::MenuBarPlacement::None).empty());
 }
 
+TEST_CASE("no default binding takes a menu-owned chord", "[menubar][keys]")
+{
+    auto const unswapped = test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+    for (auto const& [edition, token, label]: config::configEnumValues<config::DefaultsEdition>())
+    {
+        INFO("edition " << token);
+        auto const owned = window::menuOwnedBindings(config::defaultInputMappings(edition),
+                                                     command::MenuBarPlacement::Global);
+        CHECK(owned.empty());
+    }
+}
+
 TEST_CASE("the bar holds the six menus", "[display][menubar]")
 {
     REQUIRE_WIDGETS_OR_SKIP();

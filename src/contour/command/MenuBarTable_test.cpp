@@ -227,7 +227,9 @@ TEST_CASE("menuBar.noChordTwice", "[menubar]")
 
     auto const* copy = findNode(defaults.nodes, "Copy");
     REQUIRE(copy != nullptr);
-    CHECK(copy->shortcut == "⌃C");
+    // Ctrl+C copies and then clears the selection (one binding, two actions), so it is not advertised next
+    // to Copy alone -- the same as in a generated contour.yml (@see indexBinding).
+    CHECK(copy->shortcut.empty());
     auto const* clear = findNode(defaults.nodes, "Clear Selection");
     REQUIRE(clear != nullptr);
     CHECK(clear->shortcut == "⎋");

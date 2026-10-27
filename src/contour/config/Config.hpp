@@ -1596,24 +1596,16 @@ struct TerminalProfile
                                .modifiers { vtbackend::Modifier::Alt },
                                .input = '0',
                                .binding = { { actions::SwitchToTab { .position = 10 } } } },
-            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                                  auto mods = vtbackend::MatchModes();
-                                  mods.enable(vtbackend::MatchModes::Select);
-                                  mods.enable(vtbackend::MatchModes::Insert);
-                                  return mods;
-                              }(),
-                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                               .input = 'C',
-                               .binding = { { actions::CopySelection {} } } },
-            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                                  auto mods = vtbackend::MatchModes();
-                                  mods.enable(vtbackend::MatchModes::Select);
-                                  mods.enable(vtbackend::MatchModes::Insert);
-                                  return mods;
-                              }(),
-                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                               .input = 'C',
-                               .binding = { { actions::CancelSelection {} } } },
+            CharInputMapping {
+                .modes = []() -> vtbackend::MatchModes {
+                    auto mods = vtbackend::MatchModes();
+                    mods.enable(vtbackend::MatchModes::Select);
+                    mods.enable(vtbackend::MatchModes::Insert);
+                    return mods;
+                }(),
+                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                .input = 'C',
+                .binding = { { actions::CopySelection {} }, { actions::CancelSelection {} } } },
             CharInputMapping { .modes = []() -> vtbackend::MatchModes {
                                   auto mods = vtbackend::MatchModes();
                                   mods.enable(vtbackend::MatchModes::Select);
@@ -1622,25 +1614,8 @@ struct TerminalProfile
                               }(),
                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
                                .input = 'V',
-                               .binding = { { actions::PasteClipboard { .strip = false } } } },
-            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                                  auto mods = vtbackend::MatchModes();
-                                  mods.enable(vtbackend::MatchModes::Select);
-                                  mods.enable(vtbackend::MatchModes::Insert);
-                                  return mods;
-                              }(),
-                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                               .input = 'V',
-                               .binding = { { actions::CancelSelection {} } } },
-            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
-                                  auto mods = vtbackend::MatchModes();
-                                  mods.enable(vtbackend::MatchModes::Insert);
-                                  return mods;
-                              }(),
-                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
-                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                               .input = ',',
-                               .binding = { { actions::OpenConfiguration {} } } },
+                               .binding = { { actions::PasteClipboard { .strip = false } },
+                                            { actions::CancelSelection {} } } },
             CharInputMapping { .modes = []() -> vtbackend::MatchModes {
                                   auto mods = vtbackend::MatchModes();
                                   mods.enable(vtbackend::MatchModes::Insert);
