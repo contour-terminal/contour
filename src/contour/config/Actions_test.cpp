@@ -414,3 +414,17 @@ TEST_CASE("actions::fromString names Use Selection for Find", "[actions][parse]"
     REQUIRE(entry != catalog.end());
     CHECK_FALSE(entry->documentation.empty());
 }
+
+TEST_CASE("actions::fromString names ToggleCommandFold, a non-repeatable block action", "[actions][parse]")
+{
+    auto const action = contour::actions::fromString("ToggleCommandFold");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::ToggleCommandFold>(*action));
+    CHECK(contour::actions::isNonRepeatable(*action));
+
+    auto const& catalog = contour::actions::actionCatalog();
+    auto const entry = std::ranges::find(
+        catalog, std::string_view { "ToggleCommandFold" }, &contour::actions::ActionCatalogEntry::name);
+    REQUIRE(entry != catalog.end());
+    CHECK_FALSE(entry->documentation.empty());
+}

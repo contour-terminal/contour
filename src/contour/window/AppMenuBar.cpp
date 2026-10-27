@@ -272,7 +272,8 @@ namespace
                 continue;
             switch (node.kind)
             {
-                case ContextMenuEntryKind::Separator: break;
+                case ContextMenuEntryKind::Separator:
+                case ContextMenuEntryKind::Header: break;
                 case ContextMenuEntryKind::Command: applyState(*action, node); break;
                 case ContextMenuEntryKind::Submenu:
                     action->setEnabled(node.availability == RowAvailability::Enabled);
@@ -466,6 +467,10 @@ QList<QAction*> AppMenuBar::fill(
                 added.push_back(menu.insertSeparator(before));
                 break;
             }
+            case ContextMenuEntryKind::Header:
+                // A header heads a block menu, which is never part of the menu bar's table.
+                Require(node.kind != ContextMenuEntryKind::Header);
+                break;
             case ContextMenuEntryKind::Submenu: {
                 auto* const submenu = new QMenu(actionText(node.title), &menu);
                 auto* const action = menu.insertMenu(before, submenu);

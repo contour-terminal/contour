@@ -100,6 +100,21 @@ namespace
                 continue;
             }
 
+            // A block menu's facts: a line of text that cannot be picked. A section header where AppKit has
+            // one (macOS 14), else a disabled item that looks the same but for its weight.
+            if (node.kind == ContextMenuEntryKind::Header)
+            {
+                NSMenuItem* header = nil;
+                if (@available(macOS 14.0, *))
+                    header = [NSMenuItem sectionHeaderWithTitle:toNSString(node.title)];
+                else
+                    header = [[NSMenuItem alloc] initWithTitle:toNSString(node.title) action:nil keyEquivalent:@""];
+                header.enabled = NO;
+                header.tag = -1;
+                [menu addItem:header];
+                continue;
+            }
+
             // No key equivalents (R-i): a context menu only names the chord in its title column, and
             // AppKit would otherwise fire it while focus is elsewhere.
             NSMenuItem* const item = [[NSMenuItem alloc] initWithTitle:toNSString(node.title)
@@ -131,7 +146,13 @@ namespace
         auto result = std::vector<NativeMenuOutline> {};
         for (NSMenuItem* item in menu.itemArray)
         {
+            auto const isHeader = [&] {
+                if (@available(macOS 14.0, *))
+                    return static_cast<bool>(item.isSectionHeader);
+                return false;
+            }();
             auto const kind = item.isSeparatorItem ? ContextMenuEntryKind::Separator
+                              : isHeader           ? ContextMenuEntryKind::Header
                               : item.hasSubmenu    ? ContextMenuEntryKind::Submenu
                                                    : ContextMenuEntryKind::Command;
             result.push_back(NativeMenuOutline {

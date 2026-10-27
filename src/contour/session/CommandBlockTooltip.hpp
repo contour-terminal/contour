@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace contour::session
 {
@@ -23,6 +24,18 @@ namespace contour::session
 /// @return The text, one fact per line; empty for a prompt still being typed at, which has none.
 [[nodiscard]] std::string commandBlockTooltipText(vtbackend::CommandBlockRecord const& record,
                                                   std::chrono::local_seconds startedAt);
+
+/// The lines that head a block's menu: its command, how it ended and for how long (@see
+/// vtbackend::blockStatusText), where it ran and when it started, each only when the record knows it.
+///
+/// The command line and the directory are sanitised for display, as in commandBlockTooltipText().
+/// @param record The block the menu was opened for.
+/// @param startedAt When it started, in local civil time; not shown for a record that knows no start.
+/// @param now The wall clock now, what a running command's time counts to.
+/// @return The lines; none for a prompt still being typed at.
+[[nodiscard]] std::vector<std::string> commandBlockHeaderLines(vtbackend::CommandBlockRecord const& record,
+                                                               std::chrono::local_seconds startedAt,
+                                                               std::chrono::system_clock::time_point now);
 
 /// What a click on the gutter's block column does for the hovered block, as its tooltip's last line says.
 enum class BlockTooltipHint : uint8_t

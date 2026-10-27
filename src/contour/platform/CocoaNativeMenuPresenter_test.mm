@@ -59,7 +59,8 @@ void checkMirrors(std::vector<MenuNode> const& nodes, std::vector<NativeMenuOutl
         CHECK(item.title == node.title);
         CHECK(item.check == shownCheck(node.check));
         CHECK(item.image == (node.swatch ? SwatchImage::Present : SwatchImage::Absent));
-        if (node.kind != ContextMenuEntryKind::Separator)
+        // A separator or a section header has no enabled state of its own to compare.
+        if (node.kind != ContextMenuEntryKind::Separator && node.kind != ContextMenuEntryKind::Header)
             CHECK(item.availability == node.availability);
         if (node.kind == ContextMenuEntryKind::Command)
             CHECK(item.tag == static_cast<long>(node.actionIndex));
@@ -149,4 +150,29 @@ TEST_CASE("off the cocoa plugin it is Unsupported", "[nativemenu][cocoa]")
         presenter->present(tabMenuTree(3), MenuAnchor { .window = nullptr, .position = std::nullopt }, {});
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == MenuPresentError::Unsupported);
+}
+
+TEST_CASE("a header row is a titled item that picks nothing", "[nativemenu][cocoa]")
+{
+    // Section headers are a macOS 14 item kind; an older system draws the same title as a disabled item.
+    auto const entries = std::vector {
+        ContextMenuEntry { .kind = ContextMenuEntryKind::Header,
+                           .title = "make",
+                           .availability = RowAvailability::Disabled },
+        ContextMenuEntry { .kind = ContextMenuEntryKind::Separator },
+        ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
+                           .title = "Copy Output",
+                           .action = contour::actions::CopyCommandBlock {} },
+    };
+    auto const tree = buildMenuTree(entries, {}, ShortcutStyle::MacGlyphs);
+    auto const outline = contour::platform::outlineNativeMenu(tree);
+    REQUIRE(outline.size() == 3);
+    if (@available(macOS 14.0, *))
+        CHECK(outline[0].kind == ContextMenuEntryKind::Header);
+    CHECK(outline[0].title == "make");
+    CHECK(outline[0].tag == -1);
+
+    // A pick maps past the header: the command's tag is its index in the tree's actions, which hold no header.
+    CHECK(outline[2].kind == ContextMenuEntryKind::Command);
+    CHECK(outline[2].tag == 0);
 }

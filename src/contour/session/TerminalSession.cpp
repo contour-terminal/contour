@@ -5229,16 +5229,37 @@ command::ContextMenuState TerminalSession::contextMenuState()
         }();
 
         // ...with what its rows may act on.
-        auto const blockUnderCursor = [&]() -> std::optional<command::PointedBlock> {
+        auto const blockUnderCursor = [&]() -> std::optional<command::BlockMenuState> {
             if (block == nullptr)
                 return std::nullopt;
-            return command::PointedBlock {
+
+            // Whether its output folds, and how it stands: a fold hangs on the head row.
+            auto const fold = [&] {
+                if (!_config.folding.value().enabled)
+                    return command::FoldPresence::None;
+                auto const head = vtbackend::headOffsetOf(terminal().primaryScreen().grid(), *block);
+                if (!head || !terminal().foldContaining(*head))
+                    return command::FoldPresence::None;
+                return terminal().foldState().isCollapsed(block->headStableId)
+                           ? command::FoldPresence::Collapsed
+                           : command::FoldPresence::Expanded;
+            }();
+
+            // When the command started; a block that never reached its command has only its prompt's time.
+            auto const startedAt =
+                terminal().localTimeOf(block->commandStartedAt.or_else([&] { return block->promptStartedAt; })
+                                           .value_or(std::chrono::system_clock::time_point {}));
+            return command::BlockMenuState {
                 .id = block->id,
+                .header = commandBlockHeaderLines(*block, startedAt, terminal().wallTimeNow()),
                 .output = block->state == vtbackend::CommandBlockState::Prompting
                               ? command::OutputPresence::Absent
                               : command::OutputPresence::Present,
                 .commandLine = block->commandLine.empty() ? command::CommandLinePresence::Absent
                                                           : command::CommandLinePresence::Present,
+                .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
+                                                            : command::PromptPresence::Absent,
+                .fold = fold,
             };
         }();
 
@@ -5270,8 +5291,6 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
             .blockUnderCursor = blockUnderCursor,
-            .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
-                                                        : command::PromptPresence::Absent,
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
@@ -6283,6 +6302,18 @@ bool TerminalSession::operator()(actions::ToggleFold)
 {
     return withScrollableChange(
         [](auto& terminal) { return terminal.toggleFoldContaining(foldAnchorLine(terminal)); });
+}
+
+bool TerminalSession::operator()(actions::ToggleCommandFold const& action)
+{
+    // The block's head row carries its fold; a block whose rows have left the grid has none to toggle.
+    return withScrollableChange([&](vtbackend::Terminal& terminal) {
+        auto const* const record = terminal.targetedCommandBlock(action.target, action.block);
+        if (record == nullptr)
+            return false;
+        auto const head = vtbackend::headOffsetOf(terminal.primaryScreen().grid(), *record);
+        return head && terminal.toggleFoldContaining(*head);
+    });
 }
 
 bool TerminalSession::operator()(actions::ToggleFoldAt action)

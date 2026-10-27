@@ -346,6 +346,10 @@ struct MenuTable
                     break;
                 }
 
+                case ContextMenuEntryKind::Header:
+                    // Headers are made from a state's lines, never described by a table row.
+                    break;
+
                 case ContextMenuEntryKind::Command: {
                     auto action = row.actionFor(state);
                     entries.emplace_back(ContextMenuEntry {

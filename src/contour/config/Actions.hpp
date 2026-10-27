@@ -163,6 +163,8 @@ struct CopyCommandBlock{ vtbackend::CommandBlockTarget target = vtbackend::Comma
 struct CopyCommandLine{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(CopyCommandLine const&) const = default; };
 // OSC 133: type a block's command line at the shell's prompt and run it, once the user confirmed it; a non-zero block pins it
 struct RerunCommand{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(RerunCommand const&) const = default; };
+// OSC 133: collapse a block's output to its head row, or expand it again; a non-zero block pins it
+struct ToggleCommandFold{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(ToggleCommandFold const&) const = default; };
 struct ClearToPrompt{}; // OSC 133: drop every row above the current prompt, scrollback and page alike
 // OSC 133: show a block's output in a pager (a split or a tab over a private file), or pipe it into a program
 struct OpenCommandOutput{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; std::string program {}; OutputPlacement placement = OutputPlacement::Split; std::optional<OutputFormat> format {}; vtbackend::CommandBlockId block {}; bool operator==(OpenCommandOutput const&) const = default; };
@@ -287,6 +289,7 @@ using Action = std::variant<CancelSelection,
                             CopyCommandBlock,
                             CopyCommandLine,
                             RerunCommand,
+                            ToggleCommandFold,
                             ClearToPrompt,
                             OpenCommandOutput,
                             CloseOtherTabs,
@@ -310,7 +313,13 @@ using Action = std::variant<CancelSelection,
 /// the writer and the palette tell a bare binding from a configured one.
 template <typename T>
 concept CommandBlockActionConcept =
-    core::oneOf<T, SelectCommandBlock, CopyCommandBlock, CopyCommandLine, RerunCommand, OpenCommandOutput>;
+    core::oneOf<T,
+                SelectCommandBlock,
+                CopyCommandBlock,
+                CopyCommandLine,
+                RerunCommand,
+                ToggleCommandFold,
+                OpenCommandOutput>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -738,6 +747,10 @@ namespace documentation
         "shell that marks its prompts (OSC 133) and reports or shows its command lines; refused while a "
         "command is running, and for a command line that cannot be typed as it is."
     };
+    constexpr inline std::string_view ToggleCommandFold {
+        "Collapses or expands a command block's output (target: pointer, cursor or last). Requires a shell "
+        "that emits OSC 133 marks, and folding to be enabled."
+    };
     constexpr inline std::string_view ClearToPrompt {
         "Clears the scrollback and the screen above the current prompt. A prompt on the screen moves to its "
         "top, with a running command's output; one in the scrollback becomes the oldest line kept. Requires "
@@ -938,6 +951,8 @@ struct ActionCatalogEntry
         ActionCatalogEntry {
             "CopyCommandLine", Action { CopyCommandLine {} }, documentation::CopyCommandLine },
         ActionCatalogEntry { "RerunCommand", Action { RerunCommand {} }, documentation::RerunCommand },
+        ActionCatalogEntry {
+            "ToggleCommandFold", Action { ToggleCommandFold {} }, documentation::ToggleCommandFold },
         ActionCatalogEntry { "ClearToPrompt", Action { ClearToPrompt {} }, documentation::ClearToPrompt },
         ActionCatalogEntry {
             "OpenCommandOutput", Action { OpenCommandOutput {} }, documentation::OpenCommandOutput },

@@ -1220,6 +1220,7 @@ if(CONTOUR_TESTING)
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp
+        command/BlockMenu_test.cpp
         command/CommandCatalog_test.cpp
         command/CommandPaletteTree_test.cpp
         command/CommandHistory_test.cpp

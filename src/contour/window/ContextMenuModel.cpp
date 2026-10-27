@@ -45,6 +45,11 @@ namespace
                 row["kind"] = QStringLiteral("separator");
                 break;
 
+            case command::ContextMenuEntryKind::Header:
+                row["kind"] = QStringLiteral("header");
+                row["title"] = QString::fromStdString(node.title);
+                break;
+
             case command::ContextMenuEntryKind::Submenu:
                 row["kind"] = QStringLiteral("submenu");
                 row["title"] = QString::fromStdString(node.title);

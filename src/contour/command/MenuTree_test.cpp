@@ -141,3 +141,25 @@ TEST_CASE("menuTree.separatorsAndSubmenusCarryNoAction", "[menutree]")
     CHECK(tree.actions.size() == countCommands(tree.nodes));
     CHECK(tree.actions.size() == 2);
 }
+
+TEST_CASE("menuTree.aHeaderHasNoActionAndNoChord", "[menutree]")
+{
+    auto const entries = std::vector {
+        ContextMenuEntry { .kind = ContextMenuEntryKind::Header,
+                           .title = "make",
+                           .availability = RowAvailability::Disabled },
+        separatorRow(),
+        commandRow("Close", actions::CloseTab {}),
+    };
+    auto const tree = buildMenuTree(entries, {}, ShortcutStyle::MacGlyphs);
+    REQUIRE(tree.nodes.size() == 3);
+    CHECK(tree.nodes[0].kind == ContextMenuEntryKind::Header);
+    CHECK(tree.nodes[0].title == "make");
+    CHECK(tree.nodes[0].availability == RowAvailability::Disabled);
+    CHECK_FALSE(tree.nodes[0].chord.has_value());
+    CHECK(tree.nodes[0].shortcut.empty());
+
+    // The header took no slot of the actions: the one command row is the first.
+    REQUIRE(tree.actions.size() == 1);
+    CHECK(tree.nodes[2].actionIndex == 0);
+}

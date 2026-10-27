@@ -6,6 +6,7 @@
 # terminal state, not about Qt, so they are decided here and rendered a layer up. That split is
 # what makes ContextMenu_test and CommandPaletteModel's ranking testable without a display.
 add_library(contour_command STATIC
+    BlockMenu.cpp BlockMenu.hpp
     Command.cpp Command.hpp
     CommandCatalog.cpp CommandCatalog.hpp
     CommandHistory.cpp CommandHistory.hpp

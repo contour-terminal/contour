@@ -7712,9 +7712,9 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
 
     SECTION("not while a command runs: typed, it would be that command's input")
     {
-        CHECK(session->contextMenuState().livePrompt == contour::command::PromptPresence::Present);
+        CHECK(terminal.shellIsPrompting());
         terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
-        CHECK(session->contextMenuState().livePrompt == contour::command::PromptPresence::Absent);
+        CHECK_FALSE(terminal.shellIsPrompting());
         CHECK_FALSE((*session)(RerunCommand {}));
         CHECK(asked == 0);
     }
@@ -10310,6 +10310,31 @@ TEST_CASE("TerminalSession: a user binding of Ctrl+Shift+G wins over the built-i
     CHECK(acting->terminal().selectionAvailable());
 }
 
+TEST_CASE("TerminalSession: ToggleCommandFold folds the block it names, wherever the pointer is",
+          "[contour][session][semanticblocks][folding]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writeFinishedBlock(*session, "make", "built\r\nmore\r\n", ";cmdline_url=make");
+    auto const* make = session->terminal().commandBlockAt(vtbackend::LineOffset(0));
+    REQUIRE(make != nullptr);
+    auto const head = make->headStableId;
+    auto const pinned =
+        contour::actions::ToggleCommandFold { .target = vtbackend::CommandBlockTarget::Pointer,
+                                              .block = make->id };
+
+    REQUIRE_FALSE(session->terminal().foldState().isCollapsed(head));
+    CHECK((*session)(pinned));
+    CHECK(session->terminal().foldState().isCollapsed(head));
+    CHECK((*session)(pinned));
+    CHECK_FALSE(session->terminal().foldState().isCollapsed(head));
+
+    // A block the store no longer holds has nothing to fold.
+    auto unknown = pinned;
+    unknown.block = vtbackend::CommandBlockId(make->id.value + 1000);
+    CHECK_FALSE((*session)(unknown));
+}
+
 TEST_CASE("TerminalSession: the context menu pins the command block that was right-clicked",
           "[contour][session][contextmenu][semanticblocks]")
 {
@@ -10332,6 +10357,24 @@ TEST_CASE("TerminalSession: the context menu pins the command block that was rig
         CHECK(state.blockUnderCursor->id == make->id);
         CHECK(state.blockUnderCursor->output == contour::command::OutputPresence::Present);
         CHECK(state.blockUnderCursor->commandLine == contour::command::CommandLinePresence::Present);
+
+        // Its facts head the menu: the command first, then how it ended.
+        REQUIRE(state.blockUnderCursor->header.size() >= 2);
+        CHECK(state.blockUnderCursor->header.front() == "make");
+        CHECK_FALSE(state.blockUnderCursor->header[1].empty());
+
+        // A fold hangs on its head while it has output, and the menu offers to close it...
+        CHECK(state.blockUnderCursor->fold == contour::command::FoldPresence::Expanded);
+
+        // ...and, once it is closed, to open it again.
+        session->terminal().foldState().collapse(make->headStableId);
+        session->sendMouseMoveEvent(
+            Modifiers {},
+            vtbackend::CellLocation { vtbackend::LineOffset(0), vtbackend::ColumnOffset(0) },
+            pixels);
+        CHECK(session->contextMenuState().blockUnderCursor->fold
+              == contour::command::FoldPresence::Collapsed);
+        session->terminal().foldState().expand(make->headStableId);
 
         // The pinned row acts on that block even though the pointer has since moved away.
         session->sendMouseMoveEvent(

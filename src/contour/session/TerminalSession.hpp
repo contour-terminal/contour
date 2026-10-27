@@ -1668,6 +1668,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyCommandBlock const& action);
     bool operator()(actions::CopyCommandLine const& action);
     bool operator()(actions::RerunCommand const& action);
+    bool operator()(actions::ToggleCommandFold const& action);
     bool operator()(actions::OpenCommandOutput const& action);
 
     /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.

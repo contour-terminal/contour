@@ -38,7 +38,8 @@ namespace
             };
             switch (entry.kind)
             {
-                case ContextMenuEntryKind::Separator: break;
+                case ContextMenuEntryKind::Separator:
+                case ContextMenuEntryKind::Header: break; // no action, no chord
                 case ContextMenuEntryKind::Submenu: result.children = nodes(entry.children); break;
                 case ContextMenuEntryKind::Command:
                     result.actionIndex = tree.actions.size();

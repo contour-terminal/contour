@@ -8,9 +8,11 @@
 
 #include <chrono>
 #include <string>
+#include <vector>
 
 using contour::session::BlockTooltipHint;
 using contour::session::blockTooltipHintText;
+using contour::session::commandBlockHeaderLines;
 using contour::session::commandBlockTooltipText;
 using namespace std::chrono_literals;
 
@@ -50,6 +52,23 @@ TEST_CASE("CommandBlockTooltip.saysHowWhenWhereAndWhat", "[contour][gutter]")
     // The duration is vtbackend::formatCommandDuration's: 4.25 s reads "4s".
     CHECK(commandBlockTooltipText(finished(2), Started)
           == "Exit code 2\nTook 4s\nStarted 2026-10-09 14:03:07\nIn /home/user/src\n$ make -j8");
+}
+
+TEST_CASE("CommandBlockTooltip.theHeadingOfTheMenuIsOneFactPerLine", "[contour][gutter][blockheader]")
+{
+    // Command first, then the status in the chip's words, where it ran, and when it started.
+    auto const now = chrono::system_clock::time_point {};
+    CHECK(commandBlockHeaderLines(finished(2), Started, now)
+          == std::vector<std::string> {
+              "make -j8", "Failed · exit 2 · 4s", "/home/user/src", "Started 14:03:07" });
+
+    // What the record does not know is left out, and a prompt has no heading at all.
+    auto bare = vtbackend::CommandBlockRecord {};
+    bare.state = vtbackend::CommandBlockState::Finished;
+    bare.exitCode = 1;
+    CHECK(commandBlockHeaderLines(bare, Started, now) == std::vector<std::string> { "Failed · exit 1" });
+    bare.state = vtbackend::CommandBlockState::Prompting;
+    CHECK(commandBlockHeaderLines(bare, Started, now).empty());
 }
 
 TEST_CASE("CommandBlockTooltip.namesTheSignalThatEndedACommand", "[contour][gutter]")

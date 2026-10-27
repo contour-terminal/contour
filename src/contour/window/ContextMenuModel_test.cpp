@@ -155,3 +155,20 @@ TEST_CASE("ContextMenuModel.swatch rows group into one row", "[contextmenumodel]
     CHECK(children[2].toMap()["actionId"].toInt() == 3);
     CHECK(children[3].toMap()["actionId"].toInt() == 4);
 }
+
+TEST_CASE("ContextMenuModel.aHeaderRowHasATitleAndNoAction", "[contextmenumodel]")
+{
+    auto const nodes = std::vector<MenuNode> {
+        MenuNode { .kind = ContextMenuEntryKind::Header,
+                   .title = "Failed · exit 8",
+                   .availability = RowAvailability::Disabled },
+        commandNode("Copy Output", 0),
+    };
+    auto const model = window::toContextMenuModel(nodes);
+    REQUIRE(model.size() == 2);
+    auto const header = model[0].toMap();
+    CHECK(header["kind"].toString() == "header");
+    CHECK(header["title"].toString() == "Failed · exit 8");
+    CHECK_FALSE(header.contains("actionId"));
+    CHECK(model[1].toMap()["actionId"].toInt() == 0);
+}

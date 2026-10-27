@@ -127,6 +127,7 @@ namespace
         ActionCategory { .name = "CopyCommandBlock", .category = CommandCategory::Blocks },
         ActionCategory { .name = "CopyCommandLine", .category = CommandCategory::Blocks },
         ActionCategory { .name = "RerunCommand", .category = CommandCategory::Blocks },
+        ActionCategory { .name = "ToggleCommandFold", .category = CommandCategory::Blocks },
         ActionCategory { .name = "ClearToPrompt", .category = CommandCategory::Blocks },
         ActionCategory { .name = "OpenCommandOutput", .category = CommandCategory::Blocks },
         ActionCategory { .name = "CloseOtherTabs", .category = CommandCategory::Tab },
