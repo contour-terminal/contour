@@ -8773,12 +8773,13 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(Sea
 std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
     SearchQuery const& query, CellLocation startPosition) const
 {
-    // Bounded by the grid itself: every row it has.
-    return searchReverseFrom(query, startPosition, _grid.linesUsed());
+    // Bounded by the grid itself: every row it has, whatever the query.
+    auto read = SearchReadBudget::rowsOnly(_grid.linesUsed());
+    return searchReverseFrom(query, startPosition, read);
 }
 
 std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
-    SearchQuery const& query, CellLocation startPosition, LineCount budget) const
+    SearchQuery const& query, CellLocation startPosition, SearchReadBudget& read) const
 {
     auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
     if (startPosition.line > lastLine)
@@ -8787,10 +8788,10 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
     if (startPosition.line < -boxed_cast<LineOffset>(historyLineCount()))
         return nullopt;
 
-    // Whole segments, so a match is found or missed as one: the budget is a floor on the rows read.
-    auto rowsRead = LineCount(0);
+    // Whole segments, so a match is found or missed as one; the budget refuses the next one once spent.
     auto segment = optional { searchSegmentAt(_grid, startPosition.line, query.segmentCells()) };
-    while (segment)
+    while (segment
+           && read.admit(*segment, boxed_cast<LineCount>(segment->last - segment->first) + LineCount(1)))
     {
         auto const matches = query.matchesIn(_grid, *segment);
         if (!matches)
@@ -8801,21 +8802,19 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
         });
         if (match != backwards.end())
             return match->first;
-        rowsRead += boxed_cast<LineCount>(segment->last - segment->first) + LineCount(1);
-        if (rowsRead >= budget)
-            break;
         segment = previousSearchSegment(_grid, *segment, query.segmentCells());
     }
     return nullopt;
 }
 
 std::expected<optional<CellLocationRange>, SearchPatternError> Screen::matchStartingAt(
-    SearchQuery const& query, CellLocation start) const
+    std::shared_ptr<SearchQuery const> const& query, CellLocation start, SearchMatchMemo& memo) const
 {
     if (start.line < -boxed_cast<LineOffset>(historyLineCount())
         || start.line >= boxed_cast<LineOffset>(pageSize().lines))
         return nullopt;
-    auto const matches = query.matchesIn(_grid, searchSegmentAt(_grid, start.line, query.segmentCells()));
+    auto const matches =
+        memo.matchesIn(query, _grid, searchSegmentAt(_grid, start.line, query->segmentCells()));
     if (!matches)
         return std::unexpected { matches.error() };
     auto const match = std::ranges::find(*matches, start, &CellLocationRange::first);

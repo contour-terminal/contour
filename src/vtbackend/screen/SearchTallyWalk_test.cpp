@@ -431,6 +431,73 @@ TEST_CASE("probe.aGridWithinTheBudgetIsAnsweredWhole", "[searchwalk]")
     }
 }
 
+TEST_CASE("probe.aRegexProvesAbsenceOnAPageTallerThanOneSegment", "[searchwalk]")
+{
+    // Q1: the probe's bound for a regex is what it costs the engine, not one segment's rows. At 200 columns a
+    // regex segment is 10 rows; a page of 30 short lines costs 30 x 200 squared, far under RegexSegmentCells
+    // squared, so a keystroke still proves a regex absent there. One line wrapped over all 30 rows is three
+    // full segments, which a keystroke does not read: undecided, for the walk to settle.
+    auto constexpr Columns = 200;
+    auto constexpr Rows = 30;
+    auto const bottom = CellLocation { .line = LineOffset(Rows - 1), .column = ColumnOffset(Columns - 1) };
+
+    auto shortLines = MockTerm { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
+    writeRows(shortLines, Rows, [](int) { return std::string("hay"); });
+    REQUIRE(shortLines.terminal.setSearchOptions(Regex).has_value());
+    REQUIRE(shortLines.terminal.setNewSearchTerm(U"z+", SearchOrigin::Typed).has_value());
+    CHECK(shortLines.terminal.probeSearchReverse(bottom).outcome == SearchProbeOutcome::Absent);
+
+    auto longLine = MockTerm { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
+    longLine.writeToScreen(std::string(std::size_t { Columns } * Rows, 'h'));
+    REQUIRE(longLine.terminal.setSearchOptions(Regex).has_value());
+    REQUIRE(longLine.terminal.setNewSearchTerm(U"z+", SearchOrigin::Typed).has_value());
+    CHECK(longLine.terminal.probeSearchReverse(bottom).outcome == SearchProbeOutcome::Undecided);
+    // A literal's probe is bounded by rows alone.
+    REQUIRE(longLine.terminal.setSearchOptions({}).has_value());
+    CHECK(longLine.terminal.probeSearchReverse(bottom).outcome == SearchProbeOutcome::Absent);
+}
+
+TEST_CASE("searchWalk.aRegexStepStartsNoSecondLongSegment", "[searchwalk]")
+{
+    // A step that has read a short line does not go on to a regex segment longer than half the budget: one
+    // segment's cost per step, not two.
+    auto constexpr Columns = 80;
+    auto mock = MockTerm<> { PageSize { LineCount(30), ColumnCount(Columns) }, LineCount(0) };
+    mock.writeToScreen("x\r\n" + std::string(std::size_t { Columns } * 25, 'a'));
+    auto const& grid = mock.terminal.primaryScreen().grid();
+
+    auto walk = SearchTallyWalk { compiled(U"q", Regex), grid, CellLocation {} };
+    REQUIRE(walk.step(grid, SearchWalkStepLines).has_value());
+    CHECK(walk.rowsLastStep() == LineCount(1));
+    // The next begins with it, and goes on to the four empty rows below, each a short segment that costs
+    // little.
+    REQUIRE(walk.step(grid, SearchWalkStepLines).has_value());
+    CHECK(walk.rowsLastStep() == LineCount(29));
+}
+
+TEST_CASE("search.theFocusedMatchIsReadThroughTheMemo", "[searchwalk]")
+{
+    // Every walk step refreshes the current match; a regex runs over the cursor's segment once for all of
+    // them.
+    auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(10) }, LineCount(0) };
+    mock.writeToScreen("abc");
+    auto& terminal = mock.terminal;
+    REQUIRE(terminal.setSearchOptions(Regex).has_value());
+    REQUIRE(terminal.setNewSearchTerm(U"ab.", SearchOrigin::Typed).has_value());
+    terminal.moveNormalModeCursorTo(CellLocation {});
+    auto const& memo = terminal.searchMatchMemo();
+
+    REQUIRE(terminal.focusedSearchMatch().has_value());
+    CHECK(memo.engineRuns() == 1);
+    REQUIRE(terminal.focusedSearchMatch().has_value());
+    CHECK(memo.engineRuns() == 1);
+
+    // A new query starts the memo over.
+    REQUIRE(terminal.setNewSearchTerm(U"a.c", SearchOrigin::Typed).has_value());
+    REQUIRE(terminal.focusedSearchMatch().has_value());
+    CHECK(memo.engineRuns() == 2);
+}
+
 TEST_CASE("searchWalk.theTerminalRestartsTheWalkOnAnotherPage", "[searchwalk]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };

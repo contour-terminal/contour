@@ -23,12 +23,22 @@ class SearchMatchMemo;
 
 namespace detail
 {
-    struct SearchSubjectCell;
+    /// One cell of a segment's subject: the units it spells and the columns it covers.
+    struct SearchSubjectCell
+    {
+        std::size_t firstUnit = 0; ///< Its first unit in SearchSubject::units.
+        std::size_t endUnit = 0;   ///< One past its last unit.
+        CellLocation first {};     ///< Its column.
+        CellLocation last {};      ///< Its last column: a wide character's second half.
+
+        bool operator==(SearchSubjectCell const&) const = default;
+    };
+
     struct SearchSubject;
 } // namespace detail
 
-/// How many cells a regex is fed as one text: a regex segment's budget, and what one step of a walk or the
-/// keystroke's probe feeds it at most.
+/// How many cells a regex is fed as one text: a regex segment's budget, and the measure of what one bounded
+/// read -- a walk's step, the keystroke's probe -- may cost the engine (@see SearchReadBudget).
 ///
 /// Derived from cost. libc++'s std::wregex is quadratic in its subject for patterns such as `.*timeout`,
 /// `\w+q` or `a*q` that fail at every start without ever tripping its complexity limit: measured on Apple
@@ -79,6 +89,50 @@ struct SearchSegment
                                                                  SearchSegment segment,
                                                                  std::size_t cells);
 
+class SearchQuery;
+
+/// What a bounded read -- a walk's step, the keystroke's probe -- may still take, in whole segments.
+///
+/// Rows bound every read. A regex's is also bounded by what it costs the engine, which grows with the square
+/// of a segment (@ref RegexSegmentCells): the read stops before a segment that would take the sum of its
+/// segments' squared lengths past RegexSegmentCells squared, and starts no second segment longer than half
+/// RegexSegmentCells. A page of short lines is so read whole, and a long logical line one segment at a time.
+/// The first segment is always read.
+class SearchReadBudget
+{
+  public:
+    /// A bounded read.
+    /// @param query   The query read for.
+    /// @param rows    The rows it covers at most.
+    /// @param columns The grid's width: a segment's length is its rows times this.
+    SearchReadBudget(SearchQuery const& query, LineCount rows, ColumnCount columns) noexcept;
+
+    /// A read bounded by rows alone, whatever the query: one that must reach as far as it is asked to.
+    /// @param rows The rows it covers at most.
+    /// @return The budget.
+    [[nodiscard]] static SearchReadBudget rowsOnly(LineCount rows) noexcept;
+
+    /// Takes @p segment on, where the budget allows it.
+    /// @param segment The segment the read would go on to.
+    /// @param rows    The rows of it the caller counts as read.
+    /// @return Whether it may be read; once not, exhausted() says so.
+    [[nodiscard]] bool admit(SearchSegment segment, LineCount rows) noexcept;
+
+    /// @return Whether a segment was refused: the read stopped short of where it was going.
+    [[nodiscard]] bool exhausted() const noexcept { return _exhausted; }
+
+  private:
+    SearchReadBudget(LineCount rows, ColumnCount columns, bool costBounded) noexcept;
+
+    LineCount _rows;
+    std::size_t _columns;
+    bool _costBounded;
+    LineCount _rowsRead {};
+    std::size_t _segments = 0;
+    std::size_t _cost = 0; ///< The sum of the squared lengths of the segments read, in cells.
+    bool _exhausted = false;
+};
+
 /// A search pattern compiled once, with the options it was compiled under.
 ///
 /// Immutable once compiled: everything a match needs -- the resolved case comparison, the folded needle or
@@ -118,12 +172,9 @@ class SearchQuery
         return _regex ? RegexSegmentCells : MaxScanCells;
     }
 
-    /// The rows a bounded read -- a walk's step, the keystroke's probe -- may cover at most under this query.
-    /// @param budget  The rows the caller would read.
-    /// @param columns The grid's width.
-    /// @return @p budget for a literal; for a regex, no more than one segment's worth of rows, so one read
-    ///         feeds the engine about @ref RegexSegmentCells cells at most.
-    [[nodiscard]] LineCount boundedRows(LineCount budget, ColumnCount columns) const noexcept;
+    /// @return Whether a read must also be bounded by the engine's cost: a regex's grows faster than its
+    ///         subject, a literal's does not.
+    [[nodiscard]] bool costGrowsFasterThanItsSubject() const noexcept { return _regex.has_value(); }
 
     /// Every match whose first cell is in @p segment, in order.
     ///
@@ -181,6 +232,13 @@ class SearchMatchMemo
     [[nodiscard]] std::expected<std::vector<CellLocationRange>, SearchPatternError> matchesIn(
         std::shared_ptr<SearchQuery const> const& query, Grid const& grid, SearchSegment segment);
 
+    /// Forgets everything: there is no query whose matches it could hold.
+    void clear() noexcept
+    {
+        _query.reset();
+        _entries.clear();
+    }
+
     /// @return How often it has run the regex engine rather than remembered: a cost, read by the tests.
     [[nodiscard]] std::size_t engineRuns() const noexcept { return _engineRuns; }
 
@@ -188,10 +246,10 @@ class SearchMatchMemo
     /// One segment's matches, its lines relative to its top row.
     struct Entry
     {
-        int64_t firstRow = 0;                   ///< Its top row's stable id.
-        std::wstring units;                     ///< What the engine read.
-        std::vector<CellLocationRange> cells;   ///< Which cells spelled it.
-        std::vector<CellLocationRange> matches; ///< What it found.
+        int64_t firstRow = 0;                         ///< Its top row's stable id.
+        std::wstring units;                           ///< What the engine read.
+        std::vector<detail::SearchSubjectCell> cells; ///< Which cells spelled which units.
+        std::vector<CellLocationRange> matches;       ///< What it found.
     };
 
     /// More than a page shows: a page of one-row lines is a few hundred segments at most.

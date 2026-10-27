@@ -3808,10 +3808,11 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] std::expected<WalkProgress, SearchPatternError> continueSearchTally(
         TerminalSearchTally& tally, LineCount budget = SearchWalkStepLines);
 
-    /// searchReverse(), giving up after @p budget rows of whole segments: the per-keystroke probe (R-e). A
-    /// match it finds is revealed as searchReverse() reveals one.
+    /// searchReverse(), in whole segments while a SearchReadBudget of @p budget rows admits them -- for a
+    /// regex, also bounded by what it costs the engine: the per-keystroke probe (R-e). A match it finds is
+    /// revealed as searchReverse() reveals one.
     ///
-    /// Where the whole page on display fits in the budget, the probe also answers for the rows below
+    /// Where the whole grid on display fits in the budget, the probe also answers for the rows below
     /// @p from: it finds the last match there, as a finished tally walk would jump to, or proves there is
     /// none anywhere.
     /// @param from   Where to search backwards from.
@@ -4312,9 +4313,9 @@ class Terminal: public IStatusLinePublishTarget
     /// into Search::query or, where it does not compile, Search::problem. An empty pattern leaves both empty.
     void compileSearch();
 
-    /// The last match of the active query at or before @p from, within @p budget rows of whole segments;
+    /// The last match of the active query at or before @p from, in whole segments while @p read admits them;
     /// nothing without a query. Reveals nothing. @see probeSearchReverse
-    [[nodiscard]] std::optional<CellLocation> searchReverseWithin(CellLocation from, LineCount budget);
+    [[nodiscard]] std::optional<CellLocation> searchReverseWithin(CellLocation from, SearchReadBudget& read);
 
     /// Brings @p match into view where there is one, and reports the screen updated, as every step does.
     /// @return @p match.

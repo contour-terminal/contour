@@ -912,23 +912,24 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
         SearchQuery const& query, CellLocation startPosition) const;
 
-    /// searchReverseFrom(), stopping once @p budget rows of whole segments are read: the keystroke probe's
-    /// bound, so typing never walks a deep scrollback.
+    /// searchReverseFrom(), reading whole segments while @p read admits them: the keystroke probe's bound, so
+    /// typing never walks a deep scrollback, nor feeds a slow regex much.
     /// @param query         The compiled pattern.
     /// @param startPosition Where to begin; a match starting exactly here is returned.
-    /// @param budget        The rows after which it gives up; a segment is read whole.
+    /// @param read          What the read may take; exhausted() afterwards where it stopped short.
     /// @return The match's first cell, nothing where there is none within the budget, or
     ///         SearchPatternError::TooComplex.
     [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
-        SearchQuery const& query, CellLocation startPosition, LineCount budget) const;
+        SearchQuery const& query, CellLocation startPosition, SearchReadBudget& read) const;
 
     /// The match of @p query that begins at @p start.
     /// @param query The compiled pattern.
     /// @param start A cell of the grid.
+    /// @param memo  Where a regex's matches of the segment are remembered (Terminal::searchMatchMemo).
     /// @return The match's first cell and last column, nothing where no match begins there, or
     ///         SearchPatternError::TooComplex.
     [[nodiscard]] std::expected<std::optional<CellLocationRange>, SearchPatternError> matchStartingAt(
-        SearchQuery const& query, CellLocation start) const;
+        std::shared_ptr<SearchQuery const> const& query, CellLocation start, SearchMatchMemo& memo) const;
 
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {

@@ -8599,6 +8599,7 @@ std::expected<SearchChange, SearchPatternError> Terminal::installSearch(std::u32
 void Terminal::compileSearch()
 {
     _search.query.reset();
+    _searchMatchMemo.clear();
     _search.problem.reset();
     if (_search.pattern.empty())
         return;
@@ -8634,6 +8635,7 @@ void Terminal::endSearchQuery(SearchPatternError error)
 {
     _search.problem = error;
     _search.query.reset();
+    _searchMatchMemo.clear();
     _eventListener.searchQueryEnded();
 }
 
@@ -8643,7 +8645,11 @@ std::optional<CellLocationRange> Terminal::focusedSearchMatch() const
         return std::nullopt;
     // Const, so a failure to match cannot end the query here; it reads as no match, and the next step or
     // count that meets it ends the query.
-    return displayedPage().matchStartingAt(*_search.query, normalModeCursorPosition()).value_or(std::nullopt);
+    // Through the memo the render pass fills: a walk step's refresh of the current match does not run a regex
+    // over the cursor's segment again.
+    return displayedPage()
+        .matchStartingAt(_search.query, normalModeCursorPosition(), _searchMatchMemo)
+        .value_or(std::nullopt);
 }
 
 SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
@@ -8682,11 +8688,11 @@ std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(Te
     return progress;
 }
 
-std::optional<CellLocation> Terminal::searchReverseWithin(CellLocation from, LineCount budget)
+std::optional<CellLocation> Terminal::searchReverseWithin(CellLocation from, SearchReadBudget& read)
 {
     if (!_search.query)
         return std::nullopt;
-    return settleSearch(displayedPage().searchReverseFrom(*_search.query, from, budget));
+    return settleSearch(displayedPage().searchReverseFrom(*_search.query, from, read));
 }
 
 std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocation> match)
@@ -8699,25 +8705,32 @@ std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocati
 
 SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
 {
-    // A keystroke's read: a regex is fed about one segment, as a walk's step is; the walk finds the rest.
-    if (_search.query)
-        budget = _search.query->boundedRows(budget, pageSize().columns);
-    auto match = searchReverseWithin(from, budget);
-    auto const wholeGridFits = displayedPage().grid().linesUsed() <= budget;
-    if (!match && wholeGridFits)
+    // A keystroke's read: rows bound it, and for a regex what it costs the engine (SearchReadBudget), so an
+    // ordinary page is still read whole while a long line is read a segment at a time; the walk finds the
+    // rest.
+    auto const readBudget = [&] {
+        return _search.query ? SearchReadBudget { *_search.query, budget, pageSize().columns }
+                             : SearchReadBudget::rowsOnly(budget);
+    };
+    auto aboveFrom = readBudget();
+    auto match = searchReverseWithin(from, aboveFrom);
+    auto wholeGridRead = false;
+    if (!match && !aboveFrom.exhausted())
     {
-        // Small enough to answer for every row: the last match, below @p from, is where a finished walk
-        // would wrap to, and none at all is proved.
+        // It reached the history's top: the grid may be small enough to answer for every row. The last match,
+        // below @p from, is where a finished walk would wrap to, and none at all is proved.
         auto const bottomRight = CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - 1,
                                                 .column = boxed_cast<ColumnOffset>(pageSize().columns) - 1 };
-        match = searchReverseWithin(bottomRight, budget);
+        auto wholeGrid = readBudget();
+        match = searchReverseWithin(bottomRight, wholeGrid);
+        wholeGridRead = !wholeGrid.exhausted();
     }
     revealSearchMatch(match);
 
     if (match)
         return SearchProbe { .outcome = SearchProbeOutcome::Found, .match = match };
     // No query (none set, or ended by the probe itself) proves no absence.
-    if (wholeGridFits && _search.query)
+    if (wholeGridRead && _search.query)
         return SearchProbe { .outcome = SearchProbeOutcome::Absent, .match = std::nullopt };
     return SearchProbe {};
 }
@@ -8772,6 +8785,7 @@ void Terminal::clearSearch()
 {
     _search.pattern.clear();
     _search.query.reset();
+    _searchMatchMemo.clear();
     _search.problem.reset();
     publishBindingModes();
     _search.origin = SearchOrigin::Typed;
@@ -8807,7 +8821,8 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     // The probe's search, bounded by the grid itself: every row it has.
-    return revealSearchMatch(searchReverseWithin(searchPosition, displayedPage().grid().linesUsed()));
+    auto read = SearchReadBudget::rowsOnly(displayedPage().grid().linesUsed());
+    return revealSearchMatch(searchReverseWithin(searchPosition, read));
 }
 
 CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept

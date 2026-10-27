@@ -39,14 +39,14 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
     if (_progress == WalkProgress::Finished)
         return _progress;
 
-    // A regex is fed about one segment per step, whatever the caller allows: its cost grows faster than its
-    // subject, and the step runs under the terminal's lock.
-    budget = _query->boundedRows(budget, grid.pageSize().columns);
+    // A regex's step is also bounded by what it costs the engine, whatever rows the caller allows: its cost
+    // grows faster than its subject, and the step runs under the terminal's lock.
+    auto read = SearchReadBudget { *_query, budget, grid.pageSize().columns };
 
     // The segment just read: the next one is found from it without walking back to its line's head, so a
     // step looks a head up once, where it begins, however long the line.
     auto previous = std::optional<SearchSegment> {};
-    while (_progress == WalkProgress::Running && (_rowsLastStep < budget || _rowsLastStep == LineCount(0)))
+    while (_progress == WalkProgress::Running)
     {
         // Rows evicted before the walk reached them are gone, and so are their matches.
         _nextRow = std::max(_nextRow, grid.stableRangeFloor());
@@ -62,6 +62,8 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
         // below), and a regex match across the old cut, which neither cut reads whole, is not counted.
         auto const segment = previous ? *nextSearchSegment(grid, *previous, _query->segmentCells())
                                       : segmentFromHead(grid, *row);
+        if (!read.admit(segment, boxed_cast<LineCount>(segment.last - *row) + LineCount(1)))
+            break;
         previous = segment;
         auto const matches = _query->matchesIn(grid, segment);
         if (!matches)

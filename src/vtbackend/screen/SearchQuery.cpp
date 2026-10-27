@@ -234,15 +234,6 @@ namespace
 
 namespace detail
 {
-    /// One cell of a segment's subject: the units it spells and the columns it covers.
-    struct SearchSubjectCell
-    {
-        std::size_t firstUnit = 0; ///< Its first unit in SearchSubject::units.
-        std::size_t endUnit = 0;   ///< One past its last unit.
-        CellLocation first {};     ///< Its column.
-        CellLocation last {};      ///< Its last column: a wide character's second half.
-    };
-
     /// A segment as the matcher reads it (R-a): its cells' text in order, and which cells spelled it.
     struct SearchSubject
     {
@@ -554,11 +545,12 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchMatchMem
     }
 
     auto const subject = query->subjectOf(grid, segment);
-    auto cells = std::vector<CellLocationRange> {};
-    cells.reserve(subject.cells.size());
-    for (auto const& cell: subject.cells)
-        cells.push_back(CellLocationRange { .first = relativeTo(cell.first, segment.first),
-                                            .second = relativeTo(cell.last, segment.first) });
+    auto cells = subject.cells;
+    for (auto& cell: cells)
+    {
+        cell.first = relativeTo(cell.first, segment.first);
+        cell.last = relativeTo(cell.last, segment.first);
+    }
 
     auto const firstRow = grid.stableLineIdOf(segment.first);
     auto const absolute = [&segment](std::vector<CellLocationRange> const& matches) {
@@ -572,11 +564,7 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchMatchMem
     };
 
     auto const entry = std::ranges::find(_entries, firstRow, &Entry::firstRow);
-    auto const sameCells = [](CellLocationRange const& a, CellLocationRange const& b) {
-        return a.first == b.first && a.second == b.second;
-    };
-    if (entry != _entries.end() && entry->units == subject.units
-        && std::ranges::equal(entry->cells, cells, sameCells))
+    if (entry != _entries.end() && entry->units == subject.units && entry->cells == cells)
         return absolute(entry->matches);
 
     ++_engineRuns;
@@ -599,11 +587,40 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchMatchMem
     return matches;
 }
 
-LineCount SearchQuery::boundedRows(LineCount budget, ColumnCount columns) const noexcept
+SearchReadBudget::SearchReadBudget(LineCount rows, ColumnCount columns, bool costBounded) noexcept:
+    _rows { rows }, _columns { unbox<std::size_t>(columns) }, _costBounded { costBounded }
 {
-    if (!_regex)
-        return budget;
-    return std::min(budget, LineCount::cast_from(rowsPerSegment(columns, RegexSegmentCells)));
+}
+
+SearchReadBudget::SearchReadBudget(SearchQuery const& query, LineCount rows, ColumnCount columns) noexcept:
+    SearchReadBudget { rows, columns, query.costGrowsFasterThanItsSubject() }
+{
+}
+
+SearchReadBudget SearchReadBudget::rowsOnly(LineCount rows) noexcept
+{
+    return SearchReadBudget { rows, ColumnCount(0), false };
+}
+
+bool SearchReadBudget::admit(SearchSegment segment, LineCount rows) noexcept
+{
+    auto const cells = (unbox<std::size_t>(segment.last - segment.first) + 1) * _columns;
+    if (_segments > 0)
+    {
+        auto constexpr CostLimit = RegexSegmentCells * RegexSegmentCells;
+        auto const refused =
+            _rowsRead >= _rows
+            || (_costBounded && (cells > RegexSegmentCells / 2 || _cost + (cells * cells) > CostLimit));
+        if (refused)
+        {
+            _exhausted = true;
+            return false;
+        }
+    }
+    ++_segments;
+    _rowsRead += rows;
+    _cost += cells * cells;
+    return true;
 }
 
 SearchSegment searchSegmentAt(Grid const& grid, LineOffset row, std::size_t cells)

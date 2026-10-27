@@ -3721,12 +3721,12 @@ TEST_CASE("search.matchStartingAtAndTheFocusedMatch", "[screen]")
 
     SECTION("a match begins at its first cell and ends on a wide character's second half")
     {
-        auto const match = screen.matchStartingAt(*query, at(1));
+        auto const match = screen.matchStartingAt(query, at(1), mock.terminal.searchMatchMemo());
         REQUIRE(match.has_value());
         REQUIRE(match->has_value());
         CHECK((*match)->first == at(1));
         CHECK((*match)->second == at(2));
-        auto const onSecondHalf = screen.matchStartingAt(*query, at(2));
+        auto const onSecondHalf = screen.matchStartingAt(query, at(2), mock.terminal.searchMatchMemo());
         REQUIRE(onSecondHalf.has_value());
         CHECK_FALSE(onSecondHalf->has_value());
 
