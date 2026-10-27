@@ -36,6 +36,7 @@
 
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/RestoredCounts.hpp>
 #include <vthost/client/Liveness.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -489,6 +490,11 @@ class NativeClient final
     ///         a daemon that predates the field. @see proto::ServerHello::daemonInstance
     [[nodiscard]] uint64_t daemonInstance() const noexcept { return _daemonInstance; }
 
+    /// @return What the daemon's restore brought back, when this connection's hello said so: only the first
+    ///         accepted Attach connection after a restore is told. Empty for zero counts, from a daemon that
+    ///         predates the fields, and before the handshake. @see proto::ServerHello::restoredWindows
+    [[nodiscard]] std::optional<RestoredCounts> restoredCounts() const noexcept { return _restoredCounts; }
+
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
     ///
     /// Public because it is a pure decision about @p handshake with no state behind it, and one
@@ -574,12 +580,13 @@ class NativeClient final
     /// Answers the daemon's unknown PDUs, and holds back the ones it said it does not know.
     proto::UnsupportedTracker _unsupported;
     uint64_t _nextSerial = 1;
-    vtbackend::HostIdentity _daemonIdentity;         ///< @see daemonIdentity()
-    std::string _daemonRelease;                      ///< @see daemonRelease()
-    uint64_t _daemonInstance = 0;                    ///< @see daemonInstance()
-    std::vector<uint64_t> _followedWindows;          ///< @see followedWindows()
-    std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
+    vtbackend::HostIdentity _daemonIdentity;          ///< @see daemonIdentity()
+    std::string _daemonRelease;                       ///< @see daemonRelease()
+    uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
+    std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
+    std::vector<uint64_t> _followedWindows;           ///< @see followedWindows()
+    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
     LivenessTracker _liveness;              ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason; ///< @see lossReason()
     uint64_t _nextHeartbeatNonce = 1;

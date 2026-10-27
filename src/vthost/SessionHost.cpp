@@ -343,8 +343,12 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
     // listener, so the layout is in place before a client could possibly attach. A restored workspace
     // replaces the startup layout, unless it brought nothing back.
-    if (config.restore && realizeRestoredWorkspace(*config.restore) > 0)
+    auto const realized = config.restore ? realizeRestoredWorkspace(*config.restore) : RealizedRestore {};
+    if (realized.panes > 0)
+    {
         _restoreOutcome = RestoreOutcome::Realized;
+        _restoreAnnouncement = realized.windows;
+    }
     else
         realizeStartupLayout(_window, config.startupLayout);
 }
@@ -702,42 +706,45 @@ Uuid SessionHost::restoredUuid(ObjectKind kind, std::optional<ObjectIdentityReco
     return _objects.mint();
 }
 
-std::size_t SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
+SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
 {
-    auto realized = std::size_t { 0 };
+    auto realized = RealizedRestore {};
     for (auto const& window: restore.snapshot.windows)
     {
         // The first window that brings anything back is the host's own, which never stays empty while a
         // later one fills.
-        auto const id = realized == 0 ? _window : _model.createWindow()->id();
+        auto const id = realized.panes == 0 ? _window : _model.createWindow()->id();
         // The host's own window takes the identity of each one that tries to fill it, the last such one
         // keeping it.
         auto const uuid = restoredUuid(ObjectKind::Window, window.identity);
         _objects.bind(id, uuid);
         _objects.setLabel(ObjectRef { .kind = ObjectKind::Window, .uuid = uuid }, labelOf(window.identity));
-        auto const panes = realizeRestoredWindow(id, window, restore);
+        auto const inWindow = realizeRestoredWindow(id, window, restore);
         // A window none of whose panes came back is not left behind empty.
-        if (panes == 0 && id != _window)
+        if (inWindow.panes == 0 && id != _window)
         {
             _objects.forget(id);
             _model.removeWindow(id);
         }
-        realized += panes;
+        realized.panes += inWindow.panes;
+        if (inWindow.tabs > 0)
+            realized.windows.push_back(RestoredWindow { .window = id.value, .tabs = inWindow.tabs });
     }
     sessionLog()("restore: {} pane(s) of a snapshot of {} window(s) came back",
-                 realized,
+                 realized.panes,
                  restore.snapshot.windows.size());
     return realized;
 }
 
-std::size_t SessionHost::realizeRestoredWindow(WindowId window,
-                                               WindowSnapshot const& snapshot,
-                                               WorkspaceRestore const& restore)
+SessionHost::RealizedWindow SessionHost::realizeRestoredWindow(WindowId window,
+                                                               WindowSnapshot const& snapshot,
+                                                               WorkspaceRestore const& restore)
 {
-    auto realized = std::size_t { 0 };
+    auto realized = RealizedWindow {};
     auto tabs = std::vector<Tab*> {};
     for (auto const& tabSnapshot: snapshot.tabs)
     {
+        auto const panesBefore = realized.panes;
         auto const restored = restoredTabOf(tabSnapshot);
         // As for a startup layout: the tab's UUID is staged with its first pane and bound when the model
         // announces the tab. A restored object keeps the UUID and label it was captured with.
@@ -779,7 +786,7 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
                 seedSession(request,
                             SpawnIds { .window = windowUuid(window), .tab = *tabUuid, .pane = paneUuid })
                     .has_value();
-            realized += seeded ? 1 : 0;
+            realized.panes += seeded ? 1 : 0;
             return seeded;
         };
         auto* const tab = vtworkspace::realizeLayoutTab(_model, window, restored->layout, seeder);
@@ -788,6 +795,7 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
         if (tab == nullptr)
             continue;
         tabs.push_back(tab);
+        realized.tabs += realized.panes > panesBefore ? 1 : 0;
         auto leaf = tabSnapshot.activeLeaf;
         if (auto const* const active = leafAt(*tab->rootPane(), leaf))
             _model.setActivePane(tab->id(), active->id());
@@ -797,6 +805,19 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
     if (snapshot.activeTab < tabs.size())
         _model.activateTab(window, tabs[snapshot.activeTab]->id());
     return realized;
+}
+
+std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
+    std::function<bool(uint64_t)> const& follows)
+{
+    auto const restored = std::exchange(_restoreAnnouncement, {});
+    auto counts = RestoredCounts {};
+    for (auto const& entry: restored | std::views::filter([&](auto const& w) { return follows(w.window); }))
+    {
+        ++counts.windows;
+        counts.tabs += entry.tabs;
+    }
+    return counts.windows > 0 ? std::optional { counts } : std::nullopt;
 }
 
 void SessionHost::holdInitialInput(SessionId session, std::string input)

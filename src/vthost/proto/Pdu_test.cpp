@@ -788,9 +788,9 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    // The release string (length byte and five characters), and the followed-window count and the instance
-    // behind it.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/8);
+    // The release string (length byte and five characters), and the followed-window count, the instance and
+    // the two restored counts behind it.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/10);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
 
@@ -860,9 +860,9 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        // "r", "zeta" and their lengths, the followed-window count and the instance
-        auto const frame = encodeWithoutTrailingField(hello, 9);
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 9);
+        // "r", "zeta" and their lengths, the followed-window count, the instance and the two restored counts
+        auto const frame = encodeWithoutTrailingField(hello, 11);
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 11);
         auto expected = hello;
         expected.hostname.clear();
         expected.releaseVersion.clear();
@@ -1839,8 +1839,9 @@ TEST_CASE("ServerHello carries the followed windows; a refusal carries none", "[
           == std::vector<uint64_t> { 1, 3 });
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } }))
               .followedWindows.empty());
-    // A daemon from before the field: the count, its ids and the instance after them are missing.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    // A daemon from before the field: the count, its ids, the instance and the restored counts after them are
+    // missing.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 6);
     CHECK(decodeAs<ServerHello>(legacy).followedWindows.empty());
 }
 
@@ -1850,10 +1851,26 @@ TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as
         ServerHello { .agreedVersion = 4, .followedWindows = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
     // A daemon from before the field: the followed windows end the blob.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 1);
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
     CHECK(decoded.agreedVersion == 4);
+}
+
+TEST_CASE("ServerHello carries what a restore brought back; an older daemon's reads as nothing",
+          "[vthost][pdu]")
+{
+    auto const hello =
+        ServerHello { .agreedVersion = 4, .daemonInstance = 7, .restoredWindows = 2, .restoredTabs = 7 };
+    auto const decoded = std::get<ServerHello>(roundTrip(DecodedPdu { hello }));
+    CHECK(decoded.restoredWindows == 2);
+    CHECK(decoded.restoredTabs == 7);
+    CHECK(decoded.daemonInstance == 7);
+    // A daemon from before the fields: the two varints at the blob's end are missing.
+    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 2));
+    CHECK(legacy.restoredWindows == 0);
+    CHECK(legacy.restoredTabs == 0);
+    CHECK(legacy.daemonInstance == 7);
 }
 
 TEST_CASE("EditTab and Heartbeat round-trip", "[vthost][pdu]")

@@ -799,6 +799,10 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
     _daemonRelease = hello.releaseVersion;
     _daemonInstance = hello.daemonInstance;
+    _restoredCounts = hello.restoredWindows == 0 && hello.restoredTabs == 0
+                          ? std::nullopt
+                          : std::optional { RestoredCounts { .windows = hello.restoredWindows,
+                                                             .tabs = hello.restoredTabs } };
     _followedWindows = hello.followedWindows;
     _negotiated = std::move(*outcome);
     _handshakeTimer.reset();

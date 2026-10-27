@@ -484,3 +484,65 @@ TEST_CASE("a snapshot that repeats a UUID restores the second object under a fre
     CHECK(first->bytes == repeated.uuid);
     CHECK(*second != *first);
 }
+
+namespace
+{
+
+/// @return A snapshot of one window per count given, each holding that many single-pane tabs.
+[[nodiscard]] WorkspaceSnapshot windowsOf(std::vector<int> const& tabCounts)
+{
+    auto snapshot = WorkspaceSnapshot { .takenAt = Now };
+    for (auto const tabs: tabCounts)
+    {
+        auto window = WindowSnapshot {};
+        for (auto const _: std::views::iota(0, tabs))
+            window.tabs.push_back(TabSnapshot { .root = leaf() });
+        snapshot.windows.push_back(std::move(window));
+    }
+    return snapshot;
+}
+
+} // namespace
+
+TEST_CASE("a restore announces the windows and tabs it brought back, once", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    auto const everything = [](uint64_t) {
+        return true;
+    };
+
+    CHECK(host->takeRestoreAnnouncement(everything) == RestoredCounts { .windows = 2, .tabs = 7 });
+    CHECK_FALSE(host->takeRestoreAnnouncement(everything).has_value());
+}
+
+TEST_CASE("a window none of whose panes spawned is not announced", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    h.recorded.failFirst = 3; // every pane of the first window
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+
+    CHECK(host->takeRestoreAnnouncement([](uint64_t) { return true; })
+          == RestoredCounts { .windows = 1, .tabs = 4 });
+}
+
+TEST_CASE("a client is told only of the windows it follows", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    auto const first = host->model().windowAt(0)->id().value;
+
+    CHECK(host->takeRestoreAnnouncement([first](uint64_t window) { return window == first; })
+          == RestoredCounts { .windows = 1, .tabs = 3 });
+    // The question is asked of the first client only: nothing is left for another.
+    CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+}
+
+TEST_CASE("a host that restored nothing has nothing to announce", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    h.recorded.failing = true;
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 2 }), .divider = DividerOf });
+    CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+    CHECK_FALSE(h.makeHost({})->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+}

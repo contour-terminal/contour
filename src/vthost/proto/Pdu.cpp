@@ -379,6 +379,8 @@ namespace
         for (auto const window: pdu.followedWindows)
             fields.varint(window);
         fields.varint(pdu.daemonInstance);
+        fields.varint(pdu.restoredWindows);
+        fields.varint(pdu.restoredTabs);
         out.blob(fields.view());
     }
 
@@ -1111,6 +1113,10 @@ namespace
                 return std::unexpected(followed.error());
         }
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.daemonInstance, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredWindows, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredTabs, error))
             return std::unexpected(error);
         return pdu;
     }

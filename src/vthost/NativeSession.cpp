@@ -2019,6 +2019,14 @@ void NativeSession::attachClient(uint64_t serial,
             if (auto* window = _host.model().windowAt(i); window != nullptr && window->tabCount() > 0)
                 reply.followedWindows.push_back(window->id().value);
     reply.daemonInstance = _host.instance();
+    // Told to the first attaching client only, whichever windows it follows: the host forgets it with the
+    // answer.
+    if (auto const restored = _host.takeRestoreAnnouncement(
+            [this](uint64_t window) { return follows(vtworkspace::WindowId { window }); }))
+    {
+        reply.restoredWindows = restored->windows;
+        reply.restoredTabs = restored->tabs;
+    }
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;

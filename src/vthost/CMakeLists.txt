@@ -69,6 +69,7 @@ add_library(vthost STATIC
     ServiceControl_systemd.cpp
     ServiceControl_systemd.hpp
     ServiceControl_win32.cpp
+    RestoredCounts.hpp
     SessionSettings.cpp
     SessionEnd.hpp
     SessionSettings.hpp

@@ -189,11 +189,14 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
           == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown followed=[] "
-             "instance=0000000000000000");
+             "instance=0000000000000000 restored=0/0");
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .followedWindows = { 1, 3 } } })
               .contains("followed=[1,3]"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .daemonInstance = 0xC0FFEE } })
-              .ends_with("instance=0000000000c0ffee"));
+              .contains("instance=0000000000c0ffee"));
+    CHECK(
+        summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .restoredWindows = 2, .restoredTabs = 7 } })
+            .ends_with("restored=2/7"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .releaseVersion = "0.8.1" } })
               .contains("release=0.8.1"));
     CHECK(summarize(DecodedPdu { ServerHello { .layout = HelloLayout::VersionAlone, .codecVersion = 3 } })

@@ -45,6 +45,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -58,6 +59,7 @@
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
+#include <vthost/RestoredCounts.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
@@ -995,6 +997,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         was given.
     [[nodiscard]] RestoreOutcome restoreOutcome() const noexcept { return _restoreOutcome; }
 
+    /// Hands over, once, what the restore realized, for the first client to be told.
+    /// @param follows Whether the asking client follows a window, by its id: only those windows are counted.
+    /// @return The windows and tabs SessionHostConfig::restore brought back that @p follows names, the first
+    ///         time this is called after it brought something back, and nullopt every time after, and when it
+    ///         brought nothing, or nothing @p follows names.
+    [[nodiscard]] std::optional<RestoredCounts> takeRestoreAnnouncement(
+        std::function<bool(uint64_t)> const& follows);
+
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
 
@@ -1152,19 +1162,40 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
     void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
 
+    /// A window a restore brought back.
+    struct RestoredWindow
+    {
+        uint64_t window = 0; ///< Its id.
+        uint32_t tabs = 0;   ///< The tabs of it with at least one spawned pane.
+    };
+
+    /// What realizing one window of a restore brought back.
+    struct RealizedWindow
+    {
+        std::size_t panes = 0; ///< The panes that spawned.
+        uint32_t tabs = 0;     ///< The tabs with at least one such pane.
+    };
+
+    /// What a restore realized: the panes that spawned, and the windows holding at least one tab of them.
+    struct RealizedRestore
+    {
+        std::size_t panes = 0;               ///< The panes that spawned.
+        std::vector<RestoredWindow> windows; ///< Each window with a tab, in snapshot order.
+    };
+
     /// Realizes @p restore's windows: the first into the host's own window, each further one into a new
     /// window, every tab via vtworkspace::realizeLayoutTab, then each tab's active pane and zoom and each
     /// window's active tab. A pane's saved directory is used only while it still exists. Called once, from
     /// the constructor body.
     /// @param restore The snapshot, and what its panes re-run.
-    /// @return How many panes were realized.
-    std::size_t realizeRestoredWorkspace(WorkspaceRestore const& restore);
+    /// @return What was realized.
+    RealizedRestore realizeRestoredWorkspace(WorkspaceRestore const& restore);
 
     /// Realizes one window of a restore into @p window.
-    /// @return How many panes were realized.
-    std::size_t realizeRestoredWindow(vtworkspace::WindowId window,
-                                      WindowSnapshot const& snapshot,
-                                      WorkspaceRestore const& restore);
+    /// @return What was realized.
+    RealizedWindow realizeRestoredWindow(vtworkspace::WindowId window,
+                                         WindowSnapshot const& snapshot,
+                                         WorkspaceRestore const& restore);
 
     /// @param kind What the object is.
     /// @param identity What a snapshot captured of it.
@@ -1404,6 +1435,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The restored sessions whose command the restart stopped and that have run nothing since. Loop thread.
     std::unordered_map<uint64_t, Interruption> _interruptions;
     RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome
+    std::vector<RestoredWindow>
+        _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
 
     /// The UUIDs and labels of windows, tabs and panes. Declared before the model, whose events bind into it.
     ObjectRegistry _objects;

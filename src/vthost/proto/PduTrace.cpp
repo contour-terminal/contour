@@ -136,13 +136,15 @@ namespace
                            case HelloLayout::Negotiating: break;
                        }
                        return std::format("layout=negotiating agreed={} versions={} caps={} release={} "
-                                          "followed={} instance={:016x}",
+                                          "followed={} instance={:016x} restored={}/{}",
                                           value.agreedVersion,
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
                                           value.releaseVersion.empty() ? "unknown" : value.releaseVersion,
                                           formatWindows(value.followedWindows),
-                                          value.daemonInstance);
+                                          value.daemonInstance,
+                                          value.restoredWindows,
+                                          value.restoredTabs);
                    } },
         TraceRow { PduType::Input,
                    "Input",

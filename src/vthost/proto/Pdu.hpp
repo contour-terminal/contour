@@ -294,6 +294,12 @@ struct ServerHello
     /// A daemon that restores a saved workspace after a restart (phase 6) is a new instance all the same: a
     /// client that stayed connected sees its old windows lost, and the restored ones arrive as new windows.
     uint64_t daemonInstance = 0;
+    /// The windows a restore of the daemon's saved workspace brought back, told once: to the first accepted
+    /// Attach connection after it, and zero to every other connection and in every refusal. Zero reads as
+    /// "nothing to tell", also from a daemon that predates the field. @see vthost::RestoredCounts
+    uint32_t restoredWindows = 0;
+    /// The tabs of those windows; zero as @ref restoredWindows is.
+    uint32_t restoredTabs = 0;
     bool operator==(ServerHello const&) const = default;
 };
 
