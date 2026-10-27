@@ -225,4 +225,8 @@ ChromeHeaderOccupantNames::ChromeHeaderOccupantNames(QObject* parent): QObject {
 {
 }
 
+ChromeSecureInputNames::ChromeSecureInputNames(QObject* parent): QObject { parent }
+{
+}
+
 } // namespace contour::window

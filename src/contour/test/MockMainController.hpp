@@ -86,6 +86,7 @@ struct MainWindowScene
     /// What the OS reserves at the band's leading edge for its own window controls while the chrome draws
     /// the band (macOS's traffic lights); 0 under the native frame, which draws them in a bar of its own.
     qreal nativeControlsInset = 0;
+    snapshot::SecureDecor secure = snapshot::SecureDecor::None; ///< Which tabs wait for a password.
 };
 
 /// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
@@ -152,6 +153,7 @@ class MockMainController: public MainWindowControllerMock
         BadgeRole = Qt::UserRole + 10,
         BadgeTextRole = Qt::UserRole + 11,
         BadgeProgressRole = Qt::UserRole + 12,
+        SecureRole = Qt::UserRole + 13,
     };
 
     /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
@@ -428,6 +430,7 @@ class MockMainController: public MainWindowControllerMock
             case Roles::BadgeRole: return static_cast<int>(badge.kind);
             case Roles::BadgeTextRole: return QString {};
             case Roles::BadgeProgressRole: return badge.progress;
+            case Roles::SecureRole: return isLocked(index.row()) ? 1 : 0;
             default: return {};
         }
     }
@@ -447,6 +450,7 @@ class MockMainController: public MainWindowControllerMock
             { static_cast<int>(Roles::BadgeRole), "badge" },
             { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
             { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
+            { static_cast<int>(Roles::SecureRole), "tabSecure" },
         };
     }
     // }}}
@@ -488,6 +492,18 @@ class MockMainController: public MainWindowControllerMock
     }
 
     /// The badge of row @p row: rows 1, 2, ... carry DecorBadges under EveryBadge.
+    /// @return Whether tab @p row waits for a password under the scene's SecureDecor: the active tab and the
+    ///         last one.
+    [[nodiscard]] bool isLocked(int row) const noexcept
+    {
+        switch (_scene.secure)
+        {
+            case snapshot::SecureDecor::None: break;
+            case snapshot::SecureDecor::Locked: return row == _scene.activeTab || row == _scene.tabCount - 1;
+        }
+        return false;
+    }
+
     [[nodiscard]] DecorBadge decorBadge(int row) const
     {
         auto const slot = static_cast<std::size_t>(row) - 1;

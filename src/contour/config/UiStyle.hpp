@@ -229,6 +229,9 @@ struct UiStyleTokens
     std::string_view findNextGlyph {};     ///< The find bar's next-match button.
     /// The overlay scrollbar's thumb, repeated down its column; empty where the thumb is a rounded shape.
     std::string_view scrollThumbGlyph {};
+    /// A locked pane's lock as cell text, set between the chip glyphs (`[secure]`); empty where the lock is
+    /// the bundled icon.
+    std::string_view secureInputText {};
 
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
@@ -419,6 +422,7 @@ namespace detail
         .findPreviousGlyph = "▴",
         .findNextGlyph = "▾",
         .scrollThumbGlyph = "",
+        .secureInputText = "",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",
@@ -503,6 +507,7 @@ namespace detail
         .findPreviousGlyph = "↑",
         .findNextGlyph = "↓",
         .scrollThumbGlyph = "┃",
+        .secureInputText = "secure",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",

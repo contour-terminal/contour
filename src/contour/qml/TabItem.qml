@@ -45,6 +45,15 @@ Item {
     property int tabBadge: 0
     property string tabBadgeText: ""
     property int tabBadgeProgress: -1
+    // Whether any pane of the tab is at a password prompt (WindowController's SecureRole). A bool, the
+    // QML-facing carve-out: the role says only yes or no. Not required, so a TabItem built on its own shows no
+    // lock.
+    property bool locked: false
+    // The lock goes on the tab whenever the tab well shows it -- this tab is in it -- whatever the pane's
+    // header shows (window::SecureIndicatorRules).
+    readonly property bool lockShown: root.locked && !root.iconOnly
+        && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotHidden,
+                                            chromeStyle.secureInputs.spotShown).tab === true
 
     // What the pill shows, as TabStrip reads it from chromeStyle.tabWellLayout(): "full", or "iconOnly"
     // once the well is too narrow for labels. The Flat shape always shows its label.
@@ -82,11 +91,11 @@ Item {
     // each after an s3, then s4. Its width is the well's (TabStrip assigns it); this is only what it would
     // like.
     readonly property real naturalWidth: root.pill
-        ? chromeStyle.space.s5 + icon.width + chromeStyle.space.s3 + label.implicitWidth
+        ? chromeStyle.space.s5 + icon.width + chromeStyle.space.s3 + lock.room + label.implicitWidth
           + root.partGap + badgeSlot.width + badgeSlot.gapAfter
           + zoomBadge.width + zoomBadge.anchors.rightMargin
           + chromeStyle.size.tabClose + chromeStyle.space.s4
-        : label.implicitWidth + chromeStyle.labelPadding
+        : lock.room + label.implicitWidth + chromeStyle.labelPadding
           + chromeStyle.labelGap + chromeStyle.controlWidth
           + chromeStyle.trailingPadding
           + separator.width + chromeStyle.tabSlack
@@ -436,11 +445,25 @@ Item {
         dragThreshold: 8
     }
 
+    // The lock, before the title, while a pane of the tab is at a password prompt.
+    SecureInputLock {
+        id: lock
+        objectName: "tabLock"   // findChild() handle for the GUI test
+        anchors.left: root.pill ? icon.right : colorCell.right
+        anchors.leftMargin: root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.lockShown
+        color: root.foreground
+        font: root.labelFont
+        // What it takes from the title's row: itself and the gap after it, nothing while hidden.
+        readonly property real room: visible ? width + root.partGap : 0
+    }
+
     Text {
         id: label
         objectName: "tabLabel"   // findChild() handle for the GUI test
-        anchors.left: root.pill ? icon.right : colorCell.right
-        anchors.leftMargin: root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
+        anchors.left: lock.visible ? lock.right : root.pill ? icon.right : colorCell.right
+        anchors.leftMargin: lock.visible ? root.partGap : root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
         anchors.right: badgeSlot.left
         anchors.rightMargin: root.partGap
         anchors.verticalCenter: parent.verticalCenter

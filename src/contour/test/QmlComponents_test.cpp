@@ -19,6 +19,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/SecureInput.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/SearchStatus.hpp>
@@ -39,6 +40,7 @@
 #include <contour/window/LinkPillPlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -11842,6 +11844,101 @@ TEST_CASE("overlay motion: Reduce Motion cross-fades and keeps the hold (offscre
         CHECK(std::ranges::all_of(durations,
                                   [](int ms) { return ms == contour::config::ReducedMotionCrossFadeMs; }));
     }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
+
+// {{{ Secure input: the lock
+
+TEST_CASE("SecureInputLock: the icon on the native rows, `[secure]` on the Terminal row (offscreen)",
+          "[contour][gui][qml][secureinput]")
+{
+    for (auto const row: { contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        contour::test::QmlMessageCapture const warnings;
+        QQmlEngine engine;
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        setup.secureInput = contour::platform::SecureInputSupport::Native;
+        contour::test::installChromeStyle(engine, setup);
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SecureInputLock.qml")));
+        INFO("errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        auto lock = std::unique_ptr<QObject>(component.create());
+        REQUIRE(lock != nullptr);
+        QCoreApplication::processEvents();
+
+        // Named for what it means, on every row: the OS turns secure keyboard entry on here.
+        CHECK(accessibleNameOf(*lock) == QStringLiteral("Secure input on"));
+        auto* icon = lock->findChild<QQuickItem*>(QStringLiteral("secureInputIcon"));
+        auto* text = lock->findChild<QQuickItem*>(QStringLiteral("secureInputText"));
+        REQUIRE(icon != nullptr);
+        REQUIRE(text != nullptr);
+        if (row == contour::config::ChromeStyle::Terminal)
+        {
+            CHECK_FALSE(icon->isVisible());
+            CHECK(text->isVisible());
+            CHECK(text->property("text").toString() == QStringLiteral("[secure]"));
+        }
+        else
+        {
+            CHECK(icon->isVisible());
+            CHECK_FALSE(text->isVisible());
+            auto const edge = chromeToken(engine, "size", "secureInputGlyph");
+            CHECK(edge > 0);
+            CHECK(qobject_cast<QQuickItem*>(lock.get())->width() == edge);
+            CHECK(qobject_cast<QQuickItem*>(lock.get())->height() == edge);
+        }
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("SecureInputLock: \"Input hidden\" where the OS has no secure keyboard entry (offscreen)",
+          "[contour][gui][qml][secureinput]")
+{
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.secureInput = contour::platform::SecureInputSupport::None;
+    contour::test::installChromeStyle(engine, setup);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SecureInputLock.qml")));
+    REQUIRE(component.isReady());
+    auto lock = std::unique_ptr<QObject>(component.create());
+    REQUIRE(lock != nullptr);
+    CHECK(accessibleNameOf(*lock) == QStringLiteral("Input hidden"));
+}
+
+TEST_CASE("pane card: a pane at a password prompt shows the lock and says so in its header (offscreen)",
+          "[contour][gui][qml][secureinput][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = paneCardSetup();
+    setup.secureInput = contour::platform::SecureInputSupport::Native;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setForegroundProcessName(QStringLiteral("sudo"));
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& lock = PaneTreeHost::partOf(card, "paneHeaderLock");
+    auto const& name = PaneTreeHost::partOf(card, "paneHeaderName");
+    CHECK_FALSE(lock.isVisible());
+    CHECK(name.property("text").toString() == QStringLiteral("sudo"));
+
+    panes.leftSession.setSecureIndicator(static_cast<int>(contour::window::SecureIndicator::Locked));
+    QCoreApplication::processEvents();
+    CHECK(lock.isVisible());
+    CHECK(name.property("text").toString() == QStringLiteral("sudo · Secure input on"));
+    // After the lock, by the header's gap: the lock never covers the name.
+    CHECK(name.x() >= lock.x() + lock.width());
+    // The other pane is not locked.
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "paneHeaderLock").isVisible());
+
+    panes.leftSession.setSecureIndicator(static_cast<int>(contour::window::SecureIndicator::None));
+    QCoreApplication::processEvents();
+    CHECK_FALSE(lock.isVisible());
+    CHECK(name.property("text").toString() == QStringLiteral("sudo"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}

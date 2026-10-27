@@ -11,6 +11,7 @@
 #include <contour/session/EndReason.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QObject>
@@ -83,6 +84,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal findIcon READ findIcon CONSTANT)
     Q_PROPERTY(qreal linkPill READ linkPill CONSTANT)
     Q_PROPERTY(qreal scrollbar READ scrollbar CONSTANT)
+    Q_PROPERTY(qreal secureInputGlyph READ secureInputGlyph CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -212,6 +214,11 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal linkPill() const noexcept { return _tokens.linkPill * _units.vertical; }
     /// @return The overlay scrollbar's track width in logical pixels.
     [[nodiscard]] qreal scrollbar() const noexcept { return _tokens.scrollbar * _units.horizontal; }
+    /// @return The secure-input lock's icon edge in logical pixels; 0 on the Terminal row, which sets text.
+    [[nodiscard]] qreal secureInputGlyph() const noexcept
+    {
+        return _tokens.secureInputGlyph * _units.vertical;
+    }
 
   private:
     config::SizeTokens _tokens {};
@@ -1181,6 +1188,28 @@ class ChromeHeaderOccupantNames: public QObject
     {
         return static_cast<int>(occupant);
     }
+};
+
+/// The QML names of secure input's values, `chromeStyle.secureInputs`: what a pane's `secureIndicator`
+/// holds (window::SecureIndicator), and what secureIndicatorSpots() takes (window::SpotShown).
+class ChromeSecureInputNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int locked READ locked CONSTANT)
+    Q_PROPERTY(int spotHidden READ spotHidden CONSTANT)
+    Q_PROPERTY(int spotShown READ spotShown CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeSecureInputNames(QObject* parent);
+
+    /// @return Each window::SecureIndicator as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return static_cast<int>(SecureIndicator::None); }
+    [[nodiscard]] static constexpr int locked() noexcept { return static_cast<int>(SecureIndicator::Locked); }
+    /// @return Each window::SpotShown as its underlying value.
+    [[nodiscard]] static constexpr int spotHidden() noexcept { return static_cast<int>(SpotShown::No); }
+    [[nodiscard]] static constexpr int spotShown() noexcept { return static_cast<int>(SpotShown::Yes); }
 };
 
 } // namespace contour::window

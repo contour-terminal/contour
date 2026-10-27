@@ -535,3 +535,37 @@ TEST_CASE("accessibility: the permission dialog's accessible tree", "[contour][g
     }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+TEST_CASE("accessibility: a locked pane's header names the lock and says so",
+          "[contour][gui][qml][a11y][secureinput]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine); // no secure keyboard entry: "Input hidden"
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setForegroundProcessName(QStringLiteral("ssh"));
+    session.setSecureIndicator(1); // window::SecureIndicator::Locked
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+    auto const policy = QVariantMap { { "content", QStringLiteral("name") },
+                                      { "actions", QStringLiteral("hidden") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) },
+                                    { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                    { "policy", policy } });
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString()
+          == QStringLiteral("ssh · Input hidden"));
+
+    auto const locks = partsNamed(*header, QStringLiteral("paneHeaderLock"));
+    REQUIRE(locks.size() == 1);
+    auto* lock = accessibleAttachedOf(locks.front());
+    REQUIRE(lock != nullptr);
+    CHECK(lock->property("role").toInt() == QAccessible::Indicator);
+    CHECK(lock->property("name").toString() == QStringLiteral("Input hidden"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

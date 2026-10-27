@@ -449,6 +449,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Banner.qml
         qml/Toast.qml
         qml/LinkPill.qml
+        qml/SecureInputLock.qml
         qml/ElevationShadow.qml
         qml/KitDialog.qml
         qml/PermissionDialog.qml

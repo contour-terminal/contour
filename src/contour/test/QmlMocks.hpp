@@ -75,6 +75,8 @@ class MockSession: public QObject
     Q_PROPERTY(QString foregroundProcessName READ foregroundProcessName NOTIFY foregroundProcessNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(int programStatus READ programStatus NOTIFY paneProgramStatusChanged)
+    // Mirrors TerminalSession's lock: a window::SecureIndicator's value.
+    Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
     Q_PROPERTY(QString programStatusText READ programStatusText NOTIFY paneProgramStatusChanged)
     // }}}
     // {{{ The ended pane: what its footer reads, mirroring TerminalSession's properties and their signal.
@@ -239,6 +241,16 @@ class MockSession: public QObject
     [[nodiscard]] QString const& foregroundProcessName() const noexcept { return _foregroundProcessName; }
     [[nodiscard]] QString const& title() const noexcept { return _title; }
     [[nodiscard]] int programStatus() const noexcept { return _programStatus; }
+    [[nodiscard]] int secureIndicator() const noexcept { return _secureIndicator; }
+
+    /// The program in the pane hid what is typed, or showed it again, as TerminalSession::refreshInputEcho()
+    /// tells.
+    /// @param indicator A window::SecureIndicator's value.
+    void setSecureIndicator(int indicator)
+    {
+        _secureIndicator = indicator;
+        emit secureIndicatorChanged();
+    }
     [[nodiscard]] QString const& programStatusText() const noexcept { return _programStatusText; }
 
     /// The shell reported another directory, as TerminalSession::refreshDisplayWorkingDirectory() tells.
@@ -447,6 +459,7 @@ class MockSession: public QObject
     void isScrollbarVisibleChanged();
     void sizeIndicatorRequested();
     void linkTargetChanged();
+    void secureIndicatorChanged();
     void overlayClearanceChanged();
     void commandBlockHoverChanged();
     void scrollbarMarksChanged();
@@ -497,7 +510,8 @@ class MockSession: public QObject
     QString _foregroundProcessName;
     QString _title;
     QVariantMap _pendingPermission;
-    int _programStatus = 0; ///< window::TabBadgeKind::None.
+    int _programStatus = 0;   ///< window::TabBadgeKind::None.
+    int _secureIndicator = 0; ///< window::SecureIndicator::None.
     QString _programStatusText;
     int _sessionEnd = 0; ///< session::EndReason::None.
     QString _endMessage;

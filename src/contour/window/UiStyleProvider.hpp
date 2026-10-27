@@ -99,6 +99,7 @@ struct ChromeGlyphs
     QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
     QString findPrevious;    ///< The find bar's previous-match button.
     QString findNext;        ///< The find bar's next-match button.
+    QString secureInput;     ///< A locked pane's lock as cell text; empty where the lock is the icon.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -273,6 +274,11 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* paneStates READ paneStates CONSTANT)
     /// The QML names of what holds a pane header's trailing area (window::HeaderTrailingOccupant).
     Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
+    /// The QML names of secure input's values (window::SecureIndicator, window::SpotShown).
+    Q_PROPERTY(QObject* secureInputs READ secureInputs CONSTANT)
+    /// A locked pane's lock as cell text, set between chipOpenGlyph and chipCloseGlyph (`secure` on the
+    /// Terminal row); empty on the native rows, which draw the bundled lock icon.
+    Q_PROPERTY(QString secureInputCellText READ secureInputCellText CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     /// The words beside a pane's lock, and every lock's accessible name (window::secureInputStateText).
@@ -340,6 +346,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
     [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
     [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
+    [[nodiscard]] QObject* secureInputs() noexcept { return &_secureInputs; }
+    [[nodiscard]] QString const& secureInputCellText() const noexcept { return _glyphs.secureInput; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
     /// @return The row's pane header height before the density applies, in logical pixels.
@@ -818,6 +826,7 @@ class UiStyleProvider: public QObject
     ChromePaneEndNames _paneEnds;
     ChromePaneStateNames _paneStates;
     ChromeHeaderOccupantNames _headerOccupants;
+    ChromeSecureInputNames _secureInputs;
     int _paletteRevision = 0;
 };
 

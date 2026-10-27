@@ -164,6 +164,8 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(radii.linkPill),
              double(radii.scrollbar),
              double(row.motion.lingerMs) });
+    // The secure-input lock's icon edge; the Terminal row sets the lock as cell text instead.
+    out.push_back(size.secureInputGlyph);
     return out;
 }
 
@@ -231,7 +233,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeTail,
                    { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 },
                    nativeFind,
-                   nativeOverlay }),
+                   nativeOverlay,
+                   { 11 } }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -257,7 +260,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeTail,
                    { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 },
                    nativeFind,
-                   nativeOverlay }),
+                   nativeOverlay,
+                   { 11 } }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
@@ -283,7 +287,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeTail,
                    { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 },
                    nativeFind,
-                   nativeOverlay }),
+                   nativeOverlay,
+                   { 11 } }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -311,7 +316,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    // the find bar, in cells and rows (tui)
                    { 1, 48, 4, 1, 2, 1, 0, 1, 1, 1, 0 },
                    // A one-cell pill and track, set flush, square, and the hold every row shares.
-                   { 1, 1, 0, 0, 0, 600 } }),
+                   { 1, 1, 0, 0, 0, 600 },
+                   // No icon: the lock is `[secure]` in cells.
+                   { 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,

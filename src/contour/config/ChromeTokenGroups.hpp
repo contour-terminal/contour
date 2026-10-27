@@ -432,6 +432,9 @@ struct SizeTokens
     int linkPill = 0;  ///< Height of the link pill (vertical units).
     int scrollbar = 0; ///< Width of the overlay scrollbar's track (horizontal units).
 
+    // The secure-input lock.
+    int secureInputGlyph = 0; ///< Edge of the lock's icon; 0 where the Terminal row draws it as cell text.
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -1065,7 +1068,8 @@ namespace detail
                   .findButtonHeight = 22,
                   .findIcon = 14,
                   .linkPill = 22,
-                  .scrollbar = 8 },
+                  .scrollbar = 8,
+                  .secureInputGlyph = 11 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -1161,7 +1165,8 @@ namespace detail
                   .findButtonHeight = 22,
                   .findIcon = 14,
                   .linkPill = 22,
-                  .scrollbar = 8 },
+                  .scrollbar = 8,
+                  .secureInputGlyph = 11 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -1254,7 +1259,8 @@ namespace detail
                   .findButtonHeight = 22,
                   .findIcon = 14,
                   .linkPill = 22,
-                  .scrollbar = 8 },
+                  .scrollbar = 8,
+                  .secureInputGlyph = 11 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -1351,7 +1357,8 @@ namespace detail
                   .findButtonHeight = 1,
                   .findIcon = 0,
                   .linkPill = 1,
-                  .scrollbar = 1 },
+                  .scrollbar = 1,
+                  .secureInputGlyph = 0 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,

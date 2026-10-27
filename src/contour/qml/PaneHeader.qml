@@ -11,6 +11,10 @@
 // button runs: SplitVertical (split right), SplitHorizontal (split down), TogglePaneZoom and ClosePane
 // (window::PaneHeaderActions).
 //
+// While the program in the pane hides what is typed (a password prompt) the header shows the lock after the
+// status, and `<process> · Secure input on` (`Input hidden` where the OS has no secure keyboard entry) in
+// place of the name: a header is shown, so the lock goes here (window::SecureIndicatorRules).
+//
 // The name is never elided before the working directory, which elides in the middle so that both the
 // root and the leaf of a long path survive; assistive technology always hears the whole path.
 //
@@ -48,6 +52,13 @@ Item {
     readonly property string name: chromeStyle.paneHeaderName(session ? session.foregroundProcessName : "",
                                                                session ? session.title : "")
     readonly property string workingDirectory: session ? session.displayWorkingDirectory : ""
+    /// Whether the pane is at a password prompt, and the rule puts the lock in a shown header.
+    readonly property bool locked: !!session && session.secureIndicator === chromeStyle.secureInputs.locked
+        && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotShown,
+                                            chromeStyle.secureInputs.spotHidden).header === true
+    /// What the name slot reads: the name, or while locked the name and the lock's state.
+    // Concatenated, not formatted: a title the application set may itself contain "%2".
+    readonly property string shownName: locked ? name + qsTr(" · ") + chromeStyle.secureInputText : name
     readonly property int programStatus: session ? session.programStatus : chromeStyle.badgeKinds.none
     // colorOn() and badgeLook() read the palette, hence the paletteRevision read in each binding.
     readonly property var statusLook: chromeStyle.paletteRevision < 0 ? ({})
@@ -97,7 +108,7 @@ Item {
 
     Accessible.role: Accessible.StaticText
     // Concatenated, not formatted: a title the application set may itself contain "%2".
-    Accessible.name: workingDirectory !== "" ? name + qsTr(", ") + workingDirectory : name
+    Accessible.name: workingDirectory !== "" ? shownName + qsTr(", ") + workingDirectory : shownName
 
     // A click on the header, as on the terminal, makes the pane the active one. It takes the press for
     // itself: an overlay header lies over the terminal, which must not see the click as its own.
@@ -145,14 +156,26 @@ Item {
         Accessible.ignored: true
     }
 
+    SecureInputLock {
+        id: lock
+        objectName: "paneHeaderLock"
+        visible: header.locked
+        x: status.visible ? status.x + status.width + header.gap : header.leading
+        anchors.verticalCenter: parent.verticalCenter
+        // The header's secondary label, whatever the focus: the canvas's label.secondary.
+        color: header.dimmedText
+        font: chromeStyle.type.footnote
+    }
+
     Text {
         id: nameLabel
         objectName: "paneHeaderName"
-        x: status.visible ? status.x + status.width + header.gap : header.leading
+        x: lock.visible ? lock.x + lock.width + header.gap
+         : status.visible ? status.x + status.width + header.gap : header.leading
         anchors.verticalCenter: parent.verticalCenter
         // Its whole width first: only a header too narrow for the name alone cuts it.
         width: Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
-        text: header.name
+        text: header.shownName
         elide: Text.ElideRight
         font: chromeStyle.type.paneHeader
         color: header.text

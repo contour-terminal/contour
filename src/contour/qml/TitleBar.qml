@@ -1,6 +1,7 @@
 // vim:syntax=qml
 // The title band: the window's own bar, holding its controls, the host chip, the tabs or the active
-// session's title, a draggable region, the daemon drift chip and (under the Pill shape) the new-tab button.
+// session's title, a draggable region, the secure-input chip, the daemon drift chip and (under the Pill shape)
+// the new-tab button.
 //
 // Because the window is frameless, this bar owns everything the native decoration used to: the tabs, an
 // empty draggable region (drag to move the window, double-click to maximize/restore), and the
@@ -158,7 +159,8 @@ Item {
     readonly property real leadingPartsWidth: leadingSlot.Layout.preferredWidth
                                               + hostChipSlot.Layout.preferredWidth
                                               + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
-    readonly property real trailingPartsWidth: driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
+    readonly property real trailingPartsWidth: secureChipSlot.Layout.preferredWidth + secureChipSlot.Layout.rightMargin
+                                               + driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
                                                + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
                                                + trailingSlot.Layout.preferredWidth
     readonly property real fixedPartsWidth: root.leadingPartsWidth + root.trailingPartsWidth
@@ -274,6 +276,67 @@ Item {
             }
         }
 
+        // The lock, as a band chip, while the active tab's pane is at a password prompt and neither a pane
+        // header nor the tab well is there to show it: one tab, one pane (window::SecureIndicatorRules).
+        Item {
+            id: secureChipSlot
+            readonly property int headerSpot: (root.controller ? (root.controller.visiblePaneCount ?? 1) : 1) > 1
+                                              ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
+            readonly property int wellSpot: root.controller && (root.controller.tabBarShouldShow ?? false)
+                                            ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
+            readonly property bool shown: root.isBand && titleRows.activeLocked
+                && chromeStyle.secureIndicatorSpots(headerSpot, wellSpot).band === true
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: shown ? secureChip.implicitWidth : 0
+            Layout.preferredHeight: secureChip.implicitHeight
+            Layout.rightMargin: shown ? root.gap : 0
+
+            Item {
+                id: secureChip
+                objectName: "secureInputChip"
+                visible: secureChipSlot.shown
+                readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
+                // The chip's padding at each end, unless its cells bracket it.
+                readonly property real padding: bracketed ? 0 : chromeStyle.space.toolbarChipPadding
+                implicitWidth: chipRow.implicitWidth + padding + padding
+                implicitHeight: chromeStyle.size.toolbarChip
+                width: implicitWidth
+                height: implicitHeight
+                Accessible.role: Accessible.Indicator
+                Accessible.name: chromeStyle.secureInputText
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: chromeStyle.radii.toolbarChip
+                    color: chromeStyle.colors.chipFill
+                }
+
+                Row {
+                    id: chipRow
+                    anchors.centerIn: parent
+                    spacing: chromeStyle.space.s3
+
+                    SecureInputLock {
+                        id: chipLock
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: chromeStyle.colors.chipText
+                        Accessible.ignored: true
+                    }
+
+                    // The words beside the icon; the Terminal row's cell text already says it.
+                    Text {
+                        objectName: "secureInputChipText"
+                        visible: !chipLock.drawsText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: chromeStyle.secureInputText
+                        font: chromeStyle.type.footnote
+                        color: chromeStyle.colors.chipText
+                        Accessible.ignored: true
+                    }
+                }
+            }
+        }
+
         // The drift chip's place in the band's trailing area, before the "+" (Pill) or the window controls
         // (Flat). Main.qml parents the chip here while the band is shown; it is the band's only.
         Item {
@@ -338,11 +401,25 @@ Item {
     // One object per tab, carrying its title and whether it is active, while the band shows a title.
     Instantiator {
         id: titleRows
-        active: bandTitle.visible
+        // Also while the band may hold the secure-input chip: it reads whether the active tab is locked.
+        active: bandTitle.visible || root.isBand
         model: root.controller
         delegate: QtObject {
             required property string title
             required property bool isActive
+            // Through the model object, as TabStrip reads it: a model without the role locks nothing.
+            required property var model
+            readonly property bool locked: (model.tabSecure ?? 0) !== 0
+        }
+
+        // Whether the active tab has a pane at a password prompt.
+        readonly property bool activeLocked: {
+            for (let index = 0; index < titleRows.count; ++index) {
+                const row = titleRows.objectAt(index);
+                if (row && row.isActive)
+                    return row.locked;
+            }
+            return false;
         }
 
         readonly property string activeTitle: {

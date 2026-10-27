@@ -529,6 +529,23 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(visibleItemsNamed(*bar, QStringLiteral("scrollbarMark")) == 2);
                 break;
             }
+            case SnapshotScript::SecureInput:
+                // The active pane's header and both tabs carry the lock, wherever the row draws a header.
+                CHECK(visibleItemsNamed(content, QStringLiteral("paneHeaderLock")) == 1);
+                CHECK(visibleItemsNamed(content, QStringLiteral("tabLock")) == row.tabCount);
+                break;
+            case SnapshotScript::SecureInputBand: {
+                // The lock on the tab where the edition shows the tab well, else as the band's chip where a
+                // band is shown (a Flat row hides it with the strip, and the lock with it).
+                auto const wellShown =
+                    contour::config::isTabBarShown(scene.look().tabBarVisibility, row.tabCount);
+                auto const* band = scene.root().findChild<QQuickItem*>(QStringLiteral("bandBackground"));
+                auto const bandShown = band != nullptr && band->isVisible();
+                CHECK(visibleItemsNamed(content, QStringLiteral("tabLock")) == (wellShown ? 1 : 0));
+                CHECK(visibleItemsNamed(content, QStringLiteral("secureInputChip"))
+                      == (!wellShown && bandShown ? 1 : 0));
+                break;
+            }
             case SnapshotScript::SingleTab: break;
             case SnapshotScript::PermissionPaste: {
                 auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));

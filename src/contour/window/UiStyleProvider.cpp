@@ -206,6 +206,7 @@ namespace
             .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
             .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
             .findNext = QString::fromUtf8(tokens.findNextGlyph),
+            .secureInput = QString::fromUtf8(tokens.secureInputText),
         };
     }
 
@@ -269,7 +270,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _badgeKinds { this },
     _paneEnds { this },
     _paneStates { this },
-    _headerOccupants { this }
+    _headerOccupants { this },
+    _secureInputs { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);

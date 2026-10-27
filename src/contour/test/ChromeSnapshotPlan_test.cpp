@@ -345,7 +345,8 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
     // Step 3c's rows.
     CHECK(static_cast<int>(SnapshotScript::SizeIndicator)
           == static_cast<int>(SnapshotScript::ConfigReloadBanner) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::ScrollbarOverlay);
+    CHECK(static_cast<int>(SnapshotScript::ScrollbarOverlay)
+          == static_cast<int>(SnapshotScript::LinkPillSplit) + 1);
     struct Expected
     {
         SnapshotScript script;
@@ -398,4 +399,41 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
         std::array { contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal };
     CHECK(snapshotMatrix(rows).size()
           == SnapshotScripts.size() * rows.size() * SnapshotEditions.size() * SnapshotAppearances.size());
+}
+
+TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
+{
+    using namespace contour::test::snapshot;
+    // Step 6.6's two rows, after Step 3e's: the lock in a split's header and on two tabs, and in the band.
+    CHECK(static_cast<int>(SnapshotScript::SecureInput)
+          == static_cast<int>(SnapshotScript::ScrollbarOverlay) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SecureInputBand);
+
+    auto const& split = scriptRow(SnapshotScript::SecureInput);
+    CHECK(split.name == "secure-input");
+    CHECK(split.tabCount == 2);
+    CHECK(split.panes == PaneShape::SplitThree);
+    CHECK(split.activeTab == 0);
+    CHECK(split.secure == SecureDecor::Locked);
+
+    auto const& band = scriptRow(SnapshotScript::SecureInputBand);
+    CHECK(band.name == "secure-input-band");
+    CHECK(band.tabCount == 1);
+    CHECK(band.panes == PaneShape::SingleLeaf);
+    CHECK(band.secure == SecureDecor::Locked);
+
+    // Only these two lock anything; every other field as the plain window has it.
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK(
+            (row.secure == SecureDecor::Locked)
+            == (row.script == SnapshotScript::SecureInput || row.script == SnapshotScript::SecureInputBand));
+        if (row.secure == SecureDecor::Locked)
+        {
+            CHECK(row.action == ScriptAction::None);
+            CHECK(row.banner == SnapshotBanner::None);
+            CHECK(row.density == contour::config::ChromeDensity::Comfortable);
+        }
+    }
 }

@@ -25,6 +25,7 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
@@ -230,6 +231,7 @@ class ChromeSnapshotScene
             .frame = scriptRow(variant.script).frame,
             // measureBand() gives the macOS host's band its inset, from the row's surface; none elsewhere.
             .nativeControlsInset = 0,
+            .secure = scriptRow(variant.script).secure,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -353,6 +355,9 @@ class ChromeSnapshotScene
 
     /// @return The font the chrome was configured with, as resolved for the variant's row.
     [[nodiscard]] QFont const& chromeFont() const noexcept { return _chromeFont; }
+
+    /// @return The look the scene was built with, from its edition and appearance.
+    [[nodiscard]] SnapshotLook const& look() const noexcept { return _look; }
 
     /// @return The AppKit title bar the band was measured over (see measureBand), or std::nullopt when the
     ///         variant has none to measure: off a macOS host, under the native frame, or in full screen.
@@ -595,6 +600,9 @@ class ChromeSnapshotScene
                 session->setReconnecting(true);
             if (leaf == ActiveLeaf)
                 searchIn(*session, script.find);
+            // The active pane waits for a password, as the scene's tabs say (MockMainController::isLocked).
+            if (leaf == ActiveLeaf && script.secure == SecureDecor::Locked)
+                session->setSecureIndicator(static_cast<int>(window::SecureIndicator::Locked));
             switch (script.paneEnd)
             {
                 case SnapshotPaneEnd::None: break;

@@ -167,6 +167,9 @@ Row {
                 required property int badge
                 required property string badgeText
                 required property int badgeProgress
+                // Read through the model object, not as a required role: a model without the tabSecure role
+                // (WindowController's SecureRole) shows no lock rather than failing the delegate.
+                required property var model
 
                 // A pill is the well's width and its own height, centred in the well; a Flat tab is as
                 // wide as its title and as tall as the strip.
@@ -188,6 +191,7 @@ Row {
                 tabBadge: badge
                 tabBadgeText: badgeText
                 tabBadgeProgress: badgeProgress
+                locked: (model.tabSecure ?? 0) !== 0
                 onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                 Component.onDestruction: if (engaged) root.engagedTabs -= 1
             }

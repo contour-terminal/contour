@@ -3067,3 +3067,90 @@ TEST_CASE("Main.qml: the host chip's name is bold, and the band's title medium (
     }
 }
 // }}}
+
+// {{{ Secure input: the lock on a tab, or in the band
+
+namespace
+{
+/// The name @p item announces, from its `Accessible` attached object; empty without one.
+[[nodiscard]] QString announcedName(QQuickItem const& item)
+{
+    for (auto* child: item.findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+        if (child->inherits("QQuickAccessibleAttached"))
+            return child->property("name").toString();
+    return {};
+}
+} // namespace
+
+TEST_CASE("a tab whose pane waits for a password carries the lock, and only that tab (offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::Terminal })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        // The active tab and the last one are locked: with the second active, only the second.
+        MockMainController controller { MainWindowScene {
+            .tabCount = 2, .activeTab = 1, .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == 2);
+        CHECK_FALSE(part(*tabs[0], QStringLiteral("tabLock")).isVisible());
+        auto const& lock = part(*tabs[1], QStringLiteral("tabLock"));
+        CHECK(lock.isVisible());
+        // Before the title, which keeps its room after it; named for assistive technology.
+        CHECK(part(*tabs[1], QStringLiteral("tabLabel")).x() >= lock.x() + lock.width());
+        CHECK(announcedName(lock) == QStringLiteral("Input hidden"));
+        // A tab well is shown, so the band shows no chip.
+        CHECK_FALSE(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("one tab of one pane at a password prompt shows the lock as a band chip (offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput]")
+{
+    // The Pill rows only: they keep the band for its traffic lights when the strip hides. The Flat rows hide
+    // the band with the strip (TitleBandRules), which leaves this case no place for the lock -- an open
+    // question of Step 6.6, not a chip this test could find.
+    for (auto const row: { ChromeStyle::MacOS })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        // tab_bar: multiple hides the strip for one tab, and one pane has no header: the band is left.
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .secure = contour::test::snapshot::SecureDecor::Locked } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+
+        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chip->isVisible());
+        CHECK(chip->height() == styleGroup(engine, "size").property("toolbarChip").toReal());
+        CHECK(announcedName(*chip) == QStringLiteral("Input hidden"));
+        // No strip is loaded for one tab under `multiple`: no tab carries a lock.
+        CHECK(std::ranges::none_of(root->findChildren<QQuickItem*>(QStringLiteral("tabLock")),
+                                   [](QQuickItem const* lock) { return lock->isVisible(); }));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("no pane waiting for a password shows no lock anywhere (offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    CHECK_FALSE(root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
