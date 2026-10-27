@@ -31,6 +31,11 @@ Item {
     property var policy: ({})
     /// The card's corner radius: the header's top corners take it, its bottom edge stays square.
     property real cornerRadius: 0
+    // Whether the find bar has taken this row (the Terminal row's, SearchBar's headerRow anchor): the name
+    // stays, and the directory and the buttons give the bar their room. A bool, the QML carve-out.
+    property bool findActive: false
+    // Where the find bar goes when it takes this row: after the name, to the trailing edge.
+    readonly property alias findSlot: findSlotItem
 
     /// The pane's own background, which every colour here is resolved against.
     readonly property color background: session ? session.backgroundColor : "black"
@@ -152,7 +157,7 @@ Item {
     Text {
         id: cwdLabel
         objectName: "paneHeaderCwd"
-        visible: header.policy.content === "nameAndCwd" && width > 0
+        visible: !header.findActive && header.policy.content === "nameAndCwd" && width > 0
         x: nameLabel.x + nameLabel.width + header.gap
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(0, actions.x - header.gap - x)
@@ -164,6 +169,14 @@ Item {
         Accessible.ignored: true
     }
 
+    Item {
+        id: findSlotItem
+        objectName: "paneHeaderFindSlot"
+        x: nameLabel.x + nameLabel.width + header.gap
+        width: Math.max(0, header.width - header.trailing - x)
+        height: header.height
+    }
+
     Row {
         id: actions
         objectName: "paneHeaderActions"
@@ -172,7 +185,7 @@ Item {
         spacing: header.gap
         // One fade, on every row: under Reduce Motion motion.fast is already the cross-fade's duration.
         opacity: header.policy.actions === "shown" ? 1.0 : 0.0
-        visible: opacity > 0
+        visible: !header.findActive && opacity > 0
         onVisibleChanged: Qt.callLater(header.settleFocus)
         Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.fast } }
 

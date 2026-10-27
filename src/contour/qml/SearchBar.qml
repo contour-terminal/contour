@@ -67,11 +67,16 @@ Popup {
                                                                     root._band.top, root._band.bottom)
                                      : ({ anchor: "topRight", x: 0, y: 0, width: 0 })
 
-    parent: root.displayItem
-    x: root.placement.x
-    y: root.placement.y
-    width: root.placement.width
-    height: chromeStyle.size.findBar
+    // The Terminal row's bar takes the pane header's row where the pane has one: the header's own fill
+    // behind it, no grid row spent on it.
+    readonly property bool _inHeaderRow: root.placement.anchor === "headerRow" && root.headerSlot !== null
+    readonly property bool occupiesHeaderRow: root._inHeaderRow && root.visible
+
+    parent: root._inHeaderRow ? root.headerSlot : root.displayItem
+    x: root._inHeaderRow ? 0 : root.placement.x
+    y: root._inHeaderRow ? 0 : root.placement.y
+    width: root._inHeaderRow ? root.headerSlot.width : root.placement.width
+    height: root._inHeaderRow ? root.headerSlot.height : chromeStyle.size.findBar
     // None: the placement already keeps the bar inside its pane, and a margin would clamp it off the
     // design's place (F7). The shadow is drawn outside the surface, past the popup's own bounds.
     margins: 0
@@ -87,6 +92,7 @@ Popup {
     background: PopupSurface {
         objectName: "searchBarBackground"
         radius: chromeStyle.radii.findBar
+        visible: !root._inHeaderRow
     }
 
     // One guarded alias rather than the same test repeated at every use: null while a split pane is

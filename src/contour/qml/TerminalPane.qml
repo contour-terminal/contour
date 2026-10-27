@@ -57,6 +57,12 @@ ContourTerminal {
     // in from its corners (window::cardContentInset), and its colour fills the card up to the edge.
     property real backgroundOutset: 0
 
+    // The pane header's find slot, and whether the pane has an inline header (a PaneHeaderPresence's value),
+    // for the find bar (SessionChrome's SearchBar); and whether the bar sits in that header row now.
+    property Item headerFindSlot: null
+    property int headerPresent: 0
+    readonly property bool findInHeaderRow: chrome.findInHeaderRow
+
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which
     // flips node.active via the model's activePaneChanged), grab Qt keyboard focus so keystrokes go
     // to this terminal — not just the focus cue. Without this, keyboard pane navigation moved the
@@ -208,6 +214,8 @@ ContourTerminal {
         id: chrome
         session: pane.session
         displayItem: pane
+        headerFindSlot: pane.headerFindSlot
+        headerPresent: pane.headerPresent
     }
 
     // Policy for the unfocused-dim overlay, kept a pure function (like PaneNode.clampRatio) so every

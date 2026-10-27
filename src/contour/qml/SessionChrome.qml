@@ -37,6 +37,12 @@ Item {
     // The enclosing ContourTerminal display, used to relay showNotification and to grab keyboard focus.
     property var displayItem: parent
 
+    // The pane header's find slot and whether the pane has an inline header (PaneCard, through
+    // TerminalPane): where the Terminal row's find bar goes. None outside a card.
+    property Item headerFindSlot: null
+    property int headerPresent: 0
+    readonly property bool findInHeaderRow: searchBar.occupiesHeaderRow
+
     // Whether the scrollbar is moving to follow the session's viewport (@see updateScrollBarPosition): a move
     // of the session's own, which onScrollBarPositionChanged does not write back.
     property bool followingSession: false
@@ -364,7 +370,8 @@ Item {
         id: searchBar
         session: chrome.session
         displayItem: chrome.displayItem
-        header: 0
+        header: chrome.headerPresent
+        headerSlot: chrome.headerFindSlot
     }
 
     // Play the session's bell, at once or once multimedia is ready.

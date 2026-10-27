@@ -4427,6 +4427,114 @@ TEST_CASE("pane card: the grid keeps clear of a rounded card's corners (offscree
     }
 }
 
+namespace
+{
+/// Opens the find bar of @p card's pane, which the test cannot go on without.
+[[nodiscard]] QObject& openFindBarOf(QQuickItem const& card)
+{
+    auto* bar = card.findChild<QObject*>(QStringLiteral("searchBar"));
+    REQUIRE(bar != nullptr);
+    QMetaObject::invokeMethod(bar, "open");
+    QCoreApplication::processEvents();
+    return *bar;
+}
+
+/// The item the find bar @p bar is placed in.
+[[nodiscard]] QQuickItem* parentOf(QObject const& bar)
+{
+    return bar.property("parent").value<QQuickItem*>();
+}
+} // namespace
+
+TEST_CASE("pane card: the Terminal row's find bar takes the header row and no grid cells (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& other = host.cardOf(panes.right());
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    auto const closed = QRectF { terminal.x(), terminal.y(), terminal.width(), terminal.height() };
+
+    auto& bar = openFindBarOf(card);
+    CHECK(parentOf(bar) == &PaneTreeHost::partOf(card, "paneHeaderFindSlot"));
+    CHECK(bar.property("height").toReal() == Catch::Approx(host.style().cellHeight()));
+    CHECK(QRectF { terminal.x(), terminal.y(), terminal.width(), terminal.height() } == closed);
+    CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderActions").isVisible());
+    CHECK(PaneTreeHost::partOf(card, "paneHeaderName").isVisible());
+    // The other pane's header is its own.
+    CHECK(PaneTreeHost::partOf(other, "paneHeaderCwd").isVisible());
+
+    QMetaObject::invokeMethod(&bar, "close");
+    QCoreApplication::processEvents();
+    CHECK(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
+    CHECK(PaneTreeHost::partOf(card, "paneHeaderActions").isVisible());
+}
+
+TEST_CASE("pane card: a Terminal-row pane without a header gets the floating bar (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+
+    auto const& card = host.cardOf(leaf);
+    auto& bar = openFindBarOf(card);
+    CHECK(parentOf(bar) == &PaneTreeHost::terminalOf(card));
+    CHECK(bar.property("placement").toMap().value("anchor").toString() == QStringLiteral("topRight"));
+    CHECK(bar.property("height").toReal() == Catch::Approx(host.style().cellHeight()));
+}
+
+TEST_CASE("pane card: the native find bar sits under the header (offscreen)", "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    auto& bar = openFindBarOf(card);
+    CHECK(parentOf(bar) == &terminal);
+    // In the card's coordinates: the header, the card's content inset (F5), and the bar's own inset.
+    auto const header = host.style().property("size").value<QObject*>()->property("paneHeader").toReal();
+    CHECK(terminal.y() + bar.property("y").toReal() == header + host.style().paneCardContentInset(1.0) + 8.0);
+}
+
+TEST_CASE("pane card: a Minimal header revealed over the grid leaves the find bar where it was (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    // F5: the bar asks whether the pane has an INLINE header; Minimal's, revealed while ⌥ is held, lies over
+    // the grid, and the bar does not hop in and out with the key.
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    setup.density = contour::config::ChromeDensity::Minimal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto& bar = openFindBarOf(card);
+    auto const before = QPointF { bar.property("x").toReal(), bar.property("y").toReal() };
+    auto* const parentBefore = parentOf(bar);
+    REQUIRE(parentBefore == &PaneTreeHost::terminalOf(card));
+
+    host.paneNode->setProperty("headerReveal", 1);
+    QCoreApplication::processEvents();
+    REQUIRE(PaneTreeHost::partOf(card, "paneHeader").isVisible());
+    CHECK(parentOf(bar) == parentBefore);
+    CHECK(QPointF { bar.property("x").toReal(), bar.property("y").toReal() } == before);
+}
+
 TEST_CASE("pane card: only a soft shadow lifts the active card (offscreen)", "[contour][gui][qml][panecard]")
 {
     using contour::config::ChromeStyle;
@@ -4590,6 +4698,7 @@ TEST_CASE("pane card: Minimal shows no headers until the modifier is held (offsc
           "[contour][gui][qml][panecard]")
 {
     auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
     auto panes = TwoPanes {};
@@ -4798,6 +4907,7 @@ TEST_CASE("pane card: under Reduce Motion the actions cross-fade and the overlay
           "[contour][gui][qml][panecard]")
 {
     auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     setup.accessibility.motion = contour::config::MotionPreference::Reduced;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
@@ -9427,6 +9537,7 @@ TEST_CASE("pane end: the reconnecting dim lies under the header and never over a
           "[contour][gui][qml][paneend]")
 {
     auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
     auto panes = TwoPanes {};

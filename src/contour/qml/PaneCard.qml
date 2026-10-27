@@ -89,6 +89,10 @@ Item {
             squareTop: card.headerInline ? card.cornerRadius : 0
             squareBottom: footer.visible ? card.cornerRadius : 0
             onActivated: { if (card.node) card.node.activate() }
+            // The find bar's room in the header row, and whether the pane has an inline header to give it
+            // (F5: not a Minimal overlay header, which comes and goes with a held key).
+            headerFindSlot: header.findSlot
+            headerPresent: card.headerInline ? 1 : 0
         }
     }
 
@@ -153,6 +157,7 @@ Item {
         node: card.node
         policy: card.policy
         cornerRadius: card.cornerRadius
+        findActive: terminal.findInHeaderRow
         // A hidden header button drops the keyboard focus; typing goes back to this pane's grid.
         onFocusReleased: terminal.forceActiveFocus()
     }
