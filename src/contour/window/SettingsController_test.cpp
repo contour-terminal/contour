@@ -37,6 +37,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QColor>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -46,6 +47,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -3367,7 +3369,8 @@ TEST_CASE("SettingsController: a hand edit made before a scheme opens is kept", 
 {
     // The scheme draft is parsed from the bytes the session records as seen, whatever the configuration
     // holds of the scheme.
-    auto fx = Fixture("default_profile: main\nprofiles:\n    main:\n        colors: mine\n");
+    // No profile draws with it: one that did would follow it, which is not what this case is about.
+    auto fx = Fixture(BasicConfig);
     auto palette = vtbackend::ColorPalette {};
     REQUIRE(
         fx.store->write(config::colorSchemeFile("mine"), config::emitColorSchemeYaml(palette)).has_value());
@@ -3422,7 +3425,8 @@ TEST_CASE("SettingsController: renaming a profile that was never opened keeps a 
 TEST_CASE("SettingsController: renaming a scheme that was never opened carries a hand edit", "[settings]")
 {
     // N1: the rename reads the side file as it is, as opening it does, and records those same bytes.
-    auto fx = Fixture("default_profile: main\nprofiles:\n    main:\n        colors: mine\n");
+    // No profile draws with it: one that did would follow it, which is not what this case is about.
+    auto fx = Fixture(BasicConfig);
     auto palette = vtbackend::ColorPalette {};
     REQUIRE(
         fx.store->write(config::colorSchemeFile("mine"), config::emitColorSchemeYaml(palette)).has_value());
@@ -3749,6 +3753,253 @@ TEST_CASE("SettingsController: reopening a scheme within the debounce shows its 
     CHECK(fx.errors.isEmpty());
     REQUIRE(fx.schemeFile("midnight").has_value());
     CHECK(fx.schemeFile("midnight")->defaultBackground == vtbackend::RGBColor { 0x10, 0x10, 0x10 });
+}
+
+// }}}
+
+// {{{ The Colors page: gallery, readout and what a profile's use of a scheme allows
+
+namespace
+{
+/// The colour (as "#rrggbb") of @p slot in the open scheme's rows.
+[[nodiscard]] QString slotColor(SettingsController const& controller, QString const& slot)
+{
+    return rowWithKey(controller.schemeColors(), slot).value("color").toString();
+}
+
+/// Writes side-file profile @p name, a copy of contour.yml's `main` drawn with @p colors, and reloads.
+void writeProfileDrawnWith(Fixture& fx, std::string const& name, config::ColorConfig colors)
+{
+    auto profile = *fx.cfg.findProfile("main");
+    profile.colors = std::move(colors);
+    REQUIRE(fx.store->write(config::profileFile(name), config::emitProfileYaml(profile)).has_value());
+    fx.reload();
+}
+
+/// Writes side-file color scheme @p name with the default palette, and reloads.
+void writeScheme(Fixture& fx, std::string const& name)
+{
+    REQUIRE(
+        fx.store
+            ->write(config::colorSchemeFile(name), config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+            .has_value());
+    fx.reload();
+}
+} // namespace
+
+TEST_CASE("SettingsController: the scheme gallery lists every scheme with its colours", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+
+    auto const gallery = fx.controller->schemeGallery();
+    auto names = QStringList {};
+    for (auto const& raw: gallery)
+        names << raw.toMap().value("name").toString();
+    auto expected = QStringList {};
+    for (auto const& raw: fx.controller->colorSchemes())
+        expected << raw.toMap().value("name").toString();
+    CHECK(names == expected);
+    CHECK(names.contains("midnight"));
+    CHECK(names.contains("default"));
+
+    for (auto const& raw: gallery)
+    {
+        auto const card = raw.toMap();
+        INFO(card.value("name").toString().toStdString());
+        CHECK(card.value("background").toString().size() == 7);
+        CHECK(card.value("foreground").toString().size() == 7);
+        auto const normal = card.value("normal").toStringList();
+        CHECK(normal.size() == 8);
+        for (auto const& color: normal)
+            CHECK(QColor::isValidColorName(color));
+    }
+
+    // Each card says whether it is one Settings made, and so can edit.
+    auto const cardOf = [&](QString const& name) {
+        for (auto const& raw: gallery)
+            if (raw.toMap().value("name").toString() == name)
+                return raw.toMap();
+        return QVariantMap {};
+    };
+    CHECK(cardOf("midnight").value("editable").toBool());
+    CHECK_FALSE(cardOf("default").value("editable").toBool());
+    CHECK(cardOf("default").value("background").toString()
+          == QString::asprintf("#%02x%02x%02x",
+                               vtbackend::ColorPalette {}.defaultBackground.red,
+                               vtbackend::ColorPalette {}.defaultBackground.green,
+                               vtbackend::ColorPalette {}.defaultBackground.blue));
+}
+
+TEST_CASE("SettingsController: the gallery follows a colour as it is edited, and shows a new scheme at once",
+          "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("midnight");
+    REQUIRE(fx.controller->setSchemeColor("background", "#102030").has_value());
+
+    auto const backgroundOf = [&](QString const& name) {
+        for (auto const& raw: fx.controller->schemeGallery())
+            if (raw.toMap().value("name").toString() == name)
+                return raw.toMap().value("background").toString();
+        return QString {};
+    };
+    CHECK(backgroundOf("midnight") == "#102030"); // before the debounce writes it
+
+    // A duplicate is staged, not yet written, and is on the page nonetheless.
+    auto const copy = fx.controller->duplicateColorScheme("midnight");
+    REQUIRE(copy.has_value());
+    CHECK(backgroundOf(*copy) == "#102030");
+}
+
+TEST_CASE("SettingsController: every slot says what its colour is read against", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("midnight");
+    auto const background = slotColor(*fx.controller, "background");
+
+    auto const rows = fx.controller->schemeColors();
+    REQUIRE_FALSE(rows.isEmpty());
+    CHECK(rowWithKey(rows, "background").value("against").toString().isEmpty());
+    for (auto const& raw: rows)
+    {
+        auto const row = raw.toMap();
+        INFO(row.value("key").toString().toStdString());
+        REQUIRE(row.contains("against"));
+        if (row.value("key").toString() == "background")
+            continue;
+        // What it sits on is a colour the scheme has; no slot is judged against itself or against nothing.
+        CHECK(QColor::isValidColorName(row.value("against").toString()));
+    }
+    // The text slots sit on the background.
+    for (auto const* slot: { "foreground", "normal_red", "normal_white", "bright_black", "bright_white" })
+        CHECK(rowWithKey(rows, slot).value("against").toString() == background);
+}
+
+TEST_CASE("SettingsController: every slot sits in a block of the editor", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("midnight");
+
+    auto counts = std::map<QString, int> {};
+    for (auto const& raw: fx.controller->schemeColors())
+        ++counts[raw.toMap().value("group").toString()];
+    CHECK(counts["base"] == 2);
+    CHECK(counts["normal"] == 8);
+    CHECK(counts["bright"] == 8);
+    CHECK(counts["interface"] > 0);
+    CHECK(counts.size() == 4);
+}
+
+TEST_CASE("SettingsController: contrastReadout answers the page's ratio and verdict", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    auto const widest = fx.controller->contrastReadout("#000000", "#ffffff");
+    CHECK(widest.value("text").toString() == "21.0 : 1");
+    CHECK(widest.value("passes").toBool());
+
+    auto const narrow = fx.controller->contrastReadout("#777777", "#ffffff");
+    CHECK(narrow.value("text").toString() == "4.5 : 1"); // 4.48, shown to one decimal
+    CHECK_FALSE(narrow.value("passes").toBool());
+
+    // A half-typed colour is no reading.
+    CHECK(fx.controller->contrastReadout("#12", "#ffffff").value("text").toString().isEmpty());
+}
+
+TEST_CASE("SettingsController: a colour scheme a profile draws with cannot be deleted", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    writeScheme(fx, "dawn");
+    writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
+    writeProfileDrawnWith(
+        fx, "dually", config::DualColorConfig { .colorSchemeLight = "dawn", .colorSchemeDark = "default" });
+
+    for (auto const* name: { "midnight", "dawn" })
+    {
+        INFO(name);
+        auto const refused = fx.controller->deleteColorScheme(name);
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().kind == config::SettingsErrorKind::InUse);
+        CHECK(refused.error().message.contains(name == std::string_view { "midnight" } ? "work" : "dually"));
+    }
+    fx.fire();
+    CHECK(fx.schemeFile("midnight").has_value());
+    CHECK(fx.schemeFile("dawn").has_value());
+
+    // The page shows the reason as it does for any refusal.
+    fx.controller->requestDeleteScheme("midnight");
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("work"));
+
+    // The draft being edited counts, before it is written: a scheme a profile is about to leave is free.
+    fx.controller->editProfile("work");
+    fx.controller->setColorScheme("default");
+    REQUIRE(fx.controller->deleteColorScheme("midnight").has_value());
+    fx.fire();
+    CHECK_FALSE(fx.schemeFile("midnight").has_value());
+}
+
+TEST_CASE("SettingsController: a profile that is about to use a scheme keeps it from being deleted",
+          "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    fx.openSideProfile("work");
+    fx.controller->setColorScheme("midnight"); // staged, not yet written
+
+    auto const refused = fx.controller->deleteColorScheme("midnight");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().kind == config::SettingsErrorKind::InUse);
+}
+
+TEST_CASE("SettingsController: renaming a scheme moves the profiles that draw with it", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    writeScheme(fx, "dawn");
+    writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
+    writeProfileDrawnWith(
+        fx, "dually", config::DualColorConfig { .colorSchemeLight = "dawn", .colorSchemeDark = "midnight" });
+    fx.controller->editProfile("work"); // one of them is open, with its draft
+
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.schemeFile("nightfall").has_value());
+    CHECK_FALSE(fx.schemeFile("midnight").has_value());
+    auto const* work = fx.cfg.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(std::get<config::SimpleColorConfig>(work->colors.value()).colorScheme == "nightfall");
+    auto const* dually = fx.cfg.findProfile("dually");
+    REQUIRE(dually != nullptr);
+    auto const& dual = std::get<config::DualColorConfig>(dually->colors.value());
+    CHECK(dual.colorSchemeLight == "dawn"); // not the one renamed
+    CHECK(dual.colorSchemeDark == "nightfall");
+    CHECK(fx.controller->colorScheme() == "nightfall"); // the open draft moved too
+}
+
+TEST_CASE("SettingsController: a scheme a contour.yml profile draws with cannot be renamed",
+          "[settings][schemes]")
+{
+    // contour.yml is never written, so the profile would keep naming a scheme that is gone.
+    auto fx = Fixture(std::string_view { R"(
+default_profile: main
+profiles:
+    main:
+        colors: midnight
+)" });
+    writeScheme(fx, "midnight");
+
+    auto const refused = fx.controller->renameColorScheme("midnight", "nightfall");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().kind == config::SettingsErrorKind::InUse);
+    CHECK(refused.error().message.contains("main"));
+    fx.fire();
+    CHECK(fx.schemeFile("midnight").has_value());
+    CHECK_FALSE(fx.schemeFile("nightfall").has_value());
 }
 
 // }}}

@@ -394,7 +394,8 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsSectionPage.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ProfilePage.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ConfirmDialog.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemeEditor.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemesPage.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SchemeCard.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPatternList.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml"),
     };
@@ -12969,6 +12970,37 @@ TEST_CASE("KitColorWell: only #rgb and #rrggbb commit, anything else puts the ol
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("KitColorWell: Return commits the colour shown only where asked to, leaving the field never does",
+          "[contour][gui][qml][kit][colorwell]")
+{
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(contour::config::ChromeStyle::MacOS));
+
+    auto const commitsFor = [&](bool commitsUnchanged, auto const& leave) {
+        auto kit = KitControl(engine,
+                              "KitColorWell",
+                              { { "hex", QStringLiteral("#112233") },
+                                { "commitsUnchanged", commitsUnchanged },
+                                { "name", QStringLiteral("Derived") } });
+        QSignalSpy const committed(kit.item(), SIGNAL(committed(QString)));
+        kit.part("colorHexField")->forceActiveFocus();
+        leave(kit);
+        return committed.count();
+    };
+    auto const pressReturn = [](KitControl& kit) {
+        kit.key(Qt::Key_Return);
+    };
+    auto const dropFocus = [](KitControl& kit) {
+        kit.part("colorHexField")->setFocus(false);
+    };
+
+    CHECK(commitsFor(true, pressReturn) == 1);
+    CHECK(commitsFor(false, pressReturn) == 0);
+    CHECK(commitsFor(true, dropFocus) == 0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("KitFontPicker: the search narrows the families, Escape closes the list (offscreen)",
           "[contour][gui][qml][kit][fontpicker]")
 {
@@ -13193,6 +13225,15 @@ TEST_CASE("kit controls: every ink reads on what it sits on, on every row, schem
                                  { "name", QStringLiteral("x") } });
         CHECK(kitContrast(colorOf(well.part("colorHexField")), controlFill) >= TextContrast);
         CHECK(kitContrast(colorOf(well.part("colorReadout")), ground) >= TextContrast);
+        // A readout under the rule is in the danger ink, which reads as well (on a Terminal row it may be the
+        // scheme's own help ink, where that reads).
+        auto failing = KitControl(engine,
+                                  "KitColorWell",
+                                  { { "hex", QStringLiteral("#336699") },
+                                    { "readout", QStringLiteral("2.1 : 1") },
+                                    { "readoutFails", true },
+                                    { "name", QStringLiteral("x") } });
+        CHECK(kitContrast(colorOf(failing.part("colorReadout")), ground) >= TextContrast);
 
         auto popUp = KitControl(engine,
                                 "KitPopUp",

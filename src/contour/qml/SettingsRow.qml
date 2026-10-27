@@ -36,7 +36,8 @@ Item {
     // by hand may name less.
     readonly property var _defaults: ({ key: "", label: "", help: "", problem: "", value: "", overridden: false,
                                         options: [], optionLabels: [], min: -Infinity, max: Infinity,
-                                        step: 1, decimals: 0, unitText: "", displayFactor: 1 })
+                                        step: 1, decimals: 0, unitText: "", displayFactor: 1,
+                                        readout: "" })
     readonly property var _data: Object.assign({}, root._defaults, root.field)
     // The 32-bit range an integer field without bounds of its own holds, as the loader reads one.
     readonly property real _intLimit: 2147483647
@@ -259,10 +260,15 @@ Item {
         id: colorWellControl
         KitColorWell {
             hex: String(root._data.value)
+            readout: root._data.readout
+            readoutFails: root._data.readoutFails === true
+            commitsUnchanged: root._data.commitsUnchanged === true
             name: root._data.label
             description: root._data.help
             editable: root.editable
-            onCommitted: hex => root.commit(hex)
+            // A colour the caller derives is pinned by committing the one it shows, which is no change of value.
+            onCommitted: hex => root._data.commitsUnchanged === true ? root.committed(root._data.key, hex)
+                                                                     : root.commit(hex)
         }
     }
 

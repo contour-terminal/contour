@@ -28,6 +28,7 @@ enum class SettingsErrorKind : uint8_t
     UnknownSetting,  ///< A key no Settings row has.
     NotApplied,      ///< A value settings.yml would hold but the loader does not apply.
     NameTaken,       ///< A name another profile or colour scheme already has.
+    InUse,           ///< A colour scheme a profile still draws with, so it cannot go or change name.
     ReloadFailed,    ///< The side files were written, but the configuration did not reload.
 };
 

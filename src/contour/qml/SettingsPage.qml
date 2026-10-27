@@ -383,84 +383,9 @@ Rectangle {
     // {{{ The profile's sub-pages: what is not a scalar setting.
     Component {
         id: schemesPage
-        ColumnLayout {
-            id: schemes
-            objectName: "schemesPage"
-            readonly property bool editable: root.controller !== null && !root.controller.locked
-                                             && !root.controller.editingReadOnly
-            readonly property var names: root.controller ? root.controller.colorSchemes.map(scheme => scheme.name) : []
-            spacing: chromeStyle.settings.groupGap
-
-            SettingsGroup {
-                Layout.fillWidth: true
-                Layout.margins: chromeStyle.space.s8
-                title: qsTr("Color scheme")
-
-                SettingsRow {
-                    Layout.fillWidth: true
-                    showSeparator: true
-                    editable: schemes.editable
-                    field: ({ key: "color_scheme_mode",
-                              label: qsTr("Mode"),
-                              help: "",
-                              controlName: "segmented",
-                              options: ["simple", "dual"],
-                              optionLabels: [qsTr("Single"), qsTr("Light / Dark")],
-                              value: root.controller ? root.controller.colorSchemeMode : "simple" })
-                    onCommitted: (key, value) => root.controller.setColorSchemeMode(value)
-                }
-                SettingsRow {
-                    Layout.fillWidth: true
-                    visible: root.controller && root.controller.colorSchemeMode === "simple"
-                    editable: schemes.editable
-                    field: ({ key: "color_scheme",
-                              label: qsTr("Scheme"),
-                              help: "",
-                              controlName: "popUp",
-                              options: schemes.names,
-                              optionLabels: schemes.names,
-                              value: root.controller ? root.controller.colorScheme : "" })
-                    onCommitted: (key, value) => root.controller.setColorScheme(value)
-                }
-                SettingsRow {
-                    Layout.fillWidth: true
-                    visible: root.controller && root.controller.colorSchemeMode === "dual"
-                    showSeparator: true
-                    editable: schemes.editable
-                    field: ({ key: "color_scheme_light",
-                              label: qsTr("Light"),
-                              help: "",
-                              controlName: "popUp",
-                              options: schemes.names,
-                              optionLabels: schemes.names,
-                              value: root.controller ? root.controller.colorSchemeLight : "" })
-                    onCommitted: (key, value) => root.controller.setColorSchemeLight(value)
-                }
-                SettingsRow {
-                    Layout.fillWidth: true
-                    visible: root.controller && root.controller.colorSchemeMode === "dual"
-                    editable: schemes.editable
-                    field: ({ key: "color_scheme_dark",
-                              label: qsTr("Dark"),
-                              help: "",
-                              controlName: "popUp",
-                              options: schemes.names,
-                              optionLabels: schemes.names,
-                              value: root.controller ? root.controller.colorSchemeDark : "" })
-                    onCommitted: (key, value) => root.controller.setColorSchemeDark(value)
-                }
-            }
-
-            // The palette of the scheme the profile uses, to edit.
-            ColorSchemeEditor {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.leftMargin: chromeStyle.space.s8
-                Layout.rightMargin: chromeStyle.space.s8
-                controller: root.controller
-                Component.onCompleted: if (root.controller && root.controller.colorScheme.length > 0)
-                                           root.controller.editColorScheme(root.controller.colorScheme)
-            }
+        ColorSchemesPage {
+            controller: root.controller
+            onDeleteRequested: name => root.requestDelete("scheme", name)
         }
     }
 

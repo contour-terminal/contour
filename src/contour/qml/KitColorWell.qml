@@ -5,7 +5,8 @@
 //
 // `hex` is the caller's. The field takes `#rgb` or `#rrggbb`; committed with Return or by leaving it, a
 // valid entry asks for `#rrggbb` (lower case) through `committed`, and anything else puts the old hex back.
-// A hex equal to the current one asks for nothing.
+// A hex equal to the current one asks for nothing, unless `commitsUnchanged` is set and the entry is made with
+// Return: that is how a colour the caller derives is pinned to the one it shows.
 //
 // Not editable, it is disabled: dimmed to `settings.disabledOpacity`, and it takes no input.
 import QtQuick
@@ -22,6 +23,10 @@ FocusScope {
     /// The contrast readout shown under the field, "{ratio} : 1"; empty shows none. Set by the caller,
     /// which knows the scheme the colour is judged in.
     property string readout
+    /// Whether the readout reports a colour below the contrast rule; it is then drawn in the danger ink.
+    property bool readoutFails: false
+    /// Whether Return commits the colour shown even where it is the hex already. Leaving the field does not.
+    property bool commitsUnchanged: false
     /// What a screen reader calls the well.
     property string name
     /// What a screen reader reads after the name.
@@ -117,6 +122,13 @@ FocusScope {
                         root.showHex();
                         field.focus = false;
                     }
+                    // Return on the colour shown, where that is a commit: only an entry that differs is one
+                    // otherwise, and that is the editingFinished below.
+                    onAccepted: {
+                        const entered = root.normalized(field.text);
+                        if (root.commitsUnchanged && entered.length > 0 && entered === root.hex.toLowerCase())
+                            root.committed(entered);
+                    }
                     // Return, or leaving the field.
                     onEditingFinished: {
                         const entered = root.normalized(field.text);
@@ -135,7 +147,8 @@ FocusScope {
             visible: root.readout.length > 0
             text: root.readout
             font: chromeStyle.type.footnote
-            color: chromeStyle.colors.settingsHelp
+            color: root.readoutFails ? chromeStyle.statusInk(chromeStyle.statusDanger)
+                                     : chromeStyle.colors.settingsHelp
             Accessible.ignored: true
         }
     }

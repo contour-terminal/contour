@@ -136,11 +136,19 @@ class SettingsController: public QObject
     Q_PROPERTY(QString colorSchemeLight READ colorSchemeLight NOTIFY draftChanged)
     Q_PROPERTY(QString colorSchemeDark READ colorSchemeDark NOTIFY draftChanged)
 
+    /// One card per color scheme, in name order, for the Colors page's gallery: { name, editable, background,
+    /// foreground, normal: [8 x "#rrggbb"] }. `editable` is a QML-facing bool: Settings made the scheme, so
+    /// it takes a change. The scheme being edited is drawn from its draft, so a colour shows as it is typed,
+    /// and a scheme staged and not yet written is there too.
+    Q_PROPERTY(QVariantList schemeGallery READ schemeGallery NOTIFY schemeGalleryChanged)
+
     /// The colors of the color-scheme draft being edited: one QVariantMap per slot
-    /// { key, label, color ("#rrggbb"), colorSource }. `colorSource` says where the colour shown comes from:
-    /// "scheme" for a slot every scheme sets, "derived" for one the scheme leaves unset so that it follows
-    /// the colours it derives from, and "pinned" for such a slot the scheme sets after all. Empty when no
-    /// scheme is open for editing.
+    /// { key, label, group ("base"|"normal"|"bright"|"interface"), color ("#rrggbb"), against, colorSource };
+    /// `against` is the "#rrggbb" of what the slot sits on, which its contrast readout measures against, and
+    /// empty for the background. `colorSource` says where the colour shown comes from: "scheme" for a slot
+    /// every scheme sets, "derived" for one the scheme leaves unset so that it follows the colours it derives
+    /// from, and "pinned" for such a slot the scheme sets after all. Empty when no scheme is open for
+    /// editing.
     Q_PROPERTY(QVariantList schemeColors READ schemeColors NOTIFY schemeDraftChanged)
     /// The name of the color-scheme draft being edited ("" when none is open).
     Q_PROPERTY(QString editingScheme READ editingScheme NOTIFY editingSchemeChanged)
@@ -189,6 +197,7 @@ class SettingsController: public QObject
     [[nodiscard]] QString linkGesture() const { return _linkGesture; }
     [[nodiscard]] QVariantList profiles() const { return _profiles; }
     [[nodiscard]] QVariantList colorSchemes() const { return _colorSchemes; }
+    [[nodiscard]] QVariantList schemeGallery() const;
     [[nodiscard]] QString defaultProfile() const { return _defaultProfile; }
     [[nodiscard]] QVariantList keybindings() const { return _keybindings; }
     [[nodiscard]] QVariantList globalFields() const;
@@ -398,6 +407,13 @@ class SettingsController: public QObject
     Q_INVOKABLE void requestDeleteScheme(QString const& name);
     /// The page's Rename of a scheme: renameColorScheme, a failure reported through errorOccurred.
     Q_INVOKABLE void requestRenameScheme(QString const& oldName, QString const& newName);
+    /// The contrast of colour @p foreground on @p background, as a colour well's readout shows it.
+    /// @param foreground "#rrggbb" or "#rgb".
+    /// @param background What it sits on, in the same spelling.
+    /// @return { text: "4.8 : 1" (empty when either is no colour), passes: whether it reaches 4.5 : 1 }; the
+    ///         bool is QML-facing.
+    [[nodiscard]] Q_INVOKABLE QVariantMap contrastReadout(QString const& foreground,
+                                                          QString const& background) const;
     // }}}
 
   signals:
@@ -411,6 +427,8 @@ class SettingsController: public QObject
     void globalFieldsChanged();
     /// Whether this Settings session has something to revert may have changed.
     void changesChanged();
+    /// schemeGallery() changed: a scheme was written, added or removed, or the one being edited was.
+    void schemeGalleryChanged();
     /// The IDENTITY of the color scheme being edited changed (a different scheme selected, one duplicated,
     /// renamed or deleted) — but NOT a mere color tweak. Kept separate from
     /// @ref schemeDraftChanged so the editor's name field can re-seed on an identity change without being
@@ -458,6 +476,15 @@ class SettingsController: public QObject
     /// file, or a built-in scheme, in that order; the default palette for a name none answers to. Read once
     /// per name until the next refresh() (@ref _previewPaletteCache).
     [[nodiscard]] vtbackend::ColorPalette schemePalette(std::string const& name) const;
+    /// schemePalette() without the cache: the scheme as the store and the configuration have it now.
+    [[nodiscard]] vtbackend::ColorPalette readSchemePalette(std::string const& name) const;
+    /// The profiles that draw with color scheme @p name, the open draft standing for its profile. What is
+    /// still inside the debounce for a profile is written first, so that the configuration is what they say.
+    /// @return Their names, in the configuration's order; or why a pending change could not be written.
+    [[nodiscard]] std::expected<std::vector<std::string>, config::SettingsError> profilesDrawingWith(
+        std::string const& name);
+    /// The draft as it is written: less a link pattern still in error, which the reader would skip.
+    [[nodiscard]] config::TerminalProfile writableDraft() const;
     /// The palette the draft profile's status-line roles preview against: its scheme, or for a light/dark
     /// pair the one of the current appearance -- by name, so a scheme switched in the draft previews before
     /// it is saved. The default palette while no profile is open.
@@ -535,6 +562,9 @@ class SettingsController: public QObject
     QString _linkGesture; ///< Listed by refresh(): how links are opened.
     QVariantList _profiles;
     QVariantList _colorSchemes;
+    /// The gallery's cards of the schemes as the store and the configuration have them, built by refresh();
+    /// schemeGallery() puts the draft being edited over them.
+    QVariantList _schemeGalleryCards;
     QVariantList _keybindings;
     QString _defaultProfile;
 

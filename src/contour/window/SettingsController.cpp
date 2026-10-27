@@ -3,6 +3,7 @@
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/window/ColorContrastReadout.hpp>
 #include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsControls.hpp>
@@ -67,6 +68,12 @@ using fields::unboundedRange;
 
 namespace
 {
+    /// The page's background: what most of a scheme's colours are drawn on.
+    [[nodiscard]] vtbackend::RGBColor pageBackground(vtbackend::ColorPalette const& palette)
+    {
+        return palette.defaultBackground;
+    }
+
     /// A colour slot a scheme may leave unset, in which case the palette derives it. The editor row
     /// shows the colour in effect and writes an explicit one only when edited.
     struct DerivedColorSlot
@@ -79,6 +86,8 @@ namespace
         void (*assign)(vtbackend::ColorPalette&, std::optional<vtbackend::RGBColor>);
         /// The colour in effect: the scheme's own, or the derived one while the slot is unset.
         vtbackend::RGBColor (*resolve)(vtbackend::ColorPalette const&);
+        /// The colour the slot is drawn on, which its contrast readout is measured against.
+        vtbackend::RGBColor (*sitsOn)(vtbackend::ColorPalette const&) = &pageBackground;
     };
 
     /// The slot of the block column's colour for @p Outcome in one state: the palette's array @p Colors,
@@ -125,7 +134,8 @@ namespace
                          auto const background = pair ? pair->background : p.defaultBackground;
                          pair = vtbackend::RGBColorPair { .foreground = *color, .background = background };
                      },
-                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)().foreground; } };
+                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)().foreground; },
+                 .sitsOn = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)().background; } };
     }
 
     /// The slot of the block column's resting colour for @p Outcome (ColorPalette::blockStatusColor).
@@ -151,7 +161,7 @@ namespace
     /// @param key   QML key.
     /// @param label Swatch label.
     /// @return The slot.
-    template <auto Own, auto Resolve>
+    template <auto Own, auto Resolve, auto SitsOn = &pageBackground>
     constexpr DerivedColorSlot memberSlot(std::string_view key, std::string_view label)
     {
         return { .key = key,
@@ -159,7 +169,8 @@ namespace
                  .own = [](vtbackend::ColorPalette const& p) { return p.*Own; },
                  .assign = [](vtbackend::ColorPalette& p,
                               std::optional<vtbackend::RGBColor> color) { p.*Own = color; },
-                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)(); } };
+                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)(); },
+                 .sitsOn = SitsOn };
     }
 
     /// The command-block colour slots, in the order the editor lists them after the ANSI banks. Adding
@@ -188,8 +199,10 @@ namespace
                    &vtbackend::ColorPalette::stickyHeaderBackgroundColor>("sticky_header_background",
                                                                           "Sticky header: background"),
         memberSlot<&vtbackend::ColorPalette::stickyHeaderSeparator,
-                   &vtbackend::ColorPalette::stickyHeaderSeparatorColor>("sticky_header_separator",
-                                                                         "Sticky header: separator"),
+                   &vtbackend::ColorPalette::stickyHeaderSeparatorColor,
+                   [](vtbackend::ColorPalette const& p) {
+                       return p.stickyHeaderBackgroundColor();
+                   }>("sticky_header_separator", "Sticky header: separator"),
     };
 
     /// Where the colour a scheme editor row shows comes from.
@@ -203,6 +216,18 @@ namespace
     /// The QML-facing token of each SchemeColorSource, indexed by it.
     constexpr auto SchemeColorSourceTokens = std::array { "scheme"sv, "derived"sv, "pinned"sv };
 
+    /// Which block of the Colors page's editor a slot sits in.
+    enum class SchemeColorGroup : uint8_t
+    {
+        Base = 0,  ///< The default foreground and background.
+        Normal,    ///< The eight normal ANSI colours.
+        Bright,    ///< The eight bright ANSI colours.
+        Interface, ///< The slots the palette derives for the gutter, folds, sticky header and block status.
+    };
+
+    /// The QML-facing token of each SchemeColorGroup, indexed by it.
+    constexpr auto SchemeColorGroupTokens = std::array { "base"sv, "normal"sv, "bright"sv, "interface"sv };
+
     /// A data-driven descriptor for one editable color slot of a palette.
     struct SchemeColorDescriptor
     {
@@ -213,6 +238,10 @@ namespace
             set; //!< Makes it the scheme's own.
         /// How the palette derives the slot while the scheme leaves it unset; none for one every scheme sets.
         DerivedColorSlot const* derived = nullptr;
+        /// The colour the slot is drawn on; unset for the background, which sits on nothing the scheme has.
+        std::function<vtbackend::RGBColor(vtbackend::ColorPalette const&)> sitsOn = &pageBackground;
+        /// Which block of the editor the slot sits in.
+        SchemeColorGroup group = SchemeColorGroup::Interface;
 
         /// Where the colour in effect comes from in @p palette.
         [[nodiscard]] SchemeColorSource source(vtbackend::ColorPalette const& palette) const
@@ -241,11 +270,14 @@ namespace
                                          if (*pair && (*pair)->background == p.defaultBackground)
                                              (*pair)->background = c;
                                      p.defaultBackground = c;
-                                 } });
+                                 },
+                             .sitsOn = {},
+                             .group = SchemeColorGroup::Base });
             list.push_back({ .key = "foreground",
                              .label = "Foreground",
                              .get = [](auto const& p) { return p.defaultForeground; },
-                             .set = [](auto& p, auto c) { p.defaultForeground = c; } });
+                             .set = [](auto& p, auto c) { p.defaultForeground = c; },
+                             .group = SchemeColorGroup::Base });
             static constexpr auto AnsiNames =
                 std::array<std::string_view, 8> { "black", "red",     "green", "yellow",
                                                   "blue",  "magenta", "cyan",  "white" };
@@ -258,14 +290,16 @@ namespace
                                      .label = QString::fromStdString((bright ? "Bright " : "Normal ")
                                                                      + std::string(AnsiNames[i])),
                                      .get = [slot](auto const& p) { return p.palette.at(slot); },
-                                     .set = [slot](auto& p, auto c) { p.palette.at(slot) = c; } });
+                                     .set = [slot](auto& p, auto c) { p.palette.at(slot) = c; },
+                                     .group = bright ? SchemeColorGroup::Bright : SchemeColorGroup::Normal });
                 }
             for (auto const& derived: DerivedColorSlots)
                 list.push_back({ .key = toQString(derived.key),
                                  .label = toQString(derived.label),
                                  .get = derived.resolve,
                                  .set = [assign = derived.assign](auto& p, auto c) { assign(p, c); },
-                                 .derived = &derived });
+                                 .derived = &derived,
+                                 .sitsOn = derived.sitsOn });
             return list;
         }();
         return descriptors;
@@ -283,6 +317,23 @@ namespace
     QString rgbToHex(vtbackend::RGBColor color)
     {
         return QString::asprintf("#%02x%02x%02x", color.red, color.green, color.blue);
+    }
+
+    /// The gallery card of scheme @p name drawn with @p palette: its background and foreground, and the eight
+    /// normal colours as a strip.
+    QVariantMap galleryCardOf(QString const& name, bool editable, vtbackend::ColorPalette const& palette)
+    {
+        static constexpr auto NormalColors = size_t { 8 };
+        auto normal = QStringList {};
+        for (auto const& color: palette.palette | std::views::take(NormalColors))
+            normal.push_back(rgbToHex(color));
+        auto card = QVariantMap {};
+        card[QStringLiteral("name")] = name;
+        card[QStringLiteral("editable")] = editable; // QML-facing bool
+        card[QStringLiteral("background")] = rgbToHex(palette.defaultBackground);
+        card[QStringLiteral("foreground")] = rgbToHex(palette.defaultForeground);
+        card[QStringLiteral("normal")] = normal;
+        return card;
     }
 
     /// Parses "#rrggbb" (or any Qt-recognized color string) into an RGBColor, black on a parse failure.
@@ -522,6 +573,8 @@ SettingsController::SettingsController(ConfigAccessor config,
     _editability { editabilityOf(_config()) },
     _globalDraft { _config().guiManagedSettings }
 {
+    // The gallery shows the draft being edited over the schemes the store has.
+    connect(this, &SettingsController::schemeDraftChanged, this, &SettingsController::schemeGalleryChanged);
     _session = makeSession();
     _session->observe(config::guiSettingsFile(), loadedBytesOf(config::guiSettingsFile()));
     refresh();
@@ -546,10 +599,8 @@ void SettingsController::setColorPreference(vtbackend::ColorPreference appearanc
     emit draftChanged();
 }
 
-vtbackend::ColorPalette SettingsController::schemePalette(std::string const& name) const
+vtbackend::ColorPalette SettingsController::readSchemePalette(std::string const& name) const
 {
-    if (_previewPaletteCache && _previewPaletteCache->name == name)
-        return _previewPaletteCache->palette;
     auto const& cfg = _config();
     auto palette = vtbackend::ColorPalette {};
     if (auto const it = cfg.colorschemes.value().find(name); it != cfg.colorschemes.value().end())
@@ -558,6 +609,14 @@ vtbackend::ColorPalette SettingsController::schemePalette(std::string const& nam
         palette = *loaded;
     else
         (void) vtbackend::defaultColorPalettes(name, palette);
+    return palette;
+}
+
+vtbackend::ColorPalette SettingsController::schemePalette(std::string const& name) const
+{
+    if (_previewPaletteCache && _previewPaletteCache->name == name)
+        return _previewPaletteCache->palette;
+    auto palette = readSchemePalette(name);
     _previewPaletteCache = CachedPalette { .name = name, .palette = palette };
     return palette;
 }
@@ -718,6 +777,7 @@ void SettingsController::onSessionError(SettingsError const& error)
         case SettingsErrorKind::UnknownSetting:
         case SettingsErrorKind::NotApplied:
         case SettingsErrorKind::NameTaken:
+        case SettingsErrorKind::InUse:
         case SettingsErrorKind::ReloadFailed: break;
     }
     fail(error.message);
@@ -872,13 +932,17 @@ void SettingsController::refresh()
         errorLog()("Could not list the color schemes: {}", listed.error());
 
     _colorSchemes.clear();
+    _schemeGalleryCards.clear();
     for (auto const& name: schemeNames)
     {
         auto row = QVariantMap {};
         row[QStringLiteral("name")] = QString::fromStdString(name);
         row[QStringLiteral("editable")] = (!locked() && onDisk.contains(name));
         _colorSchemes.push_back(row);
+        _schemeGalleryCards.push_back(galleryCardOf(
+            QString::fromStdString(name), !locked() && onDisk.contains(name), readSchemePalette(name)));
     }
+    emit schemeGalleryChanged();
 
     // Keybindings (read-only): the configured key, character and mouse mappings, then the built-in ones a
     // press can still reach, so a binding Contour adds later shows up here without a configuration edit.
@@ -995,7 +1059,7 @@ std::expected<void, SettingsError> SettingsController::profileDraftWritable() co
     return refuse(SettingsErrorKind::ReadOnly, "Built in · Duplicate to Edit.");
 }
 
-std::expected<void, SettingsError> SettingsController::stageProfileDraft()
+config::TerminalProfile SettingsController::writableDraft() const
 {
     // A link pattern still in error is held back -- the reader would skip it, or the terminal disable it --
     // and its row says why; everything else in the draft is written meanwhile.
@@ -1016,8 +1080,13 @@ std::expected<void, SettingsError> SettingsController::stageProfileDraft()
         std::erase_if(patterns, inError);
         writable.hintPatterns = std::move(patterns);
     }
+    return writable;
+}
+
+std::expected<void, SettingsError> SettingsController::stageProfileDraft()
+{
     // What it stages is what the reload that follows reads, so followReloadedDrafts() leaves the draft be.
-    auto bytes = config::emitProfileYaml(writable);
+    auto bytes = config::emitProfileYaml(writableDraft());
     auto staged = stage(config::profileFile(_editingProfile.toStdString()), bytes);
     if (staged)
         _draftSeededFrom = std::move(bytes);
@@ -1670,11 +1739,51 @@ QVariantList SettingsController::schemeColors() const
         row[QStringLiteral("key")] = descriptor.key;
         row[QStringLiteral("label")] = descriptor.label;
         row[QStringLiteral("color")] = rgbToHex(descriptor.get(_schemeDraft));
+        row[QStringLiteral("group")] =
+            toQString(SchemeColorGroupTokens.at(static_cast<size_t>(descriptor.group)));
+        row[QStringLiteral("against")] =
+            descriptor.sitsOn ? rgbToHex(descriptor.sitsOn(_schemeDraft)) : QString {};
         row[QStringLiteral("colorSource")] =
             toQString(SchemeColorSourceTokens.at(static_cast<size_t>(descriptor.source(_schemeDraft))));
         colors.push_back(row);
     }
     return colors;
+}
+
+QVariantList SettingsController::schemeGallery() const
+{
+    auto cards = _schemeGalleryCards;
+    if (_schemeAccess == DraftAccess::Closed)
+        return cards;
+    // The scheme being edited is drawn from its draft; one staged and not yet written takes its place in
+    // name order, as the written one will.
+    auto const card = galleryCardOf(_editingScheme, _schemeAccess == DraftAccess::Editable, _schemeDraft);
+    auto const nameOf = [](QVariant const& raw) {
+        return raw.toMap().value(QStringLiteral("name")).toString();
+    };
+    auto const at = std::ranges::find(cards, _editingScheme, nameOf);
+    if (at != cards.end())
+        *at = card;
+    else
+        cards.insert(std::ranges::lower_bound(cards,
+                                              _editingScheme.toStdString(),
+                                              std::less {},
+                                              [&](QVariant const& raw) { return nameOf(raw).toStdString(); }),
+                     card);
+    return cards;
+}
+
+QVariantMap SettingsController::contrastReadout(QString const& foreground, QString const& background) const
+{
+    auto result = QVariantMap {};
+    result[QStringLiteral("text")] = QString {};
+    result[QStringLiteral("passes")] = false; // QML-facing bool
+    if (!QColor::isValidColorName(foreground) || !QColor::isValidColorName(background))
+        return result;
+    auto const readout = contrastReadoutOf(hexToRgb(foreground), hexToRgb(background));
+    result[QStringLiteral("text")] = QString::fromStdString(formatContrast(readout));
+    result[QStringLiteral("passes")] = readout.verdict == ContrastVerdict::Passes;
+    return result;
 }
 
 void SettingsController::editColorScheme(QString const& name)
@@ -1764,6 +1873,65 @@ void SettingsController::resetSchemeColor(QString const& key)
     report(stageSchemeDraft());
 }
 
+namespace
+{
+    /// Whether @p colors names color scheme @p name, as the one scheme or as either half of the pair.
+    [[nodiscard]] bool drawsWithScheme(config::ColorConfig const& colors, std::string const& name)
+    {
+        if (auto const* const simple = std::get_if<config::SimpleColorConfig>(&colors))
+            return simple->colorScheme == name;
+        auto const& dual = std::get<config::DualColorConfig>(colors);
+        return dual.colorSchemeLight == name || dual.colorSchemeDark == name;
+    }
+
+    /// @p names as a sentence's noun phrase: profile “a”, or profiles “a”, “b”.
+    [[nodiscard]] std::string joinedNames(std::vector<std::string> const& names)
+    {
+        auto joined = std::string { names.size() == 1 ? "profile " : "profiles " };
+        auto separator = std::string_view {};
+        for (auto const& name: names)
+        {
+            joined += std::format("{}“{}”", separator, name);
+            separator = ", ";
+        }
+        return joined;
+    }
+
+    /// @p colors with every use of scheme @p from naming @p to.
+    [[nodiscard]] config::ColorConfig withSchemeRenamed(config::ColorConfig colors,
+                                                        std::string const& from,
+                                                        std::string const& to)
+    {
+        if (auto* const simple = std::get_if<config::SimpleColorConfig>(&colors))
+        {
+            if (simple->colorScheme == from)
+                simple->colorScheme = to;
+        }
+        else
+            for (auto* const half: { &std::get<config::DualColorConfig>(colors).colorSchemeLight,
+                                     &std::get<config::DualColorConfig>(colors).colorSchemeDark })
+                if (*half == from)
+                    *half = to;
+        return colors;
+    }
+} // namespace
+
+std::expected<std::vector<std::string>, SettingsError> SettingsController::profilesDrawingWith(
+    std::string const& name)
+{
+    // What is still inside the debounce for a profile is written first, so that the configuration says what
+    // each draws with. The open draft is among them: it is staged on every edit.
+    for (auto const& pending: _session->pendingWrites(config::SideFileKind::Profile))
+        if (auto const settled = settlePendingOf(pending); !settled)
+            return std::unexpected(settled.error());
+    auto users = std::vector<std::string> {};
+    for (auto const& [profileName, profile]: _config().profiles.value())
+        if (_session->pendingFor(config::profileFile(profileName)) != config::PendingChange::Removal
+            && drawsWithScheme(profile.colors.value(), name))
+            users.push_back(profileName);
+    return users;
+}
+
 bool SettingsController::schemeNameTaken(std::string const& name) const
 {
     return colorSchemeSideFileExists(name) || isInlineColorScheme(name)
@@ -1826,6 +1994,19 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
     if (schemeNameTaken(trimmed.toStdString()))
         return refuse(SettingsErrorKind::NameTaken, "A color scheme with that name already exists.");
 
+    // The profiles that draw with it follow it to its new name -- except one contour.yml defines, which
+    // Settings never writes, and which would keep naming a scheme that is gone.
+    auto const users = profilesDrawingWith(oldName.toStdString());
+    if (!users)
+        return std::unexpected(users.error());
+    for (auto const& user: *users)
+        if (!isSideFileProfile(user))
+            return refuse(SettingsErrorKind::InUse,
+                          std::format("The color scheme “{}” is used by the profile “{}”, which contour.yml "
+                                      "defines, so it cannot be renamed here.",
+                                      oldName.toStdString(),
+                                      user));
+
     // The open draft carries what is staged for the scheme; another one is as its side file has it, read
     // once: the palette is parsed from the very bytes the session records as seen, as opening it does.
     auto palette = std::optional<vtbackend::ColorPalette> {};
@@ -1852,16 +2033,41 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
     if (!palette)
         return refuse(SettingsErrorKind::UnknownSetting, "Open the color scheme to rename it.");
 
-    // One change: the new file and the old one's removal are written together or not at all.
-    auto const files = std::array {
-        config::StagedFile { .file = config::colorSchemeFile(trimmed.toStdString()),
-                             .bytes = config::emitColorSchemeYaml(*palette) },
-        config::StagedFile { .file = config::colorSchemeFile(oldName.toStdString()), .bytes = std::nullopt },
+    // One change: the new file, the profiles that move to it and the old one's removal are written together
+    // or not at all, every write before the removal.
+    auto files = std::vector<config::StagedFile> {
+        { .file = config::colorSchemeFile(trimmed.toStdString()),
+          .bytes = config::emitColorSchemeYaml(*palette) },
     };
+    auto movedDraft = std::optional<TerminalProfile> {};
+    for (auto const& user: *users)
+    {
+        auto const isOpen = _profileAccess == DraftAccess::Editable && _editingProfile.toStdString() == user;
+        auto profile = isOpen ? writableDraft() : *_config().findProfile(user);
+        profile.colors =
+            withSchemeRenamed(profile.colors.value(), oldName.toStdString(), trimmed.toStdString());
+        if (isOpen)
+        {
+            movedDraft = _draft;
+            movedDraft->colors = profile.colors;
+        }
+        else
+            // The bytes below are the configuration's, so what the session saw of the file is what the loader
+            // read: a hand edit made since is a conflict.
+            _session->observe(config::profileFile(user), loadedBytesOf(config::profileFile(user)));
+        files.push_back({ .file = config::profileFile(user), .bytes = config::emitProfileYaml(profile) });
+    }
+    files.push_back({ .file = config::colorSchemeFile(oldName.toStdString()), .bytes = std::nullopt });
     auto staged = _session->stageTogether(files);
     emit changesChanged();
     if (!staged)
         return staged;
+    if (movedDraft)
+    {
+        _draft = std::move(*movedDraft);
+        _draftSeededFrom = config::emitProfileYaml(writableDraft());
+        emit draftChanged();
+    }
 
     if (_editingScheme == oldName)
     {
@@ -1886,6 +2092,16 @@ std::expected<void, SettingsError> SettingsController::deleteColorScheme(QString
     if (!colorSchemeSideFileExists(name.toStdString()))
         return refuse(SettingsErrorKind::ReadOnly,
                       "Only color schemes made in Settings can be deleted here.");
+    // A scheme a profile still draws with would leave it on the default palette: refused, naming them.
+    auto const users = profilesDrawingWith(name.toStdString());
+    if (!users)
+        return std::unexpected(users.error());
+    if (!users->empty())
+        return refuse(SettingsErrorKind::InUse,
+                      std::format("The color scheme “{}” is used by {}; give {} another scheme first.",
+                                  name.toStdString(),
+                                  joinedNames(*users),
+                                  users->size() == 1 ? "it" : "them"));
 
     if (auto const staged = stage(config::colorSchemeFile(name.toStdString()), std::nullopt); !staged)
         return staged;

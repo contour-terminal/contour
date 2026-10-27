@@ -294,6 +294,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ProfileRules.hpp
         window/SettingsControls.hpp
         window/SettingsSearch.hpp
+        window/ColorContrastReadout.hpp
         window/SettingsSections.hpp
         window/QtSaveScheduler.hpp
         window/SettingsPreview.hpp
@@ -459,7 +460,8 @@ if(CONTOUR_FRONTEND_GUI)
         qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
         qml/PopupSurface.qml
-        qml/ColorSchemeEditor.qml
+        qml/ColorSchemesPage.qml
+        qml/SchemeCard.qml
         qml/StatusLineIndicatorEditor.qml
         qml/LinkPatternList.qml
         qml/StatusLineSegmentRow.qml
@@ -1311,6 +1313,7 @@ if(CONTOUR_TESTING)
         window/ProfileRules_test.cpp
         window/SettingsControls_test.cpp
         window/SettingsSearch_test.cpp
+        window/ColorContrastReadout_test.cpp
         window/SettingsSections_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp

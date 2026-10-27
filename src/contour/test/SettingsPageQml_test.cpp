@@ -881,6 +881,7 @@ TEST_CASE("every settings row's control carries its label and help", "[contour][
     };
     checkPage("section:general");
     checkPage("profile:main");
+    checkPage("profile:main:schemes");
 
     // The sidebar rows are list items named by their titles, inside a list named "Settings sections".
     REQUIRE(fx.open("section:general"));
@@ -2107,23 +2108,172 @@ TEST_CASE("the page drops a refusal with the page or draft it was about", "[cont
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("ColorSchemeEditor pins a derived colour on Return only, and lets it follow again",
-          "[contour][gui][qml][settings]")
+namespace
+{
+/// Writes side-file colour scheme @p name with the default palette beside @p fx's contour.yml and reloads.
+void addScheme(PageFixture& fx, std::string const& name)
+{
+    REQUIRE(
+        fx.store
+            ->write(config::colorSchemeFile(name), config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+            .has_value());
+    fx.reload();
+    fx.settle();
+}
+
+/// The palette of side-file colour scheme @p name as it is on disk now.
+[[nodiscard]] std::optional<vtbackend::ColorPalette> schemeOnDisk(PageFixture const& fx,
+                                                                  std::string const& name)
+{
+    return config::loadColorSchemeFile(fx.configDir / config::relativePathOf(config::colorSchemeFile(name)));
+}
+
+/// "#rrggbb" of @p color.
+[[nodiscard]] QString hexOf(vtbackend::RGBColor color)
+{
+    return QString::asprintf("#%02x%02x%02x", color.red, color.green, color.blue);
+}
+
+/// Opens the Colors page of the profile "New Profile", which the fixture adds, drawing with the one scheme
+/// `default` (a new profile draws with a light and a dark one).
+void openColorsPage(PageFixture& fx)
+{
+    fx.addProfile();
+    fx.controller->setColorSchemeMode("simple");
+    fx.controller->setColorScheme("default");
+    REQUIRE(fx.open("profile:New Profile:schemes"));
+}
+
+/// The card of scheme @p name on the page.
+[[nodiscard]] QQuickItem& schemeCard(PageFixture const& fx, QString const& name)
+{
+    return required(fx.byName("schemeCard:" + name));
+}
+
+/// Opens scheme @p name for editing, as clicking its card does.
+void openScheme(PageFixture& fx, QString const& name)
+{
+    REQUIRE(QMetaObject::invokeMethod(&schemeCard(fx, name), "opened"));
+    fx.settle();
+    REQUIRE(fx.controller->editingScheme() == name);
+}
+} // namespace
+
+TEST_CASE("the colour schemes page edits a slot live", "[contour][gui][qml][settings][schemes]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    auto window = fx.activeWindow(QSize(1000, 800));
+    fx.settle();
+
+    // The page opens on the scheme the profile draws with, a built-in one: its wells are deaf and the page
+    // offers a copy.
+    REQUIRE(fx.controller->editingScheme() == "default");
+    auto const* well = fx.controlOf("scheme.normal_red");
+    REQUIRE(well != nullptr);
+    CHECK_FALSE(well->isEnabled());
+    CHECK(required(fx.byName("duplicateSchemeButton")).isVisible());
+    CHECK(required(fx.byName("duplicateSchemeButton")).property("text").toString() == "Duplicate to Edit");
+
+    // Picking the card of an editable scheme opens it: the wells take input.
+    openScheme(fx, "midnight");
+    REQUIRE(fx.controlOf("scheme.normal_red")->isEnabled());
+    CHECK_FALSE(required(fx.byName("duplicateSchemeButton")).isVisible());
+
+    // Typing a hex into a well stages it, and it is on disk once the debounce runs.
+    auto& hex = required(fx.fieldOf("scheme.normal_red"));
+    window.typeOver(hex, "#102030");
+    fx.settle();
+    fx.scheduler->fire();
+    fx.settle();
+    auto const stored = schemeOnDisk(fx, "midnight");
+    REQUIRE(stored.has_value());
+    CHECK(stored->palette.at(1) == vtbackend::RGBColor { 0x10, 0x20, 0x30 });
+
+    // The readout follows the colour, against the scheme's background.
+    auto const background = hexOf(stored->defaultBackground);
+    auto const expected = fx.controller->contrastReadout("#102030", background);
+    auto const* readout = findDescendant(*fx.controlOf("scheme.normal_red"), [](QQuickItem const& item) {
+        return item.objectName() == "colorReadout";
+    });
+    REQUIRE(readout != nullptr);
+    CHECK(readout->property("text").toString() == expected.value("text").toString());
+    CHECK(readout->property("text").toString().endsWith(" : 1"));
+
+    // The Terminal row draws the well as its glyph, in the colour.
+    if (row == config::ChromeStyle::Terminal)
+    {
+        auto const* glyph = findDescendant(*fx.controlOf("scheme.normal_red"), [](QQuickItem const& item) {
+            return item.objectName() == "colorWellGlyph";
+        });
+        REQUIRE(glyph != nullptr);
+        CHECK(glyph->isVisible());
+        CHECK(glyph->property("text").toString() == "██");
+        CHECK(glyph->property("color").value<QColor>() == QColor(0x10, 0x20, 0x30));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the schemes gallery shows every scheme, marks the profile's, and opens one on a click",
+          "[contour][gui][qml][settings][schemes]")
 {
     contour::test::QmlMessageCapture const warnings;
     auto fx = PageFixture(OneProfile);
-    fx.controller->duplicateScheme("default"); // an editable scheme, opened for editing
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
 
-    // The editor on its own, over the controller, in an active window.
-    QQmlComponent component(&fx.engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemeEditor.qml")));
-    INFO("component errors: " << component.errorString().toStdString());
-    REQUIRE(component.isReady());
-    auto editor = std::unique_ptr<QQuickItem>(qobject_cast<QQuickItem*>(component.createWithInitialProperties(
-        QVariantMap { { "controller", QVariant::fromValue(static_cast<QObject*>(fx.controller.get())) } })));
-    REQUIRE(editor != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*editor);
+    for (auto const& raw: fx.controller->colorSchemes())
+    {
+        auto const name = raw.toMap().value("name").toString();
+        INFO(name.toStdString());
+        auto& card = schemeCard(fx, name);
+        CHECK(card.isVisible());
+        CHECK(findDescendants(card,
+                              [](QQuickItem const& item) { return item.objectName() == "schemeCardSwatch"; })
+                  .size()
+              == 8);
+        CHECK(
+            required(findDescendant(
+                         card, [](QQuickItem const& item) { return item.objectName() == "schemeCardName"; }))
+                .property("text")
+                .toString()
+            == name);
+    }
+
+    // The check is on the scheme the profile draws with, and on no other.
+    auto const checked = [&](QString const& name) {
+        return required(findDescendant(
+                            schemeCard(fx, name),
+                            [](QQuickItem const& item) { return item.objectName() == "schemeCardCheck"; }))
+            .isVisible();
+    };
+    REQUIRE(fx.controller->colorScheme() == "default");
+    CHECK(checked("default"));
+    CHECK_FALSE(checked("midnight"));
+    fx.controller->setColorScheme("midnight");
     fx.settle();
+    CHECK(checked("midnight"));
+    CHECK_FALSE(checked("default"));
+
+    // The card of the scheme open for editing says so.
+    openScheme(fx, "midnight");
+    CHECK(schemeCard(fx, "midnight").property("isEditing").toBool());
+    CHECK_FALSE(schemeCard(fx, "default").property("isEditing").toBool());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a derived colour is pinned on Return only, and follows the scheme again through Reset",
+          "[contour][gui][qml][settings][schemes]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    auto window = fx.activeWindow(QSize(1000, 800));
+    openScheme(fx, "midnight");
 
     auto const key = QStringLiteral("gutter_text");
     auto const sourceOf = [&fx, &key]() {
@@ -2132,39 +2282,248 @@ TEST_CASE("ColorSchemeEditor pins a derived colour on Return only, and lets it f
                 return raw.toMap().value("colorSource").toString();
         return QString {};
     };
-    // Looked up again each time: a changed draft rebuilds the swatches.
-    auto const partOf = [&](char const* name) -> QQuickItem& {
-        auto& swatch = required(findDescendant(*editor, [&key](QQuickItem const& candidate) {
-            return candidate.property("modelData").toMap().value("key").toString() == key;
-        }));
-        return required(findDescendant(swatch, [name](QQuickItem const& candidate) {
-            return candidate.objectName() == QLatin1String(name);
-        }));
+    auto const row = [&]() -> QQuickItem& {
+        return required(fx.byName("settingsRow:scheme." + key));
     };
     REQUIRE(sourceOf() == "derived");
-    CHECK(partOf("schemeColorFollows").isVisible());
-    CHECK(partOf("schemeColorFollows").property("text").toString() == "Follows the scheme's other colors");
-    CHECK_FALSE(partOf("followSchemeColorButton").isVisible());
+    CHECK(required(findDescendant(
+                       row(), [](QQuickItem const& item) { return item.objectName() == "settingsRowHelp"; }))
+              .property("text")
+              .toString()
+          == "Follows the scheme's other colors");
+    CHECK_FALSE(fx.byName("modifiedResetButton:scheme." + key)->isVisible());
 
     // Passing through the field is no edit.
-    TestWindow::focus(partOf("schemeColorField"));
+    TestWindow::focus(required(fx.fieldOf("scheme." + key)));
     window.dropFocus();
     fx.settle();
     CHECK(sourceOf() == "derived");
 
     // Return commits the colour shown, which keeps it from now on.
-    TestWindow::focus(partOf("schemeColorField"));
+    TestWindow::focus(required(fx.fieldOf("scheme." + key)));
     window.press(Qt::Key_Return);
     fx.settle();
     CHECK(sourceOf() == "pinned");
-    CHECK_FALSE(partOf("schemeColorFollows").isVisible());
-    CHECK(partOf("followSchemeColorButton").isVisible());
-    auto* const followAccessible = QAccessible::queryAccessibleInterface(&partOf("followSchemeColorButton"));
-    REQUIRE(followAccessible != nullptr);
-    CHECK(followAccessible->text(QAccessible::Name) == "Follow the scheme's other colors again");
+    CHECK(required(fx.byName("modifiedResetButton:scheme." + key)).isVisible());
 
-    clickButton(&partOf("followSchemeColorButton"));
+    clickButton(&required(fx.byName("modifiedResetButton:scheme." + key)));
     fx.settle();
     CHECK(sourceOf() == "derived");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the schemes page creates a scheme as a copy of the open one",
+          "[contour][gui][qml][settings][schemes]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    openScheme(fx, "midnight");
+    REQUIRE(fx.controller->setSchemeColor("background", "#102030").has_value());
+
+    clickButton(&required(fx.byName("newSchemeButton")));
+    fx.settle();
+
+    // The copy is open at once, before it is written, and carries the colours of what it copies.
+    CHECK(fx.controller->editingScheme() == "midnight copy");
+    CHECK(required(fx.byName("schemeCard:midnight copy")).property("isEditing").toBool());
+    CHECK(fx.controlOf("scheme.normal_red")->isEnabled());
+    fx.scheduler->fire();
+    fx.settle();
+    auto const copy = schemeOnDisk(fx, "midnight copy");
+    REQUIRE(copy.has_value());
+    CHECK(copy->defaultBackground == vtbackend::RGBColor { 0x10, 0x20, 0x30 });
+    CHECK(schemeOnDisk(fx, "midnight").has_value());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the schemes page renames a scheme, and a profile that draws with it follows",
+          "[contour][gui][qml][settings][schemes]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    fx.controller->setColorScheme("midnight"); // the profile this page is of draws with it
+    fx.scheduler->fire();
+    fx.settle();
+    openScheme(fx, "midnight");
+
+    auto* dialog = fx.item()->findChild<QObject*>("renameSchemeDialog");
+    REQUIRE(dialog != nullptr);
+    clickButton(&required(fx.byName("renameSchemeButton")));
+    fx.settle();
+    CHECK(dialog->property("visible").toBool());
+    auto* field =
+        findDescendant(*dialog->property("contentItem").value<QQuickItem*>(),
+                       [](QQuickItem const& item) { return item.objectName() == "renameSchemeField"; });
+    REQUIRE(field != nullptr);
+    CHECK(field->property("text").toString() == "midnight"); // offered as it is
+    field->setProperty("text", QStringLiteral("nightfall"));
+    QMetaObject::invokeMethod(dialog, "accept");
+    fx.settle();
+    fx.scheduler->fire();
+    fx.settle();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(schemeOnDisk(fx, "nightfall").has_value());
+    CHECK_FALSE(schemeOnDisk(fx, "midnight").has_value());
+    CHECK(fx.controller->editingScheme() == "nightfall");
+    // The profile moved with it: its draft, its file, and the check on the card.
+    CHECK(fx.controller->colorScheme() == "nightfall");
+    auto const* profile = fx.cfg.findProfile("New Profile");
+    REQUIRE(profile != nullptr);
+    CHECK(std::get<config::SimpleColorConfig>(profile->colors.value()).colorScheme == "nightfall");
+    CHECK(required(findDescendant(schemeCard(fx, "nightfall"), [](QQuickItem const& item) {
+              return item.objectName() == "schemeCardCheck";
+          })).isVisible());
+    CHECK(fx.byName("schemeCard:midnight") == nullptr);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the schemes page deletes a scheme after asking, and refuses one a profile draws with",
+          "[contour][gui][qml][settings][schemes]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    addScheme(fx, "midnight");
+    addScheme(fx, "dawn");
+    openColorsPage(fx);
+    fx.controller->setColorScheme("midnight");
+    fx.scheduler->fire();
+    fx.settle();
+    auto* dialog = fx.item()->findChild<QObject*>("deleteDialog");
+    REQUIRE(dialog != nullptr);
+
+    SECTION("one in use is refused, with the reason on the page")
+    {
+        openScheme(fx, "midnight");
+        clickButton(&required(fx.byName("deleteSchemeButton")));
+        fx.settle();
+        CHECK(dialog->property("message").toString().contains("“midnight”"));
+        QMetaObject::invokeMethod(dialog, "confirmed");
+        fx.settle();
+        fx.scheduler->fire();
+        fx.settle();
+
+        CHECK(schemeOnDisk(fx, "midnight").has_value());
+        auto const* banner = fx.byName("settingsErrorBanner");
+        REQUIRE(banner != nullptr);
+        CHECK(banner->property("text").toString().contains("New Profile"));
+    }
+
+    SECTION("one nobody draws with is removed once confirmed")
+    {
+        openScheme(fx, "dawn");
+        clickButton(&required(fx.byName("deleteSchemeButton")));
+        fx.settle();
+        CHECK(dialog->property("message").toString().contains("“dawn”"));
+        CHECK(schemeOnDisk(fx, "dawn").has_value()); // asked, not yet done
+        QMetaObject::invokeMethod(dialog, "confirmed");
+        fx.settle();
+        fx.scheduler->fire();
+        fx.settle();
+
+        CHECK_FALSE(schemeOnDisk(fx, "dawn").has_value());
+        CHECK(fx.byName("schemeCard:dawn") == nullptr);
+        CHECK(fx.errors.isEmpty());
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a locked or read-only page offers no way to change a scheme Settings did not make",
+          "[contour][gui][qml][settings][schemes]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    REQUIRE(fx.open("profile:main:schemes")); // contour.yml's profile: its choice is read-only
+    REQUIRE(fx.controller->editingReadOnly());
+
+    // The profile's choice is deaf; the scheme is its own file and is offered a copy, not an edit.
+    CHECK_FALSE(required(fx.controlOf("color_scheme")).isEnabled());
+    CHECK_FALSE(required(fx.controlOf("scheme.background")).isEnabled());
+    CHECK(required(fx.byName("duplicateSchemeButton")).isVisible());
+    CHECK_FALSE(required(fx.byName("renameSchemeButton")).isVisible());
+    CHECK_FALSE(required(fx.byName("deleteSchemeButton")).isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("every ink of the Colors page reads on what it sits on, on every row, scheme and appearance",
+          "[contour][gui][qml][settings][schemes][contrast]")
+{
+    // Review Focus 3, for what Task 15 draws: a slot's readout (passing and failing), a card's name and
+    // check on the card, and the ring of the card open for editing.
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const rowName = GENERATE(from_range(contrastRows()));
+    INFO("appearance: " << (appearance == vtbackend::ColorPreference::Light ? "light" : "dark")
+                        << ", row: " << rowName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    contour::test::QmlMessageCapture const warnings;
+
+    auto setup = rowSetup(config::ChromeStyle::ContourLinux);
+    if (rowName == "macos")
+        setup.row = config::ChromeStyle::MacOS;
+    else if (rowName == "fluent")
+        setup.row = config::ChromeStyle::Fluent;
+    else if (rowName == "linux")
+        setup.row = config::ChromeStyle::ContourLinux;
+    else
+        setup = terminalRowSetup(rowName);
+
+    auto fx = PageFixture(OneProfile, nullptr, setup);
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    fx.controller->setColorScheme("midnight");
+    openScheme(fx, "midnight");
+    // One slot the scheme cannot be read in, so that a failing readout is on the page as well as passing
+    // ones.
+    auto const background = fx.controller->schemeColors().at(0).toMap().value("color").toString();
+    REQUIRE(fx.controller->setSchemeColor("normal_red", background).has_value());
+    fx.settle();
+
+    auto const token = [&fx](char const* name) {
+        auto* style =
+            fx.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        return style->property("colors").value<QObject*>()->property(name).value<QColor>();
+    };
+    auto const colorOf = [](QQuickItem const* item) {
+        return item->property("color").value<QColor>();
+    };
+    auto const window = QGuiApplication::palette().color(QPalette::Window);
+    auto const page = over(token("settingsPageFill"), window);
+    auto const group = over(token("settingsGroupFill"), page);
+    constexpr auto TextContrast = 4.5;
+    constexpr auto MarkContrast = 3.0;
+
+    // Every readout, whether it passes or not.
+    auto const readouts = findDescendants(*fx.item(), [](QQuickItem const& item) {
+        return item.objectName() == "colorReadout" && item.isVisible();
+    });
+    REQUIRE_FALSE(readouts.empty());
+    auto failing = 0;
+    for (auto const* readout: readouts)
+    {
+        CHECK(contrast(colorOf(readout), group) >= TextContrast);
+        failing += readout->property("text").toString().startsWith("1.0") ? 1 : 0;
+    }
+    CHECK(failing >= 1);
+
+    // A card's name and check sit on the card.
+    auto const& card = schemeCard(fx, "midnight");
+    CHECK(contrast(colorOf(&required(findDescendant(
+                       card, [](QQuickItem const& item) { return item.objectName() == "schemeCardName"; }))),
+                   group)
+          >= TextContrast);
+    auto const& check = required(
+        findDescendant(card, [](QQuickItem const& item) { return item.objectName() == "schemeCardCheck"; }));
+    REQUIRE(check.isVisible());
+    CHECK(contrast(colorOf(&check), group) >= TextContrast);
+
+    // The ring of the card open for editing is a mark on the group.
+    auto const* frame = card.property("background").value<QObject*>();
+    REQUIRE(frame != nullptr);
+    auto const ring = frame->property("border").value<QObject*>()->property("color").value<QColor>();
+    CHECK(contrast(ring, group) >= MarkContrast);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
