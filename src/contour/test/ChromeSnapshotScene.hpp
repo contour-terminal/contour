@@ -533,8 +533,9 @@ class ChromeSnapshotScene
     {
         auto* session = qobject_cast<ScrollingMockSession*>(_sessions[ActiveLeaf].get());
         REQUIRE(session != nullptr); // makeSessions() gives a scrolling script's active leaf one
-        auto const palette =
-            config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance);
+        // The colour config owns the palettes preferredColorPalette points into, so it must outlive them.
+        auto const colorConfig = config::defaultColors(_variant.edition);
+        auto const* const palette = config::preferredColorPalette(colorConfig, _variant.appearance);
         auto colors = QVariantList {};
         for (auto const kind: vtbackend::ScrollbarMarkKindList)
             colors.append(
