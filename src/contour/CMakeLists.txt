@@ -247,6 +247,8 @@ set(_header_files
     session/SizeIndicator.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
+    window/DropZonePolicy.hpp
+    window/DroppedText.hpp
     window/ProgramStatusBadge.hpp
     window/SecureInputPolicy.hpp
     window/SecureLockPlacement.hpp
@@ -1295,6 +1297,8 @@ if(CONTOUR_TESTING)
         window/ChromeFocus_test.cpp
         window/ChromeKeys_test.cpp
         window/HeldModifierReveal_test.cpp
+        window/DropZonePolicy_test.cpp
+        window/DroppedText_test.cpp
         window/FindBarPlacement_test.cpp
         window/LinkPillPlacement_test.cpp
         window/PaneHeaderPolicy_test.cpp

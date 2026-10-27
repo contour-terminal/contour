@@ -57,6 +57,15 @@ enum class FocusDirection : uint8_t
     Down,
 };
 
+/// The side of a pane that a new half is placed on when a whole tab is grafted beside it.
+enum class SplitSide : uint8_t
+{
+    Left = 0,
+    Right,
+    Top,
+    Bottom,
+};
+
 /// Returns the split axis you must cross to move along @p direction.
 ///
 /// Moving Left/Right crosses a Vertical split (children are side by side); moving Up/Down crosses a
