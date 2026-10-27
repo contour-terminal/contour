@@ -4698,7 +4698,6 @@ TEST_CASE("pane card: Minimal shows no headers until the modifier is held (offsc
           "[contour][gui][qml][panecard]")
 {
     auto setup = paneCardSetup();
-    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
     auto panes = TwoPanes {};
@@ -4907,7 +4906,6 @@ TEST_CASE("pane card: under Reduce Motion the actions cross-fade and the overlay
           "[contour][gui][qml][panecard]")
 {
     auto setup = paneCardSetup();
-    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     setup.accessibility.motion = contour::config::MotionPreference::Reduced;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
@@ -9537,7 +9535,6 @@ TEST_CASE("pane end: the reconnecting dim lies under the header and never over a
           "[contour][gui][qml][paneend]")
 {
     auto setup = paneCardSetup();
-    setup.row = contour::config::ChromeStyle::Terminal;
     setup.density = contour::config::ChromeDensity::Minimal;
     auto host = PaneTreeHost { setup, QSize { 800, 400 } };
     auto panes = TwoPanes {};
