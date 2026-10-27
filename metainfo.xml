@@ -107,6 +107,10 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Shows the size indicator as a pill centred on each resized pane ("100 × 30", or "13 pt" while zooming the font), announced once to screen readers when it settles</li>
+          <li>Makes the scrollbar an overlay that follows the system's scroll bar setting and hides at the bottom of the scrollback unless a failed or running command or a mark lies above; adds <code>scrollbar.mode</code> (<code>system</code>, <code>overlay</code>, <code>always</code>)</li>
+          <li>Replaces the hyperlink tooltip with a target pill shown while the follow modifier is held, placed in the pane header or over blank cells and never on the prompt row; <code>hyperlink_hover_tooltip</code> now shows it on plain hover and is off in the new defaults</li>
+          <li>Draws hint-mode labels in the cursor colour under contour-dark and contour-light, dims everything else, and turns the labels to the selection colour once a prefix is typed; adds the <code>hint_label_typed</code> scheme key</li>
           <li>Changes Settings to open in a window of its own, one per app, from Settings… in the Contour menu (⌘, on macOS, Ctrl+Shift+, elsewhere), the command palette or the <code>OpenConfiguration</code> binding. It opens with or without a terminal window, is brought forward when asked for again, and keeps its place and unsaved edits when closed</li>
           <li>Removes the Settings tab from the tab strip and the Settings entry from the new-tab menu</li>
           <li>Adds macOS tabs as pills in a tab well within the title band, with a centred title while there is one tab</li>
