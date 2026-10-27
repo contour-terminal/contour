@@ -2053,6 +2053,14 @@ class Terminal: public IStatusLinePublishTarget
     /// @param gridLine The grid line the pointer is over in the gutter, or nullopt when it left.
     void setGutterHoverLine(std::optional<LineOffset> gridLine);
 
+    /// Lights the rail of @p block as hovered, or clears it with nullopt: the pointer is over its rows.
+    ///
+    /// The pointer over the rail's strip beside a block hovers it too, through setGutterHoverLine().
+    /// Refreshes the frame only when the hovered block changes. Called under the terminal's lock, as every
+    /// mutator is.
+    /// @param block The hovered block, or nullopt when the pointer left every block.
+    void setHoveredCommandBlock(std::optional<CommandBlockId> block);
+
     // }}}
 
     // {{{ Sticky command header (OSC 133 blocks)
@@ -5674,6 +5682,9 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
     std::optional<LineOffset> _gutterHoverLine;
+
+    /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
+    std::optional<CommandBlockId> _hoveredCommandBlock;
     // }}}
 
     // {{{ Sticky command header

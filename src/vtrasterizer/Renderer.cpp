@@ -1021,7 +1021,13 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
 {
     ZoneScoped;
     for (auto const& marker: gutter)
+    {
+        // A rail cell names a segment of the strip after the cells, not a character at a column: there is no
+        // glyph to draw for it here.
+        if (marker.rail != vtbackend::RailSegment::None || marker.mark != vtbackend::RailMark::None)
+            continue;
         renderOverlayCell(gutterRenderCell(marker), "renderGutter");
+    }
 }
 
 void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)

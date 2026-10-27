@@ -17,6 +17,7 @@
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
+#include <vtbackend/shell/BlockRail.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
@@ -3972,7 +3973,7 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     // Built per frame rather than cached: Settings is mutable through settings(), and the layout formats a
     // sample only when timestamps are on.
     auto const layout = gutterLayoutFor(_settings.gutter);
-    if (layout.totalColumns == 0)
+    if (layout.totalColumns == 0 && layout.rail == BlockRailPresence::Absent)
         return;
 
     auto const& gutter = _settings.gutter;
@@ -4015,6 +4016,67 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     auto const hoveredHead =
         _gutterHoverLine ? foldCovering(foldRanges(), grid.stableLineIdOf(*_gutterHoverLine)) : std::nullopt;
 
+    // The rail: each drawn row's block and those of the rows just beyond the page's two edges, looked up once
+    // per row -- never by walking a block's rows, so a frame costs the drawn rows times a block lookup
+    // however tall the blocks are. Index 0 is the row above the page, index rows + 1 the row below it.
+    auto const rows = unbox<int>(drawnRowLimit());
+    auto railBlocks = std::vector<CommandBlockRecord const*> {};
+    if (layout.rail == BlockRailPresence::Present)
+    {
+        railBlocks.reserve(static_cast<size_t>(rows) + 2);
+        for (auto const y: std::views::iota(-1, rows + 1))
+            railBlocks.push_back(commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y))));
+        // A row beyond an edge exists only where the translation moved past the edge row: at the top of the
+        // history, or below the last line, it is held to the edge row itself.
+        auto const edgeHeld = [&](int beyond, int edge) {
+            return _viewport.translateScreenToGridLine(LineOffset(beyond))
+                   == _viewport.translateScreenToGridLine(LineOffset(edge));
+        };
+        if (rows > 0 && edgeHeld(-1, 0))
+            railBlocks.front() = nullptr;
+        if (rows > 0 && edgeHeld(rows, rows - 1))
+            railBlocks.back() = nullptr;
+    }
+    auto const railRecordAt = [&](int y) {
+        auto const index = y + 1;
+        return railBlocks.at(static_cast<size_t>(index));
+    };
+    auto const railIdOf = [&](int y) -> std::optional<CommandBlockId> {
+        auto const* const record = railRecordAt(y);
+        return record ? std::optional { record->id } : std::nullopt;
+    };
+    // The block the pointer is over: on its rows (setHoveredCommandBlock), or on the strip beside them.
+    auto const* const gutterHoveredRecord = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr;
+    auto const attentionOf = [&](CommandBlockId id) {
+        auto const hovered =
+            _hoveredCommandBlock == id || (gutterHoveredRecord != nullptr && gutterHoveredRecord->id == id);
+        return hovered ? BlockAttention::Hovered : BlockAttention::Rest;
+    };
+    auto const railRowAt = [&](int y, UserMarkPresence mark) {
+        auto row = GutterRow {};
+        if (railBlocks.empty())
+            return row;
+        auto const* const record = railRecordAt(y);
+        auto const facts =
+            RailRowFacts { .block = railIdOf(y),
+                           .above = railIdOf(y - 1),
+                           .below = railIdOf(y + 1),
+                           .state = record ? record->state : CommandBlockState::Prompting,
+                           // With exit status off the rail is neutral, as the glyph column is uncoloured.
+                           .outcome = record && gutter.exitStatus ? outcomeOf(*record)
+                                                                  : CommandBlockOutcome::Success,
+                           .mark = gutter.userMarks ? mark : UserMarkPresence::Absent,
+                           .attention = record ? attentionOf(record->id) : BlockAttention::Rest };
+        row.rail = railSegmentOf(facts);
+        row.railMark = railMarkOf(facts, row.rail);
+        if (record != nullptr)
+        {
+            row.outcome = facts.outcome;
+            row.railColor = railColor(_colorPalette, facts.outcome, facts.attention);
+        }
+        return row;
+    };
+
     // Shifted by baseLine for the same reason every cell is: a status line at the top moves the main page
     // down, and a gutter left where it was would point at the wrong row.
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
@@ -4039,19 +4101,17 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                                ? GutterHover::Hovered
                                : GutterHover::Rest;
 
-        appendGutterCells(
-            layout,
-            GutterRow { .screenLine = baseLine + screenRow,
-                        .timestamp = timestampOf(line),
-                        .lineNumber = lineNumberOf(gridLine, y),
-                        .glyph = glyph,
-                        // Mixed only for a glyph there is: most rows have none.
-                        .glyphColors = glyph == BlockColumnGlyph::None
-                                           ? RGBColorPair {}
-                                           : blockColumnColors(_colorPalette, glyph, outcome, hover),
-                        .weight = foldWeightOf(facts, gutter, hover) },
-            textColors,
-            output.gutter);
+        auto row = railRowAt(y, facts.mark);
+        row.screenLine = baseLine + screenRow;
+        row.timestamp = timestampOf(line);
+        row.lineNumber = lineNumberOf(gridLine, y);
+        row.glyph = glyph;
+        // Mixed only for a glyph there is: most rows have none.
+        row.glyphColors = glyph == BlockColumnGlyph::None
+                              ? RGBColorPair {}
+                              : blockColumnColors(_colorPalette, glyph, outcome, hover);
+        row.weight = foldWeightOf(facts, gutter, hover);
+        appendGutterCells(layout, row, textColors, output.gutter);
     }
 }
 
@@ -4471,14 +4531,29 @@ void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
         return range ? std::optional { range->headStableId } : std::nullopt;
     };
 
-    auto const before = headOf(_gutterHoverLine);
+    // The rail lights the block beside the pointer, which a row with no fold has too.
+    auto const blockOf = [this](std::optional<LineOffset> line) -> std::optional<CommandBlockId> {
+        auto const* const record = line ? commandBlockAt(*line) : nullptr;
+        return record ? std::optional { record->id } : std::nullopt;
+    };
+
+    auto const before = std::pair { headOf(_gutterHoverLine), blockOf(_gutterHoverLine) };
     _gutterHoverLine = gridLine;
-    if (before == headOf(gridLine))
+    if (before == std::pair { headOf(gridLine), blockOf(gridLine) })
         return;
 
     // The highlight lives only in the render buffer, so nothing else would notice it changed: without
     // this the tint appears on the next frame something else happens to dirty, which for an idle
     // terminal is never.
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::setHoveredCommandBlock(std::optional<CommandBlockId> block)
+{
+    if (_hoveredCommandBlock == block)
+        return;
+    _hoveredCommandBlock = block;
+    // Like the gutter's hover, the lit rail lives only in the render buffer.
     breakLoopAndRefreshRenderBuffer();
 }
 

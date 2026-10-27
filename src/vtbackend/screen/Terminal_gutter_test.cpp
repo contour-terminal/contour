@@ -675,3 +675,241 @@ TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][s
                                    [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
     }
 }
+
+namespace
+{
+/// The gutter settings of a native chrome row with exit status on: the block column is the rail's strip.
+constexpr auto RailGutter = GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+
+/// The rail cells of @p buffer, by screen row: the cells that draw a segment or a mark.
+[[nodiscard]] std::map<int, RenderGutterCell> railCellsOf(RenderBuffer const& buffer)
+{
+    auto cells = std::map<int, RenderGutterCell> {};
+    for (auto const& cell: buffer.gutter)
+        if (cell.rail != RailSegment::None || cell.mark != RailMark::None)
+        {
+            CHECK(cell.codepoint == 0);
+            CHECK(cell.column == ColumnOffset(0));
+            CHECK(cells.emplace(unbox<int>(cell.lineOffset), cell).second); // one per row
+        }
+    return cells;
+}
+
+/// The segment drawn beside screen row @p row of @p cells; None where the row has no rail cell.
+[[nodiscard]] RailSegment segmentAt(std::map<int, RenderGutterCell> const& cells, int row)
+{
+    auto const found = cells.find(row);
+    return found == cells.end() ? RailSegment::None : found->second.rail;
+}
+
+/// The mark drawn beside screen row @p row of @p cells; None where the row has no rail cell.
+[[nodiscard]] RailMark markAt(std::map<int, RenderGutterCell> const& cells, int row)
+{
+    auto const found = cells.find(row);
+    return found == cells.end() ? RailMark::None : found->second.mark;
+}
+
+/// `ls` printing two rows and succeeding, `false` printing one and failing, then a live prompt: the
+/// blocks span rows 0-2 and 3-4, the prompt row 5.
+/// @param gutter The gutter to draw with.
+void runASuccessAndAFailure(MockTerm<>& mc, GutterSettings const& gutter)
+{
+    mc.terminal.settings().gutter = gutter;
+    runCommand(mc, "ls", { "file1", "file2" }, 0);
+    runCommand(mc, "false", { "bad" }, 1);
+    mc.writeToScreen(PromptStart);
+}
+} // namespace
+
+TEST_CASE("Gutter.terminal.aFailedBlockDrawsAHeadAndATail", "[gutter]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runASuccessAndAFailure(mc, RailGutter);
+
+    auto const cells = railCellsOf(renderOf(mc.terminal));
+    auto const segments = std::vector { RailSegment::Head, RailSegment::Body, RailSegment::Tail,
+                                        RailSegment::Head, RailSegment::Tail, RailSegment::None };
+    auto const marks = std::vector { RailMark::None,  RailMark::None, RailMark::None,
+                                     RailMark::Cross, RailMark::None, RailMark::None };
+    for (auto const row: std::views::iota(0, static_cast<int>(segments.size())))
+    {
+        CAPTURE(row);
+        CHECK(segmentAt(cells, row) == segments[static_cast<size_t>(row)]);
+        CHECK(markAt(cells, row) == marks[static_cast<size_t>(row)]);
+    }
+    CHECK(cells.size() == 5); // the live prompt and the rows below draw none
+    CHECK(cells.at(0).outcome == CommandBlockOutcome::Success);
+    CHECK(cells.at(3).outcome == CommandBlockOutcome::Failure);
+    CHECK(cells.at(4).railColor == mc.terminal.colorPalette().blockStatusColor(CommandBlockOutcome::Failure));
+}
+
+TEST_CASE("Gutter.terminal.hoveringASuccessShowsItsCheck", "[gutter]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runASuccessAndAFailure(mc, RailGutter);
+    auto const* first = mc.terminal.commandBlockAt(LineOffset(0));
+    REQUIRE(first != nullptr);
+    auto const& palette = mc.terminal.colorPalette();
+
+    mc.terminal.setHoveredCommandBlock(first->id);
+    auto const hovered = railCellsOf(renderOf(mc.terminal));
+    CHECK(markAt(hovered, 0) == RailMark::Check);
+    CHECK(hovered.at(0).railColor == palette.blockStatusHoverColor(CommandBlockOutcome::Success));
+    CHECK(hovered.at(2).railColor == palette.blockStatusHoverColor(CommandBlockOutcome::Success));
+    // The other block keeps its rest colour.
+    CHECK(hovered.at(3).railColor == palette.blockStatusColor(CommandBlockOutcome::Failure));
+
+    mc.terminal.setHoveredCommandBlock(std::nullopt);
+    auto const atRest = railCellsOf(renderOf(mc.terminal));
+    CHECK(markAt(atRest, 0) == RailMark::None);
+    CHECK(atRest.at(0).railColor == palette.blockStatusColor(CommandBlockOutcome::Success));
+}
+
+TEST_CASE("Gutter.terminal.aRunningBlockShowsItsTriangle", "[gutter]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = RailGutter;
+    startCommand(mc, "sleep 9");
+    mc.writeToScreen("still going\r\n");
+
+    auto const cells = railCellsOf(renderOf(mc.terminal));
+    REQUIRE_FALSE(cells.empty());
+    CHECK(segmentAt(cells, 0) == RailSegment::Head);
+    CHECK(markAt(cells, 0) == RailMark::Running);
+    auto const running = mc.terminal.colorPalette().blockStatusColor(CommandBlockOutcome::Running);
+    for (auto const& [row, cell]: cells)
+    {
+        CAPTURE(row);
+        CHECK(cell.outcome == CommandBlockOutcome::Running);
+        CHECK(cell.railColor == running);
+    }
+}
+
+namespace
+{
+/// A terminal of 10 rows keeping 120 000 rows of history, the rail on, in which `seq` printed @p lines lines
+/// and finished, with a live prompt below.
+[[nodiscard]] std::unique_ptr<MockTerm<>> tallBlock(int lines)
+{
+    auto mc = std::make_unique<MockTerm<>>(
+        PageSize { LineCount(10), ColumnCount(20) },
+        HistoryLimits { .guaranteed = LineCount(120'000), .capacity = LineCount(120'000) });
+    mc->terminal.settings().gutter = RailGutter;
+    startCommand(*mc, "seq");
+    printLines(*mc, "line", lines);
+    mc->writeToScreen(commandEnd(0));
+    mc->writeToScreen(PromptStart);
+    return mc;
+}
+} // namespace
+
+TEST_CASE("Gutter.terminal.aHundredThousandLineBlockDrawsItsRail", "[gutter]")
+{
+    // Review Focus 2: a block far taller than the page, scrolled. A frame looks at the drawn rows and one
+    // beyond each edge, never at the block's rows.
+    auto const mc = tallBlock(100'000);
+    auto& terminal = mc->terminal;
+
+    SECTION("scrolled into its middle, every drawn row is its body")
+    {
+        REQUIRE(terminal.viewport().scrollToTop());
+        REQUIRE(terminal.viewport().scrollDown(LineCount(50'000)));
+        auto const cells = railCellsOf(renderOf(terminal));
+        REQUIRE(static_cast<int>(cells.size()) == unbox<int>(terminal.pageSize().lines));
+        for (auto const& [row, cell]: cells)
+        {
+            CAPTURE(row);
+            CHECK(cell.rail == RailSegment::Body);
+            CHECK(cell.mark == RailMark::None);
+        }
+    }
+
+    SECTION("scrolled to its top, its first row is its head and the row above the page is nobody's")
+    {
+        REQUIRE(terminal.viewport().scrollToTop());
+        auto const cells = railCellsOf(renderOf(terminal));
+        CHECK(segmentAt(cells, 0) == RailSegment::Head);
+        CHECK(segmentAt(cells, 1) == RailSegment::Body);
+    }
+
+    SECTION("at its last row, that row is its tail")
+    {
+        auto const cells = railCellsOf(renderOf(terminal));
+        auto const promptRow = unbox<int>(terminal.primaryScreen().cursor().position.line);
+        CHECK(segmentAt(cells, promptRow - 2) == RailSegment::Body);
+        CHECK(segmentAt(cells, promptRow - 1) == RailSegment::Tail);
+        CHECK(segmentAt(cells, promptRow) == RailSegment::None);
+    }
+}
+
+TEST_CASE("Gutter.terminal.aCollapsedBlockIsASingleRow", "[gutter]")
+{
+    // Collapsed, a block's projection is its head alone. A fold is found within MaxFoldScanLines of the page
+    // (the scan's bound, Folding.hpp), so the tallest block that folds is a little under that: a hundred
+    // thousand lines do not fold at all.
+    auto const mc = tallBlock(static_cast<int>(MaxFoldScanLines) / 2);
+    REQUIRE(mc->terminal.collapseLastFold());
+    auto const cells = railCellsOf(renderOf(mc->terminal));
+    REQUIRE(cells.size() == 1);
+    CHECK(cells.begin()->second.rail == RailSegment::Single);
+}
+
+TEST_CASE("Gutter.terminal.aBlockEndingOnThePagesLastRowEndsThere", "[gutter]")
+{
+    // With a fold collapsed on the page the rows are the projection's, and the row below the last one is
+    // found by walking visible lines, which stops at the page's last line: a block reaching it still ends on
+    // it rather than running on into itself.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = RailGutter;
+    runCommand(mc, "ls", { "a", "b", "c" }); // rows 0-3, collapsed to row 0
+    REQUIRE(mc.terminal.collapseLastFold());
+    startCommand(mc, "make"); // its head on row 4, its output on rows 5-8, the cursor on row 9
+    printLines(mc, "x", 4);
+    REQUIRE(mc.terminal.primaryScreen().cursor().position.line == LineOffset(9));
+
+    auto const cells = railCellsOf(renderOf(mc.terminal));
+    REQUIRE_FALSE(cells.empty());
+    auto const lastRow = cells.rbegin()->first;
+    REQUIRE(lastRow == 6); // the ls head, then make's six rows
+    CHECK(segmentAt(cells, 0) == RailSegment::Single);
+    CHECK(segmentAt(cells, 1) == RailSegment::Head);
+    CHECK(segmentAt(cells, lastRow - 1) == RailSegment::Body);
+    CHECK(segmentAt(cells, lastRow) == RailSegment::Tail);
+}
+
+TEST_CASE("Gutter.terminal.aBlockStartingOnTheHistorysFirstRowStartsThere", "[gutter]")
+{
+    // The row above the page is found by walking visible lines up, which stops at the history's first line:
+    // a block starting on it, scrolled to the top under a collapsed fold, still starts there.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) },
+                         HistoryLimits { .guaranteed = LineCount(100), .capacity = LineCount(100) } };
+    mc.terminal.settings().gutter = RailGutter;
+    startCommand(mc, "seq");
+    printLines(mc, "x", 20);
+    mc.writeToScreen(commandEnd(0));
+    runCommand(mc, "ls", { "a", "b", "c" });
+    mc.writeToScreen(PromptStart);
+    REQUIRE(mc.terminal.collapseLastFold());
+    REQUIRE(mc.terminal.viewport().scrollToTop());
+
+    auto const cells = railCellsOf(renderOf(mc.terminal));
+    CHECK(segmentAt(cells, 0) == RailSegment::Head);
+    CHECK(segmentAt(cells, 1) == RailSegment::Body);
+}
+
+TEST_CASE("Gutter.terminal.theGlyphFormDrawsTodaysCells", "[gutter]")
+{
+    // The Terminal row keeps the glyph column: the same session draws today's cells, and no rail.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runASuccessAndAFailure(mc,
+                           GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Glyphs });
+
+    auto const buffer = renderOf(mc.terminal);
+    CHECK(railCellsOf(buffer).empty());
+    auto const rows = gutterRows(buffer, 1);
+    CHECK(rows
+          == std::map<int, std::u32string> {
+              { 0, withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::Finished, FoldWeight::Light)) },
+              { 3, withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::Failed, FoldWeight::Light)) },
+          });
+}

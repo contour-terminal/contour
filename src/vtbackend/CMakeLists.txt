@@ -27,8 +27,10 @@ set(vtbackend_HEADERS
     core/CaptureLineMode.hpp
     core/ClipboardWriter.hpp
     core/CommandBlockId.hpp
+    core/BlockRailKinds.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp
+    shell/BlockRail.hpp
     shell/CommandBlock.hpp
     shell/CommandBlockAddress.hpp
     shell/CommandBlockRows.hpp
@@ -120,6 +122,7 @@ set(vtbackend_HEADERS
     core/SteadyClockRef.hpp
     shell/StickyHeader.hpp
     core/StickyHeaderKind.hpp
+    core/UserMarkPresence.hpp
     screen/StatusLineCommandCache.hpp
     screen/StatusLineExtensions.hpp
     screen/OverlayClearance.hpp
@@ -163,6 +166,7 @@ set(vtbackend_SOURCES
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
+    shell/BlockRail.cpp
     shell/CommandBlock.cpp
     shell/CommandBlockRows.cpp
     shell/CommandBlockPaths.cpp
@@ -314,6 +318,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
+        shell/BlockRail_test.cpp
         shell/CommandBlock_test.cpp
         shell/CommandBlockRows_test.cpp
         shell/CommandBlockPaths_test.cpp

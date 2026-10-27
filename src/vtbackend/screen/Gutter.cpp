@@ -579,6 +579,23 @@ void appendGutterCells(GutterLayout const& layout,
                unicode::convert_to<char32_t>(std::string_view { row.timestamp }));
     appendText(GutterSegmentKind::LineNumber, row.lineNumber.view());
 
+    if (layout.rail == BlockRailPresence::Present)
+    {
+        if (row.rail == RailSegment::None && row.railMark == RailMark::None)
+            return;
+        output.push_back(
+            RenderGutterCell { .lineOffset = row.screenLine,
+                               .codepoint = 0,
+                               .attributes = gutterCellAttributes(RGBColorPair {
+                                   .foreground = row.railColor, .background = textColors.background }),
+                               .column = ColumnOffset(0),
+                               .rail = row.rail,
+                               .mark = row.railMark,
+                               .outcome = row.outcome,
+                               .railColor = row.railColor });
+        return;
+    }
+
     auto const block = layout.segment(GutterSegmentKind::BlockColumn);
     if (!block)
         return;

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockRailKinds.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/UserMarkPresence.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/LocalTime.hpp>
@@ -158,13 +160,6 @@ enum class BlockHeadState : uint8_t
     Finished, ///< The head of a command that has finished.
 };
 
-/// Whether a row carries the user's own mark (LineFlag::UserMark).
-enum class UserMarkPresence : uint8_t
-{
-    Absent = 0, ///< The row carries no user mark.
-    Present,    ///< vi `mm` marked the row.
-};
-
 /// Whether the pointer is over the fold a gutter row belongs to.
 enum class GutterHover : uint8_t
 {
@@ -309,10 +304,17 @@ struct GutterRow
     BlockColumnGlyph glyph = BlockColumnGlyph::None; ///< The block column's glyph.
     RGBColorPair glyphColors {};           ///< The glyph's colours, as blockColumnColors() picks them.
     FoldWeight weight = FoldWeight::Light; ///< How heavy the glyph's strokes are (foldWeightOf()).
+
+    // The block rail, drawn instead of the glyph where the layout has the rail's strip.
+    RailSegment rail = RailSegment::None;          ///< The rail segment beside the row (railSegmentOf()).
+    RailMark railMark = RailMark::None;            ///< The mark on it (railMarkOf()).
+    std::optional<CommandBlockOutcome> outcome {}; ///< How the row's block reads; nullopt for none.
+    RGBColor railColor {};                         ///< The rail's colour (railColor()).
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,
-/// the gutter's left edge being column -layout.totalColumns.
+/// the gutter's left edge being column -layout.totalColumns -- and, where the layout has the rail's strip
+/// and the row draws a segment or a mark there, one rail cell.
 /// @param layout The gutter's segments.
 /// @param row What the row shows; text wider than its segment is cut at the segment's edge.
 /// @param textColors The timestamps' and line numbers' colours, from ColorPalette::gutterTextColors().

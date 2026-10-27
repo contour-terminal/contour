@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockRailKinds.hpp>
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -113,6 +115,13 @@ struct RenderGutterCell
     /// The column it is drawn at, relative to grid column 0: -1 is the cell beside the grid, and a
     /// gutter N columns wide spans -N .. -1.
     ColumnOffset column { -1 };
+
+    // A rail cell -- one per row beside which the block rail draws a segment or a mark -- is the strip after
+    // the gutter's cells, not a cell column: its codepoint is 0 and its column 0.
+    RailSegment rail = RailSegment::None;          ///< The rail segment it draws.
+    RailMark mark = RailMark::None;                ///< The mark on the bar.
+    std::optional<CommandBlockOutcome> outcome {}; ///< How its block reads; nullopt for a row of no block.
+    RGBColor railColor {};                         ///< The bar's colour.
 };
 
 /// The sticky command header drawn over the main page's first row.
