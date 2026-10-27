@@ -3488,6 +3488,36 @@ TEST_CASE("closing a busy tab asks first, and Cancel keeps it (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("Cancel on the close question gives the keyboard back to the tab asked about (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    auto scene = palette.scene();
+    scene.tabCount = 3;
+    MockMainController controller { scene };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    static_cast<void>(activeMainWindow(*root));
+    auto const tabs = tabDelegates(*root);
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("closeTabConfirmation"));
+    REQUIRE(dialog != nullptr);
+
+    controller.focusTabWell(1);
+    REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+    emit controller.closeTabConfirmationRequested(41, QStringLiteral("build"), QStringLiteral("make"));
+    REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+
+    // Cancel. The chrome still holds focus on that tab, so that is where the keys must go.
+    REQUIRE(QMetaObject::invokeMethod(dialog, "reject"));
+    REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 2000));
+    CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab")).isEmpty());
+    CHECK(controller.focusedTabIndex() == 1);
+    CHECK(tabs[1]->hasActiveFocus());
+    CHECK(ringedTabs(*root) == std::vector<int> { 1 });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the window reports what its chrome shows, and the toolbar's items wear the ring (offscreen)",
           "[contour][gui][qml][mainwindow][chromefocus]")
 {
