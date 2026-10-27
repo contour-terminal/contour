@@ -9014,6 +9014,49 @@ struct DialogHost
 };
 } // namespace
 
+TEST_CASE("Toast: a hidden toast takes no hover from what lies beneath (offscreen)",
+          "[contour][gui][qml][kit][toast]")
+{
+    // Main.qml's toast is always there, over the band's reveal edge in full screen. Hidden, it must let the
+    // edge see the pointer, or the band never reveals. hoverEnabled is set as a desktop platform sets it;
+    // the offscreen one's style hints leave it off, which would hide the fault.
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, contour::test::defaultChromeSetup());
+    contour::test::QmlMessageCapture const warnings;
+
+    QQmlComponent component(&engine);
+    component.setData("import QtQuick\n"
+                      "import Contour.Ui\n"
+                      "Item {\n"
+                      "    width: 400; height: 200\n"
+                      "    readonly property bool beneathHovered: beneath.hovered\n"
+                      "    Item { anchors.fill: parent; HoverHandler { id: beneath } }\n"
+                      "    Toast {\n"
+                      "        objectName: \"hiddenToast\"; x: 0; y: 0; z: 1; text: \"Copied 3 lines\"\n"
+                      "        hoverEnabled: true\n"
+                      "    }\n"
+                      "}\n",
+                      QUrl());
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    DialogHost host;
+    auto root = std::unique_ptr<QObject>(component.create());
+    auto* item = qobject_cast<QQuickItem*>(root.get());
+    REQUIRE(item != nullptr);
+    item->setParentItem(host.window.contentItem());
+    auto const* toast = item->findChild<QQuickItem*>(QStringLiteral("hiddenToast"));
+    REQUIRE(toast != nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return toast->width() > 0.0; }, 2000));
+
+    auto const onToast = toast->mapToScene(QPointF(toast->width() / 2, toast->height() / 2)).toPoint();
+    // Two moves, because a move to where the pointer already is sends nothing.
+    QTest::mouseMove(&host.window, onToast + QPoint(0, 100));
+    QTest::mouseMove(&host.window, onToast);
+    CHECK(QTest::qWaitFor([&] { return item->property("beneathHovered").toBool(); }, 2000));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("KitDialog: a sheet on the macOS row, centred elsewhere (offscreen)",
           "[contour][gui][qml][kit][dialog]")
 {

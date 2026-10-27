@@ -36,6 +36,10 @@ Control {
     implicitWidth: implicitContentWidth + leftPadding + rightPadding
 
     opacity: shown ? 1 : 0
+    // Gone once it has faded out: a host keeps it in the scene for good (Main.qml, over the band's reveal
+    // edge in full screen), and a Control left there invisible still takes the pointer's hover from what
+    // lies beneath it.
+    visible: opacity > 0
     Behavior on opacity {
         NumberAnimation { duration: chromeStyle.motion.standard }
     }
