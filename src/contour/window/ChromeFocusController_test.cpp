@@ -22,6 +22,7 @@
 #include <string>
 
 #include <QtTest/QSignalSpy>
+#include <vtworkspace/SessionModel.hpp>
 
 namespace
 {
@@ -290,15 +291,68 @@ TEST_CASE("Backspace on a tab running a program asks first", "[windowcontroller]
 
     CHECK(f.chromeKey(Qt::Key_Backspace));
 
-    // Nothing closed, focus stays, and the question names the row and the program.
+    // Nothing closed, focus stays, and the question names the tab and the program.
     REQUIRE(asked.count() == 1);
-    CHECK(asked.first().at(0).toInt() == 0);
+    auto const* tab = f.app->manager().model().window(controller.windowId())->tabAt(0);
+    REQUIRE(tab != nullptr);
+    CHECK(asked.first().at(0).toULongLong() == tab->id().value);
     CHECK(asked.first().at(2).toString() == QStringLiteral("make"));
     CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
     CHECK(f.area() == ChromeArea::Tabs);
 
-    controller.confirmCloseTab(0);
+    controller.confirmCloseTab(tab->id().value);
     CHECK(f.factory->createdPtys[0]->isClosed());
+}
+
+TEST_CASE("a confirmed close reaches the tab that was asked about, not the row it had",
+          "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    auto asked =
+        QSignalSpy { &controller, &contour::window::WindowController::closeTabConfirmationRequested };
+    auto withdrawn =
+        QSignalSpy { &controller, &contour::window::WindowController::closeTabConfirmationWithdrawn };
+    controller.activateTab(1);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == 1);
+    REQUIRE(f.chromeKey(Qt::Key_Backspace));
+    REQUIRE(asked.count() == 1);
+    auto const askedAbout = asked.first().at(0).toULongLong();
+
+    SECTION("a tab before it closes while the question is open")
+    {
+        auto& model = f.app->manager().model();
+        auto const* first = f.app->manager().model().window(controller.windowId())->tabAt(0);
+        REQUIRE(first != nullptr);
+        auto const firstId = first->id();
+        model.closeTab(controller.windowId(), firstId);
+        REQUIRE(controller.count() == 2);
+
+        controller.confirmCloseTab(askedAbout);
+
+        // The asked-about tab moved up to row 0; the one that took row 1 is the third, and it survives.
+        CHECK(f.factory->createdPtys[1]->isClosed());
+        CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
+        // Only the closed tab's own question is withdrawn, and that one was not asked about.
+        REQUIRE(withdrawn.count() == 1);
+        CHECK(withdrawn.first().at(0).toULongLong() == firstId.value);
+        CHECK(withdrawn.first().at(0).toULongLong() != askedAbout);
+    }
+
+    SECTION("the tab asked about goes while the question is open")
+    {
+        auto& model = f.app->manager().model();
+        model.closeTab(controller.windowId(), vtworkspace::TabId { askedAbout });
+        REQUIRE(controller.count() == 2);
+        REQUIRE(withdrawn.count() == 1);
+        CHECK(withdrawn.first().at(0).toULongLong() == askedAbout);
+
+        controller.confirmCloseTab(askedAbout);
+
+        CHECK_FALSE(f.factory->createdPtys[0]->isClosed());
+        CHECK_FALSE(f.factory->createdPtys[2]->isClosed());
+    }
 }
 
 TEST_CASE("a bare F6 is written to the PTY", "[windowcontroller][chromefocus]")

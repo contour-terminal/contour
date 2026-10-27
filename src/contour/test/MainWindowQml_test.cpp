@@ -3427,7 +3427,7 @@ TEST_CASE("closing a busy tab asks first, and Cancel keeps it (offscreen)",
 
     SECTION("a named program")
     {
-        emit controller.closeTabConfirmationRequested(1, QStringLiteral("build"), QStringLiteral("make"));
+        emit controller.closeTabConfirmationRequested(41, QStringLiteral("build"), QStringLiteral("make"));
         REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
         CHECK(dialog->property("heading").toString() == QStringLiteral("Close “build”?"));
         CHECK(dialog->property("message").toString()
@@ -3453,22 +3453,37 @@ TEST_CASE("closing a busy tab asks first, and Cancel keeps it (offscreen)",
         REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 2000));
         CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab")).isEmpty());
 
-        emit controller.closeTabConfirmationRequested(1, QStringLiteral("build"), QStringLiteral("make"));
+        emit controller.closeTabConfirmationRequested(41, QStringLiteral("build"), QStringLiteral("make"));
         REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
         REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
         CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab"))
-              == QStringList { "confirmCloseTab:1" });
+              == QStringList { "confirmCloseTab:41" });
+    }
+
+    SECTION("the tab goes while the question is open")
+    {
+        emit controller.closeTabConfirmationRequested(41, QStringLiteral("build"), QStringLiteral("make"));
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+
+        // Another tab going leaves the question be; the tab's own going withdraws it, and Close is not
+        // offered.
+        emit controller.closeTabConfirmationWithdrawn(40);
+        QCoreApplication::processEvents();
+        CHECK(dialog->property("opened").toBool());
+        emit controller.closeTabConfirmationWithdrawn(41);
+        REQUIRE(QTest::qWaitFor([&] { return !dialog->property("opened").toBool(); }, 2000));
+        CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab")).isEmpty());
     }
 
     SECTION("a program that cannot be known")
     {
-        emit controller.closeTabConfirmationRequested(2, QStringLiteral("shell"), QString {});
+        emit controller.closeTabConfirmationRequested(42, QStringLiteral("shell"), QString {});
         REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
         CHECK(dialog->property("message").toString()
               == QStringLiteral("A program may still be running in this tab."));
         REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
         CHECK(controller.calls.filter(QStringLiteral("confirmCloseTab"))
-              == QStringList { "confirmCloseTab:2" });
+              == QStringList { "confirmCloseTab:42" });
     }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

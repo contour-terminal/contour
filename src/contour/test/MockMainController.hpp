@@ -255,7 +255,7 @@ class MockMainController: public MainWindowControllerMock
         return chromeKeysHandled;
     }
     /// Records the confirmed close of the tab at @p row.
-    Q_INVOKABLE void confirmCloseTab(int row) { calls << QStringLiteral("confirmCloseTab:%1").arg(row); }
+    Q_INVOKABLE void confirmCloseTab(quint64 tab) { calls << QStringLiteral("confirmCloseTab:%1").arg(tab); }
     /// Mirrors WindowController::activateTab(): makes tab @p index the active one.
     void setActiveTab(int index)
     {
@@ -571,8 +571,10 @@ class MockMainController: public MainWindowControllerMock
     void multimediaReadyChanged();
     void hostingNoticeChanged();
     void chromeFocusChanged();
-    /// Closing a busy tab asks first: the row, its label and the running program (empty when unknown).
-    void closeTabConfirmationRequested(int row, QString const& tabLabel, QString const& program);
+    /// Closing a busy tab asks first: the tab's id, its label and the running program (empty when unknown).
+    void closeTabConfirmationRequested(quint64 tab, QString const& tabLabel, QString const& program);
+    /// The tab the question was about is going away.
+    void closeTabConfirmationWithdrawn(quint64 tab);
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);

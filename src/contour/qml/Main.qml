@@ -564,7 +564,7 @@ ThemedWindow
     KitDialog {
         id: closeTabDialog
         objectName: "closeTabConfirmation"
-        property int row: -1
+        property var tab: 0 // the TabId value; a 64-bit id, so not an int
         property string tabLabel
         property string program
         heading: qsTr("Close “%1”?").arg(closeTabDialog.tabLabel)
@@ -576,17 +576,22 @@ ThemedWindow
         rejectText: qsTr("Cancel")
         acceptRole: chromeStyle.statusDanger
         defaultButton: KitDialog.Reject
-        onAccepted: if (appWindow.win) appWindow.win.confirmCloseTab(closeTabDialog.row)
+        onAccepted: if (appWindow.win) appWindow.win.confirmCloseTab(closeTabDialog.tab)
     }
 
     Connections {
         target: appWindow.win
         ignoreUnknownSignals: true
-        function onCloseTabConfirmationRequested(row, tabLabel, program) {
-            closeTabDialog.row = row
+        function onCloseTabConfirmationRequested(tab, tabLabel, program) {
+            closeTabDialog.tab = tab
             closeTabDialog.tabLabel = tabLabel
             closeTabDialog.program = program
             closeTabDialog.open()
+        }
+        // The tab asked about is gone: the question has no subject, and Close must not reach another tab.
+        function onCloseTabConfirmationWithdrawn(tab) {
+            if (closeTabDialog.opened && closeTabDialog.tab === tab)
+                closeTabDialog.reject()
         }
     }
     // }}}

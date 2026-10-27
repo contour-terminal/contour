@@ -1172,12 +1172,13 @@ void WindowController::closeTabAskingIfBusy(int row)
     }
     auto* active = _manager.sessionForId(tab->activePane()->session());
     emit closeTabConfirmationRequested(
-        row, resolvedTabLabel(tab, active, row), QString::fromStdString(program));
+        tab->id().value, resolvedTabLabel(tab, active, row), QString::fromStdString(program));
 }
 
-void WindowController::confirmCloseTab(int row)
+void WindowController::confirmCloseTab(quint64 tab)
 {
-    closeTabAtIndex(row);
+    if (auto const row = rowOfTab(vtworkspace::TabId { tab }); row >= 0)
+        closeTabAtIndex(row);
 }
 // }}}
 
@@ -2612,6 +2613,8 @@ void WindowController::onTabAdded(int)
 
 void WindowController::onTabAboutToBeRemoved(int index)
 {
+    if (auto const* tab = tabAtRow(index); tab != nullptr)
+        emit closeTabConfirmationWithdrawn(tab->id().value);
     // The tab well's focus belongs to a tab, not to a row: a tab before it going shifts it, and the tab
     // itself going ends it.
     if (_chromeArea == window::ChromeArea::Tabs)

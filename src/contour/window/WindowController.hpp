@@ -340,9 +340,10 @@ class WindowController:
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
-    /// Closes the tab at @p row after the user confirmed the question closeTabConfirmationRequested() asked.
-    /// @param row The tab's row.
-    Q_INVOKABLE void confirmCloseTab(int row);
+    /// Closes the tab the user confirmed closing, as closeTabConfirmationRequested() asked. A tab that is
+    /// already gone closes nothing: its row may now hold another tab.
+    /// @param tab The tab's vtworkspace::TabId value.
+    Q_INVOKABLE void confirmCloseTab(quint64 tab);
     // }}}
     /// Asks the QML to open this window's "save layout as" name prompt (the keyboard/palette entry point
     /// for a nameless SaveLayout action). Emits saveLayoutRequested(); the dialog calls saveLayoutAs()
@@ -987,12 +988,17 @@ class WindowController:
     void tabBarShouldShowChanged();
     /// The chrome focus moved: the area, the focused tab or the focused toolbar item changed.
     void chromeFocusChanged();
-    /// Closing the tab at @p row may end a running program, so the window asks first; QML shows the
-    /// dialog and calls confirmCloseTab() on "Close".
-    /// @param row The tab's row.
+    /// Closing a tab may end a running program, so the window asks first; QML shows the dialog and calls
+    /// confirmCloseTab() on "Close". The tab is named by its id, not its row: rows shift while the question
+    /// is open.
+    /// @param tab The tab's vtworkspace::TabId value.
     /// @param tabLabel The tab's resolved label.
     /// @param program The running program's name; empty when no pane could name one.
-    void closeTabConfirmationRequested(int row, QString const& tabLabel, QString const& program);
+    void closeTabConfirmationRequested(quint64 tab, QString const& tabLabel, QString const& program);
+    /// The tab a close question was asked about is going away (it closed, or moved to another window), so
+    /// QML withdraws the question.
+    /// @param tab The tab's vtworkspace::TabId value.
+    void closeTabConfirmationWithdrawn(quint64 tab);
     void activeSessionChanged();
     void chromeHeightChanged();
     /// @see hostingNotice
