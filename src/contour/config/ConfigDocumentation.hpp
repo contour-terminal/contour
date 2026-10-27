@@ -1704,6 +1704,17 @@ constexpr StringLiteral HintLabelConfig {
     "    background_alpha: {}\n"
 };
 
+constexpr StringLiteral HintLabelTypedConfig {
+    "\n"
+    "{comment} Colors for hint mode labels once a prefix is typed: every label still on screen starts with\n"
+    "{comment} it, and is drawn whole in this pair. Unset: the typed characters fade toward the background.\n"
+    "hint_label_typed:\n"
+    "    foreground: {}\n"
+    "    foreground_alpha: {}\n"
+    "    background: {}\n"
+    "    background_alpha: {}\n"
+};
+
 constexpr StringLiteral HintMatchConfig {
     "\n"
     "{comment} Colors for hint mode match bodies (the text behind the labels).\n"
@@ -3633,6 +3644,7 @@ using SearchHighlightFocused = DocumentationEntry<SearchHighlightFocusedConfig, 
 using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dummy>;
 using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
+using HintLabelTyped = DocumentationEntry<HintLabelTypedConfig, Dummy>;
 using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
 using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
 using Extensions = DocumentationEntry<ExtensionsConfig, ExtensionsWeb>;

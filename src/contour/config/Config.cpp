@@ -2149,6 +2149,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
     loadEntry("word_highlight_current", where.wordHighlightCurrent);
     loadEntry("word_highlight_other", where.wordHighlight);
     loadEntry("hint_label", where.hintLabel);
+    // Left unset unless the scheme says otherwise: an unset pair keeps the typed characters mixed halfway to
+    // the background. A key it leaves out is hint_label's.
+    loadMap("hint_label_typed", [&](YAML::Node const&) {
+        auto typed = where.hintLabelTyped.value_or(where.hintLabel);
+        loadFromEntry(node, "hint_label_typed", typed);
+        where.hintLabelTyped = typed;
+    });
     loadEntry("hint_match", where.hintMatch);
     loadEntry("input_method_editor", where.inputMethodEditor);
 
@@ -5191,6 +5198,14 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                    entry.hintLabel.foregroundAlpha,
                    entry.hintLabel.background,
                    entry.hintLabel.backgroundAlpha);
+
+    // Only where the scheme sets it: written out, an unset pair would pin the colours it leaves to the label.
+    if (entry.hintLabelTyped)
+        processWithDoc(documentation::HintLabelTyped {},
+                       entry.hintLabelTyped->foreground,
+                       entry.hintLabelTyped->foregroundAlpha,
+                       entry.hintLabelTyped->background,
+                       entry.hintLabelTyped->backgroundAlpha);
 
     processWithDoc(documentation::HintMatch {},
                    entry.hintMatch.foreground,

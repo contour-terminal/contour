@@ -5510,9 +5510,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     auto const& hintMatch = _colorPalette.hintMatch;
     auto const labelFg = resolveColor(hintLabel.foreground);
     auto const labelBg = resolveColor(hintLabel.background);
-    // Dimmed version of label colors for the already-typed portion.
-    auto const typedLabelFg = mixColor(labelFg, _colorPalette.defaultBackground, 0.5f);
-    auto const typedLabelBg = mixColor(labelBg, _colorPalette.defaultBackground, 0.5f);
+    // The already-typed portion: the scheme's typed pair, where it sets one, for the whole label (once a
+    // prefix is typed every label on screen starts with it); else the label mixed halfway to the background.
+    auto const& typedPair = _colorPalette.hintLabelTyped;
+    auto const typedLabelFg = typedPair ? resolveColor(typedPair->foreground)
+                                        : mixColor(labelFg, _colorPalette.defaultBackground, 0.5f);
+    auto const typedLabelBg = typedPair ? resolveColor(typedPair->background)
+                                        : mixColor(labelBg, _colorPalette.defaultBackground, 0.5f);
+    auto const typedLength = typedPair && !filter.empty() ? std::string::npos : filter.size();
     auto const matchBg = resolveColor(hintMatch.background);
     auto const matchBgAlpha = hintMatch.backgroundAlpha;
 
@@ -5592,12 +5597,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
             // overruns a match shorter than its own label: a half-drawn label cannot be typed.
             if (auto const labelIdx = labelIndexAt(cell.position, match))
             {
-                // Replace codepoints with label character.
+                // Replace codepoints with label character, in one narrow cell: over a wide glyph's head or a
+                // scaled (OSC 66) cell it keeps neither their width nor their sizing, and draws over nothing.
                 cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[*labelIdx]));
                 cell.width = 1;
+                cell.sizing = GlyphSizing {};
 
                 // Distinguish the already-typed prefix from the characters still to type.
-                auto const typed = *labelIdx < filter.size();
+                auto const typed = *labelIdx < typedLength;
                 cell.attributes.foregroundColor = typed ? typedLabelFg : labelFg;
                 cell.attributes.backgroundColor = typed ? typedLabelBg : labelBg;
                 cell.attributes.flags |= CellFlag::Bold;
@@ -5618,7 +5625,8 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
 
         // Fade cells that belong to no match toward the default background, so labels stand out.
         if (!onMatch)
-            blendAttributesTo(cell.attributes, _colorPalette.defaultBackground, 0.5f);
+            blendAttributesTo(
+                cell.attributes, _colorPalette.defaultBackground, 1.0f - _colorPalette.hintUnmatchedOpacity);
     }
 }
 

@@ -300,6 +300,15 @@ struct ColorPalette
     CellRGBColorAndAlphaPair hintMatch = { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x4488CC_rgb, .backgroundAlpha=0.35f };
     // clang-format on
 
+    /// The hint labels once a prefix is typed (`hint_label_typed`): every label on screen then starts with
+    /// it, and is drawn whole in this pair. Empty: the typed characters are drawn in @ref hintLabel mixed
+    /// halfway to the background, the rest in @ref hintLabel.
+    std::optional<CellRGBColorAndAlphaPair> hintLabelTyped {};
+
+    /// How much of its colour a cell outside every hint match keeps while hint mode is on: the rest is
+    /// blended toward the background, so the labels stand out.
+    float hintUnmatchedOpacity = 0.5f;
+
     RGBColorPair indicatorStatusLineInactive = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineInsertMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineNormalMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };

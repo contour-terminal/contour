@@ -5860,3 +5860,171 @@ TEST_CASE("Terminal.overlayClearance.theStatusLineIsNeverBlank", "[terminal][ove
     }
 }
 // }}}
+
+// {{{ Hint labels
+namespace
+{
+
+/// Puts @p mock into hint mode over its visible page, with the built-ins and @p userPatterns.
+void activateHints(MockTerm<vtpty::MockPty>& mock,
+                   std::span<vtbackend::LinkPatternSpec const> userPatterns = {})
+{
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = { .table = std::make_shared<vtbackend::LinkPatterns const>(
+                                                       vtbackend::LinkPatterns::compile(userPatterns)),
+                                                   .names = {},
+                                                   .resolve = {} },
+                                     .action = vtbackend::HintAction::Copy });
+}
+
+/// The rendered cell at @p line, @p column, if one was emitted there.
+[[nodiscard]] vtbackend::RenderCell const* cellAt(vtbackend::RenderBuffer const& frame, int line, int column)
+{
+    auto const at = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+    auto const found = std::ranges::find(frame.cells, at, &vtbackend::RenderCell::position);
+    return found != frame.cells.end() ? &*found : nullptr;
+}
+
+/// Gives @p mock the palette scheme @p name sets, with no screen transition: a frame then shows the colours
+/// themselves rather than a blend on the way to them.
+void usePalette(MockTerm<vtpty::MockPty>& mock, std::string_view name)
+{
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+    mock.terminal.settings().screenTransitionDuration = std::chrono::milliseconds { 0 };
+    mock.terminal.setColorPalette(palette);
+}
+
+} // namespace
+
+TEST_CASE("Terminal.hintLabels.useTheCursorColourAndDimTheRest", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    usePalette(mock, "contour-dark");
+    // Below the top row, which hint mode's vi cursor starts on and draws highlighted.
+    mock.writeToScreen("\r\nsee https://example.com now");
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto const* label = cellAt(frame, 1, 4);
+    REQUIRE(label != nullptr);
+    CHECK(label->attributes.backgroundColor == RGBColor { 0xE8, 0xC2, 0x6E });
+    CHECK(label->attributes.foregroundColor == RGBColor { 0x1C, 0x1E, 0x24 });
+
+    // An unmatched cell keeps 45 % of its colour: it is blended 55 % toward the background.
+    auto const* unmatched = cellAt(frame, 1, 0);
+    REQUIRE(unmatched != nullptr);
+    CHECK(unmatched->attributes.foregroundColor
+          == vtbackend::mixColor(RGBColor { 0xD9, 0xDC, 0xE3 }, RGBColor { 0x1C, 0x1E, 0x24 }, 0.55f));
+}
+
+TEST_CASE("Terminal.hintLabels.aTypedPrefixTurnsTheLabelsToTheSelection", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    // 27 URLs, as HintModeHandler.LabelAssignment.TwoChar writes them: two-character labels.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(120) } };
+    usePalette(mock, "contour-dark");
+    for (auto const i: std::views::iota(0, 27))
+        mock.writeToScreen(std::format("https://site{}.com{}", i, i % 5 == 4 ? "\r\n" : " "));
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintMatches().size() == 27);
+    REQUIRE(mock.terminal.hintMatches().front().label.size() == 2);
+
+    REQUIRE(mock.terminal.hintModeHandler().processInput(U'a'));
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto labelCells = 0;
+    for (auto const& match: mock.terminal.hintModeHandler().matches())
+    {
+        INFO("label " << match.label);
+        auto const screen = mock.terminal.viewport().translateGridToScreenCoordinate(match.start);
+        for (auto const index: std::views::iota(0, static_cast<int>(match.label.size())))
+        {
+            auto const* cell = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column) + index);
+            REQUIRE(cell != nullptr);
+            CHECK(cell->attributes.backgroundColor == RGBColor { 0x3A, 0x4A, 0x6B });
+            CHECK(cell->attributes.foregroundColor == RGBColor { 0xD9, 0xDC, 0xE3 });
+            ++labelCells;
+        }
+    }
+    CHECK(labelCells > 0);
+}
+
+TEST_CASE("Terminal.hintLabels.otherSchemesKeepTheirLook", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(120) } };
+    auto const& palette = mock.terminal.colorPalette();
+    REQUIRE_FALSE(palette.hintLabelTyped.has_value());
+    CHECK(palette.hintUnmatchedOpacity == 0.5f);
+    for (auto const i: std::views::iota(0, 27))
+        mock.writeToScreen(std::format("https://site{}.com{}", i, i % 5 == 4 ? "\r\n" : " "));
+    mock.writeToScreen("\r\nplain");
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintModeHandler().processInput(U'a'));
+
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto const label = RGBColor { 0xFF, 0xCC, 0x00 };
+    auto const background = palette.defaultBackground;
+    auto const& first = mock.terminal.hintModeHandler().matches().front();
+    auto const screen = mock.terminal.viewport().translateGridToScreenCoordinate(first.start);
+    auto const* typed = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column));
+    auto const* untyped = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column) + 1);
+    REQUIRE(typed != nullptr);
+    REQUIRE(untyped != nullptr);
+    CHECK(typed->attributes.backgroundColor == vtbackend::mixColor(label, background, 0.5f));
+    CHECK(untyped->attributes.backgroundColor == label);
+
+    // "plain" is no match: blended halfway, as before.
+    auto const* plain = cellAt(frame, 6, 0);
+    REQUIRE(plain != nullptr);
+    CHECK(plain->attributes.foregroundColor
+          == vtbackend::mixColor(palette.defaultForeground, background, 0.5f));
+}
+
+TEST_CASE("Terminal.hintLabels.aLabelOverAWideCharacterIsNarrowCells", "[terminal][hintmode][hintlabels]")
+{
+    // A label character is one narrow cell wherever it lands: over a wide glyph's head, or over a scaled
+    // (OSC 66) cell, it must not keep their width or their sizing and draw over its neighbour.
+    auto const narrow = [](vtbackend::RenderCell const& cell) {
+        return cell.width == 1 && cell.sizing == vtbackend::GlyphSizing {};
+    };
+    auto const checkLabel = [&](MockTerm<vtpty::MockPty>& mock) {
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        auto const& match = mock.terminal.hintMatches().front();
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto shown = std::string {};
+        for (auto const index: std::views::iota(0, static_cast<int>(match.label.size())))
+        {
+            auto const* cell = cellAt(frame, 0, unbox<int>(match.start.column) + index);
+            REQUIRE(cell != nullptr);
+            CHECK(narrow(*cell));
+            REQUIRE(cell->codepoints.size() == 1);
+            shown += static_cast<char>(cell->codepoints.front());
+        }
+        CHECK(shown == match.label);
+    };
+
+    SECTION("a wide character's head")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("日本/notes.txt");
+        auto const patterns = std::array { vtbackend::LinkPatternSpec {
+            .name = "cjk", .regex = R"(日本\S*)", .activation = {} } };
+        activateHints(mock, patterns);
+        checkLabel(mock);
+    }
+
+    SECTION("a scaled cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("\033]66;s=2;X\a/notes.txt");
+        auto const patterns = std::array { vtbackend::LinkPatternSpec {
+            .name = "scaled", .regex = R"(X\S*)", .activation = {} } };
+        activateHints(mock, patterns);
+        checkLabel(mock);
+    }
+}
+// }}}

@@ -476,3 +476,42 @@ TEST_CASE("ColorPalette.otherSchemesKeepTheirSearchColours", "[ColorPalette]")
         CHECK(palette.searchHighlightFocused == ColorPalette {}.searchHighlightFocused);
     }
 }
+
+TEST_CASE("ColorPalette.hintLabels.contourSchemesReadAtAA", "[ColorPalette]")
+{
+    // Hint labels take the cursor colour, and a typed label the selection, in contour-dark and contour-light
+    // alone; both pairs read at 4.5:1 there. Every other scheme keeps the look it had.
+    auto const rgbOf = [](CellRGBColor const& color) {
+        REQUIRE(std::holds_alternative<RGBColor>(color));
+        return std::get<RGBColor>(color);
+    };
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK(rgbOf(palette.hintLabel.background) == rgbOf(palette.cursor.color));
+        CHECK(rgbOf(palette.hintLabel.foreground) == palette.defaultBackground);
+        CHECK(contrastRatio(rgbOf(palette.hintLabel.foreground), rgbOf(palette.hintLabel.background))
+              >= MinimumTextContrast);
+        REQUIRE(palette.hintLabelTyped.has_value());
+        CHECK(rgbOf(palette.hintLabelTyped->foreground) == palette.defaultForeground);
+        CHECK(contrastRatio(rgbOf(palette.hintLabelTyped->foreground),
+                            rgbOf(palette.hintLabelTyped->background))
+              >= MinimumTextContrast);
+        CHECK(palette.hintUnmatchedOpacity == 0.45f);
+    }
+
+    auto const unchanged = ColorPalette {};
+    for (auto const name: defaultColorPaletteNames())
+    {
+        if (name == "contour-dark"sv || name == "contour-light"sv)
+            continue;
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK_FALSE(palette.hintLabelTyped.has_value());
+        CHECK(palette.hintUnmatchedOpacity == unchanged.hintUnmatchedOpacity);
+    }
+    CHECK(unchanged.hintUnmatchedOpacity == 0.5f);
+}

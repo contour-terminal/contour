@@ -119,6 +119,9 @@ namespace
                         0x3A3F48_rgb },
     };
 
+    /// How much of its colour an unmatched cell keeps in hint mode, in the contour schemes.
+    constexpr auto ContourHintUnmatchedOpacity = 0.45f;
+
     /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line
     /// indicators (inactive and insert: the scheme's idle pair; normal: page on blue; visual: page on
     /// magenta), a running block in blue, and search matches in yellow, because yellow means search.
@@ -154,6 +157,19 @@ namespace
                                            .foregroundAlpha = 1.0f,
                                            .background = scheme.searchCurrentMatch,
                                            .backgroundAlpha = 0.85f };
+
+        // Hint labels: the scheme's background on its cursor, and once a prefix is typed its foreground on
+        // its selection; the rest keeps 45 %. The cursor colour is no search yellow: the one named exception
+        // to "nothing else is yellow-filled" (ruling Q1).
+        palette.hintLabel = { .foreground = scheme.background,
+                              .foregroundAlpha = 1.0f,
+                              .background = scheme.cursor,
+                              .backgroundAlpha = 1.0f };
+        palette.hintLabelTyped = CellRGBColorAndAlphaPair { .foreground = scheme.foreground,
+                                                            .foregroundAlpha = 1.0f,
+                                                            .background = scheme.selection,
+                                                            .backgroundAlpha = 1.0f };
+        palette.hintUnmatchedOpacity = ContourHintUnmatchedOpacity;
     }
 
     /// Every built-in color scheme, as one table.

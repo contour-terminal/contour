@@ -1383,6 +1383,53 @@ profiles:
     CHECK(hiddenProfile->scrollbar.value().position == ScrollBarPosition::Hidden);
 }
 
+TEST_CASE("Config: a scheme's hint_label_typed loads, stays empty where unset, and round-trips", "[config]")
+{
+    QTemporaryDir dir;
+    constexpr auto WithTyped = R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: typed
+color_schemes:
+    typed:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+        hint_label_typed:
+            foreground: '#D9DCE3'
+            foreground_alpha: 1.0
+            background: '#3A4A6B'
+            background_alpha: 1.0
+)"sv;
+    auto const scheme = schemeOf(loadFromYaml(dir, WithTyped));
+    REQUIRE(scheme.hintLabelTyped.has_value());
+    CHECK(scheme.hintLabelTyped->foreground
+          == vtbackend::CellRGBColor { vtbackend::RGBColor(0xD9, 0xDC, 0xE3) });
+    CHECK(scheme.hintLabelTyped->background
+          == vtbackend::CellRGBColor { vtbackend::RGBColor(0x3A, 0x4A, 0x6B) });
+
+    SECTION("unset stays empty, and is not written")
+    {
+        auto config = classicConfig();
+        REQUIRE_FALSE(config.colorschemes.value()["default"].hintLabelTyped.has_value());
+        CHECK_FALSE(contour::config::createString<contour::config::YAMLConfigWriter>(config).contains(
+            "hint_label_typed"));
+    }
+
+    SECTION("the writer round-trips it")
+    {
+        auto config = classicConfig();
+        config.colorschemes.value()["default"].hintLabelTyped = scheme.hintLabelTyped;
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("hint_label_typed:"));
+        auto const reloaded = schemeOf(loadFromYaml(dir, written));
+        REQUIRE(reloaded.hintLabelTyped.has_value());
+        CHECK(*reloaded.hintLabelTyped == *scheme.hintLabelTyped);
+    }
+}
+
 TEST_CASE("Config: scrollbar.mode reads system, overlay and always, and keeps the default on anything else",
           "[config]")
 {
