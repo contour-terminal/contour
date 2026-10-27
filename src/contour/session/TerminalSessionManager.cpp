@@ -2140,7 +2140,10 @@ void TerminalSessionManager::reconnectHost()
     {
         managerLog()("Not reconnecting: {}.", describe(started.error()));
         _reconnectRun = ReconnectRun::Running;
-        reconnectFailed(describe(started.error()));
+        // The connection that just failed reports itself through connectionClosed(), with its own reason:
+        // that is the one to show, so the run is left for it to end.
+        if (started.error() != ReconnectError::ConnectionEnding)
+            reconnectFailed(describe(started.error()));
         return;
     }
     _reconnectRun = ReconnectRun::Running;

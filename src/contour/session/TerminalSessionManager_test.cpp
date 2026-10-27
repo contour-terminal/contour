@@ -2944,6 +2944,22 @@ TEST_CASE(
           == "Disconnected from the Contour daemon. Its sessions are still running.");
 }
 
+TEST_CASE("TerminalSessionManager: Return pressed as the connection fails shows the connection's own reason",
+          "[manager][paneend][reconnect]")
+{
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    // The controller is Failed but its connectionClosed has not been handled yet.
+    lost.factory->reconnectResult = std::unexpected(contour::session::ReconnectError::ConnectionEnding);
+    lost.left->runFooterAction();
+
+    manager.connectionClosed("the daemon refused the handshake");
+
+    for (auto* session: { lost.left, lost.right })
+        CHECK(session->getFooterMessage()
+              == QStringLiteral("Could not reconnect: the daemon refused the handshake."));
+}
+
 TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
           "[manager][paneend][reconnect]")
 {

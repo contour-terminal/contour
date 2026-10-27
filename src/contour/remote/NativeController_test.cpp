@@ -2528,7 +2528,7 @@ TEST_CASE("NativeController.reconnect.afterARefusal", "[attach][controller][reco
     daemon.serveAgain([&] { daemon.services = {}; });
     auto const early = controller.reconnect();
     REQUIRE_FALSE(early.has_value());
-    CHECK(early.error() == ReconnectError::AlreadyConnected);
+    CHECK(early.error() == ReconnectError::ConnectionEnding);
     CHECK(controller.connectionState() == ConnectionState::Failed);
 
     controller.stop(); // what the GUI's connectionClosed handler does

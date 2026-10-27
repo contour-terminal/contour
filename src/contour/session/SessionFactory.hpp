@@ -112,8 +112,9 @@ struct InterruptionSink
 enum class ReconnectError : uint8_t
 {
     NotAttached = 0,  ///< The factory is not attached to a daemon: there was no connection to seek again.
-    AlreadyConnected, ///< A connection is up, being sought by the supervisor that runs now, or ended but not
-                      ///< yet stopped.
+    AlreadyConnected, ///< A connection is up, or being sought by the supervisor that runs now.
+    ConnectionEnding, ///< A run failed and its owner has not yet been told: its connectionClosed is on the
+                      ///< way, and says why.
 };
 
 /// A short reason for @p error, for the footer's "Could not reconnect: {}." and logs.
@@ -125,6 +126,7 @@ enum class ReconnectError : uint8_t
     {
         case ReconnectError::NotAttached: return "this window is not attached to a daemon";
         case ReconnectError::AlreadyConnected: return "the connection is already being sought";
+        case ReconnectError::ConnectionEnding: return "the connection has just ended";
     }
     return "unknown error";
 }
