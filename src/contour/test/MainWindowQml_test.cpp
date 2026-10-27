@@ -3197,6 +3197,28 @@ TEST_CASE("the in-pane lock is the last resort: a band, a tab well or a header h
     }
 }
 
+TEST_CASE("tabs in a full-screen band that is not on screen do not hold the lock (offscreen)",
+          "[contour][gui][qml][mainwindow][secureinput][securelock]")
+{
+    // Review I1: macOS full screen, two tabs, Pill row. The tabs sit in the band's centre, and the band only
+    // appears while the pointer is on the edge: with it away, nothing on screen holds the lock.
+    auto scene = MainWindowScene { .tabCount = 2,
+                                   .activeTab = 1,
+                                   .secure = contour::test::snapshot::SecureDecor::Locked };
+    auto band = FullScreenBand { MotionPreference::Reduced, scene };
+    CHECK_FALSE(band.root->property("tabsOnScreen").toBool());
+    CHECK_FALSE(band.root->property("bandOnScreen").toBool());
+    CHECK(band.root->property("secureLockInPane").toBool());
+    CHECK_FALSE(band.root->findChild<QQuickItem*>(QStringLiteral("secureInputChip"))->isVisible());
+
+    // The same window, not in full screen: the band rests on screen with the tabs in it.
+    band.window->showNormal();
+    REQUIRE(QTest::qWaitFor([&] { return band.window->visibility() != QWindow::FullScreen; }, 2000));
+    CHECK(band.root->property("tabsOnScreen").toBool());
+    CHECK(band.root->property("bandOnScreen").toBool());
+    CHECK_FALSE(band.root->property("secureLockInPane").toBool());
+}
+
 TEST_CASE("no pane waiting for a password shows no lock anywhere (offscreen)",
           "[contour][gui][qml][mainwindow][secureinput]")
 {

@@ -280,9 +280,11 @@ Item {
         // header nor the tab well is there to show it: one tab, one pane (window::SecureIndicatorRules).
         Item {
             id: secureChipSlot
-            readonly property int headerSpot: (root.controller ? (root.controller.visiblePaneCount ?? 1) : 1) > 1
-                                              ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
-            readonly property int wellSpot: root.controller && (root.controller.tabBarShouldShow ?? false)
+            // The panes' headers are not known here, and may be hidden (density, a short pane): the chip is
+            // shown whatever they do, so that two indicators beat none.
+            readonly property int headerSpot: chromeStyle.secureInputs.spotHidden
+            // The tabs on screen now (Main.qml): in a strip, or in a band that rests on screen.
+            readonly property int wellSpot: root.window && root.window.tabsOnScreen
                                             ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden
             // A band that only appears on demand (full screen) is not one the lock can rely on.
             readonly property int bandSpot: root.presence === "shown" || root.presence === "pinned"

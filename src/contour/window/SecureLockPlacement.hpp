@@ -2,8 +2,8 @@
 #pragma once
 
 /// @file
-/// Where the in-pane lock pill goes: the last place the secure-input lock can be drawn, for the one tab of
-/// one pane that has no header, tab well or band to hold it (window::SecureIndicatorRules). Qt-free.
+/// Where the in-pane lock pill goes: the last place the secure-input lock can be drawn, for a pane that has
+/// no header, tab well or band on screen to hold it (window::SecureIndicatorRules). Qt-free.
 
 #include <contour/window/LinkPillPlacement.hpp>
 
@@ -18,13 +18,14 @@ namespace contour::window
 /// Where the lock pill goes.
 enum class SecureLockAnchor : uint8_t
 {
-    Hidden = 0,  ///< Nowhere: no blank place is big enough, or the other pills hold them.
-    TopRight,    ///< The grid's top right, inset.
-    BottomRight, ///< The grid's bottom right, inset.
+    Hidden = 0,   ///< Nowhere: the pane is too small for the pill at all.
+    TopRight,     ///< The grid's top right, inset, over blank cells.
+    BottomRight,  ///< The grid's bottom right, inset, over blank cells.
+    TopRightOver, ///< The last resort: the top right over whatever is there, cells and other pills included.
 };
 
 /// How many SecureLockAnchor values there are, derived from the last one.
-inline constexpr size_t SecureLockAnchorCount = static_cast<size_t>(SecureLockAnchor::BottomRight) + 1;
+inline constexpr size_t SecureLockAnchorCount = static_cast<size_t>(SecureLockAnchor::TopRightOver) + 1;
 
 /// Everything the lock pill's place depends on.
 struct SecureLockInputs
@@ -52,19 +53,53 @@ struct SecureLockPlacement
 
 namespace detail
 {
+    /// Whether a spot needs the cells under the pill to be blank.
+    enum class SpotCells : uint8_t
+    {
+        Blank = 0, ///< Only where every cell under it is blank and none is on an avoided row.
+        Any,       ///< Whatever is there.
+    };
+
+    /// Whether a spot gives way to the find bar and the link pill that hold it.
+    enum class SpotYields : uint8_t
+    {
+        Yes = 0, ///< It is skipped while @ref SecureLockSpot::heldByFindBar or heldByLinkPill is current.
+        No,      ///< It is taken whatever else is there.
+    };
+
     /// One place the lock may go, and what holds it.
     struct SecureLockSpot
     {
         SecureLockAnchor anchor;       ///< The place.
         FindBarPresence heldByFindBar; ///< The find bar presence that holds it.
         LinkPillAnchor heldByLinkPill; ///< The link pill anchor that holds it.
+        SpotCells cells;               ///< What it needs of the cells under it.
+        SpotYields yields;             ///< Whether the holders above keep it from the lock.
+        bool atTop;                    ///< Whether it is at the pane's top (else its bottom).
     };
 
     /// The places the lock may go, in order of preference.
     inline constexpr auto SecureLockSpots = std::array {
-        SecureLockSpot { SecureLockAnchor::TopRight, FindBarPresence::Top, LinkPillAnchor::TopRight },
-        SecureLockSpot {
-            SecureLockAnchor::BottomRight, FindBarPresence::Bottom, LinkPillAnchor::BottomRight },
+        SecureLockSpot { SecureLockAnchor::TopRight,
+                         FindBarPresence::Top,
+                         LinkPillAnchor::TopRight,
+                         SpotCells::Blank,
+                         SpotYields::Yes,
+                         true },
+        SecureLockSpot { SecureLockAnchor::BottomRight,
+                         FindBarPresence::Bottom,
+                         LinkPillAnchor::BottomRight,
+                         SpotCells::Blank,
+                         SpotYields::Yes,
+                         false },
+        // The lock must never be invisible while secure input is on: with no blank place free (a
+        // full-screen program, the find bar and the link pill holding both) it covers a few cells.
+        SecureLockSpot { SecureLockAnchor::TopRightOver,
+                         FindBarPresence::Closed,
+                         LinkPillAnchor::Hidden,
+                         SpotCells::Any,
+                         SpotYields::No,
+                         true },
     };
 
     /// The anchors' QML names, indexed by SecureLockAnchor.
@@ -72,12 +107,13 @@ namespace detail
         "hidden",
         "topRight",
         "bottomRight",
+        "topRightOver",
     };
 } // namespace detail
 
 /// The QML name of @p anchor.
 /// @param anchor The anchor.
-/// @return `"hidden"`, `"topRight"` or `"bottomRight"`.
+/// @return `"hidden"`, `"topRight"`, `"bottomRight"` or `"topRightOver"`.
 [[nodiscard]] constexpr std::string_view secureLockAnchorName(SecureLockAnchor anchor) noexcept
 {
     return detail::SecureLockAnchorNames[static_cast<size_t>(anchor)];
@@ -87,10 +123,11 @@ namespace detail
 /// pill.
 ///
 /// At the grid's top right when every cell under it is blank, none is on an avoided row, and neither the find
-/// bar nor the link pill holds the top; else at the bottom right under the same test; else nowhere. The lock
-/// yields to both, so the three never overlap.
+/// bar nor the link pill holds the top; else at the bottom right under the same test; else, as a last
+/// resort, at the top right over whatever is there. The lock yields to both pills while it has a blank place,
+/// so it covers something only when it has none: it is never invisible.
 /// @param in What the place depends on.
-/// @return The place; SecureLockAnchor::Hidden where there is none.
+/// @return The place; SecureLockAnchor::Hidden only where the pane is too small for the pill at all.
 [[nodiscard]] inline SecureLockPlacement placeSecureLock(SecureLockInputs const& in) noexcept
 {
     auto const width = in.lockWidth;
@@ -102,12 +139,12 @@ namespace detail
         std::max(0, static_cast<int>(std::floor((x - in.grid.marginLeft) / in.grid.cellWidth)));
     for (auto const& spot: detail::SecureLockSpots)
     {
-        if (in.findBar == spot.heldByFindBar || in.linkPill == spot.heldByLinkPill)
+        if (spot.yields == detail::SpotYields::Yes
+            && (in.findBar == spot.heldByFindBar || in.linkPill == spot.heldByLinkPill))
             continue;
-        auto const y = spot.anchor == SecureLockAnchor::TopRight
-                           ? in.insetTop
-                           : in.paneHeight - in.insetTop - in.lockHeight;
-        if (y < in.insetTop || !detail::isBandClear(in.grid, y, in.lockHeight, firstColumn))
+        auto const y = spot.atTop ? in.insetTop : in.paneHeight - in.insetTop - in.lockHeight;
+        if (spot.cells == detail::SpotCells::Blank
+            && (y < in.insetTop || !detail::isBandClear(in.grid, y, in.lockHeight, firstColumn)))
             continue;
         return { .anchor = spot.anchor, .x = x, .y = y };
     }

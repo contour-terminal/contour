@@ -54,6 +54,8 @@ struct Base
 constexpr auto TopRight = SecureLockPlacement { .anchor = SecureLockAnchor::TopRight, .x = 700, .y = 8 };
 constexpr auto BottomRight =
     SecureLockPlacement { .anchor = SecureLockAnchor::BottomRight, .x = 700, .y = 370 };
+constexpr auto TopRightOver =
+    SecureLockPlacement { .anchor = SecureLockAnchor::TopRightOver, .x = 700, .y = 8 };
 
 } // namespace
 
@@ -77,15 +79,17 @@ TEST_CASE("secureLock.neverOnThePromptRow", "[securelock]")
     auto base = Base {};
     base.avoidRows = { 0 };
     CHECK(placeSecureLock(base.inputs()) == BottomRight);
+    // Both blank places taken by the prompt: the last resort covers the top right rather than vanish.
     base.avoidRows = { 0, Rows - 1 };
-    CHECK(placeSecureLock(base.inputs()).anchor == SecureLockAnchor::Hidden);
+    CHECK(placeSecureLock(base.inputs()) == TopRightOver);
 }
 
-TEST_CASE("secureLock.noBlankCellsNoLock", "[securelock]")
+TEST_CASE("secureLock.coversCellsAsALastResortWhenNoneAreBlank", "[securelock]")
 {
+    // A full-screen program: nothing is blank, and the lock still shows (review I1).
     auto base = Base {};
     base.trailingBlank.assign(Rows, 0);
-    CHECK(placeSecureLock(base.inputs()).anchor == SecureLockAnchor::Hidden);
+    CHECK(placeSecureLock(base.inputs()) == TopRightOver);
 }
 
 TEST_CASE("secureLock.yieldsToTheFindBar", "[securelock]")
@@ -113,15 +117,39 @@ TEST_CASE("secureLock.yieldsToTheLinkPill", "[securelock]")
     CHECK(placeSecureLock(base.inputs()) == TopRight);
 }
 
-TEST_CASE("secureLock.hasNowhereWhenTheOtherTwoHoldBothPlaces", "[securelock]")
+TEST_CASE("secureLock.coversAPillWhenTheOtherTwoHoldBothPlaces", "[securelock]")
 {
     auto base = Base {};
     base.findBar = FindBarPresence::Top;
     base.linkPill = LinkPillAnchor::BottomRight;
-    CHECK(placeSecureLock(base.inputs()).anchor == SecureLockAnchor::Hidden);
+    CHECK(placeSecureLock(base.inputs()) == TopRightOver);
 }
 
-TEST_CASE("secureLock.neverOverlapsAnythingForEveryOccupantPair", "[securelock]")
+TEST_CASE("secureLock.isNeverInvisibleAndCoversOnlyWithNoBlankPlace", "[securelock]")
+{
+    // Every occupant pair, with blank cells and with none: the lock shows, and sits over something only when
+    // neither blank place is free.
+    for (auto const find: std::views::iota(size_t { 0 }, FindBarPresenceCount))
+        for (auto const link: std::views::iota(size_t { 0 }, LinkPillAnchorCount))
+            for (auto const blank: { true, false })
+            {
+                auto base = Base {};
+                base.findBar = static_cast<FindBarPresence>(find);
+                base.linkPill = static_cast<LinkPillAnchor>(link);
+                base.trailingBlank.assign(Rows, blank ? Columns : 0);
+                auto const placed = placeSecureLock(base.inputs());
+                INFO("find bar " << find << ", link pill " << link << ", blank " << blank);
+                CHECK(placed.anchor != SecureLockAnchor::Hidden);
+                auto const topFree =
+                    base.findBar != FindBarPresence::Top && base.linkPill != LinkPillAnchor::TopRight;
+                auto const bottomFree =
+                    base.findBar != FindBarPresence::Bottom && base.linkPill != LinkPillAnchor::BottomRight;
+                CHECK((placed.anchor == SecureLockAnchor::TopRightOver)
+                      == (!blank || (!topFree && !bottomFree)));
+            }
+}
+
+TEST_CASE("secureLock.neverOverlapsAnythingWhileABlankPlaceIsFree", "[securelock]")
 {
     for (auto const find: std::views::iota(size_t { 0 }, FindBarPresenceCount))
         for (auto const link: std::views::iota(size_t { 0 }, LinkPillAnchorCount))
@@ -152,4 +180,5 @@ TEST_CASE("secureLock.anchorNamesAreTheQmlOnes", "[securelock]")
     CHECK(contour::window::secureLockAnchorName(SecureLockAnchor::Hidden) == "hidden");
     CHECK(contour::window::secureLockAnchorName(SecureLockAnchor::TopRight) == "topRight");
     CHECK(contour::window::secureLockAnchorName(SecureLockAnchor::BottomRight) == "bottomRight");
+    CHECK(contour::window::secureLockAnchorName(SecureLockAnchor::TopRightOver) == "topRightOver");
 }

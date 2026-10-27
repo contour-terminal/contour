@@ -76,15 +76,21 @@ ThemedWindow
     // Where a sheet hangs from (KitDialog): the top of the content, below the band and the banners.
     readonly property real sheetTop: content.y
 
-    // Whether the lock is drawn in the pane itself (window::SecureIndicatorRules): one tab of one pane, with
-    // no pane header, tab well or always-shown band to hold it. Each pane draws its own, handed down by
-    // PaneNode like visiblePanes; a bool by the QML-facing carve-out, the rule's answer.
+    // What is on screen now for the secure-input lock (window::SecureIndicatorRules), not what the gates
+    // allow: a band that only appears while the pointer is on its edge (full screen) holds nothing.
+    // Whether a title band rests on screen:
+    readonly property bool bandOnScreen: appWindow.band.band === "shown" || appWindow.band.band === "pinned"
+    // Whether the tabs are on screen: in their own strip, or in the centre of a band that is.
+    readonly property bool tabsOnScreen: appWindow.band.tabBar === "shown"
+                                         || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen)
+
+    // Whether a pane without a header draws the lock in itself (window::SecureIndicatorRules): neither the
+    // tabs nor a band are on screen to hold it. Each pane adds its own header's presence (PaneCard); handed
+    // down by PaneNode like visiblePanes; a bool by the QML-facing carve-out, the rule's answer.
     readonly property bool secureLockInPane: chromeStyle.secureIndicatorSpots(
-        (appWindow.win ? appWindow.win.visiblePaneCount : 1) > 1 ? chromeStyle.secureInputs.spotShown
-                                                                  : chromeStyle.secureInputs.spotHidden,
-        appWindow.tabBarShouldShow ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden,
-        appWindow.band.band === "shown" || appWindow.band.band === "pinned" ? chromeStyle.secureInputs.spotShown
-                                                                             : chromeStyle.secureInputs.spotHidden).pane === true
+        chromeStyle.secureInputs.spotHidden,
+        appWindow.tabsOnScreen ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden,
+        appWindow.bandOnScreen ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden).pane === true
 
     // Whether a full-screen band rests below the menu bar AppKit reveals over the window's top, as a native
     // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar

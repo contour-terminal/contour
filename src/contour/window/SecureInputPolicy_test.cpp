@@ -151,6 +151,25 @@ TEST_CASE("SecureIndicatorRules places the lock as R-f says", "[secureinputpolic
     }
 }
 
+TEST_CASE("SecureIndicatorRules: every combination draws the lock somewhere, and a pane adds its own header",
+          "[secureinputpolicy]")
+{
+    // Review I1: Main.qml decides the in-pane pill for a pane without a header (header No), and each pane
+    // then drops it if its own header is on screen; that must equal the rule asked with the pane's header.
+    using contour::window::secureIndicatorSpots;
+    for (auto const header: Spots)
+        for (auto const well: Spots)
+            for (auto const band: Spots)
+            {
+                auto const& rule = secureIndicatorSpots(header, well, band);
+                CHECK((rule.lockInHeader == SpotShown::Yes || rule.lockOnTab == SpotShown::Yes
+                       || rule.bandChip == SpotShown::Yes || rule.lockInPane == SpotShown::Yes));
+                auto const withoutHeader = secureIndicatorSpots(SpotShown::No, well, band);
+                CHECK((rule.lockInPane == SpotShown::Yes)
+                      == (header == SpotShown::No && withoutHeader.lockInPane == SpotShown::Yes));
+            }
+}
+
 TEST_CASE("secureInputStateText says 'on' only for a pane the OS secures", "[secureinputpolicy]")
 {
     // Review I3: the words are a claim about one pane. Every combination, so a new indicator is checked.

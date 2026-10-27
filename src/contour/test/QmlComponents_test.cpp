@@ -12073,7 +12073,7 @@ TEST_CASE("secure lock pill: it yields to the find bar (offscreen)",
     }
 }
 
-TEST_CASE("secure lock pill: over a full-screen program it shows nowhere (offscreen)",
+TEST_CASE("secure lock pill: over a full-screen program it covers the top right, never vanishing (offscreen)",
           "[contour][gui][qml][secureinput][securelock]")
 {
     for (auto const row: InPaneLockRows)
@@ -12082,12 +12082,41 @@ TEST_CASE("secure lock pill: over a full-screen program it shows nowhere (offscr
         auto scene = SecureLockScene { row };
         scene.setLocked();
         REQUIRE(scene.lock->isVisible());
-        // Every cell painted: no blank place. Secure Keyboard Entry is still on; only the pill is missing.
+        // Every cell painted: no blank place. Secure Keyboard Entry is on, so the lock must show: it covers
+        // a few cells at the top right (review I1).
         scene.session->setOverlayClearance(linkClearance(100, 20, 0));
         QCoreApplication::processEvents();
-        CHECK(scene.anchor() == QStringLiteral("hidden"));
-        CHECK_FALSE(scene.lock->isVisible());
+        CHECK(scene.anchor() == QStringLiteral("topRightOver"));
+        CHECK(scene.lock->isVisible());
     }
+}
+
+TEST_CASE("pane card: the in-pane lock follows the pane's own header, shown or not (offscreen)",
+          "[contour][gui][qml][secureinput][securelock][panecard]")
+{
+    // Review I1: header visibility is decided per pane. Under Minimal density a split's headers show only
+    // while the reveal modifier is held; with them hidden, nothing else on screen need hold the lock, so the
+    // pane draws it itself -- and drops it again once its header is on screen to carry it.
+    auto setup = paneCardSetup();
+    setup.density = contour::config::ChromeDensity::Minimal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    host.root().setProperty("lockInPane", true); // the window level: no tabs and no band on screen
+    panes.leftSession.setOverlayClearance(linkClearance(100, 20, 100));
+    panes.leftSession.setSecureIndicator(static_cast<int>(contour::window::SecureIndicator::Locked));
+    QCoreApplication::processEvents();
+
+    auto const& card = host.cardOf(panes.left());
+    REQUIRE_FALSE(card.property("headerShown").toBool());
+    CHECK(PaneTreeHost::partOf(card, "secureInputPill").isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderLock").isVisible());
+
+    host.root().setProperty("headerReveal", static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+    QCoreApplication::processEvents();
+    REQUIRE(card.property("headerShown").toBool());
+    CHECK_FALSE(PaneTreeHost::partOf(card, "secureInputPill").isVisible());
+    CHECK(PaneTreeHost::partOf(card, "paneHeaderLock").isVisible());
 }
 
 TEST_CASE("pane card: a pane at a password prompt shows the lock and says so in its header (offscreen)",

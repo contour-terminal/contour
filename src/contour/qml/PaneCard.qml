@@ -31,7 +31,8 @@ Item {
     property var node: null
     /// The panes the tab shows (WindowController.visiblePaneCount).
     property int visiblePanes: 1
-    /// Whether a locked pane draws its lock in a pill over its grid (PaneNode.lockInPane).
+    /// Whether a locked pane without a header draws its lock in a pill over its grid (PaneNode.lockInPane). A
+    /// pane whose header is shown on screen now holds the lock there instead, so the card drops it.
     property bool lockInPane: false
     /// A window::HeaderReveal's value (WindowController.headerReveal).
     property int headerReveal: 0
@@ -87,7 +88,7 @@ Item {
             session: card.session
             paneActive: card.isActive
             visiblePanes: card.visiblePanes
-            lockInPane: card.lockInPane
+            lockInPane: card.lockInPane && !card.headerShown
             cornerRadius: card.cornerRadius
             squareTop: card.headerInline ? card.cornerRadius : 0
             squareBottom: footer.visible ? card.cornerRadius : 0
