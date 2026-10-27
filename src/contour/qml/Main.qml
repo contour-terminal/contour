@@ -516,6 +516,9 @@ ThemedWindow
             appWindow.tabStrip.focusTab(tab)
         else if (item >= 0 && item < appWindow.toolbarItems.length)
             appWindow.toolbarItems[item].forceActiveFocus()
+        else if (appWindow.isInside(appWindow.activeFocusItem, appWindow.contentItem)
+                 && !appWindow.inTerminal(appWindow.activeFocusItem))
+            appWindow.restoreTerminalFocus() // the chrome let go while an item of it held the keyboard
     }
 
     Connections {
@@ -524,14 +527,19 @@ ThemedWindow
         function onChromeFocusChanged() { appWindow.applyChromeFocus() }
     }
 
-    // Whether @p item is inside the terminal content.
-    function inTerminal(item) {
+    // Whether @p item is @p ancestor or lies beneath it.
+    function isInside(item, ancestor) {
         while (item) {
-            if (item === paneContentLoader.item)
+            if (item === ancestor)
                 return true
             item = item.parent
         }
         return false
+    }
+
+    // Whether @p item is inside the terminal content.
+    function inTerminal(item) {
+        return !!paneContentLoader.item && appWindow.isInside(item, paneContentLoader.item)
     }
 
     // The terminal taking active focus ends the chrome's: it is where keys go again, so no ring stays up.
@@ -681,10 +689,15 @@ ThemedWindow
             paneContentLoader.item.forceActiveFocus();
     }
 
-    // Restore focus to the terminal whenever the active tab changes (tab click / switch).
+    // Restore focus to the terminal whenever the active tab changes (tab click / switch). The model announces
+    // the active row after a reorder or a background close as well, and those must not take the keyboard
+    // from a chrome that holds it: the controller ends the chrome focus before it activates a tab.
     Connections {
         target: appWindow.win
-        function onActiveTabIndexChanged() { appWindow.restoreTerminalFocus(); }
+        function onActiveTabIndexChanged() {
+            if (!appWindow.chromeHasFocus)
+                appWindow.restoreTerminalFocus()
+        }
     }
 
     onClosing: {

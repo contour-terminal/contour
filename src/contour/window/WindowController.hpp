@@ -1196,6 +1196,9 @@ class WindowController:
     // {{{ Keyboard focus in the chrome (GUI thread only)
     /// Moves focus into @p area, seeding the focused item of the area it enters.
     void enterChromeArea(window::ChromeArea area);
+    /// Ends the chrome's focus without touching the active focus item.
+    /// @return Whether the chrome had focus.
+    [[nodiscard]] bool dropChromeFocus();
     /// Keeps the focused item inside the area after the tab count or the toolbar changed.
     void clampChromeFocus();
     /// Runs @p command on the focused area. @return Whether it was handled.
@@ -1212,6 +1215,13 @@ class WindowController:
     int _focusedTabIndex = -1;
     int _focusedToolbarIndex = -1;
     int _toolbarItemCount = 0;
+    /// Whether the tab holding the chrome focus is being removed.
+    enum class FocusedTabRemoval : uint8_t
+    {
+        None,
+        Pending, ///< onTabClosed() then ends the chrome focus.
+    };
+    FocusedTabRemoval _focusedTabRemoval = FocusedTabRemoval::None;
     // }}}
 
     // {{{ Command palette

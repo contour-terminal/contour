@@ -100,13 +100,77 @@ TEST_CASE("keys move, activate and reorder in the tab well", "[windowcontroller]
     CHECK(controller.focusedTabIndex() == 2);
     CHECK(controller.activeTabIndex() == 1); // moving focus activates nothing
 
+    // Return activates the tab, and the keyboard goes back to the terminal.
     CHECK(f.chromeKey(Qt::Key_Return));
     CHECK(controller.activeTabIndex() == 2);
+    CHECK(f.area() == ChromeArea::Terminal);
 
     // Alt+Left reorders the focused tab and keeps focus on it.
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == 2);
     CHECK(f.chromeKey(Qt::Key_Left, Qt::AltModifier));
+    CHECK(f.area() == ChromeArea::Tabs);
     CHECK(controller.focusedTabIndex() == 1);
     CHECK(controller.activeTabIndex() == 1);
+}
+
+TEST_CASE("the focus stays on its tab when another tab is reordered or closed",
+          "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.activateTab(1);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(controller.focusedTabIndex() == 1);
+
+    SECTION("a tab moves from before it to after it")
+    {
+        controller.moveTab(0, 2);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == 0);
+    }
+
+    SECTION("a tab moves from after it to before it")
+    {
+        controller.moveTab(2, 0);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == 2);
+    }
+
+    SECTION("a tab after it closes")
+    {
+        controller.closeTabsToRight(1);
+        CHECK(controller.count() == 2);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == 1);
+    }
+
+    SECTION("the tabs around it close")
+    {
+        controller.closeOtherTabs(1);
+        CHECK(controller.count() == 1);
+        CHECK(f.area() == ChromeArea::Tabs);
+        CHECK(controller.focusedTabIndex() == 0);
+    }
+}
+
+TEST_CASE("closing the focused tab ends the chrome focus", "[windowcontroller][chromefocus]")
+{
+    auto const f = ChromeFixture {};
+    auto& controller = f.controller();
+    controller.activateTab(0);
+    controller.moveChromeFocus(contour::window::ChromeFocusAction::Next);
+    REQUIRE(f.area() == ChromeArea::Tabs);
+    REQUIRE(controller.focusedTabIndex() == 0);
+    REQUIRE(f.chromeKey(Qt::Key_Right));
+    REQUIRE(controller.focusedTabIndex() == 1);
+
+    // Closes the tabs after row 0, the focused one among them.
+    controller.closeTabsToRight(0);
+
+    CHECK(controller.count() == 1);
+    CHECK(f.area() == ChromeArea::Terminal);
+    CHECK(controller.focusedTabIndex() == -1);
 }
 
 TEST_CASE("reordering at either end does nothing", "[windowcontroller][chromefocus]")

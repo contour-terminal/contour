@@ -228,6 +228,30 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers)
     {
         chromeKeys.emplace_back(qtKey, qtModifiers);
+        if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Tabs)
+        {
+            // The two keys the controller answers by changing the model, whose announcements Main.qml must
+            // not mistake for the user leaving the chrome.
+            auto const alt = (qtModifiers & Qt::AltModifier) != 0;
+            if (alt && (qtKey == Qt::Key_Left || qtKey == Qt::Key_Right))
+            {
+                auto const target = _focusedTab + (qtKey == Qt::Key_Left ? -1 : 1);
+                if (target < 0 || target >= _scene.tabCount)
+                    return true;
+                moveTab(_focusedTab, target);
+                if (_chromeArea == window::ChromeArea::Tabs) // as the controller checks again after a move
+                {
+                    _focusedTab = target;
+                    emit chromeFocusChanged();
+                }
+                return true;
+            }
+            if (qtKey == Qt::Key_Escape)
+            {
+                leaveChrome();
+                return true;
+            }
+        }
         return chromeKeysHandled;
     }
     /// Records the confirmed close of the tab at @p row.
@@ -420,7 +444,14 @@ class MockMainController: public MainWindowControllerMock
         return mockTabTextColor(tabBackground);
     }
     Q_INVOKABLE void activateTab(int) {}
-    Q_INVOKABLE void moveTab(int, int) {}
+    /// Mirrors WindowController::moveTab(): the active tab goes with the tab, and the model always announces
+    /// the active row, as WindowController::onTabMoved() does.
+    Q_INVOKABLE void moveTab(int from, int to)
+    {
+        if (_scene.activeTab == from)
+            _scene.activeTab = to;
+        emit activeTabIndexChanged();
+    }
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
     Q_INVOKABLE void tearOffTab(int) {}
@@ -457,7 +488,13 @@ class MockMainController: public MainWindowControllerMock
     /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
     /// hovered tab, which a shown window's tab strip can be. No session runs anywhere, so none.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int /*index*/) const { return {}; }
-    Q_INVOKABLE void closeTabAtIndex(int) {}
+    /// Mirrors WindowController::closeTabAtIndex() as far as the window sees it: the model announces the
+    /// active row after every close, whichever tab went (WindowController::onTabClosed()).
+    Q_INVOKABLE void closeTabAtIndex(int index)
+    {
+        calls << QStringLiteral("closeTabAtIndex:%1").arg(index);
+        emit activeTabIndexChanged();
+    }
     Q_INVOKABLE void closeOtherTabs(int) {}
     Q_INVOKABLE void closeTabsToRight(int) {}
 
@@ -518,6 +555,8 @@ class MockMainController: public MainWindowControllerMock
     std::vector<std::pair<int, int>> chromeKeys;
     /// What chromeKey() answers.
     bool chromeKeysHandled = true;
+    /// Whether chromeKey() acts on Alt+Left, Alt+Right and Escape in the tab well as the controller does.
+    bool mirrorsChromeKeys = false;
 
   signals:
     void activeTabIndexChanged();

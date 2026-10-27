@@ -3514,4 +3514,93 @@ TEST_CASE("the window reports what its chrome shows, and the toolbar's items wea
     CHECK_FALSE(controller.reportedTabsShown);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+namespace
+{
+
+/// The pane tree Main.qml's terminal content is, which a key typed into the terminal lands in.
+[[nodiscard]] QQuickItem* paneTreeOf(QObject& root)
+{
+    auto const items = root.findChildren<QQuickItem*>();
+    auto const tree = std::ranges::find_if(items, [](QQuickItem const* item) {
+        return QByteArrayView(item->metaObject()->className()).startsWith("PaneNode");
+    });
+    return tree != items.end() ? *tree : nullptr;
+}
+
+} // namespace
+
+TEST_CASE("moving a tab with the keyboard keeps the chrome focus, and Escape gives it back (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    auto scene = palette.scene();
+    scene.tabCount = 3;
+    MockMainController controller { scene };
+    controller.mirrorsChromeKeys = true;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto& window = activeMainWindow(*root);
+    auto const tabs = tabDelegates(*root);
+    auto* paneTree = paneTreeOf(*root);
+    REQUIRE(paneTree != nullptr);
+
+    // Ctrl+F6 puts the focus on the active tab; Alt+Right moves that tab one place and the model announces
+    // it.
+    controller.focusTabWell(0);
+    REQUIRE(QTest::qWaitFor([&] { return tabs[0]->hasActiveFocus(); }, 1000));
+    QTest::keyClick(&window, Qt::Key_Right, Qt::AltModifier);
+    QCoreApplication::processEvents();
+
+    // The moved tab still holds the chrome focus, and the ring: the announcement was not the user leaving.
+    CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Tabs));
+    CHECK(controller.focusedTabIndex() == 1);
+    CHECK(controller.calls.filter(QStringLiteral("leaveChrome")).isEmpty());
+    REQUIRE(QTest::qWaitFor([&] { return tabs[1]->hasActiveFocus(); }, 1000));
+    CHECK(ringedTabs(*root) == std::vector<int> { 1 });
+
+    // So it can move again, and Escape ends the chrome focus.
+    QTest::keyClick(&window, Qt::Key_Right, Qt::AltModifier);
+    QCoreApplication::processEvents();
+    CHECK(controller.focusedTabIndex() == 2);
+    QTest::keyClick(&window, Qt::Key_Escape);
+    QCoreApplication::processEvents();
+    CHECK(controller.chromeFocusArea() == static_cast<int>(contour::window::ChromeArea::Terminal));
+    CHECK(ringedTabs(*root).empty());
+    CHECK(isWithin(window.activeFocusItem(), paneTree));
+
+    // A key typed now is the terminal's: the chrome is not offered it.
+    auto const offered = controller.chromeKeys.size();
+    QTest::keyClick(&window, Qt::Key_A);
+    CHECK(controller.chromeKeys.size() == offered);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("closing another tab does not take the focus out of the chrome (offscreen)",
+          "[contour][gui][qml][mainwindow][chromefocus]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    auto scene = palette.scene();
+    scene.tabCount = 3;
+    MockMainController controller { scene };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    [[maybe_unused]] auto& window = activeMainWindow(*root);
+    auto const tabs = tabDelegates(*root);
+
+    controller.focusTabWell(0);
+    REQUIRE(QTest::qWaitFor([&] { return tabs[0]->hasActiveFocus(); }, 1000));
+
+    // A tab closes in the background (its shell exited): the model announces the active row.
+    controller.closeTabAtIndex(2);
+    QCoreApplication::processEvents();
+
+    CHECK(controller.calls.filter(QStringLiteral("leaveChrome")).isEmpty());
+    CHECK(controller.focusedTabIndex() == 0);
+    CHECK(tabs[0]->hasActiveFocus());
+    CHECK(ringedTabs(*root) == std::vector<int> { 0 });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 // }}}

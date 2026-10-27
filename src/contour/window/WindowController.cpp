@@ -1012,15 +1012,20 @@ void WindowController::moveChromeFocus(window::ChromeFocusAction action)
     enterChromeArea(window::chromeFocusTarget(action, _chromeArea, _chromePresence));
 }
 
-void WindowController::leaveChrome()
+bool WindowController::dropChromeFocus()
 {
     if (_chromeArea == window::ChromeArea::Terminal)
-        return;
+        return false;
     _chromeArea = window::ChromeArea::Terminal;
     _focusedTabIndex = -1;
     _focusedToolbarIndex = -1;
     emit chromeFocusChanged();
-    if (_activeDisplay != nullptr)
+    return true;
+}
+
+void WindowController::leaveChrome()
+{
+    if (dropChromeFocus() && _activeDisplay != nullptr)
         _activeDisplay->forceActiveFocus();
 }
 
@@ -1120,18 +1125,21 @@ bool WindowController::runChromeCommand(window::ChromeCommand command)
         case ChromeCommand::Activate:
             if (!inTabs)
                 return false; // a toolbar item is pressed by the item itself
-            activateTab(_focusedTabIndex);
+            // Leave first: the window gives the terminal the keyboard when the active tab changes, and only
+            // while the chrome no longer holds it (a reorder or a background close keeps it).
+            {
+                auto const tab = _focusedTabIndex;
+                leaveChrome();
+                activateTab(tab);
+            }
             return true;
         case ChromeCommand::Close: closeTabAskingIfBusy(_focusedTabIndex); return true;
         case ChromeCommand::MoveLeft:
         case ChromeCommand::MoveRight: {
             auto const target = _focusedTabIndex + (command == ChromeCommand::MoveLeft ? -1 : 1);
+            // The focus follows the moved tab in onTabAboutToBeMoved(), where every move is seen.
             if (target >= 0 && target < count())
-            {
                 moveTab(_focusedTabIndex, target);
-                _focusedTabIndex = target;
-                emit chromeFocusChanged();
-            }
             return true;
         }
         case ChromeCommand::Leave: leaveChrome(); return true;
@@ -2604,6 +2612,15 @@ void WindowController::onTabAdded(int)
 
 void WindowController::onTabAboutToBeRemoved(int index)
 {
+    // The tab well's focus belongs to a tab, not to a row: a tab before it going shifts it, and the tab
+    // itself going ends it.
+    if (_chromeArea == window::ChromeArea::Tabs)
+    {
+        if (index == _focusedTabIndex)
+            _focusedTabRemoval = FocusedTabRemoval::Pending;
+        else if (index < _focusedTabIndex)
+            --_focusedTabIndex;
+    }
     beginRemoveRows(QModelIndex(), index, index);
 }
 
@@ -2611,6 +2628,10 @@ void WindowController::onTabClosed()
 {
     endRemoveRows();
     _badges.clear(); // Its badge goes with it.
+    if (std::exchange(_focusedTabRemoval, FocusedTabRemoval::None) == FocusedTabRemoval::Pending)
+        static_cast<void>(dropChromeFocus()); // Main.qml gives the terminal the keyboard on the signal below.
+    else if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged(); // the focused tab may have moved up a row
     emit countChanged();
     // See onTabAdded: re-notify so the strip re-hides in Multiple mode when the count falls back to 1.
     emit tabBarShouldShowChanged();
@@ -2620,6 +2641,16 @@ void WindowController::onTabClosed()
 
 void WindowController::onTabAboutToBeMoved(int fromIndex, int toIndex)
 {
+    // The focus follows its tab: the moved one lands on toIndex, and those between shift by one.
+    if (_chromeArea == window::ChromeArea::Tabs)
+    {
+        if (_focusedTabIndex == fromIndex)
+            _focusedTabIndex = toIndex;
+        else if (fromIndex < _focusedTabIndex && _focusedTabIndex <= toIndex)
+            --_focusedTabIndex;
+        else if (toIndex <= _focusedTabIndex && _focusedTabIndex < fromIndex)
+            ++_focusedTabIndex;
+    }
     auto const destination = toIndex > fromIndex ? toIndex + 1 : toIndex;
     _tabMoveInProgress = beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destination);
 }
@@ -2631,6 +2662,8 @@ void WindowController::onTabMoved()
         endMoveRows();
         _tabMoveInProgress = false;
     }
+    if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged();
     emit activeTabIndexChanged();
     refreshAllTabTitles();
 }
