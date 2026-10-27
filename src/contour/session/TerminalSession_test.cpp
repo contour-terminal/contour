@@ -5926,9 +5926,9 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK(launcher.detached.empty());
     }
 
-    SECTION("a local file:// link opens the file its tooltip names")
+    SECTION("a local file:// link opens the file its pill names")
     {
-        // Read by the resolver the tooltip uses (vtbackend::localPathOfFileUrl): a fragment is no part of the
+        // Read by the resolver the pill uses (vtbackend::localPathOfFileUrl): a fragment is no part of the
         // path. A drive-letter link, which Qt cannot parse, is a local file only under the Windows path
         // convention; anywhere else it names no file here, and both show and open it as written.
         auto const windowsPaths = vtbackend::NativePathConvention == vtbackend::PathConvention::Windows;
@@ -5951,8 +5951,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
             CHECK(launcher.openedUrls.back()
                   == (path ? QUrl::fromLocalFile(QString::fromStdString(*path))
                            : QUrl(QString::fromStdString(uri))));
-            CHECK(contour::session::hyperlinkTooltipText(
-                      uri, std::string { contour::test::TestApp::HostName }, 64)
+            CHECK(contour::session::linkPillText(uri, std::string { contour::test::TestApp::HostName }, 64)
                   == path.value_or(uri));
         }
     }

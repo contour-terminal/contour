@@ -33,24 +33,6 @@ namespace contour::session
 /// @return @p text unchanged when it already fits, otherwise the elided form.
 [[nodiscard]] std::string elideMiddle(std::string_view text, size_t maxLength);
 
-/// What to show for a hovered OSC 8 target, or empty for "say nothing".
-///
-/// A local file:// URI shows its decoded path, because the scheme and the authority naming this very
-/// machine are noise to someone looking at a path they may want to open. Everything else shows the URI as
-/// written: for a remote target the scheme and host are exactly the part worth reading before clicking.
-/// Either is made safe to show (vtbackend::SanitizePurpose::Display), so a control or bidi override it
-/// holds is replaced rather than obeyed.
-///
-/// @param uri       The hyperlink's target, as the application set it.
-/// @param localHost This machine's host name, against which the URI's authority is measured; nullopt when
-///                  no file:// URI names a path here -- a pane replicating another machine's daemon
-///                  (vtbackend::Terminal::fileUrlLocalHost).
-/// @param maxLength Maximum number of codepoints to show.
-/// @return The tooltip text, or empty when there is nothing worth showing.
-[[nodiscard]] std::string hyperlinkTooltipText(std::string_view uri,
-                                               std::optional<std::string_view> localHost,
-                                               size_t maxLength);
-
 /// What the link pill says for an OSC 8 target (spec R-f).
 ///
 /// A URL with an authority reads as its host and its non-empty, decoded path segments joined by " › "

@@ -154,10 +154,12 @@ namespace detail
         return {};
     if (in.host == LinkPillHost::PaneHeader && in.findBar != FindBarPresence::Top
         && in.headerSlotWidth >= in.pillMinimumWidth)
-        return { .anchor = LinkPillAnchor::HeaderTrailing,
-                 .x = in.headerSlotWidth - std::min(in.pillWidth, in.headerSlotWidth),
-                 .y = 0,
-                 .width = std::min(in.pillWidth, in.headerSlotWidth) };
+    {
+        auto const width = std::min(in.pillWidth, in.headerSlotWidth);
+        return {
+            .anchor = LinkPillAnchor::HeaderTrailing, .x = in.headerSlotWidth - width, .y = 0, .width = width
+        };
+    }
 
     auto const width = std::min(in.pillWidth, in.paneWidth - (2 * in.insetRight));
     if (width <= 0 || in.grid.cellWidth <= 0 || in.grid.cellHeight <= 0)

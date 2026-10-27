@@ -159,28 +159,13 @@ std::string elideMiddle(std::string_view text, size_t maxLength)
     return out;
 }
 
-std::string hyperlinkTooltipText(std::string_view uri,
-                                 std::optional<std::string_view> localHost,
-                                 size_t maxLength)
-{
-    if (uri.empty())
-        return {};
-
-    // Shown, so made safe to show: a decoded path, or the target itself, may hold a line feed or a bidi
-    // override, which would add a line to the tooltip or reverse what follows it.
-    return elideMiddle(
-        vtbackend::sanitizeCommandLine(localFilePath(uri, localHost).value_or(std::string { uri }),
-                                       vtbackend::SanitizePurpose::Display),
-        maxLength);
-}
-
 std::string linkPillText(std::string_view uri, std::optional<std::string_view> localHost, size_t maxLength)
 {
     if (uri.empty())
         return {};
 
-    // A local file is its path. A file elsewhere keeps its scheme, as the tooltip did: the path alone would
-    // read as one on this machine.
+    // A local file is its path. A file elsewhere keeps its scheme: the path alone would read as one on this
+    // machine.
     if (auto const path = localFilePath(uri, localHost))
         return shown(*path, maxLength);
     if (isFileUrl(uri))

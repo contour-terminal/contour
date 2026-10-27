@@ -1650,19 +1650,19 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
     }
 }
 
+std::chrono::steady_clock::duration TerminalSession::elapsed() const noexcept
+{
+    return _app.terminalClocks().steady.now() - _startTime;
+}
+
 int TerminalSession::getUptime() const noexcept
 {
-    auto const diff =
-        std::chrono::duration_cast<std::chrono::seconds>(_app.terminalClocks().steady.now() - _startTime);
-    return static_cast<int>(diff.count());
+    return static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(elapsed()).count());
 }
 
 float TerminalSession::uptime() const noexcept
 {
-    using namespace std::chrono;
-    auto const uptimeMsecs =
-        duration_cast<milliseconds>(_app.terminalClocks().steady.now() - _startTime).count();
-    return static_cast<float>(uptimeMsecs) / 1000.0f;
+    return std::chrono::duration<float>(elapsed()).count();
 }
 
 void TerminalSession::requestSizeIndicator(SizeIndicatorKind event)
@@ -1675,8 +1675,7 @@ void TerminalSession::requestSizeIndicator(SizeIndicatorKind event)
     // The profile's YAML boolean, converted here at the boundary.
     auto const setting =
         profile().sizeIndicatorOnResize.value() ? SizeIndicatorSetting::On : SizeIndicatorSetting::Off;
-    if (sizeIndicatorGate(_app.terminalClocks().steady.now() - _startTime, setting)
-        == SizeIndicatorGate::Quiet)
+    if (sizeIndicatorGate(elapsed(), setting) == SizeIndicatorGate::Quiet)
         return;
 
     _sizeIndicatorKind = nextSizeIndicatorKind(_sizeIndicatorBurst, _sizeIndicatorKind, event);
@@ -2201,8 +2200,7 @@ void TerminalSession::handleDeviceClosedLocked()
     if (!_terminal.device().isClosed())
         _terminal.device().close();
 
-    auto const now = _app.terminalClocks().steady.now();
-    auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
+    auto const diff = std::chrono::duration_cast<std::chrono::seconds>(elapsed());
 
     auto const exitStatus = sessionExitStatusOf(_terminal.device());
     if (exitStatus)
@@ -3962,8 +3960,8 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             decidesPointerShapeForCell
             || (chord == vtbackend::LinkRevealChange::Changed && _display != nullptr);
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
-        // Read only on a new cell, where the tooltip is updated (below).
-        auto const tooltipTarget = [&]() -> HoveredLink {
+        // Read only on a new cell, where the hovered link is updated (below).
+        auto const hoveredLink = [&]() -> HoveredLink {
             if (!decidesPointerShapeForCell)
                 return std::monostate {};
             if (auto const link = _terminal.tryGetHoveringHyperlink())
@@ -3975,7 +3973,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         auto const pointsAtTarget = decidesPointerShape
                                     && (_terminal.linkPointerShape() == vtbackend::LinkPointerShape::Hand
                                         || _terminal.collapsedFoldLabelAt(pos).has_value());
-        return Hover { .link = tooltipTarget(),
+        return Hover { .link = hoveredLink(),
                        .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
                                                      : std::nullopt,
                        .pointerShape =

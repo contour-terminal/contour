@@ -467,15 +467,38 @@ class ChromeSnapshotScene
 
     /// Gives every leaf's session the page its pane holds, and raises its size indicator with that size, as
     /// the resize that settled on it does.
+    ///
+    /// Each pill is then held: its pane's hold timer (`sizeIndicatorHold`) is stopped, so the pill stays
+    /// until the scene goes, and the picture is taken of a pill fully shown however long the grab takes --
+    /// never of one fading out after its 600 ms hold.
     void showSizeIndicators()
     {
+        auto pills = std::vector<QQuickItem*> {};
         for (auto const [session, terminal]: std::views::zip(_sessions, terminalsOfLeaves()))
         {
             auto const page = pageOf(*terminal);
             session->setPageSize(unbox(page.columns), unbox(page.lines));
             session->requestSizeIndicator(QString::fromStdString(
                 session::sizeIndicatorText(session::SizeIndicatorKind::PageSize, page, 0.0)));
+            auto* hold = terminal->findChild<QObject*>(QStringLiteral("sizeIndicatorHold"));
+            REQUIRE(hold != nullptr);
+            QMetaObject::invokeMethod(hold, "stop");
+            auto* pill = terminal->findChild<QQuickItem*>(QStringLiteral("sizeIndicator"));
+            REQUIRE(pill != nullptr);
+            pills.push_back(pill);
         }
+        waitFullyShown(pills);
+    }
+
+    /// Waits until every one of @p overlays has faded fully in: a state, not a duration.
+    static void waitFullyShown(std::span<QQuickItem* const> overlays)
+    {
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                return std::ranges::all_of(overlays,
+                                           [](QQuickItem const* item) { return item->opacity() == 1.0; });
+            },
+            2000));
     }
 
     /// Holds the follow modifier over a link in the active pane: the session names SnapshotLinkTarget, how
@@ -499,6 +522,9 @@ class ChromeSnapshotScene
                                                 vtbackend::Modifiers {},
                                                 command::shortcutStyleFor(variantHost(_variant)));
         session.setLinkTarget(QString::fromUtf8(SnapshotLinkTarget), QString::fromStdString(hint), true);
+        auto* pill = terminal->findChild<QQuickItem*>(QStringLiteral("linkPill"));
+        REQUIRE(pill != nullptr);
+        waitFullyShown(std::array { pill });
     }
 
     /// Scrolls the active pane SnapshotScrollOffset lines back into SnapshotHistoryLines of history, with a
@@ -524,6 +550,10 @@ class ChromeSnapshotScene
                                    colors);
         session->setScrollbarVisible(true);
         session->setScrollOffset(SnapshotScrollOffset);
+        auto* bar =
+            terminalsOfLeaves()[ActiveLeaf]->findChild<QQuickItem*>(QStringLiteral("verticalScrollBar"));
+        REQUIRE(bar != nullptr);
+        waitFullyShown(std::array { bar });
     }
 
     /// Opens the active pane's find bar, as the SearchReverse action does, and waits for it to stand open.

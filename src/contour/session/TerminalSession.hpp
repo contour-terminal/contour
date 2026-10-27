@@ -519,8 +519,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] std::string const& hoveredDetectedLinkText();
 
     /// Re-decides whether the link pill shows and what its hint says, from the link under the pointer, the
-    /// held modifiers and whether an application takes the mouse; emits linkTargetChanged (and the tooltip's
-    /// signal) on a change. GUI thread; takes the terminal lock.
+    /// held modifiers and whether an application takes the mouse; emits linkTargetChanged on a change. GUI
+    /// thread; takes the terminal lock.
     /// @param text The link target's text (linkPillText()); empty over none.
     void refreshLinkTarget(QString text);
 
@@ -1572,6 +1572,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// @return Seconds since the session started, by the app's injected steady clock.
     float uptime() const noexcept;
+
+    /// @return How long the session has run, by the app's injected steady clock.
+    [[nodiscard]] std::chrono::steady_clock::duration elapsed() const noexcept;
 
     /// The permission the active profile configures for @p role.
     ///
