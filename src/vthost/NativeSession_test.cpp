@@ -1095,6 +1095,12 @@ struct NativeSessionFlushTester
         return session._flushDeadline;
     }
 
+    /// @return Whether @p id has an echo state this connection last sent or still owes.
+    static bool tracksInputEcho(NativeSession const& session, vtworkspace::SessionId id)
+    {
+        return session._inputEchoSent.contains(id.value) || session._inputEchoPending.contains(id.value);
+    }
+
     /// @return How many flush coroutines are live, superseded ones included.
     static std::size_t flushesInFlight(NativeSession const& session) { return session._flushesInFlight; }
 
@@ -5983,6 +5989,21 @@ TEST_CASE("the idle check of the echo state runs only within the activity window
     f.update(client, id, "Password:");
     REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
     CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+}
+
+TEST_CASE("a closed session's echo bookkeeping is dropped with the rest of its per-session state",
+          "[vthost][native][flush][inputecho]")
+{
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attach(id, inputEchoHello());
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.update(client, id, "Password:");
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    REQUIRE(NativeSessionFlushTester::tracksInputEcho(*client.session, id));
+
+    client.session->sessionClosed(id);
+    CHECK_FALSE(NativeSessionFlushTester::tracksInputEcho(*client.session, id));
 }
 
 TEST_CASE("a viewer that does not mirror the echo state arms no idle check",

@@ -389,6 +389,8 @@ void NativeSession::sessionClosed(SessionId session)
     std::erase(_snapshotQueue, session.value);
     _recordsAwaitingRoom.erase(session.value);
     _programStatusPending.erase(session.value);
+    _inputEchoPending.erase(session.value);
+    _inputEchoSent.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
