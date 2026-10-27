@@ -4079,7 +4079,9 @@ TEST_CASE("the command a restart stopped is reported until the session runs one 
     {
         m.increment({ runningWire(2) });
         REQUIRE(m.mirror->interruptedCommand().empty());
-        m.increment({}); // a later delta must not resurrect the stale value
+        // A resync that states none, with the value the mirror was first told gone from it: nothing the
+        // mirror kept may resurrect the stale value.
+        m.snapshot(stateWith({ finishedWire(1, 0), promptingWire(2) }));
         CHECK(m.mirror->interruptedCommand().empty());
     }
 }
