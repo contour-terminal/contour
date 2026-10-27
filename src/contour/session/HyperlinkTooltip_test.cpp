@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The pure decision layer behind the OSC 8 hyperlink tooltip: what text to show, and when to show or
-// hide it. The tooltip itself is a QML popup and cannot be opened offscreen, so this is the seam that
-// carries the behaviour under test.
+// The pure decision layer behind the link pill: what a hovered link's target says, and when it changes.
 
 #include <contour/session/HyperlinkTooltip.hpp>
 
@@ -24,9 +22,6 @@ using contour::session::HoverChange;
 using contour::session::HyperlinkHoverTracker;
 using contour::session::hyperlinkTooltipText;
 using contour::session::OscLinkTarget;
-using vtbackend::CellLocation;
-using vtbackend::ColumnOffset;
-using vtbackend::LineOffset;
 
 namespace
 {
@@ -36,11 +31,6 @@ namespace
     if (uri.empty())
         return std::monostate {};
     return OscLinkTarget { .uri = std::string { uri } };
-}
-
-[[nodiscard]] CellLocation cell(int line, int column)
-{
-    return CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
 }
 
 /// The number of codepoints in @p text (its UTF-8 lead bytes).
@@ -324,15 +314,14 @@ TEST_CASE("HyperlinkHoverTracker carries a detected link's text as it is handed 
     // A detected link's pill text is formatted already (linkPillText(DetectedLink)): read as a URI again, a
     // path would become a breadcrumb of a breadcrumb.
     auto tracker = HyperlinkHoverTracker { [] { return std::optional<std::string_view> { "fedora" }; } };
-    auto const entered =
-        tracker.update(contour::session::DetectedLinkText { .text = "x.y \u203A a" }, cell(1, 2), 64);
+    auto const entered = tracker.update(contour::session::DetectedLinkText { .text = "x.y \u203A a" }, 64);
     CHECK(entered.change == HoverChange::Changed);
     CHECK(entered.text == "x.y \u203A a");
     // The same text again is the same link.
-    CHECK(tracker.update(contour::session::DetectedLinkText { .text = "x.y \u203A a" }, cell(1, 3), 64).change
+    CHECK(tracker.update(contour::session::DetectedLinkText { .text = "x.y \u203A a" }, 64).change
           == HoverChange::Unchanged);
     // An OSC 8 link spelled like it is another link.
-    CHECK(tracker.update(osc("x.y \u203A a"), cell(1, 4), 64).change == HoverChange::Changed);
+    CHECK(tracker.update(osc("x.y \u203A a"), 64).change == HoverChange::Changed);
 }
 
 TEST_CASE("HyperlinkHoverTracker shows a detected link's text safe and short", "[contour][hyperlink]")
@@ -341,13 +330,11 @@ TEST_CASE("HyperlinkHoverTracker shows a detected link's text safe and short", "
     auto tracker = HyperlinkHoverTracker { [] { return std::optional<std::string_view> { "fedora" }; } };
     auto const rightToLeftOverride = std::string { '\xE2', '\x80', '\xAE' };
     auto const spoofed = tracker.update(
-        contour::session::DetectedLinkText { .text = "/tmp/" + rightToLeftOverride + "txt.exe" },
-        cell(0, 0),
-        64);
+        contour::session::DetectedLinkText { .text = "/tmp/" + rightToLeftOverride + "txt.exe" }, 64);
     CHECK(spoofed.text == "/tmp/\xEF\xBF\xBDtxt.exe");
 
-    auto const lengthy = tracker.update(
-        contour::session::DetectedLinkText { .text = "/" + std::string(300, 'x') }, cell(1, 0), 40);
+    auto const lengthy =
+        tracker.update(contour::session::DetectedLinkText { .text = "/" + std::string(300, 'x') }, 40);
     CHECK(codepointCount(lengthy.text) == 40);
 }
 
@@ -359,51 +346,48 @@ TEST_CASE("HyperlinkHoverTracker asks where a file:// target is local at each li
     auto localHost = std::optional<std::string_view> { "fedora" };
     auto tracker = HyperlinkHoverTracker { [&] { return localHost; } };
 
-    CHECK(tracker.update(osc("file:///tmp/x.log"), cell(0, 0), 64).text == "/tmp/x.log");
+    CHECK(tracker.update(osc("file:///tmp/x.log"), 64).text == "/tmp/x.log");
     CHECK(tracker.clear().change == HoverChange::Changed);
 
     localHost = std::nullopt;
-    CHECK(tracker.update(osc("file:///tmp/x.log"), cell(0, 0), 64).text == "file:///tmp/x.log");
+    CHECK(tracker.update(osc("file:///tmp/x.log"), 64).text == "file:///tmp/x.log");
 }
 
 TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hyperlink]")
 {
     auto tracker = HyperlinkHoverTracker { [] { return std::optional<std::string_view> { "fedora" }; } };
 
-    SECTION("entering a link announces it, anchored where it was entered")
+    SECTION("entering a link announces it")
     {
-        auto const entered = tracker.update(osc("https://example.com/"), cell(3, 10), 64);
+        auto const entered = tracker.update(osc("https://example.com/"), 64);
         CHECK(entered.change == HoverChange::Changed);
         CHECK(entered.text == "example.com");
-        CHECK(entered.anchor == cell(3, 10));
     }
 
     SECTION("moving within one link announces nothing")
     {
-        CHECK(tracker.update(osc("https://example.com/"), cell(3, 10), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
 
-        // The whole reason this holds state: a tooltip has a show delay, and re-announcing on every
-        // cell would restart it, so a tooltip over a link being slowly traced would never appear.
-        for (auto const column: { 11, 12, 13, 14 })
-            CHECK_FALSE(tracker.update(osc("https://example.com/"), cell(3, column), 64).change
-                        == HoverChange::Changed);
+        // The whole reason this holds state: re-announcing on every cell would re-decide the pill, and copy
+        // the target again, for each cell of a link the pointer traces.
+        for ([[maybe_unused]] auto const cell: std::views::iota(0, 4))
+            CHECK_FALSE(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
     }
 
-    SECTION("crossing to a different link re-anchors")
+    SECTION("crossing to a different link announces it")
     {
-        CHECK(tracker.update(osc("https://a.example/"), cell(1, 1), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://a.example/"), 64).change == HoverChange::Changed);
 
-        auto const crossed = tracker.update(osc("https://b.example/"), cell(1, 40), 64);
+        auto const crossed = tracker.update(osc("https://b.example/"), 64);
         CHECK(crossed.change == HoverChange::Changed);
         CHECK(crossed.text == "b.example");
-        CHECK(crossed.anchor == cell(1, 40));
     }
 
-    SECTION("leaving a link hides the tooltip")
+    SECTION("leaving a link clears the target")
     {
-        CHECK(tracker.update(osc("https://example.com/"), cell(3, 10), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
 
-        auto const left = tracker.update(osc(""), cell(3, 40), 64);
+        auto const left = tracker.update(osc(""), 64);
         CHECK(left.change == HoverChange::Changed);
         CHECK(left.text.empty());
     }
@@ -413,30 +397,30 @@ TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hy
         // Both a bare clear() and a move over plain text must stay silent, or every mouse move over an
         // ordinary terminal would push an update to the GUI.
         CHECK_FALSE(tracker.clear().change == HoverChange::Changed);
-        CHECK_FALSE(tracker.update(osc(""), cell(0, 0), 64).change == HoverChange::Changed);
-        CHECK_FALSE(tracker.update(osc(""), cell(0, 1), 64).change == HoverChange::Changed);
+        CHECK_FALSE(tracker.update(osc(""), 64).change == HoverChange::Changed);
+        CHECK_FALSE(tracker.update(osc(""), 64).change == HoverChange::Changed);
     }
 
     SECTION("clear() hides, and a second clear() stays silent")
     {
-        CHECK(tracker.update(osc("https://example.com/"), cell(2, 2), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
         CHECK(tracker.clear().change == HoverChange::Changed);
         CHECK_FALSE(tracker.clear().change == HoverChange::Changed);
     }
 
     SECTION("re-entering the same link after leaving announces it again")
     {
-        CHECK(tracker.update(osc("https://example.com/"), cell(2, 2), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
         CHECK(tracker.clear().change == HoverChange::Changed);
         // The tooltip was hidden, so the same URL is a real transition once more -- a tracker that
         // remembered it would leave the user with no tooltip on the way back.
-        CHECK(tracker.update(osc("https://example.com/"), cell(2, 2), 64).change == HoverChange::Changed);
+        CHECK(tracker.update(osc("https://example.com/"), 64).change == HoverChange::Changed);
     }
 
     SECTION("the shown text is elided, so one absurd URL cannot span the window")
     {
         auto const huge = std::string("https://example.com/") + std::string(500, 'x');
-        auto const entered = tracker.update(osc(huge), cell(0, 0), 40);
+        auto const entered = tracker.update(osc(huge), 40);
         CHECK(entered.change == HoverChange::Changed);
         CHECK(codepointCount(entered.text) == 40);
     }

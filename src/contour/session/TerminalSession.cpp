@@ -3996,7 +3996,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // The hovered link follows the cell; whether its pill shows follows the chord as well (a modifier pressed
     // while another window had the focus arrives with the next move, not as a key).
     if (decidesPointerShapeForCell)
-        updateHyperlinkHover(hover.link, pos);
+        updateHyperlinkHover(hover.link);
     // Whatever the cell did: a move onto the next cell of the same link updates no target, but the chord it
     // carries may still change whether the pill shows.
     if (hover.chord == vtbackend::LinkRevealChange::Changed)
@@ -4218,8 +4218,8 @@ ConsumedByStickyHeader TerminalSession::sendStickyHeaderHoverEvent(
 
 namespace
 {
-    /// The most codepoints a link's tooltip shows; a longer target is elided in its middle.
-    constexpr auto MaxTooltipLength = size_t { 100 };
+    /// The most codepoints a link's pill shows; a longer target is elided in its middle.
+    constexpr auto MaxLinkTargetLength = size_t { 100 };
 } // namespace
 
 std::string const& TerminalSession::hoveredDetectedLinkText()
@@ -4235,17 +4235,17 @@ std::string const& TerminalSession::hoveredDetectedLinkText()
         _hoveredDetectedLink = HoveredDetectedLink {
             .index = index,
             .link = id,
-            .text = link != nullptr ? linkPillText(*link, MaxTooltipLength) : std::string {},
+            .text = link != nullptr ? linkPillText(*link, MaxLinkTargetLength) : std::string {},
         };
     }
     return _hoveredDetectedLink.text;
 }
 
-void TerminalSession::updateHyperlinkHover(HoveredLink const& link, vtbackend::CellLocation cell)
+void TerminalSession::updateHyperlinkHover(HoveredLink const& link)
 {
     // Tracked whatever hyperlink_hover_tooltip says: the key decides when the target shows, not whether it is
     // known (refreshLinkTarget()).
-    auto const change = _hyperlinkHover.update(link, cell, MaxTooltipLength);
+    auto const change = _hyperlinkHover.update(link, MaxLinkTargetLength);
     if (change.change == HoverChange::Unchanged)
         return;
 
@@ -4263,14 +4263,12 @@ void TerminalSession::refreshLinkTarget(QString text)
         vtbackend::Modifiers bypass;
     };
     auto const state = _terminal.runUnderStateLock([&] {
-        // A plain click goes to the application only while it tracks the mouse, input is allowed and vi mode
-        // is Insert (Terminal::allowPassMouseEventToApp): only then does following a link need the bypass.
-        auto const applicationTakesClicks = _terminal.mouseProtocol().has_value() && _terminal.allowInput()
-                                            && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert;
+        // Only while the application takes plain clicks does following a link need the bypass.
         return LinkState { .pointer = _terminal.hoverPointer(),
                            .held = _terminal.followModifiers(),
-                           .bypass = applicationTakesClicks ? _config.bypassMouseProtocolModifiers.value()
-                                                            : vtbackend::Modifiers {} };
+                           .bypass = _terminal.applicationTakesClicks()
+                                         ? _config.bypassMouseProtocolModifiers.value()
+                                         : vtbackend::Modifiers {} };
     });
 
     // Re-read at every decision, so a configuration reload takes effect with the next one.

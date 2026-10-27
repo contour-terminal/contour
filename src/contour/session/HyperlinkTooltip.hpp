@@ -147,15 +147,14 @@ enum class HoverChange : uint8_t
     Changed,       ///< The link under the pointer, and so its text, changed.
 };
 
-/// Tracks which hyperlink the pointer is over, and says when a tooltip should appear or vanish.
+/// Tracks which hyperlink the pointer is over, and says when the link pill's target changes.
 ///
-/// Kept free of Qt, of the terminal and of the display so the decision is testable on its own — the
-/// tooltip itself cannot be, because a QML popup has no overlay to open into offscreen.
+/// Kept free of Qt, of the terminal and of the display so the decision is testable on its own.
 class HyperlinkHoverTracker
 {
   public:
     /// Says, when asked, the host name a file:// target must name to be a path on this machine, or nullopt
-    /// when none does. @see hyperlinkTooltipText
+    /// when none does. @see linkPillText
     using LocalHostSource = std::function<std::optional<std::string_view>()>;
 
     /// @param localHost Asked at each link the pointer enters, telling a local file:// target from a remote
@@ -163,37 +162,34 @@ class HyperlinkHoverTracker
     ///        after it is built (vtbackend::Terminal::fileUrlLocalHost).
     explicit HyperlinkHoverTracker(LocalHostSource localHost): _localHost { std::move(localHost) } {}
 
-    /// What the GUI should do about the tooltip, if anything.
+    /// What the GUI should do about the link pill's target, if anything.
     struct Change
     {
         HoverChange change = HoverChange::Unchanged; ///< Whether anything need be announced at all.
-        std::string text;                            ///< What to show (linkPillText()); empty means hide.
-        vtbackend::CellLocation anchor {};           ///< The cell the pointer ENTERED the link at.
+        std::string text;                            ///< What to show (linkPillText()); empty means none.
     };
 
     /// Reports the hyperlink under the pointer.
     ///
-    /// Moving WITHIN one link reports no change. That is the point of holding state here: a tooltip has
-    /// a show delay, and re-announcing on every cell would restart it on each one, so a tooltip over a
-    /// link the user is slowly tracing would never actually appear.
+    /// Moving WITHIN one link reports no change. That is the point of holding state here: the session
+    /// re-decides the pill on each change, and re-announcing on every cell would redo that, and copy the
+    /// target again, for each cell of a link the pointer traces.
     ///
     /// @param link      The link under the pointer; std::monostate over none.
-    /// @param cell      Where the pointer is, in viewport coordinates.
     /// @param maxLength Maximum number of codepoints an OSC 8 target's text shows; a detected link's text is
     ///                  shown as handed in.
     /// @return What changed, if anything.
-    [[nodiscard]] Change update(HoveredLink const& link, vtbackend::CellLocation cell, size_t maxLength);
+    [[nodiscard]] Change update(HoveredLink const& link, size_t maxLength);
 
     /// Reports that there is no longer a hyperlink under the pointer -- it left the terminal, or the
     /// view scrolled out from under it.
     ///
-    /// @return What changed; nothing when no tooltip was showing.
+    /// @return What changed; nothing when no link was under the pointer.
     [[nodiscard]] Change clear();
 
   private:
     LocalHostSource _localHost;
     HoveredLink _link {};
-    vtbackend::CellLocation _anchor {};
 };
 
 } // namespace contour::session

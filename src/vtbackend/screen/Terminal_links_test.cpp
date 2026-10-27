@@ -160,6 +160,23 @@ TEST_CASE("Terminal.links.anApplicationThatTakesClicksKeepsLinksAtRest", "[termi
     CHECK(mock.terminal.linkPointerShape() == LinkPointerShape::Hand);
 }
 
+TEST_CASE("Terminal.links.applicationTakesClicksOnlyWhileItTracksTheMouseInInsertMode", "[terminal][links]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    CHECK_FALSE(mock.terminal.applicationTakesClicks());
+    mock.writeToScreen("\033[?1000h");
+    CHECK(mock.terminal.applicationTakesClicks());
+    // Whatever modifiers are held: the bypass is the caller's question, not this one.
+    (void) mock.terminal.updateHeldModifiers(Modifier::Shift);
+    CHECK(mock.terminal.applicationTakesClicks());
+    // Vi Normal mode keeps clicks in the terminal.
+    mock.terminal.inputHandler().setMode(ViMode::Normal);
+    CHECK_FALSE(mock.terminal.applicationTakesClicks());
+    mock.terminal.inputHandler().setMode(ViMode::Insert);
+    mock.writeToScreen("\033[?1000l");
+    CHECK_FALSE(mock.terminal.applicationTakesClicks());
+}
+
 TEST_CASE("Terminal.links.linksAreRevealedByTheChordTheClickWouldMatch", "[terminal][links]")
 {
     // The follow chord is Ctrl and the bypass modifier Shift (the defaults): a click matches its binding

@@ -6938,7 +6938,7 @@ struct LinkPillScene
     }
 
     /// Shows the target with the hint, and waits until the pill has faded in.
-    void show(bool shown = true)
+    void show(bool shown = true) const
     {
         session->setLinkTarget(
             QStringLiteral("github.com › contour-terminal"), QStringLiteral("⌘-click to open"), shown);

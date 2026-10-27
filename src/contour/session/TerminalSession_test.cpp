@@ -12658,6 +12658,52 @@ TEST_CASE("TerminalSession: a resize asks for the size indicator outside the loc
     CHECK(texts.size() == 1);
 }
 
+TEST_CASE("TerminalSession: a resize on another thread announces the changed page size on the session's",
+          "[contour][session][sizeindicator][threading]")
+{
+    // applyResize() reaches this from the render thread: the signals wake QML, so they are posted and emitted
+    // on the session's thread, after the loop runs; each only where its dimension changed.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    auto const* const sessionThread = QThread::currentThread();
+    auto lines = std::vector<int> {};
+    auto columns = std::vector<int> {};
+    auto offThread = 0;
+    auto const onSessionThread = [&] {
+        if (QThread::currentThread() != sessionThread)
+            ++offThread;
+    };
+    QObject::connect(
+        pane.session.get(), &contour::session::TerminalSession::lineCountChanged, [&](int value) {
+            onSessionThread();
+            lines.push_back(value);
+        });
+    QObject::connect(
+        pane.session.get(), &contour::session::TerminalSession::columnsCountChanged, [&](int value) {
+            onSessionThread();
+            columns.push_back(value);
+        });
+
+    auto const page = [](int columnCount, int lineCount) {
+        return vtbackend::PageSize { .lines = vtbackend::LineCount(lineCount),
+                                     .columns = vtbackend::ColumnCount(columnCount) };
+    };
+    std::thread { [&] { contour::session::announcePageSize(*pane, page(80, 25), page(100, 30)); } }.join();
+    CHECK(lines.empty());
+    CHECK(columns.empty());
+    QCoreApplication::processEvents();
+    CHECK(lines == std::vector { 30 });
+    CHECK(columns == std::vector { 100 });
+
+    // Only the columns changed: only they are announced. The same page: nothing.
+    std::thread { [&] { contour::session::announcePageSize(*pane, page(100, 30), page(120, 30)); } }.join();
+    std::thread { [&] { contour::session::announcePageSize(*pane, page(120, 30), page(120, 30)); } }.join();
+    QCoreApplication::processEvents();
+    CHECK(lines == std::vector { 30 });
+    CHECK(columns == std::vector { 100, 120 });
+    CHECK(offThread == 0);
+}
+
 TEST_CASE("TerminalSession: a font zoom reads in points and keeps its text through its resize",
           "[contour][session][sizeindicator]")
 {
@@ -12959,10 +13005,13 @@ TEST_CASE("TerminalSession: output under a shown pill asks QML to place it again
         session->sendMouseMoveEvent(vtbackend::Modifiers {}, OnFirstLink, vtbackend::PixelCoordinate {});
         REQUIRE(session->linkTargetShown());
         auto const before = session->overlayClearanceRevision();
-        std::thread { [&] {
-            session->terminal().writeToScreen("\r\nmore");
-            session->terminal().writeToScreen("\r\nand more");
-        } }.join();
+        // Two writes, with the GUI thread's loop run between them: the first one's post has arrived and
+        // started the frame, and the second lands inside that frame.
+        std::thread { [&] { session->terminal().writeToScreen("\r\nmore"); } }.join();
+        QCoreApplication::processEvents();
+        CHECK(changes.count() == 0);
+        std::thread { [&] { session->terminal().writeToScreen("\r\nand more"); } }.join();
+        QCoreApplication::processEvents();
         CHECK(changes.count() == 0);
 
         // A frame later, once, for the whole burst.

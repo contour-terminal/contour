@@ -199,20 +199,16 @@ std::string linkPillText(vtbackend::DetectedLink const& link, size_t maxLength)
     return shown(path, maxLength);
 }
 
-HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(HoveredLink const& link,
-                                                            vtbackend::CellLocation cell,
-                                                            size_t maxLength)
+HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(HoveredLink const& link, size_t maxLength)
 {
     if (std::holds_alternative<std::monostate>(link))
         return clear();
 
-    // Still the same link: say nothing, so the tooltip's show delay is not restarted, and so the
-    // tooltip does not slide along as the pointer traces the text.
+    // Still the same link: say nothing, so the pill is not re-decided for each cell the pointer traces.
     if (link == _link)
         return {};
 
     _link = link;
-    _anchor = cell;
     auto text = std::visit(
         [&](auto const& hovered) -> std::string {
             using Hovered = std::decay_t<decltype(hovered)>;
@@ -225,7 +221,7 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(HoveredLink const& l
                 return {};
         },
         link);
-    return { .change = HoverChange::Changed, .text = std::move(text), .anchor = _anchor };
+    return { .change = HoverChange::Changed, .text = std::move(text) };
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()
@@ -234,7 +230,7 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()
         return {};
 
     _link = std::monostate {};
-    return { .change = HoverChange::Changed, .text = {}, .anchor = _anchor };
+    return { .change = HoverChange::Changed, .text = {} };
 }
 
 } // namespace contour::session

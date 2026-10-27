@@ -111,6 +111,19 @@ geometry::GutterWidth configuredGutterWidth(config::Config const& config,
     return extent.leadIn + extent.columns;
 }
 
+void announcePageSize(TerminalSession& session, vtbackend::PageSize oldPage, vtbackend::PageSize newPage)
+{
+    auto const linesChanged = oldPage.lines != newPage.lines;
+    auto const columnsChanged = oldPage.columns != newPage.columns;
+    if (linesChanged || columnsChanged)
+        platform::postToObject(&session, [&session, newPage, linesChanged, columnsChanged]() {
+            if (linesChanged)
+                emit session.lineCountChanged(newPage.lines.as<int>());
+            if (columnsChanged)
+                emit session.columnsCountChanged(newPage.columns.as<int>());
+        });
+}
+
 void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
 {
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
@@ -144,17 +157,8 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 
-    // Posted, as resizeToFit() posts the size indicator: this runs on the render thread too
-    // (TerminalDisplay::createRenderer()), and the signals wake QML bindings on the session's thread.
-    auto const linesChanged = oldPageSize.lines != fit.pageSize.lines;
-    auto const columnsChanged = oldPageSize.columns != fit.pageSize.columns;
-    if (linesChanged || columnsChanged)
-        platform::postToObject(&session, [&session, page = fit.pageSize, linesChanged, columnsChanged]() {
-            if (linesChanged)
-                emit session.lineCountChanged(page.lines.as<int>());
-            if (columnsChanged)
-                emit session.columnsCountChanged(page.columns.as<int>());
-        });
+    // This runs on the render thread too (TerminalDisplay::createRenderer()).
+    announcePageSize(session, oldPageSize, fit.pageSize);
 
     // What the child is told, which is not the same question as how big the window is: the profile
     // decides whether the display's content scale is divided out first, and margins are excluded

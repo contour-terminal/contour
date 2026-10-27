@@ -1626,6 +1626,15 @@ class Terminal: public IStatusLinePublishTarget
     /// Whether the follow gesture's modifiers are held (Settings::linkFollowModifiers).
     [[nodiscard]] FollowModifiers followModifiers() const noexcept;
 
+    /// Whether a plain click goes to the application: it tracks the mouse, input is allowed and vi mode is
+    /// Insert. Only then does a click need the bypass modifiers to reach the terminal (a link, a selection).
+    /// The caller holds the state lock.
+    [[nodiscard]] bool applicationTakesClicks() const noexcept
+    {
+        return _inputGenerator.mouseProtocol().has_value() && allowInput()
+               && _inputHandler.mode() == ViMode::Insert;
+    }
+
     /// Where the pointer counts as being when it is over a link: Elsewhere while an application takes clicks
     /// (mouse tracking on, the bypass modifier not held), so that the link stays at rest.
     [[nodiscard]] LinkPointer hoverPointer() const noexcept;
@@ -4491,8 +4500,7 @@ class Terminal: public IStatusLinePublishTarget
 
     bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
-        return _inputGenerator.mouseProtocol().has_value()
-               && mouseInputAllowedInInsertMode(currentlyPressedModifier);
+        return applicationTakesClicks() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
     }
 
     /// No-protocol counterpart to @ref allowPassMouseEventToApp: fires when a wheel notch should

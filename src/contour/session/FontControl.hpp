@@ -100,6 +100,14 @@ class TerminalSession;
 /// @param viewSize What the child is told the pixel size is.
 void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, vtbackend::ImageSize viewSize);
 
+/// Tells @p session's QML that its page changed size: lineCountChanged() and columnsCountChanged(), each only
+/// where that dimension changed. Posted to the session's thread, as resizeToFit() posts the size indicator:
+/// applyResize() runs on the render thread too, and the signals wake QML bindings.
+/// @param session The session whose page changed.
+/// @param oldPage The page before the resize.
+/// @param newPage The page after it.
+void announcePageSize(TerminalSession& session, vtbackend::PageSize oldPage, vtbackend::PageSize newPage);
+
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,
