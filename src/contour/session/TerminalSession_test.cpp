@@ -12624,8 +12624,9 @@ TEST_CASE("TerminalSession: a resize asks for the size indicator outside the loc
           "[contour][session][sizeindicator]")
 {
     // resizeToFit() is applyResize()'s terminal half, which the render thread reaches too: the request is
-    // posted, and runs on the session's thread with the lock free and the resize done. The text is the MAIN
-    // page, which the indicator status line is no part of.
+    // posted, and runs on the session's thread after the resize is done. That nothing arrives before the
+    // event loop runs is what shows it is posted; the probe confirms the lock is free by then, which it would
+    // be either way. The text is the MAIN page, which the indicator status line is no part of.
     using contour::session::SizeIndicatorKind;
     TestApp testApp;
     auto pane = makeSessionWithSurface(testApp.app());

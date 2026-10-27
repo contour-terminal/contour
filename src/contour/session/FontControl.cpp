@@ -144,11 +144,17 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 
-    if (oldPageSize.lines != fit.pageSize.lines)
-        emit session.lineCountChanged(fit.pageSize.lines.as<int>());
-
-    if (oldPageSize.columns != fit.pageSize.columns)
-        emit session.columnsCountChanged(fit.pageSize.columns.as<int>());
+    // Posted, as resizeToFit() posts the size indicator: this runs on the render thread too
+    // (TerminalDisplay::createRenderer()), and the signals wake QML bindings on the session's thread.
+    auto const linesChanged = oldPageSize.lines != fit.pageSize.lines;
+    auto const columnsChanged = oldPageSize.columns != fit.pageSize.columns;
+    if (linesChanged || columnsChanged)
+        platform::postToObject(&session, [&session, page = fit.pageSize, linesChanged, columnsChanged]() {
+            if (linesChanged)
+                emit session.lineCountChanged(page.lines.as<int>());
+            if (columnsChanged)
+                emit session.columnsCountChanged(page.columns.as<int>());
+        });
 
     // What the child is told, which is not the same question as how big the window is: the profile
     // decides whether the display's content scale is divided out first, and margins are excluded

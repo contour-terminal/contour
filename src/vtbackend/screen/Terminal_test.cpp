@@ -6028,3 +6028,19 @@ TEST_CASE("Terminal.hintLabels.aLabelOverAWideCharacterIsNarrowCells", "[termina
     }
 }
 // }}}
+
+TEST_CASE("Terminal.overlayClearance.readsWhatIsDrawn", "[terminal][overlayclearance]")
+{
+    // A collapsed fold hides its rows: the rows drawn after its head are the ones below it. And at the bottom
+    // the page ends in rows past the history, which show no line at all, so are blank.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(30) };
+    mc.writeToScreen("\033]133;A\033\\$ make\r\n\033]133;C\033\\out1\r\nout22\r\nout333\r\n");
+    mc.writeToScreen("\033]133;D;0\033\\\033]133;A\033\\$ ");
+    REQUIRE(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 14, 16, 15, 14, 19, 20 });
+
+    REQUIRE_FALSE(mc.terminal.foldRanges().empty());
+    mc.terminal.foldState().collapse(mc.terminal.foldRanges().front().headStableId);
+    // The head, then the prompt below the folded output ("$ " ends in a plain space, which is blank), then rows
+    // past the history.
+    CHECK(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 14, 19, 20, 20, 20, 20 });
+}
