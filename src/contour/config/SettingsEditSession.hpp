@@ -158,6 +158,13 @@ class SettingsEditSession
     /// @return Nothing, or the first error; the rest go to the error sink.
     [[nodiscard]] std::expected<void, SettingsError> flush();
 
+    /// Writes the change @p file is staged in, and only that one, now, then reloads once if it wrote or
+    /// adopted anything. Every other staged change stays pending, with the debounce running, and neither
+    /// fails nor is reported by this flush: a caller that asked for one file's save judges that file.
+    /// @param file A side file; nothing staged for it does nothing and does not reload.
+    /// @return Nothing, or the first error of that change; the rest go to the error sink.
+    [[nodiscard]] std::expected<void, SettingsError> flushChangeOf(SideFile const& file);
+
     /// Drops what is staged and puts every touched file back as it was when the session first saw it
     /// (removing one that was absent), then reloads once. A file changed on disk since the session last saw
     /// it is adopted instead, as a flush adopts it.

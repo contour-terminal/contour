@@ -273,6 +273,52 @@ TEST_CASE("SettingsEditSession: a direct flush returns the first error and repor
     CHECK(fx.reloads == 1);
 }
 
+TEST_CASE("SettingsEditSession: flushing one file's change leaves the other pending changes alone",
+          "[settingssession]")
+{
+    auto const target = configDir() / mainProfile();
+    auto const fileSystem =
+        vthost::testing::FaultyFileSystem { [&](auto op, std::filesystem::path const& path) {
+            return op == vthost::testing::FaultOp::Rename && path == target;
+        } };
+    handEdit(fileSystem, mainProfile(), "p0");
+    handEdit(fileSystem, "settings.yml", "s0");
+    auto fx = SessionFixture { fileSystem };
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    REQUIRE(fx.session.stage(guiSettingsFile(), "s1").has_value());
+
+    auto const flushed = fx.session.flushChangeOf(guiSettingsFile());
+
+    // The unwritable profile is a different change: it neither fails this flush nor is written by it.
+    REQUIRE(flushed.has_value());
+    CHECK(contentOf(fileSystem, "settings.yml") == "s1");
+    CHECK(fx.session.pendingFor(guiSettingsFile()) == PendingChange::None);
+    CHECK(fx.session.pendingFor(profileFile("main")) == PendingChange::Write);
+    CHECK(fx.reloads == 1);
+    CHECK(fx.reported.empty());
+}
+
+TEST_CASE("SettingsEditSession: flushing one file's change writes the files staged with it",
+          "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    handEdit(fileSystem, "settings.yml", "s0");
+    auto fx = SessionFixture { fileSystem };
+    auto const together = std::array {
+        StagedFile { .file = guiSettingsFile(), .bytes = "s1" },
+        StagedFile { .file = profileFile("main"), .bytes = "p1" },
+    };
+    REQUIRE(fx.session.stageTogether(together).has_value());
+
+    REQUIRE(fx.session.flushChangeOf(guiSettingsFile()).has_value());
+
+    CHECK(contentOf(fileSystem, "settings.yml") == "s1");
+    CHECK(contentOf(fileSystem, mainProfile()) == "p1");
+    CHECK_FALSE(fx.session.hasPending());
+    CHECK(fx.reloads == 1);
+}
+
 TEST_CASE("SettingsEditSession: a file observed when its draft was seeded is not written over",
           "[settingssession]")
 {

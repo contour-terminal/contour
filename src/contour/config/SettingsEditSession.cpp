@@ -128,6 +128,22 @@ std::expected<void, SettingsError> SettingsEditSession::flush()
     return settleAll(std::exchange(_pending, {}));
 }
 
+std::expected<void, SettingsError> SettingsEditSession::flushChangeOf(SideFile const& file)
+{
+    auto const staged = _pending.find(file);
+    if (staged == _pending.end())
+        return {};
+    auto const change = staged->second.change;
+    auto targets = std::map<SideFile, Pending> {};
+    for (auto const& [member, pending]: _pending)
+        if (pending.change == change)
+            targets.emplace(member, pending);
+    std::erase_if(_pending, [change](auto const& entry) { return entry.second.change == change; });
+    if (_pending.empty())
+        _scheduler.cancel();
+    return settleAll(targets);
+}
+
 std::expected<void, SettingsError> SettingsEditSession::revert()
 {
     _scheduler.cancel();

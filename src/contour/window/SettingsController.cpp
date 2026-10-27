@@ -1510,7 +1510,9 @@ std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::
         return staged;
     }
     emit globalFieldsChanged();
-    auto flushed = _session->flush();
+    // Only settings.yml's change (with the side-file profiles staged beside it): an unrelated pending file
+    // that cannot be written is that file's own flush to report, not this write's.
+    auto flushed = _session->flushChangeOf(config::guiSettingsFile());
     emit changesChanged();
     return flushed;
 }

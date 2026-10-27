@@ -423,6 +423,26 @@ TEST_CASE("SettingsController: the app's own override goes through the one save 
     }
 }
 
+TEST_CASE("SettingsController: the app's own override is judged by settings.yml alone", "[settings]")
+{
+    // m6: a colour scheme change still pending, whose file an editor changed since, would fail "Use New" if
+    // the write flushed everything. It fails that scheme's own flush later, and nothing else.
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("mine");
+    fx.controller->commitSchemeColor(QStringLiteral("background"), QStringLiteral("#102030"));
+    REQUIRE(fx.controller->hasChanges());
+    auto const schemePath = config::relativePathOf(config::colorSchemeFile("mine"));
+    fx.handEdit(schemePath, "edited: elsewhere\n");
+
+    auto const written = fx.controller->writeGlobalOverride(
+        config::DefaultsEditionKey, config::configEnumToken(config::DefaultsEdition::Native2026));
+
+    REQUIRE(written.has_value());
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Native2026);
+    CHECK(fx.fileContent(schemePath) == "edited: elsewhere\n");
+}
+
 TEST_CASE("SettingsController: a hand edit made after the draft was opened is not written over", "[settings]")
 {
     // I1: the draft was seeded before an editor saved the file; the first commit must not overwrite it.
