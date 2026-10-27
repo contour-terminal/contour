@@ -122,6 +122,7 @@ nav:
     - Hint mode: demo/hint-mode.md
     - Input modes: input-modes.md
     - Accessibility: accessibility.md
+    - Secure input: secure-input.md
     - Size indicator: demo/size_indicator.md
     - Git branch drawings: demo/git-branch-drawings.md
   - VT sequence reference:
