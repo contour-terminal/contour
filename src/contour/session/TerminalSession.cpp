@@ -2280,7 +2280,11 @@ FooterAction TerminalSession::footerAction() const noexcept
     {
         case window::PaneFooterKind::None: return FooterAction::None;
         case window::PaneFooterKind::Ended: return endAction();
-        case window::PaneFooterKind::Interrupted: return window::interruptionActionOf(_interruptionPrompt);
+        case window::PaneFooterKind::Interrupted:
+            // A line cut at the recorded maximum is not the command that ran: shown, never offered.
+            if (_interruption && vtbackend::isTruncatedCommandLine(_interruption->raw()))
+                return FooterAction::None;
+            return window::interruptionActionOf(_interruptionPrompt);
     }
     return FooterAction::None;
 }
@@ -2603,6 +2607,7 @@ namespace
         NoCommandLine, ///< The block is gone, or reported no command line.
         NoPrompt,   ///< A command is running, or the page on display is no shell's: typed, it would be input.
         Untypeable, ///< Typed, it would lose a character a shell reads as a key -- and be another command.
+        Truncated,  ///< The line was cut to the recorded maximum: it is not the command that ran.
     };
 
     /// Whether @p commandLine can be typed at @p terminal's prompt as it is, now.
@@ -2615,6 +2620,8 @@ namespace
     [[nodiscard]] std::expected<void, RerunRefusal> checkRerun(vtbackend::Terminal const& terminal,
                                                                std::string_view commandLine)
     {
+        if (vtbackend::isTruncatedCommandLine(commandLine))
+            return std::unexpected(RerunRefusal::Truncated);
         if (!terminal.shellIsPrompting())
             return std::unexpected(RerunRefusal::NoPrompt);
         if (!terminal.pastesUnchanged(commandLine))
@@ -2629,6 +2636,7 @@ namespace
             case RerunRefusal::NoCommandLine: return "there is no command line to run";
             case RerunRefusal::NoPrompt: return "the shell is not at its prompt";
             case RerunRefusal::Untypeable: return "it cannot be typed as it is";
+            case RerunRefusal::Truncated: return "its recorded line was cut short";
         }
         return "";
     }

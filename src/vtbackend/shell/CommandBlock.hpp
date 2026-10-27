@@ -261,6 +261,12 @@ struct CommandStart
 /// @return truncateUtf8(@p text, MaxRecordedCommandLineBytes).
 [[nodiscard]] std::string truncatedCommandLine(std::string_view text);
 
+/// @param text A command line as recorded.
+/// @return Whether @p text is what truncatedCommandLine() leaves of a longer line: it ends in the ellipsis
+/// and
+///         is as long as a cut line is. Not the command that ran, so not one to type again.
+[[nodiscard]] bool isTruncatedCommandLine(std::string_view text) noexcept;
+
 /// How a finished command ended, as far as its record can tell -- the one classification the gutter's
 /// colour and the finish notification both read.
 enum class CommandEnding : uint8_t

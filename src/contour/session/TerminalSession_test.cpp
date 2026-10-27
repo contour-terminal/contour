@@ -7701,6 +7701,25 @@ TEST_CASE("TerminalSession: a restored shell's footer names the stopped command 
     }
 }
 
+TEST_CASE("TerminalSession: a stopped command cut at the recorded maximum is never offered to Run Again",
+          "[contour][session][paneend][interrupted]")
+{
+    using contour::session::FooterAction;
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(vtbackend::test::PromptStart);
+    interrupt(*session,
+              vtbackend::truncatedCommandLine(std::string(vtbackend::MaxRecordedCommandLineBytes + 1, 'x')));
+    session->screenUpdated();
+    QCoreApplication::processEvents();
+    // Named in the footer, but it is not the command that ran.
+    CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Interrupted));
+    CHECK(session->footerAction() == FooterAction::None);
+    CHECK(session->requestRerun(vtbackend::CommandLineText {
+              vtbackend::truncatedCommandLine(std::string(vtbackend::MaxRecordedCommandLineBytes + 1, 'x')) })
+          == contour::session::RerunAsk::Refused);
+}
+
 TEST_CASE("TerminalSession: Return at a restored shell goes to the shell",
           "[contour][session][paneend][interrupted]")
 {

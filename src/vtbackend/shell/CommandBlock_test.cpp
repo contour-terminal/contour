@@ -109,6 +109,21 @@ TEST_CASE("CommandBlock.truncatedCommandLine.keepsWhatFits", "[semanticblocks][b
     CHECK(truncatedCommandLine(exactly) == exactly);
 }
 
+TEST_CASE("CommandBlock.isTruncatedCommandLine.recognisesWhatTruncatedCommandLineMakes",
+          "[semanticblocks][blockstore]")
+{
+    // Every cut position a multi-byte code point can give, and the plain one.
+    for (auto const* const unit: { "x", "\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x98\x80" })
+    {
+        auto line = std::string {};
+        while (line.size() < MaxRecordedCommandLineBytes + 8)
+            line += unit;
+        CHECK(isTruncatedCommandLine(truncatedCommandLine(line)));
+    }
+    CHECK_FALSE(isTruncatedCommandLine("ls -la"));
+    CHECK_FALSE(isTruncatedCommandLine(std::string(MaxRecordedCommandLineBytes, 'x')));
+}
+
 TEST_CASE("CommandBlock.truncatedCommandLine.cutsAtACodepointAndEndsInAnEllipsis",
           "[semanticblocks][blockstore]")
 {
