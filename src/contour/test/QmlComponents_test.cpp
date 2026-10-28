@@ -27,6 +27,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/DisplayHarness.hpp>
+#include <contour/test/DisplayPixels.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/MockMainController.hpp>
@@ -5428,6 +5429,191 @@ TEST_CASE(
           == std::vector<int> { static_cast<int>(contour::window::DropZone::SplitRight) });
     CHECK(drop.controller().droppedTabPayloads == std::vector<QString> { QString::fromLatin1(TabJson) });
     CHECK(QTest::qWaitFor([&] { return !ring.isVisible() && !ghost.isVisible(); }));
+}
+
+namespace
+{
+/// Whether @p ink is @p mark over @p ground, as an edge anti-aliased across pixels draws it: every channel
+/// moved toward the mark by about the same share, and by a good part of the way.
+/// @param mark   The colour the edge is drawn in.
+/// @param ground What it is drawn over.
+/// @param ink    The strongest pixel of the edge.
+[[nodiscard]] bool isBlendOf(vtbackend::RGBColor mark, vtbackend::RGBColor ground, vtbackend::RGBColor ink)
+{
+    constexpr auto MinimumShare = 0.4;
+    constexpr auto ShareSpread = 0.1;
+    auto shares = std::vector<double> {};
+    auto const channels = std::array { std::tuple { mark.red, ground.red, ink.red },
+                                       std::tuple { mark.green, ground.green, ink.green },
+                                       std::tuple { mark.blue, ground.blue, ink.blue } };
+    for (auto const& [markValue, groundValue, inkValue]: channels)
+        if (markValue != groundValue)
+            shares.push_back(static_cast<double>(inkValue - groundValue)
+                             / static_cast<double>(markValue - groundValue));
+    return !shares.empty() && *std::ranges::min_element(shares) >= MinimumShare
+           && *std::ranges::max_element(shares) - *std::ranges::min_element(shares) <= ShareSpread;
+}
+
+/// A pane card over a REAL TerminalDisplay and a live session, in a shown window: what a user drags a tab
+/// over. The grid is full of text, so the ring and the ghost are drawn over cells that are not all one
+/// colour.
+struct DropGridHost
+{
+    contour::test::TestApp testApp;
+    vtpty::ChannelPty* pty = nullptr; ///< Owned by the session's terminal.
+    std::unique_ptr<contour::session::TerminalSession> session;
+    PaneTreeHost host;
+    MockPaneProxy leaf { /*leaf*/ true };
+    DragSource source;
+
+    /// How long a frame is given to reach the scene graph before it is grabbed.
+    static constexpr int FrameSettleMs = 50;
+    /// How long the scene may take to stop changing by itself.
+    static constexpr int FrameSettleTimeoutMs = 10000;
+    /// The lines of text the page is filled with.
+    static constexpr int FilledLines = 25;
+
+    DropGridHost(): host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
+    {
+        auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
+            vtbackend::PageSize { vtbackend::LineCount(FilledLines), vtbackend::ColumnCount(80) });
+        pty = ptyOwned.get();
+        session = contour::test::makeTestSession(
+            &testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
+        // PaneTreeHost stands the stub in for the terminal; the card here draws over the real one.
+        qmlRegisterType<contour::display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
+        leaf.setSession(session.get());
+        host.show(leaf, /*visiblePanes*/ 1);
+        source.mime.setData(TabMime, TabJson);
+        fillGrid();
+    }
+
+    DropGridHost(DropGridHost const&) = delete;
+    DropGridHost& operator=(DropGridHost const&) = delete;
+
+    ~DropGridHost()
+    {
+        session->terminate(); // closes the PTY; the blocked reader wakes and winds down
+        QCoreApplication::processEvents();
+        host.paneNode.reset(); // the display detaches from the session while it still lives
+        QCoreApplication::processEvents();
+        session.reset();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+
+    [[nodiscard]] QQuickItem& card() const { return host.cardOf(leaf); }
+    [[nodiscard]] QQuickItem& part(char const* name) const { return PaneTreeHost::partOf(card(), name); }
+
+    /// @return The point of the card at @p fx, @p fy (fractions of its size), in window coordinates.
+    [[nodiscard]] QPointF at(qreal fx, qreal fy) const
+    {
+        return card().mapToScene(QPointF { card().width() * fx, card().height() * fy });
+    }
+
+    /// Starts a drag of a tab over the card at @p fx, @p fy.
+    void dragOver(qreal fx, qreal fy)
+    {
+        source.enter(at(fx, fy));
+        source.move(at(fx, fy));
+    }
+
+    /// @return The card's rectangle in the grabbed frame's pixels.
+    [[nodiscard]] QRect cardPixels() const
+    {
+        auto const dpr = host.window.devicePixelRatio();
+        auto const rect = card().mapRectToScene(QRectF { QPointF {}, card().size() });
+        return QRect { QPointF { rect.topLeft() * dpr }.toPoint(), QSizeF { rect.size() * dpr }.toSize() };
+    }
+
+    /// Fills the page with lines of text, and waits until the terminal has parsed them all.
+    void fillGrid()
+    {
+        auto text = std::string {};
+        for ([[maybe_unused]] auto const line: std::views::iota(0, FilledLines))
+            text += "\033[1m" + std::string(80, 'X') + "\033[m\r\n";
+        text += contour::test::DisplayHarness::StatusRequest;
+        pty->feed(text);
+        REQUIRE(QTest::qWaitFor(
+            [&] { return pty->stdinSnapshot().contains(contour::test::DisplayHarness::StatusAnswer); }));
+        (void) frame();
+    }
+
+    /// @return A frame of the window, grabbed once the scene has stopped changing by itself: what fades
+    ///         out on its own (the overlay scrollbar after output) has done so.
+    [[nodiscard]] QImage frame()
+    {
+        auto image = QImage {};
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                QTest::qWait(FrameSettleMs);
+                auto const next = host.window.grabWindow();
+                auto const settled = !next.isNull() && next == image;
+                image = next;
+                return settled;
+            },
+            FrameSettleTimeoutMs));
+        return image;
+    }
+};
+} // namespace
+
+TEST_CASE("display: a tab dragged to a pane's edge draws the ring and the ghost over the cells, on that "
+          "edge's half only",
+          "[display][panecard][drop]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto drop = DropGridHost {};
+    auto const dpr = drop.host.window.devicePixelRatio();
+    auto const cardRect = drop.cardPixels();
+    auto const before = drop.frame();
+
+    drop.dragOver(0.95, 0.5);
+    REQUIRE(drop.source.accepted);
+    auto& ghost = drop.part("dropGhost");
+    REQUIRE(QTest::qWaitFor([&] { return ghost.isVisible(); }));
+    auto const during = drop.frame();
+
+    auto const mark =
+        drop.host.style().colorOn(static_cast<int>(contour::config::ChromeColorRole::ScrollbarThumbActive),
+                                  drop.session->getBackgroundColor());
+    auto const markRgb = vtbackend::RGBColor { static_cast<uint8_t>(mark.red()),
+                                               static_cast<uint8_t>(mark.green()),
+                                               static_cast<uint8_t>(mark.blue()) };
+
+    // The ring: the card's own edge, in the mark's colour, and 3:1 against what it covers.
+    auto const ringProbe = QRect { cardRect.center().x() - 2, cardRect.top(), 5, 4 };
+    auto const ring = regionColors(during, ringProbe);
+    auto const beneathRing = regionColors(before, ringProbe);
+    INFO("ring ink " << hexOf(ring.ink) << " mark " << hexOf(markRgb) << " beneath "
+                     << hexOf(beneathRing.ground));
+    CHECK(isBlendOf(markRgb, beneathRing.ground, ring.ink));
+    CHECK(vtbackend::contrastRatio(ring.ink, beneathRing.ground) >= MarkContrast);
+
+    // The ghost's edge, over the cells: the half on the right edge's side, in the same colour.
+    auto const ghostRect = QRectF { ghost.mapToScene(QPointF {}), ghost.size() };
+    auto const ghostLeft = static_cast<int>(ghostRect.left() * dpr);
+    auto const ghostMid = static_cast<int>(ghostRect.center().y() * dpr);
+    auto const ghostProbe = QRect { ghostLeft - 1, ghostMid - 2, 5, 5 };
+    auto const ghostEdge = regionColors(during, ghostProbe);
+    auto const beneathGhost = regionColors(before, ghostProbe);
+    INFO("ghost ink " << hexOf(ghostEdge.ink) << " beneath " << hexOf(beneathGhost.ground));
+    CHECK(isBlendOf(markRgb, beneathGhost.ground, ghostEdge.ink));
+    CHECK(vtbackend::contrastRatio(ghostEdge.ink, beneathGhost.ground) >= MarkContrast);
+
+    // Inside the ring, only the right half changed: nothing is drawn over the left half.
+    auto const interior = cardRect.adjusted(6, 6, -6, -6);
+    auto const changed = changedBounds(before, during, interior);
+    REQUIRE_FALSE(changed.isNull());
+    CHECK(changed.left() >= cardRect.center().x() - 2);
+
+    // The tab leaves: the frame is what it was before the drag.
+    drop.source.leave();
+    REQUIRE(QTest::qWaitFor([&] { return !ghost.isVisible(); }));
+    auto const after = drop.frame();
+    auto const left = changedBounds(before, after, cardRect);
+    INFO("left over: " << left.x() << "," << left.y() << " " << left.width() << "x" << left.height());
+    CHECK(left.isNull());
 }
 
 TEST_CASE("pane card: the ghost follows the edge the tab is nearest, and the middle shows none (offscreen)",
