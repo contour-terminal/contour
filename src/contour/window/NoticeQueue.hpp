@@ -213,9 +213,12 @@ inline constexpr auto DropRefusalRows = std::array {
                      .text = "Not inserted: a file name holds a control character." },
     DropRefusalRow { .error = DropTextError::Unquotable,
                      .text = "Not inserted: a file name holds a character cmd cannot quote." },
+    DropRefusalRow { .error = DropTextError::UnknownShell,
+                     .text = "Not inserted: a file name holds a character that could run as a command, and "
+                             "this pane's shell is not known." },
 };
 
-static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::Unquotable) + 1U,
+static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::UnknownShell) + 1U,
               "DropRefusalRows must have a row for every drop error");
 
 /// What the toast for a refused drop says.

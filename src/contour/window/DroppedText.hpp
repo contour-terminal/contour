@@ -20,6 +20,11 @@ enum class ShellQuoting : uint8_t
     Posix = 0,  //!< Backslash-escapes; what bash, zsh, fish, sh, vim's `:e` and a remote shell read.
     PowerShell, //!< Single quotes, a single quote doubled.
     Cmd,        //!< Double quotes; no way to escape `%` or `"` inside them.
+    /// The shell is not known (no foreground process to ask: Windows, a daemon's pane, or a transport such
+    /// as ssh whose far side is anyone's). No quoting is right for all shells, so a name holding any
+    /// character one of them reads as syntax (@c detail::UnknownShellMetacharacters) is refused, and the
+    /// rest is double-quoted.
+    Unknown,
 };
 
 /// A row of the quoting table: a foreground process and how its shell reads paths.
@@ -29,11 +34,15 @@ struct ShellQuotingRow
     ShellQuoting quoting;     //!< How it reads a path.
 };
 
-/// The processes that do not read POSIX escapes. Everything else is @c ShellQuoting::Posix.
+/// The processes that do not read POSIX escapes, and the transports whose far side's shell is unknown.
+/// Everything else is @c ShellQuoting::Posix.
 inline constexpr auto ShellQuotingRows = std::array {
     ShellQuotingRow { .process = "pwsh", .quoting = ShellQuoting::PowerShell },
     ShellQuotingRow { .process = "powershell", .quoting = ShellQuoting::PowerShell },
     ShellQuotingRow { .process = "cmd", .quoting = ShellQuoting::Cmd },
+    ShellQuotingRow { .process = "ssh", .quoting = ShellQuoting::Unknown },
+    ShellQuotingRow { .process = "wsl", .quoting = ShellQuoting::Unknown },
+    ShellQuotingRow { .process = "sudo", .quoting = ShellQuoting::Unknown },
 };
 
 namespace detail
@@ -56,10 +65,13 @@ namespace detail
 ///
 /// Only the base name counts (a path in either separator style), its arguments are ignored, and a
 /// trailing `.exe` is ignored, in any case.
-/// @param foregroundProcess The foreground process's name or path; may be empty.
-/// @return The quoting of the matching row; @c ShellQuoting::Posix when none matches.
+/// @param foregroundProcess The foreground process's name or path; empty when it is not known.
+/// @return The quoting of the matching row; @c ShellQuoting::Unknown when there is no process to name;
+///         @c ShellQuoting::Posix when none matches.
 [[nodiscard]] constexpr ShellQuoting shellQuotingFor(std::string_view foregroundProcess) noexcept
 {
+    if (foregroundProcess.empty())
+        return ShellQuoting::Unknown;
     if (auto const slash = foregroundProcess.find_last_of("/\\"); slash != std::string_view::npos)
         foregroundProcess.remove_prefix(slash + 1);
     // A configured shell is a command line ("pwsh -NoLogo"): the program is its first word.
@@ -80,12 +92,18 @@ enum class DropTextError : uint8_t
     NoPaths = 0,      //!< There was nothing to type.
     ControlCharacter, //!< A name holds a control character (U+0000-U+001F, U+007F, U+0080-U+009F).
     Unquotable,       //!< The shell has no way to quote a character in a name (`%` or `"` under cmd).
+    UnknownShell,     //!< The shell is not known, and a name holds a character some shell reads as syntax.
 };
 
 namespace detail
 {
     /// The characters a POSIX shell (and zsh, and fish) treat specially in a word, besides a space.
     inline constexpr auto PosixSpecials = std::string_view { "\\!\"#$&'()*,;<=>?[]^`{|}~ " };
+
+    /// What a name may not hold when the shell is not known: the characters at least one of POSIX shells,
+    /// PowerShell and cmd reads as syntax even inside double quotes, or that quoting itself needs. A
+    /// backslash is in the list: Qt hands a local file over with `/` as its separator on every platform.
+    inline constexpr auto UnknownShellMetacharacters = std::string_view { "$`;&|<>()'\"\\!%^" };
 
     /// PowerShell reads these typographic quotes as single quotes; each is doubled like `'`.
     inline constexpr auto PowerShellQuotes =
@@ -145,6 +163,18 @@ namespace detail
         out += '\'';
     }
 
+    /// PowerShell reads these typographic double quotes as `"`; inside double quotes they end the string.
+    inline constexpr auto PowerShellDoubleQuotes =
+        std::array<std::string_view, 3> { "\u201C", "\u201D", "\u201E" };
+
+    /// Whether @p path holds what is unsafe to type when the shell is not known.
+    [[nodiscard]] inline bool isUnsafeForUnknownShell(std::string_view path) noexcept
+    {
+        return path.find_first_of(UnknownShellMetacharacters) != std::string_view::npos
+               || std::ranges::any_of(PowerShellDoubleQuotes,
+                                      [&](std::string_view q) { return path.contains(q); });
+    }
+
     [[nodiscard]] inline bool isUnquotableForCmd(std::string_view path) noexcept
     {
         return path.find_first_of("%\"") != std::string_view::npos;
@@ -173,6 +203,8 @@ namespace detail
             return std::unexpected(DropTextError::ControlCharacter);
         if (quoting == ShellQuoting::Cmd && detail::isUnquotableForCmd(path))
             return std::unexpected(DropTextError::Unquotable);
+        if (quoting == ShellQuoting::Unknown && detail::isUnsafeForUnknownShell(path))
+            return std::unexpected(DropTextError::UnknownShell);
     }
 
     auto text = std::string {};
@@ -183,6 +215,7 @@ namespace detail
             case ShellQuoting::Posix: detail::appendPosix(text, path); break;
             case ShellQuoting::PowerShell: detail::appendPowerShell(text, path); break;
             case ShellQuoting::Cmd:
+            case ShellQuoting::Unknown:
                 text += '"';
                 text += path;
                 text += '"';

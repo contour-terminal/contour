@@ -14400,7 +14400,7 @@ TEST_CASE("TerminalSession: dropped paths are quoted for the shell in front", "[
         CHECK(mockPtyOf(*session).stdinBuffer() == "/tmp/it\\'s\\ here.txt ");
     }
 
-    SECTION("a pane with no foreground process to ask (a daemon's) follows the profile's shell")
+    SECTION("a pane with no foreground process to ask (a daemon's) guesses no shell from the profile")
     {
         auto const profile = registerProfile(
             testApp.app(), "pwsh-profile", [](auto& p) { p.shell.value().program = "pwsh -NoLogo"; });
@@ -14415,8 +14415,15 @@ TEST_CASE("TerminalSession: dropped paths are quoted for the shell in front", "[
             contour::session::SessionRole::Shell,
             contour::session::SessionHosting::Remote);
         mockPtyOf(*session).setForegroundProcessName(std::string { "zsh" }); // not asked: it is not ours
+
+        // A name any shell reads as syntax (here a quote, live in PowerShell, bash and cmd alike) is refused
+        // whatever the profile says.
         session->insertDroppedUrls(file);
-        CHECK(mockPtyOf(*session).stdinBuffer() == "'/tmp/it''s here.txt' ");
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+        // A name without any is typed, double-quoted.
+        session->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/my%20file.txt")) });
+        CHECK(mockPtyOf(*session).stdinBuffer() == "\"/tmp/my file.txt\" ");
     }
 }
 

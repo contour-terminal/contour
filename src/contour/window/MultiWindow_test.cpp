@@ -1732,6 +1732,22 @@ constexpr auto PaneHeight = 500.0;
 }
 } // namespace
 
+TEST_CASE("a drop onto a pane whose shell is not known refuses a name that could run, with a toast",
+          "[contour][multiwindow][drop]")
+{
+    // The mock pty has no foreground process to name, as a Windows or daemon-hosted pane has none.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    ScopedController window { app.manager() };
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    REQUIRE(pane != nullptr);
+    REQUIRE_FALSE(window->notices().toastShown());
+
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/x%24%28id%29")) }); // /tmp/x$(id)
+    REQUIRE(window->notices().toastShown());
+    CHECK(window->notices().toastText().contains(QStringLiteral("shell is not known")));
+}
+
 TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][multiwindow][drop]")
 {
     TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());

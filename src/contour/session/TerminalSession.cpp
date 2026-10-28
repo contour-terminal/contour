@@ -2605,9 +2605,9 @@ void TerminalSession::pasteText(QString const& text, unsigned count, vtbackend::
 
 window::ShellQuoting TerminalSession::dropQuoting() const
 {
-    // A pane hosted on a daemon has no foreground process to ask; its shell is the profile's.
-    auto const foreground = foregroundProcessName();
-    return window::shellQuotingFor(foreground.empty() ? profile().shell.value().program : foreground);
+    // No foreground process to ask (Windows, a pane hosted on a daemon) is no guess from the profile's shell:
+    // what runs in front of the prompt may be any other. shellQuotingFor() answers Unknown for it.
+    return window::shellQuotingFor(foregroundProcessName());
 }
 
 void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)

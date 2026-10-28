@@ -115,6 +115,37 @@ TEST_CASE("droppedText.cmdRefusesWhatItCannotQuote", "[droppedtext]")
     }
 }
 
+TEST_CASE("droppedText.anUnknownShellRefusesEveryMetacharacterOfAnyShell", "[droppedtext]")
+{
+    // Whatever shell reads the line -- bash, pwsh, cmd -- none of these may reach it: each is live in at
+    // least one of them, even inside double quotes.
+    for (auto const c: std::string_view { "$`;&|<>()'\"\\!%^" })
+    {
+        auto const name = std::string("/tmp/a") + c + "b";
+        INFO(name);
+        auto const text = one(name, ShellQuoting::Unknown);
+        REQUIRE_FALSE(text.has_value());
+        CHECK(text.error() == DropTextError::UnknownShell);
+    }
+    // PowerShell's typographic double quotes end a double-quoted string as well.
+    for (auto const& quote: { "\u201C", "\u201D", "\u201E" })
+        CHECK(one(std::string("/tmp/a") + quote + "b", ShellQuoting::Unknown).error()
+              == DropTextError::UnknownShell);
+    // One such name refuses the whole drop, and a control character keeps its own reason.
+    auto const mixed = std::vector<std::string> { "/tmp/good", "/tmp/$(x)" };
+    CHECK(droppedPathsText(mixed, ShellQuoting::Unknown).error() == DropTextError::UnknownShell);
+    CHECK(one("/tmp/a\nb", ShellQuoting::Unknown).error() == DropTextError::ControlCharacter);
+}
+
+TEST_CASE("droppedText.anUnknownShellGetsDoubleQuotedNames", "[droppedtext]")
+{
+    // Spaces, unicode and the other punctuation survive double quotes in all three shells.
+    auto const paths = std::vector<std::string> { "/Users/me/My Report.pdf", "C:/a/日本語 {x}#~*?.txt" };
+    auto const text = droppedPathsText(paths, ShellQuoting::Unknown);
+    REQUIRE(text.has_value());
+    CHECK(*text == R"("/Users/me/My Report.pdf" "C:/a/日本語 {x}#~*?.txt" )");
+}
+
 TEST_CASE("droppedText.noPathsIsAnError", "[droppedtext]")
 {
     auto const text = droppedPathsText({}, ShellQuoting::Posix);
@@ -135,8 +166,11 @@ TEST_CASE("droppedText.quotingFollowsTheForegroundProcess", "[droppedtext]")
     CHECK(shellQuotingFor("/bin/bash -l") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("vim") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("zsh") == ShellQuoting::Posix);
-    CHECK(shellQuotingFor("ssh") == ShellQuoting::Posix);
-    CHECK(shellQuotingFor("") == ShellQuoting::Posix);
+    // What nothing names, and what leads to a shell nobody here knows, is no shell to guess at.
+    CHECK(shellQuotingFor("") == ShellQuoting::Unknown);
+    CHECK(shellQuotingFor("ssh") == ShellQuoting::Unknown);
+    CHECK(shellQuotingFor("wsl.exe") == ShellQuoting::Unknown);
+    CHECK(shellQuotingFor("/usr/bin/sudo") == ShellQuoting::Unknown);
     CHECK(shellQuotingFor("cmdline") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("/home/me/cmd/vim") == ShellQuoting::Posix);
     for (auto const& row: ShellQuotingRows)
