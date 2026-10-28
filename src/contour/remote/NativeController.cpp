@@ -135,7 +135,10 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         NativeClient::LayoutHandler {
             [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } },
         NativeClient::PermissionHandler {
-            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } });
+            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } },
+        vthost::client::LivenessPolicy {},
+        NativeClient::TabMergeRefusedHandler {
+            [this](vthost::proto::TabMergeRefused const&) { emit tabMergeRefused(); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)

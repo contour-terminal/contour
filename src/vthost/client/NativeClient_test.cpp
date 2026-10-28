@@ -2329,6 +2329,54 @@ TEST_CASE("mergeTabIntoSplit is sent to a daemon that shares TabMerge, and the t
     CHECK(h.host.terminal(draggedSession) != nullptr);
 }
 
+TEST_CASE("a daemon's TabMergeRefused reaches the client's handler once per refusal",
+          "[vthost][attach][compat][tab-merge]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto refusals = std::vector<uint8_t> {};
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions {
+                           .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler {},
+                       NativeClient::PermissionHandler {},
+                       vthost::client::LivenessPolicy {},
+                       NativeClient::TabMergeRefusedHandler { [&](proto::TabMergeRefused const& refused) {
+                           refusals.push_back(refused.reason);
+                       } } };
+    // Refuses every merge (as a daemon that finds the tab stale does), accepts the hello.
+    auto const refusing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::TabMerge })) } };
+        if (std::holds_alternative<proto::MergeTabIntoSplit>(frame.pdu))
+            return Script { { std::nullopt, proto::TabMergeRefused { .reason = 3 } } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<uint8_t> const* refusals) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        std::ignore =
+            client->mergeTabIntoSplit(std::array<uint64_t, 1> { 1 }, 2, vtworkspace::SplitSide::Right);
+        co_await core::net::testing::waitUntil(loop, [&] { return !refusals->empty(); });
+        client->detach();
+    }(&loop, &client, &refusals);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, refusing, &seen), std::move(scenario)));
+
+    CHECK(refusals == std::vector<uint8_t> { 3 });
+}
+
 TEST_CASE("against a daemon without TabMerge no MergeTabIntoSplit is written",
           "[vthost][attach][compat][tab-merge]")
 {

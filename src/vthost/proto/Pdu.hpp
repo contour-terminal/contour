@@ -80,6 +80,7 @@ enum class PduType : uint8_t
     ProgramStatus = 33,
     SessionInputEcho = 34,
     MergeTabIntoSplit = 35,
+    TabMergeRefused = 36,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1289,6 +1290,17 @@ struct MergeTabIntoSplit
     bool operator==(MergeTabIntoSplit const&) const = default;
 };
 
+/// Server→client (Capability::TabMerge), under the serial of the MergeTabIntoSplit it answers: the daemon
+/// changed nothing, so the client can tell its user rather than leave a drop that did nothing unexplained.
+/// A merge the daemon performs is answered by the layout push alone.
+struct TabMergeRefused
+{
+    /// Why, as a vthost::TabMergeError's value. Carried, not judged: a value this build does not know is
+    /// still a refusal.
+    uint8_t reason = 0;
+    bool operator==(TabMergeRefused const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1368,7 +1380,8 @@ using DecodedPdu = std::variant<Invalid,
                                 ControlEvent,
                                 ProgramStatus,
                                 SessionInputEcho,
-                                MergeTabIntoSplit>;
+                                MergeTabIntoSplit,
+                                TabMergeRefused>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

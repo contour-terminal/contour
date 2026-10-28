@@ -1745,7 +1745,13 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         // Applied to the model, so the layout push that reaches every client, this one included, is the
         // answer: the dragged tab's sessions move into the target tab and none is spawned or closed.
         if (auto const merged = applyTabMerge(_host.model(), *merge); !merged)
+        {
             errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(merged.error()));
+            // Said, so the user whose drop did nothing is told: no layout push follows a refusal.
+            send(frame.serial,
+                 proto::DecodedPdu {
+                     proto::TabMergeRefused { .reason = std::to_underlying(merged.error()) } });
+        }
         return TabVerb::Served;
     }
     return TabVerb::None;

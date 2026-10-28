@@ -386,7 +386,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            SessionEventHandler onSessionEvent,
                            LayoutHandler onLayout,
                            PermissionHandler onPermissionRequest,
-                           LivenessPolicy liveness):
+                           LivenessPolicy liveness,
+                           TabMergeRefusedHandler onTabMergeRefused):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -398,6 +399,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onSessionEvent(std::move(onSessionEvent)),
     _onLayout(std::move(onLayout)),
     _onPermissionRequest(std::move(onPermissionRequest)),
+    _onTabMergeRefused(std::move(onTabMergeRefused)),
     _liveness(liveness)
 {
 }
@@ -748,6 +750,12 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     {
         if (_onPermissionRequest)
             _onPermissionRequest(*request);
+        return;
+    }
+    if (auto const* refused = std::get_if<proto::TabMergeRefused>(&pdu))
+    {
+        if (_onTabMergeRefused)
+            _onTabMergeRefused(*refused);
         return;
     }
     // A probe's echo: noted as life above, which is all it is for.

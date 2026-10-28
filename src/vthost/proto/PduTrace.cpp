@@ -442,6 +442,11 @@ namespace
                                           value.targetSession,
                                           value.side);
                    } },
+        TraceRow { PduType::TabMergeRefused,
+                   "TabMergeRefused",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("reason={}", std::get<TabMergeRefused>(pdu).reason);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

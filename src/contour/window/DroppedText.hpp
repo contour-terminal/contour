@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -92,8 +94,8 @@ enum class DropTextError : uint8_t
     NoPaths = 0,      //!< There was nothing to type.
     ControlCharacter, //!< A name holds a control character (U+0000-U+001F, U+007F, U+0080-U+009F), or one
                       //!< that changes what the text looks like (a bidi control, U+2028, U+2029).
-    Unquotable,   //!< The shell has no way to quote a character in a name (`%`, `"` or `!` under cmd).
-    UnknownShell, //!< The shell is not known, and a name holds a character some shell reads as syntax.
+    Unquotable,       //!< The shell has no way to quote a character in a name (`%`, `"` or `!` under cmd).
+    UnknownShell,     //!< The shell is not known, and a name holds a character some shell reads as syntax.
 };
 
 namespace detail
@@ -114,14 +116,14 @@ namespace detail
     [[nodiscard]] inline bool holdsControlCharacter(std::string_view path) noexcept
     {
         constexpr auto C1Lead = '\xC2';
-        for (auto const [i, c]: std::views::enumerate(path))
+        for (auto const [i, c]: core::views::enumerate(path))
         {
             auto const byte = static_cast<unsigned char>(c);
             if (byte < 0x20 || byte == 0x7F)
                 return true;
-            if (c == C1Lead && i + 1 < static_cast<std::ptrdiff_t>(path.size()))
+            if (c == C1Lead && i + 1 < path.size())
             {
-                auto const next = static_cast<unsigned char>(path[static_cast<size_t>(i) + 1]);
+                auto const next = static_cast<unsigned char>(path[i + 1]);
                 if (next >= 0x80 && next <= 0x9F)
                     return true;
             }
@@ -135,12 +137,12 @@ namespace detail
     [[nodiscard]] inline bool holdsDeceptiveCharacter(std::string_view path) noexcept
     {
         constexpr auto Lead = '\xE2';
-        for (auto const [i, c]: std::views::enumerate(path))
+        for (auto const [i, c]: core::views::enumerate(path))
         {
-            if (c != Lead || i + 2 >= static_cast<std::ptrdiff_t>(path.size()))
+            if (c != Lead || i + 2 >= path.size())
                 continue;
-            auto const second = static_cast<unsigned char>(path[static_cast<size_t>(i) + 1]);
-            auto const third = static_cast<unsigned char>(path[static_cast<size_t>(i) + 2]);
+            auto const second = static_cast<unsigned char>(path[i + 1]);
+            auto const third = static_cast<unsigned char>(path[i + 2]);
             if (second == 0x80 && third >= 0xA8 && third <= 0xAE) // U+2028..U+202E
                 return true;
             if (second == 0x81 && third >= 0xA6 && third <= 0xA9) // U+2066..U+2069

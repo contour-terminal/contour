@@ -261,6 +261,11 @@ namespace
         return std::to_underlying(PduType::SessionInputEcho);
     }
 
+    [[nodiscard]] constexpr uint64_t tagOf(TabMergeRefused const&) noexcept
+    {
+        return std::to_underlying(PduType::TabMergeRefused);
+    }
+
     // --- body encoders ------------------------------------------------------
 
     void encodeBody(Writer&, Invalid const&)
@@ -800,6 +805,11 @@ namespace
             out.varint(session);
         out.varint(pdu.targetSession);
         out.u8(pdu.side);
+    }
+
+    void encodeBody(Writer& out, TabMergeRefused const& pdu)
+    {
+        out.u8(pdu.reason);
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1650,6 +1660,15 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeTabMergeRefused(Reader& in)
+    {
+        auto pdu = TabMergeRefused {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), pdu.reason, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -1843,6 +1862,7 @@ namespace
         DecodeRow { PduType::ProgramStatus, decodeProgramStatus },
         DecodeRow { PduType::SessionInputEcho, decodeSessionInputEcho },
         DecodeRow { PduType::MergeTabIntoSplit, decodeMergeTabIntoSplit },
+        DecodeRow { PduType::TabMergeRefused, decodeTabMergeRefused },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

@@ -1383,6 +1383,17 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             _nativeController->stop();
         },
         Qt::QueuedConnection);
+    // A drop the daemon refused did nothing there, and nothing local follows: say so.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::tabMergeRefused,
+        this,
+        [this] {
+            _sessionManager.postNoticeToEveryWindow(
+                window::Notice { .kind = window::NoticeKind::DropRefused,
+                                 .text = std::string { window::TabMergeRefusedText } });
+        },
+        Qt::QueuedConnection);
 #ifdef CONTOUR_EXTENSIONS
     connect(
         _nativeController.get(),

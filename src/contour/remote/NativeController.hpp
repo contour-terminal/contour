@@ -422,6 +422,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
 
+    /// The daemon refused a tab merge this client asked for, and changed nothing (fires on the reactor
+    /// thread; connect queued). The GUI tells the user.
+    void tabMergeRefused();
+
   private:
     /// One discovered remote session awaiting a local tab.
     struct PendingSession

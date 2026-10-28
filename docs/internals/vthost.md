@@ -275,6 +275,11 @@ session or side, both sessions in one tab, two windows (`CrossWindow`), or a tab
 exactly the sessions named (`StaleTab`: another client merged into it meanwhile, so the request would
 drag along panes nobody dragged).
 
+A refusal is not silent: the daemon answers it with **`TabMergeRefused`** (tag 36, under the request's
+serial, to a client that negotiated `TabMerge`), carrying the `TabMergeError` as a byte, and the client
+tells its user in a toast (`NativeClient`'s `TabMergeRefusedHandler`, `NativeController::tabMergeRefused`).
+A merge that succeeds is answered by the layout push alone.
+
 A client does not merge locally, since the next push would undo it: `NativeController::requestRemoteTabMerge`
 sends the verb and `applyRemoteLayout` grafts the tab when the push arrives (`findNewMerge` recognises a
 leaf beside a subtree that is exactly one other local tab's sessions). The merge stays within one window,

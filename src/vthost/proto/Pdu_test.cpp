@@ -1904,6 +1904,15 @@ TEST_CASE("MergeTabIntoSplit round-trips and carries a side no enumerator names"
     STATIC_CHECK(std::to_underlying(PduType::MergeTabIntoSplit) == 35);
 }
 
+TEST_CASE("TabMergeRefused round-trips, and carries a reason this build does not know",
+          "[vthost][pdu][merge]")
+{
+    for (auto const reason: { uint8_t { 0 }, uint8_t { 3 }, uint8_t { 0xEE } })
+        CHECK(std::get<TabMergeRefused>(roundTrip(DecodedPdu { TabMergeRefused { .reason = reason } })).reason
+              == reason);
+    STATIC_CHECK(std::to_underlying(PduType::TabMergeRefused) == 36);
+}
+
 TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[vthost][pdu]")
 {
     CHECK(std::get<CreateTab>(roundTrip(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } }))

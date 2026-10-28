@@ -287,6 +287,8 @@ class NativeClient final
     /// Handler invoked when a status-line extension the daemon runs asks this client's user whether it may
     /// run its declared commands; answered with answerPermission().
     using PermissionHandler = std::function<void(proto::PermissionRequest const&)>;
+    /// Handler invoked when the daemon answers a mergeTabIntoSplit() with a refusal: it changed nothing.
+    using TabMergeRefusedHandler = std::function<void(proto::TabMergeRefused const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -335,6 +337,7 @@ class NativeClient final
     /// @param liveness When a silent daemon is probed and given up on, timed by @p loop's clock; applied
     ///        only when both ends share Capability::Heartbeat, save for its handshake deadline, which
     ///        applies to every daemon.
+    /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -344,7 +347,8 @@ class NativeClient final
                  SessionEventHandler onSessionEvent,
                  LayoutHandler onLayout,
                  PermissionHandler onPermissionRequest = {},
-                 LivenessPolicy liveness = {});
+                 LivenessPolicy liveness = {},
+                 TabMergeRefusedHandler onTabMergeRefused = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -586,6 +590,7 @@ class NativeClient final
     SessionEventHandler _onSessionEvent;
     LayoutHandler _onLayout;
     PermissionHandler _onPermissionRequest;
+    TabMergeRefusedHandler _onTabMergeRefused;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply

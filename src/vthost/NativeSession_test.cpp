@@ -49,6 +49,7 @@
 #include <vthost/HostIdentity.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/control/ControlService.hpp>
@@ -5459,6 +5460,34 @@ TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pu
     CHECK(h.host.terminal(draggedSession) != nullptr);
     CHECK_FALSE(std::ranges::any_of(
         received, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); }));
+}
+
+TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, under its serial",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+
+    // The request names a tab as holding a session it does not: a stale view of it.
+    auto const isRefusal = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::TabMergeRefused>(frame.pdu);
+    };
+    auto const received = h.exchangeUntil(
+        { proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) },
+          proto::MergeTabIntoSplit { .tabSessions = { dragged->rootPane()->session().value, 9999 },
+                                     .targetSession = target->rootPane()->session().value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+        [&](auto const& got) { return std::ranges::any_of(got, isRefusal); });
+    auto const refusal = std::ranges::find_if(received, isRefusal);
+    REQUIRE(refusal != received.end());
+    CHECK(refusal->serial == 2); // the merge's: the second frame the client sent
+    CHECK(std::get<proto::TabMergeRefused>(refusal->pdu).reason
+          == std::to_underlying(vthost::TabMergeError::StaleTab));
+    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(target->paneCount() == 1);
 }
 
 TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupported and changes nothing",

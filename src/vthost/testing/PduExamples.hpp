@@ -163,6 +163,7 @@ namespace vthost::testing
         { proto::PduType::MergeTabIntoSplit,
           proto::DecodedPdu {
               proto::MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } } },
+        { proto::PduType::TabMergeRefused, proto::DecodedPdu { proto::TabMergeRefused { .reason = 3 } } },
     };
 }
 
