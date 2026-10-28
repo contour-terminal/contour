@@ -163,7 +163,7 @@ TEST_CASE("ChipRenderer.aLabelWiderThanItsPillIsCutToFit", "[renderer][chip]")
     };
 
     CHECK(fittedLabel(U"Failed", 60, tenPerCodepoint) == U"Failed");
-    CHECK(fittedLabel(U"Failed", 59, tenPerCodepoint) == U"Faile");
+    CHECK(fittedLabel(U"Failed", 59, tenPerCodepoint) == std::u32string_view { U"Failed" }.substr(0, 5));
     CHECK(fittedLabel(U"Failed · exit 8", 30, tenPerCodepoint) == U"Fai");
     CHECK(fittedLabel(U"Failed", 5, tenPerCodepoint).empty());
     CHECK(fittedLabel(U"Failed", 0, tenPerCodepoint).empty());
