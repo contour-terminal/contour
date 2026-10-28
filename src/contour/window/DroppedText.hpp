@@ -19,13 +19,13 @@ namespace contour::window
 /// How the shell in a pane reads a path typed at its prompt.
 enum class ShellQuoting : uint8_t
 {
-    Posix = 0,  //!< Backslash-escapes; what bash, zsh, fish, sh, vim's `:e` and a remote shell read.
+    Posix = 0,  //!< Backslash-escapes; what the known POSIX shells (bash, zsh, fish, sh, ...) read.
     PowerShell, //!< Single quotes, a single quote doubled.
     Cmd,        //!< Double quotes; no way to escape `%`, `"` or (delayed expansion) `!` inside them.
-    /// The shell is not known (no foreground process to ask: Windows, a daemon's pane, or a transport such
-    /// as ssh whose far side is anyone's). No quoting is right for all shells, so a name holding any
-    /// character one of them reads as syntax (@c detail::UnknownShellMetacharacters) is refused, and the
-    /// rest is double-quoted.
+    /// The shell is not known (no foreground process to ask: Windows, a daemon's pane; or a program that is
+    /// not a known shell, such as a multiplexer, a transport like ssh whose far side is anyone's, or
+    /// nushell). No quoting is right for all shells, so a name holding any character one of them reads as
+    /// syntax (@c detail::UnknownShellMetacharacters) is refused, and the rest is double-quoted.
     Unknown,
 };
 
@@ -36,15 +36,31 @@ struct ShellQuotingRow
     ShellQuoting quoting;     //!< How it reads a path.
 };
 
-/// The processes that do not read POSIX escapes, and the transports whose far side's shell is unknown.
-/// Everything else is @c ShellQuoting::Posix.
+/// The programs whose prompt is known to read a path as it is documented to be typed. Every other
+/// foreground program -- a multiplexer, a transport, nushell, elvish, xonsh -- is
+/// @c ShellQuoting::Unknown: a multiplexer or transport hides the shell behind it, and a shell that is not
+/// listed may not read a backslash as an escape.
 inline constexpr auto ShellQuotingRows = std::array {
+    ShellQuotingRow { .process = "sh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "bash", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "zsh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "dash", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "ash", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "ksh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "ksh93", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "mksh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "oksh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "pdksh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "yash", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "posh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "rbash", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "busybox", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "fish", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "csh", .quoting = ShellQuoting::Posix },
+    ShellQuotingRow { .process = "tcsh", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "pwsh", .quoting = ShellQuoting::PowerShell },
     ShellQuotingRow { .process = "powershell", .quoting = ShellQuoting::PowerShell },
     ShellQuotingRow { .process = "cmd", .quoting = ShellQuoting::Cmd },
-    ShellQuotingRow { .process = "ssh", .quoting = ShellQuoting::Unknown },
-    ShellQuotingRow { .process = "wsl", .quoting = ShellQuoting::Unknown },
-    ShellQuotingRow { .process = "sudo", .quoting = ShellQuoting::Unknown },
 };
 
 namespace detail
@@ -69,7 +85,7 @@ namespace detail
 /// trailing `.exe` is ignored, in any case.
 /// @param foregroundProcess The foreground process's name or path; empty when it is not known.
 /// @return The quoting of the matching row; @c ShellQuoting::Unknown when there is no process to name;
-///         @c ShellQuoting::Posix when none matches.
+///         @c ShellQuoting::Unknown when none matches.
 [[nodiscard]] constexpr ShellQuoting shellQuotingFor(std::string_view foregroundProcess) noexcept
 {
     if (foregroundProcess.empty())
@@ -85,7 +101,7 @@ namespace detail
     for (auto const& row: ShellQuotingRows)
         if (detail::equalsIgnoringCase(foregroundProcess, row.process))
             return row.quoting;
-    return ShellQuoting::Posix;
+    return ShellQuoting::Unknown;
 }
 
 /// Why dropped paths produced no text.

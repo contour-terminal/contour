@@ -14393,11 +14393,21 @@ TEST_CASE("TerminalSession: dropped paths are quoted for the shell in front", "[
         CHECK(mockPtyOf(*session).stdinBuffer() == "'/tmp/it''s here.txt' ");
     }
 
-    SECTION("a program that is no shell gets POSIX escapes, as vim's :e reads them")
+    SECTION("a known POSIX shell gets POSIX escapes")
     {
-        auto session = makeDropSession(testApp, "vim", false);
+        auto session = makeDropSession(testApp, "zsh", false);
         session->insertDroppedUrls(file);
         CHECK(mockPtyOf(*session).stdinBuffer() == "/tmp/it\\'s\\ here.txt ");
+    }
+
+    SECTION("a program that is no known POSIX shell refuses a name with a metacharacter")
+    {
+        for (auto const* program: { "nu", "elvish", "tmux", "mosh-client", "vim" })
+        {
+            auto session = makeDropSession(testApp, program, false);
+            session->insertDroppedUrls(file);
+            CHECK(mockPtyOf(*session).stdinBuffer().empty());
+        }
     }
 
     SECTION("a pane with no foreground process to ask (a daemon's) guesses no shell from the profile")

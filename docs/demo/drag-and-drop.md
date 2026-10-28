@@ -22,10 +22,10 @@ the program in the foreground, and not run. A trailing space lets you keep typin
 
 | Foreground program | Quoting |
 |--------------------|---------|
-| bash, zsh, fish, sh, vim and others | each special character, and spaces, escaped with a backslash |
+| a known POSIX shell (bash, zsh, fish, sh, dash, ksh, ...) | each special character, and spaces, escaped with a backslash |
 | PowerShell (`pwsh`, `powershell`) | single quotes, `'` doubled |
 | `cmd` | double quotes |
-| unknown (Windows, a pane hosted by the daemon, `ssh`, `wsl`, `sudo`) | double quotes, and a name holding any character one of those shells reads as syntax is refused |
+| anything else: Windows, a pane hosted by the daemon, a multiplexer (`tmux`, `screen`, `zellij`), a transport (`ssh`, `mosh`, `docker exec`, `su`, `sudo`, `wsl`), nushell, elvish, vim | double quotes, and a name holding any character one of those shells reads as syntax is refused |
 
 The text arrives as a paste, so an application that enabled bracketed paste receives it wrapped.
 Web links are typed the same way as file names, each one a quoted word, so a link a web page chose cannot

