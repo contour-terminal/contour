@@ -71,6 +71,11 @@ namespace contour::window
 
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
 /// -- or re-targets -- another the user may still have open.
+/// The random token that tells this process's tab drags from any other's: generated once, on first use, and
+/// the same for the rest of the process's life.
+/// @return The token, which a tab drag's payload carries as `token`.
+[[nodiscard]] QString const& processToken();
+
 enum class MenuSurface : uint8_t
 {
     Pane = 0, ///< The terminal pane's menu; acts on the pane it was opened over.
@@ -224,15 +229,15 @@ class WindowController:
     /// @param clock    What the held-modifier reveal measures its hold against.
     /// @param noticeAnnouncer Builds what the window's notices are said through; the window says them only
     ///                 while `accessibility_announcements` allows.
-    /// @param processId The id this process stamps into a tab drag's payload (processId()); a drag that
-    ///                 names another process is refused. The application's own in production.
+    /// @param processToken The token this process stamps into a tab drag's payload (processToken()); a drag
+    ///                 that carries another is refused. The application's own in production.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
                      NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer(),
-                     qint64 processId = QCoreApplication::applicationPid());
+                     QString processToken = window::processToken());
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -298,11 +303,13 @@ class WindowController:
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
     /// window and a DropArea can target the destination window across the shared engine.
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return _windowId.value; }
-    /// The id of this process, which a tab drag's payload carries (`pid`). The payload rides in an OS-level
-    /// drag, so a drop reads it back from whatever process started the drag: one that names another
-    /// process (a second Contour, or any application forging the mime type) names a window and a row of
-    /// ITS model, and is refused.
-    Q_INVOKABLE [[nodiscard]] qint64 processId() const noexcept { return _processId; }
+    /// The random token of this process, which a tab drag's payload carries (`token`). The payload rides in
+    /// an OS-level drag, so a drop reads it back from whatever process started the drag: one that carries
+    /// another token (a second Contour, also one in its own PID namespace as under Flatpak) names a window
+    /// and a row of ITS model, and is refused. Another application that forges the mime type is refused
+    /// unless it learns the token, which is not published anywhere but in this process's own drags; it is a
+    /// guard against mix-ups between instances, not against a hostile process of the same user.
+    Q_INVOKABLE [[nodiscard]] QString processToken() const { return _processToken; }
     /// Moves the tab at @p fromIndex of the window identified by @p sourceWindowId into THIS window at
     /// @p toIndex — the drop of a tab dragged from another window's strip onto this one.
     /// @param sourceWindowId The dragged tab's source window id (from windowIdValue()).
@@ -1233,7 +1240,7 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
-    qint64 _processId; ///< What processId() answers.
+    QString _processToken; ///< What processToken() answers.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     std::optional<WindowPosition> _initialPosition;
     std::optional<WindowPosition> _lastWindowPosition;

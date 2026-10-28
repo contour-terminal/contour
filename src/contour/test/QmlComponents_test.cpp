@@ -283,7 +283,7 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
-    Q_INVOKABLE [[nodiscard]] qint64 processId() const noexcept { return contour::test::MockProcessId; }
+    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::MockProcessToken; }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
@@ -661,8 +661,8 @@ TEST_CASE("GUI tab strip instantiates and binds against a populated model (offsc
 TEST_CASE("A TabItem's drag names the window, the row and the process that started it (offscreen)",
           "[contour][gui][qml][drop]")
 {
-    // The payload rides an OS-level drag, so a drop in another process reads it too: the pid is what lets
-    // it refuse ids and rows that name this process's model.
+    // The payload rides an OS-level drag, so a drop in another process reads it too: the per-process token
+    // is what lets it refuse ids and rows that name this process's model.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
@@ -699,7 +699,7 @@ TEST_CASE("A TabItem's drag names the window, the row and the process that start
     REQUIRE(payload.isObject());
     CHECK(payload.object().value("windowId").toInt() == 1);
     CHECK(payload.object().value("tabIndex").toInt() == 3);
-    CHECK(payload.object().value("pid").toDouble() == static_cast<double>(contour::test::MockProcessId));
+    CHECK(payload.object().value("token").toString() == contour::test::MockProcessToken);
 }
 
 TEST_CASE("A colored TabItem fills with the user color and picks contrasting text (offscreen)",

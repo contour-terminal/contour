@@ -39,6 +39,7 @@
 
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QUuid>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
@@ -63,16 +64,23 @@
 namespace contour::window
 {
 
+QString const& processToken()
+{
+    // QUuid draws from the platform's random source; it is unique per process, not per PID namespace.
+    static auto const token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return token;
+}
+
 WindowController::WindowController(session::TerminalSessionManager& manager,
                                    vtworkspace::WindowId windowId,
                                    config::MenuPresentation menuPresentation,
                                    std::optional<WindowPosition> initialPosition,
                                    core::platform::IClock const& clock,
                                    NoticeAnnouncerFactory const& noticeAnnouncer,
-                                   qint64 processId):
+                                   QString processToken):
     _manager { manager },
     _windowId { windowId },
-    _processId { processId },
+    _processToken { std::move(processToken) },
     _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
     // and survives a config reload in place (the loaded values are assigned into it, the object is not
@@ -825,9 +833,9 @@ namespace
     };
 
     /// Reads the `application/x-contour-tab` JSON of a drag. It is data from whichever process started the
-    /// drag, so nothing is assumed: a missing, non-integral or out-of-range field, or a `pid` that is not
-    /// @p ownProcessId, reads as no drag.
-    [[nodiscard]] std::optional<TabDrag> parseTabDrag(QString const& json, qint64 ownProcessId)
+    /// drag, so nothing is assumed: a missing, non-integral or out-of-range field, or a `token` that is not
+    /// @p ownToken, reads as no drag.
+    [[nodiscard]] std::optional<TabDrag> parseTabDrag(QString const& json, QString const& ownToken)
     {
         auto const document = QJsonDocument::fromJson(json.toUtf8());
         if (!document.isObject())
@@ -836,8 +844,7 @@ namespace
         auto const windowId = object.value("windowId");
         auto const tabIndex = object.value("tabIndex");
         // Ids and rows are only meaningful in the model of the process that wrote them.
-        if (auto const pid = object.value("pid");
-            !pid.isDouble() || pid.toDouble() != static_cast<double>(ownProcessId))
+        if (auto const token = object.value("token"); !token.isString() || token.toString() != ownToken)
             return std::nullopt;
         auto const isWhole = [](QJsonValue const& value, double max) {
             return value.isDouble() && value.toDouble() >= 0.0 && value.toDouble() <= max
@@ -890,7 +897,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
                 return none;
             break;
         case DropPayload::Tab: {
-            auto const drag = parseTabDrag(tabPayload, _processId);
+            auto const drag = parseTabDrag(tabPayload, _processToken);
             auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
             auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
             if (source == nullptr)
@@ -916,7 +923,7 @@ void WindowController::dropTabOnPane(session::TerminalSession const* pane,
 
     // Re-resolved here, not trusted from the caller: the payload names a window and a row, which may be
     // anything by now.
-    auto const drag = parseTabDrag(tabPayload, _processId);
+    auto const drag = parseTabDrag(tabPayload, _processToken);
     auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
     auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
     auto const [targetWindow, targetTab, leaf] = _manager.model().findSessionLeaf(pane->modelSessionId());

@@ -289,7 +289,7 @@ Row {
                     return
                 var payload = JSON.parse(raw)
                 // Written by another process (or forged): its window ids and rows are not this model's.
-                if (payload.pid !== root.controller.processId())
+                if (payload.token !== root.controller.processToken())
                     return
                 var target = hoverIndex
                 if (payload.windowId === root.controller.windowIdValue())

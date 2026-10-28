@@ -427,8 +427,8 @@ Item {
         Drag.mimeData: ({
             "application/x-contour-tab": JSON.stringify({
                 windowId: root.controller ? root.controller.windowIdValue() : 0,
-                // A drop refuses a payload another process wrote: ids and rows name ITS model.
-                pid: root.controller ? root.controller.processId() : 0,
+                // A drop refuses a payload another process wrote (another token): ids and rows name ITS model.
+                token: root.controller ? root.controller.processToken() : "",
                 tabIndex: root.tabIndex
             })
         })
