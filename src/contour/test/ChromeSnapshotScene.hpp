@@ -320,6 +320,9 @@ class ChromeSnapshotScene
             case ScriptAction::OpenBlockMenu: openBlockMenu(); break;
             case ScriptAction::HoverBlock: hoverBlock(); break;
         }
+        // The cards announce where the header lives once the panes have their size, which showSticky() reads.
+        _incubation.settle();
+        QCoreApplication::processEvents();
         showSticky();
         // The window's notices post their banner as the reload that failed would.
         if (scriptRow(_variant.script).banner == SnapshotBanner::ConfigReload)
@@ -374,6 +377,9 @@ class ChromeSnapshotScene
     {
         return _measuredTitleBar;
     }
+
+    /// The session of the active leaf, whose card announced where its sticky header lives.
+    [[nodiscard]] MockSession& activeSession() { return *_sessions[ActiveLeaf]; }
 
   private:
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
@@ -633,18 +639,25 @@ class ChromeSnapshotScene
                 { QStringLiteral("jumpLabel"), QStringLiteral("Jump to Command ↑") },
             };
         };
+        // Where the active card says the header lives, as the real session would be told: the grid draws it
+        // where neither a pane header nor the band's title can, so the chrome then carries nothing.
+        auto const hostOf = [&] {
+            auto const& hosts = _sessions[ActiveLeaf]->stickyHosts;
+            REQUIRE_FALSE(hosts.empty());
+            return static_cast<window::StickyHeaderHost>(hosts.back());
+        };
+        auto const publishFor = [&](SnapshotSticky const& sticky) {
+            auto const host = hostOf();
+            if (host == window::StickyHeaderHost::Grid)
+                return;
+            _sessions[ActiveLeaf]->setStickyHeader(publish(sticky, host));
+            if (host == window::StickyHeaderHost::TitleBand)
+                _controller.setActiveStickyHeader(publish(sticky, host));
+        };
         switch (_variant.script)
         {
-            case SnapshotScript::StickyPaneHeader:
-                _sessions[ActiveLeaf]->setStickyHeader(
-                    publish(SnapshotStickyFailed, window::StickyHeaderHost::PaneHeader));
-                break;
-            case SnapshotScript::StickyTitleBand:
-                _sessions[ActiveLeaf]->setStickyHeader(
-                    publish(SnapshotStickySucceeded, window::StickyHeaderHost::TitleBand));
-                _controller.setActiveStickyHeader(
-                    publish(SnapshotStickySucceeded, window::StickyHeaderHost::TitleBand));
-                break;
+            case SnapshotScript::StickyPaneHeader: publishFor(SnapshotStickyFailed); break;
+            case SnapshotScript::StickyTitleBand: publishFor(SnapshotStickySucceeded); break;
             default: break;
         }
     }

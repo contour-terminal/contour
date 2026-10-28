@@ -232,6 +232,41 @@ void checkBlockScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
 }
 } // namespace
 
+TEST_CASE("A sample block's sticky header is shown somewhere on every row (offscreen)",
+          "[contour][gui][qml][snapshot][stickyheader]")
+{
+    using namespace contour::test::snapshot;
+    using contour::window::StickyHeaderHost;
+    for (auto const row: { contour::config::ChromeStyle::MacOS,
+                           contour::config::ChromeStyle::Fluent,
+                           contour::config::ChromeStyle::ContourLinux,
+                           contour::config::ChromeStyle::Terminal })
+    {
+        auto const variant = SnapshotVariant { .script = SnapshotScript::StickyTitleBand,
+                                               .row = row,
+                                               .edition = SnapshotEditions.front(),
+                                               .appearance = vtbackend::ColorPreference::Dark };
+        INFO(snapshotFileName(variant));
+        auto scene = ChromeSnapshotScene { variant };
+        scene.show();
+
+        // The card decides where the lone pane's header lives; the band shows the title or it does not.
+        auto const& hosts = scene.activeSession().stickyHosts;
+        REQUIRE_FALSE(hosts.empty());
+        auto const host = static_cast<StickyHeaderHost>(hosts.back());
+        auto const* title = scene.root().findChild<QQuickItem*>(QStringLiteral("bandTitle"));
+        auto const bandShows = title != nullptr && title->isVisible()
+                               && title->property("text").toString().startsWith(
+                                   QString::fromUtf8(SnapshotStickySucceeded.glyph));
+        CHECK((host == StickyHeaderHost::TitleBand) == bandShows);
+
+        // Where no band shows it, the grid draws it, so the chrome carries nothing: it is never withheld
+        // from the grid and shown nowhere.
+        CHECK(scene.activeSession().stickyHeader().isEmpty() == (host == StickyHeaderHost::Grid));
+        CHECK(host != StickyHeaderHost::PaneHeader);
+    }
+}
+
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
 {
