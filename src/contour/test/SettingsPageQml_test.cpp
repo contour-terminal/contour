@@ -2422,6 +2422,61 @@ TEST_CASE("the colour schemes page edits a slot live", "[contour][gui][qml][sett
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a slot row of the Colors page holds its well, readout and hex, and clears its neighbours",
+          "[contour][gui][qml][settings][schemes]")
+{
+    // The Terminal row's rows are one cell tall: a well with its readout beneath must make the row taller
+    // instead of spilling into the next row, and the hex field must be wide enough for "#rrggbb".
+    auto const row = GENERATE(
+        config::ChromeStyle::MacOS, config::ChromeStyle::ContourLinux, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    addScheme(fx, "midnight");
+    openColorsPage(fx);
+    auto window = fx.activeWindow(QSize(1000, 800));
+    openScheme(fx, "midnight");
+    fx.settle();
+
+    auto const rows = findDescendants(*fx.item(), [](QQuickItem const& item) {
+        return item.objectName().startsWith("settingsRow:scheme.") && item.isVisible();
+    });
+    REQUIRE(rows.size() > 2);
+    auto const sceneRect = [&](QQuickItem const& item) {
+        return item.mapRectToScene(QRectF { 0, 0, item.width(), item.height() });
+    };
+    for (auto const* slot: rows)
+    {
+        INFO(slot->objectName().toStdString());
+        auto const slotRect = sceneRect(*slot);
+        auto const* well = fx.controlOf(slot->objectName().mid(QStringLiteral("settingsRow:").size()));
+        REQUIRE(well != nullptr);
+        // The well, with its readout, lies inside its row.
+        auto const wellRect = sceneRect(*well);
+        CHECK(slotRect.contains(wellRect));
+        auto const* readout = findDescendant(*slot, [](QQuickItem const& item) {
+            return item.objectName() == "colorReadout" && item.isVisible();
+        });
+        if (readout != nullptr)
+            CHECK(slotRect.contains(sceneRect(*readout)));
+        // The hex is not cut off by its field.
+        auto const* field = findDescendant(
+            *slot, [](QQuickItem const& item) { return item.objectName() == "colorHexField"; });
+        REQUIRE(field != nullptr);
+        CHECK(field->property("contentWidth").toReal() + field->property("leftPadding").toReal()
+                  + field->property("rightPadding").toReal()
+              <= field->width());
+    }
+    // No row reaches into the next.
+    for (auto const index: std::views::iota(std::size_t { 1 }, rows.size()))
+    {
+        auto const above = sceneRect(*rows[index - 1]);
+        auto const below = sceneRect(*rows[index]);
+        if (above.top() < below.top()) // the same block, in order
+            CHECK(above.bottom() <= below.top() + 0.5);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the schemes gallery shows every scheme, marks the profile's, and opens one on a click",
           "[contour][gui][qml][settings][schemes]")
 {

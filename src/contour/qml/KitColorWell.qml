@@ -68,6 +68,12 @@ FocusScope {
                                                     : root.description
     Accessible.focusable: true
 
+    TextMetrics {
+        id: hexMetrics
+        font: chromeStyle.type.body
+        text: "#" + "888888"
+    }
+
     Column {
         id: column
         spacing: chromeStyle.space.s2
@@ -103,7 +109,9 @@ FocusScope {
             }
 
             Rectangle {
-                width: chromeStyle.settings.stepperField
+                // Wide enough for "#rrggbb" in the field's font, whatever the style's field width.
+                width: Math.max(chromeStyle.settings.stepperField, hexMetrics.advanceWidth + field.leftPadding
+                                                                       + field.rightPadding)
                 height: chromeStyle.settings.control
                 radius: chromeStyle.radii.control
                 color: chromeStyle.colors.controlFill

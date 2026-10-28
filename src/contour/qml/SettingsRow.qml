@@ -67,8 +67,10 @@ Item {
     }
 
     objectName: "settingsRow:" + root._data.key
+    // A control taller than the row (a colour well with its readout beneath) makes the row taller, so it
+    // never spills into the next one.
     implicitHeight: Math.max(root._hasHelp ? chromeStyle.settings.rowWithHelp : chromeStyle.settings.row,
-                             texts.implicitHeight + root._textInset)
+                             texts.implicitHeight + root._textInset, control.implicitHeight + root._textInset)
     implicitWidth: texts.implicitWidth + root._sidePadding
 
     // The card of a row, where each row is its own; a grouped list draws one behind all its rows.
