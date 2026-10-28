@@ -299,6 +299,10 @@ class ChromeSnapshotScene
             _settingsWindow->setLastPage(
                 QString::fromUtf8(settingsPageId(scriptRow(_variant.script).settingsPage)));
             REQUIRE(_settingsWindow->show(nullptr).has_value());
+            // The page fades in on opening: wait it out, or the picture catches it half transparent.
+            auto const* loader = subject().findChild<QQuickItem*>(QStringLiteral("settingsPageLoader"));
+            REQUIRE(loader != nullptr);
+            REQUIRE(QTest::qWaitFor([&] { return loader->opacity() == 1.0; }, PopupSettleMs));
         }
         switch (scriptRow(_variant.script).action)
         {

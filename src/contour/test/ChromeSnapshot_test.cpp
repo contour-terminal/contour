@@ -349,6 +349,11 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
         case SnapshotSettingsPage::LinkPatterns: CHECK(shows("linkPatternsPage")); break;
         case SnapshotSettingsPage::StatusLine: CHECK(shows("statusLinePage")); break;
     }
+    // The picture is taken once the page's fade-in ran out, or it catches the page half transparent: the
+    // dimmed pages of the first display pass.
+    auto const* loader = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsPageLoader"));
+    REQUIRE(loader != nullptr);
+    CHECK(loader->opacity() == 1.0);
     // `work` is the editable profile, `main` the one contour.yml defines.
     CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("readOnlyBanner"))->isVisible()
           == (row.settingsPage == SnapshotSettingsPage::ProfileReadOnly));
