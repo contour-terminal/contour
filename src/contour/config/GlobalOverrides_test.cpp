@@ -26,6 +26,14 @@ TEST_CASE("GlobalOverrides: chrome_density is a scalar row covering its own key 
     CHECK_FALSE(row->covers("chrome_density.x"));
 }
 
+TEST_CASE("GlobalOverrides: secure_input is a scalar row covering its own key alone", "[config][secureinput]")
+{
+    auto const* row = globalOverrideFor("secure_input");
+    REQUIRE(row != nullptr);
+    CHECK(row->key == "secure_input");
+    CHECK_FALSE(row->covers("secure_input.x"));
+}
+
 TEST_CASE("GlobalOverrides: a section row covers each of its leaves, not the section itself", "[config]")
 {
     auto const* row = globalOverrideFor("gutter.line_numbers");

@@ -62,6 +62,7 @@ namespace
         scalar<&Config::uiStyle>("ui_style"),
         scalar<&Config::windowControlStyle>("window_control_style"),
         scalar<&Config::chromeDensity>("chrome_density"),
+        scalar<&Config::secureInput>("secure_input"),
         scalar<&Config::uiFontFamily>("ui_font_family"),
         scalar<&Config::uiFontSize>("ui_font_size"),
         scalar<&Config::earlyExitThreshold>("early_exit_threshold"),

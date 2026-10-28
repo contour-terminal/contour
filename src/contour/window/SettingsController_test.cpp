@@ -46,6 +46,7 @@
 #include <cstddef>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -1377,6 +1378,29 @@ TEST_CASE("SettingsController: chrome_density offers both densities and round-tr
 
     fx.resetGlobal("chrome_density");
     CHECK(fx.cfg.chromeDensity.value() == config::ChromeDensity::Comfortable);
+}
+
+TEST_CASE("SettingsController: secure_input offers its modes and round-trips", "[settings][secureinput]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::SecureInputMode>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto const row = rowWithKey(fx.controller->globalFields(), "secure_input");
+    CHECK(row.value("type").toString() == "enum");
+    CHECK(row.value("options").toStringList() == expected);
+    CHECK(row.value("group").toInt() == static_cast<int>(SettingsGroup::GeneralAdvanced));
+
+    // The edition's default is stated by contour.yml's loader; the override says the other one.
+    auto const before = fx.cfg.secureInput.value();
+    auto const other = before == config::SecureInputMode::Off ? "auto" : "off";
+    fx.commitGlobal("secure_input", other);
+    CHECK(fx.cfg.secureInput.value() != before);
+
+    fx.resetGlobal("secure_input");
+    CHECK(fx.cfg.secureInput.value() == before);
 }
 
 TEST_CASE("SettingsController: every global field's override survives save and reload", "[settings]")
@@ -3659,6 +3683,71 @@ TEST_CASE("SettingsController: option_as_alt is a segmented row of the four sett
     CHECK(written->contains("option_as_alt: left\n"));
     CHECK(fx.cfg.findProfile("New Profile")->optionAsAlt.value() == config::OptionAsAlt::Left);
     CHECK(rowWithKey(fx.controller->profileFields(), "option_as_alt").value("value").toString() == "left");
+}
+
+TEST_CASE("SettingsController: input_method_editor_style offers both styles and is written to the profile",
+          "[settings][preedit]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->addProfile();
+    fx.scheduler->fire();
+    REQUIRE_FALSE(fx.controller->editingReadOnly());
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<vtbackend::PreeditStyle>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+    REQUIRE(expected == QStringList { "highlighted", "inline" });
+
+    auto const row = rowWithKey(fx.controller->profileFields(), "input_method_editor_style");
+    REQUIRE_FALSE(row.isEmpty());
+    CHECK(row.value("options").toStringList() == expected);
+    CHECK(row.value("group").toInt() == static_cast<int>(SettingsGroup::ProfileBehaviour));
+    auto const before = fx.cfg.findProfile("New Profile")->inputMethodEditorStyle.value();
+    CHECK(row.value("value").toString()
+          == QString::fromUtf8(config::configEnumToken(before).data(),
+                               static_cast<qsizetype>(config::configEnumToken(before).size())));
+
+    auto const other = before == vtbackend::PreeditStyle::Inline ? "highlighted" : "inline";
+    fx.controller->commitProfileField("input_method_editor_style", other);
+    fx.scheduler->fire();
+    auto const written = fx.fileContent("profiles/New Profile.yml");
+    REQUIRE(written.has_value());
+    CHECK(written->contains(std::format("input_method_editor_style: {}\n", other)));
+    CHECK(fx.cfg.findProfile("New Profile")->inputMethodEditorStyle.value() != before);
+}
+
+TEST_CASE(
+    "SettingsController: scrollbar.mode is an enum row of the three preferences, written to the profile",
+    "[settings][scrollbar]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->addProfile();
+    fx.scheduler->fire();
+    REQUIRE_FALSE(fx.controller->editingReadOnly());
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::ScrollBarModePreference>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+    REQUIRE(expected.size() == 3);
+
+    auto const row = rowWithKey(fx.controller->profileFields(), "scrollbar_mode");
+    REQUIRE_FALSE(row.isEmpty());
+    CHECK(row.value("options").toStringList() == expected);
+    CHECK(row.value("group").toInt() == static_cast<int>(SettingsGroup::ProfileHistory));
+    // A new profile takes its edition's mode, whatever that is: the row shows it.
+    auto const before = fx.cfg.findProfile("New Profile")->scrollbar.value().mode;
+    auto const beforeToken = config::configEnumToken(before);
+    CHECK(row.value("value").toString().toStdString() == beforeToken);
+    auto const other = before == config::ScrollBarModePreference::Always ? "overlay" : "always";
+
+    fx.controller->commitProfileField("scrollbar_mode", other);
+    fx.scheduler->fire();
+    auto const written = fx.fileContent("profiles/New Profile.yml");
+    REQUIRE(written.has_value());
+    CHECK(written->contains(std::format("mode: {}", other)));
+    CHECK(fx.cfg.findProfile("New Profile")->scrollbar.value().mode != before);
+    CHECK(rowWithKey(fx.controller->profileFields(), "scrollbar_mode").value("value").toString().toStdString()
+          == other);
 }
 
 // {{{ An unflushed edit survives switching to another draft

@@ -437,6 +437,13 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                         "Input method editor",
                         "Enable IME (input method) support.",
                         [](auto& p) -> auto& { return p.inputMethodEditor.value(); }),
+              enumFieldFromTable<vtbackend::PreeditStyle>(
+                  "input_method_editor_style",
+                  "Input method text",
+                  "How the text an input method is composing is drawn: highlighted as a block, or inline "
+                  "and underlined as the text it will become.",
+                  [](TerminalProfile const& p) { return p.inputMethodEditorStyle.value(); },
+                  [](TerminalProfile& p, auto v) { p.inputMethodEditorStyle = v; }),
               boolField("highlight_word_and_matches_on_double_click",
                         "Highlight word on double-click",
                         "Highlight the double-clicked word and its other occurrences.",
@@ -620,6 +627,17 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                   [](TerminalProfile& p, auto v) {
                       auto sb = p.scrollbar.value();
                       sb.position = v;
+                      p.scrollbar = sb;
+                  }),
+              enumFieldFromTable<config::ScrollBarModePreference>(
+                  "scrollbar_mode",
+                  "Scrollbar behaviour",
+                  "Whether the scrollbar hides at the bottom of the scrollback (overlay) or stays while "
+                  "there is scrollback (always). The default follows the system's scroller style.",
+                  [](TerminalProfile const& p) { return p.scrollbar.value().mode; },
+                  [](TerminalProfile& p, auto v) {
+                      auto sb = p.scrollbar.value();
+                      sb.mode = v;
                       p.scrollbar = sb;
                   }),
               boolField("hide_scrollbar_in_alt_screen",
@@ -1447,6 +1465,7 @@ namespace
         GlobalFieldGroupRow { .key = "command_palette_recent_count", .group = SettingsGroup::GeneralPalette },
         GlobalFieldGroupRow { .key = "word_delimiters", .group = SettingsGroup::GeneralPalette },
         GlobalFieldGroupRow { .key = "read_buffer_size", .group = SettingsGroup::GeneralAdvanced },
+        GlobalFieldGroupRow { .key = "secure_input", .group = SettingsGroup::GeneralAdvanced },
         GlobalFieldGroupRow { .key = "grapheme_clustering", .group = SettingsGroup::GeneralAdvanced },
         GlobalFieldGroupRow { .key = "text_scaling_method", .group = SettingsGroup::GeneralAdvanced },
         GlobalFieldGroupRow { .key = "renderer.gpu", .group = SettingsGroup::GeneralAdvanced },
@@ -1618,6 +1637,13 @@ std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
                 [](config::Config const& c) { return c.uiFontSize.value(); },
                 NumberRange {
                     .min = 0.0, .max = Unbounded, .step = 0.5, .decimals = 1, .unit = NumberUnit::Points }),
+            // Read where the lock is decided (TerminalSession::secureIndicator), so a change applies live.
+            globalEnumFieldFromTable<config::SecureInputMode>(
+                "secure_input",
+                "Secure input",
+                "Whether a pane that hides what you type (a password prompt) shows a lock and, on macOS, "
+                "turns on Secure Keyboard Entry while it has focus.",
+                [](config::Config const& c) { return c.secureInput.value(); }),
             globalBoolField("grapheme_clustering",
                             "Grapheme clustering",
                             "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the "
