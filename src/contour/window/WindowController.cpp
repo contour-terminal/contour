@@ -45,7 +45,6 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
-#include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
 
 #include <chrono>
@@ -2007,10 +2006,7 @@ void WindowController::onWindowStateChanged()
 
 Qt::ColorScheme WindowController::effectiveColorScheme() const
 {
-    // The scheme last forced onto the chrome, so the frame and the band agree with it after an OSC 11 too.
-    if (auto const applied = _manager.app().appliedGuiScheme())
-        return *applied;
-    return QGuiApplication::styleHints()->colorScheme();
+    return _manager.app().effectiveColorScheme();
 }
 
 bool WindowController::dressesTitleBand() const noexcept

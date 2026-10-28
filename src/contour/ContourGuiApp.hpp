@@ -604,6 +604,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         return _appliedGuiScheme;
     }
 
+    /// The scheme the chrome shows: the one last forced onto it, else the OS's. The native window frames
+    /// read it, so they agree with the chrome after an OSC 11 too.
+    /// @return The effective scheme.
+    [[nodiscard]] Qt::ColorScheme effectiveColorScheme() const;
+
     /// The application's version string, as the About dialog shows it.
     /// Defined in ContourGuiApp.cpp, the one place the build-wide version macro is visible to the GUI.
     /// @return The version, with the branch and commit it was built from.
@@ -1210,6 +1215,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// window goes before the engine it was built on, and before _settingsWindow, so it outlives the host
     /// that borrows it.
     std::unique_ptr<window::SettingsController> _settingsController;
+    /// The Settings window's OS frame, made with the host; declared before _settingsWindow, which borrows it.
+    std::unique_ptr<platform::NativeWindowFrame> _settingsFrame;
     /// The app's one Settings window host, created on first use; it owns the window.
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
 

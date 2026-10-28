@@ -11,6 +11,7 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/SettingsDressingFixtures.hpp>
 #include <contour/test/SettingsFixtures.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
@@ -19,6 +20,8 @@
 #include <contour/window/WindowLivenessQt.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
+#include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeySequence>
 #include <QtGui/QPalette>
@@ -31,9 +34,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <expected>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <string_view>
 #include <vector>
 
@@ -61,14 +66,15 @@ struct HostFixture: ControllerFixture
     std::vector<std::string> openedInNewTab; ///< The profiles the host was asked to open in a tab.
     test::InMemoryGuiStateStore ownState;    ///< What the host remembers, unless the case shares another's.
     config::GuiStateStore& state;            ///< What the host remembers across closes and restarts.
+    test::SettingsDressingRecorder dressing; ///< What the host dressed its window with.
     SettingsWindowHost host;
 
     /// @param conventions The conventions the host presents the window with.
-    /// @param style       The chrome style the engine's tokens resolve.
+    /// @param chrome      The chrome row the engine's tokens resolve.
     /// @param remembered  What the host remembers; null for a store of its own.
     explicit HostFixture(window::SettingsWindowConventions conventions =
                              window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                         config::UiStyle style = config::UiStyle::Native,
+                         test::ChromeSetup const& chrome = test::defaultChromeSetup(),
                          config::GuiStateStore* remembered = nullptr):
         ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} },
         state { remembered != nullptr ? *remembered : ownState },
@@ -78,12 +84,13 @@ struct HostFixture: ControllerFixture
                    ++factoryCalls;
                    return window::loadSettingsWindow(engine, self);
                },
+               dressing.dressing(),
                state,
                window::SettingsPreview::SessionFactory {},
                [this] { ++configurationEdits; },
                [this](std::string const& profile) { openedInNewTab.push_back(profile); } }
     {
-        test::installChromeStyle(engine, style);
+        test::installChromeStyle(engine, chrome);
         engine.setIncubationController(&incubation);
     }
 
@@ -396,7 +403,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
     {
         {
             auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                       config::UiStyle::Native,
+                                       test::defaultChromeSetup(),
                                        &remembered };
             auto& settings = first.show();
             settings.setGeometry(frame);
@@ -407,7 +414,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
         CHECK(remembered.state.settingsWindow->page == "section:appearance");
 
         auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                    config::UiStyle::Native,
+                                    test::defaultChromeSetup(),
                                     &remembered };
         CHECK(second.host.lastPage() == QStringLiteral("section:appearance"));
         auto& settings = second.show();
@@ -428,7 +435,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
                                                                         .show = {},
                                                                         .page = {} };
         auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                config::UiStyle::Native,
+                                test::defaultChromeSetup(),
                                 &remembered };
         auto& settings = fx.show();
         REQUIRE(available.width() >= 740);
@@ -443,7 +450,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
         auto normalFrame = QRect {};
         {
             auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                       config::UiStyle::Native,
+                                       test::defaultChromeSetup(),
                                        &remembered };
             auto& settings = first.show();
             settings.setGeometry(frame);
@@ -462,7 +469,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
         CHECK(QRect(normal.x, normal.y, normal.width, normal.height) == normalFrame);
 
         auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                    config::UiStyle::Native,
+                                    test::defaultChromeSetup(),
                                     &remembered };
         auto& settings = second.show();
         CHECK(settings.windowStates() == Qt::WindowMaximized);
@@ -472,7 +479,7 @@ TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qm
     {
         remembered.state.dismissedOffers = { config::NewDefaultsOffer::ExistingConfig };
         auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                                config::UiStyle::Native,
+                                test::defaultChromeSetup(),
                                 &remembered };
         fx.show();
         fx.host.closeSettings();
@@ -497,7 +504,7 @@ TEST_CASE("Settings reopens on the page it showed, or on its first page",
     auto const open = [&remembered]() {
         return std::make_unique<HostFixture>(
             window::settingsWindowConventionsFor(config::HostPlatform::Other),
-            config::UiStyle::Native,
+            test::defaultChromeSetup(),
             &remembered);
     };
 
@@ -654,7 +661,7 @@ TEST_CASE("the Settings window's Terminal row counts it in cells",
     contour::test::QmlMessageCapture const warnings;
     auto const& row = config::ChromeTokenRows[static_cast<std::size_t>(config::ChromeStyle::Terminal)];
     auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
-                            config::UiStyle::Terminal };
+                            test::defaultChromeSetup(config::UiStyle::Terminal) };
     auto const& settings = fx.show();
 
     CHECK(preferredSizeOf(settings).width()
@@ -685,6 +692,7 @@ TEST_CASE("a Settings window factory that fails leaves no window",
         [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
             return std::unexpected { SettingsWindowError::LoadFailed };
         },
+        test::undressedSettingsWindow(),
         remembered,
         window::SettingsPreview::SessionFactory {},
         [] {},
@@ -710,6 +718,7 @@ TEST_CASE("a Settings window host has a preview exactly when it can make its ses
             [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
                 return std::unexpected { SettingsWindowError::LoadFailed };
             },
+            test::undressedSettingsWindow(),
             remembered,
             std::move(factory),
             [] {},
@@ -721,4 +730,132 @@ TEST_CASE("a Settings window host has a preview exactly when it can make its ses
               return std::unique_ptr<session::TerminalSession> {};
           })->preview()
           != nullptr);
+}
+
+namespace
+{
+
+/// The inputs under which the Settings window's title bar shows Mica.
+constexpr auto FluentMica = window::SettingsBackdropInputs { .row = config::ChromeStyle::Fluent,
+                                                             .material = config::Material::Mica,
+                                                             .scheme = Qt::ColorScheme::Dark };
+
+/// Sends @p window the palette change that follows every flip of the chrome's light or dark.
+void changePalette(QQuickWindow& window)
+{
+    auto change = QEvent { QEvent::ApplicationPaletteChange };
+    QCoreApplication::sendEvent(&window, &change);
+}
+
+/// @return Whether every decoration @p frame was asked for is the OS's own.
+[[nodiscard]] bool onlyServerFrames(test::RecordingWindowFrame const& frame)
+{
+    return std::ranges::all_of(frame.applied, [](platform::WindowDecoration decoration) {
+        return decoration == platform::WindowDecoration::Server;
+    });
+}
+
+/// @return The colour the Settings sidebar paints in @p window.
+[[nodiscard]] QColor sidebarColor(QQuickWindow const& window)
+{
+    auto const* sidebar = window.findChild<QQuickItem*>(QStringLiteral("settingsSidebar"));
+    REQUIRE(sidebar != nullptr);
+    return sidebar->property("color").value<QColor>();
+}
+
+} // namespace
+
+TEST_CASE("the Settings window keeps the OS's frame, with Mica behind its title bar on the Fluent row",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = FluentMica;
+    auto& window = fx.show();
+
+    REQUIRE_FALSE(fx.dressing.frame.applied.empty());
+    CHECK(onlyServerFrames(fx.dressing.frame));
+    REQUIRE(fx.dressing.record.applied.size() == 1);
+    CHECK(fx.dressing.record.applied.front() == window::settingsBackdropFor(FluentMica));
+
+    SECTION("a palette change dresses the frame again and asks for no second backdrop")
+    {
+        auto const before = fx.dressing.frame.applied.size();
+        changePalette(window);
+        CHECK(fx.dressing.frame.applied.size() == before + 1);
+        CHECK(onlyServerFrames(fx.dressing.frame));
+        CHECK(fx.dressing.record.applied.size() == 1);
+    }
+
+    SECTION("the chrome turning light asks for the backdrop in light")
+    {
+        fx.dressing.inputs.scheme = Qt::ColorScheme::Light;
+        changePalette(window);
+        REQUIRE(fx.dressing.record.applied.size() == 2);
+        CHECK(fx.dressing.record.applied.back().scheme == Qt::ColorScheme::Light);
+    }
+
+    SECTION("Mica taken away takes the backdrop off")
+    {
+        fx.dressing.inputs.material = config::Material::Solid;
+        changePalette(window);
+        REQUIRE(fx.dressing.record.applied.size() == 2);
+        CHECK(fx.dressing.record.applied.back().backdrop == config::BandBackdrop::Client);
+    }
+}
+
+TEST_CASE("a failed material leaves the Settings window its own paint for good",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = FluentMica;
+    fx.dressing.record.failWith = platform::TitleBandMaterialError::Unsupported;
+    auto& window = fx.show();
+    CHECK(fx.dressing.record.applied.size() == 1);
+
+    // A request that would differ is not made: the window's material failed once (R-g).
+    fx.dressing.inputs.scheme = Qt::ColorScheme::Light;
+    changePalette(window);
+    CHECK(fx.dressing.record.applied.size() == 1);
+}
+
+TEST_CASE("the Settings sidebar keeps its own surface fill on every row and backdrop",
+          "[contour][gui][qml][settings][window]")
+{
+    // The window is server-framed: the OS's material sits in its title bar only, and the client area behind
+    // the sidebar stays opaque, so a sidebar that went clear would show the page's fill instead.
+    for (auto const rowIndex: std::views::iota(std::size_t { 0 }, config::detail::ChromeStyleCount))
+    {
+        auto const row = static_cast<config::ChromeStyle>(rowIndex);
+        for (auto const materialIndex: std::views::iota(std::size_t { 0 }, config::MaterialCount))
+        {
+            auto const material = static_cast<config::Material>(materialIndex);
+            INFO("row " << rowIndex << ", material " << materialIndex);
+            auto chrome = test::defaultChromeSetup();
+            chrome.row = row;
+            auto fx =
+                HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other), chrome };
+            fx.dressing.inputs = window::SettingsBackdropInputs { .row = row,
+                                                                  .material = material,
+                                                                  .scheme = Qt::ColorScheme::Dark };
+            auto const& window = fx.show();
+
+            auto const fill = fx.provider().colors()->property("settingsSidebarFill").value<QColor>();
+            CHECK(sidebarColor(window) == fill);
+        }
+    }
+}
+
+TEST_CASE("the Settings window on the macOS row asks for no backdrop",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = window::SettingsBackdropInputs { .row = config::ChromeStyle::MacOS,
+                                                          .material = config::Material::Glass,
+                                                          .scheme = Qt::ColorScheme::Dark };
+    auto& window = fx.show();
+    changePalette(window);
+
+    CHECK_FALSE(fx.dressing.frame.applied.empty());
+    CHECK(onlyServerFrames(fx.dressing.frame));
+    CHECK(fx.dressing.record.applied.empty());
 }

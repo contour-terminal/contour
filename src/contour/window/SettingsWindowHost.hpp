@@ -2,6 +2,9 @@
 #pragma once
 
 #include <contour/config/GuiStateStore.hpp>
+#include <contour/platform/NativeWindowFrame.hpp>
+#include <contour/platform/TitleBandMaterial.hpp>
+#include <contour/window/SettingsBackdrop.hpp>
 #include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 
@@ -52,6 +55,16 @@ class SettingsWindowHost;
 using SettingsWindowFactory = std::function<std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError>(
     SettingsWindowHost& host)>;
 
+/// What dresses the Settings window's frame (R-m): it keeps the OS's own title bar, which on the Fluent row
+/// shows Mica and follows the chrome's light or dark.
+struct SettingsWindowDressing
+{
+    platform::NativeWindowFrame& frame;     ///< Decorates the window; borrowed, outlives the host.
+    platform::ITitleBandMaterial& material; ///< Draws the backdrop; borrowed, outlives the host.
+    /// What the backdrop is decided from, read whenever the window is dressed. Called on the GUI thread.
+    std::function<SettingsBackdropInputs()> inputs;
+};
+
 /// The app's one Settings window: built on first show, and kept (never destroyed) when it closes.
 ///
 /// It is what SettingsWindow.qml binds to as `host`: the controller the page edits, the title and the
@@ -76,6 +89,8 @@ class SettingsWindowHost final: public QObject
     /// @param controller  What the page edits; borrowed, outlives this host.
     /// @param conventions The title and title-bar buttons the window presents itself with.
     /// @param factory     Builds the window on the first show.
+    /// @param dressing    The frame and backdrop the window is dressed with on every expose and palette
+    /// change.
     /// @param state       What the window remembers across restarts: its frame, screen and page. Borrowed:
     ///                    it outlives this host.
     /// @param previewFactory Makes the preview terminal's session; null: the host has no `preview`.
@@ -88,6 +103,7 @@ class SettingsWindowHost final: public QObject
     SettingsWindowHost(SettingsController& controller,
                        SettingsWindowConventions conventions,
                        SettingsWindowFactory factory,
+                       SettingsWindowDressing dressing,
                        config::GuiStateStore& state,
                        SettingsPreview::SessionFactory previewFactory,
                        std::function<void()> editConfiguration,
@@ -115,9 +131,9 @@ class SettingsWindowHost final: public QObject
     /// Builds the window on the first call; a hidden window then has the controller refreshed, is placed
     /// (R-c) unless it is maximised or full screen, whose geometry is left alone, and shown in the state it
     /// closed in, while a visible one is left as it is, mid-edit draft included. Either way a minimised
-    /// state is cleared (keeping maximised), and the window is raised and activated. The first show of a run
-    /// places the window over the frame it closed at in the run before, on the screen it was on when that
-    /// screen is there, maximised if it was (GuiState::settingsWindow).
+    /// state is cleared (keeping maximised), the window is dressed, and it is raised and activated. The first
+    /// show of a run places the window over the frame it closed at in the run before, on the screen it was on
+    /// when that screen is there, maximised if it was (GuiState::settingsWindow).
     /// @param anchor The screen of the window that asked; null for the primary screen.
     /// @return Nothing, or why the window could not be built. A failed build keeps no window, and the next
     ///         call tries again.
@@ -150,11 +166,21 @@ class SettingsWindowHost final: public QObject
     /// @param page The page's id.
     void setLastPage(QString const& page);
 
+    /// Dresses the window on its expose and on a palette change (the chrome's light or dark may have
+    /// flipped).
+    /// @param watched The object the event is for.
+    /// @param event   The event.
+    /// @return False: the event goes on to the window.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
   signals:
     /// lastPage() changed.
     void lastPageChanged();
 
   private:
+    /// Applies the OS's own frame, and the backdrop the inputs ask for when it differs from the one applied.
+    void dress();
+
     /// What a hidden window leaves behind: what Settings staged is written, and the frame, screen and page
     /// are remembered.
     void onHidden();
@@ -169,6 +195,7 @@ class SettingsWindowHost final: public QObject
     SettingsController& _controller;
     SettingsWindowConventions _conventions;
     SettingsWindowFactory _factory;
+    SettingsWindowDressing _dressing;
     config::GuiStateStore& _state;
     std::function<void()> _editConfiguration;
     std::function<void(std::string const&)> _openInNewTab;
@@ -178,6 +205,10 @@ class SettingsWindowHost final: public QObject
     QString _lastPage;
     /// The frame the window last had while neither maximised nor full screen: the one it returns to.
     std::optional<QRect> _normalGeometry;
+    /// The backdrop request last applied successfully; none before the first, or after it was withdrawn.
+    std::optional<platform::TitleBandRequest> _appliedBackdrop;
+    /// Once the material failed, the window asks for none again (R-g).
+    platform::BandMaterialHealth _backdropHealth = platform::BandMaterialHealth::Working;
     std::unique_ptr<QQuickWindow> _window;
 };
 

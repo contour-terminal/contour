@@ -206,10 +206,10 @@ namespace
             if (!needsFrameApplied(window, decoration))
             {
                 // The decoration stands, but the scheme its border was tinted for need not: a reload or
-                // an OSC 11 flips the chrome without touching the decoration, and WindowController
-                // re-applies on the palette change that follows.
-                if (policy.shadow == FrameShadowStrategy::NativeFrameKept
-                    && window.property(BorderSchemeKey).toInt() != schemeRecord(_colorScheme()))
+                // an OSC 11 flips the chrome without touching the decoration, and WindowController (or
+                // the Settings window's host, on the OS's own frame) re-applies on the palette change
+                // that follows.
+                if (window.property(BorderSchemeKey).toInt() != schemeRecord(_colorScheme()))
                     tintBorder(window, hwnd);
                 return;
             }
@@ -220,6 +220,9 @@ namespace
                 // back the margins the kept frame extended -- the OS's frame never had them (F32).
                 frameEventFilter().forget(hwnd);
                 reapplySystemBackdrop(window, hwnd, api);
+                // The OS's title bar still follows the chrome's light or dark (R-m): the dark-mode
+                // attribute is what turns it, and the Mica in it, dark.
+                tintBorder(window, hwnd);
                 return;
             }
 

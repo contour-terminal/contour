@@ -282,4 +282,40 @@ TEST_CASE("the corner preference stays round under Mica", "[native][win32][mica]
           == std::optional { contour::platform::DwmwcpRound });
 }
 
+TEST_CASE("the Settings window keeps the OS's title bar, dark with the chrome and Mica behind it",
+          "[native][win32][settings-frame]")
+{
+    if (!onNativeWindows())
+        SKIP("Requires the native Windows platform.");
+    auto const frame = contour::platform::makeWin32WindowFrame([] { return Qt::ColorScheme::Dark; });
+    REQUIRE(frame != nullptr);
+    auto const material = contour::platform::makeTitleBandMaterial();
+    auto window = QQuickWindow {};
+    window.resize(WindowWidth, WindowHeight);
+    window.create();
+    frame->apply(window, contour::platform::WindowDecoration::Server);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+    auto* const hwnd = reinterpret_cast<HWND>(window.winId());
+
+    // The OS's own title bar follows the chrome's dark scheme (R-m).
+    CHECK(attributeOf(hwnd, contour::platform::DwmwaUseImmersiveDarkMode)
+          == std::optional { DWORD { TRUE } });
+
+    auto const request = TitleBandRequest { .backdrop = BandBackdrop::NativeMaterial,
+                                            .kind = BackdropKind::Main,
+                                            .growth = contour::config::TitleBarGrowth::None,
+                                            .scheme = Qt::ColorScheme::Dark };
+    auto const applied = material->apply(window, request);
+    if (!hasSystemBackdrop())
+    {
+        // Below Windows 11 22H2 there is no Mica to ask for; the window keeps the solid title bar.
+        REQUIRE_FALSE(applied.has_value());
+        CHECK(applied.error() == TitleBandMaterialError::Unsupported);
+        return;
+    }
+    CHECK(applied.has_value());
+    CHECK(backdropOf(hwnd) == dword(DwmBackdrop::MainWindow));
+}
+
 #endif

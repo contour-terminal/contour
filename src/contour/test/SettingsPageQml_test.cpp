@@ -19,6 +19,7 @@
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/SettingsDressingFixtures.hpp>
 #include <contour/test/SettingsFixtures.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
@@ -249,6 +250,7 @@ struct SettingsPageView
         host { *controller,
                window::settingsWindowConventionsFor(config::HostPlatform::Other),
                [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); },
+               contour::test::undressedSettingsWindow(),
                state,
                preview == PreviewSource::Recording
                    ? window::SettingsPreview::SessionFactory { [this](config::Config const& config,

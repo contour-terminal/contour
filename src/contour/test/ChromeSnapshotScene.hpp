@@ -27,6 +27,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/RecordingShellRcEditor.hpp>
+#include <contour/test/SettingsDressingFixtures.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -1133,6 +1134,7 @@ class ChromeSnapshotScene
             *_settings,
             window::settingsWindowConventionsFor(variantHost(_variant)),
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); },
+            test::undressedSettingsWindow(),
             _settingsState,
             window::SettingsPreview::SessionFactory {}, // the snapshot scene has no preview session
             [] {},

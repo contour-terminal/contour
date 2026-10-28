@@ -3058,30 +3058,50 @@ std::shared_ptr<config::GuiStateStore> const& ContourGuiApp::guiState()
     return _guiState;
 }
 
+Qt::ColorScheme ContourGuiApp::effectiveColorScheme() const
+{
+    return _appliedGuiScheme.value_or(QGuiApplication::styleHints()->colorScheme());
+}
+
 window::SettingsWindowHost& ContourGuiApp::settingsWindow()
 {
-    if (!_settingsWindow)
-        _settingsWindow = std::make_unique<window::SettingsWindowHost>(
-            settingsController(),
-            window::settingsWindowConventionsFor(_hostPlatform),
-            _settingsWindowFactory,
-            *guiState(),
-            [this](config::Config const& preview, std::string const& profileName) {
-                return sessionsManager().createPreviewSession(preview, profileName);
-            },
-            [this] {
-                auto const url = QUrl::fromLocalFile(platform::toQString(_config.configFile));
-                if (auto const opened = externalLauncher().openUrl(url); !opened)
-                    errorLog()("Could not open the configuration file \"{}\": {}.",
-                               _config.configFile.string(),
-                               platform::describe(opened.error()));
-            },
-            [this](std::string const& profileName) {
-                // A command of the app's own, as the menu bar's: the tab opens in the window the app would
-                // run one in, and without a window says so.
-                runMenuBarAction(actions::CreateNewTab { .profileName = profileName },
-                                 command::ActionScope::Application);
-            });
+    if (_settingsWindow)
+        return *_settingsWindow;
+    // The Settings window keeps the OS's title bar (R-m), which follows the chrome's light or dark.
+    _settingsFrame = platform::makeNativeWindowFrame([this] { return effectiveColorScheme(); });
+    _settingsWindow = std::make_unique<window::SettingsWindowHost>(
+        settingsController(),
+        window::settingsWindowConventionsFor(_hostPlatform),
+        _settingsWindowFactory,
+        window::SettingsWindowDressing {
+            .frame = *_settingsFrame,
+            .material = titleBandMaterial(),
+            .inputs =
+                [this] {
+                    return window::SettingsBackdropInputs {
+                        .row = _chromeStyle,
+                        .material = titleBandTokens(window::BarCentre::Empty).material,
+                        .scheme = effectiveColorScheme(),
+                    };
+                },
+        },
+        *guiState(),
+        [this](config::Config const& preview, std::string const& profileName) {
+            return sessionsManager().createPreviewSession(preview, profileName);
+        },
+        [this] {
+            auto const url = QUrl::fromLocalFile(platform::toQString(_config.configFile));
+            if (auto const opened = externalLauncher().openUrl(url); !opened)
+                errorLog()("Could not open the configuration file \"{}\": {}.",
+                           _config.configFile.string(),
+                           platform::describe(opened.error()));
+        },
+        [this](std::string const& profileName) {
+            // A command of the app's own, as the menu bar's: the tab opens in the window the app would
+            // run one in, and without a window says so.
+            runMenuBarAction(actions::CreateNewTab { .profileName = profileName },
+                             command::ActionScope::Application);
+        });
     return *_settingsWindow;
 }
 

@@ -300,6 +300,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsSections.hpp
         window/QtSaveScheduler.hpp
         window/SettingsPreview.hpp
+        window/SettingsBackdrop.hpp
         window/SettingsWindowHost.hpp
         session/PreviewTranscript.hpp
         session/PastePreview.hpp
@@ -974,6 +975,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/MultiWindow_test.cpp
             window/SettingsController_test.cpp
             window/SettingsPreview_test.cpp
+            window/SettingsBackdrop_test.cpp
             window/SettingsWindowHost_test.cpp
             window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp

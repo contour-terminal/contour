@@ -51,6 +51,7 @@ namespace
 SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
                                        SettingsWindowConventions conventions,
                                        SettingsWindowFactory factory,
+                                       SettingsWindowDressing dressing,
                                        config::GuiStateStore& state,
                                        SettingsPreview::SessionFactory previewFactory,
                                        std::function<void()> editConfiguration,
@@ -60,6 +61,7 @@ SettingsWindowHost::SettingsWindowHost(SettingsController& controller,
     _controller { controller },
     _conventions { conventions },
     _factory { std::move(factory) },
+    _dressing { std::move(dressing) },
     _state { state },
     _editConfiguration { std::move(editConfiguration) },
     _openInNewTab { std::move(openInNewTab) },
@@ -95,7 +97,49 @@ SettingsWindowHost::~SettingsWindowHost()
     // A window destroyed with its host is no close: it neither writes nor remembers, and its last signals
     // must not reach a host half torn down.
     if (_window)
+    {
         _window->disconnect(this);
+        _window->removeEventFilter(this);
+    }
+}
+
+bool SettingsWindowHost::eventFilter(QObject* watched, QEvent* event)
+{
+    // A palette change follows every flip of the chrome's light or dark: a reload, an OSC 11, the OS's own.
+    if (_window && watched == _window.get()
+        && (event->type() == QEvent::Expose || event->type() == QEvent::ApplicationPaletteChange))
+        dress();
+    return QObject::eventFilter(watched, event);
+}
+
+void SettingsWindowHost::dress()
+{
+    auto& window = *_window;
+    // On every expose, as WindowController seeds its frame: the frame skips what it already applied, and
+    // re-tints its title bar for a scheme that changed.
+    _dressing.frame.apply(window, platform::WindowDecoration::Server);
+
+    // Applied only to a platform window that exists: the material leaves one without a handle alone, and
+    // recording such a request as applied would skip the first real apply.
+    if (window.handle() == nullptr)
+        return;
+    auto const request = _backdropHealth == platform::BandMaterialHealth::Working
+                             ? settingsBackdropFor(_dressing.inputs())
+                             : std::nullopt;
+    if (request == _appliedBackdrop)
+        return;
+    // A request withdrawn (Reduced transparency, a contrast theme) takes the material back off.
+    auto const applied = _dressing.material.apply(
+        window, request.value_or(platform::TitleBandRequest { .kind = config::BackdropKind::Main }));
+    if (!applied)
+    {
+        errorLog()("The Settings window's material failed ({}); it paints its own background.",
+                   platform::titleBandMaterialErrorName(applied.error()));
+        _backdropHealth = platform::BandMaterialHealth::Failed;
+        _appliedBackdrop.reset();
+    }
+    else
+        _appliedBackdrop = request;
 }
 
 QString SettingsWindowHost::title() const
@@ -122,6 +166,7 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
         if (!built)
             return std::unexpected { built.error() };
         _window = std::move(*built);
+        _window->installEventFilter(this);
         // However the window goes -- the page's Close, the shortcut, the title bar's button -- what is staged
         // is written then, not 300 ms later, when the app may be gone, and where it was is remembered.
         connect(_window.get(), &QWindow::visibleChanged, this, [this](bool visible) {
@@ -156,6 +201,9 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
         // Not show(), which is showNormal() on the desktop: a window closed maximised reopens maximised.
         window.setVisible(true);
     }
+    // Dressed now, with the platform window shown, rather than only at its first expose, which the
+    // platform may deliver later.
+    dress();
     raiseAndActivate(window);
     return {};
 }
