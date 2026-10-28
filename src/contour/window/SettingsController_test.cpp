@@ -4194,3 +4194,61 @@ TEST_CASE("SettingsController: a failed Use New leaves nothing staged for the ne
     CHECK_FALSE(settings->contains("defaults_edition"));
     CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
 }
+
+// }}}
+// {{{ Deleting what is not open is judged by what Settings last loaded
+
+TEST_CASE("SettingsController: deleting an unopened profile keeps a hand edit made since the load",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeSideProfiles(fx, { "work" });
+    auto const workFile = config::relativePathOf(config::profileFile("work"));
+    fx.handEdit(workFile, "show_title_bar: false\n");
+
+    fx.controller->requestDeleteProfile("work");
+    fx.fire();
+
+    CHECK(fx.fileContent(workFile) == "show_title_bar: false\n");
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: deleting an unopened scheme keeps a hand edit made since the load",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    REQUIRE(fx.store
+                ->write(config::colorSchemeFile("midnight"),
+                        config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+                .has_value());
+    fx.reload();
+    auto const schemeFile = config::relativePathOf(config::colorSchemeFile("midnight"));
+    fx.handEdit(schemeFile, "edited: elsewhere\n");
+
+    fx.controller->requestDeleteScheme("midnight");
+    fx.fire();
+
+    CHECK(fx.fileContent(schemeFile) == "edited: elsewhere\n");
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: deleting an unopened profile or scheme removes what was loaded", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeSideProfiles(fx, { "work" });
+    REQUIRE(fx.store
+                ->write(config::colorSchemeFile("midnight"),
+                        config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+                .has_value());
+    fx.reload();
+
+    fx.controller->requestDeleteProfile("work");
+    fx.controller->requestDeleteScheme("midnight");
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::profileFile("work"))).has_value());
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("midnight"))).has_value());
+}

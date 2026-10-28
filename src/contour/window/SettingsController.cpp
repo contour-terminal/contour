@@ -948,6 +948,10 @@ void SettingsController::refresh()
 
     _colorSchemes.clear();
     _schemeGalleryCards.clear();
+    _schemeListedBytes.clear();
+    for (auto const& name: onDisk)
+        if (auto const read = _services.store->read(config::colorSchemeFile(name)))
+            _schemeListedBytes.emplace(name, *read);
     for (auto const& name: schemeNames)
     {
         auto row = QVariantMap {};
@@ -1337,6 +1341,11 @@ std::expected<void, SettingsError> SettingsController::deleteProfile(QString con
     if (!isSideFileProfile(name.toStdString()))
         return refuse(SettingsErrorKind::ReadOnly, "Only profiles made in Settings can be deleted here.");
 
+    // The open draft's file was observed when it was opened. Another is as the loader read it, as in a
+    // rename: a hand edit made since is a conflict, not removed unseen.
+    if (_editingProfile != name)
+        _session->observe(config::profileFile(name.toStdString()),
+                          loadedBytesOf(config::profileFile(name.toStdString())));
     if (auto const staged = stage(config::profileFile(name.toStdString()), std::nullopt); !staged)
         return staged;
 
@@ -2147,6 +2156,11 @@ std::expected<void, SettingsError> SettingsController::deleteColorScheme(QString
                                   joinedNames(*users),
                                   users->size() == 1 ? "it" : "them"));
 
+    // As the gallery last listed it, unless it is the open draft, which was observed when it was opened.
+    if (_editingScheme != name)
+        if (auto const listed = _schemeListedBytes.find(name.toStdString());
+            listed != _schemeListedBytes.end())
+            _session->observe(config::colorSchemeFile(name.toStdString()), listed->second);
     if (auto const staged = stage(config::colorSchemeFile(name.toStdString()), std::nullopt); !staged)
         return staged;
 

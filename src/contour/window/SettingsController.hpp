@@ -598,6 +598,9 @@ class SettingsController: public QObject
     DraftAccess _schemeAccess = DraftAccess::Closed;
     std::optional<std::string>
         _schemeSeededFrom; //!< The side file's bytes an editable draft was seeded from.
+    /// The bytes of each color scheme side file as refresh() last listed them: what a delete of a scheme
+    /// that is not open judges a hand edit against.
+    std::map<std::string, std::optional<std::string>> _schemeListedBytes;
 
     /// A scheme's palette as @ref schemePalette last read it, under the name it was read for.
     struct CachedPalette
