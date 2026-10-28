@@ -391,40 +391,9 @@ Rectangle {
 
     Component {
         id: linksPage
-        Flickable {
-            id: links
-            objectName: "linksPage"
-            clip: true
-            contentWidth: width
-            contentHeight: linksColumn.implicitHeight + root._pageMargins
-            boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {}
-
-            ColumnLayout {
-                id: linksColumn
-                x: chromeStyle.space.s8
-                y: chromeStyle.space.s8
-                width: links.width - root._pageMargins
-                spacing: chromeStyle.settings.groupGap
-
-                // How links are opened, and the patterns that find them.
-                Label {
-                    objectName: "linkGestureLabel"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: root.controller ? root.controller.linkGesture : ""
-                    font: chromeStyle.type.body
-                    color: chromeStyle.colors.settingsLabel
-                    textFormat: Text.PlainText
-                }
-
-                LinkPatternList {
-                    Layout.fillWidth: true
-                    controller: root.controller
-                    editable: root.controller !== null && !root.controller.locked && !root.controller.editingReadOnly
-                    onDeleteRequested: (index, name) => root.requestDelete("linkPattern:" + index, name)
-                }
-            }
+        LinkPatternsPage {
+            controller: root.controller
+            onDeleteRequested: (index, name) => root.requestDelete("linkPattern:" + index, name)
         }
     }
 

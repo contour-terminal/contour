@@ -1298,24 +1298,45 @@ TEST_CASE("the Status Line page's indicator editor is inert on a read-only profi
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("the Links page's pattern list is inert on a read-only profile",
-          "[contour][gui][qml][settings][links]")
+namespace
 {
+/// The text field inside the control named @p objectName on the page, or nullptr.
+[[nodiscard]] QQuickItem* textFieldNamed(PageFixture const& fx, QString const& objectName)
+{
+    auto const* control = fx.byName(objectName);
+    return control != nullptr
+               ? findDescendant(*control,
+                                [](QQuickItem const& item) { return item.inherits("QQuickTextField"); })
+               : nullptr;
+}
+
+/// Opens the Links page of the profile "New Profile", which the fixture adds.
+void openLinksPage(PageFixture& fx)
+{
+    fx.addProfile();
+    REQUIRE_FALSE(fx.controller->editingReadOnly());
+    REQUIRE(fx.open("profile:New Profile:links"));
+}
+} // namespace
+
+TEST_CASE("the Links page's table is inert on a read-only profile", "[contour][gui][qml][settings][links]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
     contour::test::QmlMessageCapture const warnings;
-    auto fx = PageFixture(OneProfile);
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
     REQUIRE(fx.open("profile:main:links"));
     REQUIRE(fx.controller->editingReadOnly());
 
-    auto* list = fx.item()->findChild<QObject*>("linkPatternList");
-    REQUIRE(list != nullptr);
-    CHECK_FALSE(list->property("editable").toBool());
-    auto const* add = fx.item()->findChild<QObject*>("addLinkPatternButton");
-    REQUIRE(add != nullptr);
-    CHECK_FALSE(add->property("enabled").toBool());
+    CHECK(fx.byName("linkPatternsTable") != nullptr);
+    auto const* clickable = fx.byName("linkPatternClickable:0");
+    REQUIRE(clickable != nullptr);
+    CHECK_FALSE(clickable->isEnabled());
+    CHECK_FALSE(required(fx.byName("addLinkPatternButton")).isEnabled());
+    CHECK_FALSE(required(fx.byName("removeLinkPatternButton")).isEnabled());
 
     // Its one write path refuses too, and so would the controller behind it.
     auto const before = fx.controller->linkPatterns();
-    QMetaObject::invokeMethod(list,
+    QMetaObject::invokeMethod(fx.byName("linkPatternsPage"),
                               "commit",
                               Q_ARG(QVariant, QVariant { 1 }),
                               Q_ARG(QVariant, QVariant { QStringLiteral("clickable") }),
@@ -1325,49 +1346,87 @@ TEST_CASE("the Links page's pattern list is inert on a read-only profile",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("the Links page's pattern list adds, previews and removes patterns",
+TEST_CASE("the Clickable switch of a built-in applies live, as a name-only override",
           "[contour][gui][qml][settings][links]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    openLinksPage(fx);
+
+    auto const first = fx.controller->linkPatterns().front().toMap();
+    REQUIRE(first.value("builtin").toBool());
+    auto const was = first.value("clickable").toBool();
+    auto* clickable = fx.byName("linkPatternClickable:0");
+    REQUIRE(clickable != nullptr);
+    CHECK(clickable->property("checked").toBool() == was);
+
+    QMetaObject::invokeMethod(clickable, "toggle");
+    fx.settle();
+    CHECK(clickable->property("checked").toBool() == !was);
+    CHECK(fx.controller->linkPatterns().front().toMap().value("clickable").toBool() == !was);
+
+    // Written once the debounce runs, as the override of that one key.
+    fx.scheduler->fire();
+    fx.settle();
+    auto const* profile = fx.cfg.findProfile("New Profile");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->hintPatterns.value()
+          == std::vector { config::HintPatternConfig { .name = first.value("name").toString().toStdString(),
+                                                       .regex = {},
+                                                       .clickable = !was,
+                                                       .url = {} } });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Links page adds, previews and removes a pattern", "[contour][gui][qml][settings][links]")
 {
     contour::test::QmlMessageCapture const warnings;
     auto fx = PageFixture(OneProfile);
-    fx.addProfile();
-    REQUIRE_FALSE(fx.controller->editingReadOnly());
-    REQUIRE(fx.open("profile:New Profile:links"));
+    openLinksPage(fx);
     auto* item = fx.item();
+    auto* page = fx.byName("linkPatternsPage");
+    REQUIRE(page != nullptr);
 
-    auto* list = item->findChild<QObject*>("linkPatternList");
-    REQUIRE(list != nullptr);
-    CHECK(list->property("editable").toBool());
+    // A built-in is selected first: its detail is not offered, and it cannot be removed.
+    CHECK_FALSE(required(fx.byName("linkPatternDetail")).isVisible());
+    CHECK_FALSE(required(fx.byName("removeLinkPatternButton")).isEnabled());
 
     // The preview shows what the selected row, the url built-in, finds in the sample.
-    auto const* preview = item->findChild<QObject*>("linkPatternPreview");
+    auto const* preview = fx.byName("linkSamplePreview");
     REQUIRE(preview != nullptr);
-    list->setProperty("sample", QStringLiteral("see https://example.com/x and more"));
+    page->setProperty("sample", QStringLiteral("see https://example.com/x and more"));
     fx.settle();
     CHECK(preview->property("text").toString() == "see <u>https://example.com/x</u> and more");
 
     auto const builtins = fx.controller->linkPatterns().size();
-    clickButton(item->findChild<QObject*>("addLinkPatternButton"));
+    clickButton(fx.byName("addLinkPatternButton"));
     fx.settle();
     REQUIRE(fx.controller->linkPatterns().size() == builtins + 1);
     auto const added = fx.controller->linkPatterns().back().toMap();
 
-    // The new row says what it lacks, in the chrome style's error colour. A delegate has no QObject parent,
-    // so the label is looked for in the visual tree.
+    // The new row is selected, with its detail and the means to remove it.
+    CHECK(page->property("selected").toInt() == builtins);
+    CHECK(required(fx.byName("linkPatternDetail")).isVisible());
+    CHECK(required(fx.byName("removeLinkPatternButton")).isEnabled());
+
+    // It says what it lacks, under its row, in the danger ink.
     auto const* shownProblem = findDescendant(*item, [](QQuickItem const& label) {
         return label.objectName() == "linkPatternProblem" && !label.property("text").toString().isEmpty();
     });
     REQUIRE(shownProblem != nullptr);
     CHECK(shownProblem->property("text").toString() == added.value("problem").toString());
-    auto const* style = fx.engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
+    auto* style = fx.engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
     REQUIRE(style != nullptr);
-    CHECK(shownProblem->property("color").value<QColor>() == style->property("errorColor").value<QColor>());
+    auto danger = QColor {};
+    REQUIRE(QMetaObject::invokeMethod(style,
+                                      "statusInk",
+                                      Q_RETURN_ARG(QColor, danger),
+                                      Q_ARG(int, style->property("statusDanger").toInt())));
+    CHECK(shownProblem->property("color").value<QColor>() == danger);
 
-    // Deleting asks first, naming the pattern, and removes it once confirmed.
-    QMetaObject::invokeMethod(list,
-                              "deleteRequested",
-                              Q_ARG(int, static_cast<int>(builtins)),
-                              Q_ARG(QString, added.value("name").toString()));
+    // Removing asks first, naming the pattern, and removes it once confirmed.
+    clickButton(fx.byName("removeLinkPatternButton"));
     fx.settle();
     auto* dialog = item->findChild<QObject*>("deleteDialog");
     REQUIRE(dialog != nullptr);
@@ -1377,40 +1436,29 @@ TEST_CASE("the Links page's pattern list adds, previews and removes patterns",
     QMetaObject::invokeMethod(dialog, "confirmed");
     fx.settle();
     CHECK(fx.controller->linkPatterns().size() == builtins);
+    CHECK(page->property("selected").toInt() < builtins); // on a row the table has
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("the Links page's pattern list takes what is typed, one field after the other",
+TEST_CASE("the Links page's detail takes what is typed, one field after the other",
           "[contour][gui][qml][settings][links]")
 {
-    // Typed for real into the list's own fields: leaving the name field commits it, which changes the model,
-    // while the focus is already on its way to the regex field.
+    // Typed for real into the detail's own fields: leaving the name field commits it, which changes the
+    // model, while the focus is already on its way to the regex field.
     contour::test::QmlMessageCapture const warnings;
     auto fx = PageFixture(OneProfile);
-    fx.addProfile();
-    REQUIRE_FALSE(fx.controller->editingReadOnly());
-    REQUIRE(fx.open("profile:New Profile:links"));
-    auto* page = fx.item();
+    openLinksPage(fx);
     auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
-    clickButton(page->findChild<QObject*>("addLinkPatternButton"));
+    clickButton(fx.byName("addLinkPatternButton"));
     fx.settle();
     auto const row = static_cast<int>(fx.controller->linkPatterns().size()) - 1;
-    auto const added = fx.controller->linkPatterns().back().toMap().value("name").toString();
 
-    // The new row's fields, found in the visual tree: a delegate has no QObject parent.
-    auto const fieldNamed = [&](QString const& objectName) -> QQuickItem& {
-        auto* const name = findDescendant(*page, [&](QQuickItem const& item) {
-            return item.objectName() == "linkPatternName" && item.property("text").toString() == added;
-        });
-        return required(findDescendant(required(required(name).parentItem()), [&](QQuickItem const& item) {
-            return item.objectName() == objectName;
-        }));
-    };
-
-    auto* const name = &fieldNamed("linkPatternName");
-    auto const regex = QPointer<QQuickItem> { &fieldNamed("linkPatternRegex") };
+    auto* const name = textFieldNamed(fx, "linkPatternName");
+    auto const regex = QPointer<QQuickItem> { textFieldNamed(fx, "linkPatternRegex") };
+    REQUIRE(name != nullptr);
+    REQUIRE_FALSE(regex.isNull());
     TestWindow::focus(*name);
     QMetaObject::invokeMethod(name, "selectAll");
     window.type("jira");
@@ -1426,6 +1474,48 @@ TEST_CASE("the Links page's pattern list takes what is typed, one field after th
     auto const stored = fx.controller->linkPatterns().at(row).toMap();
     CHECK(stored.value("name").toString() == "jira");
     CHECK(stored.value("regex").toString() == "T-[0-9]");
+
+    // The URL template, last.
+    auto* const url = textFieldNamed(fx, "linkPatternUrl");
+    REQUIRE(url != nullptr);
+    window.typeOver(*url, "https://j/{0}");
+    fx.settle();
+    CHECK(fx.controller->linkPatterns().at(row).toMap().value("url").toString() == "https://j/{0}");
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a pattern with a problem says so under its row and is not written",
+          "[contour][gui][qml][settings][links]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    openLinksPage(fx);
+    auto window = fx.activeWindow(QSize(1000, 800));
+    fx.settle();
+
+    clickButton(fx.byName("addLinkPatternButton"));
+    fx.settle();
+    auto* const regex = textFieldNamed(fx, "linkPatternRegex");
+    REQUIRE(regex != nullptr);
+    window.typeOver(*regex, "(");
+    fx.settle();
+
+    // A regex that does not compile: its row says why.
+    auto const row = fx.controller->linkPatterns().back().toMap();
+    REQUIRE_FALSE(row.value("problem").toString().isEmpty());
+    auto const* shown = findDescendant(*fx.item(), [&](QQuickItem const& label) {
+        return label.objectName() == "linkPatternProblem"
+               && label.property("text").toString() == row.value("problem").toString();
+    });
+    REQUIRE(shown != nullptr);
+    CHECK(shown->isVisible());
+
+    // The profile's file never holds it, as the reader would skip it.
+    fx.scheduler->fire();
+    fx.settle();
+    auto const* profile = fx.cfg.findProfile("New Profile");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->hintPatterns.value().empty());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -2525,5 +2615,75 @@ TEST_CASE("every ink of the Colors page reads on what it sits on, on every row, 
     REQUIRE(frame != nullptr);
     auto const ring = frame->property("border").value<QObject*>()->property("color").value<QColor>();
     CHECK(contrast(ring, group) >= MarkContrast);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("every ink of the Links page reads on what it sits on, on every row, scheme and appearance",
+          "[contour][gui][qml][settings][links][contrast]")
+{
+    // Review Focus 3, for what Task 16 draws: a row's name, kind and problem, the gesture line, the sample's
+    // preview and note, and the ring of the selected row.
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const rowName = GENERATE(from_range(contrastRows()));
+    INFO("appearance: " << (appearance == vtbackend::ColorPreference::Light ? "light" : "dark")
+                        << ", row: " << rowName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    contour::test::QmlMessageCapture const warnings;
+
+    auto setup = rowSetup(config::ChromeStyle::ContourLinux);
+    if (rowName == "macos")
+        setup.row = config::ChromeStyle::MacOS;
+    else if (rowName == "fluent")
+        setup.row = config::ChromeStyle::Fluent;
+    else if (rowName == "linux")
+        setup.row = config::ChromeStyle::ContourLinux;
+    else
+        setup = terminalRowSetup(rowName);
+
+    auto fx = PageFixture(OneProfile, nullptr, setup);
+    openLinksPage(fx);
+    clickButton(fx.byName("addLinkPatternButton")); // a row with a problem, selected
+    fx.settle();
+
+    auto const token = [&fx](char const* name) {
+        auto* style =
+            fx.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        return style->property("colors").value<QObject*>()->property(name).value<QColor>();
+    };
+    auto const colorOf = [](QQuickItem const* item) {
+        return item->property("color").value<QColor>();
+    };
+    auto const window = QGuiApplication::palette().color(QPalette::Window);
+    auto const group = over(token("settingsGroupFill"), over(token("settingsPageFill"), window));
+    auto const page = over(token("settingsPageFill"), window);
+    constexpr auto TextContrast = 4.5;
+    constexpr auto MarkContrast = 3.0;
+
+    for (auto const* name:
+         { "linkPatternRowName", "linkPatternKind", "linkPatternProblem", "linkSamplePreview" })
+    {
+        INFO(name);
+        auto const items = findDescendants(*fx.item(), [name](QQuickItem const& item) {
+            return item.objectName() == QLatin1String(name) && item.isVisible();
+        });
+        REQUIRE_FALSE(items.empty());
+        for (auto const* item: items)
+            CHECK(contrast(colorOf(item), group) >= TextContrast);
+    }
+    // The gesture line sits on the page, not in a group.
+    CHECK(contrast(colorOf(fx.byName("linkGestureLabel")), page) >= TextContrast);
+    auto const* note = fx.byName("linkPatternNote");
+    REQUIRE(note != nullptr);
+    if (note->isVisible())
+        CHECK(contrast(colorOf(note), group) >= TextContrast);
+
+    // The ring of the selected row is a mark on the group.
+    auto const* selectedRow = fx.byName(QStringLiteral("linkPatternRow:")
+                                        + QString::number(fx.controller->linkPatterns().size() - 1));
+    REQUIRE(selectedRow != nullptr);
+    auto const* frame = selectedRow->property("background").value<QObject*>();
+    REQUIRE(frame != nullptr);
+    CHECK(contrast(frame->property("border").value<QObject*>()->property("color").value<QColor>(), group)
+          >= MarkContrast);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

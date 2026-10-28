@@ -3,7 +3,6 @@
 # the lines with `python3 scripts/check-qml-sizes.py --print-baseline` and keep this header.
 src/contour/qml/ColorSlotField.qml 9
 src/contour/qml/ConfirmDialog.qml 13
-src/contour/qml/LinkPatternList.qml 8
 src/contour/qml/PopupSurface.qml 1
 src/contour/qml/StatusLineChip.qml 11
 src/contour/qml/StatusLineIndicatorEditor.qml 8

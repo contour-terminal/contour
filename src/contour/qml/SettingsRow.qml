@@ -170,7 +170,9 @@ Item {
                 default: return textControl;
                 }
             }
-            onLoaded: item.objectName = "settingsControl:" + root._data.key
+            // A field may name its control (a page's tests and a screen reader's rotor look it up by name).
+            onLoaded: item.objectName = root._data.controlObjectName !== undefined
+                                        ? root._data.controlObjectName : "settingsControl:" + root._data.key
         }
     }
 

@@ -463,7 +463,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ColorSchemesPage.qml
         qml/SchemeCard.qml
         qml/StatusLineIndicatorEditor.qml
-        qml/LinkPatternList.qml
+        qml/LinkPatternsPage.qml
         qml/StatusLineSegmentRow.qml
         qml/StatusLineChip.qml
         qml/StatusLineItemDialog.qml

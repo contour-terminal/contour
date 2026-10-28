@@ -396,7 +396,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ConfirmDialog.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ColorSchemesPage.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SchemeCard.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPatternList.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPatternsPage.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml"),
     };
 
