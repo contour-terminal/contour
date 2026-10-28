@@ -149,17 +149,24 @@ namespace detail
     }
 
     /// Whether @p path holds a character that makes the typed text look other than it runs: the bidi
-    /// embeddings, overrides and isolates (U+202A..U+202E, U+2066..U+2069) and the line and paragraph
-    /// separators (U+2028, U+2029), which sanitizeCommandLine() replaces for display too.
+    /// marks (U+200E, U+200F, U+061C), embeddings, overrides and isolates (U+202A..U+202E,
+    /// U+2066..U+2069) and the line and paragraph separators (U+2028, U+2029), which
+    /// sanitizeCommandLine() replaces for display too.
     [[nodiscard]] inline bool holdsDeceptiveCharacter(std::string_view path) noexcept
     {
         constexpr auto Lead = '\xE2';
+        constexpr auto ArabicLead = '\xD8';
+        constexpr auto ArabicLetterMarkTail = '\x9C'; // U+061C is D8 9C in UTF-8
         for (auto const [i, c]: core::views::enumerate(path))
         {
+            if (c == ArabicLead && i + 1 < path.size() && path[i + 1] == ArabicLetterMarkTail)
+                return true;
             if (c != Lead || i + 2 >= path.size())
                 continue;
             auto const second = static_cast<unsigned char>(path[i + 1]);
             auto const third = static_cast<unsigned char>(path[i + 2]);
+            if (second == 0x80 && third >= 0x8E && third <= 0x8F) // U+200E, U+200F
+                return true;
             if (second == 0x80 && third >= 0xA8 && third <= 0xAE) // U+2028..U+202E
                 return true;
             if (second == 0x81 && third >= 0xA6 && third <= 0xA9) // U+2066..U+2069

@@ -36,7 +36,7 @@ and the page that started the drag chose the text, not you.
 ## What is refused
 
 - A file name holding a control character (a newline, an escape, and the like) or a character that
-  makes the typed text look other than it runs (a text-direction control, U+2028, U+2029) refuses the
+  makes the typed text look other than it runs (a text-direction control such as U+200E or U+202E, U+2028, U+2029) refuses the
   whole drop with "Not inserted: a file name holds a control or text-direction character.", because such
   a name could run as a command in the shell.
 - Under `cmd`, a name holding `%`, `"` or `!` cannot be quoted safely and is refused too.

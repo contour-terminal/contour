@@ -155,7 +155,10 @@ TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[
     // other than it runs; as for a control character, nothing of the drop is typed.
     for (auto const quoting:
          { ShellQuoting::Posix, ShellQuoting::PowerShell, ShellQuoting::Cmd, ShellQuoting::Unknown })
-        for (auto const& bad: { "\u2028",
+        for (auto const& bad: { "\u200E",
+                                "\u200F",
+                                "\u061C",
+                                "\u2028",
                                 "\u2029",
                                 "\u202A",
                                 "\u202B",
@@ -172,8 +175,10 @@ TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[
             REQUIRE_FALSE(text.has_value());
             CHECK(text.error() == DropTextError::ControlCharacter);
         }
-    // Their neighbours are ordinary text: U+2027, U+202F (narrow no-break space), U+2065 and U+206A.
-    for (auto const& fine: { "\u2027", "\u202F", "\u2065", "\u206A" })
+    // Their neighbours are ordinary text: U+200D (zero-width joiner, which emoji need), U+2027, U+202F
+    // (narrow no-break space), U+2065, U+206A, and the Arabic semicolon and the code point after the letter
+    // mark.
+    for (auto const& fine: { "\u200D", "\u2027", "\u202F", "\u2065", "\u206A", "\u061B", "\u061D" })
         CHECK(one(std::string("/tmp/a") + fine + "b", ShellQuoting::PowerShell).has_value());
 }
 
