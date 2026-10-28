@@ -284,7 +284,7 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
-    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::MockProcessToken; }
+    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::mockProcessToken(); }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
@@ -700,7 +700,7 @@ TEST_CASE("A TabItem's drag names the window, the row and the process that start
     REQUIRE(payload.isObject());
     CHECK(payload.object().value("windowId").toInt() == 1);
     CHECK(payload.object().value("tabIndex").toInt() == 3);
-    CHECK(payload.object().value("token").toString() == contour::test::MockProcessToken);
+    CHECK(payload.object().value("token").toString() == contour::test::mockProcessToken());
 }
 
 TEST_CASE("A colored TabItem fills with the user color and picks contrasting text (offscreen)",
@@ -4614,10 +4614,15 @@ namespace
 [[nodiscard]] QVariantMap stickyEntry(int outcome, int host)
 {
     using contour::config::StatusColorRole;
-    auto const role =
-        outcome == static_cast<int>(vtbackend::CommandBlockOutcome::Running)   ? StatusColorRole::Running
-        : outcome == static_cast<int>(vtbackend::CommandBlockOutcome::Failure) ? StatusColorRole::Danger
-                                                                               : StatusColorRole::Success;
+    auto const role = [outcome] {
+        switch (static_cast<vtbackend::CommandBlockOutcome>(outcome))
+        {
+            case vtbackend::CommandBlockOutcome::Running: return StatusColorRole::Running;
+            case vtbackend::CommandBlockOutcome::Failure: return StatusColorRole::Danger;
+            case vtbackend::CommandBlockOutcome::Success: return StatusColorRole::Success;
+        }
+        return StatusColorRole::Success;
+    }();
     return QVariantMap { { QStringLiteral("glyph"), QStringLiteral("✓") },
                          { QStringLiteral("command"), QStringLiteral("cmake --build") },
                          { QStringLiteral("detail"), QStringLiteral("2m 14s") },

@@ -30,7 +30,11 @@
 namespace contour::test
 {
 /// The token every mock window controller answers to processToken(): what its tabs stamp into a drag.
-inline QString const MockProcessToken = QStringLiteral("mock-process-token");
+/// @return The token.
+[[nodiscard]] inline QString mockProcessToken()
+{
+    return QStringLiteral("mock-process-token");
+}
 
 /// The colours a mock offers in its tab menu's "Tab Color" sub-menu, in order.
 inline constexpr auto MockTabPalette = std::array {
