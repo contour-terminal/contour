@@ -288,6 +288,13 @@ daemon sends the block records along with the screen. Reattaching does not repla
 commands that finished while you were away. `OpenCommandOutput` opens no pane there — the pane would run
 on the daemon's side, which never sees the file — so bind it with `placement: detached` instead.
 
+## Restored sessions
+
+When the daemon brings a workspace back after a restart, each pane's history comes back above a dimmed
+"Restored · session ended hh:mm" row, which names the day too when it is not today. A command that was still
+running when the snapshot was taken is shown as abandoned: its chip stops counting, since the program it
+belonged to is gone. The first window to attach also shows one toast, such as "Restored 2 windows, 7 tabs".
+
 ## Settings page
 
 Every setting above but the key bindings can also be changed on the settings page:

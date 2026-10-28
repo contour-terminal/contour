@@ -62,8 +62,11 @@ Step 6.3 done (exited process: a restored pane names the command the restart sto
 first and defaults to Deny, and Dismiss, cleared by the pane's next command; a pane cut off from its daemon offers
 Reconnect, which restarts the attach and takes the panes back in place by their remote session id). Its ledger is
 `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-3.md`.
+Step 6.2 done (restore: each restored pane's history sits above a dimmed "Restored · session ended hh:mm" divider,
+a command still running at the snapshot is seeded as abandoned, and the first client after a restore gets one
+"Restored 2 windows, 7 tabs" toast). Its ledger is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-2.md`.
 Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
-1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 3f, 6.10 and 6.3.
+1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 3f, 6.10, 6.3 and 6.2.
 
 ## Rules for every step
 
@@ -105,6 +108,6 @@ Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |
-| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10 and 6.3 done) |
+| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10, 6.3 and 6.2 done) |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.
