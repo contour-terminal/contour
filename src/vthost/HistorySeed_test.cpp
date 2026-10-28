@@ -106,9 +106,9 @@ TEST_CASE("the seeded divider is one dim row that a resize cuts instead of wrapp
         auto const& grid = fresh.terminal.primaryScreen().grid();
         CAPTURE(columns);
         auto const rows =
-            std::views::iota(-3, 8)
-            | std::views::filter([&](int row) { return grid.lineText(LineOffset(row)).contains("Restored"); })
-            | std::ranges::to<std::vector>();
+            std::ranges::to<std::vector>(std::views::iota(-3, 8) | std::views::filter([&](int row) {
+                                             return grid.lineText(LineOffset(row)).contains("Restored");
+                                         }));
         REQUIRE(rows.size() == 1);
         auto const dividerRow = LineOffset(rows.front());
         CHECK(grid.lineText(dividerRow).starts_with("──── Restored"));
