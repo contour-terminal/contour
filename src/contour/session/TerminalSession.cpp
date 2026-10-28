@@ -4406,6 +4406,9 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> 
     // The tooltip describes a BLOCK, so it follows the block column only, and moves on only when the
     // pointer reaches another block.
     updateCommandBlockHover(block, hit->screenRow);
+    // Off the block column no block is decided for the pointer's row, so a scroll has none to refresh.
+    if (!onBlockColumn)
+        _blockHoverRow.reset();
 
     // Consumed either way -- only the shape differs, saying whether there is anything here to click.
     if (clickable)

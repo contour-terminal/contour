@@ -8682,6 +8682,27 @@ TEST_CASE("TerminalSession: a scroll that moves no block under the pointer withd
     CHECK(spy.count() == 0);
 }
 
+TEST_CASE("TerminalSession: a scroll over the line numbers lights no block", "[contour][session][gutter]")
+{
+    // Beside the block column there is nothing to light, and a scroll decides the hover again only for a
+    // pointer that stands on the grid or on the block column.
+    using contour::session::TerminalSession;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    runFailingCommand(*session);
+    session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::BlockColumn));
+    REQUIRE(session->terminal().hoveredBlock().has_value());
+    session->sendGutterHoverEvent(gutterHit(0, vtbackend::GutterSegmentKind::LineNumber));
+    REQUIRE_FALSE(session->terminal().hoveredBlock().has_value());
+
+    session->onScrollOffsetChanged(vtbackend::ScrollOffset(0));
+    QCoreApplication::processEvents();
+
+    CHECK_FALSE(session->terminal().hoveredBlock().has_value());
+    CHECK(session->blockActionsAnchor().isEmpty());
+}
+
 TEST_CASE("TerminalSession: without shell integration there is no block to anchor actions to",
           "[contour][session][gutter]")
 {
