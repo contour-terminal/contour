@@ -653,9 +653,10 @@ TEST_CASE("display: window resize reflows the grid through the real render loop"
 TEST_CASE("display: the page leaves the configured gutter's columns left of the grid",
           "[display][geometry][gutter]")
 {
-    // Line numbers six columns wide beside the two-cell block column: a gutter of eight cells, behind the
-    // blank lead-in that keeps them off the window's edge. Fitted around any other width, the grid would be
-    // drawn across the numbers, or a blank strip away from them.
+    // Line numbers six columns wide beside the block column: two cells under the glyph form, the rail's strip
+    // (its token's width, not a whole number of cells) under the rail form, behind the blank lead-in that
+    // keeps them off the window's edge. Fitted around any other width, the grid would be drawn across the
+    // numbers, or a blank strip away from them.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
                                 config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
@@ -668,12 +669,18 @@ TEST_CASE("display: the page leaves the configured gutter's columns left of the 
         contour::geometry::scaled(contour::session::toGeometryMargins(h.session->profile().margins.value()),
                                   h.display->devicePixelRatio());
     auto const leadIn = contour::geometry::gutterLeadIn(h.display->devicePixelRatio());
-    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + (8 * cellWidth));
+    auto const& chrome = h.session->gutterChrome();
+    auto const blockColumn =
+        chrome.form == vtbackend::BlockColumnForm::Rail
+            ? contour::session::chromeDevicePixels(chrome.stripPoints, h.display->devicePixelRatio())
+            : 2 * cellWidth;
+    auto const gutter = (6 * cellWidth) + blockColumn;
+    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + gutter);
 
-    // And the extent the window is told the page needs counts the same eight cells and the same lead-in.
+    // And the extent the window is told the page needs counts the same gutter and the same lead-in.
     auto const columns = unbox<int>(h.session->terminal().totalPageSize().columns);
     CHECK(unbox<int>(h.display->pixelSize().width)
-          == (2 * margins.horizontal) + leadIn + ((8 + columns) * cellWidth));
+          == (2 * margins.horizontal) + leadIn + gutter + (columns * cellWidth));
 }
 
 TEST_CASE("display: a reload that widens the gutter widens the window's minimum with the page",
