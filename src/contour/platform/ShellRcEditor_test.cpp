@@ -549,24 +549,30 @@ TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and noth
         auto const rc = [&](Rig const& rig) {
             return rig.editor.inspect(shell, noSession)->file;
         };
-        // Every cut from one byte up to the line minus its marker's last byte and the line ending: the
-        // last two cuts leave a whole, merely unterminated or terminated line.
-        for (auto const landed: std::views::iota(std::size_t { 1 }, line.size()))
+        // Every cut from one byte up to the whole line without its line ending: all but the last leave a
+        // part of the line (Partial); the last leaves the whole line, unterminated, which is installed.
+        for (auto const landed: std::views::iota(std::size_t { 1 }, line.size() + 1))
         {
             INFO("shell " << static_cast<int>(shell) << " landed " << landed);
+            auto const wholeLine = landed == line.size();
             auto rig = Rig {};
             rig.disk.files.addFile(rc(rig), "export A=1\n");
             rig.disk.fault = DiskFault::SilentPrefix;
             rig.disk.landBytes = landed;
-            REQUIRE(rig.editor.install(shell, line, noSession).error() == ShellRcError::AppendCutShort);
+            REQUIRE(rig.editor.install(shell, line, noSession).error()
+                    == (wholeLine ? ShellRcError::AppendUnterminated : ShellRcError::AppendCutShort));
 
             auto const inspected = rig.editor.inspect(shell, noSession);
             REQUIRE(inspected.has_value());
-            CHECK(inspected->state == RcState::Partial);
+            CHECK(inspected->state == (wholeLine ? RcState::Installed : RcState::Partial));
 
             auto const before = rig.disk.text(rc(rig));
             rig.disk.fault = DiskFault::None;
-            CHECK(rig.editor.install(shell, line, noSession).error() == ShellRcError::PartialWrite);
+            auto const again = rig.editor.install(shell, line, noSession);
+            if (wholeLine)
+                CHECK(again == RcInstall::AlreadyInstalled);
+            else
+                CHECK(again.error() == ShellRcError::PartialWrite);
             CHECK(rig.disk.text(rc(rig)) == before);
         }
     }
