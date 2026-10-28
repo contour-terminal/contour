@@ -13,6 +13,8 @@
 #include <cstddef>
 #include <filesystem>
 #include <format>
+#include <ranges>
+#include <set>
 #include <string_view>
 #include <vector>
 
@@ -359,7 +361,7 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
           == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
     CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::PaneInterrupted)].script
           == SnapshotScript::PaneInterrupted);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::RestoreSummary);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SettingsStatusLine);
     struct Expected
     {
         SnapshotScript script;
@@ -461,7 +463,8 @@ TEST_CASE("snapshot.scriptTable.secureInput", "[snapshot][secureinput]")
 TEST_CASE("snapshot.scriptTable.keyboardFocus", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    // Three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still active.
+    // Three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still active; the
+    // block scripts and then the Settings scripts follow it.
     CHECK(static_cast<int>(SnapshotScript::KeyboardFocus)
           == static_cast<int>(SnapshotScript::SecureInputBand) + 1);
     CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::KeyboardFocus)].script
@@ -517,9 +520,10 @@ TEST_CASE("snapshot.scriptTable.blocks", "[snapshot][blocks]")
                    ScriptAction::None },
     };
     CHECK(static_cast<int>(expected.front().script) == static_cast<int>(SnapshotScript::PaneInterrupted) + 1);
-    // Step 6.2's restore summary is the only row after them.
     CHECK(static_cast<int>(SnapshotScript::RestoreSummary)
           == static_cast<int>(SnapshotScript::StickyTitleBand) + 1);
+    CHECK(static_cast<int>(SnapshotScript::RestoreSummary) + 1
+          == static_cast<int>(SnapshotScript::SettingsAppearance));
     for (auto const& each: expected)
     {
         CAPTURE(each.name);
@@ -542,4 +546,81 @@ TEST_CASE("snapshot.scriptTable.blocks", "[snapshot][blocks]")
     // The menu's header is the four facts the block menu leads with, and its rows follow.
     CHECK(SnapshotBlockMenuHeader.size() == 4);
     CHECK(contour::command::BlockMenuRowCount == 5);
+}
+
+TEST_CASE("snapshot.scriptTable.settingsPages", "[snapshot]")
+{
+    using namespace contour::test::snapshot;
+    // The existing `settings` row is the General page; the new scripts come after the others, in the order
+    // of the pages.
+    CHECK(scriptRow(SnapshotScript::Settings).settingsPage == SnapshotSettingsPage::General);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SettingsStatusLine);
+
+    // The names the plan fixes, and the page each script shows.
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        SnapshotSettingsPage page;
+    };
+    for (auto const& expected: std::array {
+             Expected { SnapshotScript::SettingsAppearance,
+                        "settings-appearance",
+                        SnapshotSettingsPage::Appearance },
+             Expected {
+                 SnapshotScript::SettingsKeyboard, "settings-keyboard", SnapshotSettingsPage::Keyboard },
+             Expected { SnapshotScript::SettingsShellIntegration,
+                        "settings-shell-integration",
+                        SnapshotSettingsPage::ShellIntegration },
+             Expected { SnapshotScript::SettingsProfile, "settings-profile", SnapshotSettingsPage::Profile },
+             Expected { SnapshotScript::SettingsProfileReadOnly,
+                        "settings-profile-readonly",
+                        SnapshotSettingsPage::ProfileReadOnly },
+             Expected { SnapshotScript::SettingsColorSchemes,
+                        "settings-color-schemes",
+                        SnapshotSettingsPage::ColorSchemes },
+             Expected { SnapshotScript::SettingsLinkPatterns,
+                        "settings-link-patterns",
+                        SnapshotSettingsPage::LinkPatterns },
+             Expected { SnapshotScript::SettingsStatusLine,
+                        "settings-status-line",
+                        SnapshotSettingsPage::StatusLine },
+         })
+    {
+        CAPTURE(expected.name);
+        auto const& row = scriptRow(expected.script);
+        CHECK(row.name == expected.name);
+        CHECK(row.settingsPage == expected.page);
+        CHECK(row.surface == SnapshotSurface::SettingsWindow);
+    }
+
+    // Every page but None is shown by exactly one Settings window script, and every such script names one.
+    for (auto const index: std::views::iota(std::size_t { 1 }, SnapshotSettingsPageCount))
+    {
+        auto const page = static_cast<SnapshotSettingsPage>(index);
+        CAPTURE(settingsPageId(page));
+        CHECK(std::ranges::count_if(SnapshotScripts,
+                                    [page](SnapshotScriptRow const& row) {
+                                        return row.surface == SnapshotSurface::SettingsWindow
+                                               && row.settingsPage == page;
+                                    })
+              == 1);
+    }
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK((row.surface == SnapshotSurface::SettingsWindow)
+              == (row.settingsPage != SnapshotSettingsPage::None));
+    }
+
+    // The ids are the Settings page's own: a section or a profile, none repeated, and None has none.
+    CHECK(settingsPageId(SnapshotSettingsPage::None).empty());
+    auto ids = std::set<std::string_view> {};
+    for (auto const index: std::views::iota(std::size_t { 1 }, SnapshotSettingsPageCount))
+    {
+        auto const id = settingsPageId(static_cast<SnapshotSettingsPage>(index));
+        CAPTURE(id);
+        CHECK((id.starts_with("section:") || id.starts_with("profile:")));
+        CHECK(ids.insert(id).second);
+    }
 }

@@ -313,6 +313,48 @@ TEST_CASE("The block actions button and its glyph stay inside the terminal on ev
     }
 }
 
+namespace
+{
+/// Checks that @p scene's Settings window shows the page @p row names, built.
+/// @param scene A scene of a Settings window script.
+/// @param row   The script's row.
+void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                        contour::test::snapshot::SnapshotScriptRow const& row)
+{
+    using namespace contour::test::snapshot;
+    CHECK(scene.subject().objectName() == QStringLiteral("settingsWindow"));
+    CHECK(scene.subject().isVisible());
+    auto const* settingsPage = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsPage"));
+    REQUIRE(settingsPage != nullptr);
+    CHECK(scene.root().findChild<QObject*>(QStringLiteral("settingsPageLoader")) == nullptr);
+    // The window is on the page the script names, and the page it shows is built.
+    CHECK(settingsPage->property("currentPage").toString().toStdString() == settingsPageId(row.settingsPage));
+    auto const shows = [&](char const* objectName) {
+        return scene.subject().findChild<QQuickItem*>(QString::fromLatin1(objectName)) != nullptr;
+    };
+    switch (row.settingsPage)
+    {
+        case SnapshotSettingsPage::None: FAIL("a Settings script names a page"); break;
+        case SnapshotSettingsPage::General:
+        case SnapshotSettingsPage::Appearance:
+        case SnapshotSettingsPage::Keyboard:
+        case SnapshotSettingsPage::ShellIntegration: CHECK(shows("settingsSectionPage")); break;
+        case SnapshotSettingsPage::Profile: CHECK(shows("profilePage")); break;
+        case SnapshotSettingsPage::ProfileReadOnly:
+            CHECK(shows("profilePage"));
+            // contour.yml's own profile: the banner and its Duplicate to Edit.
+            CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("readOnlyBanner"))->isVisible());
+            break;
+        case SnapshotSettingsPage::ColorSchemes: CHECK(shows("colorSchemesPage")); break;
+        case SnapshotSettingsPage::LinkPatterns: CHECK(shows("linkPatternsPage")); break;
+        case SnapshotSettingsPage::StatusLine: CHECK(shows("statusLinePage")); break;
+    }
+    // `work` is the editable profile, `main` the one contour.yml defines.
+    CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("readOnlyBanner"))->isVisible()
+          == (row.settingsPage == SnapshotSettingsPage::ProfileReadOnly));
+}
+} // namespace
+
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
 {
@@ -384,11 +426,14 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
             case SnapshotScript::Settings:
-                CHECK(scene.subject().objectName() == QStringLiteral("settingsWindow"));
-                CHECK(scene.subject().isVisible());
-                CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsPage")) != nullptr);
-                CHECK(scene.root().findChild<QObject*>(QStringLiteral("settingsPageLoader")) == nullptr);
-                break;
+            case SnapshotScript::SettingsAppearance:
+            case SnapshotScript::SettingsKeyboard:
+            case SnapshotScript::SettingsShellIntegration:
+            case SnapshotScript::SettingsProfile:
+            case SnapshotScript::SettingsProfileReadOnly:
+            case SnapshotScript::SettingsColorSchemes:
+            case SnapshotScript::SettingsLinkPatterns:
+            case SnapshotScript::SettingsStatusLine: checkSettingsScene(scene, row); break;
             case SnapshotScript::RemoteReconnecting: {
                 auto const* overlay =
                     scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"));

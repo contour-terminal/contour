@@ -75,6 +75,8 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -292,7 +294,12 @@ class ChromeSnapshotScene
             case SnapshotWindowMode::FullScreenRevealed: showFullScreenRevealed(); break;
         }
         if (_settingsWindow != nullptr)
+        {
+            // The page the script shows is the one the host remembers: the window opens on it.
+            _settingsWindow->setLastPage(
+                QString::fromUtf8(settingsPageId(scriptRow(_variant.script).settingsPage)));
             REQUIRE(_settingsWindow->show(nullptr).has_value());
+        }
         switch (scriptRow(_variant.script).action)
         {
             case ScriptAction::None: break;
@@ -984,20 +991,47 @@ class ChromeSnapshotScene
         return config::NewDefaultsOffer::None;
     }
 
+    /// Writes the configuration the Settings window shows into @p directory and loads it into
+    /// _settingsConfig: a contour.yml with one profile, `main` (read-only in Settings), beside a side-file
+    /// profile, `work`, and a side-file colour scheme, `midnight`. Nothing is previewed: the scene has no
+    /// preview session.
+    /// @param store     The store over @p directory the side files are written through.
+    /// @param directory The configuration directory, a temporary one of the scene's.
+    void seedSettingsConfig(config::GuiConfigStore& store, std::filesystem::path const& directory)
+    {
+        auto const path = directory / "contour.yml";
+        {
+            auto out = std::ofstream(path);
+            out << std::format("defaults_edition: {}\ndefault_profile: main\nprofiles:\n    main:\n"
+                               "        shell: /bin/sh\n",
+                               config::configEnumToken(_variant.edition));
+        }
+        config::loadConfigFromFile(_settingsConfig, path);
+        auto const* main = _settingsConfig.findProfile("main");
+        REQUIRE(main != nullptr);
+        REQUIRE(store.write(config::profileFile("work"), config::emitProfileYaml(*main)).has_value());
+        REQUIRE(
+            store.write(config::colorSchemeFile("midnight"), config::emitColorSchemeYaml({})).has_value());
+        _settingsConfig = config::Config {};
+        config::loadConfigFromFile(_settingsConfig, path);
+    }
+
     /// The settings page's controller over a store in a temporary directory, or null unless @p surface
     /// is the Settings window.
-    [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(SnapshotSurface surface) const
+    [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(SnapshotSurface surface)
     {
         switch (surface)
         {
             case SnapshotSurface::MainWindow: break;
             case SnapshotSurface::SettingsWindow:
                 REQUIRE(_settingsDir.isValid());
+                auto const directory = std::filesystem::path(_settingsDir.path().toStdU16String());
+                auto store = std::make_shared<config::FileGuiConfigStore>(_settingsFiles, directory);
+                seedSettingsConfig(*store, directory);
                 return std::make_unique<window::SettingsController>(
-                    [this]() -> config::Config const& { return _config; },
+                    [this]() -> config::Config const& { return _settingsConfig; },
                     window::SettingsControllerServices {
-                        .store = std::make_shared<config::FileGuiConfigStore>(
-                            _settingsFiles, std::filesystem::path(_settingsDir.path().toStdU16String())),
+                        .store = std::move(store),
                         .reload = [] { return std::expected<void, std::string> {}; },
                         .gpuInventory = nullptr,
                         .scheduler = std::make_shared<ManualSaveScheduler>(),
@@ -1305,6 +1339,7 @@ class ChromeSnapshotScene
     std::unique_ptr<window::CommandPaletteModel> _paletteModel;
     core::platform::NativeFileSystem _settingsFiles; ///< What the Settings controller's store writes through.
     QTemporaryDir _settingsDir;
+    config::Config _settingsConfig;       ///< What the Settings controller edits (seedSettingsConfig()).
     InMemoryGuiStateStore _settingsState; ///< What the Settings window remembers: nothing, in a snapshot.
     std::unique_ptr<window::SettingsController> _settings;
     MockMainController _controller;
