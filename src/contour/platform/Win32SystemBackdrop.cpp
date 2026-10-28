@@ -80,7 +80,12 @@ std::expected<void, TitleBandMaterialError> applySystemBackdrop(QWindow& window,
     // on its first expose, and the client decoration is the default.
     auto const decoration = appliedDecoration(window).value_or(WindowDecoration::Client);
 
-    if (auto const hr = writeBackdrop(api, hwnd, systemBackdropFor(band, kind, blur)); FAILED(hr))
+    auto const backdrop = systemBackdropFor(band, kind, blur);
+    auto const hr = writeBackdrop(api, hwnd, backdrop);
+    // Before Windows 11 22H2 DWM does not know the attribute, so even none fails, with E_INVALIDARG. Nothing
+    // was asked of it then, and the window stands as decided.
+    auto const askedForNothing = backdrop == DwmBackdrop::None && hr == E_INVALIDARG;
+    if (FAILED(hr) && !askedForNothing)
     {
         // No backdrop then, and the margins of a window without one: sheet-of-glass margins over no
         // backdrop paint the client area black. Writing none fails as well where the attribute is unknown,

@@ -51,7 +51,8 @@ void recordBlurBehind(QWindow& window, BlurBehindWish blur);
 /// @param api The DWM entry points; injected, so a test passes a stub.
 /// @return Nothing on success. When DWM rejects the backdrop it is set back to none, the margins to those of
 ///         a window without one, and the result is @c Unsupported when DWM does not know the attribute
-///         (E_INVALIDARG, before Windows 11 22H2) or @c Rejected otherwise.
+///         (E_INVALIDARG, before Windows 11 22H2) or @c Rejected otherwise. Where the decided backdrop is
+///         none, DWM's not knowing the attribute is no failure: nothing was asked of it.
 [[nodiscard]] std::expected<void, TitleBandMaterialError> applySystemBackdrop(QWindow& window,
                                                                               HWND hwnd,
                                                                               DwmApi const& api);

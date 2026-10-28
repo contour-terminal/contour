@@ -219,6 +219,20 @@ TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the ma
     }
 }
 
+TEST_CASE("a client band where DWM lacks the backdrop attribute is no failure", "[native][win32][mica]")
+{
+    if (!onNativeWindows())
+        SKIP("Requires the native Windows platform.");
+    // Before Windows 11 22H2 even DWMSBT_NONE fails with E_INVALIDARG; no material was asked for.
+    auto const api = StubDwm::make(E_INVALIDARG);
+    auto const material = contour::platform::makeWin32TitleBandMaterial(api);
+    auto fixture = MaterialWindow {};
+
+    CHECK(material->apply(fixture.window, TitleBandRequest {}).has_value());
+    REQUIRE_FALSE(StubDwm::margins.empty());
+    CHECK(StubDwm::margins.back() == contour::platform::ClientFrameMargins);
+}
+
 TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica]")
 {
     if (!onNativeWindows())
