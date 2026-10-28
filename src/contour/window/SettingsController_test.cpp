@@ -4220,7 +4220,8 @@ TEST_CASE("SettingsController: renaming an unopened scheme keeps a hand edit tha
 {
     auto fx = Fixture(BasicConfig);
     writeScheme(fx, "midnight");
-    // The configuration holds midnight only because "work" draws with it, as the last version that parsed.
+    // "work" draws with midnight, and the configuration keeps no copy of it to fall back on: the next test
+    // covers the one name it does keep.
     writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
     auto const schemeFile = config::relativePathOf(config::colorSchemeFile("midnight"));
     auto const workFile = config::relativePathOf(config::profileFile("work"));
@@ -4235,6 +4236,47 @@ TEST_CASE("SettingsController: renaming an unopened scheme keeps a hand edit tha
     CHECK(fx.fileContent(schemeFile) == "{{{ half edited\n");
     CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("nightfall"))).has_value());
     CHECK(fx.fileContent(workFile) == workBefore);
+}
+
+TEST_CASE("SettingsController: renaming an unopened scheme the configuration also knows keeps a hand edit "
+          "that does not parse",
+          "[settings]")
+{
+    // The configuration's own table of schemes holds no side file's palette -- a profile carries the one it
+    // resolved -- except the built-in `default`, which it always has. A side file shadowing that name is the
+    // one rename that has an older palette to fall back on, and that fallback wrote the new file from it and
+    // removed the file holding the hand edit.
+    // contour.yml's own profile draws with another scheme, so `default` is free to be renamed.
+    auto fx = Fixture(std::string_view { R"(
+default_profile: main
+profiles:
+    main:
+        colors: monokai
+)" });
+    writeScheme(fx, "midnight");
+    writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
+    // The premise: a scheme a profile draws with is not in the configuration's table.
+    CHECK_FALSE(fx.cfg.colorschemes.value().contains("midnight"));
+    REQUIRE(fx.cfg.colorschemes.value().contains("default"));
+
+    REQUIRE(fx.store
+                ->write(config::colorSchemeFile("default"),
+                        config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+                .has_value());
+    writeProfileDrawnWith(fx, "dawn", config::SimpleColorConfig { .colorScheme = "default" });
+    auto const schemeFile = config::relativePathOf(config::colorSchemeFile("default"));
+    auto const dawnFile = config::relativePathOf(config::profileFile("dawn"));
+    auto const dawnBefore = fx.fileContent(dawnFile);
+    fx.handEdit(schemeFile, "{{{ half edited\n");
+
+    auto const renamed = fx.controller->renameColorScheme("default", "nightfall");
+    fx.fire();
+
+    REQUIRE_FALSE(renamed.has_value());
+    CHECK(renamed.error().kind == config::SettingsErrorKind::ChangedOnDisk);
+    CHECK(fx.fileContent(schemeFile) == "{{{ half edited\n");
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("nightfall"))).has_value());
+    CHECK(fx.fileContent(dawnFile) == dawnBefore);
 }
 
 TEST_CASE("SettingsController: deleting an unopened scheme keeps a hand edit made since the load",
