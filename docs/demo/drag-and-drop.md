@@ -33,6 +33,10 @@ run anything. Dropping plain text pastes it as text, as Ctrl+V does, except that
 refused where the program has not enabled bracketed paste: without it each line would run as it arrives,
 and the page that started the drag chose the text, not you.
 
+Quoting assumes the drop starts a new word. If you have an **open quote** at the prompt (a `"` or `'` you
+typed and have not closed), a dropped name can close it, and what follows runs as syntax. Contour cannot
+see the state of your shell's line editor, so finish or clear the line before you drop a file onto it.
+
 ## What is refused
 
 - A file name holding a control character (a newline, an escape, and the like) or a character that
