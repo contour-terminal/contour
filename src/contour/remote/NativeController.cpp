@@ -667,8 +667,10 @@ contour::session::RemoteRouting NativeController::requestRemoteTabMerge(vtpty::P
         return contour::session::RemoteRouting::Local;
     auto const tabSession = sessionForPty(tabPty);
     auto const targetSession = sessionForPty(targetPty);
+    // The daemon owns this layout: a merge it cannot take is no merge, not one made here that it never hears
+    // of.
     if (!tabSession || !targetSession || tabMergeSupport() == contour::session::TabMergeSupport::Unsupported)
-        return contour::session::RemoteRouting::Local;
+        return contour::session::RemoteRouting::Refused;
     // The client's send verbs must run on the reactor thread that owns it.
     _reactor.post([this, tab = *tabSession, target = *targetSession, side] {
         if (_client != nullptr)

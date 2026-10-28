@@ -221,6 +221,11 @@ inline constexpr auto DropRefusalRows = std::array {
 static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::UnknownShell) + 1U,
               "DropRefusalRows must have a row for every drop error");
 
+/// What the toast says when a tab dropped on a pane of a daemon-hosted window cannot be merged: the daemon
+/// owns the layout, and it did not take the request (or no longer can).
+inline constexpr std::string_view TabMergeRefusedText =
+    "Not merged: the daemon could not take the tab into that pane.";
+
 /// What the toast for a refused drop says.
 /// @param error Why the drop was refused.
 /// @return The text; empty when @p error needs no toast.

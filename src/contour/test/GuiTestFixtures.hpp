@@ -131,6 +131,8 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     {
         requestedTabMerges.push_back(
             TabMergeRequest { .tabPty = tabPty, .targetPty = targetPty, .side = side });
+        if (reportedTabMergeRouting)
+            return *reportedTabMergeRouting;
         return reportedHosting == contour::session::SessionHosting::Remote
                        && tabMergeSupport() == contour::session::TabMergeSupport::Supported
                    ? contour::session::RemoteRouting::Routed
@@ -198,6 +200,9 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// What tabMergeSupport() reports instead of what the hosting implies: Supported stands in for a daemon
     /// that serves the merge, Unsupported for one that does not.
     std::optional<contour::session::TabMergeSupport> reportedTabMergeSupport = std::nullopt;
+    /// What requestRemoteTabMerge() answers instead of what the hosting and support imply: Refused stands in
+    /// for a daemon that cannot take the merge now.
+    std::optional<contour::session::RemoteRouting> reportedTabMergeRouting = std::nullopt;
     /// One requestRemoteTabMerge() call.
     struct TabMergeRequest
     {

@@ -1986,6 +1986,16 @@ void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
     closeWindowIfEmpty(from);
 }
 
+void TerminalSessionManager::postTabMergeRefused(TerminalSession const* acting)
+{
+    auto notice = window::Notice { .kind = window::NoticeKind::DropRefused,
+                                   .text = std::string { window::TabMergeRefusedText } };
+    if (acting != nullptr)
+        postNotice(std::move(notice), acting);
+    else
+        postNoticeToEveryWindow(notice);
+}
+
 void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
                                                int fromIndex,
                                                vtworkspace::WindowId to,
@@ -1998,9 +2008,10 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
         return;
     auto const sourceId = source->id();
 
-    // A daemon owns the layout: it is asked to graft the tab, and its re-push reconciles the merge in. A
+    // A daemon owns the layout: it is asked to graft the tab, and its re-push reconciles the merge in. Only a
     // merge issued BY the reconciler itself (while realizing that re-push) is the local half of one the
-    // daemon already made, and falls through to be made here.
+    // daemon already made, and the factory answers Local for it. Anything else the daemon does not take is
+    // refused, never made here: it would leave this window showing a layout the daemon does not have.
     if (_sessionFactory.hosting() == SessionHosting::Remote)
     {
         auto const* const sourceLeaf = source->rootPane()->firstLeaf();
@@ -2008,11 +2019,19 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
         auto const* const targetLeaf = targetTab != nullptr ? targetTab->rootPane()->findPane(leaf) : nullptr;
         auto* const tabSession = sourceLeaf != nullptr ? sessionForId(sourceLeaf->session()) : nullptr;
         auto* const targetSession = targetLeaf != nullptr ? sessionForId(targetLeaf->session()) : nullptr;
-        if (tabSession != nullptr && targetSession != nullptr
-            && _sessionFactory.requestRemoteTabMerge(
-                   &tabSession->terminal().device(), &targetSession->terminal().device(), side)
-                   == RemoteRouting::Routed)
-            return;
+        // A session that is not found is asked about as no pane at all, so the factory decides (a
+        // reconciler's merge is let through, any other is refused).
+        switch (_sessionFactory.requestRemoteTabMerge(
+            tabSession != nullptr ? &tabSession->terminal().device() : nullptr,
+            targetSession != nullptr ? &targetSession->terminal().device() : nullptr,
+            side))
+        {
+            case RemoteRouting::Routed: return;
+            case RemoteRouting::Refused:
+                postTabMergeRefused(targetSession != nullptr ? targetSession : tabSession);
+                return;
+            case RemoteRouting::Local: break;
+        }
     }
 
     // The merge's own events look sessions up by their tab (focus follows the grafted active pane), so

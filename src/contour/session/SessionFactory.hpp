@@ -86,6 +86,8 @@ enum class RemoteRouting : uint8_t
 {
     Local = 0, ///< Not routed: the caller performs the change itself.
     Routed,    ///< Routed: the remote end's layout re-push reconciles the change in.
+    Refused,   ///< The remote end owns the layout and cannot take it now: nobody performs the change, because
+               ///< a local one would leave this window showing a layout the remote end does not have.
 };
 
 /// What a session authored on the remote end runs, as this client asks for it (SessionFactory's
@@ -244,7 +246,10 @@ class SessionFactory
     /// @param tabPty    A pty backing any pane of the tab to merge.
     /// @param targetPty The pty of the pane to split.
     /// @param side      The side of the target pane the tab goes on.
-    /// @return Routed if handed to the daemon; Local for a local factory.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the layout and cannot take it (a
+    ///         pane not bound to a session yet, the capability gone); Local for a local factory, and for
+    ///         a merge the reconciler itself applies, which is the local half of one the daemon made. A
+    ///         null pty names no pane, which the daemon cannot take either.
     [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(vtpty::Pty const* /*tabPty*/,
                                                               vtpty::Pty const* /*targetPty*/,
                                                               vtworkspace::SplitSide /*side*/)

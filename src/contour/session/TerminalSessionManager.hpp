@@ -1181,6 +1181,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The source window a tab was just moved out of.
     void closeWindowIfEmpty(vtworkspace::WindowId window);
 
+    /// Tells the user a tab merge was refused (window::TabMergeRefusedText), in the window of @p acting, or
+    /// in every window when no session is known.
+    void postTabMergeRefused(TerminalSession const* acting);
+
     /// Tells the session factory that @p splitNode's ratio is now @p ratio, naming the split by the
     /// pty of one leaf from each of its children (@see SessionFactory::reportSplitRatio).
     ///

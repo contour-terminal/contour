@@ -3950,6 +3950,23 @@ TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of
         CHECK(std::get<1>(model->findSessionLeaf(draggedSession)) == target);
     }
 
+    SECTION("a daemon that cannot take it now refuses it: nothing is merged here, and the window says so")
+    {
+        // No binding yet, or the capability lost between hover and release: the answer is Refused.
+        factory->reportedTabMergeSupport = TabMergeSupport::Supported;
+        factory->reportedTabMergeRouting = contour::session::RemoteRouting::Refused;
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, target->id(), target->rootPane()->id(), vtworkspace::SplitSide::Top);
+
+        CHECK(factory->requestedTabMerges.size() == 1);
+        CHECK(window->count() == 2); // no local merge, so this window never diverges from the daemon's
+        CHECK(target->paneCount() == 1);
+        CHECK(std::get<1>(model->findSessionLeaf(draggedSession)) == dragged);
+        REQUIRE(window->notices().toastShown());
+        CHECK(window->notices().toastText().toStdString()
+              == std::string { contour::window::TabMergeRefusedText });
+    }
+
     SECTION("a daemon's merge stays within one window")
     {
         factory->reportedTabMergeSupport = TabMergeSupport::Supported;
