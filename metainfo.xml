@@ -107,6 +107,12 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>On Windows 11 the tabs are the title bar, on Mica, with tabs that join the terminal below them; the Settings window's title bar is Mica too and follows the chrome's light or dark</li>
+          <li>Hovering the maximise button opens Windows 11's Snap Layouts</li>
+          <li>Windows caption buttons use the Segoe Fluent icons, and the Windows chrome uses Segoe UI Variable and the FluentWinUI3 controls</li>
+          <li>Contour follows Windows' animation, transparency-effects, contrast-theme and accent settings, live</li>
+          <li>On Windows 10, and with transparency effects off, the title bar is solid</li>
+          <li>Rounds the in-window menus on every platform to its own menu radius (10 px on Linux and macOS, up from 3), with row highlights rounded to match</li>
           <li>Draws command blocks as a rail beside the output: neutral for success (✓ on hover), red with ✗ for a failure, the accent with ▸ while running, in a fixed strip after the line numbers and timestamps</li>
           <li>Shows how a command went right of its prompt, only where those cells are blank, so an RPROMPT is never covered</li>
           <li>Adds a ⋯ button and a native block menu (Copy Output, Copy Command, Rerun, Open in Pager, Collapse Output) whose header names the command and how it ended; the block tooltip is gone</li>

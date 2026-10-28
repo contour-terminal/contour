@@ -45,7 +45,7 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-28, Step 6.1 (shell integration) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-1.md`; before it, Step 4b (Settings sections, controls, one save model, live preview) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-4b.md`; before it, Step 3f (command blocks), then Step 6.6 (secure input), then Steps 3c and 3e. 3c: notices and permissions (a NoticeModel with toasts announced
+Last update: 2026-10-28, Step 5a (Windows 11: Mica, Snap Layouts, the Fluent row, the Windows settings sources, in-scene menus) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-5a.md`, its Win32 code verified by the Windows CI job on #2184 and its owner checks batched for the phase; before it, Step 6.1 (shell integration) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-1.md`; before it, Step 4b (Settings sections, controls, one save model, live preview) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-4b.md`; before it, Step 3f (command blocks), then Step 6.6 (secure input), then Steps 3c and 3e. 3c: notices and permissions (a NoticeModel with toasts announced
 only while `accessibility_announcements` allows, guarded roles that take a permission decision and its memory as
 enums, a permission dialog whose every answer names the question it answers, Allow held for half a second after a
 question changes, extension and control consent queued one at a time, the Save Layout sheet). 3e: the size
@@ -115,7 +115,7 @@ Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
 | 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (done) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (done) |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (done) |
-| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
+| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (done) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |
 | 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10, 6.3, 6.2, 6.4 and 6.1 done) |
 
