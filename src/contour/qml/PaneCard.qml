@@ -294,10 +294,12 @@ Item {
         function refresh(drag) {
             payload = payloadOf(drag)
             tabPayload = payload === chromeStyle.dropPayloads.tab ? drag.getDataAsString(tabFormat) : ""
-            zone = controller && card.session
-                   ? controller.dropZoneAt(card.session, payload, drag.x, drag.y, card.width, card.height,
-                                           tabPayload)
-                   : chromeStyle.dropZones.none
+            // Fail closed: a call the engine could not make answers `undefined`, which is no zone at all.
+            const answer = controller && card.session
+                           ? controller.dropZoneAt(card.session, payload, drag.x, drag.y, card.width,
+                                                   card.height, tabPayload)
+                           : chromeStyle.dropZones.none
+            zone = typeof answer === "number" ? answer : chromeStyle.dropZones.none
         }
 
         function reset() {

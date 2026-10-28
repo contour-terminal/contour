@@ -25,6 +25,9 @@
 #include <QtCore/QEvent>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_approx.hpp>
@@ -1746,6 +1749,68 @@ TEST_CASE("a drop onto a pane whose shell is not known refuses a name that could
     pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/x%24%28id%29")) }); // /tmp/x$(id)
     REQUIRE(window->notices().toastShown());
     CHECK(window->notices().toastText().contains(QStringLiteral("shell is not known")));
+}
+
+TEST_CASE("a QML call reaches the real dropZoneAt and dropTabOnPane with a session object",
+          "[contour][multiwindow][drop][qml]")
+{
+    // Every other QML test runs against a controller mock that takes a QObject*. The real controller takes a
+    // session::TerminalSession const*: if the engine did not convert, the call would fail and the zone
+    // would be `undefined` -- which PaneCard must refuse, not accept.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    ScopedController window { app.manager() };
+    window->createNewTab();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    REQUIRE(pane != nullptr);
+
+    auto engine = QQmlEngine {};
+    engine.rootContext()->setContextProperty("controller", window.controller);
+    engine.rootContext()->setContextProperty("pane", pane);
+    auto component = QQmlComponent { &engine };
+    component.setData(R"(
+        import QtQml
+        QtObject {
+            function zone(payload, x, y, tab) {
+                return controller.dropZoneAt(pane, payload, x, y, 1000, 500, tab)
+            }
+            function drop(zone, tab) { controller.dropTabOnPane(pane, zone, tab) }
+        })",
+                      QUrl {});
+    REQUIRE(component.isReady());
+    auto const probe = std::unique_ptr<QObject> { component.create() };
+    REQUIRE(probe != nullptr);
+    auto const zoneFromQml = [&](DropPayload payload, double x, double y, QString const& tab) {
+        auto answer = QVariant {};
+        REQUIRE(QMetaObject::invokeMethod(probe.get(),
+                                          "zone",
+                                          Q_RETURN_ARG(QVariant, answer),
+                                          Q_ARG(QVariant, static_cast<int>(payload)),
+                                          Q_ARG(QVariant, x),
+                                          Q_ARG(QVariant, y),
+                                          Q_ARG(QVariant, tab)));
+        return answer;
+    };
+
+    auto const fromOtherTab = tabPayload(window.id, 0);
+    // A number, not undefined: the call was made, and it is the C++ answer.
+    auto const files = zoneFromQml(DropPayload::Files, 500, 250, {});
+    REQUIRE(files.isValid());
+    CHECK(files.toInt() == static_cast<int>(zoneAt(*window, pane, DropPayload::Files, 500, 250)));
+    CHECK(files.toInt() == static_cast<int>(DropZone::InsertText));
+    auto const split = zoneFromQml(DropPayload::Tab, 950, 250, fromOtherTab);
+    REQUIRE(split.isValid());
+    CHECK(split.toInt() == static_cast<int>(DropZone::SplitRight));
+
+    // And the drop reaches the model: the dragged tab is merged beside the pane.
+    REQUIRE(window->count() == 2);
+    QMetaObject::invokeMethod(probe.get(),
+                              "drop",
+                              Q_ARG(QVariant, static_cast<int>(DropZone::SplitRight)),
+                              Q_ARG(QVariant, fromOtherTab));
+    CHECK(window->count() == 1);
+
+    window->closeTabAtIndex(0);
 }
 
 TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][multiwindow][drop]")

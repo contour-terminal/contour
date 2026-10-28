@@ -4297,11 +4297,14 @@ class MockPaneWindowController: public QObject
 
     /// Mirrors WindowController::dropZoneAt() through the same pure decision (resolveDropZone), for a tab
     /// from another tab of a window that @ref split says can split. Records what the pane card asked.
-    [[nodiscard]] Q_INVOKABLE int dropZoneAt(
-        QObject*, int payload, qreal x, qreal y, qreal width, qreal height, QString const& tabPayload)
+    [[nodiscard]] Q_INVOKABLE QVariant
+    dropZoneAt(QObject*, int payload, qreal x, qreal y, qreal width, qreal height, QString const& tabPayload)
     {
         lastPayload = payload;
         lastTabPayload = tabPayload;
+        // What the QML engine hands back for a call it could not make (a argument it cannot convert).
+        if (answersUndefined)
+            return {};
         return static_cast<int>(contour::window::resolveDropZone(
             contour::window::DropZoneInputs { .payload = static_cast<contour::window::DropPayload>(payload),
                                               .pane = { .width = width, .height = height },
@@ -4330,10 +4333,11 @@ class MockPaneWindowController: public QObject
     }
     contour::window::SplitSupport split =
         contour::window::SplitSupport::Supported; ///< Whether a tab may split.
-    int lastPayload = 0;                          ///< The payload the pane card last asked about.
-    QString lastTabPayload;                       ///< The tab JSON the pane card last asked about.
-    std::vector<int> droppedZones;                ///< Every zone dropTabOnPane() was told, in order.
-    std::vector<QString> droppedTabPayloads;      ///< The tab JSON of each.
+    bool answersUndefined = false; ///< Whether dropZoneAt() answers `undefined`, as a failed call does.
+    int lastPayload = 0;           ///< The payload the pane card last asked about.
+    QString lastTabPayload;        ///< The tab JSON the pane card last asked about.
+    std::vector<int> droppedZones; ///< Every zone dropTabOnPane() was told, in order.
+    std::vector<QString> droppedTabPayloads; ///< The tab JSON of each.
 
   private:
     QString _hostLabel = QStringLiteral("home");
@@ -5488,6 +5492,30 @@ TEST_CASE("pane card: files and text drop into the pane's session, whatever part
     }
 
     CHECK(drop.controller().droppedZones.empty());
+}
+
+TEST_CASE("pane card: a zone the controller does not answer refuses the drag, it never accepts (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
+{
+    // `undefined` is what the engine gives for a call it could not make; `undefined !== none` would
+    // accept. The card fails closed, and a zone from an earlier answer does not outlive it.
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+    drop.dragOver(0.95, 0.5);
+    REQUIRE(drop.source.accepted);
+    REQUIRE(QTest::qWaitFor([&] { return drop.part("dropRing").isVisible(); }));
+
+    drop.controller().answersUndefined = true;
+    drop.source.move(drop.at(0.96, 0.5));
+    CHECK(QTest::qWaitFor([&] { return !drop.part("dropRing").isVisible(); }));
+    CHECK_FALSE(drop.part("dropGhost").isVisible());
+    CHECK(drop.source.drop(drop.at(0.96, 0.5)) == Qt::IgnoreAction);
+    CHECK(drop.controller().droppedZones.empty());
+
+    // A new drag that is answered nothing at all is not accepted on entry either.
+    drop.source.leave();
+    drop.dragOver(0.95, 0.5);
+    CHECK_FALSE(drop.source.accepted);
 }
 
 TEST_CASE("pane card: a drag the card cannot place is refused (offscreen)",
