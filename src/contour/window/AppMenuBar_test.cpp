@@ -379,7 +379,10 @@ TEST_CASE("a chord without ⌃ or ⌘ is no key equivalent", "[display][menubar]
     auto fixture = BarFixture {};
 
     CHECK(fixture.action(QStringLiteral("Clear Selection")).shortcut().isEmpty());
-    CHECK_FALSE(fixture.action(QStringLiteral("Copy")).shortcut().isEmpty());
+    // Copy's Ctrl+C is one mapping with two actions (copy, then cancel the selection), so the menu does not
+    // advertise it; Find's Ctrl+Shift+F carries Control and is.
+    CHECK(fixture.action(QStringLiteral("Copy")).shortcut().isEmpty());
+    CHECK_FALSE(fixture.action(QStringLiteral("Find…")).shortcut().isEmpty());
 }
 
 TEST_CASE("the role rows survive a rebuild", "[display][menubar]")
