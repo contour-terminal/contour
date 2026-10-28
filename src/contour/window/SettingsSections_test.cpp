@@ -72,3 +72,25 @@ TEST_CASE("SettingsSections: the canvas's group titles", "[settingssections]")
     CHECK(settingsGroupRow(SettingsGroup::GeneralWindows).title == "Windows");
     CHECK(settingsGroupRow(SettingsGroup::ProfileHistory).title == "History & scrollbar");
 }
+
+TEST_CASE("SettingsSections: every page link names its own target, in order", "[settingssections]")
+{
+    using contour::window::SettingsPageLinks;
+    using contour::window::SettingsPageTarget;
+    using contour::window::SettingsPageTargetCount;
+    REQUIRE(SettingsPageLinks.size() == SettingsPageTargetCount);
+    auto ids = std::set<std::string_view> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, SettingsPageTargetCount))
+    {
+        auto const& link = SettingsPageLinks.at(index);
+        INFO(link.title);
+        CHECK(link.target == static_cast<SettingsPageTarget>(index));
+        CHECK_FALSE(link.title.empty());
+        CHECK(ids.insert(link.id).second);
+    }
+    auto appearance = contour::window::linksOf(SettingsSection::Appearance);
+    REQUIRE(std::ranges::distance(appearance) == 1);
+    CHECK(appearance.front().title == "Status Line");
+    CHECK(appearance.front().target == SettingsPageTarget::DefaultProfileStatusLine);
+    CHECK(std::ranges::empty(contour::window::linksOf(SettingsSection::General)));
+}

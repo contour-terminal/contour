@@ -1535,11 +1535,18 @@ QVariantList SettingsController::sections() const
                 { QStringLiteral("title"), toQString(group.title) },
                 { QStringLiteral("scope"), scopeToken(group.scope) },
             });
+        auto links = QVariantList {};
+        for (auto const& link: linksOf(row.section))
+            links.push_back(QVariantMap {
+                { QStringLiteral("title"), toQString(link.title) },
+                { QStringLiteral("target"), toQString(link.id) },
+            });
         sections.push_back(QVariantMap {
             { QStringLiteral("id"), toQString(row.id) },
             { QStringLiteral("title"), toQString(row.title) },
             { QStringLiteral("icon"), static_cast<int>(row.icon) },
             { QStringLiteral("groups"), groups },
+            { QStringLiteral("links"), links },
         });
     }
     return sections;
@@ -1589,10 +1596,30 @@ QVariantList SettingsController::searchSettings(QString const& query) const
                             .help = descriptor.help.toStdString(),
                             .group = descriptor.group });
 
+    // The pages the sections link to are found by their title, after the rows.
+    for (auto const& link: SettingsPageLinks)
+        entries.push_back({ .key = std::string { link.id },
+                            .label = std::string { link.title },
+                            .help = {},
+                            .group = SettingsGroup::GeneralWindows,
+                            .target = link.target });
+
     auto found = QVariantList {};
     for (auto const index: matchSettings(query.toStdString(), entries))
     {
         auto const& entry = entries.at(index);
+        if (entry.target)
+        {
+            auto const& link = SettingsPageLinks.at(static_cast<std::size_t>(*entry.target));
+            found.push_back(QVariantMap {
+                { QStringLiteral("key"), QString::fromStdString(entry.key) },
+                { QStringLiteral("label"), QString::fromStdString(entry.label) },
+                { QStringLiteral("section"), toQString(settingsSectionRow(link.section).id) },
+                { QStringLiteral("target"), toQString(link.id) },
+                { QStringLiteral("scope"), scopeToken(SettingsScope::Global) },
+            });
+            continue;
+        }
         auto const& group = settingsGroupRow(entry.group);
         found.push_back(QVariantMap {
             { QStringLiteral("key"), QString::fromStdString(entry.key) },

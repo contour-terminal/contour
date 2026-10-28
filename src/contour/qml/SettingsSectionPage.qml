@@ -17,8 +17,12 @@ SettingsGroupsPage {
 
     /// A profile row was asked to open its page.
     signal profileRequested(string name)
+    /// A link to a page of its own was asked to open; @p target is the link's id.
+    signal linkRequested(string target)
 
     readonly property var _section: root.controller ? root.controller.sections.find(row => row.id === root.sectionId) : null
+
+    readonly property var _links: root._section ? root._section.links : []
 
     groups: root._section ? root._section.groups.filter(group => group.scope === "global") : []
     fields: root.controller ? root.controller.globalFields : []
@@ -28,6 +32,57 @@ SettingsGroupsPage {
     onResetRequested: key => root.controller.commitGlobalReset(key)
 
     footer: [
+        // The pages of their own this section links to.
+        SettingsGroup {
+            objectName: "sectionLinksGroup"
+            Layout.fillWidth: true
+            visible: root._links.length > 0
+
+            Repeater {
+                model: root._links
+
+                delegate: Control {
+                    id: link
+                    required property var modelData
+                    objectName: "sectionLink:" + link.modelData.target
+                    Layout.fillWidth: true
+                    implicitHeight: chromeStyle.settings.row
+                    activeFocusOnTab: true
+
+                    Accessible.role: Accessible.Button
+                    Accessible.name: link.modelData.title
+                    Accessible.onPressAction: root.linkRequested(link.modelData.target)
+
+                    Keys.onReturnPressed: root.linkRequested(link.modelData.target)
+                    Keys.onSpacePressed: root.linkRequested(link.modelData.target)
+
+                    contentItem: RowLayout {
+                        spacing: chromeStyle.space.s5
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: chromeStyle.settings.rowPadding
+                            text: link.modelData.title
+                            font: chromeStyle.type.body
+                            color: chromeStyle.colors.settingsLabel
+                            textFormat: Text.PlainText
+                            Accessible.ignored: true
+                        }
+                        Label {
+                            Layout.rightMargin: chromeStyle.settings.rowPadding
+                            text: "›"
+                            font: chromeStyle.type.body
+                            color: chromeStyle.colors.settingsHelp
+                            Accessible.ignored: true
+                        }
+                    }
+                    TapHandler {
+                        onTapped: root.linkRequested(link.modelData.target)
+                    }
+                }
+            }
+        },
+
         // The key bindings: the configured ones, then the built-in fallbacks they leave free.
         SettingsGroup {
             objectName: "keybindingsGroup"

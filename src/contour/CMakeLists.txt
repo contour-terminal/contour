@@ -465,10 +465,10 @@ if(CONTOUR_FRONTEND_GUI)
         qml/StatusLineIndicatorEditor.qml
         qml/LinkPatternsPage.qml
         qml/StatusLineSegmentRow.qml
+        qml/StatusLinePage.qml
         qml/StatusLineChip.qml
         qml/StatusLineItemDialog.qml
-        qml/StatusLinePreviewItem.qml
-        qml/ColorSlotField.qml
+        qml/StatusLineColorField.qml
         qml/Banner.qml
         qml/BlockActionsButton.qml
         qml/Toast.qml

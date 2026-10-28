@@ -129,8 +129,19 @@ Rectangle {
             root.currentPage = "profile:" + root.controller.editingProfile;
     }
 
+    /// Opens the page a section's link, or a search result for one, names.
+    /// @param target A link's target, as `controller.sections` and the search results spell it.
+    function openLink(target) {
+        if (target === "default-profile-status-line")
+            root.openPage("profile:" + root.controller.defaultProfile + ":statusline");
+    }
+
     /// Opens a search result's page and shows its row.
     function openResult(result) {
+        if (result.target !== undefined) {
+            root.openLink(result.target);
+            return;
+        }
         if (result.scope === "profile") {
             if (root.controller.editingProfile.length === 0)
                 root.controller.editProfile(root.controller.defaultProfile);
@@ -362,6 +373,7 @@ Rectangle {
             controller: root.controller
             sectionId: root._kind === "section" ? root._parts[1] : "general"
             onProfileRequested: name => root.openPage("profile:" + name)
+            onLinkRequested: target => root.openLink(target)
         }
     }
 
@@ -399,23 +411,10 @@ Rectangle {
 
     Component {
         id: statusLinePage
-        Flickable {
-            id: statusLine
-            objectName: "statusLinePage"
-            clip: true
-            contentWidth: width
-            contentHeight: statusLineEditor.implicitHeight + root._pageMargins
-            boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {}
-
-            StatusLineIndicatorEditor {
-                id: statusLineEditor
-                x: chromeStyle.space.s8
-                y: chromeStyle.space.s8
-                width: statusLine.width - root._pageMargins
-                controller: root.controller
-                editable: root.controller !== null && !root.controller.locked && !root.controller.editingReadOnly
-            }
+        StatusLinePage {
+            controller: root.controller
+            preview: root.host ? root.host.preview : null
+            profileName: root._profileName
         }
     }
     // }}}

@@ -10,6 +10,7 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -26,6 +27,8 @@ struct SettingsSearchEntry
     std::string label;                                   ///< What the row is called.
     std::string help;                                    ///< The row's help line.
     SettingsGroup group = SettingsGroup::GeneralWindows; ///< Where the row is.
+    /// Set where the row is a link to a page of its own (then @c group is unused): the page it opens.
+    std::optional<SettingsPageTarget> target {};
 };
 
 namespace detail

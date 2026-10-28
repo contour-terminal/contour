@@ -2139,35 +2139,6 @@ ApplicationWindow {
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("StatusLinePreviewItem paints a role from its resolved colour (offscreen)",
-          "[contour][gui][qml][statusline]")
-{
-    // A role name in a QML colour property is an "Unable to assign" warning and no colour; the preview
-    // paints the hex the bridge resolved beside it instead.
-    contour::test::QmlMessageCapture const warnings;
-    QQmlEngine engine;
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine);
-    component.setData(R"(
-import QtQuick
-import Contour.Ui
-StatusLinePreviewItem {
-    item: ({ type: "Clock", sample: "12:34", hasColor: true, color: "muted", colorPreview: "#123456",
-             hasBgColor: true, bgColor: "accent", bgColorPreview: "#654321" })
-})",
-                      QUrl());
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    INFO(component.errorString().toStdString());
-    REQUIRE(component.isReady());
-    std::unique_ptr<QObject> preview(component.create());
-    REQUIRE(preview != nullptr);
-    QCoreApplication::processEvents();
-
-    CHECK(preview->property("color").value<QColor>() == QColor(QStringLiteral("#654321")));
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
-}
-
 TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscreen)", "[contour][gui][qml]")
 {
     // Regression guard for the "barely visible / hard to grab" scrollbar. After the app-wide Fusion

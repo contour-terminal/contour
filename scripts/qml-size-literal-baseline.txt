@@ -1,14 +1,8 @@
 # Numeric size literals per chrome QML file (scripts/check-qml-sizes.py). This file only shrinks:
 # a new literal fails the gate, and so does a file below its count. After removing literals, regenerate
 # the lines with `python3 scripts/check-qml-sizes.py --print-baseline` and keep this header.
-src/contour/qml/ColorSlotField.qml 9
 src/contour/qml/ConfirmDialog.qml 13
 src/contour/qml/PopupSurface.qml 1
-src/contour/qml/StatusLineChip.qml 11
-src/contour/qml/StatusLineIndicatorEditor.qml 8
-src/contour/qml/StatusLineItemDialog.qml 21
-src/contour/qml/StatusLinePreviewItem.qml 1
-src/contour/qml/StatusLineSegmentRow.qml 23
 src/contour/qml/TabColorFlyout.qml 1
 src/contour/qml/TabItem.qml 2
 src/contour/qml/TerminalPane.qml 1

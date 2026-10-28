@@ -3104,6 +3104,17 @@ TEST_CASE("SettingsController: the sections and the sidebar come from the table"
         auto const groupCount = static_cast<std::size_t>(groups.size());
         auto const tableCount = static_cast<std::size_t>(std::ranges::distance(groupsOf(row.section)));
         CHECK(groupCount == tableCount);
+        auto const links = section.value("links").toList();
+        CHECK(static_cast<std::size_t>(links.size())
+              == static_cast<std::size_t>(std::ranges::distance(linksOf(row.section))));
+        for (auto const& raw: links)
+        {
+            auto const link = raw.toMap();
+            auto const found = std::ranges::find(
+                SettingsPageLinks, link.value("target").toString().toStdString(), &SettingsPageLink::id);
+            REQUIRE(found != SettingsPageLinks.end());
+            CHECK(link.value("title").toString().toStdString() == found->title);
+        }
     }
 
     auto const sidebar = fx.controller->sidebar();
@@ -3141,6 +3152,23 @@ TEST_CASE("SettingsController: search finds a profile field and a global one", "
         CHECK(raw.toMap().value("section").toString() == "shell-integration");
     }
     CHECK(fx.controller->searchSettings("  ").isEmpty());
+}
+
+TEST_CASE("SettingsController: search finds the status line page by its link",
+          "[settings][sections][statusline]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    // Without a profile open: the link is a page, not a row of the draft.
+    auto const found = fx.controller->searchSettings("status line");
+    auto const link =
+        std::ranges::find_if(found, [](QVariant const& raw) { return raw.toMap().contains("target"); });
+    REQUIRE(link != found.end());
+    auto const row = link->toMap();
+    CHECK(row.value("target").toString() == "default-profile-status-line");
+    CHECK(row.value("label").toString() == "Status Line");
+    CHECK(row.value("section").toString() == "appearance");
+    CHECK(row.value("scope").toString() == "global");
 }
 
 // }}}

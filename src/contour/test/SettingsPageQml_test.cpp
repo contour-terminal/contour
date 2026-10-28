@@ -230,6 +230,8 @@ struct SettingsPageView
     IncubationDriver incubation;
     contour::test::InMemoryGuiStateStore state; ///< What the window remembers: nothing, until it closes.
     std::vector<std::string> previewed;         ///< The profiles the recording preview was asked to run.
+    /// The status line each of those runs was configured with, in step with @c previewed.
+    std::vector<vtbackend::StatusDisplayType> previewedStatusLine;
     window::SettingsWindowHost host;
     QPointer<QObject> page;
     int configurationEdits = 0;              ///< How often "Edit contour.yml…" asked for the editor.
@@ -248,9 +250,11 @@ struct SettingsPageView
                [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); },
                state,
                preview == PreviewSource::Recording
-                   ? window::SettingsPreview::SessionFactory { [this](config::Config const& /*config*/,
+                   ? window::SettingsPreview::SessionFactory { [this](config::Config const& config,
                                                                       std::string const& profile) {
                          previewed.push_back(profile);
+                         previewedStatusLine.push_back(
+                             config.profiles.value().at(profile).statusLine.value().initialType);
                          return std::unique_ptr<session::TerminalSession> {};
                      } }
                    : window::SettingsPreview::SessionFactory {},
@@ -1184,6 +1188,110 @@ TEST_CASE("the Links page names the gesture that opens links", "[contour][gui][q
     REQUIRE(label != nullptr);
     CHECK(!fx.controller->linkGesture().isEmpty());
     CHECK(label->property("text").toString() == fx.controller->linkGesture());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Appearance links to the default profile's Status Line page",
+          "[contour][gui][qml][settings][statusline]")
+{
+    auto const row = GENERATE(config::ChromeStyle::MacOS, config::ChromeStyle::Terminal);
+    INFO("row: " << config::chromeStyleName(row));
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row), PreviewSource::Recording);
+
+    REQUIRE(fx.open("section:appearance"));
+    auto* link = fx.byName("sectionLink:default-profile-status-line");
+    REQUIRE(link != nullptr);
+    QMetaObject::invokeMethod(link, "forceActiveFocus");
+    auto window = fx.activeWindow(QSize(1000, 800));
+    TestWindow::focus(*link);
+    window.press(Qt::Key_Return);
+    fx.settle();
+
+    CHECK(fx.page->property("currentPage").toString() == "profile:main:statusline");
+    CHECK(fx.byName("statusLinePage") != nullptr);
+    // Appearance's own page is not the page of a profile: no other section links there.
+    REQUIRE(fx.open("section:general"));
+    CHECK(fx.byName("sectionLink:default-profile-status-line") == nullptr);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the sidebar search finds the Status Line page and opens it",
+          "[contour][gui][qml][settings][statusline]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    auto result = QVariantMap {};
+    for (auto const& raw: fx.controller->searchSettings("status line"))
+        if (raw.toMap().contains("target"))
+            result = raw.toMap();
+    REQUIRE_FALSE(result.isEmpty());
+
+    REQUIRE(QMetaObject::invokeMethod(fx.page.get(), "openResult", Q_ARG(QVariant, QVariant { result })));
+    fx.settle();
+
+    CHECK(fx.page->property("currentPage").toString() == "profile:main:statusline");
+    CHECK(fx.byName("statusLinePage") != nullptr);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Status Line page shows the profile's status line, and the Profile page the profile's own",
+          "[contour][gui][qml][settings][statusline][preview]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx =
+        PageFixture(OneProfile, nullptr, rowSetup(config::ChromeStyle::MacOS), PreviewSource::Recording);
+    fx.addProfile(); // a GUI-owned profile the page can edit
+    fx.controller->commitProfileField("status_line_display", QStringLiteral("none"));
+    fx.settle();
+
+    REQUIRE(fx.open("profile:New Profile"));
+    REQUIRE_FALSE(fx.previewedStatusLine.empty());
+    CHECK(fx.previewedStatusLine.back() == vtbackend::StatusDisplayType::None);
+
+    REQUIRE(fx.open("profile:New Profile:statusline"));
+    CHECK(fx.previewedStatusLine.back() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(fx.previewed.back() == "New Profile");
+
+    // An edit of a segment re-shows it, and the page keeps the status line on.
+    auto const shown = fx.previewedStatusLine.size();
+    auto* left = fx.item()->findChild<QObject*>("indicatorSegmentLeft");
+    REQUIRE(left != nullptr);
+    QMetaObject::invokeMethod(left, "rawCommitted", Q_ARG(QString, QStringLiteral("{Clock}")));
+    fx.settle();
+    CHECK(fx.previewedStatusLine.size() > shown);
+    CHECK(fx.previewedStatusLine.back() == vtbackend::StatusDisplayType::Indicator);
+
+    // The page lists the profile's own status line fields above the segments.
+    CHECK(fx.controlOf("status_line_display") != nullptr);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a placeholder added on the Status Line page is written to the profile's file",
+          "[contour][gui][qml][settings][statusline]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    fx.addProfile();
+    REQUIRE(fx.open("profile:New Profile:statusline"));
+    auto* right = fx.item()->findChild<QObject*>("indicatorSegmentRight");
+    REQUIRE(right != nullptr);
+    auto git = QVariantMap {};
+    for (auto const& raw: fx.controller->indicatorPlaceholders())
+        if (raw.toMap().value("type").toString() == "Git")
+            git = raw.toMap();
+    REQUIRE_FALSE(git.isEmpty());
+
+    QMetaObject::invokeMethod(right, "addRequested", Q_ARG(QVariant, QVariant(git)));
+    fx.scheduler->fire();
+    fx.settle();
+
+    auto const items = fx.controller->parseIndicatorSegment(fx.controller->indicatorSegment(2));
+    CHECK(items.last().toMap().value("type").toString() == "Git");
+    auto const written = fx.store->read(config::profileFile("New Profile"));
+    REQUIRE(written.has_value());
+    REQUIRE(written->has_value());
+    CHECK((**written).contains("{Git"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

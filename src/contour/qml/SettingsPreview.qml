@@ -18,6 +18,8 @@ Column {
     property var preview: null
     /// The profile to show. Asking the preview for it is this item's business, so the page need not.
     property string profileName: ""
+    /// Whether the preview shows the profile's status line, forced on, rather than as the profile has it.
+    property bool statusLine: false
     /// What sits at the caption's trailing edge: the page's buttons for the profile.
     property alias trailing: trailingRow.data
 
@@ -28,9 +30,14 @@ Column {
 
     // Shown again whenever the page opens another profile.
     function show() {
-        if (root.preview && root.profileName.length > 0)
+        if (!root.preview || root.profileName.length === 0)
+            return;
+        if (root.statusLine)
+            root.preview.showStatusLine(root.profileName);
+        else
             root.preview.show(root.profileName);
     }
+    onStatusLineChanged: root.show()
     onPreviewChanged: root.show()
     onProfileNameChanged: root.show()
     Component.onCompleted: root.show()

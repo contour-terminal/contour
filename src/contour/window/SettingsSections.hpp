@@ -261,6 +261,51 @@ static_assert(
            | std::views::filter([section](SettingsGroupRow const& row) { return row.section == section; });
 }
 
+/// A page that is not a group of fields, which a section's page links to.
+enum class SettingsPageTarget : uint8_t
+{
+    DefaultProfileStatusLine = 0, ///< The status line page of the default profile.
+};
+
+/// How many page targets there are.
+inline constexpr std::size_t SettingsPageTargetCount =
+    static_cast<std::size_t>(SettingsPageTarget::DefaultProfileStatusLine) + 1;
+
+/// One link a section's page shows to a page of its own.
+struct SettingsPageLink
+{
+    SettingsSection section = SettingsSection::Appearance; ///< The section whose page shows the link.
+    std::string_view title {};                             ///< The link's row title, and what search finds.
+    std::string_view id {};                                ///< The target's id, stable across releases.
+    SettingsPageTarget target = SettingsPageTarget::DefaultProfileStatusLine; ///< The page it opens.
+};
+
+/// Every link, in enumerator order of its target. Adding a page is adding a row here and an enumerator.
+inline constexpr auto SettingsPageLinks = std::array {
+    SettingsPageLink { .section = SettingsSection::Appearance,
+                       .title = "Status Line",
+                       .id = "default-profile-status-line",
+                       .target = SettingsPageTarget::DefaultProfileStatusLine },
+};
+
+static_assert(SettingsPageLinks.size() == SettingsPageTargetCount, "one row per SettingsPageTarget");
+static_assert(
+    [] {
+        for (auto const index: std::views::iota(std::size_t { 0 }, SettingsPageTargetCount))
+            if (SettingsPageLinks.at(index).target != static_cast<SettingsPageTarget>(index))
+                return false;
+        return true;
+    }(),
+    "the links are in enumerator order");
+
+/// @param section A section.
+/// @return The links its page shows, in page order.
+[[nodiscard]] constexpr auto linksOf(SettingsSection section)
+{
+    return SettingsPageLinks
+           | std::views::filter([section](SettingsPageLink const& row) { return row.section == section; });
+}
+
 /// The sidebar's last entry, which opens contour.yml in the OS's editor.
 inline constexpr std::string_view EditConfigEntryTitle = "Edit contour.yml…";
 

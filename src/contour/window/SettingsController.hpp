@@ -6,6 +6,7 @@
 #include <contour/config/SettingsEditSession.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/platform/FontFamilySource.hpp>
+#include <contour/window/SettingsSections.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
@@ -94,8 +95,12 @@ class SettingsController: public QObject
     Q_PROPERTY(QVariantList globalFields READ globalFields NOTIFY globalFieldsChanged)
 
     /// The Settings sections, from SettingsSectionRows: one QVariantMap per section { id, title, icon (a
-    /// SettingsIcon), groups: [{ id (a SettingsGroup), title, scope ("global"|"profile") }] }.
+    /// SettingsIcon), groups: [{ id (a SettingsGroup), title, scope ("global"|"profile") }], links: [{ title,
+    /// target (a SettingsPageLink's id) }] }.
     Q_PROPERTY(QVariantList sections READ sections NOTIFY changed)
+
+    /// The id (a SettingsGroup) of the group of status line fields, which the Status Line page shows.
+    Q_PROPERTY(int statusLineGroup READ statusLineGroup CONSTANT)
 
     /// The sidebar's rows: the sections { kind: "section", id, title, icon }, then one row per profile
     /// { kind: "profile", name, origin, editable, isDefault, tabColor ("#rrggbb", or empty for none) }, then
@@ -215,6 +220,10 @@ class SettingsController: public QObject
     [[nodiscard]] QString editingScheme() const { return _editingScheme; }
     [[nodiscard]] bool hasChanges() const noexcept;
     [[nodiscard]] QVariantList sections() const;
+    [[nodiscard]] static int statusLineGroup() noexcept
+    {
+        return static_cast<int>(SettingsGroup::ProfileStatusLine);
+    }
     [[nodiscard]] QVariantList sidebar() const;
     [[nodiscard]] QStringList fontFamilies() const { return _fontFamilies; }
 

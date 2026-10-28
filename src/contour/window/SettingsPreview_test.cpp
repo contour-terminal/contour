@@ -160,6 +160,24 @@ TEST_CASE("SettingsPreview: showStatusLine forces the indicator on", "[contour][
           == vtbackend::StatusDisplayType::Indicator);
 }
 
+TEST_CASE("SettingsPreview: a status line segment edited on the page shows in the preview at once",
+          "[contour][gui][settingspreview][statusline]")
+{
+    auto fx = PreviewFixture {};
+
+    fx.preview.showStatusLine("work");
+    REQUIRE(fx.preview.session() != nullptr);
+    auto const before = fx.preview.session()->profile().statusLine.value().indicator.right;
+    REQUIRE(before != "{Clock}");
+
+    fx.settings.controller->setIndicatorSegment(2, QStringLiteral("{Clock}"));
+
+    auto const& shown = fx.preview.session()->profile().statusLine.value();
+    CHECK(shown.indicator.right == "{Clock}");
+    // The page asked for the status line, so an edit of the draft does not turn it off again.
+    CHECK(shown.initialType == vtbackend::StatusDisplayType::Indicator);
+}
+
 TEST_CASE("SettingsPreview: a profile that does not exist makes no session",
           "[contour][gui][settingspreview]")
 {
