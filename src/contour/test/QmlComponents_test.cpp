@@ -5542,6 +5542,33 @@ TEST_CASE("pane card: files and text drop into the pane's session, whatever part
     CHECK(drop.controller().droppedZones.empty());
 }
 
+TEST_CASE(
+    "pane card: the cursor refuses over the middle of the card and accepts again over an edge (offscreen)",
+    "[contour][gui][qml][panecard][drop]")
+{
+    // Every move is answered with what a drop there would do, so the OS cursor shows it before release, and
+    // the moves keep coming: leaving the middle for an edge accepts again.
+    auto drop = DropHost {};
+    drop.source.mime.setData(TabMime, TabJson);
+
+    drop.source.enter(drop.at(0.95, 0.5));
+    drop.source.move(drop.at(0.95, 0.5));
+    CHECK(drop.source.accepted);
+
+    drop.source.move(drop.at(0.5, 0.5));
+    CHECK_FALSE(drop.source.accepted); // the middle: forbidden, but the drag is still ours
+    CHECK_FALSE(drop.part("dropRing").isVisible());
+
+    drop.source.move(drop.at(0.05, 0.5));
+    CHECK(drop.source.accepted);
+    CHECK(QTest::qWaitFor([&] { return drop.part("dropGhost").isVisible(); }));
+
+    // And a release over the middle ends as an ignored drop, so the tab tears off as it always did.
+    drop.source.move(drop.at(0.5, 0.5));
+    CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
+    CHECK(drop.controller().droppedZones.empty());
+}
+
 TEST_CASE("pane card: a zone the controller does not answer refuses the drag, it never accepts (offscreen)",
           "[contour][gui][qml][panecard][drop]")
 {

@@ -308,13 +308,18 @@ Item {
             zone = chromeStyle.dropZones.none
         }
 
-        // A tab is accepted wherever it lands on the card, so the drag keeps reporting its position into the
-        // edge bands; the middle is turned away at the drop. Anything the card cannot place is refused here.
+        // A tab is accepted on entry wherever it lands on the card, so the drag keeps reporting its position
+        // into the edge bands; anything the card cannot place at all is refused here. From then on every move
+        // is answered with what a drop there would do, so the cursor says "forbidden" over the middle and
+        // "accepting" over an edge, and a release over the middle ends IgnoreAction: the tab tears off.
         onEntered: (drag) => {
             refresh(drag)
             drag.accepted = zone !== chromeStyle.dropZones.none
         }
-        onPositionChanged: (drag) => refresh(drag)
+        onPositionChanged: (drag) => {
+            refresh(drag)
+            drag.accepted = takes
+        }
         onExited: reset()
         onDropped: (drop) => {
             refresh(drop)
