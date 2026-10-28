@@ -915,6 +915,7 @@ if(CONTOUR_FRONTEND_GUI)
         # here is not listed in the suite's own sources.
         set(contour_gui_test_heavy_sources
             config/Config_test.cpp
+            display/CommandBlockRendering_test.cpp
             display/DisplayRendering_test.cpp
             display/TerminalAccessible_test.cpp
             display/TerminalDisplayIme_test.cpp
