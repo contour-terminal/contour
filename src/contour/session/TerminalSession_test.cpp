@@ -8703,6 +8703,19 @@ TEST_CASE("TerminalSession: a scroll over the line numbers lights no block", "[c
     CHECK(session->blockActionsAnchor().isEmpty());
 }
 
+TEST_CASE("TerminalSession: a session without a manager opens no menu", "[contour][session][blockmenu]")
+{
+    TestApp testApp;
+    auto const session = contour::test::makeTestSession(
+        nullptr, std::make_unique<vtpty::MockPty>(TestPageSize), testApp.app(), {}, nullptr);
+    runFailingCommand(*session);
+    REQUIRE((*session)(contour::actions::FocusPreviousCommand {}));
+
+    // Both menus have no window to open in; neither takes the manager it does not have.
+    CHECK((*session)(contour::actions::OpenBlockMenu {}));
+    CHECK_FALSE((*session)(contour::actions::OpenContextMenu {}));
+}
+
 TEST_CASE("TerminalSession: without shell integration there is no block to anchor actions to",
           "[contour][session][gutter]")
 {

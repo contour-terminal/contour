@@ -4496,6 +4496,10 @@ void TerminalSession::openBlockMenuAt(vtbackend::CommandBlockId block, std::opti
     if (core::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
         return;
 
+    // A standalone session has no window to open a menu in.
+    if (_manager == nullptr)
+        return;
+
     // Given in the display's coordinates; a menu is anchored in its window's.
     if (anchor && _display != nullptr)
         anchor = _display->mapToWindow(*anchor);
@@ -5350,6 +5354,9 @@ bool TerminalSession::operator()(actions::OpenContextMenu)
     // that would end that drag never reaches the display: the selection would go on extending with every
     // later hover, and the auto-scroll timer would go on firing, with no button held down at all.
     if (core::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
+        return false;
+
+    if (_manager == nullptr)
         return false;
 
     _manager->openContextMenu(this);
