@@ -1229,7 +1229,8 @@ jobs:
       - name: "verify the Win32 chrome tests actually ran"
         # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
         # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
-        # pass. windows-latest has a desktop, so a skip here is a regression.
+        # pass. windows-latest has a desktop, so a skip here is a regression. The [win11-22h2] cases are left
+        # out: they SKIP on a Windows older than 22H2 (a pinned runner image), which is no regression.
         shell: pwsh
         env:
           QT_QPA_PLATFORM: windows
@@ -1242,8 +1243,8 @@ jobs:
             Write-Output "::error::$binary not found; the assertion below would pass vacuously"
             exit 1
           }
-          Write-Output "--- $binary [win32]"
-          $output = & $binary '[win32]' 2>&1 | Out-String
+          Write-Output "--- $binary [win32]~[win11-22h2]"
+          $output = & $binary '[win32]~[win11-22h2]' 2>&1 | Out-String
           $status = $LASTEXITCODE
           Write-Output $output
           if ($output -match 'skipped') {

@@ -234,7 +234,8 @@ TEST_CASE("a client band where DWM lacks the backdrop attribute is no failure", 
     CHECK(StubDwm::margins.back() == contour::platform::ClientFrameMargins);
 }
 
-TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica]")
+// [win11-22h2]: SKIPs on an older Windows, so CI's "[win32] cases actually ran" guard leaves it out.
+TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica][win11-22h2]")
 {
     if (!onNativeWindows())
         SKIP("Requires the native Windows platform.");
