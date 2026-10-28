@@ -16,6 +16,8 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
@@ -466,6 +468,47 @@ TEST_CASE("a contrast theme hands the chrome to the OS palette, and back", "[con
     // And goes again: the terminal scheme's chrome is back.
     appearance.set({});
     CHECK(app.appliedGuiScheme().has_value());
+
+    // Back to the OS palette, so no later case inherits a forced one.
+    app.applyGuiTheme(GuiTheme::System, app.defaultProfileColors());
+}
+
+TEST_CASE("leaving a contrast theme brings back the live background's chrome", "[contour][app][appearance]")
+{
+    using contour::config::GuiTheme;
+    using contour::platform::ContrastTheme;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto testApp = TestApp(nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           TestApp::testHostIdentity(),
+                           nullptr,
+                           {},
+                           nullptr,
+                           contour::test::appearanceServicesWith(accessibility, appearance));
+    auto& app = testApp.app();
+    app.config().theme = GuiTheme::Terminal;
+    app.applyGuiTheme(GuiTheme::Terminal, app.defaultProfileColors());
+    auto const profileScheme = app.appliedGuiScheme();
+    REQUIRE(profileScheme.has_value());
+
+    // The focused session sets a background (OSC 11) on the other side of the threshold from the profile's.
+    auto const live = profileScheme == Qt::ColorScheme::Dark ? vtbackend::RGBColor { 0xFF, 0xFF, 0xFF }
+                                                             : vtbackend::RGBColor { 0x00, 0x00, 0x00 };
+    app.followLiveBackground(live);
+    auto const liveScheme = app.appliedGuiScheme();
+    REQUIRE(liveScheme.has_value());
+    REQUIRE(liveScheme != profileScheme);
+
+    appearance.set({ .contrastTheme = ContrastTheme::Active });
+    CHECK(app.appliedGuiScheme() == std::nullopt);
+    // The live background is the chrome's again, not the profile's.
+    appearance.set({});
+    CHECK(app.appliedGuiScheme() == liveScheme);
 
     // Back to the OS palette, so no later case inherits a forced one.
     app.applyGuiTheme(GuiTheme::System, app.defaultProfileColors());

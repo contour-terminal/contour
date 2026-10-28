@@ -1815,6 +1815,8 @@ void ContourGuiApp::followLiveBackground(vtbackend::RGBColor liveBackground)
     // Only `theme: terminal` follows the terminal's background; any other theme would only repaint the
     // whole application for the scheme it already shows. Likewise when the background moved without
     // crossing the light/dark threshold.
+    // Kept even when nothing repaints now: leaving a contrast theme re-applies it.
+    _liveBackground = liveBackground;
     auto const theme = _config.theme.value();
     if (theme != config::GuiTheme::Terminal)
         return;
@@ -2079,8 +2081,9 @@ void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance app
     // theme's (R-l). Only when that flips between forcing a scheme and following the OS: which scheme is
     // forced is followLiveBackground()'s, and an accent change must not undo a live (OSC 11) background.
     auto const theme = _config.theme.value();
+    // Over the focused session's live background, if it set one, as followLiveBackground() would.
     if (guiSchemeFor(theme, std::nullopt).has_value() != _appliedGuiScheme.has_value())
-        applyGuiTheme(theme, defaultProfileColors());
+        applyGuiTheme(theme, defaultProfileColors(), _liveBackground);
     // Under a contrast theme the close button washes like its neighbours instead of turning red.
     if (_windowControlStyleProvider)
         _windowControlStyleProvider->setContrastTheme(appearance.contrastTheme);

@@ -1162,6 +1162,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// when returning to System, and lets @c followLiveBackground skip a repaint that changes nothing.
     std::optional<Qt::ColorScheme> _appliedGuiScheme = std::nullopt;
 
+    /// The focused session's live background (OSC 11) as @c followLiveBackground last saw it, or
+    /// @c std::nullopt before any. Leaving a contrast theme re-applies the chrome over it.
+    std::optional<vtbackend::RGBColor> _liveBackground = std::nullopt;
+
     // The host this process runs on, detected once from the environment at construction unless the appearance
     // services injected one. Declared before
     // the chrome row, which is resolved from it.
