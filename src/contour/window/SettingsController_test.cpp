@@ -4120,3 +4120,77 @@ profiles:
 }
 
 // }}}
+
+// }}}
+// {{{ A failed or conflicting direct flush re-seeds the drafts, as the debounced one does
+
+namespace
+{
+
+/// What an editor leaves behind when it saves a profile in a state that does not parse.
+constexpr auto UnparsableProfile = std::string_view { "{{{ not yaml\n" };
+
+} // namespace
+
+TEST_CASE("SettingsController: a scheme delete that flushes a conflicting profile closes its draft",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideScheme("unused");
+    fx.openSideProfile("work");
+    fx.controller->commitProfileField("show_title_bar", false);
+    auto const workFile = config::relativePathOf(config::profileFile("work"));
+    fx.handEdit(workFile, UnparsableProfile);
+
+    fx.controller->requestDeleteScheme("unused"); // flushes work within the debounce: a conflict
+
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("changed outside Settings"));
+    CHECK(fx.controller->editingProfile().isEmpty());
+    fx.controller->commitProfileField("maximized", false);
+    fx.fire();
+    CHECK(fx.fileContent(workFile) == UnparsableProfile);
+}
+
+TEST_CASE("SettingsController: opening a profile whose pending flush conflicts closes the stale draft",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    fx.controller->commitProfileField("show_title_bar", false);
+    auto const workFile = config::relativePathOf(config::profileFile("work"));
+    fx.handEdit(workFile, UnparsableProfile);
+
+    fx.controller->editProfile("work");
+
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.controller->editingProfile().isEmpty());
+    fx.controller->commitProfileField("maximized", false);
+    fx.fire();
+    CHECK(fx.fileContent(workFile) == UnparsableProfile);
+}
+
+TEST_CASE("SettingsController: a failed Use New leaves nothing staged for the next write",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    namespace fs = std::filesystem;
+    // Neither the profile's directory nor settings.yml's takes a write: nothing of the change lands.
+    auto const directories = std::array { fx.configDir(), fx.configDir() / "profiles" };
+    for (auto const& directory: directories)
+        fs::permissions(directory, fs::perms::owner_write, fs::perm_options::remove);
+    auto const written = fx.controller->writeGlobalOverride(
+        config::DefaultsEditionKey, config::configEnumToken(config::DefaultsEdition::Native2026));
+    for (auto const& directory: directories)
+        fs::permissions(directory, fs::perms::owner_write, fs::perm_options::add);
+    REQUIRE_FALSE(written.has_value()); // a full disk, as far as the store can tell
+
+    fx.controller->commitGlobalField("reflow_on_resize", false);
+    fx.fire();
+
+    auto const settings = fx.fileContent("settings.yml");
+    REQUIRE(settings.has_value());
+    CHECK_FALSE(settings->contains("defaults_edition"));
+    CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
+}

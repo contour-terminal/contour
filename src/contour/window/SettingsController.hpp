@@ -505,6 +505,11 @@ class SettingsController: public QObject
     /// that failed, or a version written outside Settings -- the drafts re-seeded from the configuration in
     /// effect.
     void onSessionError(config::SettingsError const& error);
+    /// The re-seeding half of onSessionError, for a caller that hands the error on to be shown.
+    void reseedAfter(config::SettingsError const& error);
+    /// @p result, after re-seeding the drafts when it is a failure that left a file not as staged.
+    [[nodiscard]] std::expected<void, config::SettingsError> reseededOnFailure(
+        std::expected<void, config::SettingsError> result);
     /// Re-seeds every open draft from the configuration in effect; one whose entity is gone closes.
     void reseedDrafts();
     /// Re-seeds the settings.yml draft from the configuration in effect.

@@ -734,8 +734,10 @@ void SettingsController::fail(std::string const& error)
 template <typename T>
 void SettingsController::report(std::expected<T, config::SettingsError> const& result)
 {
+    // Every result reaches here from a flush or from a staging that a flush may have followed: a conflict
+    // or a failed write re-seeds the drafts exactly as the debounced flush's error does.
     if (!result)
-        fail(result.error().message);
+        onSessionError(result.error());
 }
 
 std::optional<std::string> SettingsController::draftProblem() const
@@ -764,9 +766,8 @@ bool SettingsController::hasChanges() const noexcept
     return _session->hasChanges();
 }
 
-void SettingsController::onSessionError(SettingsError const& error)
+void SettingsController::reseedAfter(SettingsError const& error)
 {
-    // Re-seeded first: a draft that changes clears the page's error banner, which must then show this one.
     switch (error.kind)
     {
         case SettingsErrorKind::WriteFailed:
@@ -780,7 +781,21 @@ void SettingsController::onSessionError(SettingsError const& error)
         case SettingsErrorKind::InUse:
         case SettingsErrorKind::ReloadFailed: break;
     }
+}
+
+void SettingsController::onSessionError(SettingsError const& error)
+{
+    // Re-seeded first: a draft that changes clears the page's error banner, which must then show this one.
+    reseedAfter(error);
     fail(error.message);
+}
+
+std::expected<void, SettingsError> SettingsController::reseededOnFailure(
+    std::expected<void, SettingsError> result)
+{
+    if (!result)
+        reseedAfter(result.error());
+    return result;
 }
 
 void SettingsController::reseedGlobalDraft()
@@ -1688,7 +1703,7 @@ std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::
             auto const isOpen =
                 _profileAccess == DraftAccess::Editable && pending.name == _editingProfile.toStdString();
             if (!isOpen)
-                if (auto const settled = settlePendingOf(pending); !settled)
+                if (auto const settled = reseededOnFailure(settlePendingOf(pending)); !settled)
                     return settled;
         }
         if (auto const now = config::configEnumFromToken<config::DefaultsEdition>(value))
@@ -1706,7 +1721,9 @@ std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::
     emit globalFieldsChanged();
     // Only settings.yml's change (with the side-file profiles staged beside it): an unrelated pending file
     // that cannot be written is that file's own flush to report, not this write's.
-    auto flushed = _session->flushChangeOf(config::guiSettingsFile());
+    // The caller shows the error; the drafts are re-seeded here, or a write that failed would be staged
+    // again by the next edit of either draft.
+    auto flushed = reseededOnFailure(_session->flushChangeOf(config::guiSettingsFile()));
     emit changesChanged();
     return flushed;
 }
