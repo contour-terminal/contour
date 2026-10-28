@@ -159,6 +159,19 @@ constexpr auto RequestedFontSize = 13.0;
     };
 }
 
+/// Sends the OSC 50 request for RequestedFontSize and waits until its question has reached the session.
+///
+/// setFontDef() posts the request through the display's GUI queue; an answer given before the post has run
+/// finds nothing pending and changes no font, which a compositor that is slow to dispatch it (weston) shows.
+void askedForFont(DisplayHarness const& h)
+{
+    auto asks = 0;
+    contour::test::countAsks(
+        *h.session, contour::session::PermissionAsk { contour::session::GuardedRole::ChangeFont }, asks);
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+    REQUIRE(QTest::qWaitFor([&] { return asks != 0; }));
+}
+
 } // namespace
 
 TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and invalid data",
@@ -935,7 +948,7 @@ TEST_CASE("display: a font change staged without a render target reaches the sta
     // Asked for and approved while there is no render target: staged only. The next sync re-enters
     // createRenderer(), which materializes it.
     REQUIRE(h.display->fontSize().pt < RequestedFontSize);
-    h.session->setFontDef(fontRequest(RequestedFontSize));
+    askedForFont(h);
     h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once);
     REQUIRE(QTest::qWaitFor([&] {
         h.pump();
@@ -2608,7 +2621,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     auto const sizeBefore = h.display->fontSize().pt;
     REQUIRE(sizeBefore < RequestedFontSize);
 
-    h.session->setFontDef(fontRequest(RequestedFontSize));
+    askedForFont(h);
 
     // Destroy it the way a scene-graph invalidation does: on the render thread, where RHI resources
     // must be freed.
