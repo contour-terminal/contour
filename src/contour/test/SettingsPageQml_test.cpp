@@ -1030,6 +1030,15 @@ TEST_CASE("every ink of the Settings page reads on what it sits on, on every row
     auto const* selectedRow = fx.byName("sidebarRow:appearance"); // the page of the global it opened
     if (isTerminal)
         CHECK(contrast(token("settingsSelectionText"), over(colorOf(selectedRow), sidebar)) >= TextContrast);
+
+    // The search field: its box is the chrome's field fill, and its typed text and its placeholder both read
+    // on it (the first display pass found a faint placeholder on a white box).
+    auto const* search = fx.byName("settingsSearchField");
+    REQUIRE(search != nullptr);
+    auto const box = over(token("controlFill"), sidebar);
+    CHECK(colorOf(search->parentItem()) == token("controlFill"));
+    CHECK(contrast(colorOf(search), box) >= TextContrast);
+    CHECK(contrast(search->property("placeholderTextColor").value<QColor>(), box) >= TextContrast);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

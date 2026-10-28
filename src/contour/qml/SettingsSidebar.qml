@@ -118,6 +118,10 @@ Rectangle {
                     placeholderText: qsTr("Search")
                     font: chromeStyle.type.body
                     color: chromeStyle.colors.controlText
+                    // The field's own ink: the style's default is the palette's text at half strength, which is
+                    // unreadable on the Terminal row's pane-coloured field, and no softer tone reads on every scheme
+                    // (solarized-dark's ink is barely 4.5:1 on its field).
+                    placeholderTextColor: chromeStyle.colors.controlText
                     selectByMouse: true
                     Accessible.name: qsTr("Search settings")
 
@@ -331,13 +335,17 @@ Rectangle {
             }
         }
 
-        // "+ − …": add a profile, remove the selected one, and the rest of what a profile offers.
+        // "+ − …": add a profile, remove the selected one, and the rest of what a profile offers. The three share
+        // the sidebar's width, so their implicit widths never push the sidebar's contents past its edge.
         RowLayout {
             Layout.fillWidth: true
             spacing: chromeStyle.space.s3
 
             Button {
                 objectName: "addProfileButton"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.minimumWidth: 0
                 text: "+"
                 enabled: root.editable
                 Accessible.name: qsTr("Add a profile")
@@ -345,6 +353,9 @@ Rectangle {
             }
             Button {
                 objectName: "removeProfileButton"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.minimumWidth: 0
                 text: "−"
                 enabled: root.editable && root.selectedProfile.length > 0
                 Accessible.name: qsTr("Remove the selected profile")
@@ -352,12 +363,14 @@ Rectangle {
             }
             Button {
                 objectName: "profileMenuButton"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.minimumWidth: 0
                 text: "…"
                 enabled: root.editable && root.selectedProfile.length > 0
                 Accessible.name: qsTr("More about the selected profile")
                 onClicked: profileMenu.popup(parent, 0, parent.height)
             }
-            Item { Layout.fillWidth: true }
         }
     }
 

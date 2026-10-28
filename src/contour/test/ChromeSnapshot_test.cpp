@@ -354,6 +354,19 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
     auto const* loader = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsPageLoader"));
     REQUIRE(loader != nullptr);
     CHECK(loader->opacity() == 1.0);
+    // The sidebar's own contents (its search field above all) stay inside the sidebar, which ends where the
+    // page's header begins: nothing of it lies under the title.
+    auto const* sidebar = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsSidebar"));
+    auto const* header = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsHeader"));
+    auto const* search = scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsSearchField"));
+    REQUIRE(sidebar != nullptr);
+    REQUIRE(header != nullptr);
+    REQUIRE(search != nullptr);
+    auto const sceneRect = [](QQuickItem const& item) {
+        return item.mapRectToScene(QRectF { 0, 0, item.width(), item.height() });
+    };
+    CHECK(sceneRect(*sidebar).right() <= sceneRect(*header).left() + 0.5);
+    CHECK(sceneRect(*sidebar).contains(sceneRect(*search)));
     // `work` is the editable profile, `main` the one contour.yml defines.
     CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("readOnlyBanner"))->isVisible()
           == (row.settingsPage == SnapshotSettingsPage::ProfileReadOnly));
