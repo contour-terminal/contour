@@ -69,13 +69,13 @@ class TerminalSession;
 namespace contour::window
 {
 
-/// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
-/// -- or re-targets -- another the user may still have open.
 /// The random token that tells this process's tab drags from any other's: generated once, on first use, and
 /// the same for the rest of the process's life.
 /// @return The token, which a tab drag's payload carries as `token`.
 [[nodiscard]] QString const& processToken();
 
+/// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
+/// -- or re-targets -- another the user may still have open.
 enum class MenuSurface : uint8_t
 {
     Pane = 0, ///< The terminal pane's menu; acts on the pane it was opened over.

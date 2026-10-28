@@ -54,7 +54,6 @@ inline constexpr auto ShellQuotingRows = std::array {
     ShellQuotingRow { .process = "yash", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "posh", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "rbash", .quoting = ShellQuoting::Posix },
-    ShellQuotingRow { .process = "busybox", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "fish", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "csh", .quoting = ShellQuoting::Posix },
     ShellQuotingRow { .process = "tcsh", .quoting = ShellQuoting::Posix },

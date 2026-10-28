@@ -235,10 +235,10 @@ TEST_CASE("droppedText.quotingFollowsTheForegroundProcess", "[droppedtext]")
     CHECK(shellQuotingFor("/bin/bash -l") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("zsh") == ShellQuoting::Posix);
     CHECK(shellQuotingFor("/usr/bin/fish") == ShellQuoting::Posix);
-    CHECK(shellQuotingFor("busybox") == ShellQuoting::Posix);
     // What nothing names, and what leads to a shell nobody here knows, is no shell to guess at: every
     // program that is not a known POSIX shell, PowerShell or cmd is Unknown.
     CHECK(shellQuotingFor("") == ShellQuoting::Unknown);
+    CHECK(shellQuotingFor("busybox") == ShellQuoting::Unknown); // a multi-call binary, not always a shell
     for (auto const* other: { "ssh",
                               "wsl.exe",
                               "/usr/bin/sudo",
