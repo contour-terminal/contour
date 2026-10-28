@@ -1535,9 +1535,9 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
         CHECK(ChromeTokenRows[static_cast<size_t>(style)].size.focusRing == outset);
     }
 
-    // The two roles close the table, and the colour-role count derives from the last of them.
+    // The two roles are a family of their own, and the Settings window's follow them.
     CHECK(FocusColorRoleEnd - FocusColorRoleBegin == 2);
-    CHECK(FocusColorRoleEnd == ChromeColorRoleCount);
+    CHECK(FocusColorRoleEnd == SettingsColorRoleBegin);
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
