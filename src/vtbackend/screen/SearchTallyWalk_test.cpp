@@ -134,7 +134,10 @@ TEST_CASE("searchWalk.aRegexStepFeedsTheEngineOneSegmentBudget", "[searchwalk]")
     // C1: `.*x` over a long run of `a` fails at every start without tripping libc++'s complexity limit, so
     // its cost grows with the square of what it is fed. One wrapped line of 3 200 cells: a step of a regex
     // walk feeds it RegexSegmentCells at most, however many rows the caller allows; a literal's is unbounded.
-    auto constexpr Columns = 80;
+    // The rows are as wide as a segment of 25 of them is, so that a second segment of the rest is over half
+    // the budget whatever the engine's budget is.
+    auto constexpr SegmentRows = std::size_t { 25 };
+    auto constexpr Columns = static_cast<int>(RegexSegmentCells / SegmentRows);
     auto constexpr Rows = 40;
     auto mock = MockTerm<> { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
     mock.writeToScreen(std::string(std::size_t { Columns } * Rows, 'a'));
@@ -153,7 +156,7 @@ TEST_CASE("searchWalk.aRegexStepFeedsTheEngineOneSegmentBudget", "[searchwalk]")
         CHECK(unbox<std::size_t>(regexWalk.rowsLastStep()) * Columns <= RegexSegmentCells);
     }
     CHECK(regexWalk.tally().total == 0);
-    CHECK(steps == 2); // 25 rows (2 000 cells), then the other 15.
+    CHECK(steps == 2); // 25 rows, then the other 15.
 
     auto literalWalk = SearchTallyWalk { compiled(U"x"), grid, CellLocation {} };
     REQUIRE(literalWalk.step(grid, SearchWalkStepLines).has_value());
@@ -434,10 +437,11 @@ TEST_CASE("probe.aGridWithinTheBudgetIsAnsweredWhole", "[searchwalk]")
 TEST_CASE("probe.aRegexProvesAbsenceOnAPageTallerThanOneSegment", "[searchwalk]")
 {
     // Q1: the probe's bound for a regex is what it costs the engine, not one segment's rows. At 200 columns a
-    // regex segment is 10 rows; a page of 30 short lines costs 30 x 200 squared, far under RegexSegmentCells
-    // squared, so a keystroke still proves a regex absent there. One line wrapped over all 30 rows is three
-    // full segments, which a keystroke does not read: undecided, for the walk to settle.
-    auto constexpr Columns = 200;
+    // regex segment is 10 rows (the rows are RegexSegmentCells / 10 wide); a page of 30 short lines costs 30
+    // x that width squared, far under RegexSegmentCells squared, so a keystroke still proves a regex absent
+    // there. One line wrapped over all 30 rows is three full segments, which a keystroke does not read:
+    // undecided, for the walk to settle.
+    auto constexpr Columns = static_cast<int>(RegexSegmentCells / 10);
     auto constexpr Rows = 30;
     auto const bottom = CellLocation { .line = LineOffset(Rows - 1), .column = ColumnOffset(Columns - 1) };
 
@@ -460,10 +464,11 @@ TEST_CASE("probe.aRegexProvesAbsenceOnAPageTallerThanOneSegment", "[searchwalk]"
 TEST_CASE("searchWalk.aRegexStepStartsNoSecondLongSegment", "[searchwalk]")
 {
     // A step that has read a short line does not go on to a regex segment longer than half the budget: one
-    // segment's cost per step, not two.
-    auto constexpr Columns = 80;
+    // segment's cost per step, not two. The rows are as wide as a segment of 25 of them is.
+    auto constexpr SegmentRows = std::size_t { 25 };
+    auto constexpr Columns = static_cast<int>(RegexSegmentCells / SegmentRows);
     auto mock = MockTerm<> { PageSize { LineCount(30), ColumnCount(Columns) }, LineCount(0) };
-    mock.writeToScreen("x\r\n" + std::string(std::size_t { Columns } * 25, 'a'));
+    mock.writeToScreen("x\r\n" + std::string(std::size_t { Columns } * SegmentRows, 'a'));
     auto const& grid = mock.terminal.primaryScreen().grid();
 
     auto walk = SearchTallyWalk { compiled(U"q", Regex), grid, CellLocation {} };
@@ -517,11 +522,12 @@ TEST_CASE("searchWalk.theTerminalRestartsTheWalkOnAnotherPage", "[searchwalk]")
 
 TEST_CASE("searchWalk.countingSteppingAndTheCurrentMatchCutARegexAlike", "[searchwalk]")
 {
-    // One wrapped line, `ab` straddling the regex cut after 25 rows (2 000 of 80-column cells): no reader
-    // finds it as a regex, every reader finds it as a literal, which reads on past a cut.
-    auto constexpr Columns = 80;
+    // One wrapped line, `ab` straddling the regex cut after 25 rows (as wide as a segment of 25 of them is):
+    // no reader finds it as a regex, every reader finds it as a literal, which reads on past a cut.
+    auto constexpr SegmentRows = std::size_t { 25 };
+    auto constexpr Columns = static_cast<int>(RegexSegmentCells / SegmentRows);
     auto constexpr Rows = 30;
-    auto constexpr Cut = 25 * Columns;
+    auto constexpr Cut = SegmentRows * Columns;
     auto mock = MockTerm<> { PageSize { LineCount(Rows), ColumnCount(Columns) }, LineCount(0) };
     auto text = std::string(std::size_t { Columns } * Rows, '.');
     text[Cut - 1] = 'a';

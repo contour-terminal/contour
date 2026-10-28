@@ -46,7 +46,16 @@ namespace detail
 /// that), all under the terminal lock. At 2 048 one segment stays under a tenth of a second at its very
 /// worst, and an ordinary pattern over ordinary text far under a frame; a long logical line's regex
 /// matches across its cuts are not found (R-d).
+///
+/// MSVC's std::regex is not iterative: it recurses once per character a `.*` consumes and throws
+/// `error_stack` when the recursion gets too deep, which 2 048 characters already do (the walk's own
+/// `.*x` budget test hit it). There the segment is 256, an eighth of the above: a depth the matcher is not
+/// known to give up at, still three 80-column rows, and never below what a quadratic engine costs.
+#ifdef _MSC_VER
+inline constexpr std::size_t RegexSegmentCells = 256;
+#else
 inline constexpr std::size_t RegexSegmentCells = 2048;
+#endif
 
 /// The rows of one logical line a search matches as one text: at most a query's segment budget of cells
 /// (SearchQuery::segmentCells: @ref MaxScanCells for a literal, @ref RegexSegmentCells for a regex).

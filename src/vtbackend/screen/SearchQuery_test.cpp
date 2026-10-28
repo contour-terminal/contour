@@ -320,24 +320,32 @@ TEST_CASE("searchQuery.segmentsCutALongLineAtFixedRows", "[searchquery]")
 
 TEST_CASE("searchQuery.aLiteralSpansASegmentCutButARegexDoesNot", "[searchquery]")
 {
-    // 200 columns: a literal's segment is 184 rows (MaxScanCells), a regex's 10 (RegexSegmentCells). One
-    // "needle" straddles each cut: rows 9 and 10, rows 183 and 184.
-    auto constexpr Columns = 200;
-    auto constexpr Rows = 400;
+    // A regex's segment is 10 rows (the rows are just under RegexSegmentCells / 10 wide, so that the
+    // literal's cut is no multiple of them), a literal's as many as MaxScanCells holds. One "needle"
+    // straddles each cut: the last row before it and the first after it.
+    auto constexpr Columns = static_cast<int>(vtbackend::RegexSegmentCells / 10) - 1;
+    auto constexpr RegexRows = 10;
+    auto constexpr LiteralRows = static_cast<int>(vtbackend::MaxScanCells / Columns);
+    auto constexpr Rows = 2 * LiteralRows;
+    static_assert(LiteralRows % RegexRows != 0, "the literal's cut must fall inside a regex segment");
     auto text = std::string(std::size_t { Columns } * Rows, 'x');
-    text.replace((std::size_t { Columns } * 10) - 3, 6, "needle");
-    text.replace((std::size_t { Columns } * 184) - 3, 6, "needle");
+    text.replace((std::size_t { Columns } * RegexRows) - 3, 6, "needle");
+    text.replace((std::size_t { Columns } * LiteralRows) - 3, 6, "needle");
     auto const mock = termWith(Rows, Columns, text);
     auto const& grid = gridOf(mock);
 
     // A literal finds each once, by the segment it begins in.
-    CHECK(spansOf(grid, 0, U"needle") == std::vector<Span> { { 9, 197, 10, 2 }, { 183, 197, 184, 2 } });
-    CHECK(spansOf(grid, 184, U"needle").empty());
+    CHECK(spansOf(grid, 0, U"needle")
+          == std::vector<Span> { { RegexRows - 1, Columns - 3, RegexRows, 2 },
+                                 { LiteralRows - 1, Columns - 3, LiteralRows, 2 } });
+    CHECK(spansOf(grid, LiteralRows, U"needle").empty());
     // A regex finds neither across its own cut, and the second within one of its segments.
     CHECK(spansOf(grid, 0, U"needle", RegexOptions).empty());
-    CHECK(spansOf(grid, 10, U"needle", RegexOptions).empty());
-    CHECK(spansOf(grid, 10, U"dle", RegexOptions) == std::vector<Span> { { 10, 0, 10, 2 } });
-    CHECK(spansOf(grid, 180, U"needle", RegexOptions) == std::vector<Span> { { 183, 197, 184, 2 } });
+    CHECK(spansOf(grid, RegexRows, U"needle", RegexOptions).empty());
+    CHECK(spansOf(grid, RegexRows, U"dle", RegexOptions)
+          == std::vector<Span> { { RegexRows, 0, RegexRows, 2 } });
+    CHECK(spansOf(grid, LiteralRows / RegexRows * RegexRows, U"needle", RegexOptions)
+          == std::vector<Span> { { LiteralRows - 1, Columns - 3, LiteralRows, 2 } });
 }
 
 TEST_CASE("searchQuery.wholeWordResumesAtTheNextDelimiter", "[searchquery]")
