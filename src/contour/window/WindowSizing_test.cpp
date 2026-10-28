@@ -47,6 +47,15 @@ namespace
 using contour::test::ScopedController;
 using contour::test::TestApp;
 
+/// Skips the running test on a Wayland session: a Wayland client cannot place or read back its own
+/// window position, so a test that restores or saves one has nothing to observe there.
+#define SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED()                                       \
+    do                                                                             \
+    {                                                                              \
+        if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland"))) \
+            SKIP("Wayland clients cannot place windows.");                         \
+    } while (false)
+
 } // namespace
 
 TEST_CASE("chromeHeight is a plain declared property with change notification", "[contour][sizing]")
@@ -91,6 +100,7 @@ TEST_CASE("bindWindow(nullptr) and displayless showInitial are safe no-ops", "[c
 
 TEST_CASE("first window restores its location and saves normal moves", "[contour][sizing][window-position]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     TestApp app;
     app.app().config().rememberWindowPosition = true;
     app.app().config().configFile = "test-config/contour.yml";
@@ -135,6 +145,7 @@ TEST_CASE("first window restores its location and saves normal moves", "[contour
 
 TEST_CASE("unavailable saved monitor falls back to an available monitor", "[contour][window-position]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     TestApp app;
     app.app().config().configFile = "test-config/contour.yml";
     app.app().config().rememberWindowPosition = true;
@@ -177,6 +188,7 @@ TEST_CASE("disabled window position persistence neither loads nor saves", "[cont
 TEST_CASE("first startup in every presentation mode saves a normal placement without prior state",
           "[contour][sizing][window-position][native]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     auto const initialState = GENERATE(Qt::WindowNoState, Qt::WindowMaximized, Qt::WindowFullScreen);
     CAPTURE(initialState);
 
