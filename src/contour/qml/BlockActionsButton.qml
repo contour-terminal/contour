@@ -57,7 +57,11 @@ Item {
 
     Text {
         objectName: "blockActionsGlyph"
-        anchors.centerIn: parent
+        // Centred exactly, by binding rather than anchors.centerIn: that rounds onto whole pixels, so the glyph
+        // sat up to half a pixel nearer one side whenever the room beside it was odd -- on the Terminal row,
+        // half a hairline from the pane's edge.
+        x: (parent.width - width) / 2
+        y: (parent.height - height) / 2
         text: "⋯"
         // The glyph keeps a hairline of room to each side of the button: on the Terminal row the button is
         // one cell and the glyph fills it, so its first dot sat on the pane's edge and read as clipped

@@ -296,7 +296,7 @@ TEST_CASE("The block actions button and its glyph stay inside the terminal on ev
         auto const shown =
             std::ranges::find_if(buttons, [](QQuickItem const* each) { return each->isVisible(); });
         REQUIRE(shown != buttons.end());
-        auto const* const button = *shown;
+        auto* const button = *shown;
         auto const* const terminal = button->parentItem();
         auto const* const glyph = button->findChild<QQuickItem*>(QStringLiteral("blockActionsGlyph"));
         REQUIRE(glyph != nullptr);
@@ -307,14 +307,25 @@ TEST_CASE("The block actions button and its glyph stay inside the terminal on ev
         auto const buttonRect =
             button->mapRectToItem(terminal, QRectF { 0, 0, button->width(), button->height() });
         CHECK(bounds.contains(buttonRect));
-        auto const glyphRect =
-            glyph->mapRectToItem(terminal, QRectF { 0, 0, glyph->implicitWidth(), glyph->implicitHeight() });
         // Less a rounding slack: a glyph exactly one hairline in is inside, though its mapped edge may land a
         // few ulps short of it (seen on aarch64).
         auto const hairline = (1.0 / std::max(1.0, scene.window().devicePixelRatio())) - 1e-6;
-        CHECK(glyphRect.left() - buttonRect.left() >= hairline);
-        CHECK(buttonRect.right() - glyphRect.right() >= hairline);
-        CHECK(glyphRect.left() >= bounds.left() + hairline);
+        auto const glyphRectIn = [&](QRectF const& host) {
+            auto const glyphRect = glyph->mapRectToItem(
+                terminal, QRectF { 0, 0, glyph->implicitWidth(), glyph->implicitHeight() });
+            CHECK(glyphRect.left() - host.left() >= hairline);
+            CHECK(host.right() - glyphRect.right() >= hairline);
+            // Centred exactly: a glyph rounded onto whole pixels sat half a pixel nearer one side whenever
+            // the room it left was odd, half a hairline from the edge on the Terminal row (seen on Windows,
+            // whose font left an odd cell).
+            CHECK(std::abs((glyphRect.left() - host.left()) - (host.right() - glyphRect.right())) < 1e-6);
+            return glyphRect;
+        };
+        CHECK(glyphRectIn(buttonRect).left() >= bounds.left() + hairline);
+
+        // One pixel wider, the room left beside the glyph changes parity, whichever this host's font left.
+        button->setWidth(button->width() + 1);
+        glyphRectIn(button->mapRectToItem(terminal, QRectF { 0, 0, button->width(), button->height() }));
     }
 }
 
