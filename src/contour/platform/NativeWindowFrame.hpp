@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace contour::platform
 {
@@ -259,15 +260,30 @@ class NativeWindowFrame
 /// native handle outlives the window it describes, and both platforms recycle handles -- so a later
 /// window inheriting a stale entry with a matching decoration would be skipped and never decorated.
 /// This dies with the window, and one helper serves both adapters instead of two copies.
+/// The window property @ref needsFrameApplied records the applied decoration under, as the decoration + 1
+/// so "never applied" (an absent property, which converts to 0) is distinct from Client's 0.
+inline constexpr auto AppliedDecorationKey = "contour_applied_frame_decoration";
+
 [[nodiscard]] inline bool needsFrameApplied(QWindow& window, WindowDecoration decoration)
 {
-    static constexpr auto Key = "contour_applied_frame_decoration";
-    // +1 so "never applied" (an absent property, which converts to 0) is distinct from Client's 0.
     auto const wanted = static_cast<int>(decoration) + 1;
-    if (window.property(Key).toInt() == wanted)
+    if (window.property(AppliedDecorationKey).toInt() == wanted)
         return false;
-    window.setProperty(Key, wanted);
+    window.setProperty(AppliedDecorationKey, wanted);
     return true;
+}
+
+/// The decoration @p window's frame was last given, as @ref needsFrameApplied recorded it.
+/// @param window The window to ask.
+/// @return The decoration, or nothing when no frame was ever applied.
+[[nodiscard]] inline std::optional<WindowDecoration> appliedDecoration(QWindow const& window)
+{
+    switch (window.property(AppliedDecorationKey).toInt())
+    {
+        case static_cast<int>(WindowDecoration::Client) + 1: return WindowDecoration::Client;
+        case static_cast<int>(WindowDecoration::Server) + 1: return WindowDecoration::Server;
+        default: return std::nullopt;
+    }
 }
 
 /// The frame that does nothing, for platforms with no OS frame service to ask.

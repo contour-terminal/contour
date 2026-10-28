@@ -4,13 +4,17 @@
 #ifdef _WIN32
 
     #include <contour/platform/Dwmapi.hpp>
+    #include <contour/platform/Win32SystemBackdrop.hpp>
+
+    #include <core/log/LogStore.hpp>
 
     #include <QtCore/QAbstractNativeEventFilter>
     #include <QtCore/QCoreApplication>
+    #include <QtCore/QPointer>
     #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
-    #include <set>
+    #include <map>
     #include <utility>
 
 namespace contour::platform
@@ -18,6 +22,23 @@ namespace contour::platform
 
 namespace
 {
+    auto const backdropLog = core::log::Category { "window.backdrop", "Windows DWM system backdrop" };
+
+    /// Re-applies the backdrop and the margins @p window's records decide (Win32SystemBackdrop.hpp), logging
+    /// a failure that is news: the frame keeps working without the backdrop.
+    void reapplySystemBackdrop(QWindow& window, HWND hwnd)
+    {
+        auto const applied = applySystemBackdrop(window, hwnd, dwmApi());
+        if (applied)
+            return;
+        auto const expected =
+            applied.error() == TitleBandMaterialError::Unsupported
+            && unsupportedBackdropReportFor(recordedBlurBehind(window)) == UnsupportedBackdropReport::Quiet;
+        if (!expected)
+            backdropLog()("Re-applying the system backdrop: {}.",
+                          titleBandMaterialErrorName(applied.error()));
+    }
+
     /// The frame thickness Windows would put around @p hwnd at its CURRENT monitor's DPI.
     ///
     /// AdjustWindowRectExForDpi grows an empty rectangle by the frame, so the members come back
@@ -68,7 +89,10 @@ namespace
                 app->removeNativeEventFilter(this);
         }
 
-        void watch(HWND hwnd) { _watched.insert(hwnd); }
+        void watch(HWND hwnd, QWindow& window)
+        {
+            _watched.insert_or_assign(hwnd, QPointer<QWindow> { &window });
+        }
         void forget(HWND hwnd) { _watched.erase(hwnd); }
 
         bool nativeEventFilter(QByteArray const& eventType, void* message, qintptr* result) override
@@ -117,31 +141,19 @@ namespace
                 }
 
                 case WM_DWMCOMPOSITIONCHANGED:
-                    // Composition restarting drops what DwmExtendFrameIntoClientArea established.
-                    extendFrame(msg->hwnd);
+                    // Composition restarting drops what DwmExtendFrameIntoClientArea established; the
+                    // window's records say what it was (the backdrop's margins, not a fixed one pixel).
+                    if (auto* window = _watched.at(msg->hwnd).data())
+                        reapplySystemBackdrop(*window, msg->hwnd);
                     return false;
 
                 default: return false;
             }
         }
 
-        /// Asks DWM to render its frame into the client area.
-        ///
-        /// One pixel at the top, not zero: a zero margin disables the extension outright, and a
-        /// window DWM is not extending into is one it does not shadow. One pixel is the smallest
-        /// that keeps it on, and it sits under our own title bar where nothing shows.
-        static void extendFrame(HWND hwnd)
-        {
-            auto const& api = dwmApi();
-            if (api.extendFrameIntoClientArea == nullptr)
-                return;
-            auto const margins =
-                MARGINS { .cxLeftWidth = 0, .cxRightWidth = 0, .cyTopHeight = 1, .cyBottomHeight = 0 };
-            api.extendFrameIntoClientArea(hwnd, &margins);
-        }
-
       private:
-        std::set<HWND> _watched;
+        /// The windows decorated, by handle; a destroyed window's entry holds null until it is forgotten.
+        std::map<HWND, QPointer<QWindow>> _watched;
     };
 
     /// The one filter, shared by every window.
@@ -194,8 +206,10 @@ namespace
 
             if (policy.shadow != FrameShadowStrategy::NativeFrameKept)
             {
-                // The native title bar: Qt's own frame is exactly right, so stop intercepting.
+                // The native title bar: Qt's own frame is exactly right, so stop intercepting, and take
+                // back the margins the kept frame extended -- the OS's frame never had them (F32).
                 frameEventFilter().forget(hwnd);
+                reapplySystemBackdrop(window, hwnd);
                 return;
             }
 
@@ -210,7 +224,7 @@ namespace
             auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX);
 
-            frameEventFilter().watch(hwnd);
+            frameEventFilter().watch(hwnd, window);
 
             // Force the WM_NCCALCSIZE round that applies the style change.
             SetWindowPos(hwnd,
@@ -243,7 +257,9 @@ namespace
                 }
             }
 
-            Win32FrameEventFilter::extendFrame(hwnd);
+            // The margins that keep DWM's shadow on -- one pixel, or the whole client area under a
+            // backdrop -- are the system backdrop's to decide (R-h).
+            reapplySystemBackdrop(window, hwnd);
 
             tintBorder(window, hwnd);
 

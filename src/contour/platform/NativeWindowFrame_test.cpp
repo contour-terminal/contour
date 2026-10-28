@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/NativeWindowFrame.hpp>
 
+#include <QtGui/QWindow>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -23,6 +25,19 @@ constexpr auto AllPlatforms =
     std::array { FramePlatform::Other, FramePlatform::Windows, FramePlatform::MacOS };
 constexpr auto AllDecorations = std::array { WindowDecoration::Client, WindowDecoration::Server };
 } // namespace
+
+TEST_CASE("the window records the decoration its frame was given", "[contour][frame]")
+{
+    // The Win32 material reads this record to pick a server-framed window's margins (F32).
+    auto window = QWindow {};
+    CHECK_FALSE(appliedDecoration(window).has_value());
+    for (auto const decoration: AllDecorations)
+    {
+        CHECK(needsFrameApplied(window, decoration));
+        CHECK(appliedDecoration(window) == decoration);
+        CHECK_FALSE(needsFrameApplied(window, decoration));
+    }
+}
 
 #ifdef _WIN32
 TEST_CASE("Win32 custom frame fills the maximized work area", "[contour][frame][native]")

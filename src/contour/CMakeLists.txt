@@ -905,6 +905,7 @@ if(CONTOUR_FRONTEND_GUI)
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             platform/TitleBandMaterial_test.cpp
+            platform/Win32TitleBandMaterial_test.cpp
             platform/WindowResizeGrid_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)

@@ -10,6 +10,7 @@
 
 #ifdef _WIN32
     #include <contour/platform/Dwmapi.hpp>
+    #include <contour/platform/Win32SystemBackdrop.hpp>
 
     #include <Windows.h>
 #endif
@@ -42,9 +43,10 @@ namespace
 } // namespace
 #endif
 
-void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
+void setBlurBehind(QWindow* window, BlurBehindWish blur, QRegion const& region)
 {
     core::ignoreUnused(region);
+    auto const enable = blur == BlurBehindWish::On;
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (QGuiApplication::platformName() == "wayland")
@@ -130,25 +132,18 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 
     if (HWND hwnd = (HWND) window->winId(); hwnd != nullptr)
     {
-        // 1. Attempt DWM-based blur (Windows 11+)
+        // 1. Attempt DWM-based blur (Windows 11 22H2+)
         //
-        // This used to force DWMWA_USE_IMMERSIVE_DARK_MODE on here, unconditionally and regardless
-        // of the configured `theme`, which put a dark window border on a light-themed window. It is
-        // a FRAME attribute rather than a blur one -- and now that the frame is kept rather than
-        // discarded it also tints the border around the rounded corners -- so it moved to
-        // Win32WindowFrame, which is told what the effective color scheme actually is.
-        if (auto const& api = dwmApi(); api.setWindowAttribute != nullptr)
-        {
-            const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
-            const DWORD DWMSBT_NONE = 1;
-            const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
-
-            DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
-            HRESULT hr =
-                api.setWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
-            if (SUCCEEDED(hr))
-                return;
-        }
+        // Not a write of DWMWA_SYSTEMBACKDROP_TYPE of its own: the title band's Mica writes the same
+        // attribute, and blur off must hand the window back to Mica rather than to no backdrop at all. The
+        // wish is recorded on the window, and applySystemBackdrop decides from it and the band's record --
+        // Acrylic over the whole window while blur is on, the user's explicit choice (R-i).
+        //
+        // DWMWA_USE_IMMERSIVE_DARK_MODE used to be forced on here too, regardless of the configured `theme`;
+        // it is a FRAME attribute and lives in Win32WindowFrame, which knows the effective color scheme.
+        recordBlurBehind(*window, blur);
+        if (applySystemBackdrop(*window, hwnd, dwmApi()))
+            return;
 
         // 2. Fallback to undocumented SetWindowCompositionAttribute (Windows 10)
         const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));

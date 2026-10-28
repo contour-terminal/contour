@@ -2,9 +2,11 @@
 #pragma once
 
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/platform/WindowDecoration.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 // Which DWM system backdrop a window asks for, and the frame margins it extends into its client area,
@@ -82,6 +84,39 @@ inline constexpr auto SystemBackdropRows = std::array {
     return row != SystemBackdropRows.end() ? row->backdrop : DwmBackdrop::None;
 }
 
+/// How a re-apply reports DWM not knowing the backdrop it was asked for (E_INVALIDARG, before Windows 11
+/// 22H2).
+enum class UnsupportedBackdropReport : uint8_t
+{
+    Log = 0, ///< Worth a log line: the look the backdrop was to give is gone.
+    Quiet,   ///< Expected: the wish reaches its look another way, and every re-apply would say so again.
+};
+
+/// One row of the unsupported-backdrop table.
+struct UnsupportedBackdropRow
+{
+    BlurBehindWish blur {};              ///< The user's blur wish.
+    UnsupportedBackdropReport report {}; ///< How DWM not knowing the backdrop is reported.
+};
+
+/// Blur on Windows 10 is Acrylic DWM does not know, and the accent-blur fallback (BlurBehind.cpp) draws it
+/// instead; without blur the unknown backdrop is the band's material, which nothing replaces.
+inline constexpr auto UnsupportedBackdropRows = std::array {
+    UnsupportedBackdropRow { .blur = BlurBehindWish::Off, .report = UnsupportedBackdropReport::Log },
+    UnsupportedBackdropRow { .blur = BlurBehindWish::On, .report = UnsupportedBackdropReport::Quiet },
+};
+static_assert(UnsupportedBackdropRows.size() == static_cast<std::size_t>(BlurBehindWish::On) + 1,
+              "Every BlurBehindWish needs exactly one unsupported-backdrop row.");
+
+/// Decides how DWM not knowing the decided backdrop is reported.
+/// @param blur Whether the user asked for blur behind the window.
+/// @return The matching @c UnsupportedBackdropRows row's report; @c Log for a wish without one.
+[[nodiscard]] constexpr UnsupportedBackdropReport unsupportedBackdropReportFor(BlurBehindWish blur) noexcept
+{
+    auto const row = std::ranges::find(UnsupportedBackdropRows, blur, &UnsupportedBackdropRow::blur);
+    return row != UnsupportedBackdropRows.end() ? row->report : UnsupportedBackdropReport::Log;
+}
+
 /// The margins a window with a system backdrop extends its frame by: all of its client area, so the
 /// backdrop shows wherever the client paints nothing.
 inline constexpr auto SheetOfGlassMargins = FrameMargins { .left = -1, .right = -1, .top = -1, .bottom = -1 };
@@ -91,12 +126,22 @@ inline constexpr auto SheetOfGlassMargins = FrameMargins { .left = -1, .right = 
 /// smallest that keeps it on, and it sits under our own title bar where nothing shows.
 inline constexpr auto ClientFrameMargins = FrameMargins { .left = 0, .right = 0, .top = 1, .bottom = 0 };
 
+/// The margins a server-framed window keeps: none. Its frame is the OS's own, which never extended into the
+/// client area; leaving the kept client frame takes back what that frame established (F32).
+inline constexpr auto ServerFrameMargins = FrameMargins { .left = 0, .right = 0, .top = 0, .bottom = 0 };
+
 /// Decides DwmExtendFrameIntoClientArea's margins.
 /// @param band What the band shows behind it.
 /// @param blur Whether the user asked for blur behind the window.
-/// @return @c SheetOfGlassMargins under the native material or blur, else @c ClientFrameMargins.
-[[nodiscard]] constexpr FrameMargins frameMarginsFor(config::BandBackdrop band, BlurBehindWish blur) noexcept
+/// @param decoration Who draws the window's frame now.
+/// @return @c ServerFrameMargins on the OS's own frame; else @c SheetOfGlassMargins under the native material
+///         or blur, else @c ClientFrameMargins.
+[[nodiscard]] constexpr FrameMargins frameMarginsFor(config::BandBackdrop band,
+                                                     BlurBehindWish blur,
+                                                     WindowDecoration decoration) noexcept
 {
+    if (decoration == WindowDecoration::Server)
+        return ServerFrameMargins;
     if (band == config::BandBackdrop::NativeMaterial || blur == BlurBehindWish::On)
         return SheetOfGlassMargins;
     return ClientFrameMargins;

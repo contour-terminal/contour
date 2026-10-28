@@ -2169,7 +2169,7 @@ void TerminalDisplay::setWindowNormal()
 
 void TerminalDisplay::setBlurBehind(bool enable)
 {
-    platform::setBlurBehind(window(), enable);
+    platform::setBlurBehind(window(), enable ? platform::BlurBehindWish::On : platform::BlurBehindWish::Off);
 }
 
 void TerminalDisplay::toggleFullScreen()

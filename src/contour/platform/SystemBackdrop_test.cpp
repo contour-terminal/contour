@@ -65,11 +65,24 @@ TEST_CASE("backdrop.blurOffRestoresMica", "[systembackdrop]")
 
 TEST_CASE("margins.clientKeepsOnePixel", "[systembackdrop]")
 {
-    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::Off)
+    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::Off, WindowDecoration::Client)
           == FrameMargins { .left = 0, .right = 0, .top = 1, .bottom = 0 });
-    CHECK(frameMarginsFor(BandBackdrop::NativeMaterial, BlurBehindWish::Off)
+    CHECK(frameMarginsFor(BandBackdrop::NativeMaterial, BlurBehindWish::Off, WindowDecoration::Client)
           == FrameMargins { .left = -1, .right = -1, .top = -1, .bottom = -1 });
-    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::On) == SheetOfGlassMargins);
+    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::On, WindowDecoration::Client)
+          == SheetOfGlassMargins);
+}
+
+TEST_CASE("margins.serverFrameExtendsNothing", "[systembackdrop]")
+{
+    // Back on the native title bar, the window extends no frame at all: the one-pixel margin is the kept
+    // client frame's, and a server-framed window never had it (F32).
+    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::Off, WindowDecoration::Server)
+          == FrameMargins { .left = 0, .right = 0, .top = 0, .bottom = 0 });
+    CHECK(frameMarginsFor(BandBackdrop::NativeMaterial, BlurBehindWish::Off, WindowDecoration::Server)
+          == ServerFrameMargins);
+    CHECK(frameMarginsFor(BandBackdrop::Client, BlurBehindWish::On, WindowDecoration::Server)
+          == ServerFrameMargins);
 }
 
 TEST_CASE("backdrop.windows10IsSolid", "[systembackdrop]")
@@ -90,5 +103,14 @@ TEST_CASE("backdrop.windows10IsSolid", "[systembackdrop]")
     CHECK(surface.fill == BandFill::Tint);
     CHECK(systemBackdropFor(surface.backdrop, BackdropKind::Tabbed, BlurBehindWish::Off)
           == DwmBackdrop::None);
-    CHECK(frameMarginsFor(surface.backdrop, BlurBehindWish::Off) == ClientFrameMargins);
+    CHECK(frameMarginsFor(surface.backdrop, BlurBehindWish::Off, WindowDecoration::Client)
+          == ClientFrameMargins);
+}
+
+TEST_CASE("backdrop.unsupportedIsExpectedOnlyUnderBlur", "[systembackdrop]")
+{
+    // Windows 10 knows no Acrylic: blur reaches its look through the accent-blur fallback, so every re-apply
+    // failing as unsupported is expected there. Without blur the material asked for is gone, which is news.
+    CHECK(unsupportedBackdropReportFor(BlurBehindWish::On) == UnsupportedBackdropReport::Quiet);
+    CHECK(unsupportedBackdropReportFor(BlurBehindWish::Off) == UnsupportedBackdropReport::Log);
 }
