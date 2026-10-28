@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -50,6 +51,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <vthost/HistorySeed.hpp>
 
 using contour::test::DisplayHarness;
 using contour::test::HarnessWindow;
@@ -674,5 +677,64 @@ TEST_CASE("display: a chip on a double-width command row sits on the drawn half"
             }
         }
         CHECK(onRowZero >= 1);
+    }
+}
+
+/// The first column of the divider's left rule that is sampled: the page's top-left corner holds the
+/// terminal's own marks (the cursor's outline), which are not the divider's.
+constexpr auto RuleFirstColumn = 3;
+
+TEST_CASE("display: a restored pane's divider is dimmed, and the line after it is not",
+          "[display][restore][divider]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    using namespace std::chrono_literals;
+    for (auto const& variant: allVariants())
+    {
+        INFO(nameOf(variant));
+        auto const h = makeHarness(variant);
+        h->display->forceActiveFocus();
+        auto const endedAt = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 } + 9h + 41min;
+        auto const divider =
+            vthost::RestoreDivider { .sessionEndedAt = endedAt,
+                                     .today = std::chrono::floor<std::chrono::days>(endedAt) };
+        vthost::seedRestoredHistory(h->session->terminal(), {}, divider);
+        // The line after the divider says the same words, undimmed: the reference for what dim changes.
+        auto const text = vthost::restoredDividerText(divider);
+        h->feedAndSettle(text);
+
+        auto const frame = frameOf(*h);
+        auto const g = geometryOf(*h);
+        auto const textCells =
+            static_cast<int>(std::ranges::count_if(text, [](char byte) { return (byte & 0xC0) != 0x80; }));
+        // The divider centres its words between rules, one space either side.
+        auto const rule = (g.pageColumns - textCells - 2) / 2;
+        REQUIRE(rule > RuleFirstColumn);
+        auto const wordsFirst = rule + 1;
+        auto const wordsLast = rule + textCells;
+
+        auto const ground = regionColors(frame.image, g.cells(10, 0, g.pageColumns - 1)).ground;
+        auto const rulesLeft = regionColors(frame.image, g.cells(0, RuleFirstColumn, rule - 1));
+        auto const rulesRight =
+            regionColors(frame.image, g.cells(0, g.pageColumns - rule, g.pageColumns - 1));
+        auto const words = regionColors(frame.image, g.cells(0, wordsFirst, wordsLast));
+        auto const plain = regionColors(frame.image, g.cells(1, 0, textCells - 1));
+        auto const foreground = h->session->terminal().colorPalette().defaultForeground;
+        INFO("ground " << hexOf(ground) << " words " << hexOf(words.ink) << " plain " << hexOf(plain.ink)
+                       << " rules " << hexOf(rulesLeft.ink) << " " << hexOf(rulesRight.ink));
+
+        // The rules are drawn on both sides of the words, and the words are drawn between them.
+        CHECK(rulesLeft.ink != rulesLeft.ground);
+        CHECK(rulesRight.ink != rulesRight.ground);
+        CHECK(words.ink != words.ground);
+        // The line after is in the scheme's own ink; the divider's ink is the dimmed one: farther from it,
+        // and nearer the ground.
+        CHECK(nearlyEqual(plain.ink, foreground, 24));
+        CHECK(words.ink != plain.ink);
+        CHECK(distanceBetween(words.ink, ground) < distanceBetween(plain.ink, ground));
+        CHECK(distanceBetween(rulesLeft.ink, ground) < distanceBetween(plain.ink, ground));
+        // Nothing else on the page is drawn: the divider is one row and the line after it another.
+        CHECK(regionColors(frame.image, g.cells(2, 0, g.pageColumns - 1)).groundPixels
+              == regionColors(frame.image, g.cells(2, 0, g.pageColumns - 1)).pixels);
     }
 }
