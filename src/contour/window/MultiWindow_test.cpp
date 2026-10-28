@@ -1716,10 +1716,14 @@ using contour::window::DropZone;
 constexpr auto PaneWidth = 1000.0;
 constexpr auto PaneHeight = 500.0;
 
-/// The `application/x-contour-tab` payload TabItem.qml writes for the tab at @p row of window @p window.
-[[nodiscard]] QString tabPayload(vtworkspace::WindowId window, int row)
+/// The `application/x-contour-tab` payload TabItem.qml writes for the tab at @p row of window @p window,
+/// from the process @p pid (this one unless a test says another started the drag).
+[[nodiscard]] QString tabPayload(vtworkspace::WindowId window,
+                                 int row,
+                                 qint64 pid = QCoreApplication::applicationPid())
 {
-    return QString::fromStdString(std::format(R"({{"windowId":{},"tabIndex":{}}})", window.value, row));
+    return QString::fromStdString(
+        std::format(R"({{"windowId":{},"tabIndex":{},"pid":{}}})", window.value, row, pid));
 }
 
 /// What @p controller says a drop of @p payload at (@p x, @p y) over @p session's pane does.
@@ -1857,15 +1861,42 @@ TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][mul
         CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, -1)) == DropZone::None);
         CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, QStringLiteral("not json"))
               == DropZone::None);
-        CHECK(
-            zoneAt(
-                *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":"1","tabIndex":0})"))
-            == DropZone::None);
-        CHECK(
-            zoneAt(
-                *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":1.5,"tabIndex":0})"))
-            == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":"1","tabIndex":0,"pid":%1})")
+                         .arg(QCoreApplication::applicationPid()))
+              == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":1.5,"tabIndex":0,"pid":%1})")
+                         .arg(QCoreApplication::applicationPid()))
+              == DropZone::None);
         CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250) == DropZone::None);
+    }
+
+    SECTION("a drag that another process started, or that names no process, is not one of ours")
+    {
+        // The same window and row, which in THAT process are some other tab.
+        auto const foreign = tabPayload(window.id, 0, QCoreApplication::applicationPid() + 1);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, foreign) == DropZone::None);
+        CHECK(zoneAt(
+                  *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":1,"tabIndex":0})"))
+              == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"pid":"%1"})")
+                         .arg(QCoreApplication::applicationPid()))
+              == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
     }
 
     SECTION("no session, and nothing out of range, is a target")
@@ -2025,6 +2056,10 @@ TEST_CASE("WindowController: dropTabOnPane merges on a split zone and changes no
         window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 7));
         window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), QStringLiteral("{}"));
         window->dropTabOnPane(nullptr, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+        // Another process's drag, naming the same window and row: its tab is not ours to merge.
+        window->dropTabOnPane(pane,
+                              static_cast<int>(DropZone::SplitRight),
+                              tabPayload(window.id, 0, QCoreApplication::applicationPid() + 1));
         CHECK(window->count() == 2);
         CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
     }

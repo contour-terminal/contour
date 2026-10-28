@@ -60,6 +60,8 @@
 #include <QtCore/QDirIterator>
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMimeData>
 #include <QtCore/QObject>
 #include <QtCore/QRegularExpression>
@@ -72,6 +74,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
+#include <QtQml/QJSValue>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -280,6 +283,7 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
+    Q_INVOKABLE [[nodiscard]] qint64 processId() const noexcept { return contour::test::MockProcessId; }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
@@ -652,6 +656,50 @@ TEST_CASE("GUI tab strip instantiates and binds against a populated model (offsc
     // The strip realizes its three mock tabs without QML runtime errors (which would otherwise be
     // reported on the component as creation errors).
     CHECK(controller.rowCount() == 3);
+}
+
+TEST_CASE("A TabItem's drag names the window, the row and the process that started it (offscreen)",
+          "[contour][gui][qml][drop]")
+{
+    // The payload rides an OS-level drag, so a drop in another process reads it too: the pid is what lets
+    // it refuse ids and rows that name this process's model.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 3);
+    initial.insert("tabTitle", QStringLiteral("shell"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor {});
+    initial.insert("tabActive", false);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    // The drag's attached object lives on the tab's drag proxy.
+    auto* const dragProxy = tab->findChild<QObject*>(QStringLiteral("dragProxy"));
+    REQUIRE(dragProxy != nullptr);
+    auto mimeValue = QQmlProperty(dragProxy, QStringLiteral("Drag.mimeData"), qmlContext(dragProxy)).read();
+    if (mimeValue.canConvert<QJSValue>())
+        mimeValue = mimeValue.value<QJSValue>().toVariant();
+    INFO("mime data: " << mimeValue.typeName());
+    auto const mime = mimeValue.toMap();
+    auto const payload =
+        QJsonDocument::fromJson(mime.value(QStringLiteral("application/x-contour-tab")).toString().toUtf8());
+    REQUIRE(payload.isObject());
+    CHECK(payload.object().value("windowId").toInt() == 1);
+    CHECK(payload.object().value("tabIndex").toInt() == 3);
+    CHECK(payload.object().value("pid").toDouble() == static_cast<double>(contour::test::MockProcessId));
 }
 
 TEST_CASE("A colored TabItem fills with the user color and picks contrasting text (offscreen)",

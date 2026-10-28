@@ -288,6 +288,9 @@ Row {
                 if (!raw)
                     return
                 var payload = JSON.parse(raw)
+                // Written by another process (or forged): its window ids and rows are not this model's.
+                if (payload.pid !== root.controller.processId())
+                    return
                 var target = hoverIndex
                 if (payload.windowId === root.controller.windowIdValue())
                     root.controller.moveTab(payload.tabIndex, target)  // same window: reorder

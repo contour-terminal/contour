@@ -414,6 +414,7 @@ Item {
     // drop.getDataAsString(). The real tab stays put — the OS drag cursor shows dragImage as the ghost.
     Item {
         id: dragProxy
+        objectName: "dragProxy"
         Drag.dragType: Drag.Automatic
         Drag.active: dragHandler.active
         Drag.hotSpot.x: width / 2
@@ -426,6 +427,8 @@ Item {
         Drag.mimeData: ({
             "application/x-contour-tab": JSON.stringify({
                 windowId: root.controller ? root.controller.windowIdValue() : 0,
+                // A drop refuses a payload another process wrote: ids and rows name ITS model.
+                pid: root.controller ? root.controller.processId() : 0,
                 tabIndex: root.tabIndex
             })
         })

@@ -29,6 +29,8 @@
 
 namespace contour::test
 {
+/// The process id every mock window controller answers to processId(): what its tabs stamp into a drag.
+inline constexpr qint64 MockProcessId = 4242;
 
 /// The colours a mock offers in its tab menu's "Tab Color" sub-menu, in order.
 inline constexpr auto MockTabPalette = std::array {

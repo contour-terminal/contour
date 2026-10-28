@@ -33,6 +33,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QtQml>
@@ -223,12 +224,15 @@ class WindowController:
     /// @param clock    What the held-modifier reveal measures its hold against.
     /// @param noticeAnnouncer Builds what the window's notices are said through; the window says them only
     ///                 while `accessibility_announcements` allows.
+    /// @param processId The id this process stamps into a tab drag's payload (processId()); a drag that
+    ///                 names another process is refused. The application's own in production.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
                      config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
-                     NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer());
+                     NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer(),
+                     qint64 processId = QCoreApplication::applicationPid());
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -294,6 +298,11 @@ class WindowController:
     /// The raw id of the window this controller adapts, so a QML drag payload can name its source
     /// window and a DropArea can target the destination window across the shared engine.
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return _windowId.value; }
+    /// The id of this process, which a tab drag's payload carries (`pid`). The payload rides in an OS-level
+    /// drag, so a drop reads it back from whatever process started the drag: one that names another
+    /// process (a second Contour, or any application forging the mime type) names a window and a row of
+    /// ITS model, and is refused.
+    Q_INVOKABLE [[nodiscard]] qint64 processId() const noexcept { return _processId; }
     /// Moves the tab at @p fromIndex of the window identified by @p sourceWindowId into THIS window at
     /// @p toIndex — the drop of a tab dragged from another window's strip onto this one.
     /// @param sourceWindowId The dragged tab's source window id (from windowIdValue()).
@@ -1224,6 +1233,7 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
+    qint64 _processId; ///< What processId() answers.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     std::optional<WindowPosition> _initialPosition;
     std::optional<WindowPosition> _lastWindowPosition;
