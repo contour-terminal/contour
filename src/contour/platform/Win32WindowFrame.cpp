@@ -136,7 +136,9 @@ namespace
                     params->rgrc[0].right -= inset.right;
                     params->rgrc[0].bottom -= inset.bottom;
 
-                    *result = 0;
+                    // A sent message has a result to write; a dispatcher-delivered one would pass none.
+                    if (result != nullptr)
+                        *result = 0;
                     return true;
                 }
 

@@ -192,7 +192,9 @@ namespace
             if (hit != CaptionHit::MaximizeButton)
                 return false;
 
-            *result = HTMAXBUTTON;
+            // A sent message, so Qt's window procedure passes a result to write; guarded like answerNcMouse.
+            if (result != nullptr)
+                *result = HTMAXBUTTON;
             return true;
         }
 
@@ -227,7 +229,10 @@ namespace
 
             if (transition.disposition == NcDisposition::DefaultHandling)
                 return false;
-            *result = 0;
+            // Queued input: Qt's event dispatcher is the only filter caller, and it passes no result.
+            // Swallowing the message needs only the true.
+            if (result != nullptr)
+                *result = 0;
             return true;
         }
 
