@@ -29,6 +29,10 @@ constexpr auto CloseRect = LogicalRect { .x = 960, .y = 0, .width = 46, .height 
     return layout;
 }
 
+/// The monitor of the 1006-pixel window maximised, in client coordinates: the frame's 8-pixel overhang around
+/// it lies on the same monitor, as on a desktop with no neighbour above or beside.
+constexpr auto Desktop = LogicalRect { .x = -8, .y = -8, .width = 1022, .height = 616 };
+
 constexpr auto Placements =
     std::array { WindowPlacement::Windowed, WindowPlacement::Maximized, WindowPlacement::FullScreen };
 constexpr auto Visuals =
@@ -48,15 +52,16 @@ TEST_CASE("captionHit.maximizeOnly", "[captionhit]")
         CAPTURE(static_cast<int>(placement));
         for (auto const y: std::views::iota(4, 40))
             for (auto const x: std::views::iota(914, 960))
-                REQUIRE(captionHitAt({ .x = double(x), .y = double(y) }, layout, placement)
+                REQUIRE(captionHitAt({ .x = double(x), .y = double(y) }, layout, placement, Desktop)
                         == MaximizeButton);
-        CHECK(captionHitAt({ .x = 890, .y = 20 }, layout, placement) == PassThrough); // minimise
-        CHECK(captionHitAt({ .x = 980, .y = 20 }, layout, placement) == PassThrough); // close
-        CHECK(captionHitAt({ .x = 913.9, .y = 20 }, layout, placement) == PassThrough);
-        CHECK(captionHitAt({ .x = 960, .y = 20 }, layout, placement) == PassThrough); // half-open
-        CHECK(captionHitAt({ .x = 930, .y = 40 }, layout, placement) == PassThrough);
-        CHECK(captionHitAt({ .x = 400, .y = 20 }, layout, placement) == PassThrough);  // the drag region
-        CHECK(captionHitAt({ .x = 400, .y = 300 }, layout, placement) == PassThrough); // the content
+        CHECK(captionHitAt({ .x = 890, .y = 20 }, layout, placement, Desktop) == PassThrough); // minimise
+        CHECK(captionHitAt({ .x = 980, .y = 20 }, layout, placement, Desktop) == PassThrough); // close
+        CHECK(captionHitAt({ .x = 913.9, .y = 20 }, layout, placement, Desktop) == PassThrough);
+        CHECK(captionHitAt({ .x = 960, .y = 20 }, layout, placement, Desktop) == PassThrough); // half-open
+        CHECK(captionHitAt({ .x = 930, .y = 40 }, layout, placement, Desktop) == PassThrough);
+        CHECK(captionHitAt({ .x = 400, .y = 20 }, layout, placement, Desktop)
+              == PassThrough); // the drag region
+        CHECK(captionHitAt({ .x = 400, .y = 300 }, layout, placement, Desktop) == PassThrough); // the content
     }
 
     auto noMaximize = layout;
@@ -64,40 +69,63 @@ TEST_CASE("captionHit.maximizeOnly", "[captionhit]")
     for (auto const placement: Placements)
         for (auto const point:
              { LogicalPoint { 930, 20 }, LogicalPoint { 930, 0 }, LogicalPoint { 400, 300 } })
-            CHECK(captionHitAt(point, noMaximize, placement) == PassThrough);
+            CHECK(captionHitAt(point, noMaximize, placement, Desktop) == PassThrough);
 }
 
 TEST_CASE("captionHit.windowedKeepsTheResizeStrip", "[captionhit]")
 {
     auto const layout = fluentLayout();
-    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::Windowed) == PassThrough);
-    CHECK(captionHitAt({ .x = 930, .y = 3.9 }, layout, WindowPlacement::Windowed) == PassThrough);
-    CHECK(captionHitAt({ .x = 930, .y = 4 }, layout, WindowPlacement::Windowed) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::Maximized) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::FullScreen) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::Windowed, Desktop) == PassThrough);
+    CHECK(captionHitAt({ .x = 930, .y = 3.9 }, layout, WindowPlacement::Windowed, Desktop) == PassThrough);
+    CHECK(captionHitAt({ .x = 930, .y = 4 }, layout, WindowPlacement::Windowed, Desktop) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::Maximized, Desktop) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 930, .y = 2 }, layout, WindowPlacement::FullScreen, Desktop) == MaximizeButton);
 }
 
 TEST_CASE("captionHit.maximizedReachesTheEdge", "[captionhit]")
 {
     auto layout = fluentLayout();
-    CHECK(captionHitAt({ .x = 930, .y = 0 }, layout, WindowPlacement::Maximized) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 930, .y = -1 }, layout, WindowPlacement::Maximized) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 930, .y = -1 }, layout, WindowPlacement::Windowed) == PassThrough);
+    CHECK(captionHitAt({ .x = 930, .y = 0 }, layout, WindowPlacement::Maximized, Desktop) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 930, .y = -1 }, layout, WindowPlacement::Maximized, Desktop) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 930, .y = -1 }, layout, WindowPlacement::Windowed, Desktop) == PassThrough);
     // Not at the trailing edge, so nothing beyond the rectangle's own right side.
-    CHECK(captionHitAt({ .x = 960, .y = 10 }, layout, WindowPlacement::Maximized) == PassThrough);
+    CHECK(captionHitAt({ .x = 960, .y = 10 }, layout, WindowPlacement::Maximized, Desktop) == PassThrough);
 
     layout.buttons[static_cast<size_t>(WindowControlKind::Maximize)] = CloseRect;
     layout.buttons[static_cast<size_t>(WindowControlKind::Close)] = std::nullopt;
-    CHECK(captionHitAt({ .x = 1005, .y = 10 }, layout, WindowPlacement::Maximized) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::Maximized) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::FullScreen) == MaximizeButton);
-    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::Windowed) == PassThrough);
+    CHECK(captionHitAt({ .x = 1005, .y = 10 }, layout, WindowPlacement::Maximized, Desktop)
+          == MaximizeButton);
+    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::Maximized, Desktop)
+          == MaximizeButton);
+    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::FullScreen, Desktop)
+          == MaximizeButton);
+    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::Windowed, Desktop) == PassThrough);
 
     // A button not at the top keeps its top edge, maximised too.
     auto lowered = fluentLayout();
     lowered.buttons[static_cast<size_t>(WindowControlKind::Maximize)] =
         LogicalRect { .x = 914, .y = 6, .width = 46, .height = 34 };
-    CHECK(captionHitAt({ .x = 930, .y = 5 }, lowered, WindowPlacement::Maximized) == PassThrough);
+    CHECK(captionHitAt({ .x = 930, .y = 5 }, lowered, WindowPlacement::Maximized, Desktop) == PassThrough);
+}
+
+TEST_CASE("captionHit.maximizedStopsAtItsMonitor", "[captionhit]")
+{
+    // A neighbouring monitor above and one to the right: the window's own monitor ends at its client edges,
+    // and the frame overhang beyond them is the neighbours'.
+    constexpr auto Bounded = LogicalRect { .x = 0, .y = 0, .width = 1006, .height = 600 };
+    auto layout = fluentLayout();
+    for (auto const placement: { WindowPlacement::Maximized, WindowPlacement::FullScreen })
+    {
+        CAPTURE(static_cast<int>(placement));
+        CHECK(captionHitAt({ .x = 930, .y = 0 }, layout, placement, Bounded) == MaximizeButton);
+        CHECK(captionHitAt({ .x = 930, .y = -1 }, layout, placement, Bounded) == PassThrough);
+    }
+
+    layout.buttons[static_cast<size_t>(WindowControlKind::Maximize)] = CloseRect;
+    layout.buttons[static_cast<size_t>(WindowControlKind::Close)] = std::nullopt;
+    CHECK(captionHitAt({ .x = 1005, .y = 10 }, layout, WindowPlacement::Maximized, Bounded)
+          == MaximizeButton);
+    CHECK(captionHitAt({ .x = 1006, .y = 10 }, layout, WindowPlacement::Maximized, Bounded) == PassThrough);
 }
 
 TEST_CASE("captionHit.sameZoneAtEveryScale", "[captionhit]")
@@ -115,10 +143,10 @@ TEST_CASE("captionHit.sameZoneAtEveryScale", "[captionhit]")
                 CAPTURE(dpr, probe.x, probe.y, static_cast<int>(placement));
                 auto const physical = PhysicalPoint { .x = static_cast<int>(probe.x * dpr),
                                                       .y = static_cast<int>(probe.y * dpr) };
-                CHECK(captionHitAt(toLogical(physical, dpr), layout, placement)
-                      == captionHitAt(probe, layout, placement));
+                CHECK(captionHitAt(toLogical(physical, dpr), layout, placement, Desktop)
+                      == captionHitAt(probe, layout, placement, Desktop));
             }
-    CHECK(captionHitAt({ .x = 937, .y = 20 }, layout, WindowPlacement::Windowed) == MaximizeButton);
+    CHECK(captionHitAt({ .x = 937, .y = 20 }, layout, WindowPlacement::Windowed, Desktop) == MaximizeButton);
 }
 
 TEST_CASE("captionTransitions.hoverThenLeave", "[captionhit]")

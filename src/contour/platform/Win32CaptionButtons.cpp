@@ -71,6 +71,30 @@ namespace
         return WindowPlacement::Windowed;
     }
 
+    /// @return The monitor @p hwnd stands on, in its logical client coordinates (@p devicePixelRatio), or an
+    ///         empty rectangle when it cannot be read.
+    [[nodiscard]] LogicalRect monitorOf(HWND hwnd, double devicePixelRatio)
+    {
+        auto info = MONITORINFO {};
+        info.cbSize = static_cast<DWORD>(sizeof(info));
+        if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &info))
+            return {};
+        auto topLeftPoint = POINT { .x = info.rcMonitor.left, .y = info.rcMonitor.top };
+        auto bottomRightPoint = POINT { .x = info.rcMonitor.right, .y = info.rcMonitor.bottom };
+        if (!ScreenToClient(hwnd, &topLeftPoint) || !ScreenToClient(hwnd, &bottomRightPoint))
+            return {};
+        auto const logical = [devicePixelRatio](POINT point) {
+            return toLogical(PhysicalPoint { .x = static_cast<int>(point.x), .y = static_cast<int>(point.y) },
+                             devicePixelRatio);
+        };
+        auto const topLeft = logical(topLeftPoint);
+        auto const bottomRight = logical(bottomRightPoint);
+        return LogicalRect { .x = topLeft.x,
+                             .y = topLeft.y,
+                             .width = bottomRight.x - topLeft.x,
+                             .height = bottomRight.y - topLeft.y };
+    }
+
     /// One attached window: what it lent, and how its maximise button looks now.
     struct CaptionEntry
     {
@@ -187,8 +211,12 @@ namespace
             auto const logical =
                 toLogical(PhysicalPoint { .x = static_cast<int>(point.x), .y = static_cast<int>(point.y) },
                           entry->window->devicePixelRatio());
-            auto const hit =
-                captionHitAt(logical, entry->binding.layout(), placementOf(*entry->window, msg.hwnd));
+            auto const placement = placementOf(*entry->window, msg.hwnd);
+            // Windowed, the monitor is not read: no need to ask Windows for it on every pointer move.
+            auto const monitor = placement == WindowPlacement::Windowed
+                                     ? LogicalRect {}
+                                     : monitorOf(msg.hwnd, entry->window->devicePixelRatio());
+            auto const hit = captionHitAt(logical, entry->binding.layout(), placement, monitor);
             if (hit != CaptionHit::MaximizeButton)
                 return false;
 

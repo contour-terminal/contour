@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <optional>
 #include <ranges>
 
@@ -224,15 +223,19 @@ inline constexpr auto CaptionTransitions = std::array {
 ///
 /// Windowed, the top @c resizeBorder pixels stay the resize edge, as over Windows' own caption buttons.
 /// Maximised or full screen there is no resize strip, and a button at the window's top or trailing edge
-/// also takes the pixels beyond it, so the screen's edge pixel hits (Fitts).
+/// also takes the pixels beyond it, so the screen's edge pixel hits (Fitts) -- up to the edge of the window's
+/// own monitor: the frame overhang past it lies on a neighbouring monitor, stacked above or beside.
 ///
 /// @param point     The point, in logical pixels.
 /// @param layout    The caption buttons' rectangles.
 /// @param placement Where the window stands.
+/// @param monitor   The window's monitor, in the same logical client coordinates; read only when the window
+///                  is not @c Windowed.
 /// @return @c MaximizeButton over the maximise button, else @c PassThrough.
 [[nodiscard]] constexpr CaptionHit captionHitAt(LogicalPoint point,
                                                 CaptionLayout const& layout,
-                                                WindowPlacement placement) noexcept
+                                                WindowPlacement placement,
+                                                LogicalRect const& monitor) noexcept
 {
     auto const& slot = layout.buttons[static_cast<size_t>(config::WindowControlKind::Maximize)];
     if (!slot)
@@ -241,10 +244,9 @@ inline constexpr auto CaptionTransitions = std::array {
         return point.y >= layout.resizeBorder && slot->contains(point) ? CaptionHit::MaximizeButton
                                                                        : CaptionHit::PassThrough;
 
-    constexpr auto Unbounded = std::numeric_limits<double>::infinity();
     auto const right = slot->x + slot->width;
-    auto const top = slot->y == 0 ? -Unbounded : slot->y;
-    auto const end = right == layout.windowWidth ? Unbounded : right;
+    auto const top = slot->y == 0 ? monitor.y : slot->y;
+    auto const end = right == layout.windowWidth ? monitor.x + monitor.width : right;
     auto const inside =
         point.x >= slot->x && point.x < end && point.y >= top && point.y < slot->y + slot->height;
     return inside ? CaptionHit::MaximizeButton : CaptionHit::PassThrough;
