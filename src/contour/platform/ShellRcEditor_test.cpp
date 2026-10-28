@@ -521,13 +521,14 @@ TEST_CASE("ShellRcEditor: a full disk never truncates the file", "[shellrc]")
     auto midway = Rig {};
     midway.disk.files.addFile(zshRc(), "export A=1\nexport B=2");
     midway.disk.fault = DiskFault::FullMidway;
-    CHECK(midway.editor.install(ShellKind::Zsh, Line, noSession).error() == ShellRcError::PartialWrite);
+    auto const realLine = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
+    CHECK(midway.editor.install(ShellKind::Zsh, realLine, noSession).error() == ShellRcError::AppendCutShort);
     // The user's own bytes are all still there, in place; only more bytes followed them.
     CHECK(midway.disk.text(zshRc()).starts_with("export A=1\nexport B=2"));
     CHECK(!midway.disk.touched("writeFile"));
 }
 
-TEST_CASE("ShellRcEditor: an append that reports success but lands only a prefix is a PartialWrite",
+TEST_CASE("ShellRcEditor: an append that reports success but lands only a prefix is an AppendCutShort",
           "[shellrc]")
 {
     auto const line = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
@@ -535,7 +536,7 @@ TEST_CASE("ShellRcEditor: an append that reports success but lands only a prefix
     rig.disk.files.addFile(zshRc(), "export A=1\n");
     rig.disk.fault = DiskFault::SilentPrefix;
     rig.disk.landBytes = line.size() / 2;
-    CHECK(rig.editor.install(ShellKind::Zsh, line, noSession).error() == ShellRcError::PartialWrite);
+    CHECK(rig.editor.install(ShellKind::Zsh, line, noSession).error() == ShellRcError::AppendCutShort);
     CHECK(rig.disk.text(zshRc()).starts_with("export A=1\n"));
 }
 
@@ -557,7 +558,7 @@ TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and noth
             rig.disk.files.addFile(rc(rig), "export A=1\n");
             rig.disk.fault = DiskFault::SilentPrefix;
             rig.disk.landBytes = landed;
-            REQUIRE(rig.editor.install(shell, line, noSession).error() == ShellRcError::PartialWrite);
+            REQUIRE(rig.editor.install(shell, line, noSession).error() == ShellRcError::AppendCutShort);
 
             auto const inspected = rig.editor.inspect(shell, noSession);
             REQUIRE(inspected.has_value());
@@ -569,6 +570,26 @@ TEST_CASE("ShellRcEditor: a cut-short line counts as a partial install, and noth
             CHECK(rig.disk.text(rc(rig)) == before);
         }
     }
+}
+
+TEST_CASE("ShellRcEditor: what an append cut short left behind decides which error says so", "[shellrc]")
+{
+    auto const line = contour::window::shellRcLine(ShellKind::Zsh, "/usr/bin/contour").value();
+    auto const append = [&](std::string_view before, std::size_t landed) {
+        auto rig = Rig {};
+        rig.disk.files.addFile(zshRc(), std::string(before));
+        rig.disk.fault = DiskFault::SilentPrefix;
+        rig.disk.landBytes = landed;
+        return rig.editor.install(ShellKind::Zsh, line, noSession).error();
+    };
+    // Part of Contour's line landed.
+    CHECK(append("export A=1\n", line.size() / 2) == ShellRcError::AppendCutShort);
+    // Only the line ending that separates the user's last line from Contour's landed.
+    CHECK(append("export A=1", 1) == ShellRcError::AppendLineEndingOnly);
+    // The whole line landed, but not its line ending.
+    CHECK(append("export A=1\n", line.size()) == ShellRcError::AppendUnterminated);
+    // The file was already cut short before: nothing is written at all.
+    CHECK(append("export A=1\nif [ \"$TERM", 0) == ShellRcError::PartialWrite);
 }
 
 TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's line is Partial", "[shellrc]")
@@ -658,15 +679,28 @@ TEST_CASE("NullShellRcEditor: inspects nothing and writes nothing", "[shellrc]")
 
 TEST_CASE("ShellRcEditor: every error has words", "[shellrc]")
 {
-    constexpr auto Errors =
-        std::array { ShellRcError::NoHome,       ShellRcError::Unreadable, ShellRcError::Unwritable,
-                     ShellRcError::NotAFile,     ShellRcError::Changed,    ShellRcError::InvalidLine,
-                     ShellRcError::PartialWrite, ShellRcError::Superuser };
-    static_assert(Errors.size() == std::to_underlying(ShellRcError::Superuser) + 1U);
+    constexpr auto Errors = std::array { ShellRcError::NoHome,
+                                         ShellRcError::Unreadable,
+                                         ShellRcError::Unwritable,
+                                         ShellRcError::NotAFile,
+                                         ShellRcError::Changed,
+                                         ShellRcError::InvalidLine,
+                                         ShellRcError::PartialWrite,
+                                         ShellRcError::Superuser,
+                                         ShellRcError::AppendCutShort,
+                                         ShellRcError::AppendLineEndingOnly,
+                                         ShellRcError::AppendUnterminated };
+    static_assert(Errors.size() == std::to_underlying(ShellRcError::AppendUnterminated) + 1U);
     CHECK(describe(ShellRcError::NoHome) == "the home directory is not known");
     CHECK(describe(ShellRcError::Unreadable) == "the file could not be read");
     CHECK(describe(ShellRcError::Unwritable) == "the file could not be written");
     CHECK(describe(ShellRcError::NotAFile) == "it is not a regular file");
     for (auto const error: Errors)
         CHECK(!describe(error).empty());
+    // Only an error that left the file as it was may be told after "was not changed".
+    CHECK(!changedFile(ShellRcError::Unwritable));
+    CHECK(!changedFile(ShellRcError::PartialWrite));
+    CHECK(changedFile(ShellRcError::AppendCutShort));
+    CHECK(changedFile(ShellRcError::AppendLineEndingOnly));
+    CHECK(changedFile(ShellRcError::AppendUnterminated));
 }

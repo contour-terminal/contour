@@ -98,6 +98,14 @@ TEST_CASE("Notice texts", "[notices]")
           == "Added shell integration to ~/.zshrc. New zsh sessions show command blocks.");
     CHECK(shellIntegrationFailedText("~/.zshrc", contour::platform::ShellRcError::Unwritable)
           == "~/.zshrc was not changed: the file could not be written.");
+    CHECK(shellIntegrationFailedText("~/.zshrc", contour::platform::ShellRcError::PartialWrite)
+          == "~/.zshrc was not changed: its last line is a cut-short Contour line; delete that line and "
+             "try again.");
+    // A file the append did change is never said to be unchanged.
+    for (auto const error: { contour::platform::ShellRcError::AppendCutShort,
+                             contour::platform::ShellRcError::AppendLineEndingOnly,
+                             contour::platform::ShellRcError::AppendUnterminated })
+        CHECK(!shellIntegrationFailedText("~/.zshrc", error).contains("was not changed"));
     CHECK(restoreSummaryText(2, 7) == "Restored 2 windows, 7 tabs");
     CHECK(restoreSummaryText(1, 1) == "Restored 1 window, 1 tab");
     CHECK(configReloadFailedNoticeText("bad key") == "Contour could not reload its configuration: bad key");

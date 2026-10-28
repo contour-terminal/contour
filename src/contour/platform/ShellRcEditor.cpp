@@ -290,7 +290,16 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     if (after && after->content == before->content + chunk)
         return RcInstall::Appended;
     if (after && after->content != before->content)
-        return std::unexpected(ShellRcError::PartialWrite);
+    {
+        // Something landed, but not all of it: what the file says now picks the words.
+        switch (rcStateOf(shell, after->content))
+        {
+            case config::RcState::Partial: return std::unexpected(ShellRcError::AppendCutShort);
+            case config::RcState::Installed: return std::unexpected(ShellRcError::AppendUnterminated);
+            case config::RcState::Absent:
+            case config::RcState::Unknown: return std::unexpected(ShellRcError::AppendLineEndingOnly);
+        }
+    }
     return std::unexpected(ShellRcError::Unwritable);
 }
 

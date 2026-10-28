@@ -285,11 +285,14 @@ inline constexpr std::string_view TabMergeRefusedText =
                        detail::shownText(shell));
 }
 
-/// "~/.zshrc was not changed: the file could not be written."
+/// "~/.zshrc was not changed: the file could not be written.", or, for an error that may have changed the
+/// file (platform::changedFile), "~/.zshrc now ends in a cut-short Contour line: …".
 /// @param rc The startup file as the user would say it.
 /// @param error Why not.
 [[nodiscard]] inline std::string shellIntegrationFailedText(std::string_view rc, platform::ShellRcError error)
 {
+    if (platform::changedFile(error))
+        return std::format("{} {}.", detail::shownText(rc), platform::describe(error));
     return std::format("{} was not changed: {}.", detail::shownText(rc), platform::describe(error));
 }
 

@@ -29,17 +29,43 @@ namespace contour::platform
 /// Why a startup file could not be inspected or changed.
 enum class ShellRcError : uint8_t
 {
-    NoHome = 0,   ///< `HOME` is not set, so no startup file can be named.
-    Unreadable,   ///< The file exists and could not be read.
-    Unwritable,   ///< The file could not be appended to; it is as it was.
-    NotAFile,     ///< The path is a directory, a dangling link or something else but a regular file.
-    Changed,      ///< The file changed between reading it and writing to it; nothing was written.
-    InvalidLine,  ///< The line is empty or spans more than one line.
-    PartialWrite, ///< The append was cut short, now or earlier: the file ends in an incomplete Contour line.
-    Superuser,    ///< Contour runs as root, so a file it created in the user's home would belong to root.
+    NoHome = 0,     ///< `HOME` is not set, so no startup file can be named.
+    Unreadable,     ///< The file exists and could not be read.
+    Unwritable,     ///< The file could not be appended to; it is as it was.
+    NotAFile,       ///< The path is a directory, a dangling link or something else but a regular file.
+    Changed,        ///< The file changed between reading it and writing to it; nothing was written.
+    InvalidLine,    ///< The line is empty or spans more than one line.
+    PartialWrite,   ///< An earlier append was cut short: the file ends in an incomplete Contour line; nothing
+                    ///< was written.
+    Superuser,      ///< Contour runs as root, so a file it created in the user's home would belong to root.
+    AppendCutShort, ///< This append was cut short: the file now ends in part of Contour's line.
+    AppendLineEndingOnly, ///< This append was cut short before Contour's line: only a line ending landed.
+    AppendUnterminated,   ///< This append landed all of Contour's line but its line ending.
 };
 
-/// What @p error means, in words for a sentence that continues "was not changed: ".
+/// @param error The failure.
+/// @return Whether the failed install may have changed the file, so its text must not say it was not.
+[[nodiscard]] constexpr bool changedFile(ShellRcError error) noexcept
+{
+    switch (error)
+    {
+        case ShellRcError::AppendCutShort:
+        case ShellRcError::AppendLineEndingOnly:
+        case ShellRcError::AppendUnterminated: return true;
+        case ShellRcError::NoHome:
+        case ShellRcError::Unreadable:
+        case ShellRcError::Unwritable:
+        case ShellRcError::NotAFile:
+        case ShellRcError::Changed:
+        case ShellRcError::InvalidLine:
+        case ShellRcError::PartialWrite:
+        case ShellRcError::Superuser: return false;
+    }
+    return false;
+}
+
+/// What @p error means, in words for a sentence that continues "{file} was not changed: " when
+/// changedFile() is false, else "{file} ".
 /// @param error The failure.
 /// @return A short description.
 [[nodiscard]] constexpr std::string_view describe(ShellRcError error) noexcept
@@ -55,6 +81,15 @@ enum class ShellRcError : uint8_t
         case ShellRcError::Superuser: return "Contour is running as root";
         case ShellRcError::PartialWrite:
             return "its last line is a cut-short Contour line; delete that line and try again";
+        case ShellRcError::AppendCutShort:
+            return "now ends in a cut-short Contour line: the write stopped part-way; delete that last line "
+                   "and try again";
+        case ShellRcError::AppendLineEndingOnly:
+            return "got a line ending but none of Contour's line: the write stopped before it; nothing "
+                   "else changed, try again";
+        case ShellRcError::AppendUnterminated:
+            return "now holds Contour's line without its line ending: the write stopped at its very end; "
+                   "add a line break after it";
     }
     return "unknown error";
 }
