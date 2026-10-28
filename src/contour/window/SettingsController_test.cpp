@@ -59,6 +59,7 @@
 #include <vector>
 
 #include <QtTest/QSignalSpy>
+#include <vthost/testing/FaultyFileSystem.hpp>
 
 using namespace contour;
 using namespace contour::window;
@@ -4175,23 +4176,23 @@ TEST_CASE("SettingsController: a failed Use New leaves nothing staged for the ne
 {
     auto fx = Fixture(BasicConfig);
     fx.openSideProfile("work");
-    namespace fs = std::filesystem;
-    // Neither the profile's directory nor settings.yml's takes a write: nothing of the change lands.
-    auto const directories = std::array { fx.configDir(), fx.configDir() / "profiles" };
-    for (auto const& directory: directories)
-        fs::permissions(directory, fs::perms::owner_write, fs::perm_options::remove);
+    // settings.yml takes no write, as on a full or read-only disk: nothing of the change lands. The store
+    // writes through a file system that fails by injection, which holds on every platform and as root.
+    auto const settingsTarget = fx.configDir() / "settings.yml";
+    auto const faulty = vthost::testing::FaultyFileSystem { [&](auto op, std::filesystem::path const& path) {
+        return op == vthost::testing::FaultOp::Rename && path == settingsTarget;
+    } };
+    fx.store = std::make_shared<config::FileGuiConfigStore>(faulty, fx.configDir());
+    fx.restartController();
     auto const written = fx.controller->writeGlobalOverride(
         config::DefaultsEditionKey, config::configEnumToken(config::DefaultsEdition::Native2026));
-    for (auto const& directory: directories)
-        fs::permissions(directory, fs::perms::owner_write, fs::perm_options::add);
     REQUIRE_FALSE(written.has_value()); // a full disk, as far as the store can tell
 
     fx.controller->commitGlobalField("reflow_on_resize", false);
     fx.fire();
 
-    auto const settings = fx.fileContent("settings.yml");
-    REQUIRE(settings.has_value());
-    CHECK_FALSE(settings->contains("defaults_edition"));
+    // Nothing reached settings.yml, neither the refused edition nor the field committed after it.
+    CHECK_FALSE(faulty.readFile(settingsTarget).has_value());
     CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
 }
 
@@ -4212,6 +4213,28 @@ TEST_CASE("SettingsController: deleting an unopened profile keeps a hand edit ma
     CHECK(fx.fileContent(workFile) == "show_title_bar: false\n");
     REQUIRE_FALSE(fx.errors.isEmpty());
     CHECK(fx.errors.back().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: renaming an unopened scheme keeps a hand edit that does not parse",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    // The configuration holds midnight only because "work" draws with it, as the last version that parsed.
+    writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
+    auto const schemeFile = config::relativePathOf(config::colorSchemeFile("midnight"));
+    auto const workFile = config::relativePathOf(config::profileFile("work"));
+    auto const workBefore = fx.fileContent(workFile);
+    fx.handEdit(schemeFile, "{{{ half edited\n");
+
+    auto const renamed = fx.controller->renameColorScheme("midnight", "nightfall");
+    fx.fire();
+
+    REQUIRE_FALSE(renamed.has_value());
+    CHECK(renamed.error().kind == config::SettingsErrorKind::ChangedOnDisk);
+    CHECK(fx.fileContent(schemeFile) == "{{{ half edited\n");
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("nightfall"))).has_value());
+    CHECK(fx.fileContent(workFile) == workBefore);
 }
 
 TEST_CASE("SettingsController: deleting an unopened scheme keeps a hand edit made since the load",
