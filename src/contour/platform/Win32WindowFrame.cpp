@@ -26,9 +26,9 @@ namespace
 
     /// Re-applies the backdrop and the margins @p window's records decide (Win32SystemBackdrop.hpp), logging
     /// a failure that is news: the frame keeps working without the backdrop.
-    void reapplySystemBackdrop(QWindow& window, HWND hwnd)
+    void reapplySystemBackdrop(QWindow& window, HWND hwnd, DwmApi const& api)
     {
-        auto const applied = applySystemBackdrop(window, hwnd, dwmApi());
+        auto const applied = applySystemBackdrop(window, hwnd, api);
         if (applied)
             return;
         auto const expected =
@@ -43,9 +43,8 @@ namespace
     ///
     /// AdjustWindowRectExForDpi grows an empty rectangle by the frame, so the members come back
     /// negative on the leading edges; the thickness is their magnitude.
-    [[nodiscard]] FrameInset frameThicknessOf(HWND hwnd)
+    [[nodiscard]] FrameInset frameThicknessOf(HWND hwnd, DwmApi const& api)
     {
-        auto const& api = dwmApi();
         if (!api.isUsable())
             return {};
 
@@ -89,9 +88,10 @@ namespace
                 app->removeNativeEventFilter(this);
         }
 
-        void watch(HWND hwnd, QWindow& window)
+        /// Answers @p hwnd, @p window's handle, through the DWM entry points of the frame that decorated it.
+        void watch(HWND hwnd, QWindow& window, DwmApi const& api)
         {
-            _watched.insert_or_assign(hwnd, QPointer<QWindow> { &window });
+            _watched.insert_or_assign(hwnd, WatchedWindow { .window = &window, .api = api });
         }
         void forget(HWND hwnd) { _watched.erase(hwnd); }
 
@@ -126,8 +126,9 @@ namespace
                     // arrives on every step of a drag-resize, and AdjustWindowRectExForDpi is four
                     // calls deep. ncCalcSizeInset still owns the DECISION; this owns the laziness.
                     auto const maximized = IsZoomed(msg->hwnd) ? WindowMaximized::Yes : WindowMaximized::No;
-                    auto const thickness =
-                        maximized == WindowMaximized::Yes ? frameThicknessOf(msg->hwnd) : FrameInset {};
+                    auto const thickness = maximized == WindowMaximized::Yes
+                                               ? frameThicknessOf(msg->hwnd, _watched.at(msg->hwnd).api)
+                                               : FrameInset {};
                     auto const inset = ncCalcSizeInset(maximized, thickness);
 
                     auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
@@ -145,8 +146,8 @@ namespace
                 case WM_DWMCOMPOSITIONCHANGED:
                     // Composition restarting drops what DwmExtendFrameIntoClientArea established; the
                     // window's records say what it was (the backdrop's margins, not a fixed one pixel).
-                    if (auto* window = _watched.at(msg->hwnd).data())
-                        reapplySystemBackdrop(*window, msg->hwnd);
+                    if (auto const& watched = _watched.at(msg->hwnd); auto* window = watched.window.data())
+                        reapplySystemBackdrop(*window, msg->hwnd, watched.api);
                     return false;
 
                 default: return false;
@@ -154,8 +155,15 @@ namespace
         }
 
       private:
-        /// The windows decorated, by handle; a destroyed window's entry holds null until it is forgotten.
-        std::map<HWND, QPointer<QWindow>> _watched;
+        /// A decorated window and the DWM entry points its frame speaks through.
+        struct WatchedWindow
+        {
+            QPointer<QWindow> window; ///< Null once the window is destroyed, until it is forgotten.
+            DwmApi api;               ///< The decorating frame's entry points.
+        };
+
+        /// The windows decorated, by handle.
+        std::map<HWND, WatchedWindow> _watched;
     };
 
     /// The one filter, shared by every window.
@@ -172,14 +180,14 @@ namespace
     class Win32WindowFrame final: public NativeWindowFrame
     {
       public:
-        explicit Win32WindowFrame(std::function<Qt::ColorScheme()> colorScheme):
-            _colorScheme { std::move(colorScheme) }
+        Win32WindowFrame(std::function<Qt::ColorScheme()> colorScheme, DwmApi const& api):
+            _colorScheme { std::move(colorScheme) }, _api { api }
         {
         }
 
         void apply(QWindow& window, WindowDecoration decoration) override
         {
-            auto const& api = dwmApi();
+            auto const& api = _api;
             if (!api.isUsable())
                 return;
 
@@ -211,7 +219,7 @@ namespace
                 // The native title bar: Qt's own frame is exactly right, so stop intercepting, and take
                 // back the margins the kept frame extended -- the OS's frame never had them (F32).
                 frameEventFilter().forget(hwnd);
-                reapplySystemBackdrop(window, hwnd);
+                reapplySystemBackdrop(window, hwnd, api);
                 return;
             }
 
@@ -226,7 +234,7 @@ namespace
             auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX);
 
-            frameEventFilter().watch(hwnd, window);
+            frameEventFilter().watch(hwnd, window, api);
 
             // Force the WM_NCCALCSIZE round that applies the style change.
             SetWindowPos(hwnd,
@@ -261,7 +269,7 @@ namespace
 
             // The margins that keep DWM's shadow on -- one pixel, or the whole client area under a
             // backdrop -- are the system backdrop's to decide (R-h).
-            reapplySystemBackdrop(window, hwnd);
+            reapplySystemBackdrop(window, hwnd, api);
 
             tintBorder(window, hwnd);
 
@@ -301,15 +309,21 @@ namespace
             // sizeof yields size_t and the attribute size is a DWORD; spelled out rather than left
             // to an implicit narrowing, which -Werror rejects on the Windows toolchains.
             auto dark = static_cast<BOOL>(scheme == Qt::ColorScheme::Dark);
-            dwmApi().setWindowAttribute(
-                hwnd, DwmwaUseImmersiveDarkMode, &dark, static_cast<DWORD>(sizeof(dark)));
+            _api.setWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, &dark, static_cast<DWORD>(sizeof(dark)));
         }
 
         std::function<Qt::ColorScheme()> _colorScheme;
+        DwmApi _api;
     };
 } // namespace
 
 std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorScheme()> const& colorScheme)
+{
+    return makeWin32WindowFrame(colorScheme, dwmApi());
+}
+
+std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorScheme()> const& colorScheme,
+                                                        DwmApi const& api)
 {
     // Only under the Windows platform plugin: QWindow::winId() is an HWND there and something else
     // anywhere else, and handing a non-HWND to SetWindowLongPtr is undefined. The same guard the
@@ -317,10 +331,10 @@ std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorS
     if (QGuiApplication::platformName() != QStringLiteral("windows"))
         return nullptr;
 
-    if (!dwmApi().isUsable())
+    if (!api.isUsable())
         return nullptr;
 
-    return std::make_unique<Win32WindowFrame>(colorScheme);
+    return std::make_unique<Win32WindowFrame>(colorScheme, api);
 }
 
 } // namespace contour::platform

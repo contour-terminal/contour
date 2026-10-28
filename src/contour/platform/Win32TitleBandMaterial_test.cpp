@@ -116,27 +116,28 @@ struct StubDwm
     }
 
     /// Resets the recorders and answers @p result for the backdrop attribute.
-    /// @return The stub's entry points.
+    /// @return The stub's entry points, with the system's DPI ones, so a frame can be kept over them.
     [[nodiscard]] static DwmApi make(HRESULT result)
     {
         backdropResult = result;
         margins.clear();
+        auto const& system = contour::platform::dwmApi();
         return DwmApi { .setWindowAttribute = &setWindowAttribute,
                         .extendFrameIntoClientArea = &extendFrameIntoClientArea,
                         .getWindowAttribute = nullptr,
-                        .getDpiForWindow = nullptr,
-                        .adjustWindowRectExForDpi = nullptr };
+                        .getDpiForWindow = system.getDpiForWindow,
+                        .adjustWindowRectExForDpi = system.adjustWindowRectExForDpi };
     }
 };
 
-/// A shown, transparent QQuickWindow with the kept Win32 frame.
+/// A shown, transparent QQuickWindow with the kept Win32 frame, speaking through @p api.
 struct MaterialWindow
 {
-    std::unique_ptr<contour::platform::NativeWindowFrame> frame =
-        contour::platform::makeWin32WindowFrame([] { return Qt::ColorScheme::Dark; });
+    std::unique_ptr<contour::platform::NativeWindowFrame> frame;
     QQuickWindow window {};
 
-    MaterialWindow()
+    explicit MaterialWindow(DwmApi const& api = contour::platform::dwmApi()):
+        frame { contour::platform::makeWin32WindowFrame([] { return Qt::ColorScheme::Dark; }, api) }
     {
         window.setColor(Qt::transparent);
         window.resize(WindowWidth, WindowHeight);
@@ -250,19 +251,21 @@ TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica]")
     CHECK(backdropOf(fixture.hwnd()) == dword(DwmBackdrop::TabbedWindow));
 }
 
-TEST_CASE("a composition restart keeps the window's backdrop", "[native][win32][mica]")
+TEST_CASE("a composition restart extends the window's frame again", "[native][win32][mica]")
 {
     if (!onNativeWindows())
         SKIP("Requires the native Windows platform.");
-    if (!hasSystemBackdrop())
-        SKIP("Requires Windows 11 22H2 or later.");
-    auto const material = contour::platform::makeTitleBandMaterial();
-    auto fixture = MaterialWindow {};
+    auto const api = StubDwm::make(S_OK);
+    auto const material = contour::platform::makeWin32TitleBandMaterial(api);
+    auto fixture = MaterialWindow { api };
     REQUIRE(material->apply(fixture.window, MicaAlt).has_value());
+    StubDwm::margins.clear();
 
-    // The frame's filter re-applies from the window's records, not a fixed one-pixel margin over no backdrop.
+    // A restart drops what DwmExtendFrameIntoClientArea established. The frame's filter extends it again
+    // from the window's records: the sheet of glass under Mica, not a fixed one-pixel margin.
     SendMessageW(fixture.hwnd(), WM_DWMCOMPOSITIONCHANGED, 0, 0);
-    CHECK(backdropOf(fixture.hwnd()) == dword(DwmBackdrop::TabbedWindow));
+    REQUIRE_FALSE(StubDwm::margins.empty());
+    CHECK(StubDwm::margins.back() == contour::platform::SheetOfGlassMargins);
 }
 
 TEST_CASE("the corner preference stays round under Mica", "[native][win32][mica]")
