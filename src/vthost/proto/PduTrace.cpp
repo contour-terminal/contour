@@ -437,8 +437,10 @@ namespace
                    "MergeTabIntoSplit",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<MergeTabIntoSplit>(pdu);
-                       return std::format(
-                           "tab={} target={} side={}", value.tabSession, value.targetSession, value.side);
+                       return std::format("tab-sessions={} target={} side={}",
+                                          value.tabSessions.size(),
+                                          value.targetSession,
+                                          value.side);
                    } },
     };
 

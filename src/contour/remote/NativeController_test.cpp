@@ -1463,10 +1463,11 @@ TEST_CASE("a tab dropped against a daemon without TabMerge is not offered a spli
     auto const* const secondPty = &manager.sessionsOfTab(second).front()->terminal().device();
     // And a request made anyway is refused, never left for the manager to merge here: the daemon owns this
     // layout and would never hear of it.
-    CHECK(ac->requestRemoteTabMerge(secondPty, firstPty, vtworkspace::SplitSide::Right)
+    CHECK(ac->requestRemoteTabMerge(std::array { secondPty }, firstPty, vtworkspace::SplitSide::Right)
           == contour::session::RemoteRouting::Refused);
     // A pane that is not bound to a daemon session (yet) is no pane the daemon can name.
-    CHECK(ac->requestRemoteTabMerge(nullptr, firstPty, vtworkspace::SplitSide::Right)
+    CHECK(ac->requestRemoteTabMerge(
+              std::array<vtpty::Pty const*, 1> { nullptr }, firstPty, vtworkspace::SplitSide::Right)
           == contour::session::RemoteRouting::Refused);
 
     ac->stop();

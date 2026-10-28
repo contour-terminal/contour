@@ -66,7 +66,7 @@ TEST_CASE("merging a tab grafts its session beside the target and keeps every se
 {
     auto m = TwoTabs {};
     auto const merged =
-        applyTabMerge(m.model, MergeTabIntoSplit { .tabSession = 3, .targetSession = 1, .side = 1 });
+        applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 1, .side = 1 });
     REQUIRE(merged.has_value());
 
     CHECK(m.model.window(m.window)->tabCount() == 1);
@@ -85,25 +85,92 @@ TEST_CASE("a merge that names nothing changes nothing", "[vthost][tab-merge]")
     auto m = TwoTabs {};
     SECTION("an unknown tab session")
     {
-        CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSession = 99, .targetSession = 1, .side = 1 })
-              == std::unexpected { TabMergeError::UnknownSession });
+        CHECK(
+            applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 99 }, .targetSession = 1, .side = 1 })
+            == std::unexpected { TabMergeError::UnknownSession });
     }
     SECTION("an unknown target session")
     {
-        CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSession = 3, .targetSession = 99, .side = 1 })
-              == std::unexpected { TabMergeError::UnknownSession });
+        CHECK(
+            applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 99, .side = 1 })
+            == std::unexpected { TabMergeError::UnknownSession });
     }
     SECTION("an unknown side")
     {
-        CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSession = 3, .targetSession = 1, .side = 0xEE })
+        CHECK(applyTabMerge(m.model,
+                            MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 1, .side = 0xEE })
               == std::unexpected { TabMergeError::UnknownSide });
     }
     SECTION("both sessions in one tab")
     {
-        CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSession = 2, .targetSession = 1, .side = 1 })
+        CHECK(applyTabMerge(m.model,
+                            MergeTabIntoSplit { .tabSessions = { 1, 2 }, .targetSession = 1, .side = 1 })
               == std::unexpected { TabMergeError::Refused });
+    }
+    SECTION("no tab session at all")
+    {
+        CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = {}, .targetSession = 1, .side = 1 })
+              == std::unexpected { TabMergeError::UnknownSession });
     }
     CHECK(m.model.window(m.window)->tabCount() == 2);
     CHECK(m.events.tabsClosed == 0);
     CHECK(m.events.restructured == 0);
+}
+
+TEST_CASE("a merge across two windows is refused", "[vthost][tab-merge]")
+{
+    auto m = TwoTabs {};
+    auto const other = m.model.createWindow()->id();
+    auto const* const elsewhere = m.model.createTab(other); // session 4, in another window
+    REQUIRE(elsewhere != nullptr);
+
+    CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 4 }, .targetSession = 1, .side = 1 })
+          == std::unexpected { TabMergeError::CrossWindow });
+    CHECK(applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 4, .side = 1 })
+          == std::unexpected { TabMergeError::CrossWindow });
+    CHECK(m.model.window(m.window)->tabCount() == 2);
+    CHECK(m.model.window(other)->tabCount() == 1);
+    CHECK(m.events.tabsClosed == 0);
+}
+
+TEST_CASE("a request made of a stale view of the tab moves nothing", "[vthost][tab-merge]")
+{
+    // Another client merged session 2 into the tab holding 3 before this request arrived: the request still
+    // names the tab as {3}, so it would drag session 2 along with it.
+    auto m = TwoTabs {};
+    REQUIRE(m.model.mergeTabIntoSplit(m.window,
+                                      m.first->id(),
+                                      m.window,
+                                      m.dragged->id(),
+                                      m.dragged->rootPane()->id(),
+                                      vtworkspace::SplitSide::Right)
+            != nullptr);
+    REQUIRE(m.model.window(m.window)->tabCount() == 1);
+    // Now the only tab holds {1, 2, 3}; a second tab to merge it into does not exist, so build one.
+    auto const* const another = m.model.createTab(m.window); // session 4
+    REQUIRE(another != nullptr);
+    auto const eventsBefore = m.events.restructured;
+
+    SECTION("a subset of the tab")
+    {
+        CHECK(
+            applyTabMerge(m.model, MergeTabIntoSplit { .tabSessions = { 3 }, .targetSession = 4, .side = 1 })
+            == std::unexpected { TabMergeError::StaleTab });
+    }
+    SECTION("a set with a session that left")
+    {
+        CHECK(
+            applyTabMerge(m.model,
+                          MergeTabIntoSplit { .tabSessions = { 1, 2, 3, 99 }, .targetSession = 4, .side = 1 })
+            == std::unexpected { TabMergeError::StaleTab });
+    }
+    SECTION("the whole tab, in any order, is current")
+    {
+        CHECK(applyTabMerge(m.model,
+                            MergeTabIntoSplit { .tabSessions = { 3, 1, 2 }, .targetSession = 4, .side = 1 })
+                  .has_value());
+        return;
+    }
+    CHECK(m.model.window(m.window)->tabCount() == 2);
+    CHECK(m.events.restructured == eventsBefore);
 }

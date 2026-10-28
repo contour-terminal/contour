@@ -1269,15 +1269,19 @@ struct EditTab
     bool operator==(EditTab const&) const = default;
 };
 
-/// Client→server (Capability::TabMerge): graft the whole tab holding @p tabSession beside the pane hosting
+/// Client→server (Capability::TabMerge): graft the whole tab holding @p tabSessions beside the pane hosting
 /// @p targetSession, on @p side. Nothing is spawned or closed: the dragged tab's sessions keep running and
-/// move into the target tab, and every attached client is pushed one new LayoutState.
+/// move into the target tab, and every attached client is pushed the merged LayoutState -- once for each
+/// model event the merge fires, each push already showing the merged tree.
 ///
 /// Both ends are named by session, like every other client→server layout verb, because tab and pane ids are
 /// minted per model and the two ends have their own.
 struct MergeTabIntoSplit
 {
-    uint64_t tabSession = 0;    ///< Any session of the tab to merge.
+    /// EVERY session of the tab to merge, as the client sees the tab. The first names the tab; the daemon
+    /// refuses the request when the sessions its tab holds now are not exactly these, so a request made of a
+    /// stale view (the tab was merged elsewhere meanwhile) never drags in panes the user did not drag.
+    std::vector<uint64_t> tabSessions = {};
     uint64_t targetSession = 0; ///< The pane to split, by the session it hosts.
     /// A vtworkspace::SplitSide as the wire spells it. The codec carries any byte; the host refuses one it
     /// does not know (@see vthost::splitSideFrom).

@@ -260,8 +260,9 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(summarize(DecodedPdu { EditTab { .session = 9, .kind = static_cast<TabEditKind>(0xEE) } })
           == "session=9 kind=238");
     CHECK(summarize(DecodedPdu { Heartbeat { .nonce = 42 } }) == "nonce=42");
-    CHECK(summarize(DecodedPdu { MergeTabIntoSplit { .tabSession = 4, .targetSession = 9, .side = 2 } })
-          == "tab=4 target=9 side=2");
+    CHECK(
+        summarize(DecodedPdu { MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } })
+        == "tab-sessions=2 target=9 side=2");
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
     CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");

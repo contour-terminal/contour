@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -243,14 +244,16 @@ class SessionFactory
     /// @p tabPty is grafted beside the pane backed by @p targetPty -- rather than merging locally. The
     /// daemon moves the tab's sessions (none is spawned or closed) and its layout re-push reconciles the
     /// result in. A local factory returns Local so the manager merges itself.
-    /// @param tabPty    A pty backing any pane of the tab to merge.
+    /// @param tabPtys   The ptys backing EVERY pane of the tab to merge, as this window shows it; a null one
+    ///                  stands for a pane that has no pty to name. The daemon refuses a request whose set is
+    ///                  no longer its tab's.
     /// @param targetPty The pty of the pane to split.
     /// @param side      The side of the target pane the tab goes on.
     /// @return Routed if handed to the daemon; Refused if the daemon owns the layout and cannot take it (a
     ///         pane not bound to a session yet, the capability gone); Local for a local factory, and for
     ///         a merge the reconciler itself applies, which is the local half of one the daemon made. A
     ///         null pty names no pane, which the daemon cannot take either.
-    [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(vtpty::Pty const* /*tabPty*/,
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(std::span<vtpty::Pty const* const> /*tabPtys*/,
                                                               vtpty::Pty const* /*targetPty*/,
                                                               vtworkspace::SplitSide /*side*/)
     {

@@ -795,7 +795,9 @@ namespace
 
     void encodeBody(Writer& out, MergeTabIntoSplit const& pdu)
     {
-        out.varint(pdu.tabSession);
+        out.varint(pdu.tabSessions.size());
+        for (auto const session: pdu.tabSessions)
+            out.varint(session);
         out.varint(pdu.targetSession);
         out.u8(pdu.side);
     }
@@ -1639,8 +1641,11 @@ namespace
         auto pdu = MergeTabIntoSplit {};
         auto error = DecodeError {};
         // The side is carried, not judged: the host refuses a byte it does not know.
-        if (!assign(in.varint(), pdu.tabSession, error) || !assign(in.varint(), pdu.targetSession, error)
-            || !assign(in.u8(), pdu.side, error))
+        if (auto const sessions =
+                decodeVector(in, pdu.tabSessions, [](Reader& reader) { return reader.varint(); });
+            !sessions)
+            return std::unexpected(sessions.error());
+        if (!assign(in.varint(), pdu.targetSession, error) || !assign(in.u8(), pdu.side, error))
             return std::unexpected(error);
         return pdu;
     }

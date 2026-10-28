@@ -548,12 +548,12 @@ Delivery NativeClient::editTab(proto::EditTab edit)
     return Delivery::Sent;
 }
 
-Delivery NativeClient::mergeTabIntoSplit(uint64_t tabSession,
+Delivery NativeClient::mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
                                          uint64_t targetSession,
                                          vtworkspace::SplitSide side)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
-    auto const request = proto::MergeTabIntoSplit { .tabSession = tabSession,
+    auto const request = proto::MergeTabIntoSplit { .tabSessions = { tabSessions.begin(), tabSessions.end() },
                                                     .targetSession = targetSession,
                                                     .side = std::to_underlying(side) };
     if (!shares(proto::Capability::TabMerge) || send(proto::DecodedPdu { request }) == 0)

@@ -3930,7 +3930,9 @@ TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of
 
         REQUIRE(factory->requestedTabMerges.size() == 1);
         auto const& request = factory->requestedTabMerges.front();
-        CHECK(request.tabPty == &manager.sessionForId(draggedSession)->terminal().device());
+        CHECK(
+            request.tabPtys
+            == std::vector<vtpty::Pty const*> { &manager.sessionForId(draggedSession)->terminal().device() });
         CHECK(request.targetPty == &manager.sessionForId(targetSession)->terminal().device());
         CHECK(request.side == vtworkspace::SplitSide::Top);
         // The daemon's layout re-push is what changes the local tree: nothing moved here.
@@ -3948,6 +3950,27 @@ TEST_CASE("TerminalSessionManager: a merge on a daemon-hosted window is asked of
         CHECK(window->count() == 1);
         CHECK(target->paneCount() == 2);
         CHECK(std::get<1>(model->findSessionLeaf(draggedSession)) == target);
+    }
+
+    SECTION("a tab of several panes names every one of them, so the daemon can spot a stale view")
+    {
+        factory->reportedTabMergeSupport = TabMergeSupport::Supported;
+        auto* const draggedFirst = manager.sessionForId(draggedSession);
+        manager.splitActivePane(/*vertical*/ true, draggedFirst);
+        REQUIRE(dragged->paneCount() == 2);
+        factory->requestedTabMerges.clear();
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, target->id(), target->rootPane()->id(), vtworkspace::SplitSide::Left);
+
+        REQUIRE(factory->requestedTabMerges.size() == 1);
+        auto const expected = [&] {
+            auto ptys = std::vector<vtpty::Pty const*> {};
+            for (auto const* const session: manager.sessionsOfTab(dragged))
+                ptys.push_back(&session->terminal().device());
+            return ptys;
+        }();
+        CHECK(expected.size() == 2);
+        CHECK(factory->requestedTabMerges.front().tabPtys == expected);
     }
 
     SECTION("a daemon that cannot take it now refuses it: nothing is merged here, and the window says so")

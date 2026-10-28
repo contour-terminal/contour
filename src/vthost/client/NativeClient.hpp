@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -416,11 +417,14 @@ class NativeClient final
     /// Asks the daemon to graft a whole tab beside a pane of another tab. The daemon moves the tab's sessions
     /// into the target tab -- none is spawned or closed -- and re-pushes a LayoutState to every attached
     /// client.
-    /// @param tabSession Any session of the tab to merge.
+    /// @param tabSessions Every session of the tab to merge, as this client sees it; the daemon refuses the
+    ///                    request when its tab holds others now.
     /// @param targetSession The session of the pane to split.
     /// @param side Which side of that pane the tab goes on.
     /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::TabMerge.
-    Delivery mergeTabIntoSplit(uint64_t tabSession, uint64_t targetSession, vtworkspace::SplitSide side);
+    Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
+                               uint64_t targetSession,
+                               vtworkspace::SplitSide side);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.

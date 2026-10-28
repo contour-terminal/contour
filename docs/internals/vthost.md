@@ -263,14 +263,17 @@ edit naming an unknown session or kind is logged with `describe(TabEditError)` a
 nothing.
 
 **`MergeTabIntoSplit`** (tag 35, gated on `Capability::TabMerge`; without it the daemon answers
-`Unsupported`) is what dropping a tab on the edge of a pane sends. It names the dragged tab by any of its
+`Unsupported`) is what dropping a tab on the edge of a pane sends. It names the dragged tab by ALL of its
 sessions, the pane to split by its session, and a `vtworkspace::SplitSide` byte; both ends are sessions
 because tab and pane ids are minted per model. `vthost::applyTabMerge` reads the side (`splitSideFrom`,
 never a cast) and runs the same `SessionModel::mergeTabIntoSplit` an in-process window runs: the dragged
 tab's sessions move into the target tab, and **none is spawned or closed**, which is why neither
 `SplitPane` (it spawns a fresh session) nor `ClosePane` (it would kill the dragged ones) could carry it.
-The model's events fan out as one fresh `LayoutState` per affected window. An unknown session or side, or
-both sessions in one tab, is logged with `describe(TabMergeError)` and answered with nothing.
+The model's events fan out as a `LayoutState` push per event the merge fires (five today), each already
+showing the merged tree. A request is refused, and logged with `describe(TabMergeError)`, for an unknown
+session or side, both sessions in one tab, two windows (`CrossWindow`), or a tab that no longer holds
+exactly the sessions named (`StaleTab`: another client merged into it meanwhile, so the request would
+drag along panes nobody dragged).
 
 A client does not merge locally, since the next push would undo it: `NativeController::requestRemoteTabMerge`
 sends the verb and `applyRemoteLayout` grafts the tab when the push arrives (`findNewMerge` recognises a

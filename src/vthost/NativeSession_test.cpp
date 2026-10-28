@@ -5407,7 +5407,7 @@ TEST_CASE("an EditTab from a client without TabEdits is answered Unsupported", "
     CHECK_FALSE(tab->runtimeTitle());
 }
 
-TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pushes one layout",
+TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pushes the merged layout",
           "[vthost][native][tab-merge][daemon]")
 {
     auto h = NativeHarness {};
@@ -5424,16 +5424,30 @@ TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pu
     REQUIRE(tabsBefore >= 2);
 
     auto const merging =
-        proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) };
+        proto::ClientHello { .capabilities = proto::CapabilitySet::of(
+                                 { proto::Capability::TabMerge, proto::Capability::Heartbeat }) };
+    // The verb is served in order, so the heartbeat's echo arrives after every push the merge made.
     auto const received = h.exchangeUntil(
         { merging,
-          proto::MergeTabIntoSplit { .tabSession = draggedSession.value,
+          proto::MergeTabIntoSplit { .tabSessions = { draggedSession.value },
                                      .targetSession = targetSession.value,
-                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) },
+          proto::Heartbeat { .nonce = 1 } },
         [&](auto const& got) {
-            auto const* layout = lastLayoutOf(got, window);
-            return layout != nullptr && std::cmp_equal(layout->tabs.size(), tabsBefore - 1);
+            return std::ranges::any_of(
+                got, [](auto const& frame) { return std::holds_alternative<proto::Heartbeat>(frame.pdu); });
         });
+    auto const pushesOfMergedLayout = std::ranges::count_if(received, [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->window == window
+               && std::cmp_equal(layout->tabs.size(), tabsBefore - 1);
+    });
+    INFO("pushes of the merged layout: " << pushesOfMergedLayout);
+    // Not one: every model event the merge fires pushes the window's layout (the tab closed, the active tab
+    // and pane changed, the tree restructured, ...), each of them already the merged one. A change to the
+    // number is a decision about the clients' reconciliation, not an accident.
+    constexpr auto MergePushCount = 5;
+    CHECK(pushesOfMergedLayout == MergePushCount);
 
     CHECK(std::cmp_equal(tabCount(), tabsBefore - 1));
     auto const [mergedWindow, mergedTab, mergedLeaf] = h.host.model().findSessionLeaf(draggedSession);
@@ -5459,7 +5473,7 @@ TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupp
     // An older client's hello offers nothing, and a daemon of today still refuses what it did not negotiate.
     auto const received = h.exchangeUntil(
         { proto::ClientHello {},
-          proto::MergeTabIntoSplit { .tabSession = dragged->rootPane()->session().value,
+          proto::MergeTabIntoSplit { .tabSessions = { dragged->rootPane()->session().value },
                                      .targetSession = target->rootPane()->session().value,
                                      .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
         [](auto const& got) {

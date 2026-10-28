@@ -658,23 +658,29 @@ contour::session::TabMergeSupport NativeController::tabMergeSupport() const noex
                : contour::session::TabMergeSupport::Unsupported;
 }
 
-contour::session::RemoteRouting NativeController::requestRemoteTabMerge(vtpty::Pty const* tabPty,
-                                                                        vtpty::Pty const* targetPty,
-                                                                        vtworkspace::SplitSide side)
+contour::session::RemoteRouting NativeController::requestRemoteTabMerge(
+    std::span<vtpty::Pty const* const> tabPtys, vtpty::Pty const* targetPty, vtworkspace::SplitSide side)
 {
     // A merge the reconciler itself applies came FROM the daemon; asking for it again would loop.
     if (isRealizingLayout())
         return contour::session::RemoteRouting::Local;
-    auto const tabSession = sessionForPty(tabPty);
+    auto tabSessions = std::vector<uint64_t> {};
+    auto const allBound = std::ranges::all_of(tabPtys, [&](vtpty::Pty const* pty) {
+        auto const session = sessionForPty(pty);
+        if (session)
+            tabSessions.push_back(*session);
+        return session.has_value();
+    });
     auto const targetSession = sessionForPty(targetPty);
     // The daemon owns this layout: a merge it cannot take is no merge, not one made here that it never hears
     // of.
-    if (!tabSession || !targetSession || tabMergeSupport() == contour::session::TabMergeSupport::Unsupported)
+    if (tabPtys.empty() || !allBound || !targetSession
+        || tabMergeSupport() == contour::session::TabMergeSupport::Unsupported)
         return contour::session::RemoteRouting::Refused;
     // The client's send verbs must run on the reactor thread that owns it.
-    _reactor.post([this, tab = *tabSession, target = *targetSession, side] {
+    _reactor.post([this, tabs = std::move(tabSessions), target = *targetSession, side] {
         if (_client != nullptr)
-            std::ignore = _client->mergeTabIntoSplit(tab, target, side);
+            std::ignore = _client->mergeTabIntoSplit(tabs, target, side);
     });
     return contour::session::RemoteRouting::Routed;
 }

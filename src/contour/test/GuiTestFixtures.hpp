@@ -125,12 +125,13 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         return reportedTabMergeSupport.value_or(SessionFactory::tabMergeSupport());
     }
 
-    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
-                                                                        vtpty::Pty const* targetPty,
-                                                                        vtworkspace::SplitSide side) override
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
     {
-        requestedTabMerges.push_back(
-            TabMergeRequest { .tabPty = tabPty, .targetPty = targetPty, .side = side });
+        requestedTabMerges.push_back(TabMergeRequest {
+            .tabPtys = { tabPtys.begin(), tabPtys.end() }, .targetPty = targetPty, .side = side });
         if (reportedTabMergeRouting)
             return *reportedTabMergeRouting;
         return reportedHosting == contour::session::SessionHosting::Remote
@@ -206,7 +207,7 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     /// One requestRemoteTabMerge() call.
     struct TabMergeRequest
     {
-        vtpty::Pty const* tabPty = nullptr;
+        std::vector<vtpty::Pty const*> tabPtys = {};
         vtpty::Pty const* targetPty = nullptr;
         vtworkspace::SplitSide side = vtworkspace::SplitSide::Left;
     };
@@ -305,11 +306,12 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->tabMergeSupport();
     }
 
-    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
-                                                                        vtpty::Pty const* targetPty,
-                                                                        vtworkspace::SplitSide side) override
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
     {
-        return _factory->requestRemoteTabMerge(tabPty, targetPty, side);
+        return _factory->requestRemoteTabMerge(tabPtys, targetPty, side);
     }
 
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,

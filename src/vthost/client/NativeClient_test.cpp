@@ -2311,7 +2311,8 @@ TEST_CASE("mergeTabIntoSplit is sent to a daemon that shares TabMerge, and the t
                        uint64_t targetSession) -> Task<void> {
         co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
         auto const tabsBefore = h->layouts.back().tabs.size();
-        *delivery = h->client->mergeTabIntoSplit(draggedSession, targetSession, vtworkspace::SplitSide::Left);
+        *delivery = h->client->mergeTabIntoSplit(
+            std::array { draggedSession }, targetSession, vtworkspace::SplitSide::Left);
         co_await core::net::testing::waitUntil(
             &h->loop, [h, tabsBefore] { return h->layouts.back().tabs.size() == tabsBefore - 1; });
         h->client->detach();
@@ -2353,7 +2354,8 @@ TEST_CASE("against a daemon without TabMerge no MergeTabIntoSplit is written",
                        std::vector<proto::DecodedFrame> const* seen,
                        vthost::client::Delivery* delivery) -> Task<void> {
         co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
-        *delivery = client->mergeTabIntoSplit(1, 2, vtworkspace::SplitSide::Right);
+        *delivery =
+            client->mergeTabIntoSplit(std::array<uint64_t, 1> { 1 }, 2, vtworkspace::SplitSide::Right);
         // A verb that is written reaches the daemon in order, so this one arriving proves the other was not
         // sent.
         client->createTab(0, "x");

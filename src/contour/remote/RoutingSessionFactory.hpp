@@ -74,11 +74,12 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().requestRemoteSplit(actingPty, vertical, spawn);
     }
 
-    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(vtpty::Pty const* tabPty,
-                                                                        vtpty::Pty const* targetPty,
-                                                                        vtworkspace::SplitSide side) override
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
     {
-        return active().requestRemoteTabMerge(tabPty, targetPty, side);
+        return active().requestRemoteTabMerge(tabPtys, targetPty, side);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override

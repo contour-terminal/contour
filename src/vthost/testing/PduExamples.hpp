@@ -161,7 +161,8 @@ namespace vthost::testing
         { proto::PduType::SessionInputEcho,
           proto::DecodedPdu { proto::SessionInputEcho { .session = 4, .echo = 3 } } },
         { proto::PduType::MergeTabIntoSplit,
-          proto::DecodedPdu { proto::MergeTabIntoSplit { .tabSession = 4, .targetSession = 9, .side = 2 } } },
+          proto::DecodedPdu {
+              proto::MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } } },
     };
 }
 

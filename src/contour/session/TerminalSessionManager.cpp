@@ -2014,21 +2014,27 @@ void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
     // refused, never made here: it would leave this window showing a layout the daemon does not have.
     if (_sessionFactory.hosting() == SessionHosting::Remote)
     {
-        auto const* const sourceLeaf = source->rootPane()->firstLeaf();
         auto* const targetTab = _model->findTab(target);
         auto const* const targetLeaf = targetTab != nullptr ? targetTab->rootPane()->findPane(leaf) : nullptr;
-        auto* const tabSession = sourceLeaf != nullptr ? sessionForId(sourceLeaf->session()) : nullptr;
         auto* const targetSession = targetLeaf != nullptr ? sessionForId(targetLeaf->session()) : nullptr;
+        // The whole tab is named, so the daemon can tell a request made of a stale view from this one.
+        auto tabSessions = std::vector<TerminalSession*> {};
+        auto tabPtys = std::vector<vtpty::Pty const*> {};
+        source->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (!pane.isLeaf())
+                return;
+            auto* const session = sessionForId(pane.session());
+            tabSessions.push_back(session);
+            tabPtys.push_back(session != nullptr ? &session->terminal().device() : nullptr);
+        });
         // A session that is not found is asked about as no pane at all, so the factory decides (a
         // reconciler's merge is let through, any other is refused).
         switch (_sessionFactory.requestRemoteTabMerge(
-            tabSession != nullptr ? &tabSession->terminal().device() : nullptr,
-            targetSession != nullptr ? &targetSession->terminal().device() : nullptr,
-            side))
+            tabPtys, targetSession != nullptr ? &targetSession->terminal().device() : nullptr, side))
         {
             case RemoteRouting::Routed: return;
             case RemoteRouting::Refused:
-                postTabMergeRefused(targetSession != nullptr ? targetSession : tabSession);
+                postTabMergeRefused(targetSession != nullptr ? targetSession : tabSessions.front());
                 return;
             case RemoteRouting::Local: break;
         }
