@@ -67,7 +67,7 @@ ContourMenu {
 
     Component {
         id: commandEntry
-        MenuItem {
+        ContourMenuItem {
             property int actionId: -1
             onTriggered: root.pick(actionId)
         }

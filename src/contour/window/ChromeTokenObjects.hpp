@@ -375,6 +375,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal control READ control CONSTANT)
     Q_PROPERTY(qreal popover READ popover CONSTANT)
     Q_PROPERTY(qreal menu READ menu CONSTANT)
+    Q_PROPERTY(qreal menuRow READ menuRow CONSTANT)
     Q_PROPERTY(qreal paneCard READ paneCard CONSTANT)
     Q_PROPERTY(qreal noticeCard READ noticeCard CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
@@ -403,6 +404,8 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal popover() const noexcept { return _tokens.popover * _units.horizontal; }
     /// @return The radius of menus.
     [[nodiscard]] qreal menu() const noexcept { return _tokens.menu * _units.horizontal; }
+    /// @return The radius of a menu row's highlight.
+    [[nodiscard]] qreal menuRow() const noexcept { return _tokens.menuRow * _units.horizontal; }
     /// @return The radius of pane cards.
     [[nodiscard]] qreal paneCard() const noexcept { return _tokens.paneCard * _units.horizontal; }
     [[nodiscard]] qreal noticeCard() const noexcept { return _tokens.noticeCard * _units.horizontal; }

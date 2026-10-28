@@ -679,6 +679,104 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     }
 }
 
+namespace
+{
+// Defined with the kit cases further down; the cases between here and there read it too.
+[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
+} // namespace
+
+TEST_CASE("an in-scene menu takes its row's radii (offscreen)", "[contour][gui][qml][contextmenu]")
+{
+    using contour::config::ChromeStyle;
+    struct Expected
+    {
+        ChromeStyle row;
+        qreal menu;
+        qreal menuRow;
+    };
+    // The kit's `radius.menu · row`: 8 · 4 on Windows, square on the Terminal row.
+    for (auto const& expected: { Expected { .row = ChromeStyle::Fluent, .menu = 8, .menuRow = 4 },
+                                 Expected { .row = ChromeStyle::Terminal, .menu = 0, .menuRow = 0 } })
+    {
+        INFO("row: " << static_cast<int>(expected.row));
+        contour::test::QmlMessageCapture const warnings;
+        QQmlEngine engine;
+        contour::test::installChromeStyle(engine,
+                                          contour::test::ChromeSetup {
+                                              .row = expected.row,
+                                              .font = QGuiApplication::font(),
+                                              .windowControls = contour::config::WindowControlStyle::Windows,
+                                          });
+        CHECK(chromeToken(engine, "radii", "menu") == expected.menu);
+        CHECK(chromeToken(engine, "radii", "menuRow") == expected.menuRow);
+
+        auto const state = contour::command::ContextMenuState {
+            .hasSelection = true,
+            .clipboardHasText = true,
+            .hasLastCommand = false,
+            .hasLocalWorkingDirectory = true,
+            .hasSplits = false,
+            .hyperlinkUnderCursor = "",
+            .foldLine = std::nullopt,
+            .activeProfile = "dark",
+            .profileNames = { "dark", "light" },
+        };
+        auto const tree = contour::command::buildMenuTree(
+            contour::command::buildContextMenu(state), {}, contour::command::ShortcutStyle::Text);
+        auto const model = contour::window::toContextMenuModel(tree.nodes);
+
+        QQmlComponent hostComponent(&engine);
+        hostComponent.setData(QByteArrayLiteral("import QtQuick\n"
+                                                "import QtQuick.Window\n"
+                                                "import Contour.Ui\n"
+                                                "Window {\n"
+                                                "  width: 800; height: 600; visible: true\n"
+                                                "  property alias menu: contextMenu\n"
+                                                "  ActionContextMenu { id: contextMenu }\n"
+                                                "}\n"),
+                              QUrl(QStringLiteral("qrc:/contour/test/MenuRadiiHost.qml")));
+        INFO("host errors: " << hostComponent.errorString().toStdString());
+        REQUIRE(hostComponent.isReady());
+        std::unique_ptr<QObject> host(hostComponent.create());
+        REQUIRE(host != nullptr);
+        auto* menu = host->property("menu").value<QObject*>();
+        REQUIRE(menu != nullptr);
+        menu->setProperty("entries", model);
+        REQUIRE(QMetaObject::invokeMethod(menu, "popup"));
+        QCoreApplication::processEvents();
+
+        // The surface.
+        auto* surface = menu->property("background").value<QQuickItem*>();
+        REQUIRE(surface != nullptr);
+        CHECK(surface->property("radius").toReal() == expected.menu);
+
+        // A highlighted command row, and a sub-menu's row, which the menu builds itself.
+        menu->setProperty("currentIndex", 0);
+        QCoreApplication::processEvents();
+        auto rowsChecked = 0;
+        for (auto const i: std::views::iota(0, menu->property("count").toInt()))
+        {
+            QQuickItem* row = nullptr;
+            REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, row), Q_ARG(int, i)));
+            auto const* highlight =
+                row != nullptr ? row->property("background").value<QQuickItem*>() : nullptr;
+            auto const isHighlighted = row != nullptr && row->property("highlighted").toBool();
+            auto const isSubMenu = row != nullptr && row->property("subMenu").value<QObject*>() != nullptr;
+            if (highlight == nullptr || !(isHighlighted || isSubMenu))
+                continue;
+            INFO("row " << i);
+            CHECK(highlight->property("radius").toReal() == expected.menuRow);
+            ++rowsChecked;
+        }
+        // The highlighted row and at least one sub-menu row.
+        CHECK(rowsChecked >= 2);
+
+        QMetaObject::invokeMethod(menu, "close");
+        QCoreApplication::processEvents();
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("GUI tab strip instantiates and binds against a populated model (offscreen)", "[contour][gui][qml]")
 {
     // Catching delegate binding errors (e.g. an undefined `model` reference) requires actually
@@ -2422,7 +2520,6 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
 namespace
 {
 [[nodiscard]] QPoint centreOf(QQuickItem const& item);
-[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
 
 /// The colour @p role resolves to on a pane of @p background, as the chrome's colorOn() answers it.
 [[nodiscard]] QColor colorOnPane(QQmlEngine& engine,

@@ -654,6 +654,46 @@ TEST_CASE("chromeTokens.menuPresentationIgnoresPreferences", "[chrometokens]")
     }
 }
 
+TEST_CASE("chromeTokens.menuRadii", "[chrometokens]")
+{
+    // The kit's `radius.menu · row`, per row.
+    using namespace contour::config;
+    struct MenuRadii
+    {
+        ChromeStyle style;
+        int menu;
+        int menuRow;
+    };
+    constexpr auto Expected = std::array {
+        MenuRadii { .style = ChromeStyle::MacOS, .menu = 10, .menuRow = 5 },
+        MenuRadii { .style = ChromeStyle::Fluent, .menu = 8, .menuRow = 4 },
+        MenuRadii { .style = ChromeStyle::ContourLinux, .menu = 10, .menuRow = 6 },
+        MenuRadii { .style = ChromeStyle::Terminal, .menu = 0, .menuRow = 0 },
+    };
+    static_assert(Expected.size() == contour::config::detail::ChromeStyleCount,
+                  "one expectation per chrome row");
+    for (auto const& expected: Expected)
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const& radii = ChromeTokenRows[static_cast<std::size_t>(expected.style)].radii;
+        CHECK(radii.menu == expected.menu);
+        CHECK(radii.menuRow == expected.menuRow);
+    }
+}
+
+TEST_CASE("chromeTokens.menusAreNativeOnlyOnMac", "[chrometokens]")
+{
+    // R-a of the Step 5a plan: Windows keeps in-scene menus (the swatch row and the terminal scheme's
+    // colours survive only there). Reversing that is a deliberate edit of this test.
+    using namespace contour::config;
+    for (auto const index: allStyles())
+    {
+        CAPTURE(index);
+        auto const isMac = static_cast<ChromeStyle>(index) == ChromeStyle::MacOS;
+        CHECK((ChromeTokenRows[index].layout.menu == MenuPresentation::Native) == isMac);
+    }
+}
+
 TEST_CASE("chromeTokens.titleBandTokens", "[chrometokens]")
 {
     using namespace contour::config;

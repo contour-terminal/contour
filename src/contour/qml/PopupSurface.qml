@@ -46,6 +46,7 @@ Rectangle {
     // the terminal can show through it, and a popup that inherited any of that would render its text
     // over whatever happens to be scrolling underneath.
     color: root.palette.window
+    // The generic popup corner; a menu sets the row's menu radius instead (ContourMenu.qml).
     radius: chromeStyle.radius
     border.width: chromeStyle.borderWidth
     border.color: root.palette.mid

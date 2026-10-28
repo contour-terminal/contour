@@ -132,3 +132,15 @@ TEST_CASE("a native pick runs the action of the menu that was shown, not of a ne
     presenter.pick(menuA.actions.size());
     CHECK(ran.size() == 1);
 }
+
+TEST_CASE("the Fluent row routes in-scene even with a willing presenter", "[menurouting]")
+{
+    // A presenter that would show the menu, were it asked: the Fluent row's token never asks (R-a).
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto const presentation =
+        contour::config::ChromeTokenRows[static_cast<std::size_t>(contour::config::ChromeStyle::Fluent)]
+            .layout.menu;
+    auto const route = presentMenu(presentation, presenter, sampleTree(), MenuAnchor {}, [](std::size_t) {});
+    CHECK(route == MenuRoute::InScene);
+    CHECK(presenter.trees.empty());
+}

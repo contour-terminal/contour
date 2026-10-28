@@ -462,6 +462,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ConfirmDialog.qml
         qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
+        qml/ContourMenuItem.qml
         qml/PopupSurface.qml
         qml/ColorSchemesPage.qml
         qml/SchemeCard.qml

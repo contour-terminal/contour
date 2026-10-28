@@ -573,6 +573,7 @@ struct RadiusTokens
     int control = 0;    ///< Buttons and fields.
     int popover = 0;    ///< Popovers.
     int menu = 0;       ///< Menus.
+    int menuRow = 0;    ///< A menu row's highlight.
     int paneCard = 0;   ///< Pane cards.
     int noticeCard = 0; ///< The shell-integration card.
     int toast = 0;      ///< Toasts.
@@ -1515,6 +1516,7 @@ namespace detail
         .radii = { .control = 6,
                    .popover = 14,
                    .menu = 10,
+                   .menuRow = 5,
                    .paneCard = 10,
                    .noticeCard = 12,
                    .toast = 18,
@@ -1631,6 +1633,7 @@ namespace detail
         .radii = { .control = 4,
                    .popover = 8,
                    .menu = 8,
+                   .menuRow = 4,
                    .paneCard = 4,
                    .noticeCard = 8,
                    .toast = 18,
@@ -1664,6 +1667,10 @@ namespace detail
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
         .layout = { .dialog = DialogPlacement::Centered,
+                    // In-scene, not native (R-a,
+                    // docs/superpowers/plans/2026-10-25-native-redesign-step-5a.md): Windows' native menu is
+                    // an HMENU, which draws no swatch row, ignores the terminal scheme the chrome follows and
+                    // has no supported dark mode.
                     .menu = MenuPresentation::InScene,
                     .tabShape = TabShape::Joined,
                     .profileMenu = ProfileMenuAffordance::Caret,
@@ -1744,6 +1751,7 @@ namespace detail
         .radii = { .control = 8,
                    .popover = 12,
                    .menu = 10,
+                   .menuRow = 6,
                    .paneCard = 6,
                    .noticeCard = 12,
                    .toast = 18,
@@ -1882,6 +1890,7 @@ namespace detail
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
+                   .menuRow = 0,
                    .paneCard = 0,
                    .noticeCard = 0,
                    .toast = 0,

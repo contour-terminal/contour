@@ -7,7 +7,8 @@
 //     where one exists, and a native menu cannot host the sub-menus ActionContextMenu creates at
 //     runtime -- the trap that made the tab menu come up EMPTY on Windows.
 //   - background: the shared popup surface, which is where the drop shadow is drawn. An in-scene
-//     popup has no OS surface for a compositor to shadow, so it has to be painted.
+//     popup has no OS surface for a compositor to shadow, so it has to be painted. Its corner is the
+//     row's menu radius (`radii.menu`), not the generic popup one.
 //   - margins: a minimum distance to the window edge. The window CLIPS an in-scene popup, so a menu
 //     opened near an edge would otherwise have its shadow cut away. Qt's default (-1) lets a menu
 //     overflow the window instead.
@@ -21,8 +22,12 @@ Menu {
     id: control
 
     popupType: Popup.Item
-    background: PopupSurface {}
+    background: PopupSurface {
+        radius: chromeStyle.radii.menu
+    }
     margins: chromeStyle.shadowMargin
+    // The rows the menu builds itself (a sub-menu's) are ContourMenuItems too, so they take the row radius.
+    delegate: ContourMenuItem {}
 
     // Every colour a row paints -- its text, a disabled row's, a sub-menu's arrow, the highlight -- and the
     // surface beneath them, from the application palette directly, as KitDialog's are. A style's default
