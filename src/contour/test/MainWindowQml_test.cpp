@@ -1383,6 +1383,16 @@ TEST_CASE("the band's title is the sticky command header while it lives there (o
     controller.setActiveStickyHeader(header(contour::window::StickyHeaderHost::TitleBand));
     QCoreApplication::processEvents();
     CHECK(title.property("text").toString() == QStringLiteral("✓ cmake --build · 2m 14s"));
+    // Announced by what it says and how it ended, not by its duration: that ticks while the block runs.
+    CHECK(evaluateIn(title, QStringLiteral("Accessible.name")).toString()
+          == QStringLiteral("✓ cmake --build"));
+    auto ticking = header(contour::window::StickyHeaderHost::TitleBand);
+    ticking[QStringLiteral("detail")] = QStringLiteral("2m 15s");
+    controller.setActiveStickyHeader(ticking);
+    QCoreApplication::processEvents();
+    CHECK(title.property("text").toString() == QStringLiteral("✓ cmake --build · 2m 15s"));
+    CHECK(evaluateIn(title, QStringLiteral("Accessible.name")).toString()
+          == QStringLiteral("✓ cmake --build"));
     REQUIRE(jump.isVisible());
     CHECK(jump.property("text").toString() == QStringLiteral("Jump to Command ↑"));
 

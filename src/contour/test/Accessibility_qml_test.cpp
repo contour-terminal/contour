@@ -639,8 +639,15 @@ TEST_CASE("accessibility: the block's ⋯ button and the sticky header's jump li
                                 QVariantMap { { "session", object },
                                               { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
                                               { "policy", policy } });
-    // The header reads as the sticky text while it is shown.
-    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make · 12 s"));
+    // The header reads as the sticky command while it is shown, without the duration: that ticks every
+    // second while the block runs, and a name that changed with it would be announced at every tick.
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make"));
+    session.setStickyHeader(QVariantMap { { "glyph", QStringLiteral("✗") },
+                                          { "command", QStringLiteral("make") },
+                                          { "detail", QStringLiteral("13 s") },
+                                          { "statusRole", 0 },
+                                          { "jumpLabel", QStringLiteral("Jump to Command ↑") } });
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make"));
     auto const links = partsNamed(*header, QStringLiteral("paneHeaderJump"));
     REQUIRE(links.size() == 1);
     auto* jump = accessibleAttachedOf(links.front());

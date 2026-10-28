@@ -65,6 +65,9 @@ Item {
     readonly property string stickyText: stickyShown
         ? sticky.glyph + " " + sticky.command + (sticky.detail !== "" ? qsTr(" · ") + sticky.detail : "")
         : ""
+    /// What a screen reader says for it: the sticky text without its duration, which ticks every second while
+    /// the block runs. Announced when the command or its outcome's glyph changes, not at every tick.
+    readonly property string stickyName: stickyShown ? sticky.glyph + " " + sticky.command : ""
     /// What the sticky header's glyph and jump link are drawn on: the pane's background under the header's fill.
     readonly property color stickyGround: chromeStyle.paletteRevision < 0 ? "transparent"
         : Qt.tint(background, chromeStyle.colorOn(chromeStyle.roles.paneHeaderFill, background))
@@ -125,7 +128,7 @@ Item {
 
     Accessible.role: Accessible.StaticText
     // Concatenated, not formatted: a title the application set may itself contain "%2".
-    Accessible.name: stickyShown ? stickyText
+    Accessible.name: stickyShown ? stickyName
                    : workingDirectory !== "" ? shownName + qsTr(", ") + workingDirectory : shownName
 
     // A click on the header, as on the terminal, makes the pane the active one. It takes the press for

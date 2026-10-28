@@ -438,6 +438,10 @@ Item {
           + (root.sticky.detail !== "" ? qsTr(" · ") + root.sticky.detail : "")
         : ""
 
+    /// What a screen reader says for the sticky header: the text without its duration, which ticks every second
+    /// while the block runs. Announced when the command or its outcome's glyph changes, not at every tick.
+    readonly property string stickyName: root.stickyShown ? root.sticky.glyph + " " + root.sticky.command : ""
+
     Row {
         id: bandTitleRow
         objectName: "bandTitleRow"
@@ -451,6 +455,8 @@ Item {
             // The jump link keeps its room; the title gives way to it.
             width: Math.min(implicitWidth, Math.max(0, root.titleRoom - (bandJump.visible ? bandJump.width + bandTitleRow.spacing : 0)))
             text: root.stickyShown ? root.stickyText : titleRows.activeTitle
+            Accessible.role: Accessible.StaticText
+            Accessible.name: root.stickyShown ? root.stickyName : text
             font: chromeStyle.type.bodyMedium
             color: chromeStyle.colors.tabText
             elide: Text.ElideMiddle
