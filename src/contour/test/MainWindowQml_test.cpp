@@ -2500,6 +2500,37 @@ TEST_CASE("the block menu opens at the anchor the controller names, not at the p
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("an anchor under the title band opens the block menu below it (offscreen)",
+          "[contour][gui][qml][mainwindow][blockmenu]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    controller.setContextMenuModel(QVariantList { QVariantMap { { QStringLiteral("kind"), "command" },
+                                                                { QStringLiteral("title"), "Copy Output" },
+                                                                { QStringLiteral("enabled"), true },
+                                                                { QStringLiteral("checkable"), false },
+                                                                { QStringLiteral("checked"), false },
+                                                                { QStringLiteral("actionId"), 1 } } });
+    auto& band = named(*root, QStringLiteral("titleBar"));
+    REQUIRE(band.isVisible());
+    auto* menu = root->findChild<QObject*>(QStringLiteral("terminalContextMenu"));
+    REQUIRE(menu != nullptr);
+    auto const bandBottom = band.y() + band.height();
+
+    // A block at the top of the pane: its anchor is inside the band, whose centred title the menu would
+    // cover.
+    controller.setContextMenuAnchor(QPointF { 120, bandBottom / 2 });
+    controller.openContextMenu();
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    CHECK(menu->property("x").toReal() == 120);
+    CHECK(menu->property("y").toReal() == bandBottom);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chips (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {

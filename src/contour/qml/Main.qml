@@ -636,13 +636,17 @@ ThemedWindow
     }
 
     // Opens the terminal's menu where the controller says (a block menu opened from the keyboard or the ⋯
-    // button is anchored at its block), and at the pointer when it names no place (a right-click).
+    // button is anchored at its block), and at the pointer when it names no place (a right-click). A block
+    // at the pane's top is anchored under a band that rests above the content, whose centred title the menu
+    // would cover: it opens below the band, at the block's column.
     function popTerminalContextMenu() {
         const anchor = appWindow.win.contextMenuAnchor();
-        if (anchor.x === 0 && anchor.y === 0)
+        if (anchor.x === 0 && anchor.y === 0) {
             terminalContextMenu.popup();
-        else
-            terminalContextMenu.popup(anchor.x, anchor.y);
+            return;
+        }
+        const bandBottom = titleBar.visible && appWindow.band.bandEdge !== "bottom" ? titleBar.y + titleBar.height : 0;
+        terminalContextMenu.popup(anchor.x, Math.max(anchor.y, bandBottom));
     }
 
     // The title bar's own menu: a second instance of the same component, differing only in which model

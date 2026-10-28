@@ -194,6 +194,10 @@ void checkBlockScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
             auto const* menu = scene.root().findChild<QObject*>(QStringLiteral("terminalContextMenu"));
             REQUIRE(menu != nullptr);
             CHECK(menu->property("opened").toBool());
+            // Below the band that rests above the content: it does not cover the centred tab title.
+            auto const* const band = scene.root().findChild<QQuickItem*>(QStringLiteral("titleBar"));
+            if (band != nullptr && band->isVisible())
+                CHECK(menu->property("y").toReal() >= band->y() + band->height());
             CHECK(menu->property("count").toInt()
                   == static_cast<int>(SnapshotBlockMenuHeader.size() + 1
                                       + contour::command::BlockMenuRowCount));

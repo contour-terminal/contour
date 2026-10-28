@@ -594,6 +594,8 @@ class ChromeSnapshotScene
         auto const tree = command::buildMenuTree(
             command::buildBlockMenu(state), {}, command::shortcutStyleFor(variantHost(_variant)));
         _controller.setContextMenuModel(window::toContextMenuModel(tree.nodes));
+        // Anchored at the block's first row, as the ⋯ button and the chords anchor it (the strip's foot).
+        _controller.setContextMenuAnchor(QPointF { 0, SnapshotBlockHoverRow * SnapshotCellHeight });
         auto* menu = root().findChild<QObject*>(QStringLiteral("terminalContextMenu"));
         REQUIRE(menu != nullptr);
         _controller.openContextMenu();
