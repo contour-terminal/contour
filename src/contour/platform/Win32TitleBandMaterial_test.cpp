@@ -12,6 +12,7 @@
     #include <contour/platform/TitleBandMaterial.hpp>
     #include <contour/platform/Win32TitleBandMaterial.hpp>
     #include <contour/platform/Win32WindowFrame.hpp>
+    #include <contour/platform/WindowsSettings.hpp>
 
     #include <QtGui/QGuiApplication>
     #include <QtQuick/QQuickWindow>
@@ -39,9 +40,6 @@ using contour::platform::TitleBandRequest;
 namespace
 {
 
-/// The first build with DWMWA_SYSTEMBACKDROP_TYPE: Windows 11 22H2.
-constexpr auto SystemBackdropBuild = DWORD { 22621 };
-
 /// The window's logical size.
 constexpr auto WindowWidth = 800;
 constexpr auto WindowHeight = 500;
@@ -66,7 +64,7 @@ constexpr auto WindowHeight = 500;
 /// @return Whether this Windows has the system backdrop at all.
 [[nodiscard]] bool hasSystemBackdrop()
 {
-    return osBuild() >= SystemBackdropBuild;
+    return osBuild() >= contour::platform::SystemBackdropBuild;
 }
 
 /// @return The DWORD window attribute @p attribute of @p hwnd as DWM holds it, or nothing if unreadable.

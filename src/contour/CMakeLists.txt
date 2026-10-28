@@ -832,6 +832,8 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             remote/RemoteController_test.cpp
             platform/AppearanceSources_test.cpp
+            platform/WindowsAppearanceSources_test.cpp
+            platform/WindowsSettings_test.cpp
             platform/AudioNote_test.cpp
             platform/FontFamilySource_test.cpp
             platform/GuiTheme_test.cpp

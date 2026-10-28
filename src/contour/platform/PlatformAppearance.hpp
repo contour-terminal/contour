@@ -6,12 +6,21 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 
 namespace contour::platform
 {
+
+/// Whether the operating system runs a contrast theme, under which the chrome takes the OS palette rather
+/// than the terminal scheme's (R-l). macOS's Increase Contrast is a preference, not a theme: None there.
+enum class ContrastTheme : uint8_t
+{
+    None = 0, ///< No contrast theme.
+    Active,   ///< A contrast theme is on (Windows' HCF_HIGHCONTRASTON).
+};
 
 /// What the operating system publishes about its own look, for the chrome to follow.
 struct PlatformAppearance
@@ -23,6 +32,7 @@ struct PlatformAppearance
     std::optional<config::ScrollBarMode> scrollBars {};
     /// Whether the OS draws the chrome's materials; Unknown where it does not say (every OS but Windows).
     config::MaterialSupport materials = config::MaterialSupport::Unknown;
+    ContrastTheme contrastTheme = ContrastTheme::None; ///< Whether a contrast theme is on.
 
     [[nodiscard]] bool operator==(PlatformAppearance const&) const = default;
 };

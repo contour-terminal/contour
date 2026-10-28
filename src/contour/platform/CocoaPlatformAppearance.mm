@@ -71,6 +71,7 @@ namespace
                 .windowCornerRadius = std::nullopt,
                 .scrollBars = preferredScrollBars(),
                 .materials = config::MaterialSupport::Unknown,
+                .contrastTheme = ContrastTheme::None,
             };
         }
 

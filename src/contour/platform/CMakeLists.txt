@@ -71,6 +71,8 @@ add_library(contour_platform STATIC
     Win32SystemBackdrop.cpp Win32SystemBackdrop.hpp
     Win32TitleBandMaterial.cpp Win32TitleBandMaterial.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
+    WindowsAppearanceSources.cpp WindowsAppearanceSources.hpp
+    WindowsSettings.hpp
     WindowDecoration.hpp
     WindowResizeGrid.cpp WindowResizeGrid.hpp
     WindowShadow.cpp WindowShadow.hpp
