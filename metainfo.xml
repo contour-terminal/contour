@@ -107,6 +107,12 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Draws command blocks as a rail beside the output: neutral for success (✓ on hover), red with ✗ for a failure, the accent with ▸ while running, in a fixed strip after the line numbers and timestamps</li>
+          <li>Shows how a command went right of its prompt, only where those cells are blank, so an RPROMPT is never covered</li>
+          <li>Adds a ⋯ button and a native block menu (Copy Output, Copy Command, Rerun, Open in Pager, Collapse Output) whose header names the command and how it ended; the block tooltip is gone</li>
+          <li>Adds ⌘↑/⌘↓ to step through command blocks, ⇧⌘↑/⇧⌘↓ to select their output, and Ctrl+Enter or Shift+F10 to open a focused block's menu; VoiceOver says how each command went. Adds the <code>FocusPreviousCommand</code>, <code>FocusNextCommand</code>, <code>SelectPreviousCommandOutput</code>, <code>SelectNextCommandOutput</code>, <code>OpenBlockMenu</code>, <code>ClearCommandBlockFocus</code> and <code>ToggleCommandFold</code> actions and the <code>BlockFocus</code> input mode</li>
+          <li>Folded output reads "80 lines hidden ⌄"; the sticky command header moves into the pane header or the title band</li>
+          <li>Draws scrollbar ticks as solid for failures, hollow for running commands and yellow for search matches; <code>scrollbar.marks</code> gains <code>running</code> and <code>search_matches</code></li>
           <li>Moves keyboard focus into the tab bar and toolbar with Ctrl+F6 (Ctrl+Shift+F6 backwards), and on macOS to the toolbar with Ctrl+F5; in the tab bar the arrow keys move, Return activates, Backspace closes (asking first if a program may still be running) and Alt+Left or Alt+Right reorders, and a ring marks the focused item. A bare F6 still goes to the shell, and so does Ctrl+F6 when the window shows no tab bar or toolbar. Adds the actions <code>FocusNextArea</code>, <code>FocusPreviousArea</code> and <code>FocusToolbar</code></li>
           <li>Makes Ctrl+C and Ctrl+V clear the selection after copying or pasting under the built-in bindings, where it used to stay selected, as a generated configuration file already did</li>
           <li>Shows the size indicator as a pill centred on each resized pane ("100 × 30", or "13 pt" while zooming the font), announced once to screen readers when it settles</li>

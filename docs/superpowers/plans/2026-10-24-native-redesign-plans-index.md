@@ -45,13 +45,13 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-27, Step 6.6 (secure input) done, then Steps 3c and 3e done. 3c: notices and permissions (a NoticeModel with toasts announced
+Last update: 2026-10-28, Step 3f (command blocks) done; before it, Step 6.6 (secure input), then Steps 3c and 3e. 3c: notices and permissions (a NoticeModel with toasts announced
 only while `accessibility_announcements` allows, guarded roles that take a permission decision and its memory as
 enums, a permission dialog whose every answer names the question it answers, Allow held for half a second after a
 question changes, extension and control consent queued one at a time, the Save Layout sheet). 3e: the size
 indicator as a pill on each resized pane, the overlay scrollbar following the system's setting with
 `scrollbar.mode`, the link pill in place of the hyperlink tooltip, and hint labels in the cursor colour; its
-Terminal-row toast text and hint take 3c's Toast/ToastInk pair. Their ledgers, with every ruling, the task
+Terminal-row toast text and hint take 3c's Toast/ToastInk pair. 3f: command blocks as a rail with a chip, a ⋯ button and a native block menu, block focus from the keyboard, the sticky header as chrome and scrollbar ticks for running and search; its ledger is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3f.md`. Their ledgers, with every ruling, the task
 reviews and the fix rounds, are `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3c.md` and
 `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3e.md`. Step 6.10 done (IME: the candidate window anchors at the preedit's first cell, end of line included, and is
 re-announced as the pane moves, the cell geometry changes and the preedit changes; the preedit is drawn inline in the
@@ -63,7 +63,7 @@ first and defaults to Deny, and Dismiss, cleared by the pane's next command; a p
 Reconnect, which restarts the attach and takes the panes back in place by their remote session id). Its ledger is
 `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-3.md`.
 Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
-1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 6.10 and 6.3. 3f follows.
+1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 3f, 6.10 and 6.3.
 
 ## Rules for every step
 
@@ -101,7 +101,7 @@ Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
 | 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-3c.md` (done) |
 | 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-3d.md` (done) |
 | 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (done) |
-| 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
+| 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (done) |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |

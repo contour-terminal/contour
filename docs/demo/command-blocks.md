@@ -105,19 +105,45 @@ Unlike vim's, these know one fold level only, take no count, and work in normal 
 `zi` do not exist. With `folding.enabled: false`, `za`, `zc` and `zM` do nothing, while `zo` and `zR` still
 open what is collapsed.
 
+## The rail, the chip and the block menu
+
+On the native chrome styles each block gets a **rail**: a thin strip after the line numbers and timestamps,
+beside the block's rows. It is neutral for a success (a ✓ appears while the pointer is over the block), red
+with a ✗ for a failure, and the accent colour with a ▸ while the command runs. The strip has a fixed width,
+so the page never changes size when a block starts or ends. The `ui_style: terminal` row keeps the block
+column described above.
+
+- **The chip.** Right of a finished command's prompt, in cells that are blank, a small pill says how it
+  went — `Failed · exit 1 · 0.0 s` — and a running command's pill ticks. The pill is placed only where it
+  covers nothing: a prompt with an RPROMPT keeps it, and a prompt filling the whole row shows the rail's
+  mark alone, with the details in the block menu and read out by screen readers. A folded block's chip
+  says `80 lines hidden ⌄`; clicking it expands the block.
+- **The menu.** A ⋯ button beside the block, or a right-click on it, opens a native menu whose header names
+  the command and how it ended, above *Copy Output*, *Copy Command*, *Rerun*, *Open in Pager* and
+  *Collapse Output*. The block's tooltip is gone; the header carries what it said.
+- **Keyboard.** `Cmd+Up` and `Cmd+Down` (macOS) step through the blocks and announce each one;
+  `Shift+Cmd+Up` and `Shift+Cmd+Down` also select its output. `Ctrl+Enter` or `Shift+F10` opens the
+  focused block's menu, `Enter` toggles its fold, `Escape` leaves the block, and typing reaches the shell
+  again. The actions are `FocusPreviousCommand`, `FocusNextCommand`, `SelectPreviousCommandOutput`,
+  `SelectNextCommandOutput`, `OpenBlockMenu`, `ClearCommandBlockFocus` and `ToggleCommandFold`, and the
+  keys are free to rebind; while a block holds the focus the input mode `BlockFocus` is on.
+- **Ending a session** with a command still running closes its block as abandoned: no ▸, no tick and no
+  finish notification stay behind, and a restarted pane starts with no blocks.
+
 ## Scrollbar marks
 
 The scrollbar marks where commands are, so a failure far up the history is one glance — and one
 click — away. Clicking a mark scrolls its line to the top, opening its block if that was collapsed.
 Marks that fall on the same pixel merge, the most important winning: a failure, then a running command,
-then a user mark, then any other command. A command's mark takes its
+then a user mark, then any other command. A failure is a solid tick, a running command a hollow one, and
+a search match (`search_matches`) a yellow one. A command's mark takes its
 [`block_status`](../configuration/colors.md#block_status) color.
 
 ```yaml
 profiles:
   main:
     scrollbar:
-      marks: [failures, commands, user_marks]   # [] turns the marks off
+      marks: [failures, commands, user_marks, running, search_matches]   # [] turns the marks off
 ```
 
 The scrollbar is shown on the right by default, so the marks are there from the start. It floats over the
@@ -141,8 +167,9 @@ default), and with `position: Hidden`, or *hidden* on the settings page.
 
 ## Sticky command header
 
-Scrolled back into a long output, the command that produced it stays pinned above it with its exit
-status and duration — or `running 12s` while it runs. Click the header to jump to the command.
+Scrolled back into a long output, the command that produced it stays pinned above it — in the pane
+header of a split, in the title band of a single pane, and in the grid's own band under
+`show_title_bar: true` — with its exit status and duration — or `running 12s` while it runs. Click the header to jump to the command.
 
 ```yaml
 profiles:
