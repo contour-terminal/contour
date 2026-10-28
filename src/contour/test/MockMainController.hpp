@@ -447,6 +447,11 @@ class MockMainController: public MainWindowControllerMock
     /// Mirrors WindowController::openContextMenu(): what the manager calls for the OpenContextMenu
     /// action, and what makes Main.qml pop the terminal's right-click menu.
     Q_INVOKABLE void openContextMenu() { emit contextMenuRequested(); }
+    /// Mirrors WindowController::contextMenuAnchor(): where the menu was asked to open, a null point for the
+    /// pointer.
+    [[nodiscard]] Q_INVOKABLE QPointF contextMenuAnchor() const noexcept { return _contextMenuAnchor; }
+    /// Sets the point contextMenuAnchor() answers with, as openBlockMenu() does for the production one.
+    void setContextMenuAnchor(QPointF anchor) noexcept { _contextMenuAnchor = anchor; }
 
     // The startup sequence Main.qml's Component.onCompleted drives, recorded for the order check.
     Q_INVOKABLE QObject* createWindowController()
@@ -761,6 +766,7 @@ class MockMainController: public MainWindowControllerMock
     QString _hostingNotice;
     QVariantMap _activeStickyHeader;
     QVariantList _contextMenuModel;
+    QPointF _contextMenuAnchor {};
 };
 
 /// Loads Main.qml offscreen against @p controller and returns the created root object: registers the

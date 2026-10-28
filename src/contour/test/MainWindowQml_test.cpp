@@ -2464,6 +2464,32 @@ TEST_CASE("the macOS + opens profiles on a secondary click (offscreen)",
     }
 }
 
+TEST_CASE("the block menu opens at the anchor the controller names, not at the pointer (offscreen)",
+          "[contour][gui][qml][mainwindow][blockmenu]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
+    showWindow(*root);
+    controller.setContextMenuModel(QVariantList { QVariantMap { { QStringLiteral("kind"), "command" },
+                                                                { QStringLiteral("title"), "Copy Output" },
+                                                                { QStringLiteral("enabled"), true },
+                                                                { QStringLiteral("checkable"), false },
+                                                                { QStringLiteral("checked"), false },
+                                                                { QStringLiteral("actionId"), 1 } } });
+    auto* menu = root->findChild<QObject*>(QStringLiteral("terminalContextMenu"));
+    REQUIRE(menu != nullptr);
+    constexpr auto Anchor = QPointF { 120, 200 };
+
+    controller.setContextMenuAnchor(Anchor);
+    controller.openContextMenu();
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    CHECK(menu->property("x").toReal() == Anchor.x());
+    CHECK(menu->property("y").toReal() == Anchor.y());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chips (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {

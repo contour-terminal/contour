@@ -635,6 +635,16 @@ ThemedWindow
         onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerContextMenuAction(actionId); }
     }
 
+    // Opens the terminal's menu where the controller says (a block menu opened from the keyboard or the ⋯
+    // button is anchored at its block), and at the pointer when it names no place (a right-click).
+    function popTerminalContextMenu() {
+        const anchor = appWindow.win.contextMenuAnchor();
+        if (anchor.x === 0 && anchor.y === 0)
+            terminalContextMenu.popup();
+        else
+            terminalContextMenu.popup(anchor.x, anchor.y);
+    }
+
     // The title bar's own menu: a second instance of the same component, differing only in which model
     // it renders and which controller method a pick runs.
     ActionContextMenu {
@@ -663,7 +673,7 @@ ThemedWindow
         function onCommandPaletteRequested() { commandPalette.open(); }
         function onAboutRequested() { aboutDialog.open(); }
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
-        function onContextMenuRequested() { terminalContextMenu.popup(); }
+        function onContextMenuRequested() { appWindow.popTerminalContextMenu(); }
         function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }
         // Attention on behalf of a session that may have no pane on screen -- a command finishing in a
         // background tab. Such a session has no SessionChrome, so the window carries the request.
