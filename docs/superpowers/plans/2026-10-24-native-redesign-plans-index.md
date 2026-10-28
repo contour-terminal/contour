@@ -45,7 +45,7 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-28, Step 4b (Settings sections, controls, one save model, live preview) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-4b.md`; before it, Step 3f (command blocks), then Step 6.6 (secure input), then Steps 3c and 3e. 3c: notices and permissions (a NoticeModel with toasts announced
+Last update: 2026-10-28, Step 6.1 (shell integration) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-1.md`; before it, Step 4b (Settings sections, controls, one save model, live preview) done, its ledger `docs/superpowers/ledgers/2026-10-25-native-redesign-step-4b.md`; before it, Step 3f (command blocks), then Step 6.6 (secure input), then Steps 3c and 3e. 3c: notices and permissions (a NoticeModel with toasts announced
 only while `accessibility_announcements` allows, guarded roles that take a permission decision and its memory as
 enums, a permission dialog whose every answer names the question it answers, Allow held for half a second after a
 question changes, extension and control consent queued one at a time, the Save Layout sheet). 3e: the size
@@ -69,8 +69,13 @@ Reconnect, which restarts the attach and takes the panes back in place by their 
 Step 6.2 done (restore: each restored pane's history sits above a dimmed "Restored · session ended hh:mm" divider,
 a command still running at the snapshot is seeded as abandoned, and the first client after a restore gets one
 "Restored 2 windows, 7 tabs" toast). Its ledger is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-2.md`.
+Step 6.1 done (shell integration: after three commands without prompt marks a bash, zsh or fish pane offers a card
+showing the one line it would add to the shell's startup file, which is appended only on Add Line; Not Now is
+remembered per shell; Settings › Shell Integration lists each shell's startup file and installs the line, showing the
+exact line to delete when an earlier install was cut short). Its ledger is
+`docs/superpowers/ledgers/2026-10-25-native-redesign-step-6-1.md`.
 Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
-1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 3f, 4b, 6.10, 6.3, 6.2 and 6.4.
+1d), 4a, 2, 3a, 3b, 3c, 3d, 3e, 3f, 4b, 6.10, 6.3, 6.2, 6.4 and 6.1.
 
 ## Rules for every step
 
@@ -112,6 +117,6 @@ Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (done) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |
-| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10, 6.3, 6.2 and 6.4 done) |
+| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written; 6.6 secure input, 6.10, 6.3, 6.2, 6.4 and 6.1 done) |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.

@@ -295,6 +295,28 @@ When the daemon brings a workspace back after a restart, each pane's history com
 running when the snapshot was taken is shown as abandoned: its chip stops counting, since the program it
 belonged to is gone. The first window to attach also shows one toast, such as "Restored 2 windows, 7 tabs".
 
+## Installing shell integration
+
+Contour offers to turn shell integration on when a bash, zsh or fish session needs it. After you have entered
+three commands in a pane whose shell writes no prompt marks, a card appears in the pane's bottom rows: *Turn on
+command blocks*, with *Install* and *Not Now*. *Install* shows the one line it would add to the shell's startup
+file (`~/.zshrc`, `~/.bashrc` or `~/.bash_profile` on macOS, or `~/.config/fish/config.fish`) and nothing is
+written yet. *Add Line* appends it and says so in a toast; new sessions of that shell then show command blocks.
+*Cancel* hides the card for this run, and *Not Now* is remembered for that shell, in `gui-state.yml` beside
+`contour.yml`.
+
+The line runs `contour generate integration shell <shell>` from the binary that is running, and only in a shell
+Contour started (`TERM_PROGRAM` is `contour`). Contour only ever appends: it never rewrites or replaces the
+file, a file that is a symlink is appended through, and the line is not added twice. It adds nothing when
+Contour runs as root, when the file changed while it was being read, or when an earlier append was cut short
+and left half a Contour line at the end of the file: delete that line, then install again. The card is not
+offered in a window attached to another host.
+
+*Shell Integration* on the settings page starts with an *Install* group: one row per shell, saying *Installed
+in ~/.zshrc*, *Not installed* or why the file cannot be read. *Install…* asks the same question, with the same
+line, and adds it the same way, also for a shell you declined at the card. A row whose file ends in a
+cut-short Contour line shows that exact line to delete.
+
 ## Settings page
 
 Every setting above but the key bindings can also be changed on the settings page:

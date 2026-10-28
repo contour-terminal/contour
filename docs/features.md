@@ -15,6 +15,7 @@
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
 :material-check-bold:{.check-mark}  [Command blocks](demo/command-blocks.md): an exit-status gutter, line numbers, per-line timestamps, folding, scrollbar marks and a sticky command header <br/>
 :material-check-bold:{.check-mark}  [Restored sessions](demo/command-blocks.md#restored-sessions): history comes back above a "Restored" divider, with one toast saying what was restored <br/>
+:material-check-bold:{.check-mark}  [Offer to install shell integration](demo/command-blocks.md#installing-shell-integration) for bash, zsh and fish, showing the one line it adds, also in Settings <br/>
 :material-check-bold:{.check-mark}  [Notifications](demo/command-blocks.md#finish-notifications) when a long-running command finishes in a tab you are not looking at <br/>
 :material-check-bold:{.check-mark}  [Shell integration](vt-extensions/osc-133-shell-integration.md) for bash, zsh, fish, tcsh and PowerShell <br/>
 :material-check-bold:{.check-mark}  Blurred behind transparent background when using Windows 10 or KDE window manager on Linux. <br/>
