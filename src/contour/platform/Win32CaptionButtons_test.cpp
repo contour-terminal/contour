@@ -20,6 +20,7 @@
 
     #include <cmath>
     #include <cstddef>
+    #include <functional>
     #include <memory>
     #include <vector>
 
@@ -79,12 +80,7 @@ struct CaptionWindow
         frame->apply(window, contour::platform::WindowDecoration::Client);
         window.show();
         REQUIRE(QTest::qWaitForWindowExposed(&window));
-        adapter->attach(window,
-                        CaptionBinding {
-                            .layout = [this] { return layout(); },
-                            .visual = [this](CaptionButtonVisual visual) { calls.visuals.push_back(visual); },
-                            .toggleMaximize = [this] { ++calls.toggles; },
-                        });
+        attachWith([](CaptionButtonVisual) {});
     }
 
     CaptionWindow(CaptionWindow const&) = delete;
@@ -137,13 +133,41 @@ struct CaptionWindow
         return SendMessageW(hwnd(), WM_NCHITTEST, 0, screenParam(point));
     }
 
-    /// Sends the non-client mouse @p message over the maximise button.
-    void sendOverMaximize(UINT message) const
+    /// Posts the non-client mouse @p message over the maximise button.
+    ///
+    /// Posted, not sent: Qt's window procedure skips the native filters for input messages, so a queued one
+    /// reaches them only through the event dispatcher -- with a null result, as a real click does.
+    void postOverMaximize(UINT message) const
     {
-        SendMessageW(hwnd(),
-                     message,
-                     static_cast<WPARAM>(HTMAXBUTTON),
-                     screenParam(centreOf(WindowControlKind::Maximize)));
+        REQUIRE(PostMessageW(hwnd(),
+                             message,
+                             static_cast<WPARAM>(HTMAXBUTTON),
+                             screenParam(centreOf(WindowControlKind::Maximize))));
+    }
+
+    /// Posts WM_NCMOUSELEAVE, as leave tracking would.
+    void postLeave() const { REQUIRE(PostMessageW(hwnd(), WM_NCMOUSELEAVE, 0, 0)); }
+
+    /// Delivers the posted messages through the event dispatcher, then the events they queued.
+    static void pump()
+    {
+        QCoreApplication::processEvents();
+        QCoreApplication::sendPostedEvents();
+    }
+
+    /// Attaches with the recording binding, plus @p onVisual called after each visual is recorded.
+    void attachWith(std::function<void(CaptionButtonVisual)> onVisual)
+    {
+        adapter->attach(window,
+                        CaptionBinding {
+                            .layout = [this] { return layout(); },
+                            .visual =
+                                [this, onVisual = std::move(onVisual)](CaptionButtonVisual visual) {
+                                    calls.visuals.push_back(visual);
+                                    onVisual(visual);
+                                },
+                            .toggleMaximize = [this] { ++calls.toggles; },
+                        });
     }
 };
 
@@ -224,14 +248,19 @@ TEST_CASE("a non-client click toggles the window once", "[native][win32][caption
     if (!onNativeWindows())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
+    // Queued: the toggle runs after the release, not inside it.
+    auto togglesAtRelease = -1;
+    fixture.attachWith([&](CaptionButtonVisual visual) {
+        if (visual == CaptionButtonVisual::Hover && fixture.calls.visuals.size() == 3)
+            togglesAtRelease = fixture.calls.toggles;
+    });
 
-    fixture.sendOverMaximize(WM_NCMOUSEMOVE);
-    fixture.sendOverMaximize(WM_NCLBUTTONDOWN);
-    fixture.sendOverMaximize(WM_NCLBUTTONUP);
-    // Queued: the toggle runs after the message, not inside it.
-    CHECK(fixture.calls.toggles == 0);
-    QCoreApplication::processEvents();
+    fixture.postOverMaximize(WM_NCMOUSEMOVE);
+    fixture.postOverMaximize(WM_NCLBUTTONDOWN);
+    fixture.postOverMaximize(WM_NCLBUTTONUP);
+    CaptionWindow::pump();
 
+    CHECK(togglesAtRelease == 0);
     CHECK(fixture.calls.toggles == 1);
     // The leave the move asked for may follow, as the real pointer is not over the button.
     REQUIRE(fixture.calls.visuals.size() >= 3);
@@ -246,16 +275,17 @@ TEST_CASE("press, leave, release does not toggle", "[native][win32][caption]")
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
 
-    fixture.sendOverMaximize(WM_NCLBUTTONDOWN);
-    SendMessageW(fixture.hwnd(), WM_NCMOUSELEAVE, 0, 0);
-    CHECK(fixture.calls.visuals.back() == CaptionButtonVisual::Rest);
-    fixture.sendOverMaximize(WM_NCLBUTTONUP);
-    QCoreApplication::processEvents();
+    fixture.postOverMaximize(WM_NCLBUTTONDOWN);
+    fixture.postLeave();
+    fixture.postOverMaximize(WM_NCLBUTTONUP);
+    CaptionWindow::pump();
 
     CHECK(fixture.calls.toggles == 0);
-    CHECK(fixture.calls.visuals
-          == std::vector {
-              CaptionButtonVisual::Pressed, CaptionButtonVisual::Rest, CaptionButtonVisual::Hover });
+    // The leave the press asked for may follow, as the real pointer is not over the button.
+    REQUIRE(fixture.calls.visuals.size() >= 3);
+    CHECK(fixture.calls.visuals[0] == CaptionButtonVisual::Pressed);
+    CHECK(fixture.calls.visuals[1] == CaptionButtonVisual::Rest);
+    CHECK(fixture.calls.visuals[2] == CaptionButtonVisual::Hover);
 }
 
 TEST_CASE("a detach drops a toggle still queued", "[native][win32][caption]")
@@ -263,12 +293,20 @@ TEST_CASE("a detach drops a toggle still queued", "[native][win32][caption]")
     if (!onNativeWindows())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
+    // Detached from inside the release's visual: the toggle is queued by then and has not run yet.
+    auto detachedWithToggleQueued = false;
+    fixture.attachWith([&](CaptionButtonVisual visual) {
+        if (visual != CaptionButtonVisual::Hover || detachedWithToggleQueued)
+            return;
+        detachedWithToggleQueued = true;
+        fixture.adapter->detach(fixture.window);
+    });
 
-    fixture.sendOverMaximize(WM_NCLBUTTONDOWN);
-    fixture.sendOverMaximize(WM_NCLBUTTONUP);
-    fixture.adapter->detach(fixture.window);
-    QCoreApplication::processEvents();
+    fixture.postOverMaximize(WM_NCLBUTTONDOWN);
+    fixture.postOverMaximize(WM_NCLBUTTONUP);
+    CaptionWindow::pump();
 
+    REQUIRE(detachedWithToggleQueued);
     CHECK(fixture.calls.toggles == 0);
 }
 
