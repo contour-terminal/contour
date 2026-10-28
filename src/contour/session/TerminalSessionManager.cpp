@@ -364,8 +364,11 @@ std::unique_ptr<TerminalSession> TerminalSessionManager::createPreviewSession(co
                                                                               std::string const& profileName)
 {
     // Not through createBackingSession(): the session is the caller's, so it is not registered, not
-    // parented to the manager and not watched for closing, and it needs no pty from the factory. Nothing
-    // reads the mock device -- no start() -- so the transcript is written to the screen directly.
+    // parented to the manager and not watched for closing, and it needs no pty from the factory. Its device
+    // is a MockPty that never has a program on it, so the transcript is written to the screen directly. A
+    // display that shows it does call start() (TerminalDisplay::setSession), which is harmless here: the
+    // mock opens nothing, its read loop gets no bytes and ends, and the session's end path runs with the
+    // Preview role, which shows no footer.
     auto session = std::make_unique<TerminalSession>(this,
                                                      std::make_unique<vtpty::MockPty>(PreviewPageSize),
                                                      _app,

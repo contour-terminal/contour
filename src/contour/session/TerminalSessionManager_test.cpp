@@ -3742,3 +3742,24 @@ TEST_CASE("TerminalSessionManager: a preview session is in no window and a reloa
     CHECK(preview->profile().fonts.value().size.pt == previewedSize.pt);
     CHECK(window->tabCount() == tabsBefore);
 }
+
+TEST_CASE("TerminalSessionManager: starting a preview session spawns no process and opens no pty",
+          "[manager][settingspreview]")
+{
+    contour::test::ConfiguredTestApp testApp;
+    auto const preview =
+        testApp.manager().createPreviewSession(testApp.app().config(), testApp.app().profileName());
+    REQUIRE(preview != nullptr);
+    // The device is the mock the session was built with, not one a factory made.
+    auto* const mock = dynamic_cast<vtpty::MockPty*>(&preview->terminal().device());
+    REQUIRE(mock != nullptr);
+    REQUIRE_FALSE(mock->isClosed());
+
+    // What a display that shows the preview does (TerminalDisplay::setSession).
+    preview->start();
+
+    // Still the mock, with no program on it: no process was spawned, and nothing in its foreground.
+    CHECK(dynamic_cast<vtpty::MockPty*>(&preview->terminal().device()) == mock);
+    CHECK_FALSE(mock->foregroundProcessName().has_value());
+    // Destroyed with its threads started: the end path runs without a real device to close.
+}
