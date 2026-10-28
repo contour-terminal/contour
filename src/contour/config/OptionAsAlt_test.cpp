@@ -108,3 +108,15 @@ TEST_CASE("optionAsAlt.aHeldKeyIsAltWhereTheSettingNamesIt", "[optionasalt]")
                       rows, [&](Row const& row) { return row.setting == setting && row.down == down; })
                   == 1);
 }
+
+TEST_CASE("option_as_alt: both is Alt whichever side bits the held chord carries", "[option_as_alt]")
+{
+    using contour::config::optionKeyRoleForHeldChord;
+    for (auto const down:
+         { OptionKeySide::None, OptionKeySide::Left, OptionKeySide::Right, OptionKeySide::Both })
+        CHECK(optionKeyRoleForHeldChord(OptionAsAlt::Both, down) == OptionKeyRole::Alt);
+    // The other settings still name their sides.
+    CHECK(optionKeyRoleForHeldChord(OptionAsAlt::Left, OptionKeySide::None) == OptionKeyRole::Composes);
+    CHECK(optionKeyRoleForHeldChord(OptionAsAlt::Left, OptionKeySide::Left) == OptionKeyRole::Alt);
+    CHECK(optionKeyRoleForHeldChord(OptionAsAlt::Off, OptionKeySide::Both) == OptionKeyRole::Composes);
+}

@@ -113,4 +113,16 @@ constexpr std::span<ConfigEnumInfo<OptionAsAlt> const> configEnumValues() noexce
                                                                            : OptionKeyRole::Composes;
 }
 
+/// What a key event whose Alt chord is held does under @p setting: the chord is known to be held, so
+/// @p setting `Both` is Alt whichever side bits the event carries (a synthesized or forwarded event has
+/// none), and a setting naming one side needs that side down.
+/// @param setting The profile's `option_as_alt`.
+/// @param down    Which Option keys the event says are down.
+/// @return Alt or Composes.
+[[nodiscard]] constexpr OptionKeyRole optionKeyRoleForHeldChord(OptionAsAlt setting,
+                                                                OptionKeySide down) noexcept
+{
+    return setting == OptionAsAlt::Both ? OptionKeyRole::Alt : optionKeyRole(setting, down);
+}
+
 } // namespace contour::config
