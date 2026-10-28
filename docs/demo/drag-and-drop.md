@@ -22,17 +22,22 @@ the program in the foreground, and not run. A trailing space lets you keep typin
 
 | Foreground program | Quoting |
 |--------------------|---------|
-| bash, zsh, fish, sh, vim, ssh and others | each special character, and spaces, escaped with a backslash |
+| bash, zsh, fish, sh, vim and others | each special character, and spaces, escaped with a backslash |
 | PowerShell (`pwsh`, `powershell`) | single quotes, `'` doubled |
 | `cmd` | double quotes |
+| unknown (Windows, a pane hosted by the daemon, `ssh`, `wsl`, `sudo`) | double quotes, and a name holding any character one of those shells reads as syntax is refused |
 
 The text arrives as a paste, so an application that enabled bracketed paste receives it wrapped.
-Dropping a web link or plain text pastes it as text.
+Web links are typed the same way as file names, each one a quoted word, so a link a web page chose cannot
+run anything. Dropping plain text pastes it as text, as Ctrl+V does.
 
 ## What is refused
 
-- A file name holding a control character (a newline, an escape, and the like) refuses the whole
-  drop with "Not inserted: a file name holds a control character.", because such a name could run
-  as a command in the shell.
-- Under `cmd`, a name holding `%` or `"` cannot be quoted safely and is refused too.
+- A file name holding a control character (a newline, an escape, and the like) or a character that
+  makes the typed text look other than it runs (a text-direction control, U+2028, U+2029) refuses the
+  whole drop with "Not inserted: a file name holds a control or text-direction character.", because such
+  a name could run as a command in the shell.
+- Under `cmd`, a name holding `%`, `"` or `!` cannot be quoted safely and is refused too.
+- Where the shell is not known, a name holding any of ``$ ` ; & | < > ( ) ' " \ ! % ^`` is refused, and the
+  window says its shell is not known.
 - A pane whose program has ended ignores drops.

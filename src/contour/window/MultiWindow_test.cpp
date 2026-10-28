@@ -2110,7 +2110,7 @@ TEST_CASE("WindowController: a refused drop tells the window", "[contour][multiw
 
     pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/a%0Ab")) });
     CHECK(window->notices().toastText()
-          == QStringLiteral("Not inserted: a file name holds a control character."));
+          == QStringLiteral("Not inserted: a file name holds a control or text-direction character."));
 
     contour::test::closeAllTabs(*window);
 }

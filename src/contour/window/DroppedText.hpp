@@ -19,7 +19,7 @@ enum class ShellQuoting : uint8_t
 {
     Posix = 0,  //!< Backslash-escapes; what bash, zsh, fish, sh, vim's `:e` and a remote shell read.
     PowerShell, //!< Single quotes, a single quote doubled.
-    Cmd,        //!< Double quotes; no way to escape `%` or `"` inside them.
+    Cmd,        //!< Double quotes; no way to escape `%`, `"` or (delayed expansion) `!` inside them.
     /// The shell is not known (no foreground process to ask: Windows, a daemon's pane, or a transport such
     /// as ssh whose far side is anyone's). No quoting is right for all shells, so a name holding any
     /// character one of them reads as syntax (@c detail::UnknownShellMetacharacters) is refused, and the
@@ -90,9 +90,10 @@ namespace detail
 enum class DropTextError : uint8_t
 {
     NoPaths = 0,      //!< There was nothing to type.
-    ControlCharacter, //!< A name holds a control character (U+0000-U+001F, U+007F, U+0080-U+009F).
-    Unquotable,       //!< The shell has no way to quote a character in a name (`%` or `"` under cmd).
-    UnknownShell,     //!< The shell is not known, and a name holds a character some shell reads as syntax.
+    ControlCharacter, //!< A name holds a control character (U+0000-U+001F, U+007F, U+0080-U+009F), or one
+                      //!< that changes what the text looks like (a bidi control, U+2028, U+2029).
+    Unquotable,   //!< The shell has no way to quote a character in a name (`%`, `"` or `!` under cmd).
+    UnknownShell, //!< The shell is not known, and a name holds a character some shell reads as syntax.
 };
 
 namespace detail
@@ -124,6 +125,26 @@ namespace detail
                 if (next >= 0x80 && next <= 0x9F)
                     return true;
             }
+        }
+        return false;
+    }
+
+    /// Whether @p path holds a character that makes the typed text look other than it runs: the bidi
+    /// embeddings, overrides and isolates (U+202A..U+202E, U+2066..U+2069) and the line and paragraph
+    /// separators (U+2028, U+2029), which sanitizeCommandLine() replaces for display too.
+    [[nodiscard]] inline bool holdsDeceptiveCharacter(std::string_view path) noexcept
+    {
+        constexpr auto Lead = '\xE2';
+        for (auto const [i, c]: std::views::enumerate(path))
+        {
+            if (c != Lead || i + 2 >= static_cast<std::ptrdiff_t>(path.size()))
+                continue;
+            auto const second = static_cast<unsigned char>(path[static_cast<size_t>(i) + 1]);
+            auto const third = static_cast<unsigned char>(path[static_cast<size_t>(i) + 2]);
+            if (second == 0x80 && third >= 0xA8 && third <= 0xAE) // U+2028..U+202E
+                return true;
+            if (second == 0x81 && third >= 0xA6 && third <= 0xA9) // U+2066..U+2069
+                return true;
         }
         return false;
     }
@@ -177,7 +198,7 @@ namespace detail
 
     [[nodiscard]] inline bool isUnquotableForCmd(std::string_view path) noexcept
     {
-        return path.find_first_of("%\"") != std::string_view::npos;
+        return path.find_first_of("%\"!") != std::string_view::npos;
     }
 } // namespace detail
 
@@ -185,8 +206,9 @@ namespace detail
 ///
 /// Each path is escaped for @p quoting and followed by one space, so typing can go on. A path holding
 /// a control character refuses the whole drop, because the text is typed into a shell: a newline would
-/// press Return. Under cmd a path holding `%` or `"` is refused too, as cmd expands `%NAME%` inside
-/// double quotes and cannot escape `"`.
+/// press Return. So does one holding a bidi control or U+2028/U+2029, which would make the typed text look
+/// other than what runs. Under cmd a path holding `%`, `"` or `!` is refused too, as cmd expands `%NAME%`
+/// (and, with delayed expansion, `!NAME!`) inside double quotes and cannot escape `"`.
 /// @param paths The paths, in UTF-8.
 /// @param quoting How the pane's shell reads them.
 /// @return The text, or why there is none.
@@ -199,7 +221,7 @@ namespace detail
     // Validate the whole drop first: one bad name refuses all of it, so nothing is half typed.
     for (auto const& path: paths)
     {
-        if (detail::holdsControlCharacter(path))
+        if (detail::holdsControlCharacter(path) || detail::holdsDeceptiveCharacter(path))
             return std::unexpected(DropTextError::ControlCharacter);
         if (quoting == ShellQuoting::Cmd && detail::isUnquotableForCmd(path))
             return std::unexpected(DropTextError::Unquotable);

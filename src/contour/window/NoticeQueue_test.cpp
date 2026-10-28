@@ -74,7 +74,7 @@ TEST_CASE("Notice texts", "[notices]")
           == std::format("Layout “dev” was not saved: {}.",
                          contour::config::describe(contour::config::LayoutSaveError::WriteFailed)));
     CHECK(dropRefusedText(DropTextError::ControlCharacter)
-          == "Not inserted: a file name holds a control character.");
+          == "Not inserted: a file name holds a control or text-direction character.");
     CHECK(dropRefusedText(DropTextError::NoPaths).empty());
     CHECK(restoreSummaryText(2, 7) == "Restored 2 windows, 7 tabs");
     CHECK(restoreSummaryText(1, 1) == "Restored 1 window, 1 tab");

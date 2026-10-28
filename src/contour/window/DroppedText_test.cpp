@@ -39,6 +39,8 @@ TEST_CASE("droppedText.hostileAndOrdinaryNamesPerShell", "[droppedtext]")
         { R"(/tmp/a\b)", ShellQuoting::Posix, R"(/tmp/a\\b )" },
         { R"(/tmp/a|b&c<d>e)", ShellQuoting::Posix, R"(/tmp/a\|b\&c\<d\>e )" },
         { R"(/tmp/!{x}[y]*?#)", ShellQuoting::Posix, R"(/tmp/\!\{x\}\[y\]\*\?\# )" },
+        // A dropped file is always absolute, but this function's contract is any word: a relative one that
+        // starts with '-' must not be read as an option.
         { "-rf", ShellQuoting::Posix, "./-rf " },
         { "--help me", ShellQuoting::Posix, R"(./--help\ me )" },
         { "/-dash/-file", ShellQuoting::Posix, "/-dash/-file " },
@@ -105,7 +107,8 @@ TEST_CASE("droppedText.nonControlC2CharactersAreKept", "[droppedtext]")
 
 TEST_CASE("droppedText.cmdRefusesWhatItCannotQuote", "[droppedtext]")
 {
-    for (auto const& bad: { std::string("C:\\%PATH%\\a.txt"), std::string("C:\\a\"b.txt") })
+    for (auto const& bad:
+         { std::string("C:\\%PATH%\\a.txt"), std::string("C:\\a\"b.txt"), std::string("C:\\!VAR!\\a.txt") })
     {
         auto const text = one(bad, ShellQuoting::Cmd);
         REQUIRE_FALSE(text.has_value());
@@ -144,6 +147,34 @@ TEST_CASE("droppedText.anUnknownShellGetsDoubleQuotedNames", "[droppedtext]")
     auto const text = droppedPathsText(paths, ShellQuoting::Unknown);
     REQUIRE(text.has_value());
     CHECK(*text == R"("/Users/me/My Report.pdf" "C:/a/日本語 {x}#~*?.txt" )");
+}
+
+TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[droppedtext]")
+{
+    // Bidi embeddings, overrides and isolates and the line and paragraph separators make the text read
+    // other than it runs; as for a control character, nothing of the drop is typed.
+    for (auto const quoting:
+         { ShellQuoting::Posix, ShellQuoting::PowerShell, ShellQuoting::Cmd, ShellQuoting::Unknown })
+        for (auto const& bad: { "\u2028",
+                                "\u2029",
+                                "\u202A",
+                                "\u202B",
+                                "\u202C",
+                                "\u202D",
+                                "\u202E",
+                                "\u2066",
+                                "\u2067",
+                                "\u2068",
+                                "\u2069" })
+        {
+            auto const paths = std::vector<std::string> { "/tmp/good", std::string("/tmp/a") + bad + "b" };
+            auto const text = droppedPathsText(paths, quoting);
+            REQUIRE_FALSE(text.has_value());
+            CHECK(text.error() == DropTextError::ControlCharacter);
+        }
+    // Their neighbours are ordinary text: U+2027, U+202F (narrow no-break space), U+2065 and U+206A.
+    for (auto const& fine: { "\u2027", "\u202F", "\u2065", "\u206A" })
+        CHECK(one(std::string("/tmp/a") + fine + "b", ShellQuoting::PowerShell).has_value());
 }
 
 TEST_CASE("droppedText.noPathsIsAnError", "[droppedtext]")

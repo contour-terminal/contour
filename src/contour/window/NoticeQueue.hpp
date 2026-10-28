@@ -210,7 +210,7 @@ struct DropRefusalRow
 inline constexpr auto DropRefusalRows = std::array {
     DropRefusalRow { .error = DropTextError::NoPaths, .text = "" },
     DropRefusalRow { .error = DropTextError::ControlCharacter,
-                     .text = "Not inserted: a file name holds a control character." },
+                     .text = "Not inserted: a file name holds a control or text-direction character." },
     DropRefusalRow { .error = DropTextError::Unquotable,
                      .text = "Not inserted: a file name holds a character cmd cannot quote." },
     DropRefusalRow { .error = DropTextError::UnknownShell,
