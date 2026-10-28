@@ -307,7 +307,9 @@ TEST_CASE("The block actions button and its glyph stay inside the terminal on ev
         CHECK(bounds.contains(buttonRect));
         auto const glyphRect =
             glyph->mapRectToItem(terminal, QRectF { 0, 0, glyph->implicitWidth(), glyph->implicitHeight() });
-        auto const hairline = 1.0 / std::max(1.0, scene.window().devicePixelRatio());
+        // Less a rounding slack: a glyph exactly one hairline in is inside, though its mapped edge may land a
+        // few ulps short of it (seen on aarch64).
+        auto const hairline = (1.0 / std::max(1.0, scene.window().devicePixelRatio())) - 1e-6;
         CHECK(glyphRect.left() - buttonRect.left() >= hairline);
         CHECK(buttonRect.right() - glyphRect.right() >= hairline);
         CHECK(glyphRect.left() >= bounds.left() + hairline);
