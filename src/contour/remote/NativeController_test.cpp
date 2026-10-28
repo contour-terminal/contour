@@ -638,7 +638,7 @@ TEST_CASE("NativeController.interruption.postedToTheSessionsThread", "[attach][c
                                                                               "make test" } } } } } }
     };
     auto daemon =
-        DaemonFixture { {}, {}, 1, {}, vthost::WorkspaceRestore { .snapshot = snapshot, .marker = {} } };
+        DaemonFixture { {}, {}, 1, {}, vthost::WorkspaceRestore { .snapshot = snapshot, .divider = {} } };
 
     auto timeline = TestTimeline {};
     auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);

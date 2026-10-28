@@ -89,7 +89,7 @@ enum class SnapshotScript : uint8_t
     BlockActions,    //!< One pane with the pointer on a block's strip: the ⋯ button at the block's head.
     StickyPaneHeader, //!< split-three, the active pane's header showing a failed block's sticky text.
     StickyTitleBand,  //!< One pane, the title band showing a succeeded block's sticky text.
-    RestoreSummary,     //!< One pane after a daemon restore: the "Restored 2 windows, 7 tabs" toast.
+    RestoreSummary,   //!< One pane after a daemon restore: the "Restored 2 windows, 7 tabs" toast.
 };
 
 /// How a script's active tab is divided into panes.
@@ -1463,7 +1463,6 @@ inline constexpr auto SnapshotScripts = std::array {
                         .layoutName = SnapshotLayoutName::None,
                         .secure = SecureDecor::None,
                         .blocks = SnapshotBlocks::Sample },
-                        .layoutName = SnapshotLayoutName::None },
     SnapshotScriptRow { .script = SnapshotScript::RestoreSummary,
                         .name = "restore-summary",
                         .tabCount = 1,
@@ -1484,7 +1483,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .paneEnd = SnapshotPaneEnd::None,
                         .find = SnapshotFind::None,
                         .permission = SnapshotPermission::None,
-                        .layoutName = SnapshotLayoutName::None },
+                        .layoutName = SnapshotLayoutName::None,
+                        .secure = SecureDecor::None,
+                        .blocks = SnapshotBlocks::None },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

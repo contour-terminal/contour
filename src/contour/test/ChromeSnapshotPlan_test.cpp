@@ -517,7 +517,9 @@ TEST_CASE("snapshot.scriptTable.blocks", "[snapshot][blocks]")
                    ScriptAction::None },
     };
     CHECK(static_cast<int>(expected.front().script) == static_cast<int>(SnapshotScript::PaneInterrupted) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::StickyTitleBand);
+    // Step 6.2's restore summary is the only row after them.
+    CHECK(static_cast<int>(SnapshotScript::RestoreSummary)
+          == static_cast<int>(SnapshotScript::StickyTitleBand) + 1);
     for (auto const& each: expected)
     {
         CAPTURE(each.name);
