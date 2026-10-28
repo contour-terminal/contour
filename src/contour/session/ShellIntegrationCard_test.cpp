@@ -62,9 +62,11 @@ struct Rig
     /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
     /// @param hosting Where the sessions the factory makes run: in this process, or in a daemon.
     /// @param profileShell The program the default profile starts as its shell.
+    /// @param shellHost The host the offer decides on: a POSIX one, not the machine running the test.
     explicit Rig(std::string attachedHostLabel = {},
                  contour::session::SessionHosting hosting = contour::session::SessionHosting::Local,
-                 std::string profileShell = {}):
+                 std::string profileShell = {},
+                 contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
         app { [this] {
                  auto made = std::make_unique<MockPtySessionFactory>();
                  factory = made.get();
@@ -79,7 +81,8 @@ struct Rig
               nullptr,
               contour::platform::nullAppearanceServices(),
               nullptr,
-              std::move(attachedHostLabel) },
+              std::move(attachedHostLabel),
+              shellHost },
         window { app.manager() }
     {
         factory->reportedHosting = hosting;
@@ -141,6 +144,17 @@ TEST_CASE("shell integration card: three commands without a prompt mark offer it
     CHECK(rig.session->shellIntegrationPrimary() == QStringLiteral("Install"));
     CHECK(rig.session->shellIntegrationSecondary() == QStringLiteral("Not Now"));
     CHECK(rig.app.shellRcEditor().installs.empty());
+}
+
+TEST_CASE("shell integration card: a Windows host never offers it", "[contour][session][shellintegration]")
+{
+    // Windows shells do not read these files (installBlockOf()), so the probe finds nothing to offer however
+    // many commands run without a prompt mark.
+    auto rig =
+        Rig { {}, contour::session::SessionHosting::Local, {}, contour::config::HostPlatform::Windows };
+    rig.pressReturn(ShellIntegrationProbeCommands);
+
+    CHECK(rig.session->shellIntegrationCard() == HiddenStage);
 }
 
 TEST_CASE("shell integration card: a prompt mark ends the probe", "[contour][session][shellintegration]")

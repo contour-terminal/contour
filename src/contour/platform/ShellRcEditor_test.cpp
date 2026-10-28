@@ -753,3 +753,14 @@ TEST_CASE("ShellRcEditor: every error has words", "[shellrc]")
     CHECK(changedFile(ShellRcError::AppendLineEndingOnly));
     CHECK(changedFile(ShellRcError::AppendUnterminated));
 }
+
+TEST_CASE("ShellRcEditor: a path rooted at / is a place on every host, a relative one on none", "[shellrc]")
+{
+    // The editor and the rc line speak POSIX paths: `/home/me` has no drive on Windows, so is_absolute()
+    // would refuse it there and the same test would pass on one host and fail on another.
+    CHECK(contour::config::isRootedPath("/home/me"));
+    CHECK(contour::config::isRootedPath("/usr/bin/contour"));
+    CHECK_FALSE(contour::config::isRootedPath("relative"));
+    CHECK_FALSE(contour::config::isRootedPath("./contour"));
+    CHECK_FALSE(contour::config::isRootedPath(""));
+}

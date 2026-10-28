@@ -458,6 +458,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_secureInput),
     _gpuInventory { display::makePlatformGpuInventory() },
     _hostPlatform(config::detectHostPlatform(env)),
+    _shellHostPlatform(shellIntegration.host.value_or(_hostPlatform)),
     _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
     _guiState(std::move(shellIntegration.state)),
     _settingsWindowFactory { settingsWindowFactory ? std::move(settingsWindowFactory)
@@ -474,7 +475,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _shellRcEditor(shellIntegration.editor
                        ? std::move(shellIntegration.editor)
                        : std::make_unique<platform::FileShellRcEditor>(
-                             _fileSystem, env, _hostPlatform, platform::currentRunningAs())),
+                             _fileSystem, env, _shellHostPlatform, platform::currentRunningAs())),
     _contourBinary(std::move(shellIntegration.contourBinary)),
     _binaryEnvironment(window::binaryEnvironmentOf(env))
 {
@@ -2987,7 +2988,7 @@ window::SettingsController& ContourGuiApp::settingsController()
                 // The Shell Integration page's Install rows go through the editor the pane's card uses.
                 .shell = { .editor = _shellRcEditor.get(),
                            .contourBinary = [this] { return locatedContourBinary(); },
-                           .host = _hostPlatform,
+                           .host = _shellHostPlatform,
                            .homeDirectory = std::filesystem::path { QDir::homePath().toStdString() } },
             },
             _colorPreference);

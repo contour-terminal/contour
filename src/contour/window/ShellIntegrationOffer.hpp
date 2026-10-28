@@ -326,7 +326,7 @@ namespace detail
 
 /// The one line that loads Contour's integration, guarded so only shells Contour started run it.
 /// @param shell The shell the line is for.
-/// @param contourBinary The running binary, absolute.
+/// @param contourBinary The running binary, rooted (config::isRootedPath()).
 /// @return The line without a line ending, ending in config::ShellRcMarker; or why it cannot be made.
 [[nodiscard]] inline std::expected<std::string, ShellRcLineError> shellRcLine(
     config::ShellKind shell, std::filesystem::path const& contourBinary)
@@ -334,7 +334,7 @@ namespace detail
     auto const* const row = config::shellRow(shell);
     if (row == nullptr)
         return std::unexpected(ShellRcLineError::UnknownShell);
-    if (!contourBinary.is_absolute())
+    if (!config::isRootedPath(contourBinary))
         return std::unexpected(ShellRcLineError::RelativePath);
     auto const path = contourBinary.string();
     if (std::ranges::any_of(path, detail::isControl))

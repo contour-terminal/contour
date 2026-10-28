@@ -59,7 +59,7 @@ namespace
         if (!value || value->empty())
             return std::nullopt;
         auto path = std::filesystem::path { *std::move(value) };
-        if (!path.is_absolute())
+        if (!config::isRootedPath(path))
             return std::nullopt;
         return path;
     }

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string_view>
 
 namespace contour::config
@@ -100,6 +101,17 @@ inline constexpr std::string_view ShellRcMarker = "# Contour shell integration";
     if (index == 0 || index > ShellRows.size())
         return nullptr;
     return &ShellRows[index - 1];
+}
+
+/// Whether @p path names a place from the root of the file system, which is what a startup file's directory
+/// or the binary an rc line runs must do. Not `path::is_absolute()`: that also demands a drive on Windows,
+/// where the POSIX-style paths these are spelled in (`/home/me`, `/usr/bin/contour`) have none, so the same
+/// path would be accepted on one host and refused on another.
+/// @param path The path.
+/// @return Whether it starts at a root directory.
+[[nodiscard]] inline bool isRootedPath(std::filesystem::path const& path)
+{
+    return path.has_root_directory();
 }
 
 /// Names the shell a foreground process is.

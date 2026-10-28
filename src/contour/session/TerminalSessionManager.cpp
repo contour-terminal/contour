@@ -857,7 +857,7 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
         window::offerFor({ .shell = shell,
                            .locality = _app.attachedHostLabel().empty() ? window::RcLocality::ThisMachine
                                                                         : window::RcLocality::Remote,
-                           .host = _app.hostPlatform(),
+                           .host = _app.shellHostPlatform(),
                            .binary = binary.reach,
                            .dismissal = dismissal,
                            .rc = inspection->state,

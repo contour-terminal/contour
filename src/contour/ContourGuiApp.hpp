@@ -152,6 +152,11 @@ struct ShellIntegrationServices
     /// The remote host the app is attached to, for a test of a remote-hosted window. Empty (the default and
     /// production) until awaitNativeAttach() fills in attachedHostLabel().
     std::string attachedHostLabel {};
+
+    /// The host the offer and the Install rows decide on (installBlockOf()). Empty (the default and
+    /// production) is the detected host; a test sets it so the Linux behaviour and the Windows refusal both
+    /// run on every machine. The chrome keeps using the detected host.
+    std::optional<config::HostPlatform> host {};
 };
 
 /// The daemon window the boot (first) OS window should adopt when attaching, rather than authoring
@@ -547,6 +552,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// The host this process runs on, which decides where bash keeps its startup file.
     [[nodiscard]] config::HostPlatform hostPlatform() const noexcept { return _hostPlatform; }
+
+    /// The host the shell-integration offer decides on: hostPlatform(), unless a test injected another.
+    [[nodiscard]] config::HostPlatform shellHostPlatform() const noexcept { return _shellHostPlatform; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -1127,6 +1135,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // The host this process runs on, detected once from the environment at construction. Declared before
     // the chrome row, which is resolved from it.
     config::HostPlatform _hostPlatform = config::HostPlatform::Other;
+    /// The host the shell-integration offer, its editor and Settings' Install rows decide on.
+    config::HostPlatform _shellHostPlatform = config::HostPlatform::Other;
 
     /// The chrome token row, resolved from `ui_style` and the host platform at construction -- so the title
     /// band's tokens are answerable before the GUI exists -- and again once terminalGuiAction() has loaded

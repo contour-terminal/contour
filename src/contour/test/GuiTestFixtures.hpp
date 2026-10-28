@@ -610,6 +610,9 @@ class TestApp
     /// @param shellRcEditor The editor of the shells' startup files. A RecordingShellRcEditor by default,
     ///                so no test run reaches a real rc file; @see shellRcEditor().
     /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
+    /// @param shellHost The host the shell-integration offer decides on. A POSIX one by default, so the offer
+    ///                behaves the same on every machine running the tests; pass HostPlatform::Windows to see
+    ///                it refuse.
     explicit TestApp(
         std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
         std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
@@ -621,7 +624,8 @@ class TestApp
         std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
         contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
         std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
-        std::string attachedHostLabel = {}):
+        std::string attachedHostLabel = {},
+        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
@@ -641,7 +645,7 @@ class TestApp
              appearance,
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
-             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel)))
+             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel), shellHost))
     {
         parseTerminalVerb();
     }
@@ -890,14 +894,17 @@ class TestApp
     /// one a test handed), the in-memory GUI state, a fixed binary and, optionally, a remote host.
     /// Runs in the member-initializer list, so the raw pointers are set before _app is constructed.
     [[nodiscard]] contour::ShellIntegrationServices shellIntegrationServices(
-        std::unique_ptr<contour::platform::IShellRcEditor> own = nullptr, std::string attachedHostLabel = {})
+        std::unique_ptr<contour::platform::IShellRcEditor> own = nullptr,
+        std::string attachedHostLabel = {},
+        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other)
     {
         auto editor = own ? std::move(own) : std::make_unique<RecordingShellRcEditor>();
         _shellRcEditor = dynamic_cast<RecordingShellRcEditor*>(editor.get());
         return contour::ShellIntegrationServices { .editor = std::move(editor),
                                                    .state = _guiState,
                                                    .contourBinary = std::filesystem::path { ContourBinary },
-                                                   .attachedHostLabel = std::move(attachedHostLabel) };
+                                                   .attachedHostLabel = std::move(attachedHostLabel),
+                                                   .host = shellHost };
     }
 
     /// Builds the app's Settings window offscreen, on an engine of the fixture's own: the app never builds
