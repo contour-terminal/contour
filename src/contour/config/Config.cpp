@@ -212,12 +212,18 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
 
 std::array<KeyInputMapping, 4> const& blockFocusChords()
 {
-    auto const chord = [](vtbackend::Modifiers modifiers, vtbackend::Key key, actions::Action action) {
-        return KeyInputMapping { .modes { RequiresBlockFocus },
-                                 .modifiers { modifiers },
-                                 .input = key,
-                                 .binding = { { std::move(action) } } };
+    auto const chord = [](vtbackend::Modifiers modifiers,
+                          vtbackend::Key key,
+                          actions::Action action,
+                          vtbackend::MatchModes modes = RequiresBlockFocus) {
+        return KeyInputMapping {
+            .modes { modes }, .modifiers { modifiers }, .input = key, .binding = { { std::move(action) } }
+        };
     };
+    // Escape in vi's select mode is CancelSelection's (the default mapping): the block's own Escape stands
+    // aside there, so that no key press can fire both.
+    auto constexpr EscapeLetsGo =
+        vtbackend::MatchModes { vtbackend::MatchModes::BlockFocus, vtbackend::MatchModes::Select };
     static auto const rows = std::array {
         chord(vtbackend::Modifiers { vtbackend::Modifier::Control },
               vtbackend::Key::Enter,
@@ -226,7 +232,10 @@ std::array<KeyInputMapping, 4> const& blockFocusChords()
               vtbackend::Key::F10,
               actions::OpenBlockMenu {}),
         chord(vtbackend::Modifiers {}, vtbackend::Key::Enter, actions::ToggleFold {}),
-        chord(vtbackend::Modifiers {}, vtbackend::Key::Escape, actions::ClearCommandBlockFocus {}),
+        chord(vtbackend::Modifiers {},
+              vtbackend::Key::Escape,
+              actions::ClearCommandBlockFocus {},
+              EscapeLetsGo),
     };
     return rows;
 }

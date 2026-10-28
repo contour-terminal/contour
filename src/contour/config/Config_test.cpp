@@ -9500,6 +9500,11 @@ TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][
         CHECK(unclaimed == nullptr);
     }
 
+    // In vi's select mode Escape is CancelSelection's, so the block's own Escape stands aside.
+    CHECK(contour::config::applyBuiltinFallback(
+              config, Key::Escape, none, static_cast<uint8_t>(focused | MatchModes::Select))
+          == nullptr);
+
     for (auto const edition:
          { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
     {
