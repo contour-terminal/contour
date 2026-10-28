@@ -1665,7 +1665,7 @@ TEST_CASE("Terminal.statusLine.takesNoHighlightOfTheMainPage", "[terminal][statu
         REQUIRE(vt.isHighlighted(from));
     }
     else
-        (void) vt.setNewSearchTerm(U"match", SearchOrigin::Typed);
+        REQUIRE(vt.setNewSearchTerm(U"match", SearchOrigin::Typed).has_value());
 
     CHECK(sample() == unmarked);
 }

@@ -1113,7 +1113,8 @@ struct NativeSessionFlushTester
     /// Accepts @p hello as if it had arrived: the connection attaches and queues its snapshots.
     static void handshake(NativeSession& session, proto::ClientHello hello = {})
     {
-        REQUIRE(session.completeHandshake(proto::DecodedFrame { .pdu = std::move(hello) }));
+        auto const accepted = session.completeHandshake(proto::DecodedFrame { .pdu = std::move(hello) });
+        REQUIRE(accepted);
     }
 
     /// Lets go of @p session as run() does when its client leaves, advancing @p clock past every deadline

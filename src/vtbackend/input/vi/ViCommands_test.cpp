@@ -507,7 +507,8 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
 
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
-        (void) mock.terminal.setNewSearchTerm(U"search_term", vtbackend::SearchOrigin::DoubleClick);
+        REQUIRE(
+            mock.terminal.setNewSearchTerm(U"search_term", vtbackend::SearchOrigin::DoubleClick).has_value());
         mock.terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
         REQUIRE(mock.terminal.search().pattern.empty());
     }
