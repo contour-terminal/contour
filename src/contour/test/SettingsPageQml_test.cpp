@@ -1282,6 +1282,52 @@ TEST_CASE("the Status Line page shows the profile's status line, and the Profile
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a segment's label keeps the row spacing from its first chip, on every row",
+          "[contour][gui][qml][settings][statusline]")
+{
+    // "Middle" is wider than the label's column was: it ran into its first chip.
+    auto const row = GENERATE(
+        config::ChromeStyle::MacOS, config::ChromeStyle::ContourLinux, config::ChromeStyle::Terminal);
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    fx.addProfile();
+    REQUIRE(fx.open("profile:New Profile:statusline"));
+    auto window = fx.activeWindow(QSize(1000, 800));
+    for (auto const* name: { "indicatorSegmentLeft", "indicatorSegmentMiddle", "indicatorSegmentRight" })
+    {
+        auto* segment = fx.item()->findChild<QObject*>(name);
+        REQUIRE(segment != nullptr);
+        QMetaObject::invokeMethod(segment, "rawCommitted", Q_ARG(QString, QStringLiteral("{Clock}")));
+    }
+    fx.settle();
+
+    auto* style = fx.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    auto const gap = style->property("space").value<QObject*>()->property("s5").toReal();
+    auto const sceneRect = [](QQuickItem const& item) {
+        return item.mapRectToScene(QRectF { 0, 0, item.width(), item.height() });
+    };
+    auto labelRights = std::vector<qreal> {};
+    for (auto const* name: { "indicatorSegmentLeft", "indicatorSegmentMiddle", "indicatorSegmentRight" })
+    {
+        INFO(name);
+        auto const& segment = required(fx.byName(name));
+        auto const* label = findDescendant(
+            segment, [](QQuickItem const& item) { return item.objectName() == "indicatorSegmentLabel"; });
+        auto const* chip = findDescendant(
+            segment, [](QQuickItem const& item) { return item.objectName() == "indicatorChip"; });
+        REQUIRE(label != nullptr);
+        REQUIRE(chip != nullptr);
+        // The text itself, not just its box, ends a gap before the chip.
+        auto const textRight = sceneRect(*label).left() + label->property("contentWidth").toReal();
+        CHECK(sceneRect(*chip).left() - textRight >= gap - 0.5);
+        labelRights.push_back(sceneRect(*chip).left());
+    }
+    // The three rows' chips line up.
+    CHECK(labelRights.at(0) == labelRights.at(1));
+    CHECK(labelRights.at(1) == labelRights.at(2));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("a placeholder added on the Status Line page is written to the profile's file",
           "[contour][gui][qml][settings][statusline]")
 {

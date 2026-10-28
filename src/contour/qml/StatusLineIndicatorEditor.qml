@@ -170,13 +170,19 @@ ColumnLayout {
 
     // {{{ The three segment rows
     //
+    // The labels share one column width, the widest of the three, so the chips of every row start together.
+    readonly property real _labelWidth: Math.max(leftRow.naturalLabelWidth, middleRow.naturalLabelWidth,
+                                                 rightRow.naturalLabelWidth)
+    //
     // Written out rather than repeated over a three-element model: left, middle and right are a fixed,
     // individually named set, not a collection that varies, and each row wants its own index baked into
     // its handlers anyway.
     StatusLineSegmentRow {
+        id: leftRow
         objectName: "indicatorSegmentLeft"
         Layout.fillWidth: true
         segmentLabel: qsTr("Left")
+        labelWidth: root._labelWidth
         items: root.leftItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys
@@ -189,9 +195,11 @@ ColumnLayout {
     }
 
     StatusLineSegmentRow {
+        id: middleRow
         objectName: "indicatorSegmentMiddle"
         Layout.fillWidth: true
         segmentLabel: qsTr("Middle")
+        labelWidth: root._labelWidth
         items: root.middleItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys
@@ -204,9 +212,11 @@ ColumnLayout {
     }
 
     StatusLineSegmentRow {
+        id: rightRow
         objectName: "indicatorSegmentRight"
         Layout.fillWidth: true
         segmentLabel: qsTr("Right")
+        labelWidth: root._labelWidth
         items: root.rightItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys

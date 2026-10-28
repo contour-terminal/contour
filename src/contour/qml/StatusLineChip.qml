@@ -13,6 +13,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "indicatorChip"
 
     /// One entry of SettingsController::parseIndicatorSegment.
     required property var item

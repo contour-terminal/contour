@@ -13,6 +13,11 @@ Rectangle {
     id: root
 
     property string segmentLabel: ""
+    /// The width of the label's column: the owner sets the widest of its rows' labels, so the chips line up.
+    /// Never narrower than this row's own label.
+    property real labelWidth: 0
+    /// The width this row's label needs on its own.
+    readonly property real naturalLabelWidth: segmentTitle.implicitWidth
     /// The segment's items, as SettingsController::parseIndicatorSegment returned them.
     property var items: []
     /// Every placeholder that may be added, as [{ type, label, sample }].
@@ -56,12 +61,14 @@ Rectangle {
             spacing: chromeStyle.space.s5
 
             Label {
+                id: segmentTitle
+                objectName: "indicatorSegmentLabel"
                 text: root.segmentLabel
                 font: chromeStyle.type.footnoteStrong
                 color: chromeStyle.colors.settingsHelp
                 Layout.alignment: Qt.AlignTop
                 Layout.topMargin: chromeStyle.space.s3
-                Layout.preferredWidth: chromeStyle.settings.control
+                Layout.preferredWidth: Math.max(root.labelWidth, root.naturalLabelWidth, chromeStyle.settings.control)
             }
 
             Flow {
