@@ -47,7 +47,7 @@ TEST_CASE("FontLocator.listBundledFontFiles finds the shipped fonts", "[bundled-
     CHECK(!listBundledFontFiles(bundledFontsSourceDir() / "nope"));
 }
 
-#if !defined(_WIN32)
+#ifndef _WIN32
 TEST_CASE("FontLocator.registerBundledFonts makes JetBrains Mono resolvable", "[bundled-fonts]")
 {
     REQUIRE(registerBundledFonts(BundledFontDirectories { .paths = { bundledFontsSourceDir() } }));
