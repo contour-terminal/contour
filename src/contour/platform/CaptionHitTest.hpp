@@ -176,20 +176,22 @@ inline constexpr auto CaptionTransitions = std::array {
                       .after = { .visual = CaptionButtonVisual::Rest,
                                  .effect = NcEffect::None,
                                  .disposition = NcDisposition::DefaultHandling } },
-    // A press, and a double click (which is a press to the button, not the caption's maximise).
+    // A press, and a double click (which is a press to the button, not the caption's maximise). Each asks for
+    // the leave as well: a pen or touch tap lights the button with no move before it (TrackMouseEvent is
+    // idempotent).
     NcTransitionRow { .event = NcEvent::LeftDown,
                       .hit = CaptionHit::MaximizeButton,
                       .before = std::nullopt,
                       .after = { .visual = CaptionButtonVisual::Pressed,
-                                 .effect = NcEffect::None,
+                                 .effect = NcEffect::TrackLeave,
                                  .disposition = NcDisposition::Swallow } },
     NcTransitionRow { .event = NcEvent::LeftDoubleClick,
                       .hit = CaptionHit::MaximizeButton,
                       .before = std::nullopt,
                       .after = { .visual = CaptionButtonVisual::Pressed,
-                                 .effect = NcEffect::None,
+                                 .effect = NcEffect::TrackLeave,
                                  .disposition = NcDisposition::Swallow } },
-    // A release on the button toggles once, and only after a press on it.
+    // A release on the button toggles once, and only after a press on it -- whose row asked for the leave.
     NcTransitionRow { .event = NcEvent::LeftUp,
                       .hit = CaptionHit::MaximizeButton,
                       .before = CaptionButtonVisual::Pressed,
@@ -200,7 +202,7 @@ inline constexpr auto CaptionTransitions = std::array {
                       .hit = CaptionHit::MaximizeButton,
                       .before = std::nullopt,
                       .after = { .visual = CaptionButtonVisual::Hover,
-                                 .effect = NcEffect::None,
+                                 .effect = NcEffect::TrackLeave,
                                  .disposition = NcDisposition::Swallow } },
     NcTransitionRow { .event = NcEvent::LeftUp,
                       .hit = CaptionHit::PassThrough,

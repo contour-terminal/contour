@@ -136,11 +136,11 @@ TEST_CASE("captionTransitions.clickTogglesOnce", "[captionhit]")
 {
     using enum CaptionButtonVisual;
     auto const down = onNcEvent(LeftDown, MaximizeButton, Hover);
-    CHECK(down == NcTransition { Pressed, NcEffect::None, NcDisposition::Swallow });
+    CHECK(down == NcTransition { Pressed, NcEffect::TrackLeave, NcDisposition::Swallow });
     auto const up = onNcEvent(LeftUp, MaximizeButton, down.visual);
     CHECK(up == NcTransition { Hover, NcEffect::ToggleMaximize, NcDisposition::Swallow });
     auto const again = onNcEvent(LeftUp, MaximizeButton, up.visual);
-    CHECK(again.effect == NcEffect::None);
+    CHECK(again.effect != NcEffect::ToggleMaximize);
     CHECK(again.disposition == NcDisposition::Swallow);
 }
 
@@ -160,7 +160,7 @@ TEST_CASE("captionTransitions.dragOffCancels", "[captionhit]")
         auto const down = onNcEvent(LeftDown, MaximizeButton, Hover);
         auto const left = onNcEvent(MouseLeave, PassThrough, down.visual);
         CHECK(left.visual == Rest);
-        CHECK(onNcEvent(LeftUp, MaximizeButton, left.visual).effect == NcEffect::None);
+        CHECK(onNcEvent(LeftUp, MaximizeButton, left.visual).effect != NcEffect::ToggleMaximize);
     }
 }
 
@@ -168,7 +168,22 @@ TEST_CASE("captionTransitions.doubleClickIsAPress", "[captionhit]")
 {
     using enum CaptionButtonVisual;
     CHECK(onNcEvent(LeftDoubleClick, MaximizeButton, Hover)
-          == NcTransition { Pressed, NcEffect::None, NcDisposition::Swallow });
+          == NcTransition { Pressed, NcEffect::TrackLeave, NcDisposition::Swallow });
+}
+
+TEST_CASE("captionTransitions.lightingTheButtonTracksTheLeave", "[captionhit]")
+{
+    // A pen or touch tap, or a press straight after a leave, lights the button with no move before it:
+    // whatever lights it from rest must ask for the leave that unlights it. A lit button already asked when
+    // it lit.
+    for (auto const event: std::views::iota(size_t { 0 }, NcEventCount))
+        for (auto const hit: Hits)
+        {
+            CAPTURE(event, static_cast<int>(hit));
+            auto const transition = onNcEvent(static_cast<NcEvent>(event), hit, CaptionButtonVisual::Rest);
+            if (transition.visual != CaptionButtonVisual::Rest)
+                CHECK(transition.effect == NcEffect::TrackLeave);
+        }
 }
 
 TEST_CASE("captionTransitions.unmatchedKeepsTheVisual", "[captionhit]")
