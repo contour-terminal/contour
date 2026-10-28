@@ -14531,6 +14531,27 @@ TEST_CASE("TerminalSession: dropped web links and text are pasted as text", "[co
         CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~echo hi\033[201~");
     }
 
+    SECTION("text with a line break is typed only where bracketed paste brackets it")
+    {
+        auto bracketed = makeDropSession(testApp, "zsh", true);
+        bracketed->insertDroppedText(QStringLiteral("curl x|sh\nid"));
+        CHECK(mockPtyOf(*bracketed).stdinBuffer() == "\033[200~curl x|sh\nid\033[201~");
+
+        // Without it every line would press Return as it arrives: refused, nothing typed.
+        for (auto const* text: { "curl x|sh\n", "a\nb", "a\rb", "a\r\nb" })
+        {
+            CAPTURE(text);
+            auto plain = makeDropSession(testApp, "sh", false);
+            plain->insertDroppedText(QString::fromLatin1(text));
+            CHECK(mockPtyOf(*plain).stdinBuffer().empty());
+        }
+
+        // One line is as harmless as a paste.
+        auto plain = makeDropSession(testApp, "sh", false);
+        plain->insertDroppedText(QStringLiteral("echo hi"));
+        CHECK(mockPtyOf(*plain).stdinBuffer() == "echo hi");
+    }
+
     SECTION("empty text is nothing")
     {
         auto session = makeDropSession(testApp, "zsh", true);

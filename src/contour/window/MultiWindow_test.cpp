@@ -2123,6 +2123,10 @@ TEST_CASE("WindowController: a refused drop tells the window", "[contour][multiw
     CHECK(window->notices().toastText()
           == QStringLiteral("Not inserted: a file name holds a control or text-direction character."));
 
+    // A text drop with a line break onto a pane without bracketed paste says why nothing was typed.
+    pane->insertDroppedText(QStringLiteral("a\nb"));
+    CHECK(window->notices().toastText().contains(QStringLiteral("line break")));
+
     // The toast names what was dropped: a link is not a file name.
     pane->insertDroppedUrls({ QUrl(QStringLiteral("https://a/b;c")) });
     CHECK(window->notices().toastText()

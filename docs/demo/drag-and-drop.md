@@ -29,7 +29,9 @@ the program in the foreground, and not run. A trailing space lets you keep typin
 
 The text arrives as a paste, so an application that enabled bracketed paste receives it wrapped.
 Web links are typed the same way as file names, each one a quoted word, so a link a web page chose cannot
-run anything. Dropping plain text pastes it as text, as Ctrl+V does.
+run anything. Dropping plain text pastes it as text, as Ctrl+V does, except that text with a line break is
+refused where the program has not enabled bracketed paste: without it each line would run as it arrives,
+and the page that started the drag chose the text, not you.
 
 ## What is refused
 

@@ -2659,6 +2659,20 @@ void TerminalSession::insertDroppedText(QString const& text)
 {
     if (paneState() == window::PaneState::Ended)
         return;
+
+    // The page that started the drag chose this text, not the user. Without bracketed paste a line break
+    // presses Return, so the lines would run as they arrive; Ctrl+V leaves that to the user, a drop does not.
+    if (text.contains(QLatin1Char('\n')) || text.contains(QLatin1Char('\r')))
+        if (!_terminal.isModeEnabled(vtbackend::DECMode::BracketedPaste))
+        {
+            sessionLog()("Dropped text with a line break refused: no bracketed paste.");
+            if (_manager != nullptr)
+                _manager->postNotice(window::Notice { .kind = window::NoticeKind::DropRefused,
+                                                      .text = std::string { window::DropTextLineBreakText } },
+                                     this);
+            return;
+        }
+
     pasteText(text, 1, vtbackend::PasteStrip::Keep);
 }
 

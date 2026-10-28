@@ -240,6 +240,11 @@ inline constexpr auto DropRefusalRows = std::array {
 static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::LeadingDash) + 1U,
               "DropRefusalRows must have a row for every drop error");
 
+/// What the toast says when text holding a line break is dropped on a pane that has not enabled bracketed
+/// paste: typed, each line would run as it arrives.
+inline constexpr std::string_view DropTextLineBreakText =
+    "Not inserted: the text has a line break and this program has not asked for bracketed paste.";
+
 /// What the toast says when a tab dropped on a pane of a daemon-hosted window cannot be merged: the daemon
 /// owns the layout, and it did not take the request (or no longer can).
 inline constexpr std::string_view TabMergeRefusedText =
