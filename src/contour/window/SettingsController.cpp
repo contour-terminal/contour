@@ -740,7 +740,7 @@ void SettingsController::report(std::expected<T, config::SettingsError> const& r
         onSessionError(result.error());
 }
 
-std::optional<std::string> SettingsController::draftProblem() const
+std::optional<std::string> SettingsController::patternProblemOf(TerminalProfile const& profile)
 {
     // A field whose value has a problem (an invalid file_opener) is written as given: the reader keeps it and
     // reports it, and the terminal disables it, so a refusal would guard nothing. Its row shows the problem.
@@ -749,14 +749,19 @@ std::optional<std::string> SettingsController::draftProblem() const
     // its own. A built-in's broken override does not refuse the write: the page cannot change its regex, and
     // the reader keeps the entry and reports it at every load, so a refusal would guard nothing and block
     // every unrelated edit.
-    for (auto const& pattern: _draft.hintPatterns.value())
+    for (auto const& pattern: profile.hintPatterns.value())
         if (auto const reason = config::skippedHintPatternReason(pattern))
             return std::format("Link patterns: {}.", *reason);
-    for (auto const& diagnostic: config::linkPatternsFor(_draft)->diagnostics())
+    for (auto const& diagnostic: config::linkPatternsFor(profile)->diagnostics())
         if (diagnostic.severity() == vtbackend::LinkPatternSeverity::Error
             && !vtbackend::isBuiltinLinkPatternName(diagnostic.pattern))
             return diagnostic.message();
     return std::nullopt;
+}
+
+std::optional<std::string> SettingsController::draftProblem() const
+{
+    return patternProblemOf(_draft);
 }
 
 // {{{ Session
@@ -1111,14 +1116,14 @@ std::expected<void, SettingsError> SettingsController::profileDraftWritable() co
     return refuse(SettingsErrorKind::ReadOnly, "Built in · Duplicate to Edit.");
 }
 
-config::TerminalProfile SettingsController::writableDraft() const
+config::TerminalProfile SettingsController::writableForm(TerminalProfile const& profile)
 {
     // A link pattern still in error is held back -- the reader would skip it, or the terminal disable it --
     // and its row says why; everything else in the draft is written meanwhile.
-    auto writable = _draft;
-    if (draftProblem())
+    auto writable = profile;
+    if (patternProblemOf(profile))
     {
-        auto const table = config::linkPatternsFor(_draft);
+        auto const table = config::linkPatternsFor(profile);
         auto const inError = [&table](config::HintPatternConfig const& pattern) {
             if (config::skippedHintPatternReason(pattern))
                 return true;
@@ -1128,11 +1133,16 @@ config::TerminalProfile SettingsController::writableDraft() const
                                  && diagnostic.severity() == vtbackend::LinkPatternSeverity::Error;
                       });
         };
-        auto patterns = _draft.hintPatterns.value();
+        auto patterns = profile.hintPatterns.value();
         std::erase_if(patterns, inError);
         writable.hintPatterns = std::move(patterns);
     }
     return writable;
+}
+
+config::TerminalProfile SettingsController::writableDraft() const
+{
+    return writableForm(_draft);
 }
 
 std::expected<void, SettingsError> SettingsController::stageProfileDraft()
@@ -1212,7 +1222,8 @@ std::expected<QString, SettingsError> SettingsController::openNewProfile(std::st
 {
     if (auto const settled = settleOpenProfile(); !settled)
         return std::unexpected(settled.error());
-    if (auto const staged = stage(config::profileFile(name), config::emitProfileYaml(profile)); !staged)
+    if (auto const staged = stage(config::profileFile(name), config::emitProfileYaml(writableForm(profile)));
+        !staged)
         return std::unexpected(staged.error());
     _draft = std::move(profile);
     _editingProfile = QString::fromStdString(name);
@@ -1418,7 +1429,9 @@ std::expected<void, SettingsError> SettingsController::renameProfile(QString con
     if (_editingProfile != oldName)
         if (auto const settled = settlePendingOf(config::profileFile(oldName.toStdString())); !settled)
             return settled;
-    auto const* profile = _editingProfile == oldName ? &_draft : _config().findProfile(oldName.toStdString());
+    // What is written is the draft as the page writes it: a link pattern in error is held back.
+    auto const openCopy = _editingProfile == oldName ? std::optional { writableDraft() } : std::nullopt;
+    auto const* profile = openCopy ? &*openCopy : _config().findProfile(oldName.toStdString());
     if (profile == nullptr)
         return refuse(SettingsErrorKind::UnknownSetting, "Open the profile to rename it.");
 
@@ -1792,7 +1805,9 @@ std::vector<config::StagedFile> SettingsController::profilesAdoptingEdition(conf
             _session->observe(config::profileFile(name), loadedBytesOf(config::profileFile(name)));
         statusLine.indicator = indicator;
         adopted.statusLine = statusLine;
-        files.push_back({ .file = config::profileFile(name), .bytes = config::emitProfileYaml(adopted) });
+        // The open draft keeps a link pattern in error, which its page shows; the file does not get it.
+        files.push_back(
+            { .file = config::profileFile(name), .bytes = config::emitProfileYaml(writableForm(adopted)) });
         if (isOpen)
         {
             _draft = std::move(adopted);

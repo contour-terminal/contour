@@ -482,6 +482,8 @@ class SettingsController: public QObject
     /// problem (a descriptor's `validate`) is no reason: the reader keeps it, and its row shows the problem.
     /// @return The first link pattern's problem; nullopt when none has one.
     [[nodiscard]] std::optional<std::string> draftProblem() const;
+    /// draftProblem() for any profile.
+    [[nodiscard]] static std::optional<std::string> patternProblemOf(config::TerminalProfile const& profile);
     /// The palette the scheme named @p name stands for: a `color_schemes:` entry of contour.yml, a GUI side
     /// file, or a built-in scheme, in that order; the default palette for a name none answers to. Read once
     /// per name until the next refresh() (@ref _previewPaletteCache).
@@ -495,6 +497,8 @@ class SettingsController: public QObject
         std::string const& name);
     /// The draft as it is written: less a link pattern still in error, which the reader would skip.
     [[nodiscard]] config::TerminalProfile writableDraft() const;
+    /// @p profile as it is written: less a link pattern still in error, which the reader would skip.
+    [[nodiscard]] static config::TerminalProfile writableForm(config::TerminalProfile const& profile);
     /// The palette the draft profile's status-line roles preview against: its scheme, or for a light/dark
     /// pair the one of the current appearance -- by name, so a scheme switched in the draft previews before
     /// it is saved. The default palette while no profile is open.

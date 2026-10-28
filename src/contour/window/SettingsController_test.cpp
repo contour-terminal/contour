@@ -4364,3 +4364,80 @@ TEST_CASE("SettingsController: the scheme list follows a staged rename and delet
     CHECK(schemeNamesOf(fx).contains("nightfall"));
     CHECK_FALSE(schemeNamesOf(fx).contains("dawn"));
 }
+
+// }}}
+// {{{ A link pattern in error is held back on every write path
+
+namespace
+{
+
+/// A name no documentation comment of the emitted YAML mentions.
+constexpr auto HeldBackName = std::string_view { "unfinished-pattern" };
+
+/// Opens side-file profile "work" with a link pattern that is named but has no regex yet: its row says
+/// why, and no write may carry it.
+void openWorkWithLinkPatternInError(Fixture& fx)
+{
+    fx.openSideProfile("work");
+    auto const index = builtinRowCount();
+    fx.controller->addLinkPattern();
+    auto edited = linkRow(*fx.controller, index);
+    edited["name"] = QString::fromUtf8(HeldBackName.data(), static_cast<qsizetype>(HeldBackName.size()));
+    fx.controller->setLinkPattern(index, edited);
+    REQUIRE_FALSE(linkRow(*fx.controller, index).value("problem").toString().isEmpty());
+}
+
+} // namespace
+
+TEST_CASE("SettingsController: renaming a profile does not write its link pattern in error",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    openWorkWithLinkPatternInError(fx);
+
+    REQUIRE(fx.controller->renameProfile("work", "office").has_value());
+    fx.fire();
+
+    REQUIRE(fx.cfg.findProfile("office") != nullptr);
+    // The file itself, not what the reader makes of it: the reader skips a pattern without a regex.
+    auto const written = fx.fileContent(config::relativePathOf(config::profileFile("office")));
+    REQUIRE(written.has_value());
+    CHECK_FALSE(written->contains(HeldBackName));
+    // And it is still being edited.
+    CHECK(linkRow(*fx.controller, builtinRowCount()).value("name").toString().toStdString() == HeldBackName);
+}
+
+TEST_CASE("SettingsController: duplicating a profile does not write its link pattern in error",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    openWorkWithLinkPatternInError(fx);
+
+    auto const copy = fx.controller->duplicateProfile("work");
+    REQUIRE(copy.has_value());
+    fx.fire();
+
+    auto const written = fx.fileContent(config::relativePathOf(config::profileFile(copy->toStdString())));
+    REQUIRE(written.has_value());
+    CHECK_FALSE(written->contains(HeldBackName));
+}
+
+TEST_CASE("SettingsController: Use New does not write the open profile's link pattern in error",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    openWorkWithLinkPatternInError(fx);
+    // The indicator spells out the old edition's default, so the switch rewrites the profile.
+    auto const before = fx.cfg.defaultsEdition;
+    REQUIRE(before == config::DefaultsEdition::Classic);
+
+    REQUIRE(fx.controller
+                ->writeGlobalOverride(config::DefaultsEditionKey,
+                                      config::configEnumToken(config::DefaultsEdition::Native2026))
+                .has_value());
+    fx.fire();
+
+    auto const written = fx.fileContent(config::relativePathOf(config::profileFile("work")));
+    REQUIRE(written.has_value());
+    CHECK_FALSE(written->contains(HeldBackName));
+}
