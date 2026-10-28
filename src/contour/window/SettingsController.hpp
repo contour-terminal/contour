@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -533,6 +534,17 @@ class SettingsController: public QObject
     [[nodiscard]] std::expected<void, config::SettingsError> stageGlobalDraft();
     /// Rebuilds the profile rows and the default profile from the configuration and the settings.yml draft.
     void rebuildProfileRows();
+    /// The names of the color schemes there are, with the staged writes and removals applied.
+    struct SchemeNames
+    {
+        std::set<std::string> all;      ///< Every scheme there is: built in, in contour.yml, or a side file.
+        std::set<std::string> editable; ///< Those that are side files, which Settings can write.
+    };
+    [[nodiscard]] SchemeNames currentSchemeNames() const;
+    /// Rebuilds the scheme list the profile pickers show from @p names.
+    void rebuildSchemeList(SchemeNames const& names);
+    /// Rebuilds the scheme list after a rename or delete was staged, and tells the page.
+    void refreshSchemeList();
     /// Whether profile @p name is a GUI side file, written or staged in this session.
     [[nodiscard]] bool isSideFileProfile(std::string const& name) const;
     /// @p file's bytes as the configuration in effect loaded them; nullopt when it loaded none.

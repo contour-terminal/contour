@@ -4327,3 +4327,40 @@ TEST_CASE("SettingsController: renaming a scheme settles what is pending for it 
     CHECK_FALSE(fx.schemeFile("nightfall").has_value());
     CHECK_FALSE(fx.schemeFile("midnight").has_value());
 }
+
+// }}}
+// {{{ The scheme list follows what is staged
+
+namespace
+{
+
+[[nodiscard]] QStringList schemeNamesOf(Fixture const& fx)
+{
+    auto names = QStringList {};
+    for (auto const& row: fx.controller->colorSchemes())
+        names.push_back(row.toMap().value("name").toString());
+    return names;
+}
+
+} // namespace
+
+TEST_CASE("SettingsController: the scheme list follows a staged rename and delete", "[settings][schemes]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    writeScheme(fx, "dawn");
+    REQUIRE(schemeNamesOf(fx).contains("midnight"));
+
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall").has_value());
+    // Not yet written: the old name is already gone from the list, the new one already in it.
+    CHECK_FALSE(schemeNamesOf(fx).contains("midnight"));
+    CHECK(schemeNamesOf(fx).contains("nightfall"));
+
+    REQUIRE(fx.controller->deleteColorScheme("dawn").has_value());
+    CHECK_FALSE(schemeNamesOf(fx).contains("dawn"));
+
+    fx.fire();
+    CHECK_FALSE(schemeNamesOf(fx).contains("midnight"));
+    CHECK(schemeNamesOf(fx).contains("nightfall"));
+    CHECK_FALSE(schemeNamesOf(fx).contains("dawn"));
+}

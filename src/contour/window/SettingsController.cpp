@@ -798,6 +798,53 @@ std::expected<void, SettingsError> SettingsController::reseededOnFailure(
     return result;
 }
 
+SettingsController::SchemeNames SettingsController::currentSchemeNames() const
+{
+    // Those the config knows about, unioned with any colorschemes/*.yml there is, then with what is staged:
+    // a staged write is already there, and a staged removal is already gone.
+    auto names = SchemeNames {};
+    for (auto const& [name, _]: _config().colorschemes.value())
+        names.all.insert(name);
+    if (auto const listed = _services.store->list(config::SideFileKind::ColorScheme))
+        for (auto const& file: *listed)
+        {
+            names.all.insert(file.name);
+            names.editable.insert(file.name);
+        }
+    else
+        errorLog()("Could not list the color schemes: {}", listed.error());
+    for (auto const& pending: _session->pendingWrites(config::SideFileKind::ColorScheme))
+    {
+        names.all.insert(pending.name);
+        names.editable.insert(pending.name);
+    }
+    for (auto const& removed: std::set<std::string>(names.all))
+        if (_session->pendingFor(config::colorSchemeFile(removed)) == config::PendingChange::Removal)
+        {
+            names.all.erase(removed);
+            names.editable.erase(removed);
+        }
+    return names;
+}
+
+void SettingsController::refreshSchemeList()
+{
+    rebuildSchemeList(currentSchemeNames());
+    emit changed();
+}
+
+void SettingsController::rebuildSchemeList(SchemeNames const& names)
+{
+    _colorSchemes.clear();
+    for (auto const& name: names.all)
+    {
+        auto row = QVariantMap {};
+        row[QStringLiteral("name")] = QString::fromStdString(name);
+        row[QStringLiteral("editable")] = (!locked() && names.editable.contains(name));
+        _colorSchemes.push_back(row);
+    }
+}
+
 void SettingsController::reseedGlobalDraft()
 {
     _globalDraft = _config().guiManagedSettings;
@@ -932,21 +979,11 @@ void SettingsController::refresh()
     followReloadedDrafts();
     rebuildProfileRows();
 
-    // Color schemes: those the config knows about, unioned with any colorschemes/*.yml there is.
-    auto schemeNames = std::set<std::string> {};
-    for (auto const& [name, _]: cfg.colorschemes.value())
-        schemeNames.insert(name);
-    auto onDisk = std::set<std::string> {};
-    if (auto const listed = _services.store->list(config::SideFileKind::ColorScheme))
-        for (auto const& file: *listed)
-        {
-            schemeNames.insert(file.name);
-            onDisk.insert(file.name);
-        }
-    else
-        errorLog()("Could not list the color schemes: {}", listed.error());
+    auto const names = currentSchemeNames();
+    auto const& schemeNames = names.all;
+    auto const& onDisk = names.editable;
 
-    _colorSchemes.clear();
+    rebuildSchemeList(names);
     _schemeGalleryCards.clear();
     _schemeListedBytes.clear();
     for (auto const& name: onDisk)
@@ -954,10 +991,6 @@ void SettingsController::refresh()
             _schemeListedBytes.emplace(name, *read);
     for (auto const& name: schemeNames)
     {
-        auto row = QVariantMap {};
-        row[QStringLiteral("name")] = QString::fromStdString(name);
-        row[QStringLiteral("editable")] = (!locked() && onDisk.contains(name));
-        _colorSchemes.push_back(row);
         _schemeGalleryCards.push_back(galleryCardOf(
             QString::fromStdString(name), !locked() && onDisk.contains(name), readSchemePalette(name)));
     }
@@ -2115,6 +2148,7 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
     emit changesChanged();
     if (!staged)
         return staged;
+    refreshSchemeList();
     if (movedDraft)
     {
         _draft = std::move(*movedDraft);
@@ -2163,6 +2197,7 @@ std::expected<void, SettingsError> SettingsController::deleteColorScheme(QString
             _session->observe(config::colorSchemeFile(name.toStdString()), listed->second);
     if (auto const staged = stage(config::colorSchemeFile(name.toStdString()), std::nullopt); !staged)
         return staged;
+    refreshSchemeList();
 
     if (_editingScheme == name)
     {
