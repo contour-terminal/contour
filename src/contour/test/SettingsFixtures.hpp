@@ -7,6 +7,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/test/ManualSaveScheduler.hpp>
+#include <contour/test/RecordingShellRcEditor.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <core/platform/FileSystem.hpp>
@@ -41,8 +42,18 @@ struct ControllerFixture
     std::shared_ptr<config::GuiConfigStore> store;
     /// The debounce, fired by hand: fire() writes what was committed.
     std::shared_ptr<ManualSaveScheduler> scheduler = std::make_shared<ManualSaveScheduler>();
+    /// The shells' startup files, scripted and recorded: no test reaches a real rc file. Declared before the
+    /// controller, which borrows it.
+    RecordingShellRcEditor shellEditor;
+    /// Whether the Install rows' binary outlives this process, and the host they run on: a test sets these
+    /// before it lists the rows.
+    window::BinaryReach binaryReach = window::BinaryReach::Reachable;
+    config::HostPlatform shellHost = config::HostPlatform::Other;
     std::unique_ptr<window::SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
+
+    /// The binary the Install rows' line runs.
+    static constexpr std::string_view ContourBinary = "/opt/contour/bin/contour";
 
     /// Makes the store the controller writes through, over the configuration directory.
     using StoreFactory = std::function<std::shared_ptr<config::GuiConfigStore>(std::filesystem::path const&)>;
@@ -94,6 +105,15 @@ struct ControllerFixture
                 },
                 .gpuInventory = nullptr,
                 .scheduler = scheduler,
+                .shell = { .editor = &shellEditor,
+                           .contourBinary =
+                               [this] {
+                                   return window::LocatedBinary { .path =
+                                                                      std::filesystem::path { ContourBinary },
+                                                                  .reach = binaryReach };
+                               },
+                           .host = shellHost,
+                           .homeDirectory = "/home/me" },
             },
             vtbackend::ColorPreference::Dark);
         QObject::connect(controller.get(),

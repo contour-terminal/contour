@@ -231,7 +231,10 @@ std::expected<RcInspection, ShellRcError> FileShellRcEditor::inspect(
     auto state = rcStateOf(shell, file->content);
     if (state == config::RcState::Absent && hasAlternateInstall(_fileSystem, environment, *row))
         state = config::RcState::Installed;
-    return RcInspection { .file = file->path, .state = state };
+    auto partialLine = std::string {};
+    if (state == config::RcState::Partial)
+        partialLine = file->content.substr(file->content.find_last_of('\n') + 1); // npos + 1 is the start
+    return RcInspection { .file = file->path, .state = state, .partialLine = std::move(partialLine) };
 }
 
 std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellKind shell,

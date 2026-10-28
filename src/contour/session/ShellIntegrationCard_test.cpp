@@ -288,6 +288,20 @@ TEST_CASE("shell integration card: Install shows the line first and writes only 
           == QStringLiteral("Added shell integration to ~/.zshrc. New zsh sessions show command blocks."));
 }
 
+TEST_CASE("shell integration card: a file that already loads the integration is not said to be changed",
+          "[contour][session][shellintegration]")
+{
+    auto rig = Rig {};
+    rig.app.shellRcEditor().installResult = contour::platform::RcInstall::AlreadyInstalled;
+    rig.pressReturn(ShellIntegrationProbeCommands);
+    rig.session->acceptShellIntegrationCard();
+    rig.session->acceptShellIntegrationCard();
+
+    CHECK(rig.window->notices().toastText()
+          == QStringLiteral(
+              "Shell integration was already in ~/.zshrc. New zsh sessions show command blocks."));
+}
+
 TEST_CASE("shell integration card: a failed write keeps the card and says why",
           "[contour][session][shellintegration]")
 {
@@ -390,5 +404,5 @@ TEST_CASE("shell integration card: TestApp never reaches a file editor",
 {
     TestApp app;
     CHECK(dynamic_cast<contour::test::RecordingShellRcEditor*>(&app.app().shellRcEditor()) != nullptr);
-    CHECK(app.app().contourBinaryPath() == std::filesystem::path { TestApp::ContourBinary });
+    CHECK(app.app().locatedContourBinary().path == std::filesystem::path { TestApp::ContourBinary });
 }

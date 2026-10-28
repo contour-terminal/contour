@@ -11,6 +11,8 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <core/Environment.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -98,12 +100,101 @@ enum class ShellIntegrationOffer : uint8_t
     Card,
 };
 
+/// Whether the path the running binary can be named by is still there for a shell started later, on this
+/// machine's own terms. An rc line outlives this process, so a path that dies with it is no use.
+enum class BinaryReach : uint8_t
+{
+    Unreachable = 0, ///< Only this process can see it (a Flatpak sandbox path): no line can name it.
+    Reachable,       ///< Every later shell finds it there.
+};
+
+/// The environment variables that say where the running binary really lives.
+struct BinaryEnvironment
+{
+    std::string
+        appImage {}; ///< `APPIMAGE`: the AppImage file, which outlives the mount the binary runs from.
+    std::string flatpakId {}; ///< `FLATPAK_ID`: set inside a Flatpak sandbox, whose paths the host lacks.
+};
+
+/// The running binary as an rc line must name it.
+struct LocatedBinary
+{
+    std::filesystem::path path {}; ///< The path the line runs.
+    BinaryReach reach = BinaryReach::Unreachable;
+};
+
+/// Reads the variables locateBinary() decides on.
+/// @param env The environment.
+/// @return Their values; empty for an unset one.
+[[nodiscard]] inline BinaryEnvironment binaryEnvironmentOf(core::Environment const& env)
+{
+    return { .appImage = env.get("APPIMAGE").value_or(""), .flatpakId = env.get("FLATPAK_ID").value_or("") };
+}
+
+/// Decides which path an rc line names for the running binary.
+///
+/// A Flatpak is not offered a line at all, rather than a `flatpak run` one: the line is a quoted path
+/// that the guard and `generate integration` command are built around, and a command with arguments
+/// would not keep that quoting proof.
+/// @param env Where the binary lives.
+/// @param applicationFile What the process was started as (`QCoreApplication::applicationFilePath()`).
+/// @return Inside a Flatpak, @p applicationFile and Unreachable; under an AppImage, the AppImage file
+///         (the mount @p applicationFile is in vanishes on exit) and Reachable; else @p applicationFile
+///         and Reachable.
+[[nodiscard]] inline LocatedBinary locateBinary(BinaryEnvironment const& env,
+                                                std::filesystem::path const& applicationFile)
+{
+    if (!env.flatpakId.empty())
+        return { .path = applicationFile, .reach = BinaryReach::Unreachable };
+    if (!env.appImage.empty())
+        return { .path = std::filesystem::path { env.appImage }, .reach = BinaryReach::Reachable };
+    return { .path = applicationFile, .reach = BinaryReach::Reachable };
+}
+
+/// What stops Install from being offered on this host, whichever surface asks.
+enum class InstallBlock : uint8_t
+{
+    None = 0,         ///< Nothing stops it.
+    WindowsHost,      ///< Windows shells do not read these startup files.
+    BinaryUnreachable ///< The line could not name a binary a later shell finds.
+};
+
+/// The words of one block, shown by the Settings page in place of the status of a file it cannot install to.
+struct InstallBlockRow
+{
+    InstallBlock block = InstallBlock::None;
+    std::string_view text {};
+};
+
+/// Every block, in enumerator order.
+inline constexpr auto InstallBlockRows = std::array {
+    InstallBlockRow { .block = InstallBlock::None, .text = "" },
+    InstallBlockRow { .block = InstallBlock::WindowsHost,
+                      .text = "Not available on Windows: its shells do not read these files" },
+    InstallBlockRow { .block = InstallBlock::BinaryUnreachable,
+                      .text = "Not available here: shells outside this sandbox cannot run this Contour" },
+};
+
+/// The one decision both the card and the Settings page ask.
+/// @param host The host.
+/// @param binary Whether the running binary can be named by an rc line.
+/// @return What blocks Install; None when nothing does.
+[[nodiscard]] constexpr InstallBlock installBlockOf(config::HostPlatform host, BinaryReach binary) noexcept
+{
+    if (host == config::HostPlatform::Windows)
+        return InstallBlock::WindowsHost;
+    if (binary == BinaryReach::Unreachable)
+        return InstallBlock::BinaryUnreachable;
+    return InstallBlock::None;
+}
+
 /// Everything offerFor() decides on. The defaults are the "offer nothing" answers.
 struct OfferInputs
 {
     config::ShellKind shell = config::ShellKind::Unknown;
     RcLocality locality = RcLocality::Remote;
     config::HostPlatform host = config::HostPlatform::Other;
+    BinaryReach binary = BinaryReach::Unreachable;
     OfferDismissal dismissal = OfferDismissal::Open;
     config::RcState rc = config::RcState::Unknown;
     CardSlot slot = CardSlot::Free;
@@ -111,13 +202,15 @@ struct OfferInputs
 
 /// Decides whether the card shows.
 /// @param in The facts.
-/// @return Card iff the shell is known, its startup file is on this machine, the host is not Windows,
-///         the shell was not dismissed, its file does not load Contour's script, and no card showed yet.
+/// @return Card iff the shell is known, its startup file is on this machine, installBlockOf() finds
+///         nothing in the way (not Windows, a binary a later shell can run), the shell was not dismissed, its
+///         file does not load Contour's script, and no card showed yet.
 [[nodiscard]] constexpr ShellIntegrationOffer offerFor(OfferInputs const& in) noexcept
 {
     auto const offered = in.shell != config::ShellKind::Unknown && in.locality == RcLocality::ThisMachine
-                         && in.host != config::HostPlatform::Windows && in.dismissal == OfferDismissal::Open
-                         && in.rc == config::RcState::Absent && in.slot == CardSlot::Free;
+                         && installBlockOf(in.host, in.binary) == InstallBlock::None
+                         && in.dismissal == OfferDismissal::Open && in.rc == config::RcState::Absent
+                         && in.slot == CardSlot::Free;
     return offered ? ShellIntegrationOffer::Card : ShellIntegrationOffer::None;
 }
 

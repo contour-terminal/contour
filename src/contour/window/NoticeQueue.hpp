@@ -275,14 +275,28 @@ inline constexpr std::string_view TabMergeRefusedText =
     return std::vformat(text, std::make_format_args(DropSubjectNouns[std::to_underlying(subject)]));
 }
 
-/// "Added shell integration to ~/.zshrc. New zsh sessions show command blocks."
+/// What the toast says of a successful install, by platform::RcInstall: `{0}` is the startup file as the
+/// user would say it, `{1}` the shell's name.
+inline constexpr auto ShellIntegrationInstalledPatterns = std::array<std::string_view, 2> {
+    "Added shell integration to {0}. New {1} sessions show command blocks.",
+    "Shell integration was already in {0}. New {1} sessions show command blocks.",
+};
+static_assert(ShellIntegrationInstalledPatterns.size()
+              == std::to_underlying(platform::RcInstall::AlreadyInstalled) + 1U);
+
+/// "Added shell integration to ~/.zshrc. New zsh sessions show command blocks.", or, when the file
+/// already loaded it, "Shell integration was already in ~/.zshrc. …".
+/// @param result What the install did.
 /// @param rc The startup file as the user would say it.
 /// @param shell The shell's name.
-[[nodiscard]] inline std::string shellIntegrationAddedText(std::string_view rc, std::string_view shell)
+[[nodiscard]] inline std::string shellIntegrationInstalledText(platform::RcInstall result,
+                                                               std::string_view rc,
+                                                               std::string_view shell)
 {
-    return std::format("Added shell integration to {}. New {} sessions show command blocks.",
-                       detail::shownText(rc),
-                       detail::shownText(shell));
+    auto const shownRc = detail::shownText(rc);
+    auto const shownShell = detail::shownText(shell);
+    return std::vformat(ShellIntegrationInstalledPatterns[std::to_underlying(result)],
+                        std::make_format_args(shownRc, shownShell));
 }
 
 /// "~/.zshrc was not changed: the file could not be written.", or, for an error that may have changed the

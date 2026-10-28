@@ -475,7 +475,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                        ? std::move(shellIntegration.editor)
                        : std::make_unique<platform::FileShellRcEditor>(
                              _fileSystem, env, _hostPlatform, platform::currentRunningAs())),
-    _contourBinary(std::move(shellIntegration.contourBinary))
+    _contourBinary(std::move(shellIntegration.contourBinary)),
+    _binaryEnvironment(window::binaryEnvironmentOf(env))
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
@@ -497,11 +498,13 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
              .tuning = {} };
 }
 
-std::filesystem::path ContourGuiApp::contourBinaryPath() const
+window::LocatedBinary ContourGuiApp::locatedContourBinary() const
 {
     if (!_contourBinary.empty())
-        return _contourBinary;
-    return std::filesystem::path { QCoreApplication::applicationFilePath().toStdU16String() };
+        return { .path = _contourBinary, .reach = window::BinaryReach::Reachable };
+    return window::locateBinary(
+        _binaryEnvironment,
+        std::filesystem::path { QCoreApplication::applicationFilePath().toStdU16String() });
 }
 
 std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexcept
@@ -2981,6 +2984,11 @@ window::SettingsController& ContourGuiApp::settingsController()
                 .gpuInventory = _gpuInventory,
                 .fontFamilies = std::make_shared<platform::QtFontFamilySource>(),
                 .scheduler = std::make_shared<window::QtSaveScheduler>(),
+                // The Shell Integration page's Install rows go through the editor the pane's card uses.
+                .shell = { .editor = _shellRcEditor.get(),
+                           .contourBinary = [this] { return locatedContourBinary(); },
+                           .host = _hostPlatform,
+                           .homeDirectory = std::filesystem::path { QDir::homePath().toStdString() } },
             },
             _colorPreference);
         QObject::connect(

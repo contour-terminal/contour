@@ -14,6 +14,7 @@
 #include <core/Environment.hpp>
 #include <core/platform/FileSystem.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -117,11 +118,34 @@ inline constexpr auto RcEnvironmentVariables = std::array { ZDotDirVariable, Xdg
 /// reads its files from where its own environment says. An empty value means "unset for that shell".
 using RcEnvironment = std::map<std::string, std::string, std::less<>>;
 
+/// What a shell started with @p env and without @p removed has for RcEnvironment: its own entries for the
+/// variables a startup file's location depends on, and an empty value for one it drops from the inherited
+/// environment.
+/// @param env The shell's own `env` entries.
+/// @param removed Variables the shell must not inherit.
+/// @return The RcEnvironment of that shell.
+template <typename Env, typename Removed>
+[[nodiscard]] RcEnvironment rcEnvironmentOf(Env const& env, Removed const& removed)
+{
+    auto result = RcEnvironment {};
+    for (auto const name: RcEnvironmentVariables)
+    {
+        if (auto const set = env.find(std::string { name }); set != env.end())
+            result.insert_or_assign(std::string { name }, set->second);
+        else if (std::ranges::contains(removed, name))
+            result.insert_or_assign(std::string { name }, std::string {});
+    }
+    return result;
+}
+
 /// What inspecting a shell's startup file found.
 struct RcInspection
 {
     std::filesystem::path file {};                    ///< The startup file, as the shell names it.
     config::RcState state = config::RcState::Unknown; ///< Whether it loads Contour's integration.
+    /// The file's last line, which is what a cut-short install left behind and the user must delete; empty
+    /// unless @c state is config::RcState::Partial.
+    std::string partialLine {};
 
     [[nodiscard]] bool operator==(RcInspection const&) const = default;
 };

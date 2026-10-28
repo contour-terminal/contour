@@ -4,12 +4,15 @@
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/window/ColorContrastReadout.hpp>
+#include <contour/window/NoticeQueue.hpp>
 #include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsFields.hpp>
 #include <contour/window/SettingsSearch.hpp>
 #include <contour/window/SettingsSections.hpp>
+#include <contour/window/ShellInstallRows.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
@@ -957,6 +960,7 @@ void SettingsController::refresh()
         _fontFamilies.push_back(QString::fromStdString(family));
     _linkGesture =
         QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
+    listShellRows();
 
     // gui_config_locked configures the session rather than changing its state, so a change of it starts a
     // new one. Not here and now: refresh() runs inside the session's own reload. What the old session had
@@ -1592,6 +1596,110 @@ namespace
         return QStringLiteral("global");
     }
 } // namespace
+
+std::expected<platform::RcInspection, platform::ShellRcError> SettingsController::inspectShell(
+    config::ShellKind shell) const
+{
+    return _services.shell.editor->inspect(shell, rcEnvironment());
+}
+
+platform::RcEnvironment SettingsController::rcEnvironment() const
+{
+    auto const* const profile = _config().findProfile(_config().defaultProfileName.value());
+    if (profile == nullptr)
+        return {};
+    auto const& shell = profile->shell.value();
+    return platform::rcEnvironmentOf(shell.env, shell.removedEnvironment);
+}
+
+InstallBlock SettingsController::installBlock() const
+{
+    auto const reach =
+        _services.shell.contourBinary ? _services.shell.contourBinary().reach : BinaryReach::Unreachable;
+    return installBlockOf(_services.shell.host, reach);
+}
+
+void SettingsController::listShellRows()
+{
+    _shellRows.clear();
+    if (_services.shell.editor != nullptr)
+    {
+        auto const block = installBlock();
+        for (auto const& shell: config::ShellRows)
+        {
+            auto const row =
+                shellInstallRowOf(shell, inspectShell(shell.kind), _services.shell.homeDirectory, block);
+            _shellRows.push_back(QVariantMap {
+                { QStringLiteral("shell"), static_cast<int>(row.shell) },
+                { QStringLiteral("name"), toQString(row.name) },
+                { QStringLiteral("status"), toQString(row.status) },
+                { QStringLiteral("deleteLine"), toQString(row.deleteLine) },
+                { QStringLiteral("canInstall"), row.install == InstallOffer::Yes },
+            });
+        }
+    }
+    emit shellIntegrationRowsChanged();
+}
+
+QString SettingsController::shellIntegrationLine(int shell) const
+{
+    if (!_services.shell.contourBinary)
+        return {};
+    auto const line =
+        shellRcLine(static_cast<config::ShellKind>(shell), _services.shell.contourBinary().path);
+    return line ? toQString(*line) : QString {};
+}
+
+QString SettingsController::shellIntegrationRcPath(int shell) const
+{
+    auto const kind = static_cast<config::ShellKind>(shell);
+    if (_services.shell.editor == nullptr || config::shellRow(kind) == nullptr)
+        return {};
+    auto const inspection = inspectShell(kind);
+    if (!inspection || inspection->file.empty())
+        return {};
+    return toQString(displayRcPath(inspection->file, _services.shell.homeDirectory));
+}
+
+QVariantMap SettingsController::shellIntegrationConfirm(int shell) const
+{
+    auto const* const row = config::shellRow(static_cast<config::ShellKind>(shell));
+    if (row == nullptr)
+        return {};
+    auto const rc = shellIntegrationRcPath(shell).toStdString();
+    auto const line = shellIntegrationLine(shell).toStdString();
+    auto const& words = CardStageRows[std::to_underlying(CardStage::Confirm)];
+    return QVariantMap {
+        { QStringLiteral("title"), toQString(cardText(words.title, row->name, rc, line)) },
+        { QStringLiteral("line"), toQString(cardText(words.body, row->name, rc, line)) },
+        { QStringLiteral("primary"), toQString(words.primary) },
+        { QStringLiteral("secondary"), toQString(words.secondary) },
+    };
+}
+
+void SettingsController::installShellIntegration(int shell)
+{
+    auto const kind = static_cast<config::ShellKind>(shell);
+    if (_services.shell.editor == nullptr || config::shellRow(kind) == nullptr)
+        return;
+    if (auto const block = installBlock(); block != InstallBlock::None)
+    {
+        emit errorOccurred(toQString(InstallBlockRows[std::to_underlying(block)].text));
+        return;
+    }
+    auto const line = shellIntegrationLine(shell).toStdString();
+    if (line.empty())
+    {
+        emit errorOccurred(
+            tr("Shell integration could not be added: the path of this Contour is not usable."));
+        return;
+    }
+    // Named before the write, as the toast names it: the file the editor is about to append to.
+    auto const rc = shellIntegrationRcPath(shell).toStdString();
+    if (auto const installed = _services.shell.editor->install(kind, line, rcEnvironment()); !installed)
+        emit errorOccurred(toQString(shellIntegrationFailedText(rc, installed.error())));
+    listShellRows();
+}
 
 QVariantList SettingsController::sections() const
 {

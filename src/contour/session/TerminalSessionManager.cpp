@@ -829,16 +829,8 @@ namespace
     /// environment. The command override of a one-off pane is not visible here.
     [[nodiscard]] platform::RcEnvironment rcEnvironmentOf(TerminalSession const& session)
     {
-        auto const& shell = session.profile().shell.value();
-        auto result = platform::RcEnvironment {};
-        for (auto const name: platform::RcEnvironmentVariables)
-        {
-            if (auto const set = shell.env.find(std::string { name }); set != shell.env.end())
-                result.insert_or_assign(std::string { name }, set->second);
-            else if (std::ranges::contains(shell.removedEnvironment, name))
-                result.insert_or_assign(std::string { name }, std::string {});
-        }
-        return result;
+        return platform::rcEnvironmentOf(session.profile().shell.value().env,
+                                         session.profile().shell.value().removedEnvironment);
     }
 } // namespace
 
@@ -860,22 +852,23 @@ void TerminalSessionManager::offerShellIntegration(TerminalSession& session, con
         if (std::ranges::contains(state->dismissedShellIntegrations, shell))
             dismissal = window::OfferDismissal::Dismissed;
 
+    auto const binary = _app.locatedContourBinary();
     auto const offer =
         window::offerFor({ .shell = shell,
                            .locality = _app.attachedHostLabel().empty() ? window::RcLocality::ThisMachine
                                                                         : window::RcLocality::Remote,
                            .host = _app.hostPlatform(),
+                           .binary = binary.reach,
                            .dismissal = dismissal,
                            .rc = inspection->state,
                            .slot = _shellCardSlot });
     if (offer != window::ShellIntegrationOffer::Card)
         return;
 
-    auto line = window::shellRcLine(shell, _app.contourBinaryPath());
+    auto line = window::shellRcLine(shell, binary.path);
     if (!line)
     {
-        managerLog()("Not offering shell integration: no safe line for {}.",
-                     _app.contourBinaryPath().string());
+        managerLog()("Not offering shell integration: no safe line for {}.", binary.path.string());
         return;
     }
     _shellCardSlot = window::CardSlot::Taken;
@@ -895,9 +888,10 @@ std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManage
         rc = window::displayRcPath(inspection->file, _homeDirectory);
 
     if (installed)
-        postNotice(window::Notice { .kind = window::NoticeKind::ShellIntegrationAdded,
-                                    .text = window::shellIntegrationAddedText(rc, shellName) },
-                   &session);
+        postNotice(
+            window::Notice { .kind = window::NoticeKind::ShellIntegrationAdded,
+                             .text = window::shellIntegrationInstalledText(*installed, rc, shellName) },
+            &session);
     else
         postNotice(window::Notice { .kind = window::NoticeKind::ShellIntegrationFailed,
                                     .text = window::shellIntegrationFailedText(rc, installed.error()) },

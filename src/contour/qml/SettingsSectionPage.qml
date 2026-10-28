@@ -31,6 +31,147 @@ SettingsGroupsPage {
     onCommitted: (key, value) => root.controller.commitGlobalField(key, value)
     onResetRequested: key => root.controller.commitGlobalReset(key)
 
+    // The Shell Integration section's Install rows: one per shell, what its startup file is, and an Install…
+    // that asks before adding the line.
+    readonly property var _shellRows: root.sectionId === "shell-integration" && root.controller
+                                      ? root.controller.shellIntegrationRows : []
+
+    /// Asks whether to add the line that loads Contour's integration to @p shell's startup file.
+    function askInstall(shell) {
+        installDialog.shell = shell;
+        installDialog.confirm = root.controller.shellIntegrationConfirm(shell);
+        installDialog.open();
+    }
+
+    KitDialog {
+        id: installDialog
+        objectName: "shellInstallDialog"
+        /// The config::ShellKind the dialog is about.
+        property int shell: -1
+        /// What the question says: { title, line, primary, secondary }.
+        property var confirm: ({})
+        heading: installDialog.confirm.title !== undefined ? installDialog.confirm.title : ""
+        acceptText: installDialog.confirm.primary !== undefined ? installDialog.confirm.primary : ""
+        rejectText: installDialog.confirm.secondary !== undefined ? installDialog.confirm.secondary : ""
+        description: installDialog.heading
+        onAccepted: if (root.controller) root.controller.installShellIntegration(installDialog.shell)
+        bodyData: [
+            // The line itself, as it will be written, in the terminal's font: what is added is read before it
+            // is.
+            Label {
+                objectName: "shellInstallLine"
+                Layout.fillWidth: true
+                text: installDialog.confirm.line !== undefined ? installDialog.confirm.line : ""
+                font.family: root.controller && root.controller.fontFamilies.length > 0
+                             ? root.controller.fontFamilies[0] : chromeStyle.type.body.family
+                font.pixelSize: chromeStyle.type.footnote.pixelSize
+                color: chromeStyle.colors.settingsLabel
+                wrapMode: Text.WrapAnywhere
+                textFormat: Text.PlainText
+            }
+        ]
+    }
+
+    header: [
+        // What each shell's startup file holds, and the way to add Contour's integration to it.
+        SettingsGroup {
+            objectName: "shellInstallGroup"
+            Layout.fillWidth: true
+            visible: root._shellRows.length > 0
+            title: qsTr("Install")
+
+            Repeater {
+                model: root._shellRows
+
+                delegate: Item {
+                    id: shellRow
+                    required property var modelData
+                    required property int index
+                    objectName: "shellInstallRow:" + shellRow.modelData.name
+                    Layout.fillWidth: true
+                    implicitHeight: Math.max(chromeStyle.settings.row,
+                                             shellTexts.implicitHeight + 2 * chromeStyle.space.s4)
+
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: shellRow.modelData.name + ", " + shellRow.modelData.status
+
+                    // Under the row, where the group is one card.
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: chromeStyle.settings.rowPadding
+                        height: chromeStyle.borderWidth
+                        visible: shellRow.index < root._shellRows.length - 1
+                                 && chromeStyle.settingsTraits.rows === chromeStyle.settingsTraits.grouped
+                        color: chromeStyle.colors.settingsSeparator
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: chromeStyle.settings.rowPadding
+                        anchors.rightMargin: chromeStyle.settings.rowPadding
+                        spacing: chromeStyle.space.s6
+
+                        ColumnLayout {
+                            id: shellTexts
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 0
+
+                            Label {
+                                objectName: "shellInstallName"
+                                Layout.fillWidth: true
+                                text: shellRow.modelData.name
+                                font: chromeStyle.type.body
+                                color: chromeStyle.colors.settingsLabel
+                                textFormat: Text.PlainText
+                                Accessible.ignored: true
+                            }
+                            Label {
+                                objectName: "shellInstallStatus"
+                                Layout.fillWidth: true
+                                text: shellRow.modelData.status
+                                font: chromeStyle.type.footnote
+                                color: chromeStyle.colors.settingsHelp
+                                wrapMode: Text.Wrap
+                                textFormat: Text.PlainText
+                                Accessible.ignored: true
+                            }
+                            // A cut-short install: the very line to delete, as the file holds it.
+                            Label {
+                                objectName: "shellInstallDeleteLine"
+                                Layout.fillWidth: true
+                                visible: shellRow.modelData.deleteLine.length > 0
+                                text: shellRow.modelData.deleteLine
+                                font.family: root.controller && root.controller.fontFamilies.length > 0
+                                             ? root.controller.fontFamilies[0] : chromeStyle.type.body.family
+                                font.pixelSize: chromeStyle.type.footnote.pixelSize
+                                color: chromeStyle.colors.settingsLabel
+                                wrapMode: Text.WrapAnywhere
+                                textFormat: Text.PlainText
+                                Accessible.name: qsTr("Line to delete: %1").arg(text)
+                            }
+                        }
+
+                        Button {
+                            objectName: "shellInstallButton:" + shellRow.modelData.name
+                            Layout.alignment: Qt.AlignVCenter
+                            visible: shellRow.modelData.canInstall === true
+                            enabled: root.editable
+                            flat: true
+                            text: qsTr("Install…")
+                            font: chromeStyle.type.footnote
+                            palette.buttonText: chromeStyle.colors.settingsLabel
+                            Accessible.name: qsTr("Install shell integration for %1").arg(shellRow.modelData.name)
+                            onClicked: root.askInstall(shellRow.modelData.shell)
+                        }
+                    }
+                }
+            }
+        }
+    ]
+
     footer: [
         // The pages of their own this section links to.
         SettingsGroup {

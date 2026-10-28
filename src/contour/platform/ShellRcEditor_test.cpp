@@ -601,6 +601,28 @@ TEST_CASE("ShellRcEditor: what an append cut short left behind decides which err
     CHECK(append("export A=1\nif [ \"$TERM", 0) == ShellRcError::PartialWrite);
 }
 
+TEST_CASE("ShellRcEditor: a cut-short install is inspected with the line to delete", "[shellrc]")
+{
+    for (auto const shell: { ShellKind::Bash, ShellKind::Zsh, ShellKind::Fish })
+    {
+        auto const line = contour::window::shellRcLine(shell, "/usr/bin/contour").value();
+        auto rig = Rig {};
+        auto const rc = rig.editor.inspect(shell, noSession)->file;
+        auto const cut = line.substr(0, line.size() / 2);
+        rig.disk.files.addFile(rc, "export A=1\n" + cut);
+
+        auto const inspected = rig.editor.inspect(shell, noSession);
+        REQUIRE(inspected.has_value());
+        CHECK(inspected->state == RcState::Partial);
+        CHECK(inspected->partialLine == cut);
+
+        // Only a cut-short install carries a line to delete.
+        auto clean = Rig {};
+        clean.disk.files.addFile(rc, "export A=1\n");
+        CHECK(clean.editor.inspect(shell, noSession)->partialLine.empty());
+    }
+}
+
 TEST_CASE("rcStateOf: an unterminated last line that is a prefix of Contour's line is Partial", "[shellrc]")
 {
     CHECK(rcStateOf(ShellKind::Zsh, "export A=1\nif [ \"$TERM_PROGRAM\" = contour ]; then eval \"$('/x/c")

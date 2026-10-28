@@ -30,6 +30,7 @@
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -540,8 +541,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] platform::IShellRcEditor& shellRcEditor() noexcept { return *_shellRcEditor; }
 
     /// The running binary, as the line in a shell's startup file names it.
-    /// @return The injected path, else `QCoreApplication::applicationFilePath()`.
-    [[nodiscard]] std::filesystem::path contourBinaryPath() const;
+    /// @return The injected path (Reachable), else window::locateBinary() over this process's environment
+    ///         and `QCoreApplication::applicationFilePath()`: an AppImage's file, not its mount.
+    [[nodiscard]] window::LocatedBinary locatedContourBinary() const;
 
     /// The host this process runs on, which decides where bash keeps its startup file.
     [[nodiscard]] config::HostPlatform hostPlatform() const noexcept { return _hostPlatform; }
@@ -1187,6 +1189,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// @see ShellIntegrationServices::contourBinary
     std::filesystem::path _contourBinary;
+    /// Where the binary lives, read once from the environment at construction.
+    window::BinaryEnvironment _binaryEnvironment;
 
     // The application's menu bar, under a global placement alone. Built with the QML engine, once a
     // QApplication exists, and released with it.

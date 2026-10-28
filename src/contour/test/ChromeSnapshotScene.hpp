@@ -25,6 +25,7 @@
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/RecordingShellRcEditor.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -1037,6 +1038,24 @@ class ChromeSnapshotScene
 
     /// The settings page's controller over a store in a temporary directory, or null unless @p surface
     /// is the Settings window.
+    /// What the Settings snapshot's shells say about their startup files: one integrated, one not, one with
+    /// an install that was cut short, so the page shows every look of an Install row.
+    [[nodiscard]] static RecordingShellRcEditor::Inspections scriptedShellFiles()
+    {
+        auto const home = std::filesystem::path { SnapshotHomeDirectory };
+        return {
+            { config::ShellKind::Zsh,
+              platform::RcInspection { .file = home / ".zshrc", .state = config::RcState::Installed } },
+            { config::ShellKind::Bash,
+              platform::RcInspection { .file = home / ".bashrc", .state = config::RcState::Absent } },
+            { config::ShellKind::Fish,
+              platform::RcInspection { .file = home / ".config/fish/config.fish",
+                                       .state = config::RcState::Partial,
+                                       .partialLine =
+                                           R"(if test "$TERM_PROGRAM" = contour; '/usr/bin/co)" } },
+        };
+    }
+
     [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(SnapshotSurface surface)
     {
         switch (surface)
@@ -1054,6 +1073,15 @@ class ChromeSnapshotScene
                         .reload = [] { return std::expected<void, std::string> {}; },
                         .gpuInventory = nullptr,
                         .scheduler = std::make_shared<ManualSaveScheduler>(),
+                        .shell = { .editor = &_shellEditor,
+                                   .contourBinary =
+                                       [] {
+                                           return window::LocatedBinary {
+                                               .path = std::filesystem::path { SnapshotContourBinary },
+                                               .reach = window::BinaryReach::Reachable
+                                           };
+                                       },
+                                   .homeDirectory = SnapshotHomeDirectory },
                     },
                     vtbackend::ColorPreference::Dark);
         }
@@ -1360,6 +1388,9 @@ class ChromeSnapshotScene
     QTemporaryDir _settingsDir;
     config::Config _settingsConfig;       ///< What the Settings controller edits (seedSettingsConfig()).
     InMemoryGuiStateStore _settingsState; ///< What the Settings window remembers: nothing, in a snapshot.
+    /// The shells' startup files, as the Install rows show them (scriptedShellFiles()). Declared before
+    /// _settings, which borrows it.
+    RecordingShellRcEditor _shellEditor { scriptedShellFiles() };
     std::unique_ptr<window::SettingsController> _settings;
     MockMainController _controller;
     MockNewDefaultsNotice _newDefaults;

@@ -6,7 +6,9 @@
 #include <contour/config/SettingsEditSession.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/platform/FontFamilySource.hpp>
+#include <contour/platform/ShellRcEditor.hpp>
 #include <contour/window/SettingsSections.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
@@ -16,6 +18,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -25,6 +28,22 @@
 
 namespace contour::window
 {
+
+/// What the Shell Integration page's Install rows reach: the shells' startup files, and what the line added
+/// to one runs. Fixed at construction.
+struct SettingsShellServices
+{
+    /// Reads and appends to the shells' startup files, as the card in a pane does. Borrowed: it outlives the
+    /// controller. Null lists no Install row.
+    platform::IShellRcEditor* editor = nullptr;
+    /// The running binary the added line runs, and whether a later shell finds it there. Called when a row
+    /// or its line is asked for; null lists no line and no Install.
+    std::function<LocatedBinary()> contourBinary {};
+    /// The host, which decides with the binary whether Install is offered (installBlockOf()).
+    config::HostPlatform host = config::HostPlatform::Other;
+    /// The home directory, which a startup file under it is shown relative to as `~`.
+    std::filesystem::path homeDirectory {};
+};
 
 /// What a SettingsController reaches the outside world through, fixed at construction.
 struct SettingsControllerServices
@@ -41,6 +60,8 @@ struct SettingsControllerServices
     std::shared_ptr<platform::IFontFamilySource const> fontFamilies {};
     /// Runs the debounced save: a QtSaveScheduler in the app, a hand-fired one in tests.
     std::shared_ptr<config::SaveScheduler> scheduler {};
+    /// The Shell Integration page's Install rows.
+    SettingsShellServices shell {};
 };
 
 /// The editable bridge between the GUI settings page and the configuration.
@@ -107,6 +128,13 @@ class SettingsController: public QObject
     /// { kind: "profile", name, origin, editable, isDefault, tabColor ("#rrggbb", or empty for none) }, then
     /// { kind: "edit", title: "Edit contour.yml…" }.
     Q_PROPERTY(QVariantList sidebar READ sidebar NOTIFY changed)
+
+    /// The Shell Integration page's Install rows, one QVariantMap per shell in config::ShellRows order: {
+    /// shell (a config::ShellKind), name, status (what its startup file is, see window::ShellStatusRows),
+    /// deleteLine (the cut-short line to delete, empty unless the install was cut short), canInstall (a
+    /// QML-facing bool: Install... is offered) }. Empty without an editor. Listed by refresh() and after an
+    /// install.
+    Q_PROPERTY(QVariantList shellIntegrationRows READ shellIntegrationRows NOTIFY shellIntegrationRowsChanged)
 
     /// The monospace font families the font picker lists, the bundled one first; listed by refresh().
     Q_PROPERTY(QStringList fontFamilies READ fontFamilies NOTIFY changed)
@@ -227,6 +255,30 @@ class SettingsController: public QObject
     }
     [[nodiscard]] QVariantList sidebar() const;
     [[nodiscard]] QStringList fontFamilies() const { return _fontFamilies; }
+    [[nodiscard]] QVariantList shellIntegrationRows() const { return _shellRows; }
+
+    /// The line that an install of @p shell adds to its startup file, which the confirmation shows.
+    /// @param shell A config::ShellKind.
+    /// @return The line; empty for no shell, without a binary path, or one no line can be made for.
+    Q_INVOKABLE [[nodiscard]] QString shellIntegrationLine(int shell) const;
+
+    /// The startup file an install of @p shell appends to, as the user would say it.
+    /// @param shell A config::ShellKind.
+    /// @return The path; empty for no shell, or when the file cannot be named (its row says why).
+    Q_INVOKABLE [[nodiscard]] QString shellIntegrationRcPath(int shell) const;
+
+    /// What the confirmation of an install says, in the words of the card's Confirm stage
+    /// (window::CardStageRows).
+    /// @param shell A config::ShellKind.
+    /// @return { title, line, primary, secondary }: the question naming the file, the line to add, and the
+    ///         labels of the accept and reject buttons; empty for no shell.
+    Q_INVOKABLE [[nodiscard]] QVariantMap shellIntegrationConfirm(int shell) const;
+
+    /// Adds the shell integration line to @p shell's startup file, once, through the editor the card uses, so
+    /// with the same refusals (superuser, a file that changed meanwhile, a cut-short earlier install). A
+    /// refusal is reported through errorOccurred in the toast's words; either way the rows are listed again.
+    /// @param shell A config::ShellKind; none other is installed.
+    Q_INVOKABLE void installShellIntegration(int shell);
 
     /// The rows @p query finds, as matchSettings() orders them: the open profile's fields, then the globals.
     /// @param query What was typed into the search field.
@@ -444,10 +496,29 @@ class SettingsController: public QObject
     /// @ref schemeDraftChanged so the editor's name field can re-seed on an identity change without being
     /// wiped every time the user adjusts a color while typing a new name.
     void editingSchemeChanged();
+    /// shellIntegrationRows() changed.
+    void shellIntegrationRowsChanged();
     /// A user-facing error occurred (e.g. a write failed); @p message is human-readable.
     void errorOccurred(QString const& message);
 
   private:
+    /// Lists the Install rows anew from what the editor finds, and tells the page.
+    void listShellRows();
+
+    /// @param shell The shell. The editor must be set.
+    /// @return What the editor finds for @p shell, with the default profile's environment: the one the pane's
+    ///         card reads, so both name the same file.
+    [[nodiscard]] std::expected<platform::RcInspection, platform::ShellRcError> inspectShell(
+        config::ShellKind shell) const;
+
+    /// @return What the default profile's shell is started with that decides where a startup file lives
+    ///         (platform::rcEnvironmentOf()); empty when the profile is not in the configuration.
+    [[nodiscard]] platform::RcEnvironment rcEnvironment() const;
+
+    /// @return What stops Install on this host and binary (installBlockOf()); a missing binary source is
+    ///         an unreachable binary.
+    [[nodiscard]] InstallBlock installBlock() const;
+
     /// The origin of @p name among the current profiles, defaulting to Builtin if unknown.
     [[nodiscard]] config::SettingsOrigin profileOrigin(std::string const& name) const;
     /// Whether a GUI-owned side file @c colorschemes/<name>.yml exists, as the store reads it. This is the
@@ -582,6 +653,7 @@ class SettingsController: public QObject
     vtbackend::ColorPreference _appearance;   ///< Which scheme of a light/dark profile the previews use.
     std::vector<display::GpuCandidate> _gpus; ///< Listed by refresh(), not on every property read.
     QStringList _fontFamilies;                ///< Listed by refresh(), not on every property read.
+    QVariantList _shellRows;                  ///< Listed by listShellRows(), not on every property read.
     /// Forwards to _services.scheduler, telling the page after each debounced flush. Declared before
     /// _session, which borrows it.
     std::unique_ptr<config::SaveScheduler> _scheduler;

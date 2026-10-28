@@ -98,8 +98,8 @@ enum class SnapshotScript : uint8_t
     SettingsColorSchemes,     //!< The Settings window on the colour schemes page of `work`.
     SettingsLinkPatterns,     //!< The Settings window on the link patterns page of `work`.
     SettingsStatusLine,       //!< The Settings window on the status line page of `work`.
-    ShellIntegrationOffer,   //!< One pane with the shell integration card on its offer.
-    ShellIntegrationConfirm, //!< One pane with the card showing the line it would add.
+    ShellIntegrationOffer,    //!< One pane with the shell integration card on its offer.
+    ShellIntegrationConfirm,  //!< One pane with the card showing the line it would add.
 };
 
 /// How a script's active tab is divided into panes.
@@ -258,6 +258,11 @@ enum class SnapshotShellCard : uint8_t
 /// The line the Confirm snapshot shows on the card, and the startup file it names.
 inline constexpr std::string_view SnapshotShellCardLine =
     "[ \"$TERM_PROGRAM\" = contour ] && source <(/usr/bin/contour generate integration shell zsh)";
+
+/// The binary the Install rows of the Settings snapshot's lines run, and the home their startup files are
+/// shown relative to.
+inline constexpr std::string_view SnapshotContourBinary = "/usr/bin/contour";
+inline constexpr std::string_view SnapshotHomeDirectory = "/home/me";
 
 /// What one pane of a script's tab runs, as its header names it.
 struct SnapshotPaneLabel
@@ -436,7 +441,7 @@ struct SnapshotScriptRow
     SnapshotBlocks blocks = SnapshotBlocks::None;             ///< Whether the sample command block shows.
     /// The page the Settings window opens on; None for every script of the terminal window.
     SnapshotSettingsPage settingsPage = SnapshotSettingsPage::None;
-    SnapshotShellCard shellCard = SnapshotShellCard::None;    ///< The active pane's shell integration card.
+    SnapshotShellCard shellCard = SnapshotShellCard::None; ///< The active pane's shell integration card.
 };
 
 /// The rows of the script table, in enumerator order.

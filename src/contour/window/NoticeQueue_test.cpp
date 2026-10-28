@@ -94,8 +94,10 @@ TEST_CASE("Notice texts", "[notices]")
     CHECK(dropRefusedText(DropTextError::UnknownShell, DropSubject::NameOrLink)
               .starts_with("Not inserted: a name holds"));
     CHECK(dropRefusedText(DropTextError::NoPaths, DropSubject::FileName).empty());
-    CHECK(shellIntegrationAddedText("~/.zshrc", "zsh")
+    CHECK(shellIntegrationInstalledText(contour::platform::RcInstall::Appended, "~/.zshrc", "zsh")
           == "Added shell integration to ~/.zshrc. New zsh sessions show command blocks.");
+    CHECK(shellIntegrationInstalledText(contour::platform::RcInstall::AlreadyInstalled, "~/.zshrc", "zsh")
+          == "Shell integration was already in ~/.zshrc. New zsh sessions show command blocks.");
     CHECK(shellIntegrationFailedText("~/.zshrc", contour::platform::ShellRcError::Unwritable)
           == "~/.zshrc was not changed: the file could not be written.");
     CHECK(shellIntegrationFailedText("~/.zshrc", contour::platform::ShellRcError::PartialWrite)

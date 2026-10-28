@@ -3,12 +3,14 @@
 #include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <core/Utils.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <filesystem>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -28,6 +30,7 @@ constexpr OfferInputs AllYes {
     .shell = ShellKind::Zsh,
     .locality = RcLocality::ThisMachine,
     .host = HostPlatform::MacOS,
+    .binary = BinaryReach::Reachable,
     .dismissal = OfferDismissal::Open,
     .rc = RcState::Absent,
     .slot = CardSlot::Free,
@@ -133,6 +136,10 @@ TEST_CASE("offerFor.everyFieldFlippedOnceGivesNone", "[shellintegration]")
     host.host = HostPlatform::Windows;
     CHECK(offerFor(host) == ShellIntegrationOffer::None);
 
+    auto binary = AllYes;
+    binary.binary = BinaryReach::Unreachable;
+    CHECK(offerFor(binary) == ShellIntegrationOffer::None);
+
     auto dismissal = AllYes;
     dismissal.dismissal = OfferDismissal::Dismissed;
     CHECK(offerFor(dismissal) == ShellIntegrationOffer::None);
@@ -160,6 +167,55 @@ TEST_CASE("offerFor.everyNonWindowsHostOffers", "[shellintegration]")
         in.host = host;
         CHECK(offerFor(in) == ShellIntegrationOffer::Card);
     }
+}
+
+static_assert(InstallBlockRows.size() == std::to_underlying(InstallBlock::BinaryUnreachable) + 1U);
+
+TEST_CASE("locateBinary.aPlainInstallNamesTheRunningFile", "[shellintegration]")
+{
+    auto const located = locateBinary({}, "/usr/bin/contour");
+    CHECK(located.path == std::filesystem::path { "/usr/bin/contour" });
+    CHECK(located.reach == BinaryReach::Reachable);
+}
+
+TEST_CASE("locateBinary.anAppImageNamesItsFileNotItsMount", "[shellintegration]")
+{
+    auto const located =
+        locateBinary({ .appImage = "/home/me/Contour.AppImage" }, "/tmp/.mount_abc/usr/bin/contour");
+    CHECK(located.path == std::filesystem::path { "/home/me/Contour.AppImage" });
+    CHECK(located.reach == BinaryReach::Reachable);
+}
+
+TEST_CASE("locateBinary.aFlatpakHasNoPathAShellOnTheHostCanRun", "[shellintegration]")
+{
+    // Even when an AppImage variable is somehow set too: the sandbox decides.
+    for (auto const& appImage: { std::string {}, std::string { "/home/me/Contour.AppImage" } })
+    {
+        auto const located = locateBinary(
+            { .appImage = appImage, .flatpakId = "org.contourterminal.Contour" }, "/app/bin/contour");
+        CHECK(located.reach == BinaryReach::Unreachable);
+    }
+}
+
+TEST_CASE("binaryEnvironmentOf.readsTheTwoVariablesFromTheInjectedEnvironment", "[shellintegration]")
+{
+    auto const none = binaryEnvironmentOf(core::testing::FakeEnvironment {});
+    CHECK(none.appImage.empty());
+    CHECK(none.flatpakId.empty());
+    auto const both = binaryEnvironmentOf(
+        core::testing::FakeEnvironment { { { "APPIMAGE", "/a.AppImage" }, { "FLATPAK_ID", "org.x" } } });
+    CHECK(both.appImage == "/a.AppImage");
+    CHECK(both.flatpakId == "org.x");
+}
+
+TEST_CASE("installBlockOf.windowsThenAnUnreachableBinary", "[shellintegration]")
+{
+    CHECK(installBlockOf(HostPlatform::Other, BinaryReach::Reachable) == InstallBlock::None);
+    CHECK(installBlockOf(HostPlatform::Windows, BinaryReach::Reachable) == InstallBlock::WindowsHost);
+    CHECK(installBlockOf(HostPlatform::Other, BinaryReach::Unreachable) == InstallBlock::BinaryUnreachable);
+    CHECK(installBlockOf(HostPlatform::Windows, BinaryReach::Unreachable) == InstallBlock::WindowsHost);
+    for (auto const& row: InstallBlockRows)
+        CHECK((row.block == InstallBlock::None) == row.text.empty());
 }
 
 TEST_CASE("shellRcLine.quotesThePathForTheShellsSyntax", "[shellintegration]")

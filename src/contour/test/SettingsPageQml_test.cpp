@@ -23,6 +23,7 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
@@ -2912,3 +2913,240 @@ TEST_CASE("every ink of the Links page reads on what it sits on, on every row, s
           >= MarkContrast);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+// {{{ Shell Integration: the Install rows
+namespace
+{
+using config::RcState;
+using config::ShellKind;
+using platform::RcInspection;
+using platform::ShellRcError;
+
+/// The home the scripted startup files are under, as the fixture's controller shows them.
+[[nodiscard]] std::filesystem::path shellHome()
+{
+    return "/home/me";
+}
+
+/// Scripts the editor: zsh installed, bash absent, fish unreadable. The page lists them again.
+void scriptShells(PageFixture& fx)
+{
+    fx.shellEditor.inspections[ShellKind::Zsh] =
+        RcInspection { .file = shellHome() / ".zshrc", .state = RcState::Installed };
+    fx.shellEditor.inspections[ShellKind::Bash] =
+        RcInspection { .file = shellHome() / ".bashrc", .state = RcState::Absent };
+    fx.shellEditor.inspections[ShellKind::Fish] = std::unexpected(ShellRcError::Unreadable);
+    fx.controller->refresh();
+    fx.settle();
+}
+
+/// @return The text of the label @p name inside the row of shell @p shell.
+[[nodiscard]] QString shellRowText(PageFixture const& fx, char const* shell, char const* name)
+{
+    auto const* row = fx.byName(QStringLiteral("shellInstallRow:") + QLatin1String(shell));
+    REQUIRE(row != nullptr);
+    return required(
+               findDescendant(
+                   *row, [name](QQuickItem const& item) { return item.objectName() == QLatin1String(name); }))
+        .property("text")
+        .toString();
+}
+} // namespace
+
+TEST_CASE("the Shell Integration page opens on its Install group, one row per shell",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    auto const row = GENERATE(config::ChromeStyle::ContourLinux, config::ChromeStyle::Terminal);
+    INFO("row: " << static_cast<int>(row));
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    scriptShells(fx);
+    auto window = fx.activeWindow(QSize(1000, 900));
+    REQUIRE(fx.open("section:shell-integration"));
+
+    // The Install group is the section's first: above the gutter's.
+    auto const* install = fx.byName("shellInstallGroup");
+    REQUIRE(install != nullptr);
+    CHECK(install->isVisible());
+    auto const* gutter = fx.byName(QStringLiteral("settingsGroup:")
+                                   + QString::number(std::to_underlying(window::SettingsGroup::ShellGutter)));
+    REQUIRE(gutter != nullptr);
+    // Laid out once the window has had a frame.
+    auto const topOf = [&fx](QQuickItem const* item) {
+        return item->mapToItem(fx.item(), QPointF {}).y();
+    };
+    REQUIRE(QTest::qWaitFor([&] { return topOf(install) < topOf(gutter); }, 2000));
+
+    // A row for each shell, saying what its startup file is.
+    CHECK(shellRowText(fx, "zsh", "shellInstallStatus") == "Installed in ~/.zshrc");
+    CHECK(shellRowText(fx, "bash", "shellInstallStatus") == "Not installed");
+    CHECK(shellRowText(fx, "fish", "shellInstallStatus") == "Unknown: the file could not be read");
+
+    // Install… only where the line can be added.
+    CHECK(required(fx.byName("shellInstallButton:bash")).isVisible());
+    CHECK_FALSE(required(fx.byName("shellInstallButton:zsh")).isVisible());
+    CHECK_FALSE(required(fx.byName("shellInstallButton:fish")).isVisible());
+
+    // No other section has them.
+    REQUIRE(fx.open("section:appearance"));
+    CHECK(
+        (fx.byName("shellInstallGroup") == nullptr || !required(fx.byName("shellInstallGroup")).isVisible()));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Install… opens a dialog showing the line, Cancel installs nothing, Add Line installs once",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    auto const row = GENERATE(config::ChromeStyle::ContourLinux, config::ChromeStyle::Terminal);
+    INFO("row: " << static_cast<int>(row));
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile, nullptr, rowSetup(row));
+    scriptShells(fx);
+    REQUIRE(fx.open("section:shell-integration"));
+
+    auto const line =
+        window::shellRcLine(ShellKind::Bash, std::filesystem::path { PageFixture::ContourBinary }).value();
+    auto* dialog = fx.item()->findChild<QObject*>("shellInstallDialog");
+    REQUIRE(dialog != nullptr);
+    auto const dialogPart = [dialog](char const* name) -> QQuickItem const& {
+        return required(findDescendant(
+            *dialog->property("contentItem").value<QQuickItem*>(),
+            [name](QQuickItem const& item) { return item.objectName() == QLatin1String(name); }));
+    };
+
+    // Install… asks first: the line is shown, and nothing is written.
+    clickButton(fx.byName("shellInstallButton:bash"));
+    fx.settle();
+    CHECK(dialog->property("visible").toBool());
+    CHECK(dialogPart("shellInstallLine").property("text").toString().toStdString() == line);
+    CHECK(dialogPart("kitDialogHeading").property("text").toString() == "Add this line to ~/.bashrc?");
+    CHECK(fx.shellEditor.installs.empty());
+
+    // Cancel installs nothing.
+    QMetaObject::invokeMethod(dialog, "reject");
+    fx.settle();
+    CHECK_FALSE(dialog->property("visible").toBool());
+    CHECK(fx.shellEditor.installs.empty());
+
+    // Add Line counts one call, with exactly the line shown.
+    clickButton(fx.byName("shellInstallButton:bash"));
+    fx.settle();
+    QMetaObject::invokeMethod(dialog, "accept");
+    fx.settle();
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().shell == ShellKind::Bash);
+    CHECK(fx.shellEditor.installs.front().line == line);
+    CHECK(fx.errors.isEmpty());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a refused install is reported and the row stays",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    scriptShells(fx);
+    fx.shellEditor.installResult = std::unexpected(ShellRcError::Superuser);
+    REQUIRE(fx.open("section:shell-integration"));
+
+    clickButton(fx.byName("shellInstallButton:bash"));
+    fx.settle();
+    QMetaObject::invokeMethod(fx.item()->findChild<QObject*>("shellInstallDialog"), "accept");
+    fx.settle();
+
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front() == "~/.bashrc was not changed: Contour is running as root.");
+    CHECK(required(fx.byName("shellInstallButton:bash")).isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a cut-short install shows the line to delete and no Install…",
+          "[contour][gui][qml][settings][shellintegration]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = PageFixture(OneProfile);
+    auto const cut = std::string { R"(if [ "$TERM_PROGRAM" = contour ]; then eval "$('/opt/c)" };
+    fx.shellEditor.inspections[ShellKind::Zsh] =
+        RcInspection { .file = shellHome() / ".zshrc", .state = RcState::Partial, .partialLine = cut };
+    fx.controller->refresh();
+    REQUIRE(fx.open("section:shell-integration"));
+
+    CHECK(shellRowText(fx, "zsh", "shellInstallStatus").contains("~/.zshrc"));
+    auto const* zshRow = fx.byName("shellInstallRow:zsh");
+    REQUIRE(zshRow != nullptr);
+    auto const* deleteLine = findDescendant(
+        *zshRow, [](QQuickItem const& item) { return item.objectName() == "shellInstallDeleteLine"; });
+    REQUIRE(deleteLine != nullptr);
+    CHECK(deleteLine->isVisible());
+    CHECK(shellRowText(fx, "zsh", "shellInstallDeleteLine").toStdString() == cut);
+    CHECK_FALSE(required(fx.byName("shellInstallButton:zsh")).isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("every ink of the Install rows reads on what it sits on, on every row, scheme and appearance",
+          "[contour][gui][qml][settings][shellintegration][contrast]")
+{
+    // Review Focus 3, for what Task 5 draws: a shell's name, its status, the line to delete, and Install….
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const rowName = GENERATE(from_range(contrastRows()));
+    INFO("appearance: " << (appearance == vtbackend::ColorPreference::Light ? "light" : "dark")
+                        << ", row: " << rowName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    contour::test::QmlMessageCapture const warnings;
+
+    auto setup = rowSetup(config::ChromeStyle::ContourLinux);
+    if (rowName == "macos")
+        setup.row = config::ChromeStyle::MacOS;
+    else if (rowName == "fluent")
+        setup.row = config::ChromeStyle::Fluent;
+    else if (rowName == "linux")
+        setup.row = config::ChromeStyle::ContourLinux;
+    else
+        setup = terminalRowSetup(rowName);
+
+    auto fx = PageFixture(OneProfile, nullptr, setup);
+    // A row of each look: installable, installed, cut short.
+    fx.shellEditor.inspections[ShellKind::Bash] =
+        RcInspection { .file = shellHome() / ".bashrc", .state = RcState::Absent };
+    fx.shellEditor.inspections[ShellKind::Zsh] = RcInspection { .file = shellHome() / ".zshrc",
+                                                                .state = RcState::Partial,
+                                                                .partialLine = R"(if [ "$TERM)" };
+    fx.shellEditor.inspections[ShellKind::Fish] = std::unexpected(ShellRcError::Unreadable);
+    fx.controller->refresh();
+    REQUIRE(fx.open("section:shell-integration"));
+
+    auto const token = [&fx](char const* name) {
+        auto* style =
+            fx.engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        return style->property("colors").value<QObject*>()->property(name).value<QColor>();
+    };
+    auto const colorOf = [](QQuickItem const* item) {
+        return item->property("color").value<QColor>();
+    };
+    auto const window = QGuiApplication::palette().color(QPalette::Window);
+    auto const page = over(token("settingsPageFill"), window);
+    auto const group = over(token("settingsGroupFill"), page);
+    constexpr auto TextContrast = 4.5;
+
+    for (auto const* shell: { "bash", "zsh", "fish" })
+        for (auto const* name: { "shellInstallName", "shellInstallStatus", "shellInstallDeleteLine" })
+        {
+            auto const* row = fx.byName(QStringLiteral("shellInstallRow:") + QLatin1String(shell));
+            REQUIRE(row != nullptr);
+            auto const* label = findDescendant(
+                *row, [name](QQuickItem const& item) { return item.objectName() == QLatin1String(name); });
+            REQUIRE(label != nullptr);
+            if (!label->isVisible())
+                continue;
+            INFO(shell << " " << name);
+            CHECK(contrast(colorOf(label), group) >= TextContrast);
+        }
+
+    // Install…, which sits on the group (a flat button has no fill of its own).
+    auto const* button = fx.byName("shellInstallButton:bash");
+    REQUIRE(button != nullptr);
+    REQUIRE(button->isVisible());
+    CHECK(contrast(colorOf(button->property("contentItem").value<QQuickItem*>()), group) >= TextContrast);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}

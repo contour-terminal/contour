@@ -12,11 +12,14 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/ManualSaveScheduler.hpp>
+#include <contour/test/RecordingShellRcEditor.hpp>
+#include <contour/window/NoticeQueue.hpp>
 #include <contour/window/ProfileRules.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsFields.hpp>
 #include <contour/window/SettingsSections.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
@@ -113,6 +116,18 @@ class FakeFontFamilySource final: public platform::IFontFamilySource
 /// at the config directory, and a reload that reads the Config from disk and refreshes the controller, as
 /// the app's onConfigurationReloaded() does. The whole workflow runs against real files under a temp
 /// directory -- the loader is not behind a FileSystem -- and the debounce is fired by hand.
+/// The binary the Install rows' line runs.
+[[nodiscard]] std::filesystem::path contourBinary()
+{
+    return "/opt/contour/bin/contour";
+}
+
+/// The home the startup files are shown relative to.
+[[nodiscard]] std::filesystem::path home()
+{
+    return "/home/me";
+}
+
 struct Fixture
 {
     core::platform::NativeFileSystem fileSystem; ///< What the store writes through: the fixture's own files.
@@ -125,6 +140,9 @@ struct Fixture
     std::shared_ptr<display::IGpuInventory const> gpuInventory;
     std::shared_ptr<platform::IFontFamilySource const> fontFamilies; ///< Null: the bundled family alone.
     vtbackend::ColorPreference colorPreference = vtbackend::ColorPreference::Dark;
+    test::RecordingShellRcEditor shellEditor;         ///< The shells' startup files, scripted and recorded.
+    BinaryReach binaryReach = BinaryReach::Reachable; ///< Whether the Install rows' binary outlives us.
+    config::HostPlatform shellHost = config::HostPlatform::Other; ///< The host the Install rows run on.
     std::unique_ptr<SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
 
@@ -146,20 +164,27 @@ struct Fixture
     void restartController()
     {
         controller.reset();
-        controller =
-            std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
-                                                 SettingsControllerServices {
-                                                     .store = store,
-                                                     .reload = [this]() -> std::expected<void, std::string> {
-                                                         ++reloads;
-                                                         reload();
-                                                         return {};
-                                                     },
-                                                     .gpuInventory = gpuInventory,
-                                                     .fontFamilies = fontFamilies,
-                                                     .scheduler = scheduler,
-                                                 },
-                                                 colorPreference);
+        controller = std::make_unique<SettingsController>(
+            [this]() -> config::Config const& { return cfg; },
+            SettingsControllerServices {
+                .store = store,
+                .reload = [this]() -> std::expected<void, std::string> {
+                    ++reloads;
+                    reload();
+                    return {};
+                },
+                .gpuInventory = gpuInventory,
+                .fontFamilies = fontFamilies,
+                .scheduler = scheduler,
+                .shell = { .editor = &shellEditor,
+                           .contourBinary =
+                               [this] {
+                                   return LocatedBinary { .path = contourBinary(), .reach = binaryReach };
+                               },
+                           .host = shellHost,
+                           .homeDirectory = home() },
+            },
+            colorPreference);
         QObject::connect(controller.get(),
                          &SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });
@@ -4505,4 +4530,231 @@ TEST_CASE("SettingsController: Use New does not write the open profile's link pa
     auto const written = fx.fileContent(config::relativePathOf(config::profileFile("work")));
     REQUIRE(written.has_value());
     CHECK_FALSE(written->contains(HeldBackName));
+}
+
+// {{{ Shell Integration: the Install rows
+namespace
+{
+using config::RcState;
+using config::ShellKind;
+using platform::RcInspection;
+using platform::ShellRcError;
+
+/// @return The row of @p shell in @p fx's shellIntegrationRows.
+[[nodiscard]] QVariantMap shellRowOf(Fixture const& fx, ShellKind shell)
+{
+    for (auto const& row: fx.controller->shellIntegrationRows())
+        if (row.toMap().value(QStringLiteral("shell")).toInt() == std::to_underlying(shell))
+            return row.toMap();
+    return {};
+}
+
+/// Scripts the editor as the page's brief has it: zsh installed, bash absent, fish unreadable.
+void scriptShells(Fixture& fx)
+{
+    fx.shellEditor.inspections[ShellKind::Zsh] =
+        RcInspection { .file = home() / ".zshrc", .state = RcState::Installed };
+    fx.shellEditor.inspections[ShellKind::Bash] =
+        RcInspection { .file = home() / ".bashrc", .state = RcState::Absent };
+    fx.shellEditor.inspections[ShellKind::Fish] = std::unexpected(ShellRcError::Unreadable);
+    fx.controller->refresh();
+}
+} // namespace
+
+TEST_CASE("SettingsController: the Install rows list every shell with what its startup file is",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    scriptShells(fx);
+
+    auto const rows = fx.controller->shellIntegrationRows();
+    REQUIRE(static_cast<std::size_t>(rows.size()) == config::ShellRows.size());
+    // In ShellRows order.
+    for (auto const index: std::views::iota(std::size_t { 0 }, config::ShellRows.size()))
+        CHECK(rows[static_cast<qsizetype>(index)].toMap().value(QStringLiteral("shell")).toInt()
+              == std::to_underlying(config::ShellRows[index].kind));
+
+    auto const zsh = shellRowOf(fx, ShellKind::Zsh);
+    CHECK(zsh.value(QStringLiteral("name")).toString() == QStringLiteral("zsh"));
+    CHECK(zsh.value(QStringLiteral("status")).toString() == QStringLiteral("Installed in ~/.zshrc"));
+    CHECK_FALSE(zsh.value(QStringLiteral("canInstall")).toBool());
+
+    auto const bash = shellRowOf(fx, ShellKind::Bash);
+    CHECK(bash.value(QStringLiteral("status")).toString() == QStringLiteral("Not installed"));
+    CHECK(bash.value(QStringLiteral("canInstall")).toBool());
+
+    auto const fish = shellRowOf(fx, ShellKind::Fish);
+    CHECK(fish.value(QStringLiteral("status")).toString()
+          == QStringLiteral("Unknown: the file could not be read"));
+    CHECK_FALSE(fish.value(QStringLiteral("canInstall")).toBool());
+}
+
+TEST_CASE("SettingsController: a cut-short install shows the line to delete and offers no install",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const cut = std::string { R"(if [ "$TERM_PROGRAM" = contour ]; then eval "$('/opt/c)" };
+    fx.shellEditor.inspections[ShellKind::Zsh] =
+        RcInspection { .file = home() / ".zshrc", .state = RcState::Partial, .partialLine = cut };
+    fx.controller->refresh();
+
+    auto const zsh = shellRowOf(fx, ShellKind::Zsh);
+    CHECK(zsh.value(QStringLiteral("status")).toString().contains(QStringLiteral("~/.zshrc")));
+    CHECK(zsh.value(QStringLiteral("deleteLine")).toString() == QString::fromStdString(cut));
+    CHECK_FALSE(zsh.value(QStringLiteral("canInstall")).toBool());
+    // Nothing else has a line to delete.
+    CHECK(shellRowOf(fx, ShellKind::Bash).value(QStringLiteral("deleteLine")).toString().isEmpty());
+}
+
+TEST_CASE("SettingsController: the Install row names the line and the file it would add to",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    scriptShells(fx);
+
+    CHECK(fx.controller->shellIntegrationLine(std::to_underlying(ShellKind::Bash)).toStdString()
+          == window::shellRcLine(ShellKind::Bash, contourBinary()).value());
+    CHECK(fx.controller->shellIntegrationRcPath(std::to_underlying(ShellKind::Bash))
+          == QStringLiteral("~/.bashrc"));
+    // No line or file for what is no shell, or a shell whose file cannot be named.
+    CHECK(fx.controller->shellIntegrationLine(std::to_underlying(ShellKind::Unknown)).isEmpty());
+    CHECK(fx.controller->shellIntegrationRcPath(std::to_underlying(ShellKind::Fish)).isEmpty());
+}
+
+TEST_CASE("SettingsController: the confirmation says what the card's Confirm stage says",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    scriptShells(fx);
+
+    auto const confirm = fx.controller->shellIntegrationConfirm(std::to_underlying(ShellKind::Bash));
+    CHECK(confirm.value(QStringLiteral("title")).toString() == QStringLiteral("Add this line to ~/.bashrc?"));
+    CHECK(confirm.value(QStringLiteral("line")).toString().toStdString()
+          == window::shellRcLine(ShellKind::Bash, contourBinary()).value());
+    CHECK(confirm.value(QStringLiteral("primary")).toString() == QStringLiteral("Add Line"));
+    CHECK(confirm.value(QStringLiteral("secondary")).toString() == QStringLiteral("Cancel"));
+    CHECK(fx.controller->shellIntegrationConfirm(std::to_underlying(ShellKind::Unknown)).isEmpty());
+}
+
+TEST_CASE("SettingsController: installing from Settings appends the line through the editor and refreshes",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    scriptShells(fx);
+    auto const bash = std::to_underlying(ShellKind::Bash);
+
+    fx.controller->installShellIntegration(bash);
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().shell == ShellKind::Bash);
+    CHECK(fx.shellEditor.installs.front().line
+          == window::shellRcLine(ShellKind::Bash, contourBinary()).value());
+    CHECK(fx.errors.isEmpty());
+
+    // Once the editor reports the file changed, the row says so.
+    CHECK(shellRowOf(fx, ShellKind::Bash).value(QStringLiteral("status")).toString()
+          == QStringLiteral("Not installed"));
+    fx.shellEditor.inspections[ShellKind::Bash] =
+        RcInspection { .file = home() / ".bashrc", .state = RcState::Installed };
+    fx.controller->installShellIntegration(bash);
+    CHECK(shellRowOf(fx, ShellKind::Bash).value(QStringLiteral("status")).toString()
+          == QStringLiteral("Installed in ~/.bashrc"));
+}
+
+TEST_CASE("SettingsController: an install the editor refuses is reported with the same words as the toast",
+          "[settings][shellintegration]")
+{
+    for (auto const error: { ShellRcError::Superuser, ShellRcError::Changed, ShellRcError::PartialWrite })
+    {
+        CAPTURE(std::to_underlying(error));
+        auto fx = Fixture(BasicConfig);
+        scriptShells(fx);
+        fx.shellEditor.installResult = std::unexpected(error);
+
+        fx.controller->installShellIntegration(std::to_underlying(ShellKind::Bash));
+        REQUIRE(fx.errors.size() == 1);
+        CHECK(fx.errors.front().toStdString() == window::shellIntegrationFailedText("~/.bashrc", error));
+    }
+}
+
+TEST_CASE("SettingsController: an install of no shell writes nothing", "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    scriptShells(fx);
+    fx.controller->installShellIntegration(std::to_underlying(ShellKind::Unknown));
+    fx.controller->installShellIntegration(99);
+    CHECK(fx.shellEditor.installs.empty());
+}
+// }}}
+
+TEST_CASE("SettingsController: the Install rows read the default profile's startup-file environment",
+          "[settings][shellintegration]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto* const profile = fx.cfg.findProfile("main");
+    REQUIRE(profile != nullptr);
+    profile->shell.value().env["ZDOTDIR"] = "/zdot";
+    profile->shell.value().removedEnvironment.emplace_back("XDG_CONFIG_HOME");
+    auto const expected = platform::RcEnvironment { { "ZDOTDIR", "/zdot" }, { "XDG_CONFIG_HOME", "" } };
+
+    // What the pane's card asks the editor with, the page asks it with too: both name the same file.
+    fx.shellEditor.inspectedEnvironments.clear();
+    fx.controller->refresh();
+    REQUIRE_FALSE(fx.shellEditor.inspectedEnvironments.empty());
+    for (auto const& environment: fx.shellEditor.inspectedEnvironments)
+        CHECK(environment == expected);
+
+    fx.shellEditor.inspections[ShellKind::Bash] =
+        RcInspection { .file = home() / ".bashrc", .state = RcState::Absent };
+    fx.controller->installShellIntegration(std::to_underlying(ShellKind::Bash));
+    REQUIRE(fx.shellEditor.installs.size() == 1);
+    CHECK(fx.shellEditor.installs.front().sessionEnvironment == expected);
+}
+
+TEST_CASE("SettingsController: Install is offered only where the card would offer it",
+          "[settings][shellintegration]")
+{
+    struct Case
+    {
+        config::HostPlatform host;
+        BinaryReach reach;
+        InstallBlock block;
+    };
+    auto const cases = std::array {
+        Case { config::HostPlatform::Other, BinaryReach::Reachable, InstallBlock::None },
+        Case { config::HostPlatform::Windows, BinaryReach::Reachable, InstallBlock::WindowsHost },
+        Case { config::HostPlatform::Other, BinaryReach::Unreachable, InstallBlock::BinaryUnreachable },
+    };
+    for (auto const& c: cases)
+    {
+        auto fx = Fixture(BasicConfig);
+        fx.shellHost = c.host;
+        fx.binaryReach = c.reach;
+        fx.restartController(); // the host is read when the controller is built
+        scriptShells(fx);
+
+        auto const bash = shellRowOf(fx, ShellKind::Bash);
+        auto const offered = c.block == InstallBlock::None;
+        CHECK(bash.value(QStringLiteral("canInstall")).toBool() == offered);
+        if (!offered)
+            CHECK(bash.value(QStringLiteral("status")).toString()
+                  == QString::fromUtf8(
+                      InstallBlockRows[std::to_underlying(c.block)].text.data(),
+                      static_cast<qsizetype>(InstallBlockRows[std::to_underlying(c.block)].text.size())));
+        // The same facts through offerFor(): never a Card where the page offers no Install.
+        auto const card = offerFor({ .shell = ShellKind::Bash,
+                                     .locality = RcLocality::ThisMachine,
+                                     .host = c.host,
+                                     .binary = c.reach,
+                                     .dismissal = OfferDismissal::Open,
+                                     .rc = RcState::Absent,
+                                     .slot = CardSlot::Free });
+        CHECK((card == ShellIntegrationOffer::Card) == offered);
+
+        // An install the page does not offer is refused too, writing nothing.
+        fx.controller->installShellIntegration(std::to_underlying(ShellKind::Bash));
+        CHECK(fx.shellEditor.installs.size() == (offered ? 1U : 0U));
+        // A file that is already installed keeps saying so, whatever the host.
+        CHECK(shellRowOf(fx, ShellKind::Zsh).value(QStringLiteral("status")).toString()
+              == QStringLiteral("Installed in ~/.zshrc"));
+    }
 }

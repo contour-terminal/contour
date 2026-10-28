@@ -338,8 +338,24 @@ void checkSettingsScene(contour::test::snapshot::ChromeSnapshotScene const& scen
         case SnapshotSettingsPage::None: FAIL("a Settings script names a page"); break;
         case SnapshotSettingsPage::General:
         case SnapshotSettingsPage::Appearance:
-        case SnapshotSettingsPage::Keyboard:
-        case SnapshotSettingsPage::ShellIntegration: CHECK(shows("settingsSectionPage")); break;
+        case SnapshotSettingsPage::Keyboard: CHECK(shows("settingsSectionPage")); break;
+        case SnapshotSettingsPage::ShellIntegration: {
+            CHECK(shows("settingsSectionPage"));
+            // The Install group, with a row for each shell, and the cut-short one's line to delete.
+            auto const* group = scene.subject().findChild<QQuickItem*>(QStringLiteral("shellInstallGroup"));
+            REQUIRE(group != nullptr);
+            CHECK(group->isVisible());
+            auto const& page = *settingsPage;
+            for (auto const& shell: contour::config::ShellRows)
+                CHECK(contour::test::itemsNamed(page,
+                                                QStringLiteral("shellInstallRow:")
+                                                    + QString::fromUtf8(shell.name.data(), shell.name.size()))
+                          .size()
+                      == 1);
+            auto const cut = contour::test::itemsNamed(page, QStringLiteral("shellInstallDeleteLine"));
+            CHECK(std::ranges::count_if(cut, [](QQuickItem const* item) { return item->isVisible(); }) == 1);
+            break;
+        }
         case SnapshotSettingsPage::Profile: CHECK(shows("profilePage")); break;
         case SnapshotSettingsPage::ProfileReadOnly:
             CHECK(shows("profilePage"));

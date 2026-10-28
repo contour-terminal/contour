@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace contour::test
@@ -27,9 +28,18 @@ class RecordingShellRcEditor final: public platform::IShellRcEditor
         [[nodiscard]] bool operator==(Install const&) const = default;
     };
 
+    /// What inspect() answers, per shell.
+    using Inspections =
+        std::map<config::ShellKind, std::expected<platform::RcInspection, platform::ShellRcError>>;
+
+    RecordingShellRcEditor() = default;
+
+    /// @param scripted What inspect() answers from the start, for a controller that inspects as it is built.
+    explicit RecordingShellRcEditor(Inspections scripted): inspections { std::move(scripted) } {}
+
     /// What inspect() answers for a shell; a shell without an entry is not inspectable (RcState::Unknown), as
     /// the null editor says, so no card is offered unless a test scripts one.
-    std::map<config::ShellKind, std::expected<platform::RcInspection, platform::ShellRcError>> inspections;
+    Inspections inspections;
 
     /// What every install() answers.
     std::expected<platform::RcInstall, platform::ShellRcError> installResult = platform::RcInstall::Appended;
