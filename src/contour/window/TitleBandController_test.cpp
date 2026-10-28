@@ -11,6 +11,7 @@
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -69,10 +70,20 @@ constexpr auto WindowStateTimeoutMs = 2000;
             .shadow);
 }
 
+/// @return The host the macOS cases follow: the build's own on macOS, else a Linux one, so a Windows build
+///         does not swap their Flat row for the Fluent row and its joined tabs.
+[[nodiscard]] std::optional<contour::config::HostPlatform> macCasesHostPlatform()
+{
+    using contour::platform::FramePlatform;
+    if (contour::platform::currentFramePlatform() == FramePlatform::MacOS)
+        return std::nullopt;
+    return contour::config::HostPlatform::Other;
+}
+
 /// Which host a TitleBandFixture's app follows.
 enum class FixtureHost : uint8_t
 {
-    MacCases = 0, //!< macCasesFramePlatform(), on the build's own host row.
+    MacCases = 0, //!< macCasesFramePlatform(), on macCasesHostPlatform()'s row.
     Windows,      //!< The kept Windows frame and the Fluent row, on every OS.
     BareFluent,   //!< The Fluent row on a frame that hosts no material.
 };
@@ -87,7 +98,10 @@ enum class FixtureHost : uint8_t
     auto services = contour::test::appearanceServicesWith(accessibility, appearance, record);
     switch (host)
     {
-        case FixtureHost::MacCases: services.framePlatform = macCasesFramePlatform(); break;
+        case FixtureHost::MacCases:
+            services.framePlatform = macCasesFramePlatform();
+            services.hostPlatform = macCasesHostPlatform();
+            break;
         case FixtureHost::Windows:
             services.framePlatform = contour::platform::FramePlatform::Windows;
             services.hostPlatform = contour::config::HostPlatform::Windows;

@@ -1983,7 +1983,8 @@ void checkUnwritableRollsBack(ControllerFixture& fx,
     {
         auto const bytes = config::emitProfileYaml(*fx.cfg.findProfile("main"));
         std::filesystem::create_directories(fx.configDir / "profiles");
-        auto out = std::ofstream(fx.configDir / "profiles" / "work.yml");
+        // Binary: in text mode Windows would write CRLFs, and the loader's bytes would not be the mirror's.
+        auto out = std::ofstream(fx.configDir / "profiles" / "work.yml", std::ios::binary);
         out << bytes;
         mirror(bytes);
     }

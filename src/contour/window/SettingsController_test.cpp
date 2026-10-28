@@ -191,7 +191,8 @@ struct Fixture
     }
 
     /// Writes @p content to @p relative under the configuration directory, as an editor would, without
-    /// a reload: nothing watches the side files.
+    /// a reload: nothing watches the side files. The bytes land as given -- a text-mode stream would turn
+    /// each newline into CRLF on Windows, which the store then reads back as a different file.
     void handEdit(std::filesystem::path const& relative, std::string_view content) const
     {
         REQUIRE(fileSystem.writeFile(configDir() / relative, content).has_value());
@@ -504,14 +505,10 @@ TEST_CASE("SettingsController: a hand edit made after the draft was opened is no
     // I1: the draft was seeded before an editor saved the file; the first commit must not overwrite it.
     auto fx = Fixture(BasicConfig);
     fx.openSideProfile("work");
-    auto const path = fx.configDir() / config::relativePathOf(config::profileFile("work"));
     auto handEdited = *fx.cfg.findProfile("work");
     handEdited.fonts.value().size.pt = 20.0;
     auto const handBytes = config::emitProfileYaml(handEdited);
-    {
-        auto out = std::ofstream(path);
-        out << handBytes;
-    }
+    fx.handEdit(config::relativePathOf(config::profileFile("work")), handBytes);
 
     REQUIRE(fx.controller->setProfileField("font_size", 15.0).has_value());
     fx.fire();
@@ -527,10 +524,7 @@ TEST_CASE("SettingsController: a hand edit of settings.yml after it was read is 
           "[settings]")
 {
     auto fx = Fixture("default_profile: main\nreflow_on_resize: true\n");
-    {
-        auto out = std::ofstream(fx.configDir() / "settings.yml");
-        out << "snap_to_rows: true\n";
-    }
+    fx.handEdit("settings.yml", "snap_to_rows: true\n");
     // No reload: the page's settings.yml draft is from before the edit.
     REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false).has_value());
     fx.fire();

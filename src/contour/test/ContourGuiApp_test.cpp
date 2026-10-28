@@ -8,6 +8,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/AppearanceServices.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
@@ -548,12 +549,16 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
           "[contour][app][splitchrome]")
 {
     // Before the GUI publishes a provider there is no cell to measure: the solver gets, at the window's
-    // device-pixel ratio, the row the configured style resolves to on this host -- the app resolves it at
-    // construction -- at the configured density.
-    auto app = TestApp {};
-    auto const row = contour::config::resolveChromeStyle(
-        app.app().config().uiStyle.value(),
-        contour::config::detectHostPlatform(contour::test::TestEnvironment {}));
+    // device-pixel ratio, the row the configured style resolves to on the app's host -- the app resolves it
+    // at construction -- at the configured density. The host is pinned to a Linux one: the Fluent row's
+    // square-ish cards inset as far at 1.25 as at 1, so on Windows the two ratios below could not be told
+    // apart.
+    constexpr auto Host = contour::config::HostPlatform::Other;
+    auto services = contour::platform::nullAppearanceServices();
+    services.hostPlatform = Host;
+    auto app = TestApp(
+        nullptr, nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr, services);
+    auto const row = contour::config::resolveChromeStyle(app.app().config().uiStyle.value(), Host);
     auto const expected = contour::window::splitChromeOf(
         contour::config::resolveChromeTokens(
             row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
