@@ -256,10 +256,14 @@ ThemedWindow
         // `|| 0` (no measurement) keeps the token. The tabs bar below carries no traffic lights: it keeps
         // the token.
         measuredHeight: (appWindow.win && appWindow.win.titleBandHeight) || 0
-        // The band's surface: the frame and mode it is drawn in, as titleBand() was asked, and the centre it
-        // answered. Reads paletteRevision first, since the fill reads the palette.
+        // The band's surface: this window's own (WindowController.titleBandFill), which is the row's for the
+        // frame and mode it is drawn in and the centre titleBand() answered -- unless the window's frame hosts
+        // no material or its material failed. A controller that publishes none (a lightweight mock) takes the
+        // row's. Reads paletteRevision first, since the fill reads the palette.
         fill: chromeStyle.paletteRevision < 0 ? "transparent"
-              : chromeStyle.bandFill(appWindow.bandFrame, appWindow.bandMode, appWindow.band.centre || "")
+              : chromeStyle.bandFillColor(appWindow.win?.titleBandFill
+                                          ?? chromeStyle.bandSurfaceFill(appWindow.bandFrame, appWindow.bandMode,
+                                                                         appWindow.band.centre || ""))
         readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
         onHoveredChanged: appWindow.updateBandReveal()
         onEngagedChanged: appWindow.updateBandReveal()

@@ -2389,6 +2389,27 @@ TEST_CASE("a pinned full-screen band below the menu bar leaves the traffic light
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the band paints the window's own fill (offscreen)", "[contour][gui][qml][mainwindow][band]")
+{
+    // The window, not the row, has the last word: a window whose material failed paints the tint where its
+    // row would clear the band.
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+    showWindow(*root);
+    REQUIRE(bandBackgroundOf(*root).alpha() == 0);
+
+    controller.setTitleBandFill(contour::config::BandFill::Tint);
+    QCoreApplication::processEvents();
+    CHECK(bandBackgroundOf(*root).alpha() == 255);
+
+    controller.setTitleBandFill(contour::config::BandFill::Clear);
+    QCoreApplication::processEvents();
+    CHECK(bandBackgroundOf(*root).alpha() == 0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the ContourLinux band keeps today's colour (offscreen)", "[contour][gui][qml][mainwindow][band]")
 {
     QQmlEngine engine;

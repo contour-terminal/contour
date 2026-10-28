@@ -4,6 +4,7 @@
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -20,6 +21,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QPointF>
 #include <QtCore/QString>
+#include <QtCore/QVariant>
 #include <QtCore/QVariantList>
 #include <QtGui/QColor>
 
@@ -139,6 +141,9 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight WRITE setTitleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(
         qreal titleBandRevealTop READ titleBandRevealTop WRITE setTitleBandRevealTop NOTIFY titleBandChanged)
+    // Mirrors WindowController's titleBandFill: undefined in QML (Main.qml takes the row's own fill) unless a
+    // test sets it, as a window whose material failed would.
+    Q_PROPERTY(QVariant titleBandFill READ titleBandFill NOTIFY titleBandChanged)
     // Mirrors WindowController's notices: a real NoticeModel, on a clock the test moves, saying nothing.
     Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
     // Mirrors WindowController's maximise button as the OS drives it; a test sets it with
@@ -280,6 +285,18 @@ class MainWindowControllerMock: public QAbstractListModel
         emit titleBandChanged();
     }
 
+    /// Mirrors WindowController::titleBandFill(): what this window's band paints, a config::BandFill.
+    /// @return The fill a test set, or an invalid variant for none.
+    [[nodiscard]] QVariant titleBandFill() const { return _titleBandFill; }
+
+    /// Decides the band's fill, as WindowController::refreshTitleBand() would.
+    /// @param fill What the band paints.
+    void setTitleBandFill(config::BandFill fill)
+    {
+        _titleBandFill = static_cast<int>(fill);
+        emit titleBandChanged();
+    }
+
     /// Mirrors WindowController::titleBandRevealTop(): where a revealed full-screen band rests.
     [[nodiscard]] qreal titleBandRevealTop() const noexcept { return _titleBandRevealTop; }
 
@@ -403,6 +420,7 @@ class MainWindowControllerMock: public QAbstractListModel
     int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.
     int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
     qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.
+    QVariant _titleBandFill {};    ///< @see titleBandFill; invalid = the row's own.
     qreal _titleBandRevealTop = 0; ///< @see titleBandRevealTop; 0 = the window's top.
     /// @see setNativeMaximizeVisual.
     platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;

@@ -467,25 +467,38 @@ qreal UiStyleProvider::bandHeight() const noexcept
 
 QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) const
 {
-    auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
+    return bandFillColor(bandSurfaceFill(frame, mode, centre));
+}
+
+int UiStyleProvider::bandSurfaceFill(int frame, int mode, QString const& centre) const
+{
     auto const bandCentre = barCentreNamed(centre.toStdString());
     if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount) || !bandCentre)
+        return static_cast<int>(config::BandFill::Palette);
+
+    return static_cast<int>(resolveTitleBandSurface(TitleBandSurfaceInputs {
+                                                        .style = _inputs.row,
+                                                        .material = _groups.material.titleBand,
+                                                        .frame = static_cast<WindowFrame>(frame),
+                                                        .mode = static_cast<WindowMode>(mode),
+                                                        .centre = *bandCentre,
+                                                        .density = _inputs.density,
+                                                    })
+                                .fill);
+}
+
+QColor UiStyleProvider::bandFillColor(int fill) const
+{
+    auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
+    if (!inRange(fill, config::BandFillCount))
         return paletteWindow;
 
-    auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
-        .style = _inputs.row,
-        .material = _groups.material.titleBand,
-        .frame = static_cast<WindowFrame>(frame),
-        .mode = static_cast<WindowMode>(mode),
-        .centre = *bandCentre,
-        .density = _inputs.density,
-    });
     auto const background = _inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)];
     auto const tone = paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light;
     auto const orPaletteWindow = [&](std::optional<vtbackend::RGBColor> const& fill) {
         return fill ? platform::toQColor(*fill) : paletteWindow;
     };
-    switch (surface.fill)
+    switch (static_cast<config::BandFill>(fill))
     {
         case config::BandFill::Palette: break;
         case config::BandFill::Clear: return { Qt::transparent };

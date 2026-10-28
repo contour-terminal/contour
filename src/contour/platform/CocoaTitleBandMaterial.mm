@@ -129,12 +129,14 @@ namespace
     {
       public:
         /// @pre GUI (main) thread.
-        void apply(QWindow& window, TitleBandRequest const& request) override
+        /// @return Success: AppKit reports no failure to dress a title bar.
+        [[nodiscard]] std::expected<void, TitleBandMaterialError> apply(QWindow& window,
+                                                                        TitleBandRequest const& request) override
         {
             Require(NSThread.isMainThread);
             NSWindow* const nsWindow = nsWindowOf(window);
             if (nsWindow == nil)
-                return;
+                return {};
 
             // The backdrop is Qt's to draw (Qt::NoTitleBarBackgroundHint, set by the controller): nothing
             // here.
@@ -142,6 +144,7 @@ namespace
             applyGrowth(nsWindow, request.growth);
             nsWindow.hasShadow = YES;
             [nsWindow invalidateShadow];
+            return {};
         }
 
         /// @pre GUI (main) thread.

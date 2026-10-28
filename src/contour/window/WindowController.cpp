@@ -1659,7 +1659,14 @@ void WindowController::setTitleBarVisible(bool visible)
     // content view, the default request takes back what the material set -- the toolbar, the appearance
     // -- so the native title bar is an ordinary one; nothing is applied under it after that.
     if (_appliedTitleBand && visible && _osWindow != nullptr)
-        _manager.app().titleBandMaterial().apply(*_osWindow, platform::TitleBandRequest {});
+    {
+        // Best-effort: the native frame draws its own title bar whatever the material makes of this.
+        if (auto const reset =
+                _manager.app().titleBandMaterial().apply(*_osWindow, platform::TitleBandRequest {});
+            !reset)
+            display::displayLog()("Resetting the title band's material: {}.",
+                                  platform::titleBandMaterialErrorName(reset.error()));
+    }
     _appliedTitleBand.reset();
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
@@ -2008,7 +2015,7 @@ Qt::ColorScheme WindowController::effectiveColorScheme() const
 
 bool WindowController::dressesTitleBand() const noexcept
 {
-    return framePolicy().shadow == platform::FrameShadowStrategy::FullSizeContent;
+    return platform::hostsTitleBandMaterial(framePolicy().shadow);
 }
 
 QString WindowController::toastHost(QString const& band,
@@ -2040,19 +2047,27 @@ TitleBand WindowController::titleBand() const
     });
 }
 
-platform::TitleBandRequest WindowController::titleBandRequest() const
+TitleBandSurface WindowController::titleBandSurface() const
 {
     auto const centre = titleBand().centre;
     auto const tokens = _manager.app().titleBandTokens(centre);
-    auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
+    // Nothing draws a material behind the band on a frame that hosts none, nor after it failed (R-g).
+    auto const hosted = dressesTitleBand() && _bandMaterialHealth == platform::BandMaterialHealth::Working;
+    return resolveTitleBandSurface(TitleBandSurfaceInputs {
         .style = tokens.style,
-        .material = tokens.material,
+        .material = hosted ? tokens.material : config::opaqueMaterialOf(tokens.material),
         .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
         .mode = windowMode(),
         .centre = centre,
         .density = tokens.density,
     });
+}
+
+platform::TitleBandRequest WindowController::titleBandRequest() const
+{
+    auto const surface = titleBandSurface();
     return platform::TitleBandRequest { .backdrop = surface.backdrop,
+                                        .kind = config::BackdropKind::Tabbed,
                                         .growth = surface.growth,
                                         .scheme = effectiveColorScheme() };
 }
@@ -2093,7 +2108,19 @@ void WindowController::refreshTitleBand()
         // Recorded before the apply: attaching the toolbar changes Qt's safe area, and Qt may report that
         // (safeAreaMarginsChanged -> here) before apply() returns; the nested refresh must find it applied.
         _appliedTitleBand = request;
-        _manager.app().titleBandMaterial().apply(*_osWindow, request);
+        if (auto const applied = _manager.app().titleBandMaterial().apply(*_osWindow, request); !applied)
+        {
+            display::displayLog()("The title band's material failed ({}); this window paints a solid band.",
+                                  platform::titleBandMaterialErrorName(applied.error()));
+            // Once: the window asks again for the opaque band, which it keeps for its lifetime (R-g).
+            if (_bandMaterialHealth == platform::BandMaterialHealth::Working)
+            {
+                _bandMaterialHealth = platform::BandMaterialHealth::Failed;
+                _appliedTitleBand.reset();
+                refreshTitleBand();
+                return;
+            }
+        }
         // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2), and Minimal's bare band
         // detaching it moves them back: the band's leading slot reads the inset again.
         if (growthChanged)
@@ -2102,10 +2129,12 @@ void WindowController::refreshTitleBand()
 
     // Measured after the apply: the title bar reaches its grown height only once the toolbar exists.
     auto const geometry = titleBandGeometry();
-    if (geometry == _titleBandGeometry && request == _publishedTitleBand)
+    auto const fill = titleBandFill();
+    if (geometry == _titleBandGeometry && request == _publishedTitleBand && fill == _publishedTitleBandFill)
         return;
     _titleBandGeometry = geometry;
     _publishedTitleBand = request;
+    _publishedTitleBandFill = fill;
     emit titleBandChanged();
 }
 

@@ -48,6 +48,22 @@ enum class FrameShadowStrategy : uint8_t
     FullSizeContent,
 };
 
+/// Whether a frame keeps an OS title bar the title band can be dressed in -- a material behind it, the
+/// native title bar measured under it. The kept Windows frame does (DWM's backdrop, R-h), as macOS's
+/// full-size content view does; a frame that relies on the compositor has none.
+/// @param strategy The frame's shadow strategy.
+/// @return Whether the controller applies the title-band material under it.
+[[nodiscard]] constexpr bool hostsTitleBandMaterial(FrameShadowStrategy strategy) noexcept
+{
+    switch (strategy)
+    {
+        case FrameShadowStrategy::None: return false;
+        case FrameShadowStrategy::NativeFrameKept:
+        case FrameShadowStrategy::FullSizeContent: return true;
+    }
+    return false;
+}
+
 /// Who supplies the window's frame affordances -- the resize handles and the window controls.
 ///
 /// One field rather than two, because they are one decision: the frame that resizes the window is

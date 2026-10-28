@@ -137,7 +137,7 @@ struct ShownBand
     {
         window->setProperty("clearsBackground", request.backdrop == BandBackdrop::Client);
         QCoreApplication::processEvents();
-        material->apply(*window, request);
+        REQUIRE(material->apply(*window, request).has_value());
     }
 
     /// @return The title bar's height as AppKit lays it out: the frame above the content layout rectangle.

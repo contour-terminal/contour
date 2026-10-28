@@ -455,7 +455,7 @@ TEST_CASE("the app builds its title-band material through its services", "[conto
                        contour::test::appearanceServicesWith(accessibility, appearance, record));
 
     auto window = QWindow {};
-    app.app().titleBandMaterial().apply(window, {});
+    CHECK(app.app().titleBandMaterial().apply(window, {}).has_value());
     CHECK(record.applied.size() == 1);
     CHECK(record.applied.front() == contour::platform::TitleBandRequest {});
 }

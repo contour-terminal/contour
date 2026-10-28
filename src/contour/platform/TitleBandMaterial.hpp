@@ -9,12 +9,42 @@
 #include <QtCore/Qt>
 #include <QtCore/QtTypes>
 
+#include <expected>
 #include <memory>
+#include <string_view>
 
 class QWindow;
 
 namespace contour::platform
 {
+
+/// Why the OS did not draw the material a title-band request asked for.
+enum class TitleBandMaterialError : uint8_t
+{
+    Unsupported = 0, ///< The OS has no such backdrop.
+    Rejected,        ///< The call failed on an OS that has it.
+};
+
+/// The name a log line gives @p error.
+/// @param error Why the material was not drawn.
+/// @return "unsupported" or "rejected".
+[[nodiscard]] constexpr std::string_view titleBandMaterialErrorName(TitleBandMaterialError error) noexcept
+{
+    switch (error)
+    {
+        case TitleBandMaterialError::Unsupported: return "unsupported";
+        case TitleBandMaterialError::Rejected: return "rejected";
+    }
+    return "rejected";
+}
+
+/// Whether a window's title-band material still works. Per-window state the controller keeps, not
+/// configuration: once a material failed, that window paints the solid band for its lifetime (R-g).
+enum class BandMaterialHealth : uint8_t
+{
+    Working = 0, ///< The material applied, or was never asked for.
+    Failed,      ///< The material failed once: the window's band is Solid from then on.
+};
 
 /// What the controller asks the OS to draw behind and around a window's title band.
 struct TitleBandRequest
@@ -50,11 +80,14 @@ class ITitleBandMaterial
   public:
     virtual ~ITitleBandMaterial() = default;
 
-    /// Applies @p request to @p window. Best-effort: a window with no platform window yet is left alone.
+    /// Applies @p request to @p window. Best-effort: a window with no platform window yet is left alone,
+    /// and succeeds.
     /// @pre GUI (main) thread.
     /// @param window The window whose title bar to dress.
     /// @param request What to draw behind and around its band.
-    virtual void apply(QWindow& window, TitleBandRequest const& request) = 0;
+    /// @return Nothing on success; why the OS did not draw the requested backdrop otherwise.
+    [[nodiscard]] virtual std::expected<void, TitleBandMaterialError> apply(
+        QWindow& window, TitleBandRequest const& request) = 0;
 
     /// @pre GUI (main) thread.
     /// @param window The window to measure.
@@ -67,7 +100,12 @@ class NullTitleBandMaterial final: public ITitleBandMaterial
 {
   public:
     /// Does nothing.
-    void apply(QWindow& /*window*/, TitleBandRequest const& /*request*/) override {}
+    /// @return Success: there is nothing to fail.
+    [[nodiscard]] std::expected<void, TitleBandMaterialError> apply(
+        QWindow& /*window*/, TitleBandRequest const& /*request*/) override
+    {
+        return {};
+    }
 
     /// @return Zeros: there is no native title bar to measure.
     [[nodiscard]] NativeTitleBarMetrics metrics(QWindow& /*window*/) const override { return {}; }

@@ -759,6 +759,21 @@ class UiStyleProvider: public QObject
     /// @return The fill; the palette's window colour for a value out of range or an unknown centre.
     [[nodiscard]] Q_INVOKABLE QColor bandFill(int frame, int mode, QString const& centre) const;
 
+    /// What the title band paints as a surface: bandFill()'s decision before its colour.
+    /// @param frame  A window::WindowFrame.
+    /// @param mode   A window::WindowMode.
+    /// @param centre What the band's middle holds, as titleBand() names it.
+    /// @return A config::BandFill as its underlying value; @c Palette for a value out of range or an unknown
+    ///         centre.
+    [[nodiscard]] Q_INVOKABLE int bandSurfaceFill(int frame, int mode, QString const& centre) const;
+
+    /// The colour of a band fill, as bandFill() paints it. Main.qml asks it for the window's own fill
+    /// (WindowController::titleBandFill), which differs from the row's where the window's material failed.
+    /// Reads the palette, so a binding over it also reads @ref paletteRevision.
+    /// @param fill A config::BandFill as its underlying value.
+    /// @return The colour; the palette's window colour for a value out of range.
+    [[nodiscard]] Q_INVOKABLE QColor bandFillColor(int fill) const;
+
     /// The colour that says @p role, for the chrome the application palette currently paints.
     ///
     /// Picks the light or dark variant by the luminance of the palette's @c Window colour, so a status

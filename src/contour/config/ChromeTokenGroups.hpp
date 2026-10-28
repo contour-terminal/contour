@@ -34,6 +34,14 @@ enum class Material : uint8_t
 /// Number of @c Material enumerators, derived from the last one.
 inline constexpr size_t MaterialCount = static_cast<size_t>(Material::Solid) + 1;
 
+/// A material as drawn where nothing translucent may be: Glass and Mica become Solid, the rest stay.
+/// @param material The material.
+/// @return Its opaque counterpart.
+[[nodiscard]] constexpr Material opaqueMaterialOf(Material material) noexcept
+{
+    return material == Material::Glass || material == Material::Mica ? Material::Solid : material;
+}
+
 /// Which kind of window asks for the operating system's material: it picks the material's variant.
 enum class BackdropKind : uint8_t
 {
@@ -56,6 +64,9 @@ enum class BandFill : uint8_t
     Tint,        //!< The terminal background, tinted (see window::bandTintOf).
     Background,  //!< The terminal background itself (Minimal's bare band).
 };
+
+/// Number of @c BandFill enumerators, derived from the last one.
+inline constexpr size_t BandFillCount = static_cast<size_t>(BandFill::Background) + 1;
 
 /// What the native title bar is grown with.
 enum class TitleBarGrowth : uint8_t
@@ -2093,8 +2104,7 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
         || materials == MaterialSupport::Unsupported)
     {
         for (auto* material: { &tokens.material.titleBand, &tokens.material.popover })
-            if (*material == Material::Glass || *material == Material::Mica)
-                *material = Material::Solid;
+            *material = opaqueMaterialOf(*material);
     }
 
     if (preferences.contrast == ContrastPreference::Increased)

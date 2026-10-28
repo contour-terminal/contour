@@ -28,6 +28,7 @@
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -171,6 +172,9 @@ class WindowController:
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(qreal titleBandRevealTop READ titleBandRevealTop NOTIFY titleBandChanged)
     Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground NOTIFY titleBandChanged)
+    // What this window's band paints, a config::BandFill as its underlying value: the row's surface, unless
+    // this window's frame hosts no material or its material failed.
+    Q_PROPERTY(int titleBandFill READ titleBandFill NOTIFY titleBandChanged)
     // How the maximise button looks while the OS drives it (Snap Layouts): two QML-facing predicates rather
     // than the enum's number, so WindowControls.qml names no enumerator value.
     Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
@@ -772,10 +776,11 @@ class WindowController:
     // {{{ The title band's material and geometry
 
     /// Re-decides the title band: applies its request through the app's title-band material when the
-    /// window's frame is the full-size content view and the request changed (or the platform window is new
-    /// to it), then measures the band and emits titleBandChanged() when its geometry or request moved. A
-    /// request whose title-bar growth changed also moves the traffic lights, so it emits
-    /// nativeControlsInsetChanged() as well. Cheap to repeat: every hook (expose, palette, scale, screen,
+    /// window's frame hosts it (hostsTitleBandMaterial) and the request changed (or the platform window is
+    /// new to it), then measures the band and emits titleBandChanged() when its geometry, request or fill
+    /// moved. A request whose title-bar growth changed also moves the traffic lights, so it emits
+    /// nativeControlsInsetChanged() as well. A material that fails is logged, and the window falls back to
+    /// the opaque band for its lifetime (R-g). Cheap to repeat: every hook (expose, palette, scale, screen,
     /// window state, safe area, a chrome refresh) calls it. GUI thread.
     void refreshTitleBand();
 
@@ -785,9 +790,14 @@ class WindowController:
     /// @return The band.
     [[nodiscard]] TitleBand titleBand() const;
 
-    /// @return What this window asks the OS to draw behind and around its band now: the chrome row's surface
-    ///         for the window's frame, mode and band centre (titleBand()), in the effective colour scheme.
+    /// @return What this window asks the OS to draw behind and around its band now: its surface
+    ///         (titleBandSurface()) in the effective colour scheme, for a tabbed window.
     [[nodiscard]] platform::TitleBandRequest titleBandRequest() const;
+
+    /// @return What this window's band paints now, a config::BandFill as its underlying value: the same
+    ///         answer UiStyleProvider::bandFill gives, unless this window's frame hosts no material or its
+    ///         material failed, where it is the opaque band's.
+    [[nodiscard]] int titleBandFill() const { return static_cast<int>(titleBandSurface().fill); }
 
     /// @return The band's height and full-screen resting place, from the app's band tokens for the band's
     ///         centre (titleBand()) and, where the frame is the full-size content view, the native title bar
@@ -1282,8 +1292,12 @@ class WindowController:
     /// @return The colour scheme the chrome shows: the one last forced onto it, else what Qt reports.
     [[nodiscard]] Qt::ColorScheme effectiveColorScheme() const;
 
-    /// @return Whether this window's frame is the full-size content view the title-band material dresses.
+    /// @return Whether this window's frame hosts the title-band material (platform::hostsTitleBandMaterial).
     [[nodiscard]] bool dressesTitleBand() const noexcept;
+
+    /// @return The band's surface for the window's frame, mode and band centre (titleBand()): the chrome
+    ///         row's material, made opaque where the frame hosts no material or the material failed.
+    [[nodiscard]] TitleBandSurface titleBandSurface() const;
 
     /// @return FullScreen while the bound OS window is in full screen, else Windowed (also unbound).
     [[nodiscard]] WindowMode windowMode() const noexcept;
@@ -1531,6 +1545,9 @@ class WindowController:
     std::optional<platform::TitleBandRequest> _appliedTitleBand;
     // The request and the geometry refreshTitleBand() last published (the properties read these).
     std::optional<platform::TitleBandRequest> _publishedTitleBand;
+    std::optional<int> _publishedTitleBandFill;
+    // Whether this window's title-band material still works; Failed for the rest of its life once it failed.
+    platform::BandMaterialHealth _bandMaterialHealth = platform::BandMaterialHealth::Working;
     TitleBandGeometry _titleBandGeometry {};
 
     // Window-scoped native subscription; its geometry provider reads the live configuration.

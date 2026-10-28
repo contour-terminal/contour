@@ -3,8 +3,9 @@
 // The controller's half of the title band: what it asks the material for, how often, and the geometry it
 // publishes, live across Reduce Transparency, the chrome scheme, a scale change, full screen and
 // show_title_bar. The material is a recording one, measuring a 28-pt title bar that rests 24 pt down in
-// full screen. On a host whose frame is not the full-size content view (Linux, Windows) nothing is ever
-// applied -- which is how these cases prove those hosts unaffected.
+// full screen. The macOS cases follow the build's own frame on macOS and no material-hosting frame
+// elsewhere, where nothing is ever applied -- which is how they prove those hosts unaffected. The Windows
+// cases at the end follow the kept Windows frame and the Fluent row on every OS (ruling Q2).
 
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/AccessibilityPreferences.hpp>
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 
 #include <QtTest/QSignalSpy>
@@ -39,6 +41,7 @@ namespace
 {
 
 using contour::config::BandBackdrop;
+using contour::config::BandFill;
 using contour::config::ChromeDensity;
 using contour::config::TabBarVisibility;
 using contour::config::TitleBarGrowth;
@@ -48,13 +51,53 @@ using contour::window::BarCentre;
 /// How long an offscreen window-state change may take to arrive, in milliseconds.
 constexpr auto WindowStateTimeoutMs = 2000;
 
-/// @return Whether this host dresses a client-band window with the title-band material (macOS).
+/// @return The frame platform the macOS cases follow: the build's own on macOS, else one whose frame hosts
+///         no material, so the kept Windows frame does not dress the Fluent row under them.
+[[nodiscard]] contour::platform::FramePlatform macCasesFramePlatform()
+{
+    using contour::platform::FramePlatform;
+    return contour::platform::currentFramePlatform() == FramePlatform::MacOS ? FramePlatform::MacOS
+                                                                             : FramePlatform::Other;
+}
+
+/// @return Whether the macOS cases' host dresses a client-band window with the title-band material (macOS).
 [[nodiscard]] bool hostDressesTitleBand()
 {
-    return contour::platform::framePolicyFor(contour::platform::currentFramePlatform(),
-                                             contour::platform::WindowDecoration::Client)
-               .shadow
-           == contour::platform::FrameShadowStrategy::FullSizeContent;
+    return contour::platform::hostsTitleBandMaterial(
+        contour::platform::framePolicyFor(macCasesFramePlatform(),
+                                          contour::platform::WindowDecoration::Client)
+            .shadow);
+}
+
+/// Which host a TitleBandFixture's app follows.
+enum class FixtureHost : uint8_t
+{
+    MacCases = 0, //!< macCasesFramePlatform(), on the build's own host row.
+    Windows,      //!< The kept Windows frame and the Fluent row, on every OS.
+    BareFluent,   //!< The Fluent row on a frame that hosts no material.
+};
+
+/// @return The appearance services of a fixture's app on @p host.
+[[nodiscard]] contour::platform::AppearanceServices fixtureServices(
+    contour::test::AccessibilitySwitch& accessibility,
+    contour::test::AppearanceSwitch& appearance,
+    contour::test::TitleBandRecord& record,
+    FixtureHost host)
+{
+    auto services = contour::test::appearanceServicesWith(accessibility, appearance, record);
+    switch (host)
+    {
+        case FixtureHost::MacCases: services.framePlatform = macCasesFramePlatform(); break;
+        case FixtureHost::Windows:
+            services.framePlatform = contour::platform::FramePlatform::Windows;
+            services.hostPlatform = contour::config::HostPlatform::Windows;
+            break;
+        case FixtureHost::BareFluent:
+            services.framePlatform = contour::platform::FramePlatform::Other;
+            services.hostPlatform = contour::config::HostPlatform::Windows;
+            break;
+    }
+    return services;
 }
 
 /// How a TitleBandFixture leaves its window.
@@ -67,22 +110,29 @@ enum class FixtureWindow : uint8_t
 /// A test app over switched appearance sources and a recording material, and one window.
 struct TitleBandFixture
 {
-    contour::test::TitleBandRecord record { .metrics = { .height = 28, .fullScreenTop = 24 } };
+    contour::test::TitleBandRecord record;
     contour::test::AccessibilitySwitch accessibility {};
     contour::test::AppearanceSwitch appearance {};
-    contour::test::TestApp app { nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 nullptr,
-                                 contour::test::TestApp::testHostIdentity(),
-                                 nullptr,
-                                 {},
-                                 nullptr,
-                                 contour::test::appearanceServicesWith(accessibility, appearance, record) };
+    contour::test::TestApp app;
     contour::test::ScopedControllerWithOsWindow window { app.manager() };
 
     /// @param state How the window is left; created and bound by default.
-    explicit TitleBandFixture(FixtureWindow state = FixtureWindow::CreatedAndBound)
+    /// @param host  Which host the app follows; the macOS cases' by default.
+    /// @param failWith What the material answers a request for the native material; nothing by default.
+    explicit TitleBandFixture(
+        FixtureWindow state = FixtureWindow::CreatedAndBound,
+        FixtureHost host = FixtureHost::MacCases,
+        std::optional<contour::platform::TitleBandMaterialError> failWith = std::nullopt):
+        record { .metrics = { .height = 28, .fullScreenTop = 24 }, .failWith = failWith },
+        app { nullptr,
+              nullptr,
+              nullptr,
+              nullptr,
+              contour::test::TestApp::testHostIdentity(),
+              nullptr,
+              {},
+              nullptr,
+              fixtureServices(accessibility, appearance, record, host) }
     {
         if (state == FixtureWindow::Unbound)
             return;
@@ -466,4 +516,64 @@ TEST_CASE("Comfortable keeps the toolbar with one tab", "[contour][titleband][co
     CHECK(fixture.controller().titleBand().centre == BarCentre::Title);
     REQUIRE_FALSE(fixture.record.applied.empty());
     CHECK(fixture.record.applied.back().growth == TitleBarGrowth::CompactToolbar);
+}
+
+TEST_CASE("a failed apply falls back to Solid for that window", "[contour][titleband][controller]")
+{
+    // Review Focus 3: DWM rejects the backdrop on a build that should support it. The window asks once more
+    // for the client's own paint, and paints the solid band for the rest of its life.
+    auto fixture = TitleBandFixture { FixtureWindow::CreatedAndBound,
+                                      FixtureHost::Windows,
+                                      contour::platform::TitleBandMaterialError::Unsupported };
+    REQUIRE(fixture.app.app().titleBandTokens(BarCentre::Tabs).style == contour::config::ChromeStyle::Fluent);
+    auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
+
+    fixture.useClientBand();
+
+    REQUIRE(fixture.record.applied.size() == 2);
+    CHECK(fixture.record.applied.front().backdrop == BandBackdrop::NativeMaterial);
+    CHECK(fixture.record.applied.front().kind == contour::config::BackdropKind::Tabbed);
+    CHECK(fixture.record.applied.back().backdrop == BandBackdrop::Client);
+    CHECK(fixture.controller().titleBandFill() == static_cast<int>(BandFill::Tint));
+    CHECK(changes.count() == 1);
+
+    fixture.expose();
+    CHECK(fixture.record.applied.size() == 2);
+}
+
+TEST_CASE("a second window still asks for the material", "[contour][titleband][controller]")
+{
+    auto failed = TitleBandFixture { FixtureWindow::CreatedAndBound,
+                                     FixtureHost::Windows,
+                                     contour::platform::TitleBandMaterialError::Rejected };
+    failed.useClientBand();
+    REQUIRE(failed.controller().titleBandFill() == static_cast<int>(BandFill::Tint));
+
+    auto second = TitleBandFixture { FixtureWindow::CreatedAndBound, FixtureHost::Windows };
+    second.useClientBand();
+    REQUIRE_FALSE(second.record.applied.empty());
+    CHECK(second.record.applied.front().backdrop == BandBackdrop::NativeMaterial);
+    CHECK(second.controller().titleBandFill() == static_cast<int>(BandFill::Clear));
+}
+
+TEST_CASE("the kept Windows frame hosts the band", "[contour][titleband][controller]")
+{
+    using contour::platform::FrameShadowStrategy;
+    CHECK(contour::platform::hostsTitleBandMaterial(FrameShadowStrategy::NativeFrameKept));
+    CHECK(contour::platform::hostsTitleBandMaterial(FrameShadowStrategy::FullSizeContent));
+    CHECK_FALSE(contour::platform::hostsTitleBandMaterial(FrameShadowStrategy::None));
+}
+
+TEST_CASE("a frame that hosts no material paints the solid band", "[contour][titleband][controller]")
+{
+    // Off the kept Windows frame and the full-size content view, nothing draws Mica behind the band: the
+    // Fluent row's band is the tint, not a cleared band over nothing.
+    auto hosted = TitleBandFixture { FixtureWindow::CreatedAndBound, FixtureHost::Windows };
+    hosted.useClientBand();
+    REQUIRE(hosted.controller().titleBandFill() == static_cast<int>(BandFill::Clear));
+
+    auto bare = TitleBandFixture { FixtureWindow::CreatedAndBound, FixtureHost::BareFluent };
+    bare.useClientBand();
+    CHECK(bare.record.applied.empty());
+    CHECK(bare.controller().titleBandFill() == static_cast<int>(BandFill::Tint));
 }

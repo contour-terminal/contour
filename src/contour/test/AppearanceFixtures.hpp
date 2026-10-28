@@ -14,6 +14,7 @@
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/test/SecureInputFixtures.hpp>
 
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -108,6 +109,8 @@ struct TitleBandRecord
     /// Run inside apply(), after the request is recorded: what the OS may do synchronously in reply, such
     /// as Qt reporting a new safe area while the toolbar attaches. Empty by default.
     std::function<void()> duringApply {};
+    /// What apply() answers a request for the native material; nothing (success) by default.
+    std::optional<platform::TitleBandMaterialError> failWith {};
 };
 
 /// A title-band material that records into a TitleBandRecord instead of reaching the OS.
@@ -118,11 +121,16 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
     explicit RecordingTitleBandMaterial(TitleBandRecord& record): _record { record } {}
 
     /// Appends @p request to the record.
-    void apply(QWindow& /*window*/, platform::TitleBandRequest const& request) override
+    /// @return The record's failWith for a request for the native material, else success.
+    [[nodiscard]] std::expected<void, platform::TitleBandMaterialError> apply(
+        QWindow& /*window*/, platform::TitleBandRequest const& request) override
     {
         _record.applied.push_back(request);
         if (_record.duringApply)
             _record.duringApply();
+        if (_record.failWith && request.backdrop == config::BandBackdrop::NativeMaterial)
+            return std::unexpected { *_record.failWith };
+        return {};
     }
 
     /// Counts the call.
