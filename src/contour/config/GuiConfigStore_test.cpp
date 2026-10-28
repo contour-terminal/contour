@@ -266,6 +266,8 @@ TEST_CASE("GuiConfigStore: a side file's path stays in its directory", "[guiconf
     CHECK_FALSE(sideFilePathStaysIn(profiles / "sub" / "main.yml", profiles));
     CHECK_FALSE(sideFilePathStaysIn(std::filesystem::path { "colorschemes" } / "main.yml", profiles));
     CHECK_FALSE(sideFilePathStaysIn(std::filesystem::path { "main.yml" }, profiles));
+    // A name that did not convert to a path is an empty file name: `profiles/`, the directory itself.
+    CHECK_FALSE(sideFilePathStaysIn(profiles / std::filesystem::path {}, profiles));
 #ifdef _WIN32
     // What `profiles / "D:x.yml"` gives on Windows: a path on another drive's working directory.
     CHECK_FALSE(sideFilePathStaysIn(profiles / "D:x.yml", profiles));

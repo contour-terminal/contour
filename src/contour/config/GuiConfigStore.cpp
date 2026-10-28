@@ -172,7 +172,8 @@ std::expected<void, std::string> checkNewSideFileName(std::string_view name)
 
 bool sideFilePathStaysIn(std::filesystem::path const& relative, std::filesystem::path const& directory)
 {
-    return !relative.has_root_name() && !relative.has_root_directory() && relative.parent_path() == directory;
+    return !relative.has_root_name() && !relative.has_root_directory() && relative.has_filename()
+           && relative.parent_path() == directory;
 }
 
 namespace

@@ -67,7 +67,8 @@ struct SideFile
 [[nodiscard]] std::expected<void, std::string> checkNewSideFileName(std::string_view name);
 
 /// Whether @p relative, a side file's path relative to the configuration directory, is a file directly
-/// inside @p directory: no root name or root directory, and @p directory as its parent. The store's own
+/// inside @p directory: no root name or root directory, a file name (a name that did not convert to a path
+/// leaves none), and @p directory as its parent. The store's own
 /// guard, beside checkSideFileName(), against a name the platform's path rules read otherwise.
 /// @param relative The side file's relative path.
 /// @param directory The directory its kind is kept in.
