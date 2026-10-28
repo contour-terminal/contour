@@ -4693,7 +4693,12 @@ void TerminalSession::setStickyHeaderHost(window::StickyHeaderHost host)
         return;
     _stickyHeaderHost = host;
     core::locked(_terminal, [&] { _terminal.setStickyHeaderPresentation(window::presentationOf(host)); });
+    auto const shownBefore = _stickyHeaderChrome;
     refreshStickyHeader();
+    // Both chrome hosts share one presentation, so a move between them rebinds nothing, yet the host is
+    // part of what stickyHeader() publishes and decides which chrome shows the header.
+    if (_stickyHeaderChrome && _stickyHeaderChrome == shownBefore)
+        emit stickyHeaderChanged();
 }
 
 void TerminalSession::setStickyHeaderHost(int host)

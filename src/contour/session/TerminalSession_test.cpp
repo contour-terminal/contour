@@ -14116,6 +14116,34 @@ TEST_CASE("TerminalSession: the sticky header in the pane header takes no cells"
           == ConsumedByStickyHeader::Yes);
 }
 
+TEST_CASE("TerminalSession: a host change with the header shown reaches the chrome without a scroll",
+          "[contour][session][stickyheader]")
+{
+    using contour::session::TerminalSession;
+    using contour::window::StickyHeaderHost;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& session = scene.session();
+    auto& terminal = scene.terminal();
+    scene.runCommand(numberedOutput(60));
+    session.setStickyHeaderHost(StickyHeaderHost::PaneHeader);
+    REQUIRE(terminal.viewport().scrollUp(vtbackend::LineCount(5)));
+    REQUIRE(vtbackend::test::drawFrame(terminal).stickyHeader.has_value());
+    QCoreApplication::processEvents();
+    REQUIRE(session.stickyHeader().value(QStringLiteral("host")).toInt()
+            == static_cast<int>(StickyHeaderHost::PaneHeader));
+
+    // The other pane closed: the card now announces the title band. The text is unchanged, and nothing
+    // scrolls, yet the host that shows it moved.
+    auto const spy = QSignalSpy(&session, &TerminalSession::stickyHeaderChanged);
+    session.setStickyHeaderHost(StickyHeaderHost::TitleBand);
+    CHECK(spy.count() == 1);
+    CHECK(session.stickyHeader().value(QStringLiteral("host")).toInt()
+          == static_cast<int>(StickyHeaderHost::TitleBand));
+    CHECK(session.stickyHeader().value(QStringLiteral("command")).toString() == QStringLiteral("make"));
+}
+
 TEST_CASE("TerminalSession: the title band follows the active session's sticky header",
           "[contour][session][stickyheader][manager]")
 {
