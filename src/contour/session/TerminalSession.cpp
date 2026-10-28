@@ -2617,35 +2617,28 @@ void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)
     if (paneState() == window::PaneState::Ended)
         return;
 
-    auto paths = std::vector<std::string> {};
-    auto others = std::vector<std::string> {};
+    // Every URL is one word at the prompt, in the order it was dropped: a local file as its path, any other
+    // as its encoded form. A web page chooses the URLs it drags, so none of them is typed raw -- a `$(...)`
+    // in one would run when the shell reads the line.
+    auto words = std::vector<std::string> {};
     for (auto const& url: urls)
-        if (url.isLocalFile())
-            paths.push_back(url.toLocalFile().toStdString());
-        else
-            others.push_back(url.toString(QUrl::FullyEncoded).toStdString());
+        words.push_back(url.isLocalFile() ? url.toLocalFile().toStdString()
+                                          : url.toString(QUrl::FullyEncoded).toStdString());
 
-    auto text = std::string {};
-    if (!paths.empty())
+    auto const typed = window::droppedPathsText(words, dropQuoting());
+    if (!typed)
     {
-        auto const typed = window::droppedPathsText(paths, dropQuoting());
-        if (!typed)
-        {
-            // Nothing is typed, not even the names that were fine: one that is not is one that would run.
-            sessionLog()("Dropped paths refused.");
-            if (auto const reason = window::dropRefusedText(typed.error());
-                !reason.empty() && _manager != nullptr)
-                _manager->postNotice(window::Notice { .kind = window::NoticeKind::DropRefused,
-                                                      .text = std::string { reason } },
-                                     this);
-            return;
-        }
-        text = *typed;
+        // Nothing is typed, not even the names that were fine: one that is not is one that would run.
+        sessionLog()("Dropped paths refused.");
+        if (auto const reason = window::dropRefusedText(typed.error());
+            !reason.empty() && _manager != nullptr)
+            _manager->postNotice(
+                window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { reason } },
+                this);
+        return;
     }
-    for (auto const& other: others)
-        text += other + ' ';
 
-    pasteText(QString::fromStdString(text), 1, vtbackend::PasteStrip::Keep);
+    pasteText(QString::fromStdString(*typed), 1, vtbackend::PasteStrip::Keep);
 }
 
 void TerminalSession::insertDroppedText(QString const& text)

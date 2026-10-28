@@ -804,9 +804,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param targetLine A tick's targetLine.
     Q_INVOKABLE void scrollToScrollbarMark(qint64 targetLine);
     /// Types dropped URLs at this pane's prompt, as one paste. Local files become their paths, escaped for
-    /// the shell the pane runs (the foreground process's, or the profile's shell where that is not known:
-    /// a pane hosted on a daemon); other URLs are pasted as text. A name that cannot be typed safely (a
-    /// control character, or under cmd a `%` or `"`) refuses the WHOLE drop and the window says so. A
+    /// the shell the pane runs; any other URL is its encoded form, quoted the same way, so a link a web page
+    /// chose never reaches the shell as an expansion. A name that cannot be typed safely (a control
+    /// character, or what the shell has no way to quote) refuses the WHOLE drop and the window says so. A
     /// pane whose session has ended takes nothing. Goes through the paste path of a clipboard paste:
     /// bracketed when the application asked for it, and with its size limits.
     /// @param urls What was dropped.

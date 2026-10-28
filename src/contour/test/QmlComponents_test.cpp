@@ -5462,14 +5462,29 @@ TEST_CASE("pane card: files and text drop into the pane's session, whatever part
         CHECK(drop.controller().lastPayload == static_cast<int>(contour::window::DropPayload::Text));
     }
 
-    SECTION("a web link is text, not a file")
+    SECTION("a web link goes to the session's URL path, never typed as text")
     {
-        drop.source.mime.setUrls({ QUrl { QStringLiteral("https://example.org/") } });
+        auto const urls = QList<QUrl> { QUrl { QStringLiteral("https://example.org/") } };
+        drop.source.mime.setUrls(urls);
         drop.dragOver(0.5, 0.5);
         CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::CopyAction);
-        CHECK(drop.session.droppedUrls.empty());
-        CHECK(drop.session.droppedTexts.size() == 1);
-        CHECK(drop.controller().lastPayload == static_cast<int>(contour::window::DropPayload::Text));
+        REQUIRE(drop.session.droppedUrls.size() == 1);
+        CHECK(drop.session.droppedUrls.front() == urls);
+        CHECK(drop.session.droppedTexts.empty());
+    }
+
+    SECTION("a mixed list is one insertDroppedUrls call, never joined into text")
+    {
+        // A page chooses its text/uri-list: joined with a line feed, the first line would run at the drop.
+        auto const urls = QList<QUrl> { QUrl { QStringLiteral("https://a/$(touch${IFS}x)") },
+                                        QUrl { QStringLiteral("file:///tmp/c.txt") },
+                                        QUrl { QStringLiteral("https://b/") } };
+        drop.source.mime.setUrls(urls);
+        drop.dragOver(0.5, 0.5);
+        CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::CopyAction);
+        REQUIRE(drop.session.droppedUrls.size() == 1);
+        CHECK(drop.session.droppedUrls.front() == urls);
+        CHECK(drop.session.droppedTexts.empty());
     }
 
     CHECK(drop.controller().droppedZones.empty());

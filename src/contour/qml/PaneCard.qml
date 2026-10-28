@@ -282,10 +282,11 @@ Item {
         function payloadOf(drag) {
             if (drag.formats.indexOf(tabFormat) >= 0)
                 return chromeStyle.dropPayloads.tab
-            const isFile = (url) => url.toString().indexOf("file:") === 0
-            if (drag.hasUrls && drag.urls.every(isFile))
+            // Every URL list is the session's to type (files and web links alike, escaped and checked there):
+            // a page chooses what its drag carries, so none of it is pasted here as text.
+            if (drag.hasUrls)
                 return chromeStyle.dropPayloads.files
-            if (drag.hasUrls || drag.hasText)
+            if (drag.hasText)
                 return chromeStyle.dropPayloads.text
             return chromeStyle.dropPayloads.none
         }
@@ -327,10 +328,11 @@ Item {
                 drop.accept(Qt.MoveAction)
                 return
             }
+            // URLs are typed by the session as quoted words; plain text takes the paste path of Ctrl+V.
             if (dropped.payload === chromeStyle.dropPayloads.files)
                 card.session.insertDroppedUrls(drop.urls)
             else
-                card.session.insertDroppedText(drop.hasText ? drop.text : drop.urls.join("\n"))
+                card.session.insertDroppedText(drop.text)
             drop.accept(Qt.CopyAction)
         }
     }

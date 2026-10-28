@@ -14440,15 +14440,41 @@ TEST_CASE("TerminalSession: a file name that could run something refuses the who
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 }
 
+TEST_CASE("TerminalSession: a dropped URL list never types a shell expansion or a line break",
+          "[contour][session][drop]")
+{
+    // A web page chooses the text/uri-list it drags: `$(...)` in a URL would run when the shell reads
+    // the line, with no Return pressed, so each URL is typed as one quoted word.
+    TestApp testApp;
+    auto const urls = QList<QUrl> { QUrl(QStringLiteral("https://a/$(touch${IFS}x)")),
+                                    QUrl(QStringLiteral("https://b/`id`;rm")),
+                                    QUrl(QStringLiteral("file:///tmp/it's")) };
+
+    for (auto const bracketed: { true, false })
+    {
+        CAPTURE(bracketed);
+        auto session = makeDropSession(testApp, "sh", bracketed);
+        session->insertDroppedUrls(urls);
+        auto const typed = mockPtyOf(*session).stdinBuffer();
+        CHECK_FALSE(typed.contains('\n'));
+        CHECK_FALSE(typed.contains('\r'));
+        CHECK_FALSE(typed.contains("$(")); // only as \$\(
+        CHECK_FALSE(typed.contains('`'));
+        CHECK(typed.contains("\\$\\(touch\\$"));
+        CHECK(typed.contains("id%60\\;rm")); // the encoded form, and the `;` escaped
+    }
+}
+
 TEST_CASE("TerminalSession: dropped web links and text are pasted as text", "[contour][session][drop]")
 {
     TestApp testApp;
 
-    SECTION("a web link")
+    SECTION("a web link is quoted as one word, as a file name is")
     {
         auto session = makeDropSession(testApp, "zsh", true);
         session->insertDroppedUrls({ QUrl(QStringLiteral("https://example.com/a?b=1&c=2")) });
-        CHECK(mockPtyOf(*session).stdinBuffer() == "\033[200~https://example.com/a?b=1&c=2 \033[201~");
+        CHECK(mockPtyOf(*session).stdinBuffer()
+              == "\033[200~https://example.com/a\\?b\\=1\\&c\\=2 \033[201~");
     }
 
     SECTION("text")
