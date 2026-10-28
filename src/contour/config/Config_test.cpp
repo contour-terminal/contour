@@ -1299,10 +1299,13 @@ profiles:
               == ScrollbarMarkSources { ScrollbarMarkSource::SearchMatches });
     }
 
-    SECTION("commands keeps covering the running commands it always did")
+    SECTION("commands and running are two sources: leaving running out keeps it off, through a save")
     {
-        CHECK(marksAfter("marks: [Commands]")
-              == ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::Running });
+        CHECK(marksAfter("marks: [Commands]") == ScrollbarMarkSources { ScrollbarMarkSource::Commands });
+        auto const kept = ScrollbarMarkSources { ScrollbarMarkSource::Failures,
+                                                 ScrollbarMarkSource::Commands,
+                                                 ScrollbarMarkSource::UserMarks };
+        CHECK(marksAfter(std::format("marks: {}", contour::config::YAMLConfigWriter::format(kept))) == kept);
     }
 
     SECTION("[] switches every tick off")

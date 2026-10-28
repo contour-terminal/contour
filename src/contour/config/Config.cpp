@@ -3140,10 +3140,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         // Through the token table the writer spells the list from, so what it writes reads back.
         if (auto const source = configEnumFromToken<vtbackend::ScrollbarMarkSource>(token))
         {
+            // Each token is its own source: `running` left out of a list stays off, so what the settings
+            // page writes reads back.
             sources.enable(*source);
-            // `commands` predates `running` and kept covering the running ones.
-            if (*source == vtbackend::ScrollbarMarkSource::Commands)
-                sources.enable(vtbackend::ScrollbarMarkSource::Running);
         }
         else
             errorLog()("Unknown value in {} ({}): '{}'; ignored.",
