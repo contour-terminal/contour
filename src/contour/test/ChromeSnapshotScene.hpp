@@ -543,6 +543,16 @@ class ChromeSnapshotScene
         _incubation.settle();
         QCoreApplication::processEvents();
         window().requestActivate();
+        // The strip's list creates its delegates lazily, and focusTab() does nothing for a row that has none
+        // yet: a strip narrower than the window (the Fluent and Terminal rows) has not made this one.
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const tabs = itemsNamed(*window().contentItem(), QStringLiteral("tabBackground"));
+                return std::ranges::any_of(tabs, [](QQuickItem const* background) {
+                    return background->parentItem()->property("tabIndex").toInt() == SnapshotFocusedTab;
+                });
+            },
+            2000));
         _controller.focusTabWell(SnapshotFocusedTab);
         REQUIRE(QTest::qWaitFor(
             [&] {
