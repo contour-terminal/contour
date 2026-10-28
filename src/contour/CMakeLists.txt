@@ -815,6 +815,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/Accessibility_qml_test.cpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
+            display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
