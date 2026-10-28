@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/BlockMenu.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
@@ -356,7 +357,8 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
     // Step 6.3's pane-interrupted follows the keyboard-focus row.
     CHECK(static_cast<int>(SnapshotScript::PaneInterrupted)
           == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::PaneInterrupted);
+    CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::PaneInterrupted)].script
+          == SnapshotScript::PaneInterrupted);
     struct Expected
     {
         SnapshotScript script;
@@ -455,6 +457,8 @@ TEST_CASE("snapshot.scriptTable.keyboardFocus", "[snapshot]")
     // Three tabs, keyboard focus put on the second by the Ctrl+F6 action, the first still active.
     CHECK(static_cast<int>(SnapshotScript::KeyboardFocus)
           == static_cast<int>(SnapshotScript::SecureInputBand) + 1);
+    CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::KeyboardFocus)].script
+          == SnapshotScript::KeyboardFocus);
     auto const& row = scriptRow(SnapshotScript::KeyboardFocus);
     CHECK(row.name == "keyboard-focus");
     CHECK(row.tabCount == 3);
@@ -471,4 +475,62 @@ TEST_CASE("snapshot.scriptTable.keyboardFocus", "[snapshot]")
         CHECK((other.action == ScriptAction::FocusTabWell)
               == (other.script == SnapshotScript::KeyboardFocus));
     }
+}
+
+TEST_CASE("snapshot.scriptTable.blocks", "[snapshot][blocks]")
+{
+    using namespace contour::test::snapshot;
+    // The four rows after pane-interrupted: the block menu, the ⋯ button, and the sticky header in a pane
+    // header and in the title band. Each is a picture of a sample block, and no other row shows one.
+    struct Expected
+    {
+        SnapshotScript script;
+        std::string_view name;
+        int tabCount;
+        PaneShape panes;
+        ScriptAction action;
+    };
+    auto const expected = std::array {
+        Expected {
+            SnapshotScript::BlockMenu, "block-menu", 1, PaneShape::SingleLeaf, ScriptAction::OpenBlockMenu },
+        Expected { SnapshotScript::BlockActions,
+                   "block-actions",
+                   1,
+                   PaneShape::SingleLeaf,
+                   ScriptAction::HoverBlock },
+        Expected { SnapshotScript::StickyPaneHeader,
+                   "sticky-pane-header",
+                   1,
+                   PaneShape::SplitThree,
+                   ScriptAction::None },
+        Expected { SnapshotScript::StickyTitleBand,
+                   "sticky-title-band",
+                   1,
+                   PaneShape::SingleLeaf,
+                   ScriptAction::None },
+    };
+    CHECK(static_cast<int>(expected.front().script) == static_cast<int>(SnapshotScript::PaneInterrupted) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::StickyTitleBand);
+    for (auto const& each: expected)
+    {
+        CAPTURE(each.name);
+        auto const& row = scriptRow(each.script);
+        CHECK(row.name == each.name);
+        CHECK(row.tabCount == each.tabCount);
+        CHECK(row.panes == each.panes);
+        CHECK(row.action == each.action);
+        CHECK(row.blocks == SnapshotBlocks::Sample);
+    }
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        auto const listed =
+            std::ranges::any_of(expected, [&](Expected const& e) { return e.script == row.script; });
+        CHECK((row.blocks == SnapshotBlocks::Sample) == listed);
+        CHECK((row.action == ScriptAction::OpenBlockMenu || row.action == ScriptAction::HoverBlock)
+              == (row.script == SnapshotScript::BlockMenu || row.script == SnapshotScript::BlockActions));
+    }
+    // The menu's header is the four facts the block menu leads with, and its rows follow.
+    CHECK(SnapshotBlockMenuHeader.size() == 4);
+    CHECK(contour::command::BlockMenuRowCount == 5);
 }

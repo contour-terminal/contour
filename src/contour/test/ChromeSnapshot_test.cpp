@@ -5,6 +5,7 @@
 // need a display: the last case renders them, on the display route only, and only when
 // CONTOUR_SNAPSHOT_DIR names where they go.
 
+#include <contour/command/BlockMenu.hpp>
 #include <contour/command/CommandPaletteTree.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
@@ -172,6 +173,61 @@ void checkSplitCards(contour::test::snapshot::ChromeSnapshotScene const& scene,
         CHECK(visibleItemsNamed(content, QStringLiteral("paneHeader")) == panes);
         CHECK(visibleItemsNamed(content, QStringLiteral("paneCardSurface"))
               == (row.density == contour::config::ChromeDensity::Minimal ? 0 : panes));
+    }
+}
+
+/// Checks what a script that shows the sample command block drew: the block menu, the ⋯ button, and the
+/// sticky header in a pane header or in the title band.
+/// @param scene The scene the script ran in.
+/// @param row The script's row.
+/// @param content The window's content item.
+void checkBlockScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                      contour::test::snapshot::SnapshotScriptRow const& row,
+                      QQuickItem const& content)
+{
+    using namespace contour::test::snapshot;
+    switch (row.script)
+    {
+        case SnapshotScript::BlockMenu: {
+            // The terminal's menu is open on the block's: its four header rows, a separator and five
+            // commands.
+            auto const* menu = scene.root().findChild<QObject*>(QStringLiteral("terminalContextMenu"));
+            REQUIRE(menu != nullptr);
+            CHECK(menu->property("opened").toBool());
+            CHECK(menu->property("count").toInt()
+                  == static_cast<int>(SnapshotBlockMenuHeader.size() + 1
+                                      + contour::command::BlockMenuRowCount));
+            break;
+        }
+        case SnapshotScript::BlockActions:
+            // The pointer is on the block's strip: its ⋯ button shows, beside nothing but the strip.
+            CHECK(visibleItemsNamed(content, QStringLiteral("blockActionsButton")) == 1);
+            break;
+        case SnapshotScript::StickyPaneHeader: {
+            // The active pane's header names the failed block; the other panes' headers keep their names.
+            auto const stickies = contour::test::itemsNamed(content, QStringLiteral("paneHeaderSticky"));
+            REQUIRE(stickies.size() == paneCount(row.panes));
+            CHECK(std::ranges::count_if(stickies, [](QQuickItem const* each) { return each->isVisible(); })
+                  == 1);
+            auto const shown =
+                std::ranges::find_if(stickies, [](QQuickItem const* each) { return each->isVisible(); });
+            REQUIRE(shown != stickies.end());
+            CHECK((*shown)->property("text").toString().startsWith(
+                QString::fromUtf8(SnapshotStickyFailed.glyph)));
+            CHECK(visibleItemsNamed(content, QStringLiteral("paneHeaderJump")) == 1);
+            break;
+        }
+        case SnapshotScript::StickyTitleBand: {
+            // Where the band shows the title, it is the succeeded block's header; the pane has no header.
+            CHECK(visibleItemsNamed(content, QStringLiteral("paneHeaderSticky")) == 0);
+            auto const* title = scene.root().findChild<QQuickItem*>(QStringLiteral("bandTitle"));
+            REQUIRE(title != nullptr);
+            if (title->isVisible())
+                CHECK(title->property("text").toString().startsWith(
+                    QString::fromUtf8(SnapshotStickySucceeded.glyph)));
+            break;
+        }
+        default: break;
     }
 }
 } // namespace
@@ -600,6 +656,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(ringedTabs(content) == std::vector<int> { SnapshotFocusedTab });
                 break;
             }
+            case SnapshotScript::BlockMenu:
+            case SnapshotScript::BlockActions:
+            case SnapshotScript::StickyPaneHeader:
+            case SnapshotScript::StickyTitleBand: checkBlockScript(scene, row, content); break;
             case SnapshotScript::SingleTab: break;
             case SnapshotScript::PermissionPaste: {
                 auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("permissionDialog"));

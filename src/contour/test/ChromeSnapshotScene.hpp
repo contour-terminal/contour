@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/command/BlockMenu.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistory.hpp>
 #include <contour/command/CommandPaletteTree.hpp>
+#include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
@@ -22,6 +24,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
@@ -29,6 +32,8 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/StickyHeaderChrome.hpp>
+#include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -312,7 +317,10 @@ class ChromeSnapshotScene
             case ScriptAction::HoldLinkModifier: holdLinkModifier(); break;
             case ScriptAction::ScrollBack: scrollBack(); break;
             case ScriptAction::FocusTabWell: focusTabWell(); break;
+            case ScriptAction::OpenBlockMenu: openBlockMenu(); break;
+            case ScriptAction::HoverBlock: hoverBlock(); break;
         }
+        showSticky();
         // The window's notices post their banner as the reload that failed would.
         if (scriptRow(_variant.script).banner == SnapshotBanner::ConfigReload)
             _controller.notices().post(
@@ -438,6 +446,8 @@ class ChromeSnapshotScene
     /// measures columns in.
     static constexpr qreal SnapshotCellWidth = 8;
     static constexpr qreal SnapshotCellHeight = 20;
+    /// The row of the page the sample block's head is on, for the ⋯ button's anchor.
+    static constexpr qreal SnapshotBlockHoverRow = 3;
 
     /// The terminal item of each leaf's session, in leaf order: the pane whose background is drawn for it.
     /// Waits for the panes to be laid out: the window was only just shown.
@@ -560,6 +570,83 @@ class ChromeSnapshotScene
                 return tab != nullptr && tab->property("tabIndex").toInt() == SnapshotFocusedTab;
             },
             2000));
+    }
+
+    /// Opens the sample block's menu as the ⋯ button and the focus chords open it: the terminal's menu, its
+    /// model the block menu's four header rows, a separator and five commands.
+    void openBlockMenu()
+    {
+        auto const state = command::BlockMenuState {
+            .id = vtbackend::CommandBlockId { static_cast<uint32_t>(SnapshotBlockId) },
+            .header =
+                std::vector<std::string> { SnapshotBlockMenuHeader.begin(), SnapshotBlockMenuHeader.end() },
+            .output = command::OutputPresence::Present,
+            .commandLine = command::CommandLinePresence::Present,
+            .livePrompt = command::PromptPresence::Present,
+            .fold = command::FoldPresence::Expanded,
+        };
+        auto const tree = command::buildMenuTree(
+            command::buildBlockMenu(state), {}, command::shortcutStyleFor(variantHost(_variant)));
+        _controller.setContextMenuModel(window::toContextMenuModel(tree.nodes));
+        auto* menu = root().findChild<QObject*>(QStringLiteral("terminalContextMenu"));
+        REQUIRE(menu != nullptr);
+        _controller.openContextMenu();
+        REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    }
+
+    /// Puts the pointer on the sample block's strip: the active pane's session publishes the block and where
+    /// its ⋯ button goes, a few rows down the strip the rail lives in (a cell wide on the Terminal row).
+    void hoverBlock()
+    {
+        auto const* provider = qobject_cast<window::UiStyleProvider const*>(
+            _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
+        REQUIRE(provider != nullptr);
+        auto const stripWidth =
+            std::max(provider->property("space").value<QObject*>()->property("blockGutter").toReal(),
+                     provider->property("size").value<QObject*>()->property("blockActions").toReal());
+        _sessions[ActiveLeaf]->setBlockHover(
+            SnapshotBlockId,
+            QRectF { 0, SnapshotBlockHoverRow * SnapshotCellHeight, stripWidth, SnapshotCellHeight });
+        auto const buttons = root().findChildren<QQuickItem*>(QStringLiteral("blockActionsButton"));
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                return std::ranges::any_of(buttons,
+                                           [](QQuickItem const* button) { return button->isVisible(); });
+            },
+            2000));
+    }
+
+    /// Shows the sample block's sticky header where the script says it lives: the active pane's header, or
+    /// the title band. Nothing for a script without a sample block, or whose action shows the block
+    /// elsewhere.
+    void showSticky()
+    {
+        auto const publish = [&](SnapshotSticky const& sticky, window::StickyHeaderHost host) {
+            auto const& glyph = window::StickyHeaderGlyphRows.at(static_cast<std::size_t>(sticky.outcome));
+            return QVariantMap {
+                { QStringLiteral("glyph"), QString::fromUtf8(sticky.glyph) },
+                { QStringLiteral("command"), QString::fromUtf8(sticky.command) },
+                { QStringLiteral("detail"), QString::fromUtf8(sticky.detail) },
+                { QStringLiteral("outcome"), static_cast<int>(sticky.outcome) },
+                { QStringLiteral("statusRole"), static_cast<int>(glyph.role) },
+                { QStringLiteral("host"), static_cast<int>(host) },
+                { QStringLiteral("jumpLabel"), QStringLiteral("Jump to Command ↑") },
+            };
+        };
+        switch (_variant.script)
+        {
+            case SnapshotScript::StickyPaneHeader:
+                _sessions[ActiveLeaf]->setStickyHeader(
+                    publish(SnapshotStickyFailed, window::StickyHeaderHost::PaneHeader));
+                break;
+            case SnapshotScript::StickyTitleBand:
+                _sessions[ActiveLeaf]->setStickyHeader(
+                    publish(SnapshotStickySucceeded, window::StickyHeaderHost::TitleBand));
+                _controller.setActiveStickyHeader(
+                    publish(SnapshotStickySucceeded, window::StickyHeaderHost::TitleBand));
+                break;
+            default: break;
+        }
     }
 
     /// Scrolls the active pane SnapshotScrollOffset lines back into SnapshotHistoryLines of history, with a
