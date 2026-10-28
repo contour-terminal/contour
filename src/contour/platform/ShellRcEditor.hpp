@@ -203,10 +203,9 @@ class NullShellRcEditor final: public IShellRcEditor
 /// right before writing and refuses when it changed meanwhile, and reads it once more afterwards: the file
 /// system's append may report success for a write that was cut short (a close error nobody checked), so the
 /// file itself decides.
-/// The re-read before writing narrows the window in which a concurrent editor's save can interfere but
-/// cannot close it: a save in the instant between that check and the append can leave Contour's line glued
-/// to the end of the user's last line. The check after the append reports that as an error (the file then
-/// no longer equals what it was plus the line), never as success.
+/// What Contour appends always starts with a line ending (at worst one blank line), so a save that lands
+/// between the re-read and the append, leaving the user's last line unterminated, cannot glue Contour's
+/// line onto it.
 class FileShellRcEditor final: public IShellRcEditor
 {
   public:

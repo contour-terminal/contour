@@ -274,20 +274,19 @@ std::expected<RcInstall, ShellRcError> FileShellRcEditor::install(config::ShellK
     if (right->exists != before->exists || right->content != before->content)
         return std::unexpected(ShellRcError::Changed);
 
-    // A file that does not end in a line ending gets one first, so the line starts on its own line.
+    // The chunk always opens with a line ending, so Contour's line starts on its own line even if the
+    // file lost its final one after the re-read above. At worst that is one blank line.
     // CRLF files keep their endings: only the line this adds ends in a bare LF, which every shell reads.
-    auto chunk = std::string {};
-    if (!before->content.empty() && !before->content.ends_with('\n'))
-        chunk += '\n';
-    chunk += line;
-    chunk += '\n';
+    auto const chunk = std::format("\n{}\n", line);
 
     // The append's own verdict is not trusted: it can report success for a write whose tail never reached
     // the disk. Nothing is truncated or restored either way: an append can only have added bytes, so the
     // user's own lines are intact. The file, read again, says what landed.
     std::ignore = _fileSystem.appendFile(before->resolved, chunk);
     auto const after = readRc(_fileSystem, *path);
-    if (after && after->content == before->content + chunk)
+    // Not `before + chunk`: a save that landed after the re-read may sit between the two. Whatever the
+    // user's bytes are by then, the chunk must be the file's tail and nothing of `before` may be gone.
+    if (after && after->content.starts_with(before->content) && after->content.ends_with(chunk))
         return RcInstall::Appended;
     if (after && after->content != before->content)
     {
