@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,28 @@ std::expected<std::string, DropTextError> one(std::string path, ShellQuoting quo
 {
     auto const paths = std::vector { std::move(path) };
     return droppedPathsText(paths, quoting);
+}
+
+/// UTF-8 encoding of a code point below U+10000, which is all these tests use.
+std::string utf8Of(char32_t codePoint)
+{
+    constexpr auto TwoByteLimit = char32_t { 0x800 };
+    constexpr auto ContinuationMark = char32_t { 0x80 };
+    constexpr auto TwoByteMark = char32_t { 0xC0 };
+    constexpr auto ThreeByteMark = char32_t { 0xE0 };
+    constexpr auto SixBits = char32_t { 0x3F };
+    auto result = std::string {};
+    if (codePoint < TwoByteLimit)
+    {
+        result += static_cast<char>(TwoByteMark | (codePoint >> 6));
+    }
+    else
+    {
+        result += static_cast<char>(ThreeByteMark | (codePoint >> 12));
+        result += static_cast<char>(ContinuationMark | ((codePoint >> 6) & SixBits));
+    }
+    result += static_cast<char>(ContinuationMark | (codePoint & SixBits));
+    return result;
 }
 } // namespace
 
@@ -151,26 +175,20 @@ TEST_CASE("droppedText.anUnknownShellGetsDoubleQuotedNames", "[droppedtext]")
 
 TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[droppedtext]")
 {
+    // The code points are spelled as numbers, so no bidirectional control sits in this source text.
     // Bidi embeddings, overrides and isolates and the line and paragraph separators make the text read
     // other than it runs; as for a control character, nothing of the drop is typed.
+    constexpr auto DisguisingCodePoints =
+        std::array<char32_t, 14> { 0x200E, 0x200F, 0x061C, 0x2028, 0x2029, 0x202A, 0x202B,
+                                   0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069 };
+    constexpr auto OrdinaryNeighbourCodePoints =
+        std::array<char32_t, 7> { 0x200D, 0x2027, 0x202F, 0x2065, 0x206A, 0x061B, 0x061D };
     for (auto const quoting:
          { ShellQuoting::Posix, ShellQuoting::PowerShell, ShellQuoting::Cmd, ShellQuoting::Unknown })
-        for (auto const& bad: { "\u200E",
-                                "\u200F",
-                                "\u061C",
-                                "\u2028",
-                                "\u2029",
-                                "\u202A",
-                                "\u202B",
-                                "\u202C",
-                                "\u202D",
-                                "\u202E",
-                                "\u2066",
-                                "\u2067",
-                                "\u2068",
-                                "\u2069" })
+        for (auto const codePoint: DisguisingCodePoints)
         {
-            auto const paths = std::vector<std::string> { "/tmp/good", std::string("/tmp/a") + bad + "b" };
+            auto const paths =
+                std::vector<std::string> { "/tmp/good", std::string("/tmp/a") + utf8Of(codePoint) + "b" };
             auto const text = droppedPathsText(paths, quoting);
             REQUIRE_FALSE(text.has_value());
             CHECK(text.error() == DropTextError::ControlCharacter);
@@ -178,8 +196,8 @@ TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[
     // Their neighbours are ordinary text: U+200D (zero-width joiner, which emoji need), U+2027, U+202F
     // (narrow no-break space), U+2065, U+206A, and the Arabic semicolon and the code point after the letter
     // mark.
-    for (auto const& fine: { "\u200D", "\u2027", "\u202F", "\u2065", "\u206A", "\u061B", "\u061D" })
-        CHECK(one(std::string("/tmp/a") + fine + "b", ShellQuoting::PowerShell).has_value());
+    for (auto const fine: OrdinaryNeighbourCodePoints)
+        CHECK(one(std::string("/tmp/a") + utf8Of(fine) + "b", ShellQuoting::PowerShell).has_value());
 }
 
 TEST_CASE("droppedText.aWordStartingWithADashNeverReachesAProgramAsAnOption", "[droppedtext]")
