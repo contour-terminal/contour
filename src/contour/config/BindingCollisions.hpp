@@ -5,6 +5,8 @@
 
 #include <vtbackend/input/MatchModes.hpp>
 
+#include <core/Utils.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -65,8 +67,8 @@ namespace detail
                            BindingKind kind,
                            std::vector<BindingCollision>& out)
     {
-        for (auto const [i, a]: std::views::enumerate(bindings))
-            for (auto const [j, b]: std::views::enumerate(bindings | std::views::drop(i + 1)))
+        for (auto const [i, a]: core::views::enumerate(bindings))
+            for (auto const [j, b]: core::views::enumerate(bindings | std::views::drop(i + 1)))
                 if (a.input == b.input && a.modifiers == b.modifiers && a.clickCount == b.clickCount
                     && modesOverlap(a.modes, b.modes))
                     out.push_back(
