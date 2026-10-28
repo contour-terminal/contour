@@ -5,7 +5,7 @@
 // Where it goes is the session's blockActionsAnchor: the strip the rail lives in, beside the block's first
 // visible row. The button is a square of `size.blockActions`, centred on the strip, its top at the anchor's
 // top and never past the strip's end, so it covers nothing of the grid. On the Terminal row there is no strip:
-// the anchor is the one cell of the block column, and the button is that cell.
+// the anchor is the one cell of the block column, and the button is that cell, its glyph fitted into it.
 //
 // It shows and hides at once, with the anchor: there is no fade, so nothing here has to stop under Reduce
 // Motion. It takes the press for itself and leaves the pointer's hover to the grid beneath, which is what
@@ -59,6 +59,11 @@ Item {
         objectName: "blockActionsGlyph"
         anchors.centerIn: parent
         text: "⋯"
+        // The glyph keeps a hairline of room to each side of the button: on the Terminal row the button is
+        // one cell and the glyph fills it, so its first dot sat on the pane's edge and read as clipped
+        // there. Shrunk into the room the button leaves, on every row alike.
+        readonly property real room: parent.width - 2 * chromeStyle.hairline(Screen.devicePixelRatio)
+        scale: implicitWidth > room ? room / implicitWidth : 1
         font: chromeStyle.type.body
         color: chromeStyle.colors.paletteText
         Accessible.ignored: true

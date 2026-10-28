@@ -267,6 +267,48 @@ TEST_CASE("A sample block's sticky header is shown somewhere on every row (offsc
     }
 }
 
+TEST_CASE("The block actions button and its glyph stay inside the terminal on every row (offscreen)",
+          "[contour][gui][qml][snapshot][blockactions]")
+{
+    using namespace contour::test::snapshot;
+    for (auto const row: { contour::config::ChromeStyle::MacOS,
+                           contour::config::ChromeStyle::Fluent,
+                           contour::config::ChromeStyle::ContourLinux,
+                           contour::config::ChromeStyle::Terminal })
+    {
+        auto const variant = SnapshotVariant { .script = SnapshotScript::BlockActions,
+                                               .row = row,
+                                               .edition = SnapshotEditions.front(),
+                                               .appearance = vtbackend::ColorPreference::Dark };
+        INFO(snapshotFileName(variant));
+        auto scene = ChromeSnapshotScene { variant };
+        scene.show();
+
+        auto const buttons =
+            contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("blockActionsButton"));
+        auto const shown =
+            std::ranges::find_if(buttons, [](QQuickItem const* each) { return each->isVisible(); });
+        REQUIRE(shown != buttons.end());
+        auto const* const button = *shown;
+        auto const* const terminal = button->parentItem();
+        auto const* const glyph = button->findChild<QQuickItem*>(QStringLiteral("blockActionsGlyph"));
+        REQUIRE(glyph != nullptr);
+
+        // The button is inside the pane, and the glyph between the button's sides: the same inset on every
+        // row, so none is cut at the pane's edge.
+        auto const bounds = QRectF { 0, 0, terminal->width(), terminal->height() };
+        auto const buttonRect =
+            button->mapRectToItem(terminal, QRectF { 0, 0, button->width(), button->height() });
+        CHECK(bounds.contains(buttonRect));
+        auto const glyphRect =
+            glyph->mapRectToItem(terminal, QRectF { 0, 0, glyph->implicitWidth(), glyph->implicitHeight() });
+        auto const hairline = 1.0 / std::max(1.0, scene.window().devicePixelRatio());
+        CHECK(glyphRect.left() - buttonRect.left() >= hairline);
+        CHECK(buttonRect.right() - glyphRect.right() >= hairline);
+        CHECK(glyphRect.left() >= bounds.left() + hairline);
+    }
+}
+
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
 {
