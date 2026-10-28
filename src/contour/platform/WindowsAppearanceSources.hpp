@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 // The Windows accessibility and appearance sources: what WindowsSettings.hpp decides from a reader's
@@ -18,7 +19,10 @@ namespace contour::platform
 namespace detail
 {
     /// Maps a reader's readings to @p T, and reports a re-read value only when it differs from the last one
-    /// reported. The shape both Windows sources share.
+    /// the consumer saw, through @c current() or a report. The shape both Windows sources share.
+    ///
+    /// Nothing is read at construction: the sources are built before the application exists (F1), and the
+    /// consumer's first @c current() -- after it does -- is the baseline later changes compare against.
     template <typename T>
     class WindowsSettingReport
     {
@@ -26,7 +30,7 @@ namespace detail
         /// What the readings mean for this source.
         using Mapping = T (*)(WindowsSettingsReadings const&) noexcept;
 
-        /// @param reader The settings reader; read once here for the value later changes compare against.
+        /// @param reader The settings reader; first read by @c current() or a broadcast, never here.
         /// @param mapping What the readings mean.
         /// @param topic The broadcast topic this source follows, Accessibility or Appearance.
         /// @param onChange Called with each changed value; may be empty.
@@ -37,14 +41,18 @@ namespace detail
             _reader { std::move(reader) },
             _mapping { mapping },
             _topic { topic },
-            _onChange { std::move(onChange) },
-            _reported { _mapping(_reader->read()) }
+            _onChange { std::move(onChange) }
         {
         }
 
+        /// Reads, and records the value as the one the consumer has seen.
         /// @pre GUI thread.
         /// @return The value a fresh read means.
-        [[nodiscard]] T current() const { return _mapping(_reader->read()); }
+        [[nodiscard]] T current() const
+        {
+            _reported = read();
+            return *_reported;
+        }
 
         /// Re-reads when @p topic concerns this source, and reports a changed value.
         /// @pre GUI thread.
@@ -53,8 +61,8 @@ namespace detail
         {
             if (!topicConcerns(topic, _topic))
                 return;
-            auto next = current();
-            if (next == _reported)
+            auto next = read();
+            if (_reported == next)
                 return;
             _reported = next;
             if (_onChange)
@@ -62,11 +70,16 @@ namespace detail
         }
 
       private:
+        /// @return The value a fresh read means, recording nothing.
+        [[nodiscard]] T read() const { return _mapping(_reader->read()); }
+
         std::shared_ptr<IWindowsSettingsReader const> _reader;
         Mapping _mapping;
         SettingTopic _topic;
         std::function<void(T)> _onChange;
-        T _reported; ///< The value last reported, or read at construction.
+        /// The value the consumer last saw, or none before its first. Mutable: @c current() is what the
+        /// consumer sees, so reading it is what moves the baseline.
+        mutable std::optional<T> _reported = std::nullopt;
     };
 } // namespace detail
 

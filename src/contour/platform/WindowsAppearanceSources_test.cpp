@@ -88,3 +88,21 @@ TEST_CASE("a source without a callback only re-reads", "[appearance-source][wind
     source.settingsChanged(SettingTopic::Both);
     CHECK(source.current().materials == MaterialSupport::Supported);
 }
+
+TEST_CASE("a source reads nothing until the consumer asks, and that is its baseline",
+          "[appearance-source][windowssettings]")
+{
+    // Built before the application exists (F1): the settings are read once the consumer asks, after it does.
+    auto const reader = std::make_shared<FakeWindowsSettingsReader>();
+    auto received = std::vector<AccessibilityPreferences> {};
+    auto source = WindowsAccessibilityPreferenceSource { reader, [&](AccessibilityPreferences next) {
+                                                            received.push_back(next);
+                                                        } };
+    CHECK(reader->reads == 0);
+
+    // Changed before the consumer looked: what it then sees is no change to report.
+    reader->readings.highContrast = HighContrast::On;
+    CHECK(source.current().contrast == ContrastPreference::Increased);
+    source.settingsChanged(SettingTopic::Both);
+    CHECK(received.empty());
+}
