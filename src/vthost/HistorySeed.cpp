@@ -58,11 +58,12 @@ namespace
         return std::string { text.substr(0, end) };
     }
 
-    /// The seam where a seeded history's still-Running command record is ended. A snapshot taken mid-command
-    /// leaves a Running record under the divider; Step 3f Task 12 adds the Abandoned end state and
-    /// Terminal::abandonRunningCommand(), and this is the one place that call goes once it has landed.
-    void abandonSeededRunningCommand(vtbackend::Terminal const& /*terminal*/) noexcept
+    /// Ends a seeded history's still-Running command record as Abandoned: a snapshot taken mid-command
+    /// carries one, and the program it belonged to is not coming back, so its chip must not tick.
+    /// @param terminal The terminal being seeded; its lock is held by the caller.
+    void abandonSeededRunningCommand(vtbackend::Terminal& terminal)
     {
+        terminal.abandonRunningCommand();
     }
 
     /// Registers @p history's hyperlinks with @p terminal, as a mirror does.

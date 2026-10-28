@@ -10,6 +10,7 @@
 #include <format>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <vthost/HistorySeed.hpp>
@@ -205,6 +206,30 @@ TEST_CASE("seeded command blocks are found and new ones get higher ids", "[vthos
 
     fresh.terminal.writeToScreen("\033]133;A\033\\");
     CHECK(store.currentId().value > second);
+}
+
+TEST_CASE("a seeded command that was still running is abandoned, and its chip does not tick",
+          "[vthost][snapshot][seed]")
+{
+    namespace test = vtbackend::test;
+    auto source = freshTerminal();
+    source.terminal.writeToScreen(test::commandRun("ls", { "a" }, 0));
+    source.terminal.writeToScreen(test::commandStarted("sleep 100"));
+    auto history = capturePaneHistory(source.terminal, 100);
+    REQUIRE(history.commandBlocks.size() == 2);
+    // The capture already ends a Running record; a peer that does not sends it as it is.
+    history.commandBlocks[1].state = std::to_underlying(vtbackend::CommandBlockState::Running);
+    history.commandBlocks[1].end = std::to_underlying(vtbackend::CommandBlockEnd::Reported);
+    auto const runningId = vtbackend::CommandBlockId { history.commandBlocks[1].id };
+
+    auto fresh = freshTerminal();
+    seedRestoredHistory(fresh.terminal, history, DividerOn);
+
+    auto const* const record = fresh.terminal.commandBlocks().find(runningId);
+    REQUIRE(record != nullptr);
+    CHECK(record->state == vtbackend::CommandBlockState::Finished);
+    CHECK(record->end == vtbackend::CommandBlockEnd::Abandoned);
+    CHECK(vtbackend::outcomeOf(*record) != vtbackend::CommandBlockOutcome::Running);
 }
 
 TEST_CASE("a seeded hyperlink keeps its URI", "[vthost][snapshot][seed]")
