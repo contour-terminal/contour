@@ -2123,6 +2123,16 @@ TEST_CASE("WindowController: a refused drop tells the window", "[contour][multiw
     CHECK(window->notices().toastText()
           == QStringLiteral("Not inserted: a file name holds a control or text-direction character."));
 
+    // The toast names what was dropped: a link is not a file name.
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("https://a/b;c")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a link holds a character that could run as a command, and this "
+                            "pane's shell is not known."));
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("https://a/b;c")), QUrl(QStringLiteral("file:///tmp/x")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a name holds a character that could run as a command, and this "
+                            "pane's shell is not known."));
+
     contour::test::closeAllTabs(*window);
 }
 

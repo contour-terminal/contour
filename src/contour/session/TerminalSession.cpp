@@ -2640,11 +2640,15 @@ void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)
     {
         // Nothing is typed, not even the names that were fine: one that is not is one that would run.
         sessionLog()("Dropped paths refused.");
-        if (auto const reason = window::dropRefusedText(typed.error());
+        auto subject = window::DropSubject::NameOrLink;
+        if (std::ranges::all_of(urls, &QUrl::isLocalFile))
+            subject = window::DropSubject::FileName;
+        else if (std::ranges::none_of(urls, &QUrl::isLocalFile))
+            subject = window::DropSubject::Link;
+        if (auto reason = window::dropRefusedText(typed.error(), subject);
             !reason.empty() && _manager != nullptr)
             _manager->postNotice(
-                window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { reason } },
-                this);
+                window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::move(reason) }, this);
         return;
     }
 

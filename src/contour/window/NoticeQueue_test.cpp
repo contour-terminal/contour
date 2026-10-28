@@ -73,9 +73,13 @@ TEST_CASE("Notice texts", "[notices]")
     CHECK(layoutSaveFailedNoticeText("dev", contour::config::LayoutSaveError::WriteFailed)
           == std::format("Layout “dev” was not saved: {}.",
                          contour::config::describe(contour::config::LayoutSaveError::WriteFailed)));
-    CHECK(dropRefusedText(DropTextError::ControlCharacter)
+    CHECK(dropRefusedText(DropTextError::ControlCharacter, DropSubject::FileName)
           == "Not inserted: a file name holds a control or text-direction character.");
-    CHECK(dropRefusedText(DropTextError::NoPaths).empty());
+    CHECK(dropRefusedText(DropTextError::ControlCharacter, DropSubject::Link)
+          == "Not inserted: a link holds a control or text-direction character.");
+    CHECK(dropRefusedText(DropTextError::UnknownShell, DropSubject::NameOrLink)
+              .starts_with("Not inserted: a name holds"));
+    CHECK(dropRefusedText(DropTextError::NoPaths, DropSubject::FileName).empty());
     CHECK(restoreSummaryText(2, 7) == "Restored 2 windows, 7 tabs");
     CHECK(restoreSummaryText(1, 1) == "Restored 1 window, 1 tab");
     CHECK(configReloadFailedNoticeText("bad key") == "Contour could not reload its configuration: bad key");

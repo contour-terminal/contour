@@ -198,11 +198,27 @@ namespace detail
     return std::format("Contour could not reload its configuration: {}", detail::shownText(error));
 }
 
+/// What a refused drop held, which is what its toast calls the offender.
+enum class DropSubject : uint8_t
+{
+    FileName = 0, //!< Every dropped item was a local file.
+    Link,         //!< Every dropped item was a link that is not a local file.
+    NameOrLink,   //!< Files and links were dropped together.
+};
+
+/// How the toast names each @c DropSubject, in enumerator order.
+inline constexpr auto DropSubjectNouns =
+    std::array<std::string_view, 3> { "a file name", "a link", "a name" };
+
+static_assert(DropSubjectNouns.size() == std::to_underlying(DropSubject::NameOrLink) + 1U,
+              "DropSubjectNouns must have a noun for every drop subject");
+
 /// A row of the drop-refusal table: why dropped paths gave no text, and what the toast says.
 struct DropRefusalRow
 {
-    DropTextError error;   ///< Why nothing was typed.
-    std::string_view text; ///< What the toast says; empty where nothing is shown.
+    DropTextError error; ///< Why nothing was typed.
+    std::string_view
+        text; ///< What the toast says, `{}` standing for the subject's noun; empty where nothing is shown.
 };
 
 /// One row per @c DropTextError, in enumerator order. "No paths" is no refusal worth a toast: there was
@@ -210,14 +226,14 @@ struct DropRefusalRow
 inline constexpr auto DropRefusalRows = std::array {
     DropRefusalRow { .error = DropTextError::NoPaths, .text = "" },
     DropRefusalRow { .error = DropTextError::ControlCharacter,
-                     .text = "Not inserted: a file name holds a control or text-direction character." },
+                     .text = "Not inserted: {} holds a control or text-direction character." },
     DropRefusalRow { .error = DropTextError::Unquotable,
-                     .text = "Not inserted: a file name holds a character cmd cannot quote." },
+                     .text = "Not inserted: {} holds a character cmd cannot quote." },
     DropRefusalRow { .error = DropTextError::UnknownShell,
-                     .text = "Not inserted: a file name holds a character that could run as a command, and "
+                     .text = "Not inserted: {} holds a character that could run as a command, and "
                              "this pane's shell is not known." },
     DropRefusalRow { .error = DropTextError::LeadingDash,
-                     .text = "Not inserted: a name starts with a dash, which a program would read as an "
+                     .text = "Not inserted: {} starts with a dash, which a program would read as an "
                              "option." },
 };
 
@@ -231,10 +247,12 @@ inline constexpr std::string_view TabMergeRefusedText =
 
 /// What the toast for a refused drop says.
 /// @param error Why the drop was refused.
+/// @param subject What the drop held, named in the text.
 /// @return The text; empty when @p error needs no toast.
-[[nodiscard]] constexpr std::string_view dropRefusedText(DropTextError error) noexcept
+[[nodiscard]] inline std::string dropRefusedText(DropTextError error, DropSubject subject)
 {
-    return DropRefusalRows[std::to_underlying(error)].text;
+    auto const text = DropRefusalRows[std::to_underlying(error)].text;
+    return std::vformat(text, std::make_format_args(DropSubjectNouns[std::to_underlying(subject)]));
 }
 
 /// Whether the pointer rests on the toast.
