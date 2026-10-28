@@ -149,8 +149,10 @@ namespace
     CHECK(titleBar.isVisible() == (band.band != contour::window::BarPresence::Hidden));
     // The macOS row's windowed band is drawn at the height of the title bar it covers (S2): the one its
     // surface grows -- 40 pt under the compact toolbar, Minimal's bare band the bare 32 pt (P3).
+    // Only on a macOS host: elsewhere there is no title bar under the band to measure.
     if (variant.row == contour::config::ChromeStyle::MacOS && row.mode == SnapshotWindowMode::Windowed
-        && row.frame == SnapshotFrame::ClientBand && titleBar.isVisible())
+        && row.frame == SnapshotFrame::ClientBand && titleBar.isVisible()
+        && variantHost(variant) == contour::config::HostPlatform::MacOS)
     {
         REQUIRE(scene.measuredTitleBar().has_value());
         CHECK(titleBar.height() == scene.measuredTitleBar()->height);
@@ -407,6 +409,52 @@ void checkShellCard(QQuickItem const& content, contour::test::snapshot::Snapshot
                             ->findChild<QObject*>(QStringLiteral("shellIntegrationTitle"));
     REQUIRE(title != nullptr);
     CHECK(title->property("text").toString() == QString::fromUtf8(words.title));
+}
+} // namespace
+
+namespace
+{
+/// Checks the Windows host's caption scripts on @p variant's row: under caption-hover the OS-hovered
+/// maximise button is lit (the Terminal row's cells reveal their glyphs instead of the dot), and under
+/// inactive-window the close glyph is dimmed (the Terminal row's cells keep their dots).
+/// @param scene The shown scene.
+/// @param variant Its picture; its script is CaptionHover or InactiveWindow.
+void checkWindowsCaption(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                         contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    REQUIRE(variantHost(variant) == contour::config::HostPlatform::Windows);
+    auto const& content = *scene.window().contentItem();
+    auto const* context = QQmlEngine::contextForObject(&scene.root());
+    REQUIRE(context != nullptr);
+    auto const* style = context->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const dot = style->property("trafficLightGlyph").toString();
+    if (variant.row == contour::config::ChromeStyle::Terminal)
+    {
+        // R-n: on a Windows host the Terminal row's controls are scheme-inked cells.
+        auto const cells = contour::test::itemsNamed(content, QStringLiteral("windowControlCell_maximize"));
+        REQUIRE(cells.size() == 1);
+        auto const text = cells.front()->property("text").toString();
+        CHECK((text == dot) == (variant.script == SnapshotScript::InactiveWindow));
+        return;
+    }
+    if (variant.script == SnapshotScript::CaptionHover)
+    {
+        auto const fills = contour::test::itemsNamed(content, QStringLiteral("windowControlFill_maximize"));
+        REQUIRE(fills.size() == 1);
+        CHECK(fills.front()->isVisible());
+        CHECK(fills.front()->property("color").value<QColor>().alpha() > 0);
+        return;
+    }
+    CHECK_FALSE(scene.window().isActive());
+    auto const glyphs = contour::test::itemsNamed(content, QStringLiteral("windowControlGlyph_close"));
+    REQUIRE(glyphs.size() == 1);
+    auto const* colors = style->property("colors").value<QObject*>();
+    REQUIRE(colors != nullptr);
+    // By value: the binding hands back the colour in another spec than the role's.
+    CHECK(glyphs.front()->property("color").value<QColor>().rgba()
+          == colors->property("captionGlyphInactive").value<QColor>().rgba());
 }
 } // namespace
 
@@ -893,6 +941,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(banner->isVisible());
                 break;
             }
+            case SnapshotScript::CaptionHover:
+            case SnapshotScript::InactiveWindow: checkWindowsCaption(scene, variant); break;
         }
 
         // A sheet hangs below the band, never over the tab strip: every dialog the script opened.
@@ -905,6 +955,27 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(surface->mapToScene(QPointF(0, 0)).y()
                       >= titleBar->mapToScene(QPointF(0, titleBar->height())).y() - 0.5);
             }
+    }
+}
+
+TEST_CASE("The Windows caption scripts on the rows this process draws (offscreen)",
+          "[contour][gui][qml][snapshot]")
+{
+    // The Fluent row draws only under FluentWinUI3, so this is what covers it in that pass; the main case
+    // above covers the macOS and Terminal rows in every pass.
+    using namespace contour::test::snapshot;
+    auto const rows = rowsRenderableUnder(QQuickStyle::name().toStdString());
+    REQUIRE_FALSE(rows.empty());
+    for (auto const& variant: snapshotMatrix(rows))
+    {
+        if (variant.script != SnapshotScript::CaptionHover
+            && variant.script != SnapshotScript::InactiveWindow)
+            continue;
+        INFO(snapshotFileName(variant));
+        auto scene = ChromeSnapshotScene { variant };
+        scene.show();
+        CHECK(scene.diagnostics().isEmpty());
+        checkWindowsCaption(scene, variant);
     }
 }
 

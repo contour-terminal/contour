@@ -72,10 +72,28 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::MacOSHost).tabCount == scriptRow(SnapshotScript::ThreeTabs).tabCount);
     CHECK(scriptRow(SnapshotScript::MacOSHost).frame == SnapshotFrame::ClientBand);
     CHECK(scriptRow(SnapshotScript::MacOSHost).mode == SnapshotWindowMode::Windowed);
+    // The Windows host: the caption hover and the inactive window, every row on Windows -- the Terminal row
+    // with the ● cells, the Fluent row with its caption buttons.
+    for (auto const script: { SnapshotScript::CaptionHover, SnapshotScript::InactiveWindow })
+    {
+        CHECK(scriptRow(script).host == SnapshotHost::Windows);
+        CHECK(scriptRow(script).tabCount == scriptRow(SnapshotScript::ThreeTabs).tabCount);
+        CHECK(scriptRow(script).frame == SnapshotFrame::ClientBand);
+        CHECK(scriptRow(script).mode == SnapshotWindowMode::Windowed);
+    }
+    // Appended after the overlays, the last rows of the table.
+    CHECK(SnapshotScripts.back().script == SnapshotScript::InactiveWindow);
+    CHECK(scriptRow(SnapshotScript::CaptionHover).name == "caption-hover");
+    CHECK(scriptRow(SnapshotScript::CaptionHover).action == ScriptAction::HoverMaximize);
+    CHECK(scriptRow(SnapshotScript::InactiveWindow).name == "inactive-window");
+    CHECK(scriptRow(SnapshotScript::InactiveWindow).action == ScriptAction::DeactivateWindow);
     for (auto const& row: SnapshotScripts)
     {
         CAPTURE(row.name);
         CHECK((row.host == SnapshotHost::MacOS) == (row.script == SnapshotScript::MacOSHost));
+        CHECK(
+            (row.host == SnapshotHost::Windows)
+            == (row.script == SnapshotScript::CaptionHover || row.script == SnapshotScript::InactiveWindow));
     }
     // Each of the four axes is set by its own row only: every other row is a client band, windowed,
     // with no drift.
@@ -192,6 +210,8 @@ TEST_CASE("snapshot.variantHost", "[snapshot]")
         CAPTURE(contour::config::chromeStyleName(row));
         // A script's own host overrides the row's; every other script keeps it.
         CHECK(variantHost({ .script = SnapshotScript::MacOSHost, .row = row }) == HostPlatform::MacOS);
+        CHECK(variantHost({ .script = SnapshotScript::CaptionHover, .row = row }) == HostPlatform::Windows);
+        CHECK(variantHost({ .script = SnapshotScript::InactiveWindow, .row = row }) == HostPlatform::Windows);
         CHECK(variantHost({ .script = SnapshotScript::ThreeTabs, .row = row }) == rowHost(row).host);
     }
 }
@@ -362,9 +382,13 @@ TEST_CASE("snapshot.scriptTable.overlays", "[snapshot]")
           == static_cast<int>(SnapshotScript::KeyboardFocus) + 1);
     CHECK(SnapshotScripts[static_cast<std::size_t>(SnapshotScript::PaneInterrupted)].script
           == SnapshotScript::PaneInterrupted);
-    // Step 6.1's two card rows close the table, after Step 4b's Settings rows.
+    // Step 6.1's two card rows come after Step 4b's Settings rows.
     CHECK(static_cast<int>(SnapshotScript::SettingsStatusLine) + 1
           == static_cast<int>(SnapshotScript::ShellIntegrationOffer));
+    // Step 5a's Windows caption scripts follow them.
+    CHECK(static_cast<int>(SnapshotScript::ShellIntegrationConfirm) + 1
+          == static_cast<int>(SnapshotScript::CaptionHover));
+    CHECK(SnapshotScripts.back().script == SnapshotScript::InactiveWindow);
     struct Expected
     {
         SnapshotScript script;
@@ -630,8 +654,9 @@ TEST_CASE("snapshot.scriptTable.settingsPages", "[snapshot]")
 TEST_CASE("snapshot.scriptTable.shellIntegrationCard", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    // The two card rows close the table, in stage order: a single leaf each, nothing else going on.
-    CHECK(SnapshotScripts.back().script == SnapshotScript::ShellIntegrationConfirm);
+    // The two card rows follow the Settings rows, in stage order: a single leaf each, nothing else going on.
+    CHECK(static_cast<int>(SnapshotScript::SettingsStatusLine) + 1
+          == static_cast<int>(SnapshotScript::ShellIntegrationOffer));
     struct Expected
     {
         SnapshotScript script;

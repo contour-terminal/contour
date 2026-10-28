@@ -100,6 +100,8 @@ enum class SnapshotScript : uint8_t
     SettingsStatusLine,       //!< The Settings window on the status line page of `work`.
     ShellIntegrationOffer,    //!< One pane with the shell integration card on its offer.
     ShellIntegrationConfirm,  //!< One pane with the card showing the line it would add.
+    CaptionHover,   //!< three-tabs on a Windows host, the OS hovering the maximise button (Snap Layouts).
+    InactiveWindow, //!< three-tabs on a Windows host, another window active: the dimmed caption.
 };
 
 /// How a script's active tab is divided into panes.
@@ -153,6 +155,8 @@ enum class ScriptAction : uint8_t
     OpenBlockMenu,      //!< The sample block's menu, opened as the block menu's ⋯ button and chord open it.
     HoverBlock,         //!< The pointer on the sample block's strip: the session publishes its ⋯ anchor.
     ShowRestoreSummary, //!< The window's notices post the restore summary, as the first restored window does.
+    HoverMaximize, //!< The OS reports the pointer over the maximise button, as Windows' WM_NCMOUSEMOVE does.
+    DeactivateWindow, //!< Another window takes the focus.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -289,6 +293,7 @@ enum class SnapshotHost : uint8_t
 {
     RowDefault = 0, //!< Each row on its own host, as SnapshotRowHosts lists it.
     MacOS,          //!< Every row on macOS: its traffic lights, its shortcut glyphs and its title bar.
+    Windows,        //!< Every row on Windows: its caption buttons, or the Terminal row's ● cells.
 };
 
 /// The link target the link-pill scripts hold the follow modifier over, as the session spells it: a
@@ -1904,6 +1909,56 @@ inline constexpr auto SnapshotScripts = std::array {
                         .blocks = SnapshotBlocks::None,
                         .settingsPage = SnapshotSettingsPage::None,
                         .shellCard = SnapshotShellCard::Confirm },
+    SnapshotScriptRow { .script = SnapshotScript::CaptionHover,
+                        .name = "caption-hover",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::HoverMaximize,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::Windows,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None,
+                        .secure = SecureDecor::None,
+                        .blocks = SnapshotBlocks::None,
+                        .settingsPage = SnapshotSettingsPage::None,
+                        .shellCard = SnapshotShellCard::None },
+    SnapshotScriptRow { .script = SnapshotScript::InactiveWindow,
+                        .name = "inactive-window",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::DeactivateWindow,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::Windows,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .layoutName = SnapshotLayoutName::None,
+                        .secure = SecureDecor::None,
+                        .blocks = SnapshotBlocks::None,
+                        .settingsPage = SnapshotSettingsPage::None,
+                        .shellCard = SnapshotShellCard::None },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -2023,6 +2078,7 @@ struct SnapshotVariant
     {
         case SnapshotHost::RowDefault: break;
         case SnapshotHost::MacOS: return config::HostPlatform::MacOS;
+        case SnapshotHost::Windows: return config::HostPlatform::Windows;
     }
     return rowHost(variant.row).host;
 }

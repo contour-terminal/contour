@@ -12,6 +12,7 @@
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PermissionPrompt.hpp>
@@ -209,6 +210,17 @@ class ChromeSnapshotScene
         return window::HostChipState::Connected;
     }
 
+    /// Whether the band draws the window's controls on @p host: on Windows, where the frameless window's
+    /// caption buttons are the chrome's (R-n's ● cells on the Terminal row). The other hosts' pictures keep
+    /// the band's corner free of them, as they always have.
+    /// @param host The platform the picture is rendered on.
+    /// @return Drawn on Windows, None elsewhere.
+    [[nodiscard]] static constexpr ClientFrameAffordances affordancesFor(config::HostPlatform host) noexcept
+    {
+        return host == config::HostPlatform::Windows ? ClientFrameAffordances::Drawn
+                                                     : ClientFrameAffordances::None;
+    }
+
     /// @param variant The picture to build: its script, chrome row, defaults edition and appearance.
     explicit ChromeSnapshotScene(SnapshotVariant variant):
         _appearance { variant.appearance },
@@ -243,6 +255,7 @@ class ChromeSnapshotScene
             // measureBand() gives the macOS host's band its inset, from the row's surface; none elsewhere.
             .nativeControlsInset = 0,
             .secure = scriptRow(variant.script).secure,
+            .affordances = affordancesFor(variantHost(variant)),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -335,6 +348,11 @@ class ChromeSnapshotScene
             case ScriptAction::OpenBlockMenu: openBlockMenu(); break;
             case ScriptAction::HoverBlock: hoverBlock(); break;
             case ScriptAction::ShowRestoreSummary: showRestoreSummary(); break;
+            // What the caption adapter reports while the OS hovers the button (Snap Layouts' trigger).
+            case ScriptAction::HoverMaximize:
+                _controller.setNativeMaximizeVisual(platform::CaptionButtonVisual::Hover);
+                break;
+            case ScriptAction::DeactivateWindow: deactivateWindow(); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -431,6 +449,10 @@ class ChromeSnapshotScene
     static constexpr int FullScreenSettleTimeoutMs = 5000;
     /// How long macOS's animation out of a full-screen space is given.
     static constexpr int FullScreenLeaveMs = 1500;
+    /// How long the window is given to take, then to lose, the focus.
+    static constexpr int ActivationTimeoutMs = 2000;
+    /// The size of the window deactivateWindow() hands the focus to: as small as a window gets.
+    static constexpr QSize FocusTakerSize { 1, 1 };
 
     /// What halves a length to centre an item.
     static constexpr qreal HalfDivisor = 2;
@@ -681,6 +703,19 @@ class ChromeSnapshotScene
             case SnapshotScript::StickyTitleBand: publishFor(SnapshotStickySucceeded); break;
             default: break;
         }
+    }
+
+    /// Hands the focus from the window to another one, as switching to another application does. The other
+    /// window is a pixel big and the picture is the window's own frame, so it shows in no snapshot.
+    void deactivateWindow()
+    {
+        window().requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(&window(), ActivationTimeoutMs));
+        _focusTaker = std::make_unique<QWindow>();
+        _focusTaker->resize(FocusTakerSize);
+        _focusTaker->show();
+        _focusTaker->requestActivate();
+        REQUIRE(QTest::qWaitFor([&] { return !window().isActive(); }, ActivationTimeoutMs));
     }
 
     /// Scrolls the active pane SnapshotScrollOffset lines back into SnapshotHistoryLines of history, with a
@@ -1402,6 +1437,7 @@ class ChromeSnapshotScene
     /// Last: openKitDialog()'s dialog, parented into _root's tree, dies first.
     std::unique_ptr<QObject> _overlay;
     QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.
+    std::unique_ptr<QWindow> _focusTaker;     ///< The window deactivateWindow() handed the focus to, if any.
     std::optional<SnapshotNativeTitleBar>
         _measuredTitleBar; ///< What measureBand() measured over, if anything.
 };
