@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/DropZonePolicy.hpp>
 
+#include <core/Utils.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <ranges>
@@ -127,7 +129,7 @@ TEST_CASE("dropZone.ghostIsTheInsetHalfOnTheZonesSide", "[dropzone]")
 TEST_CASE("dropZone.rowsFollowTheEnumeratorOrder", "[dropzone]")
 {
     CHECK(DropZoneRows.size() == DropZoneCount);
-    for (auto const [i, row]: std::views::enumerate(DropZoneRows))
+    for (auto const [i, row]: core::views::enumerate(DropZoneRows))
         CHECK(static_cast<size_t>(row.zone) == static_cast<size_t>(i));
     CHECK(dropZoneRowOf(DropZone::SplitRight).label == "Tab → split right");
     CHECK(dropZoneRowOf(DropZone::SplitRight).side == SplitSide::Right);
