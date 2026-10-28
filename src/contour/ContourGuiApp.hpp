@@ -569,6 +569,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// switch is tracked whenever the chrome is not pinned (see the @c colorSchemeChanged handler in @c
     /// run()). Safe to call at startup and live (e.g. from the settings page).
     /// @c GuiTheme::Terminal forces the scheme the terminal background's luminance calls for.
+    /// While the OS runs a contrast theme every @p theme acts as @c GuiTheme::System, so the contrast
+    /// theme's palette reaches the chrome (@c platform::effectiveGuiTheme); the appearance handler applies
+    /// the configured theme again when the contrast theme comes or goes.
     /// @param theme The GUI theme to apply.
     /// @param colors The default profile's color configuration, which @c GuiTheme::Terminal reads.
     /// @param liveBackground The focused session's runtime default background (OSC 11), which
@@ -751,6 +754,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The OS reported a new appearance.
     /// @param appearance The appearance now in effect.
     void onPlatformAppearanceChanged(platform::PlatformAppearance appearance);
+
+    /// The scheme @c applyGuiTheme would force for @p theme now, the OS's contrast theme considered.
+    /// @param theme The configured GUI theme.
+    /// @param liveBackground The focused session's runtime default background, if known.
+    /// @return The scheme to force, or @c std::nullopt to follow the OS.
+    [[nodiscard]] std::optional<Qt::ColorScheme> guiSchemeFor(
+        config::GuiTheme theme, std::optional<vtbackend::RGBColor> liveBackground) const;
 
     /// @p configured with @c Auto resolved against this host.
     ///

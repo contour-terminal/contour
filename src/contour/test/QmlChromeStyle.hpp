@@ -76,7 +76,7 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 
     auto* controls = new contour::window::WindowControlStyleProvider(
-        setup.windowControls, setup.row, setup.isFontInstalled, &engine);
+        setup.windowControls, setup.row, setup.appearance.contrastTheme, setup.isFontInstalled, &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("windowControls"), controls);
 
     // The popups' drop shadow is served as an image, exactly as ContourGuiApp serves it: without

@@ -9422,6 +9422,46 @@ TEST_CASE("the native hover state lights the maximise button (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a contrast theme drops the red close hover (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    for (auto const contrast:
+         { contour::platform::ContrastTheme::None, contour::platform::ContrastTheme::Active })
+    {
+        INFO("contrast theme: " << static_cast<int>(contrast));
+        contour::test::QmlMessageCapture const warnings;
+        QQmlEngine engine;
+        MockTabController controller;
+        auto setup = windowsChromeOn(contour::config::ChromeStyle::Fluent);
+        setup.appearance.contrastTheme = contrast;
+        auto const host = makeTitleBarHostWith(engine, controller, setup);
+        auto* window = qobject_cast<QQuickWindow*>(host.get());
+        REQUIRE(window != nullptr);
+        activate(*window);
+        auto const* slot = findItemNamed(*window->contentItem(), QStringLiteral("windowControl_close"));
+        auto const* fill = findItemNamed(*window->contentItem(), QStringLiteral("windowControlFill_close"));
+        REQUIRE(slot != nullptr);
+        REQUIRE(fill != nullptr);
+
+        // The offscreen platform enables no hover effects of its own, so the button is asked to take
+        // hover as a desktop style would have it do. The fill sits in the button's background item.
+        auto* button = fill->parentItem() != nullptr ? fill->parentItem()->parentItem() : nullptr;
+        REQUIRE(button != nullptr);
+        button->setProperty("hoverEnabled", true);
+        // From off the button, so each pass sees the pointer enter.
+        QTest::mouseMove(window, QPoint(0, window->height() - 1));
+        QTest::mouseMove(window, sceneRectOf(*slot).center().toPoint());
+        REQUIRE(QTest::qWaitFor([&] { return button->property("hovered").toBool(); }, 2000));
+        // Windows' red without a contrast theme; under one, the wash every other caption button takes.
+        auto const expected = contrast == contour::platform::ContrastTheme::Active
+                                  ? chromeColorOf(engine, "captionWash")
+                                  : QColor(QStringLiteral("#c42b1c"));
+        CHECK(QTest::qWaitFor([&] { return fill->property("color").value<QColor>() == expected; }, 2000));
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("the caption buttons report their rectangles (offscreen)",
           "[contour][gui][qml][titlebar][windowcontrols]")
 {

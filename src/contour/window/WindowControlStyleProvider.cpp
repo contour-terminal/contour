@@ -61,10 +61,24 @@ namespace
 
 WindowControlStyleProvider::WindowControlStyleProvider(config::WindowControlStyle resolved,
                                                        config::ChromeStyle row,
+                                                       platform::ContrastTheme contrast,
                                                        std::function<bool(std::string_view)> isFontInstalled,
                                                        QObject* parent):
-    QObject { parent }, _style { resolved }, _row { row }, _isFontInstalled { std::move(isFontInstalled) }
+    QObject { parent },
+    _style { resolved },
+    _row { row },
+    _contrast { contrast },
+    _isFontInstalled { std::move(isFontInstalled) }
 {
+}
+
+void WindowControlStyleProvider::setContrastTheme(platform::ContrastTheme contrast)
+{
+    if (_contrast == contrast)
+        return;
+
+    _contrast = contrast;
+    emit changed();
 }
 
 void WindowControlStyleProvider::setStyle(config::WindowControlStyle resolved)
@@ -142,8 +156,10 @@ QVariantList WindowControlStyleProvider::buttons() const
         row[QStringLiteral("dotColor")] = colorOrUnset(tokens.dotColors[static_cast<size_t>(kind)]);
         // The close button is the only one any style tints on hover, and it is the only one whose
         // hover says something the palette cannot -- so the field is per row rather than per style.
-        row[QStringLiteral("hoverFill")] =
-            kind == config::WindowControlKind::Close ? colorOrUnset(tokens.closeHoverColor) : QString {};
+        // Under a contrast theme the palette says everything, the close button's hover included.
+        auto const tinted =
+            kind == config::WindowControlKind::Close && _contrast == platform::ContrastTheme::None;
+        row[QStringLiteral("hoverFill")] = tinted ? colorOrUnset(tokens.closeHoverColor) : QString {};
         rows.push_back(row);
     }
 

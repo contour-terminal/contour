@@ -11,12 +11,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <ranges>
 
 using contour::config::ColorConfig;
 using contour::config::DualColorConfig;
 using contour::config::GuiTheme;
 using contour::config::SimpleColorConfig;
 using contour::platform::colorSchemeOfBackground;
+using contour::platform::ContrastTheme;
+using contour::platform::effectiveGuiTheme;
 using contour::platform::qtColorSchemeFor;
 using vtbackend::operator""_rgb;
 
@@ -57,4 +60,16 @@ TEST_CASE("GuiTheme.liveBackgroundOutranksTheConfiguredOne", "[guitheme][chromef
     CHECK(qtColorSchemeFor(GuiTheme::Terminal, simpleBlack, 0xFAFAF8_rgb) == Qt::ColorScheme::Light);
     CHECK(qtColorSchemeFor(GuiTheme::Terminal, dual, 0xFAFAF8_rgb) == std::nullopt);
     CHECK(qtColorSchemeFor(GuiTheme::Dark, simpleBlack, 0xFAFAF8_rgb) == Qt::ColorScheme::Dark);
+}
+
+TEST_CASE("GuiTheme.aContrastThemeDefersToTheSystemPalette", "[guitheme]")
+{
+    // Terminal is the last enumerator, so this walks every configurable theme.
+    for (auto const value: std::views::iota(0, static_cast<int>(GuiTheme::Terminal) + 1))
+    {
+        auto const theme = static_cast<GuiTheme>(value);
+        INFO("theme: " << value);
+        CHECK(effectiveGuiTheme(theme, ContrastTheme::None) == theme);
+        CHECK(effectiveGuiTheme(theme, ContrastTheme::Active) == GuiTheme::System);
+    }
 }

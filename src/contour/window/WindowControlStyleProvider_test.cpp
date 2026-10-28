@@ -25,6 +25,7 @@
 using contour::config::ChromeStyle;
 using contour::config::StatusColorRole;
 using contour::config::WindowControlStyle;
+using contour::platform::ContrastTheme;
 using contour::window::WindowControlStyleProvider;
 
 namespace
@@ -42,7 +43,7 @@ namespace
     ChromeStyle row = ChromeStyle::ContourLinux,
     std::function<bool(std::string_view)> isInstalled = noFonts)
 {
-    return WindowControlStyleProvider { style, row, std::move(isInstalled) };
+    return WindowControlStyleProvider { style, row, ContrastTheme::None, std::move(isInstalled) };
 }
 
 /// The `action` of each button, in draw order -- i.e. exactly what the Repeater walks.
@@ -137,6 +138,30 @@ TEST_CASE("WindowControlStyleProvider: an unset color is empty, not black", "[wi
     for (auto const& row: windows.buttons())
         CHECK(row.toMap().value(QStringLiteral("dotColor")).toString().isEmpty());
     CHECK(windows.inactiveDotColor().isEmpty());
+}
+
+TEST_CASE("WindowControlStyleProvider: a contrast theme drops the red close hover", "[windowcontrols]")
+{
+    // Under a contrast theme the OS palette owns every colour, so the close button washes like its
+    // neighbours instead of insisting on #C42B1C.
+    auto const contrast = WindowControlStyleProvider {
+        WindowControlStyle::Windows, ChromeStyle::Fluent, ContrastTheme::Active, noFonts
+    };
+    for (auto const& row: contrast.buttons())
+        CHECK(row.toMap().value(QStringLiteral("hoverFill")).toString().isEmpty());
+
+    // Live: the theme comes and goes while the window is open.
+    auto provider = providerFor(WindowControlStyle::Windows, ChromeStyle::Fluent);
+    auto changes = QSignalSpy { &provider, &WindowControlStyleProvider::changed };
+    provider.setContrastTheme(ContrastTheme::Active);
+    CHECK(changes.count() == 1);
+    CHECK(rowFor(provider, QStringLiteral("close")).value(QStringLiteral("hoverFill")).toString().isEmpty());
+    provider.setContrastTheme(ContrastTheme::Active);
+    CHECK(changes.count() == 1);
+    provider.setContrastTheme(ContrastTheme::None);
+    CHECK(changes.count() == 2);
+    CHECK(rowFor(provider, QStringLiteral("close")).value(QStringLiteral("hoverFill")).toString()
+          == QStringLiteral("#c42b1c"));
 }
 
 TEST_CASE("WindowControlStyleProvider: a traffic light states every dot's color", "[windowcontrols]")

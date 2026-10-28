@@ -3,6 +3,7 @@
 
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>
@@ -65,12 +66,14 @@ class WindowControlStyleProvider: public QObject
     ///                        composition root knows the environment to resolve against.
     /// @param row             The chrome row the controls sit on, fixed for the provider's life as the
     ///                        chrome's own row is.
+    /// @param contrast        Whether the OS runs a contrast theme now. @see setContrastTheme.
     /// @param isFontInstalled Whether a font family is installed (QFontDatabase::hasFamily in production),
     /// for
     ///                        the style's icon font (config::controlGlyphsFor).
     /// @param parent          Qt ownership.
     WindowControlStyleProvider(config::WindowControlStyle resolved,
                                config::ChromeStyle row,
+                               platform::ContrastTheme contrast,
                                std::function<bool(std::string_view)> isFontInstalled,
                                QObject* parent = nullptr);
 
@@ -83,6 +86,15 @@ class WindowControlStyleProvider: public QObject
     ///
     /// @param resolved A concrete style, as for the constructor.
     void setStyle(config::WindowControlStyle resolved);
+
+    /// Follows the OS's contrast theme: under @c ContrastTheme::Active no button keeps a hover fill of its
+    /// own, so the close button washes with the palette like its neighbours instead of turning red.
+    ///
+    /// Live OS state, not configuration: the user switches a contrast theme on and off while the window is
+    /// open, and the provider is the one object every window's controls read.
+    ///
+    /// @param contrast Whether the OS runs a contrast theme now.
+    void setContrastTheme(platform::ContrastTheme contrast);
 
     [[nodiscard]] QString side() const;
     [[nodiscard]] QString presentation() const;
@@ -100,6 +112,7 @@ class WindowControlStyleProvider: public QObject
   private:
     config::WindowControlStyle _style;
     config::ChromeStyle _row;
+    platform::ContrastTheme _contrast;
     std::function<bool(std::string_view)> _isFontInstalled;
 };
 

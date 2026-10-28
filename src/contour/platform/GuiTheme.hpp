@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/Config.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -26,6 +27,24 @@ inline constexpr double DarkBackgroundLuminance = 0.18;
 {
     return vtbackend::relativeLuminance(background) < DarkBackgroundLuminance ? Qt::ColorScheme::Dark
                                                                               : Qt::ColorScheme::Light;
+}
+
+/// The GUI theme in effect while the operating system does or does not run a contrast theme.
+///
+/// A contrast theme owns the palette (R-l): forcing a scheme, the terminal's included, would paint over
+/// the very colours the user chose for legibility, so under one the chrome defers to the system palette.
+/// @param configured The configured GUI theme.
+/// @param contrast Whether the operating system runs a contrast theme.
+/// @return @c GuiTheme::System under @c ContrastTheme::Active, else @p configured.
+[[nodiscard]] constexpr config::GuiTheme effectiveGuiTheme(config::GuiTheme configured,
+                                                           ContrastTheme contrast) noexcept
+{
+    switch (contrast)
+    {
+        case ContrastTheme::None: return configured;
+        case ContrastTheme::Active: return config::GuiTheme::System;
+    }
+    return configured;
 }
 
 /// Maps the configured GUI theme to the Qt color-scheme override that should be applied to the

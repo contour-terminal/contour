@@ -437,6 +437,40 @@ TEST_CASE("ContourGuiApp reads accessibility through its injected source", "[con
     CHECK(static_cast<bool>(accessibility.notify));
 }
 
+TEST_CASE("a contrast theme hands the chrome to the OS palette, and back", "[contour][app][appearance]")
+{
+    using contour::config::GuiTheme;
+    using contour::platform::ContrastTheme;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto testApp = TestApp(nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           TestApp::testHostIdentity(),
+                           nullptr,
+                           {},
+                           nullptr,
+                           contour::test::appearanceServicesWith(accessibility, appearance));
+    auto& app = testApp.app();
+    app.config().theme = GuiTheme::Terminal;
+    app.applyGuiTheme(GuiTheme::Terminal, app.defaultProfileColors());
+    REQUIRE(app.appliedGuiScheme().has_value());
+
+    // A contrast theme comes on: no scheme is forced, so the OS's (the contrast theme's) palette shows.
+    appearance.set({ .contrastTheme = ContrastTheme::Active });
+    CHECK(app.appliedGuiScheme() == std::nullopt);
+
+    // And goes again: the terminal scheme's chrome is back.
+    appearance.set({});
+    CHECK(app.appliedGuiScheme().has_value());
+
+    // Back to the OS palette, so no later case inherits a forced one.
+    app.applyGuiTheme(GuiTheme::System, app.defaultProfileColors());
+}
+
 TEST_CASE("the app builds its title-band material through its services", "[contour][app][appearance]")
 {
     // Declared before the app, so the record and the switches outlive the material and sources.

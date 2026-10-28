@@ -1756,8 +1756,9 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
                                   std::optional<vtbackend::RGBColor> liveBackground)
 {
     // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.hpp): a forced scheme for dark/light,
-    // std::nullopt for system.
-    auto const scheme = platform::qtColorSchemeFor(theme, colors, liveBackground);
+    // std::nullopt for system -- and for every theme while the OS runs a contrast theme.
+    auto const scheme = platform::qtColorSchemeFor(
+        platform::effectiveGuiTheme(theme, platformAppearance().contrastTheme), colors, liveBackground);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
@@ -1817,9 +1818,17 @@ void ContourGuiApp::followLiveBackground(vtbackend::RGBColor liveBackground)
     auto const theme = _config.theme.value();
     if (theme != config::GuiTheme::Terminal)
         return;
-    if (platform::qtColorSchemeFor(theme, defaultProfileColors(), liveBackground) == _appliedGuiScheme)
+    if (guiSchemeFor(theme, liveBackground) == _appliedGuiScheme)
         return;
     applyGuiTheme(theme, defaultProfileColors(), liveBackground);
+}
+
+std::optional<Qt::ColorScheme> ContourGuiApp::guiSchemeFor(
+    config::GuiTheme theme, std::optional<vtbackend::RGBColor> liveBackground) const
+{
+    return platform::qtColorSchemeFor(platform::effectiveGuiTheme(theme, platformAppearance().contrastTheme),
+                                      defaultProfileColors(),
+                                      liveBackground);
 }
 
 config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
@@ -2066,6 +2075,15 @@ void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPrefe
 
 void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance appearance)
 {
+    // A contrast theme coming or going hands the chrome to the OS palette, or back to the configured
+    // theme's (R-l). Only when that flips between forcing a scheme and following the OS: which scheme is
+    // forced is followLiveBackground()'s, and an accent change must not undo a live (OSC 11) background.
+    auto const theme = _config.theme.value();
+    if (guiSchemeFor(theme, std::nullopt).has_value() != _appliedGuiScheme.has_value())
+        applyGuiTheme(theme, defaultProfileColors());
+    // Under a contrast theme the close button washes like its neighbours instead of turning red.
+    if (_windowControlStyleProvider)
+        _windowControlStyleProvider->setContrastTheme(appearance.contrastTheme);
     refreshChromeStyle();
     // Every overlay scrollbar follows the system's scroller style live.
     sessionsManager().updateSystemScrollBars(appearance.scrollBars);
@@ -2532,6 +2550,7 @@ int ContourGuiApp::terminalGuiAction()
     _windowControlStyleProvider = make_unique<window::WindowControlStyleProvider>(
         resolvedWindowControlStyle(_config.windowControlStyle.value()),
         _chromeStyle,
+        platformAppearance().contrastTheme,
         window::fontDatabaseAvailability());
 
     {
