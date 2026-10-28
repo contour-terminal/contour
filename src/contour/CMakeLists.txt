@@ -821,7 +821,6 @@ if(CONTOUR_FRONTEND_GUI)
             session/Permission_test.cpp
             session/PermissionPrompt_test.cpp
             window/NoticeModel_test.cpp
-            test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
             test/MockMainController.hpp
             test/QmlMocks.hpp
@@ -900,7 +899,9 @@ if(CONTOUR_FRONTEND_GUI)
         # flags of CI's RelWithDebInfo builds. Measured in October 2026 with GCC 16.2, as the compiler's peak
         # resident set compiling each of the suite's sources alone: Config_test 7.96 GB, TerminalSession_test
         # 4.15 GB, QmlComponents_test 3.32 GB, the others listed here 2.13 to 2.99 GB -- what the frontend's
-        # headers cost every source that includes them -- and every source not listed 1.73 GB or less. One at a
+        # headers cost every source that includes them -- and every source not listed 1.73 GB or less. Added after
+        # the native redesign grew it: MainWindowQml_test 3.47 GB (GCC 16.2, 2026-10-28), whose parallel compile
+        # ran CI's 16 GB GCC runners out of memory. One at a
         # time, beside three of the light ones, a 4-job build stays under 16 GB. To re-measure, compile each
         # source alone with the flags compile_commands.json gives it, -O2 -g in place of the optimisation
         # flags, and read the compiler's peak (wait4's ru_maxrss).
@@ -923,6 +924,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/TerminalSession_test.cpp
             test/ChromeSnapshot_test.cpp
             test/ContourGuiApp_test.cpp
+            test/MainWindowQml_test.cpp
             test/QmlComponents_test.cpp
             test/SettingsPageQml_test.cpp
             window/CommandPaletteModel_test.cpp
