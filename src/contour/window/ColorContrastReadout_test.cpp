@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+using contour::window::ContrastReadout;
 using contour::window::contrastReadoutOf;
 using contour::window::ContrastVerdict;
 using contour::window::formatContrast;
@@ -23,7 +24,7 @@ TEST_CASE("contrastReadoutOf: black on white is the widest ratio", "[contrastrea
     auto const readout = contrastReadoutOf(Black, White);
     CHECK(readout.ratio == Catch::Approx(21.0).margin(RatioTolerance));
     CHECK(readout.verdict == ContrastVerdict::Passes);
-    CHECK(formatContrast(readout) == "21.0 : 1");
+    CHECK(formatContrast(readout) == "21.00 : 1, passes");
 }
 
 TEST_CASE("contrastReadoutOf: the 4.5 : 1 rule splits #767676 from #777777 on white", "[contrastreadout]")
@@ -33,13 +34,23 @@ TEST_CASE("contrastReadoutOf: the 4.5 : 1 rule splits #767676 from #777777 on wh
     CHECK(passing.ratio
           == Catch::Approx(vtbackend::contrastRatio(RGBColor { 0x76, 0x76, 0x76 }, White))
                  .margin(RatioTolerance));
-    CHECK(formatContrast(passing) == "4.5 : 1");
+    CHECK(formatContrast(passing) == "4.54 : 1, passes");
 
     auto const failing = contrastReadoutOf(RGBColor { 0x77, 0x77, 0x77 }, White);
     CHECK(failing.verdict == ContrastVerdict::Fails);
     CHECK(failing.ratio
           == Catch::Approx(vtbackend::contrastRatio(RGBColor { 0x77, 0x77, 0x77 }, White))
                  .margin(RatioTolerance));
+    // 4.478: shown below the rule, never rounded up to it.
+    CHECK(formatContrast(failing) == "4.47 : 1, fails");
+}
+
+TEST_CASE("formatContrast: a failure just under the rule never reads as the rule", "[contrastreadout]")
+{
+    auto const justUnder = ContrastReadout { .ratio = 4.499, .verdict = ContrastVerdict::Fails };
+    CHECK(formatContrast(justUnder) == "4.49 : 1, fails");
+    auto const atRule = ContrastReadout { .ratio = 4.5, .verdict = ContrastVerdict::Passes };
+    CHECK(formatContrast(atRule) == "4.50 : 1, passes");
 }
 
 TEST_CASE("contrastReadoutOf: the rule can be asked for at another ratio", "[contrastreadout]")

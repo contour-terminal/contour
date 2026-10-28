@@ -4013,11 +4013,11 @@ TEST_CASE("SettingsController: contrastReadout answers the page's ratio and verd
     auto fx = Fixture(BasicConfig);
 
     auto const widest = fx.controller->contrastReadout("#000000", "#ffffff");
-    CHECK(widest.value("text").toString() == "21.0 : 1");
+    CHECK(widest.value("text").toString() == "21.00 : 1, passes");
     CHECK(widest.value("passes").toBool());
 
     auto const narrow = fx.controller->contrastReadout("#777777", "#ffffff");
-    CHECK(narrow.value("text").toString() == "4.5 : 1"); // 4.48, shown to one decimal
+    CHECK(narrow.value("text").toString() == "4.47 : 1, fails"); // 4.478, truncated
     CHECK_FALSE(narrow.value("passes").toBool());
 
     // A half-typed colour is no reading.

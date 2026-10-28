@@ -12880,6 +12880,28 @@ TEST_CASE("KitSlider: it shows the formatted value, and a key step commits at on
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("KitColorWell: a screen reader hears the readout, verdict included",
+          "[contour][gui][qml][kit][colorwell]")
+{
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, kitRowSetup(contour::config::ChromeStyle::MacOS));
+
+    auto kit = KitControl(engine,
+                          "KitColorWell",
+                          { { "hex", QStringLiteral("#777777") },
+                            { "readout", QStringLiteral("4.47 : 1, fails") },
+                            { "readoutFails", true },
+                            { "description", QStringLiteral("Background") },
+                            { "name", QStringLiteral("Tab colour") } });
+    auto* readout = kit.part("colorReadout");
+    CHECK(accessibleNameOf(*readout) == QStringLiteral("4.47 : 1, fails"));
+    auto const* attached = accessibleOf(kit.item());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("description").toString().contains(QStringLiteral("fails")));
+    CHECK(attached->property("description").toString().contains(QStringLiteral("Background")));
+}
+
 TEST_CASE("KitColorWell: only #rgb and #rrggbb commit, anything else puts the old hex back (offscreen)",
           "[contour][gui][qml][kit][colorwell]")
 {

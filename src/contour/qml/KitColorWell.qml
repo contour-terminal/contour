@@ -20,7 +20,7 @@ FocusScope {
     property string hex
     /// The hex of the background the readout measures the colour against.
     property string against
-    /// The contrast readout shown under the field, "{ratio} : 1"; empty shows none. Set by the caller,
+    /// The contrast readout shown under the field, "{ratio} : 1, {passes|fails}"; empty shows none. Set by the caller,
     /// which knows the scheme the colour is judged in.
     property string readout
     /// Whether the readout reports a colour below the contrast rule; it is then drawn in the danger ink.
@@ -62,7 +62,10 @@ FocusScope {
 
     Accessible.role: Accessible.EditableText
     Accessible.name: root.name
-    Accessible.description: root.description
+    // The readout follows the help: a screen reader hears the ratio and the verdict with the well.
+    Accessible.description: root.readout.length > 0 ? (root.description.length > 0 ? root.description + ". " + root.readout
+                                                                                  : root.readout)
+                                                    : root.description
     Accessible.focusable: true
 
     Column {
@@ -149,7 +152,8 @@ FocusScope {
             font: chromeStyle.type.footnote
             color: root.readoutFails ? chromeStyle.statusInk(chromeStyle.statusDanger)
                                      : chromeStyle.colors.settingsHelp
-            Accessible.ignored: true
+            Accessible.role: Accessible.StaticText
+            Accessible.name: root.readout
         }
     }
 }

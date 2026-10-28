@@ -874,7 +874,13 @@ TEST_CASE("every settings row's control carries its label and help", "[contour][
             INFO(settingsRow->objectName().toStdString());
             auto const key = settingsRow->objectName().mid(QStringLiteral("settingsRow:").size());
             auto const label = settingsRow->property("field").toMap().value("label").toString();
-            auto const help = settingsRow->property("field").toMap().value("help").toString();
+            auto const field = settingsRow->property("field").toMap();
+            // A colour row's readout (ratio and verdict) follows its help, so that a screen reader hears
+            // both.
+            auto const readout = field.value("readout").toString();
+            auto help = field.value("help").toString();
+            if (!readout.isEmpty())
+                help = help.isEmpty() ? readout : help + QStringLiteral(". ") + readout;
             auto* control = fx.controlOf(key);
             REQUIRE(control != nullptr);
             auto* const accessible = QAccessible::queryAccessibleInterface(control);
@@ -2399,7 +2405,8 @@ TEST_CASE("the colour schemes page edits a slot live", "[contour][gui][qml][sett
     });
     REQUIRE(readout != nullptr);
     CHECK(readout->property("text").toString() == expected.value("text").toString());
-    CHECK(readout->property("text").toString().endsWith(" : 1"));
+    // The ratio, then the verdict in words.
+    CHECK(readout->property("text").toString().contains(" : 1, "));
 
     // The Terminal row draws the well as its glyph, in the colour.
     if (row == config::ChromeStyle::Terminal)

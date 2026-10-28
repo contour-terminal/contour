@@ -3,13 +3,15 @@
 
 /// @file
 /// The contrast readout beside a colour well on the Colors page: the WCAG ratio of a colour against what it
-/// sits on, as "4.8 : 1", and whether it meets the rule the page holds text to. Qt-free.
+/// sits on, as "4.80 : 1, passes", and whether it meets the rule the page holds text to. Qt-free.
 
 #include <vtbackend/core/Color.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <string>
+#include <string_view>
 
 namespace contour::window
 {
@@ -45,11 +47,24 @@ struct ContrastReadout
              .verdict = ratio >= required ? ContrastVerdict::Passes : ContrastVerdict::Fails };
 }
 
+/// @param verdict The verdict.
+/// @return The word the readout says it with, so that a colour alone never carries it.
+[[nodiscard]] constexpr std::string_view contrastVerdictWord(ContrastVerdict verdict) noexcept
+{
+    return verdict == ContrastVerdict::Passes ? "passes" : "fails";
+}
+
 /// @param readout The readout.
-/// @return Its ratio to one decimal, as the page shows it: "4.8 : 1".
+/// @return The page's text: the ratio to two decimals and the verdict, as in "4.54 : 1, passes". The ratio
+///         is truncated, never rounded, so that a failing 4.499 reads "4.49", not the "4.50" of the rule.
 [[nodiscard]] inline std::string formatContrast(ContrastReadout readout)
 {
-    return std::format("{:.1f} : 1", readout.ratio);
+    constexpr auto Hundredths = 100.0;
+    // The ratio is a quotient of floating-point sums: 21 may come out a hair under, which must not
+    // read 20.99.
+    constexpr auto Slack = 1e-9;
+    auto const truncated = std::floor((readout.ratio * Hundredths) + Slack) / Hundredths;
+    return std::format("{:.2f} : 1, {}", truncated, contrastVerdictWord(readout.verdict));
 }
 
 } // namespace contour::window
