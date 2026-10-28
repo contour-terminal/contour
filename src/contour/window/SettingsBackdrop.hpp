@@ -39,32 +39,23 @@ inline constexpr auto SettingsBackdropRows = std::array {
 };
 
 /// Decides what the Settings window asks of the title-band material.
-/// @param row      The resolved chrome row.
-/// @param material The row's resolved title-band material: Solid once Reduced transparency, a contrast
-///                 theme or an OS without the material took Mica away.
-/// @param scheme   The chrome's applied light or dark, which the material follows.
-/// @return The native material for a Main window in @p scheme for a @c SettingsBackdropRows pair; nothing
-///         for every other pair.
+/// @param inputs The resolved chrome row; its resolved title-band material, Solid once Reduced transparency,
+///               a contrast theme or an OS without the material took Mica away; and the chrome's applied
+///               light or dark, which the material follows.
+/// @return The native material for a Main window in the inputs' scheme for a @c SettingsBackdropRows pair;
+///         nothing for every other pair.
 [[nodiscard]] constexpr std::optional<platform::TitleBandRequest> settingsBackdropFor(
-    config::ChromeStyle row, config::Material material, Qt::ColorScheme scheme) noexcept
+    SettingsBackdropInputs const& inputs) noexcept
 {
     auto const dressed = std::ranges::any_of(SettingsBackdropRows, [&](SettingsBackdropRow const& candidate) {
-        return candidate.row == row && candidate.material == material;
+        return candidate.row == inputs.row && candidate.material == inputs.material;
     });
     if (!dressed)
         return std::nullopt;
     return platform::TitleBandRequest { .backdrop = config::BandBackdrop::NativeMaterial,
                                         .kind = config::BackdropKind::Main,
                                         .growth = config::TitleBarGrowth::None,
-                                        .scheme = scheme };
-}
-
-/// @copydoc settingsBackdropFor(config::ChromeStyle, config::Material, Qt::ColorScheme)
-/// @param inputs The row, its material and the scheme.
-[[nodiscard]] constexpr std::optional<platform::TitleBandRequest> settingsBackdropFor(
-    SettingsBackdropInputs const& inputs) noexcept
-{
-    return settingsBackdropFor(inputs.row, inputs.material, inputs.scheme);
+                                        .scheme = inputs.scheme };
 }
 
 } // namespace contour::window

@@ -5,12 +5,12 @@
 
     #include <contour/platform/CaptionHitTest.hpp>
     #include <contour/platform/QtInvoke.hpp>
+    #include <contour/platform/QtPlatformPlugin.hpp>
 
     #include <QtCore/QAbstractNativeEventFilter>
     #include <QtCore/QByteArray>
     #include <QtCore/QCoreApplication>
     #include <QtCore/QPointer>
-    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
     #include <algorithm>
@@ -27,13 +27,6 @@ namespace contour::platform
 
 namespace
 {
-    /// @return Whether the running platform plugin is the native Windows one, the only one with an HWND to
-    ///         answer for. Asked on every call rather than at construction, which precedes the application.
-    [[nodiscard]] bool onWindows()
-    {
-        return QGuiApplication::platformName() == QStringLiteral("windows");
-    }
-
     /// A non-client mouse message, and the event the transition table knows it as.
     struct NcMessage
     {
@@ -308,13 +301,13 @@ namespace
       public:
         void attach(QWindow& window, CaptionBinding binding) override
         {
-            if (onWindows())
+            if (onNativeWindowsPlatform())
                 captionEventFilter().attach(window, std::move(binding));
         }
 
         void detach(QWindow& window) override
         {
-            if (onWindows())
+            if (onNativeWindowsPlatform())
                 captionEventFilter().detach(window);
         }
     };

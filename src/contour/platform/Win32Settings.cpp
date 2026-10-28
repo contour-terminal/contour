@@ -4,7 +4,6 @@
 #ifdef _WIN32
 
     #include <QtCore/QByteArray>
-    #include <QtGui/QGuiApplication>
 
     #include <algorithm>
     #include <array>
@@ -131,11 +130,6 @@ WindowsSettingsReadings Win32SettingsReader::read() const
     for (auto const& dword: RegistryDwords)
         readings.*dword.reading = readDword(dword);
     return readings;
-}
-
-bool onNativeWindowsPlatform()
-{
-    return QGuiApplication::platformName() == QStringLiteral("windows");
 }
 
 Win32SettingsWatcher::Win32SettingsWatcher(std::function<void(SettingTopic)> onTopic):

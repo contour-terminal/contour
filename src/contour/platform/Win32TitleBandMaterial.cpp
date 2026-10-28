@@ -3,9 +3,9 @@
 
 #ifdef _WIN32
 
+    #include <contour/platform/QtPlatformPlugin.hpp>
     #include <contour/platform/Win32SystemBackdrop.hpp>
 
-    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
 namespace contour::platform
@@ -13,13 +13,6 @@ namespace contour::platform
 
 namespace
 {
-    /// @return Whether the running platform plugin is the native Windows one, the only one with an HWND.
-    ///         Asked on every call rather than at construction, which precedes the application.
-    [[nodiscard]] bool onWindows()
-    {
-        return QGuiApplication::platformName() == QStringLiteral("windows");
-    }
-
     class Win32TitleBandMaterial final: public ITitleBandMaterial
     {
       public:
@@ -30,7 +23,7 @@ namespace
         {
             // Deliberately not winId() first, which would create a platform window: one with no handle yet
             // is left alone, as the frame leaves it, and dressed on its first expose.
-            if (!onWindows() || window.handle() == nullptr)
+            if (!onNativeWindowsPlatform() || window.handle() == nullptr)
                 return {};
             auto* hwnd = reinterpret_cast<HWND>(window.winId());
             if (hwnd == nullptr)

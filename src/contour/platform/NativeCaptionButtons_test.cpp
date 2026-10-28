@@ -5,8 +5,8 @@
 
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/NativeCaptionButtons.hpp>
+#include <contour/platform/QtPlatformPlugin.hpp>
 
-#include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -55,7 +55,7 @@ TEST_CASE("the factory builds the Win32 adapter, which leaves a non-native windo
     auto const adapter = contour::platform::makeNativeCaptionButtons();
     REQUIRE(adapter != nullptr);
     CHECK(dynamic_cast<NullNativeCaptionButtons*>(adapter.get()) == nullptr);
-    if (QGuiApplication::platformName() == QStringLiteral("windows"))
+    if (contour::platform::onNativeWindowsPlatform())
         SKIP("Covered under the native platform by Win32CaptionButtons_test.cpp.");
 
     auto calls = 0;

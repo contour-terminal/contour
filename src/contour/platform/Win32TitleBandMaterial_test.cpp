@@ -8,13 +8,13 @@
 
     #include <contour/platform/BlurBehind.hpp>
     #include <contour/platform/Dwmapi.hpp>
+    #include <contour/platform/QtPlatformPlugin.hpp>
     #include <contour/platform/SystemBackdrop.hpp>
     #include <contour/platform/TitleBandMaterial.hpp>
     #include <contour/platform/Win32TitleBandMaterial.hpp>
     #include <contour/platform/Win32WindowFrame.hpp>
     #include <contour/platform/WindowsSettings.hpp>
 
-    #include <QtGui/QGuiApplication>
     #include <QtQuick/QQuickWindow>
 
     #include <catch2/catch_test_macros.hpp>
@@ -43,12 +43,6 @@ namespace
 /// The window's logical size.
 constexpr auto WindowWidth = 800;
 constexpr auto WindowHeight = 500;
-
-/// @return Whether the native Windows platform plugin is running.
-[[nodiscard]] bool onNativeWindows()
-{
-    return QGuiApplication::platformName() == QStringLiteral("windows");
-}
 
 /// @return The running Windows' build number, from RtlGetVersion (GetVersionEx lies without a manifest).
 [[nodiscard]] DWORD osBuild()
@@ -161,7 +155,7 @@ constexpr auto MicaAlt = TitleBandRequest { .backdrop = BandBackdrop::NativeMate
 
 TEST_CASE("Mica Alt on a tabbed window", "[native][win32][mica]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     // Built before the window exists, as ContourGuiApp builds it before the application (F1): the shared
     // factory hands out the Win32 material, which still acts once a window does.
@@ -188,7 +182,7 @@ TEST_CASE("Mica Alt on a tabbed window", "[native][win32][mica]")
 TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the margins",
           "[native][win32][mica]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const api = StubDwm::make(E_INVALIDARG);
     auto const material = contour::platform::makeWin32TitleBandMaterial(api);
@@ -222,7 +216,7 @@ TEST_CASE("a rejected backdrop attribute reports Unsupported and restores the ma
 
 TEST_CASE("a client band where DWM lacks the backdrop attribute is no failure", "[native][win32][mica]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     // Before Windows 11 22H2 even DWMSBT_NONE fails with E_INVALIDARG; no material was asked for.
     auto const api = StubDwm::make(E_INVALIDARG);
@@ -237,7 +231,7 @@ TEST_CASE("a client band where DWM lacks the backdrop attribute is no failure", 
 // [win11-22h2]: SKIPs on an older Windows, so CI's "[win32] cases actually ran" guard leaves it out.
 TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica][win11-22h2]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     if (!hasSystemBackdrop())
         SKIP("Requires Windows 11 22H2 or later.");
@@ -254,7 +248,7 @@ TEST_CASE("blur wins over Mica, and off restores it", "[native][win32][mica][win
 
 TEST_CASE("a composition restart extends the window's frame again", "[native][win32][mica]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const api = StubDwm::make(S_OK);
     auto const material = contour::platform::makeWin32TitleBandMaterial(api);
@@ -271,7 +265,7 @@ TEST_CASE("a composition restart extends the window's frame again", "[native][wi
 
 TEST_CASE("the corner preference stays round under Mica", "[native][win32][mica]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const material = contour::platform::makeTitleBandMaterial();
     auto fixture = MaterialWindow {};
@@ -285,7 +279,7 @@ TEST_CASE("the corner preference stays round under Mica", "[native][win32][mica]
 TEST_CASE("the Settings window keeps the OS's title bar, dark with the chrome and Mica behind it",
           "[native][win32][settings-frame]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const frame = contour::platform::makeWin32WindowFrame([] { return Qt::ColorScheme::Dark; });
     REQUIRE(frame != nullptr);

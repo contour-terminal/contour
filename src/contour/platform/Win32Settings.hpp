@@ -3,6 +3,7 @@
 
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/QtPlatformPlugin.hpp>
 #include <contour/platform/WindowsAppearanceSources.hpp>
 #include <contour/platform/WindowsSettings.hpp>
 
@@ -29,10 +30,6 @@ class Win32SettingsReader final: public IWindowsSettingsReader
     /// @return The settings as Windows reports them now.
     [[nodiscard]] WindowsSettingsReadings read() const override;
 };
-
-/// @return Whether the running platform plugin is the native Windows one. Asked on every call rather than at
-///         construction, which precedes the application (F1).
-[[nodiscard]] bool onNativeWindowsPlatform();
 
 /// Decodes WM_SETTINGCHANGE, WM_DWMCOLORIZATIONCOLORCHANGED and WM_THEMECHANGED into a SettingChange and
 /// reports its topic (@ref topicOf) when it concerns any source. Never consumes the message.

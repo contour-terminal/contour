@@ -7,11 +7,11 @@
 
     #include <contour/platform/AccessibilityPreferenceSource.hpp>
     #include <contour/platform/PlatformAppearance.hpp>
+    #include <contour/platform/QtPlatformPlugin.hpp>
     #include <contour/platform/Win32Settings.hpp>
     #include <contour/platform/WindowsSettings.hpp>
 
     #include <QtCore/QCoreApplication>
-    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
     #include <catch2/catch_test_macros.hpp>
@@ -26,19 +26,9 @@ using contour::platform::ClientAreaAnimation;
 using contour::platform::HighContrast;
 using contour::platform::SettingTopic;
 
-namespace
-{
-
-[[nodiscard]] bool onNativeWindows()
-{
-    return QGuiApplication::platformName() == QStringLiteral("windows");
-}
-
-} // namespace
-
 TEST_CASE("the reader agrees with the system", "[native][win32][settings]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const readings = contour::platform::Win32SettingsReader {}.read();
     CHECK(readings.osBuild.has_value());
@@ -56,7 +46,7 @@ TEST_CASE("the reader agrees with the system", "[native][win32][settings]")
 
 TEST_CASE("the factories build the Windows sources", "[native][win32][settings]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto const appearance = contour::platform::makePlatformAppearance({});
     auto const accessibility = contour::platform::makeAccessibilityPreferenceSource({});
@@ -70,7 +60,7 @@ TEST_CASE("the factories build the Windows sources", "[native][win32][settings]"
 
 TEST_CASE("a broadcast reaches the watcher", "[native][win32][settings]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto topics = std::vector<SettingTopic> {};
     auto watcher =

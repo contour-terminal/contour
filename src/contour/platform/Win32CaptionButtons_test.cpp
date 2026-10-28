@@ -9,11 +9,11 @@
     #include <contour/config/WindowControlStyle.hpp>
     #include <contour/platform/CaptionHitTest.hpp>
     #include <contour/platform/NativeCaptionButtons.hpp>
+    #include <contour/platform/QtPlatformPlugin.hpp>
     #include <contour/platform/Win32CaptionButtons.hpp>
     #include <contour/platform/Win32WindowFrame.hpp>
 
     #include <QtCore/QCoreApplication>
-    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
     #include <catch2/catch_test_macros.hpp>
@@ -48,12 +48,6 @@ constexpr auto WindowHeight = 600;
 
 /// How long an HWND state change may take to arrive, in milliseconds.
 constexpr auto WindowStateTimeoutMs = 2000;
-
-/// @return Whether the native Windows platform plugin is running.
-[[nodiscard]] bool onNativeWindows()
-{
-    return QGuiApplication::platformName() == QStringLiteral("windows");
-}
 
 /// What a recording binding saw.
 struct CaptionCalls
@@ -175,7 +169,7 @@ struct CaptionWindow
 
 TEST_CASE("WM_NCHITTEST over the maximise button answers HTMAXBUTTON", "[native][win32][caption][hittest]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
 
@@ -197,7 +191,7 @@ TEST_CASE("WM_NCHITTEST over the maximise button answers HTMAXBUTTON", "[native]
 TEST_CASE("the maximised window's edge pixel over the maximise button answers HTMAXBUTTON",
           "[native][win32][caption][hittest]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
     // The maximise button alone at the trailing edge, so the screen's corner pixel lands on it.
@@ -231,7 +225,7 @@ TEST_CASE("the maximised window's edge pixel over the maximise button answers HT
 
 TEST_CASE("the scaled run hits the same button", "[native][win32][caption][hittest]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
     // contour_windows_native_scaled_test runs this under QT_SCALE_FACTOR=1.5.
@@ -245,7 +239,7 @@ TEST_CASE("the scaled run hits the same button", "[native][win32][caption][hitte
 
 TEST_CASE("a non-client click toggles the window once", "[native][win32][caption]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
     // Queued: the toggle runs after the release, not inside it.
@@ -271,7 +265,7 @@ TEST_CASE("a non-client click toggles the window once", "[native][win32][caption
 
 TEST_CASE("press, leave, release does not toggle", "[native][win32][caption]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
 
@@ -290,7 +284,7 @@ TEST_CASE("press, leave, release does not toggle", "[native][win32][caption]")
 
 TEST_CASE("a detach drops a toggle still queued", "[native][win32][caption]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
     // Detached from inside the release's visual: the toggle is queued by then and has not run yet.
@@ -312,7 +306,7 @@ TEST_CASE("a detach drops a toggle still queued", "[native][win32][caption]")
 
 TEST_CASE("detach stops answering", "[native][win32][caption]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     auto fixture = CaptionWindow {};
     REQUIRE(fixture.hitTest(fixture.centreOf(WindowControlKind::Maximize)) == HTMAXBUTTON);
@@ -324,7 +318,7 @@ TEST_CASE("detach stops answering", "[native][win32][caption]")
 TEST_CASE("the factory's adapter, built before the window, answers once it exists",
           "[native][win32][caption]")
 {
-    if (!onNativeWindows())
+    if (!contour::platform::onNativeWindowsPlatform())
         SKIP("Requires the native Windows platform.");
     // As the application builds it: through the shared factory, before any window exists.
     auto const adapter = contour::platform::makeNativeCaptionButtons();

@@ -66,6 +66,7 @@ add_library(contour_platform STATIC
     Dwmapi.hpp
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     PopupShadow.cpp PopupShadow.hpp
+    QtPlatformPlugin.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
     Win32CaptionButtons.cpp Win32CaptionButtons.hpp
     Win32Settings.cpp Win32Settings.hpp
