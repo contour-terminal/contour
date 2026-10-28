@@ -4863,6 +4863,11 @@ void Terminal::layoutStickyHeader(RenderStickyHeader& header,
                                                           : std::span<LinkRowSpan const> {},
                                                     baseLine,
                                                     textColumns);
+            // The copied row's ink was chosen against the page, not against the band: lift it where it
+            // would not read there, as the chip and the placeholder are.
+            for (auto& cell: header.cells)
+                cell.attributes.foregroundColor =
+                    legibleTintOn(_colorPalette, cell.attributes.foregroundColor, header.background);
             break;
         }
         case StickyHeaderKind::Evicted: {

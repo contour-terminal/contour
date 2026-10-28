@@ -288,8 +288,9 @@ TEST_CASE("StickyHeader.terminal.theHeaderKeepsTheRowsColoursOnItsOwnBand", "[st
     // Only what shows: the blanks after `$ make` would paint nothing the opaque band does not.
     REQUIRE(header->cells.size() == 6);
 
-    // The prompt's own SGR survives the copy ...
-    CHECK(header->cells[0].attributes.foregroundColor == palette.normalColor(2));
+    // The prompt's own SGR survives the copy, lifted only where it would not read on the band ...
+    CHECK(header->cells[0].attributes.foregroundColor
+          == legibleTintOn(palette, palette.normalColor(2), header->background));
     // ... and a cell the shell left on the page background stays on it, so the band shows through it rather
     // than one rectangle per cell painting the band's colour over the band.
     CHECK(header->cells[2].attributes.foregroundColor == palette.defaultForeground);
@@ -352,7 +353,8 @@ TEST_CASE("StickyHeader.terminal.reverseVideoCopiesTheRowAsItShows", "[stickyhea
     auto const header = renderOf(mc.terminal).stickyHeader;
     REQUIRE(header.has_value());
     REQUIRE(cellText(header->cells) == "$ make");
-    CHECK(header->cells[1].attributes.foregroundColor == palette.defaultBackground);
+    CHECK(header->cells[1].attributes.foregroundColor
+          == legibleTintOn(palette, palette.defaultBackground, header->background));
     CHECK(header->cells[1].attributes.backgroundColor == palette.defaultForeground);
 }
 

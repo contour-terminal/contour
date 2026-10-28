@@ -612,13 +612,9 @@ TEST_CASE("display: the sticky band drawn over the first row reads at the text r
             auto const text = regionColors(frame.image, spanOf(header.cells));
             auto const chip = regionColors(frame.image, spanOf(header.chip));
             INFO("text ink " << hexOf(text.ink) << " chip ink " << hexOf(chip.ink));
-            // The command's text is the scheme's own ink, as legible as the grid's text beside it
-            // (solarized-light's is 3.7:1 by design); the chip is the band's own ink, lifted to the text
-            // ratio.
-            auto const& palette = h->session->terminal().colorPalette();
-            auto const gridContrast =
-                vtbackend::contrastRatio(palette.defaultForeground, palette.defaultBackground);
-            CHECK(vtbackend::contrastRatio(text.ink, fill) >= std::min(TextContrast, gridContrast) - 0.5);
+            // The command's text and the chip both read on the band at the text ratio: the copied row's own
+            // ink is lifted where the scheme's (solarized-light's is 3.7:1) would not.
+            CHECK(vtbackend::contrastRatio(text.ink, fill) >= TextContrast);
             CHECK(vtbackend::contrastRatio(chip.ink, fill) >= TextContrast);
         }
         // Both blocks' bands were seen, the failed one's chip in its lifted red among them.
