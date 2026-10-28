@@ -56,7 +56,7 @@ struct PreviewFixture
     }
 
     /// @return The text of the preview terminal's page.
-    [[nodiscard]] std::string pageText()
+    [[nodiscard]] std::string pageText() const
     {
         REQUIRE(preview.session() != nullptr);
         return preview.session()->terminal().primaryScreen().renderMainPageText();
