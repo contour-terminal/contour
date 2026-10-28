@@ -839,6 +839,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
             display/InGridVisualsRendering_test.cpp
+            display/SettingsPreviewRendering_test.cpp
             session/ExitCode_test.cpp
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
