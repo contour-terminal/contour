@@ -528,7 +528,7 @@ TEST_CASE("display: under a global menu bar the terminal refuses Command+Q and k
           "[display][shortcutoverride]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // As the app runs: the Control/Meta swap is off, so the Command key arrives as Qt::MetaModifier.
     auto const unswapped = contour::test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
     DisplayHarness h;

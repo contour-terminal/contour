@@ -219,7 +219,7 @@ TEST_CASE("NewDefaultsNotice: Keep Mine over a broken state store still hides th
 
 TEST_CASE("Config: a settings.yml that does not parse is recorded", "[config][newdefaults]")
 {
-    QTemporaryDir dir;
+    QTemporaryDir const dir;
     REQUIRE(dir.isValid());
     auto const configDir = std::filesystem::path(dir.path().toStdU16String());
     {

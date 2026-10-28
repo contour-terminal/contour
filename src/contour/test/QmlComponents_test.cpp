@@ -3881,7 +3881,6 @@ namespace
 {
 // Defined with the kit and window-control cases further down; one unnamed namespace per translation unit.
 [[nodiscard]] QQuickItem* findItemNamed(QQuickItem const& root, QString const& objectName);
-[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
 
 /// A split of two leaves, each with its own session, on one token row and density, in a 400 x 300 window.
 struct SplitHost

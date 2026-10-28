@@ -423,6 +423,8 @@ TEST_CASE("a triggered row runs in its row's scope", "[display][menubar]")
     CHECK(fixture.scopes[1] == command::ActionScope::Window);
 }
 
+namespace
+{
 /// Checks that every command row of the Application menu that @p state enables is enabled in @p bar, and
 /// that the menu holding them is too: Qt hands a disabled menu's state to every row it merges on macOS.
 void checkApplicationRowsEnabled(window::AppMenuBar& bar, command::MenuBarState const& state)
@@ -443,6 +445,7 @@ void checkApplicationRowsEnabled(window::AppMenuBar& bar, command::MenuBarState 
         CHECK(action->isEnabled());
     }
 }
+} // namespace
 
 TEST_CASE("the Application menu's rows are enabled with no window, and after one gains focus",
           "[display][menubar]")

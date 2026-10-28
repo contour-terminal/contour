@@ -15,7 +15,7 @@ using namespace vtbackend;
 
 namespace
 {
-constexpr auto AllStyles()
+constexpr auto allStyles()
 {
     return std::views::iota(std::size_t { 0 }, contour::config::detail::ChromeStyleCount);
 }
@@ -400,7 +400,7 @@ TEST_CASE("chromeTokens.allOverridesTogether", "[chrometokens]")
     auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Reduced,
                                                         .transparency = TransparencyPreference::Reduced,
                                                         .contrast = ContrastPreference::Increased };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         auto const base = resolveChromeTokens(style, {});
@@ -425,7 +425,7 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
     auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Reduced,
                                                         .transparency = TransparencyPreference::Allowed,
                                                         .contrast = ContrastPreference::Standard };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         auto const base = resolveChromeTokens(style, {});
@@ -461,7 +461,7 @@ TEST_CASE("chromeTokens.reducedTransparency", "[chrometokens]")
     auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Full,
                                                         .transparency = TransparencyPreference::Reduced,
                                                         .contrast = ContrastPreference::Standard };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         auto const tokens = resolveChromeTokens(style, preferences);
@@ -482,7 +482,7 @@ TEST_CASE("chromeTokens.increasedContrast", "[chrometokens]")
     auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Full,
                                                         .transparency = TransparencyPreference::Allowed,
                                                         .contrast = ContrastPreference::Increased };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         auto const base = resolveChromeTokens(style, {});
@@ -603,7 +603,7 @@ TEST_CASE("chromeTokens.barInkIsTheFirstLegibleCandidate", "[chrometokens]")
 TEST_CASE("chromeTokens.menuPresentationIgnoresPreferences", "[chrometokens]")
 {
     using namespace contour::config;
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -663,7 +663,7 @@ TEST_CASE("chromeTokens.titleBandTokens", "[chrometokens]")
 TEST_CASE("chromeTokens.onlyTheMacRowIsAPill", "[chrometokens]")
 {
     using namespace contour::config;
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         CAPTURE(index);
         auto const isMac = static_cast<ChromeStyle>(index) == ChromeStyle::MacOS;
@@ -674,7 +674,7 @@ TEST_CASE("chromeTokens.onlyTheMacRowIsAPill", "[chrometokens]")
 TEST_CASE("chromeTokens.tabColoursFollowTheRolesWhereTheChromeDrawsItsOwn", "[chrometokens]")
 {
     using namespace contour::config;
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         CAPTURE(index);
         auto const& layout = ChromeTokenRows[index].layout;
@@ -693,7 +693,7 @@ TEST_CASE("chromeTokens.reducedMotionCrossFades", "[chrometokens]")
     auto const reduced = AccessibilityPreferences { .motion = MotionPreference::Reduced,
                                                     .transparency = TransparencyPreference::Allowed,
                                                     .contrast = ContrastPreference::Standard };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         CAPTURE(index);
         auto const style = static_cast<ChromeStyle>(index);
@@ -761,7 +761,7 @@ TEST_CASE("chromeTokens.bandColourRoles", "[chrometokens]")
     // those).
     CHECK(rows.size() == static_cast<size_t>(PaneGapFill) - static_cast<size_t>(TabWellFill));
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -788,7 +788,7 @@ TEST_CASE("chromeTokens.statusInkPerRow", "[chrometokens]")
     auto const schemeHue =
         std::array { SchemeSlot::Danger, SchemeSlot::Warning, SchemeSlot::Success, SchemeSlot::Accent };
     static_assert(schemeHue.size() == StatusColorRoleCount);
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1066,7 +1066,7 @@ TEST_CASE("chromeTokens.minimalSubRow", "[chrometokens]")
 
     CHECK(resolveChromeTokens(ChromeStyle::Terminal, {}, ChromeDensity::Minimal).space.splitHit == 1);
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         CAPTURE(index);
         auto const style = static_cast<ChromeStyle>(index);
@@ -1099,7 +1099,7 @@ TEST_CASE("chromeTokens.increasedContrastCapsTheDim", "[chrometokens]")
     auto const increased = AccessibilityPreferences { .motion = MotionPreference::Full,
                                                       .transparency = TransparencyPreference::Allowed,
                                                       .contrast = ContrastPreference::Increased };
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
         for (auto const density: std::views::iota(size_t { 0 }, ChromeDensityCount))
         {
             CAPTURE(index, density);
@@ -1187,7 +1187,7 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
     // Every pane role has a row here.
     CHECK(rows.size() == PaneColorRoleEnd - PaneColorRoleBegin);
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1249,7 +1249,7 @@ TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
     // Every find bar role has a row here.
     CHECK(rows.size() == FindColorRoleEnd - FindColorRoleBegin);
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1343,7 +1343,7 @@ TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
     // Every palette role has a row here.
     CHECK(rows.size() == PaletteColorRoleEnd - PaletteColorRoleBegin);
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1457,7 +1457,7 @@ TEST_CASE("chromeTokens.overlayColourRoles", "[chrometokens]")
     // Every overlay role has a row here.
     CHECK(rows.size() == OverlayColorRoleEnd - OverlayColorRoleBegin);
 
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1516,7 +1516,7 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
-    for (auto const index: AllStyles())
+    for (auto const index: allStyles())
     {
         auto const style = static_cast<ChromeStyle>(index);
         CAPTURE(index);
@@ -1550,7 +1550,7 @@ TEST_CASE("chromeTokens.theLinkPillsHintReads", "[chrometokens]")
         INFO("scheme: " << name);
         auto palette = ColorPalette {};
         REQUIRE(defaultColorPalettes(name, palette));
-        for (auto const index: AllStyles())
+        for (auto const index: allStyles())
         {
             auto const style = static_cast<ChromeStyle>(index);
             CAPTURE(index);

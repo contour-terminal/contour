@@ -431,7 +431,7 @@ TEST_CASE("chromeStyle names the status roles as properties in QML", "[contour][
             return QByteArrayView(UiStyleProvider::staticMetaObject.property(index).name())
                 .startsWith("status");
         });
-    CHECK(static_cast<size_t>(statusProperties) == contour::config::StatusColorRoleCount);
+    CHECK(std::cmp_equal(statusProperties, contour::config::StatusColorRoleCount));
 }
 
 TEST_CASE("UiStyleProvider.paletteRevision changes when the application palette does", "[contour][uistyle]")

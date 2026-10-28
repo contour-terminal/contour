@@ -54,7 +54,7 @@ using contour::window::WindowController;
                                                          int n)
 {
     auto ids = std::vector<vtworkspace::TabId> {};
-    for (auto const _: std::views::iota(0, n))
+    for ([[maybe_unused]] auto const _: std::views::iota(0, n))
     {
         auto* tab = manager.model().createTab(controller.windowId());
         REQUIRE(tab != nullptr);
@@ -192,7 +192,7 @@ TEST_CASE("runTabAction by TabId resolves the row, and ignores a tab that has go
     TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
     ScopedController const window { app.manager() };
     auto ids = std::vector<vtworkspace::TabId> {};
-    for (auto const _: std::views::iota(0, 3))
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
     {
         window->createNewTab();
         auto const* tab = app.manager().model().window(window.id)->activeTab();

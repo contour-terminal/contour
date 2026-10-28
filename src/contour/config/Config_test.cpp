@@ -4282,7 +4282,7 @@ constexpr auto ClassicExpectation = ExpectedEditionDefaults {
 /// Every first-launch value of the 2026 redesign.
 constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .edition = contour::config::DefaultsEdition::Native2026,
-#if defined(_WIN32)
+#ifdef _WIN32
     .fontFamily = "Cascadia Mono",
 #else
     .fontFamily = "JetBrains Mono",

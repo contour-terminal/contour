@@ -32,7 +32,7 @@ namespace
 ShortcutOverrideClaim claimFor(QKeySequence const& sequence, MenuBarPlacement placement)
 {
     auto const combo = sequence[0];
-    QKeyEvent event(QEvent::ShortcutOverride, combo.key(), combo.keyboardModifiers());
+    QKeyEvent const event(QEvent::ShortcutOverride, combo.key(), combo.keyboardModifiers());
     return shortcutOverrideClaim(event, placement);
 }
 
@@ -43,7 +43,7 @@ constexpr auto MenuKeys = std::array { QKeySequence::Quit, QKeySequence::Prefere
 
 TEST_CASE("ShortcutOverride: the menu-owned keys go to a global menu bar only", "[shortcutoverride]")
 {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // Where the claim matters, the Menu cases must not pass vacuously.
     REQUIRE_FALSE(QKeySequence(QKeySequence::Quit).isEmpty());
     REQUIRE_FALSE(QKeySequence(QKeySequence::Preferences).isEmpty());
@@ -89,7 +89,7 @@ namespace
 /// @return Who the chord belongs to.
 ShortcutOverrideClaim claimFor(Qt::Key key, Qt::KeyboardModifiers modifiers, MenuBarPlacement placement)
 {
-    QKeyEvent event(QEvent::ShortcutOverride, key, modifiers);
+    QKeyEvent const event(QEvent::ShortcutOverride, key, modifiers);
     return shortcutOverrideClaim(event, placement);
 }
 
@@ -134,7 +134,7 @@ TEST_CASE("ShortcutOverride: Hide, Hide Others and Minimize keep their macOS key
 
     struct Chord
     {
-        Qt::Key key;
+        Qt::Key key = Qt::Key_unknown;
         Qt::KeyboardModifiers modifiers;
     };
     auto const systemChords = std::array {

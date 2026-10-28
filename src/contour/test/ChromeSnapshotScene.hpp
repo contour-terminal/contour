@@ -372,24 +372,26 @@ class ChromeSnapshotScene
     static constexpr std::size_t PaletteHistoryCapacity = 5;
 
     /// The toast's message.
-    static inline auto const ToastText = QStringLiteral("Copied 3 lines");
+    [[nodiscard]] static QString toastText() { return QStringLiteral("Copied 3 lines"); }
     /// The size of the paste the permission-paste script asks about, and the lines its preview leaves out.
     static constexpr std::size_t SnapshotPasteBytes = 2'400'000;
     static constexpr std::size_t SnapshotPasteMoreLines = 48'211;
 
     /// The dialog's texts.
-    static inline auto const DialogHeading = QStringLiteral("Close this tab?");
-    static inline auto const DialogMessage =
-        QStringLiteral("\u201Ccmake\u201D is still running. Closing the tab will end it.");
-    static inline auto const DialogAcceptText = QStringLiteral("Close Tab");
-    static inline auto const DialogRejectText = QStringLiteral("Cancel");
+    [[nodiscard]] static QString dialogHeading() { return QStringLiteral("Close this tab?"); }
+    [[nodiscard]] static QString dialogMessage()
+    {
+        return QStringLiteral("\u201Ccmake\u201D is still running. Closing the tab will end it.");
+    }
+    [[nodiscard]] static QString dialogAcceptText() { return QStringLiteral("Close Tab"); }
+    [[nodiscard]] static QString dialogRejectText() { return QStringLiteral("Cancel"); }
 
     /// The tab whose context menu the tab-menu script opens, and whose colour flyout the tab-color-flyout
     /// script opens: the middle of three.
     static constexpr int SnapshotMenuTab = 1;
 
     /// The title of the tab menu's colour sub-menu.
-    static inline auto const TabColorTitle = QStringLiteral("Tab Color");
+    [[nodiscard]] static QString tabColorTitle() { return QStringLiteral("Tab Color"); }
 
     /// How often, and for how long at most, the full-screen size is polled until it holds still.
     static constexpr int FullScreenSettlePollMs = 200;
@@ -891,7 +893,7 @@ class ChromeSnapshotScene
     void showToast()
     {
         _controller.notices().post(
-            window::Notice { .kind = window::NoticeKind::Copied, .text = ToastText.toStdString() });
+            window::Notice { .kind = window::NoticeKind::Copied, .text = toastText().toStdString() });
         auto const* toast = _root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
         REQUIRE(toast != nullptr);
         REQUIRE(QTest::qWaitFor([&] { return toast->opacity() == 1.0; }, PopupSettleMs));
@@ -983,10 +985,10 @@ class ChromeSnapshotScene
         REQUIRE(style != nullptr);
         auto dialog = std::unique_ptr<QObject>(component.createWithInitialProperties(QVariantMap {
             { QStringLiteral("parent"), QVariant::fromValue(window().contentItem()) },
-            { QStringLiteral("heading"), DialogHeading },
-            { QStringLiteral("message"), DialogMessage },
-            { QStringLiteral("acceptText"), DialogAcceptText },
-            { QStringLiteral("rejectText"), DialogRejectText },
+            { QStringLiteral("heading"), dialogHeading() },
+            { QStringLiteral("message"), dialogMessage() },
+            { QStringLiteral("acceptText"), dialogAcceptText() },
+            { QStringLiteral("rejectText"), dialogRejectText() },
             { QStringLiteral("acceptRole"), style->property("statusDanger") },
         }));
         REQUIRE(dialog != nullptr);
@@ -1013,7 +1015,7 @@ class ChromeSnapshotScene
         _controller.openTabContextMenu(SnapshotMenuTab, {});
         REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
 
-        auto* colorRow = subMenuRow(*menu, TabColorTitle);
+        auto* colorRow = subMenuRow(*menu, tabColorTitle());
         REQUIRE(colorRow != nullptr);
         auto const* colors = colorRow->property("subMenu").value<QObject*>();
         // Triggering a sub-menu's row is what a click on it does: the menu opens the sub-menu beside it.

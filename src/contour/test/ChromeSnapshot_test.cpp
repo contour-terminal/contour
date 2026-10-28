@@ -111,6 +111,69 @@ namespace
             dialogs.push_back(dialog);
     return dialogs;
 }
+
+/// Checks that the title bar of @p scene is shown, and drawn as high, as the band table says for @p variant.
+/// @return The band the table resolved.
+[[nodiscard]] contour::window::TitleBand checkTitleBand(
+    contour::test::snapshot::ChromeSnapshotScene const& scene,
+    contour::test::snapshot::SnapshotVariant const& variant,
+    QQuickItem const& titleBar)
+{
+    using namespace contour::test::snapshot;
+    auto const& row = scriptRow(variant.script);
+    auto const look = snapshotLook(variant.edition, variant.appearance);
+    // Review focus 5: Native2026 hides a one-tab strip, Classic does not -- except on the macOS band,
+    // which always shows (1c D1). The band table decides, from the row's tab shape and the script's
+    // frame and mode.
+    using contour::window::TabStripGate;
+    auto const band = contour::window::resolveTitleBand(
+        contour::window::TitleBandRow {
+            .shape = contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
+            .density = row.density,
+        },
+        {
+            .frame = row.frame == SnapshotFrame::NativeFrame ? contour::window::WindowFrame::NativeFrame
+                                                             : contour::window::WindowFrame::ClientBand,
+            .mode = row.mode == SnapshotWindowMode::FullScreenRevealed
+                        ? contour::window::WindowMode::FullScreen
+                        : contour::window::WindowMode::Windowed,
+            .strip = contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount)
+                         ? TabStripGate::Shown
+                         : TabStripGate::Hidden,
+            .position = contour::config::TabBarPosition::Top,
+            .notice = contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
+                                                    ChromeSnapshotScene::hostChipStateFor(row.connection)),
+        });
+    CHECK(titleBar.isVisible() == (band.band != contour::window::BarPresence::Hidden));
+    // The macOS row's windowed band is drawn at the height of the title bar it covers (S2): the one its
+    // surface grows -- 40 pt under the compact toolbar, Minimal's bare band the bare 32 pt (P3).
+    if (variant.row == contour::config::ChromeStyle::MacOS && row.mode == SnapshotWindowMode::Windowed
+        && row.frame == SnapshotFrame::ClientBand && titleBar.isVisible())
+    {
+        REQUIRE(scene.measuredTitleBar().has_value());
+        CHECK(titleBar.height() == scene.measuredTitleBar()->height);
+    }
+    return band;
+}
+
+/// Checks that @p scene draws the split of @p variant as cards with headers, or as bare lines under Minimal.
+void checkSplitCards(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                     contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    auto const& row = scriptRow(variant.script);
+    // A split is drawn as cards, with headers -- or, under Minimal, as bare lines with none until the
+    // held modifier reveals them over the panes.
+    auto const& content = *scene.window().contentItem();
+    if (row.panes == PaneShape::SplitThree)
+    {
+        auto const panes =
+            static_cast<int>(scene.root().findChildren<contour::test::StubContourTerminal*>().size());
+        CHECK(visibleItemsNamed(content, QStringLiteral("paneHeader")) == panes);
+        CHECK(visibleItemsNamed(content, QStringLiteral("paneCardSurface"))
+              == (row.density == contour::config::ChromeDensity::Minimal ? 0 : panes));
+    }
+}
 } // namespace
 
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
@@ -127,53 +190,11 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
         scene.show();
         CHECK(scene.diagnostics().isEmpty());
         auto const& row = scriptRow(variant.script);
-        auto const look = snapshotLook(variant.edition, variant.appearance);
         auto* titleBar = scene.root().findChild<QQuickItem*>(QStringLiteral("titleBar"));
         REQUIRE(titleBar != nullptr);
-        // Review focus 5: Native2026 hides a one-tab strip, Classic does not -- except on the macOS band,
-        // which always shows (1c D1). The band table decides, from the row's tab shape and the script's
-        // frame and mode.
-        using contour::window::TabStripGate;
-        auto const band = contour::window::resolveTitleBand(
-            contour::window::TitleBandRow {
-                .shape =
-                    contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
-                .density = row.density,
-            },
-            {
-                .frame = row.frame == SnapshotFrame::NativeFrame ? contour::window::WindowFrame::NativeFrame
-                                                                 : contour::window::WindowFrame::ClientBand,
-                .mode = row.mode == SnapshotWindowMode::FullScreenRevealed
-                            ? contour::window::WindowMode::FullScreen
-                            : contour::window::WindowMode::Windowed,
-                .strip = contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount)
-                             ? TabStripGate::Shown
-                             : TabStripGate::Hidden,
-                .position = contour::config::TabBarPosition::Top,
-                .notice =
-                    contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
-                                                  ChromeSnapshotScene::hostChipStateFor(row.connection)),
-            });
-        CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
-        // The macOS row's windowed band is drawn at the height of the title bar it covers (S2): the one its
-        // surface grows -- 40 pt under the compact toolbar, Minimal's bare band the bare 32 pt (P3).
-        if (variant.row == contour::config::ChromeStyle::MacOS && row.mode == SnapshotWindowMode::Windowed
-            && row.frame == SnapshotFrame::ClientBand && titleBar->isVisible())
-        {
-            REQUIRE(scene.measuredTitleBar().has_value());
-            CHECK(titleBar->height() == scene.measuredTitleBar()->height);
-        }
-        // A split is drawn as cards, with headers -- or, under Minimal, as bare lines with none until the
-        // held modifier reveals them over the panes.
+        auto const band = checkTitleBand(scene, variant, *titleBar);
         auto const& content = *scene.window().contentItem();
-        if (row.panes == PaneShape::SplitThree)
-        {
-            auto const panes =
-                static_cast<int>(scene.root().findChildren<contour::test::StubContourTerminal*>().size());
-            CHECK(visibleItemsNamed(content, QStringLiteral("paneHeader")) == panes);
-            CHECK(visibleItemsNamed(content, QStringLiteral("paneCardSurface"))
-                  == (row.density == contour::config::ChromeDensity::Minimal ? 0 : panes));
-        }
+        checkSplitCards(scene, variant);
         switch (variant.script)
         {
             case SnapshotScript::ThreeTabs: {

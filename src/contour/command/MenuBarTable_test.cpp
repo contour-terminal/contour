@@ -146,7 +146,7 @@ void collectActionNames(std::vector<ContextMenuEntry> const& entries, std::set<s
 
 TEST_CASE("menuBar.sixMenusInOrder", "[menubar]")
 {
-    constexpr auto titles = std::array<std::string_view, MenuBarMenuCount> { "Contour", "Shell",  "Edit",
+    constexpr auto Titles = std::array<std::string_view, MenuBarMenuCount> { "Contour", "Shell",  "Edit",
                                                                              "View",    "Window", "Help" };
 
     for (auto const& entries: { buildMenuBar(fullState()), buildMenuBar(MenuBarState {}) })
@@ -155,7 +155,7 @@ TEST_CASE("menuBar.sixMenusInOrder", "[menubar]")
         for (auto const index: std::views::iota(std::size_t { 0 }, MenuBarMenuCount))
         {
             CHECK(entries[index].kind == ContextMenuEntryKind::Submenu);
-            CHECK(entries[index].title == titles[index]);
+            CHECK(entries[index].title == Titles[index]);
         }
     }
 }
@@ -344,6 +344,8 @@ TEST_CASE("menuBar.tabList", "[menubar]")
     CHECK(tabs[0].title == "one");
 }
 
+namespace
+{
 /// Every command row of @p entries, submenus included.
 void collectCommands(std::vector<ContextMenuEntry> const& entries, std::vector<ContextMenuEntry const*>& out)
 {
@@ -354,6 +356,7 @@ void collectCommands(std::vector<ContextMenuEntry> const& entries, std::vector<C
         collectCommands(entry.children, out);
     }
 }
+} // namespace
 
 TEST_CASE("menuBar.scopes", "[menubar]")
 {
