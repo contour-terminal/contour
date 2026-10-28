@@ -4252,3 +4252,78 @@ TEST_CASE("SettingsController: deleting an unopened profile or scheme removes wh
     CHECK_FALSE(fx.fileContent(config::relativePathOf(config::profileFile("work"))).has_value());
     CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("midnight"))).has_value());
 }
+
+// }}}
+// {{{ The settle in rename and Use New: a pending write for a file that is not open
+
+namespace
+{
+
+/// Stages a scheme rename that moves the unopened profile "work": its rewrite is now pending, and no draft
+/// is open to flush it.
+void stageSchemeRenameMovingUnopenedProfile(Fixture& fx)
+{
+    writeScheme(fx, "midnight");
+    writeProfileDrawnWith(fx, "work", config::SimpleColorConfig { .colorScheme = "midnight" });
+    REQUIRE(fx.controller->editingProfile().isEmpty());
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall").has_value());
+    REQUIRE(fx.controller->hasChanges());
+}
+
+[[nodiscard]] std::string schemeDrawnBy(Fixture const& fx, std::string const& profile)
+{
+    auto const* found = fx.cfg.findProfile(profile);
+    REQUIRE(found != nullptr);
+    return std::get<config::SimpleColorConfig>(found->colors.value()).colorScheme;
+}
+
+} // namespace
+
+TEST_CASE("SettingsController: renaming a profile settles what is pending for it first",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    stageSchemeRenameMovingUnopenedProfile(fx);
+
+    REQUIRE(fx.controller->renameProfile("work", "office").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(schemeDrawnBy(fx, "office") == "nightfall");
+    CHECK(fx.schemeFile("nightfall").has_value());
+    CHECK_FALSE(fx.schemeFile("midnight").has_value());
+}
+
+TEST_CASE("SettingsController: Use New settles what is pending for an unopened profile first",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    stageSchemeRenameMovingUnopenedProfile(fx);
+
+    REQUIRE(fx.controller
+                ->writeGlobalOverride(config::DefaultsEditionKey,
+                                      config::configEnumToken(config::DefaultsEdition::Native2026))
+                .has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(schemeDrawnBy(fx, "work") == "nightfall");
+}
+
+TEST_CASE("SettingsController: renaming a scheme settles what is pending for it first",
+          "[settings][debounce]")
+{
+    // No profile draws with it, so nothing else flushes the pending rename of the scheme to "nightfall".
+    auto fx = Fixture(BasicConfig);
+    writeScheme(fx, "midnight");
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall").has_value());
+    REQUIRE(fx.controller->hasChanges());
+
+    REQUIRE(fx.controller->renameColorScheme("nightfall", "dusk").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.schemeFile("dusk").has_value());
+    CHECK_FALSE(fx.schemeFile("nightfall").has_value());
+    CHECK_FALSE(fx.schemeFile("midnight").has_value());
+}
