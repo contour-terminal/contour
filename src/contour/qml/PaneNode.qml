@@ -50,6 +50,10 @@ FocusScope {
     // down as visiblePanes is. A bool by the QML-facing carve-out.
     property bool lockInPane: false
 
+    // A window::TitleBandPresence's value (Main.qml's titleBandPresence): whether the window's band shows the
+    // title, handed down as visiblePanes is. 0 is TitleBandPresence::Absent, as ChromeBlockNames.bandAbsent.
+    property int titleBand: 0
+
     // How deep in the tree this node sits: 0 for the tab's root, one more for each split above it.
     property int depth: 0
 
@@ -63,6 +67,7 @@ FocusScope {
         child.visiblePanes = Qt.binding(function() { return root.visiblePanes })
         child.headerReveal = Qt.binding(function() { return root.headerReveal })
         child.lockInPane = Qt.binding(function() { return root.lockInPane })
+        child.titleBand = Qt.binding(function() { return root.titleBand })
     }
 
     // Clamp a raw drag ratio into [minPaneRatio, 1 - minPaneRatio]. Hoisted to the top-level item (and
@@ -136,6 +141,7 @@ FocusScope {
             visiblePanes: root.visiblePanes
             headerReveal: root.headerReveal
             lockInPane: root.lockInPane
+            titleBand: root.titleBand
         }
     }
 

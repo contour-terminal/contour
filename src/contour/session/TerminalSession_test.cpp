@@ -8337,6 +8337,12 @@ TEST_CASE("TerminalSession: hovering a block's rows anchors its actions", "[cont
         auto const anchor = session->blockActionsAnchor();
         REQUIRE_FALSE(anchor.isEmpty());
 
+        // The block the anchor belongs to is named, for a chrome that marks it when it is also the focused
+        // one.
+        auto const* const under = session->terminal().commandBlockAt(vtbackend::LineOffset(1));
+        REQUIRE(under != nullptr);
+        CHECK(session->hoveredCommandBlock() == static_cast<qulonglong>(under->id.value));
+
         // The same anchor from the strip beside the block's first row: the button sits where the row is.
         session->sendGutterHoverEvent(gutterHit(0, GutterSegmentKind::BlockColumn));
         CHECK(session->blockActionsAnchor().top() == anchor.top());
@@ -8360,6 +8366,7 @@ TEST_CASE("TerminalSession: hovering a block's rows anchors its actions", "[cont
         // A row below every block hovers none; leaving the terminal hovers none either.
         pointAt(20);
         CHECK(session->blockActionsAnchor().isEmpty());
+        CHECK(session->hoveredCommandBlock() == 0);
         pointAt(1);
         REQUIRE_FALSE(session->blockActionsAnchor().isEmpty());
         session->onPointerLeft();
@@ -14074,6 +14081,8 @@ TEST_CASE("TerminalSession: the sticky header in the pane header takes no cells"
     CHECK(bound.value(QStringLiteral("statusRole")).toInt()
           == static_cast<int>(contour::config::StatusColorRole::Success));
     CHECK_FALSE(bound.value(QStringLiteral("jumpLabel")).toString().isEmpty());
+    // Where it lives, so a host that shows only its own (the title band) can tell.
+    CHECK(bound.value(QStringLiteral("host")).toInt() == static_cast<int>(StickyHeaderHost::PaneHeader));
 
     // Another frame showing the same says nothing new.
     (void) vtbackend::test::drawFrame(terminal);
@@ -14125,6 +14134,12 @@ TEST_CASE("TerminalSession: the title band follows the active session's sticky h
     QCoreApplication::processEvents();
     CHECK(spy.count() >= 1);
     CHECK(window->activeStickyHeader().value(QStringLiteral("command")).toString() == QStringLiteral("make"));
+    CHECK(window->activeStickyHeader().value(QStringLiteral("host")).toInt()
+          == static_cast<int>(contour::window::StickyHeaderHost::TitleBand));
+
+    // The band's jump link brings the command to the top of the pane.
+    window->jumpToActiveStickyHeader();
+    CHECK(terminal.primaryScreen().grid().lineText(terminal.viewport().topLine()).starts_with("$ make"));
 
     // Another tab in front: its session has no header to show.
     window->createNewTab();

@@ -4732,6 +4732,7 @@ QVariantMap TerminalSession::stickyHeader() const
         { QStringLiteral("detail"), QString::fromStdString(chrome.detail) },
         { QStringLiteral("outcome"), static_cast<int>(chrome.outcome) },
         { QStringLiteral("statusRole"), static_cast<int>(chrome.statusRole) },
+        { QStringLiteral("host"), static_cast<int>(_stickyHeaderHost) },
         { QStringLiteral("jumpLabel"), tr("Jump to Command ↑") },
     };
 }

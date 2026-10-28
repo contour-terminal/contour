@@ -272,7 +272,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _paneEnds { this },
     _paneStates { this },
     _headerOccupants { this },
-    _secureInputs { this }
+    _secureInputs { this },
+    _blocks { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);
@@ -518,6 +519,22 @@ QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
     return onColor(background);
 }
 
+QColor UiStyleProvider::statusTextOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::StatusColors.size()))
+        return { Qt::transparent };
+
+    auto const ground = platform::toRGBColor(background);
+    auto const text =
+        statusInk(static_cast<config::StatusColorRole>(role),
+                  config::StatusInkUse::Text,
+                  platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
+                                                                                     : ChromeTone::Light);
+    if (vtbackend::contrastRatio(platform::toRGBColor(text), ground) >= config::MinimumTextContrast)
+        return text;
+    return onColor(background);
+}
+
 QColor UiStyleProvider::accentColor() const
 {
     if (auto const& accent = _inputs.appearance.accent)
@@ -586,6 +603,16 @@ QVariantMap UiStyleProvider::paneHeader(
              { QStringLiteral("actions"), nameOf(headerActionsName(header.actions)) },
              { QStringLiteral("placement"), nameOf(headerPlacementName(header.placement)) },
              { QStringLiteral("emphasis"), nameOf(headerEmphasisName(header.emphasis)) } };
+}
+
+int UiStyleProvider::stickyHeaderHost(int headerContent, int visiblePanes, int band) const
+{
+    if (!inRange(headerContent, PaneHeaderContentCount) || !inRange(band, TitleBandPresenceCount))
+        return static_cast<int>(StickyHeaderHost::Grid);
+    return static_cast<int>(
+        stickyHeaderHostFor(StickyHeaderHostInputs { .header = static_cast<PaneHeaderContent>(headerContent),
+                                                     .visiblePanes = visiblePanes,
+                                                     .band = static_cast<TitleBandPresence>(band) }));
 }
 
 namespace

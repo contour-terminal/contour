@@ -6,7 +6,6 @@ src/contour/qml/ColorSlotField.qml 9
 src/contour/qml/ConfirmDialog.qml 13
 src/contour/qml/LinkPatternList.qml 8
 src/contour/qml/PopupSurface.qml 1
-src/contour/qml/SessionChrome.qml 3
 src/contour/qml/SettingRow.qml 23
 src/contour/qml/SettingsListItem.qml 19
 src/contour/qml/SettingsNavItem.qml 16

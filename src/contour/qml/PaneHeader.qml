@@ -15,6 +15,11 @@
 // status, and `<process> · Secure input on` (`Input hidden` where the OS has no secure keyboard entry) in
 // place of the name: a header is shown, so the lock goes here (window::SecureIndicatorRules).
 //
+// While the pane's sticky command header lives here (session.stickyHeader, set by the card through
+// setStickyHeaderHost) it takes the name's place: `✓ cmake --build · 2m 14s`, the glyph inked by its status
+// role, the command eliding in the middle first, and a link that jumps to the command. The working directory
+// gives way to it; the name is back as soon as there is no header to show.
+//
 // The name is never elided before the working directory, which elides in the middle so that both the
 // root and the leaf of a long path survive; assistive technology always hears the whole path.
 //
@@ -52,6 +57,17 @@ Item {
     readonly property string name: chromeStyle.paneHeaderName(session ? session.foregroundProcessName : "",
                                                                session ? session.title : "")
     readonly property string workingDirectory: session ? session.displayWorkingDirectory : ""
+    /// The sticky command header, `{ glyph, command, detail, statusRole, jumpLabel, ... }`; empty while the
+    /// pane's header is not where it lives, or there is nothing to show.
+    readonly property var sticky: session && session.stickyHeader !== undefined ? session.stickyHeader : ({})
+    readonly property bool stickyShown: sticky.command !== undefined && sticky.command !== ""
+    /// What the sticky text reads: `✓ cmake --build · 2m 14s`.
+    readonly property string stickyText: stickyShown
+        ? sticky.glyph + " " + sticky.command + (sticky.detail !== "" ? qsTr(" · ") + sticky.detail : "")
+        : ""
+    /// What the sticky header's glyph and jump link are drawn on: the pane's background under the header's fill.
+    readonly property color stickyGround: chromeStyle.paletteRevision < 0 ? "transparent"
+        : Qt.tint(background, chromeStyle.colorOn(chromeStyle.roles.paneHeaderFill, background))
     /// Whether the pane is at a password prompt, and the rule puts the lock in a shown header.
     readonly property bool locked: !!session && (session.secureIndicator ?? 0) >= chromeStyle.secureInputs.locked
         && chromeStyle.secureIndicatorSpots(chromeStyle.secureInputs.spotShown,
@@ -109,7 +125,8 @@ Item {
 
     Accessible.role: Accessible.StaticText
     // Concatenated, not formatted: a title the application set may itself contain "%2".
-    Accessible.name: workingDirectory !== "" ? shownName + qsTr(", ") + workingDirectory : shownName
+    Accessible.name: stickyShown ? stickyText
+                   : workingDirectory !== "" ? shownName + qsTr(", ") + workingDirectory : shownName
 
     // A click on the header, as on the terminal, makes the pane the active one. It takes the press for
     // itself: an overlay header lies over the terminal, which must not see the click as its own.
@@ -176,7 +193,10 @@ Item {
          : status.visible ? status.x + status.width + header.gap : header.leading
         anchors.verticalCenter: parent.verticalCenter
         // Its whole width first: only a header too narrow for the name alone cuts it.
-        width: Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
+        // While the sticky header is shown it holds this slot instead, and the name is not drawn.
+        width: header.stickyShown ? stickyItem.width
+                                  : Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
+        visible: !header.stickyShown
         text: header.shownName
         elide: Text.ElideRight
         font: chromeStyle.type.paneHeader
@@ -187,7 +207,7 @@ Item {
     Text {
         id: cwdLabel
         objectName: "paneHeaderCwd"
-        visible: !header.trailingHeld && header.policy.content === "nameAndCwd" && width > 0
+        visible: !header.trailingHeld && !header.stickyShown && header.policy.content === "nameAndCwd" && width > 0
         x: nameLabel.x + nameLabel.width + header.gap
         anchors.verticalCenter: parent.verticalCenter
         width: Math.max(0, actions.x - header.gap - x)
@@ -197,6 +217,80 @@ Item {
         font: chromeStyle.type.footnote
         color: header.dimmedText
         Accessible.ignored: true
+    }
+
+    // The sticky command header: its glyph, its command and its detail, in the name's slot.
+    Item {
+        id: stickyItem
+        objectName: "paneHeaderSticky"
+        visible: header.stickyShown
+        x: nameLabel.x
+        anchors.verticalCenter: parent.verticalCenter
+        height: stickyCommand.height
+        // The command gives way first; the glyph and the detail are short and keep their room.
+        width: Math.min(stickyGlyph.width + header.gap + stickyCommand.implicitWidth
+                        + (stickyDetail.visible ? header.gap + stickyDetail.width : 0),
+                        Math.max(0, actions.x - header.gap - x))
+        /// What it reads, for the card's checks and assistive technology.
+        readonly property string text: header.stickyText
+        Accessible.ignored: true
+
+        Text {
+            id: stickyGlyph
+            objectName: "paneHeaderStickyGlyph"
+            anchors.verticalCenter: parent.verticalCenter
+            text: header.stickyShown ? header.sticky.glyph : ""
+            font: chromeStyle.type.paneHeader
+            color: chromeStyle.paletteRevision < 0 || !header.stickyShown ? "transparent"
+                 : chromeStyle.statusMarkOn(header.sticky.statusRole, header.stickyGround)
+        }
+
+        Text {
+            id: stickyCommand
+            objectName: "paneHeaderStickyCommand"
+            x: stickyGlyph.width + header.gap
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(0, stickyItem.width - x - (stickyDetail.visible ? header.gap + stickyDetail.width : 0))
+            text: header.stickyShown ? header.sticky.command : ""
+            elide: Text.ElideMiddle
+            font: chromeStyle.type.paneHeader
+            color: header.text
+        }
+
+        Text {
+            id: stickyDetail
+            objectName: "paneHeaderStickyDetail"
+            visible: header.stickyShown && header.sticky.detail !== ""
+            x: stickyItem.width - width
+            anchors.verticalCenter: parent.verticalCenter
+            text: header.stickyShown ? qsTr("· ") + header.sticky.detail : ""
+            font: chromeStyle.type.footnote
+            color: header.dimmedText
+        }
+    }
+
+    // The link that brings the sticky header's command to the top of the pane, in the accent.
+    Text {
+        id: jumpLink
+        objectName: "paneHeaderJump"
+        visible: header.stickyShown && !header.trailingHeld && width > 0
+        x: stickyItem.x + stickyItem.width + header.gap
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, Math.max(0, actions.x - header.gap - x))
+        text: header.stickyShown ? header.sticky.jumpLabel : ""
+        elide: Text.ElideRight
+        font: chromeStyle.type.footnote
+        color: chromeStyle.paletteRevision < 0 ? "transparent"
+             : chromeStyle.statusTextOn(chromeStyle.statusRunning, header.stickyGround)
+        Accessible.role: Accessible.Button
+        Accessible.name: text
+        Accessible.onPressAction: if (header.session) header.session.jumpToStickyHeader()
+
+        TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onTapped: if (header.session) header.session.jumpToStickyHeader()
+        }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
     }
 
     Item {

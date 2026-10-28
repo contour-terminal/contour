@@ -255,9 +255,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
     // The block the keyboard focuses (⌘↑ / ⌘↓), as its id; 0 while none is. What a focus ring binds to.
     Q_PROPERTY(qulonglong focusedCommandBlock READ focusedCommandBlock NOTIFY focusedCommandBlockChanged)
+    // The block the pointer is over, as its id; 0 while none is. The block blockActionsAnchor belongs to.
+    Q_PROPERTY(qulonglong hoveredCommandBlock READ hoveredCommandBlock NOTIFY blockActionsAnchorChanged)
     // The sticky command header while it lives in the chrome (@see setStickyHeaderHost): { glyph, command,
     // detail, outcome: a CommandBlockOutcome as an int, statusRole: the config::StatusColorRole that inks the
-    // glyph, jumpLabel }. Empty with no header, and always while the header is drawn over the grid.
+    // glyph, host: the window::StickyHeaderHost it lives in, as an int, jumpLabel }. Empty with no header,
+    // and always while the header is drawn over the grid.
     Q_PROPERTY(QVariantMap stickyHeader READ stickyHeader NOTIFY stickyHeaderChanged)
 
     // The scrollbar's tick marks, top first: { position: 0..1 down the track, kind: a ScrollbarMarkKind as
@@ -511,6 +514,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// logical coordinates; empty while none is (@see blockActionsAnchor above). Under the glyph column of
     /// the Terminal row it is the one cell at the block column's head.
     [[nodiscard]] QRectF blockActionsAnchor() const noexcept { return _blockActionsAnchor; }
+
+    /// @return The id of the block under the pointer; 0 while none is. GUI thread.
+    [[nodiscard]] qulonglong hoveredCommandBlock() const noexcept
+    {
+        return _hoveredBlock ? static_cast<qulonglong>(_hoveredBlock->value) : 0;
+    }
 
     /// Opens the menu of the block under the pointer, below its ⋯ button: what the button does.
     /// Nothing without a block under the pointer.

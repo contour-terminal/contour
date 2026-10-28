@@ -604,3 +604,48 @@ TEST_CASE("accessibility: a locked pane's header names the lock and says so",
     CHECK(lock->property("name").toString() == QStringLiteral("Input hidden"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+TEST_CASE("accessibility: the block's ⋯ button and the sticky header's jump link are buttons",
+          "[contour][gui][qml][a11y][blocks]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    auto const object = QVariant::fromValue(static_cast<QObject*>(&session));
+
+    auto button = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/BlockActionsButton.qml"),
+                                QVariantMap { { "session", object } });
+    auto* attached = accessibleAttachedOf(button.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::Button);
+    CHECK(attached->property("name").toString() == QStringLiteral("Block actions"));
+
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+    session.setStickyHeader(QVariantMap { { "glyph", QStringLiteral("✗") },
+                                          { "command", QStringLiteral("make") },
+                                          { "detail", QStringLiteral("12 s") },
+                                          { "statusRole", 0 },
+                                          { "jumpLabel", QStringLiteral("Jump to Command ↑") } });
+    auto const policy = QVariantMap { { "content", QStringLiteral("nameAndCwd") },
+                                      { "actions", QStringLiteral("shown") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                                QVariantMap { { "session", object },
+                                              { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                              { "policy", policy } });
+    // The header reads as the sticky text while it is shown.
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make · 12 s"));
+    auto const links = partsNamed(*header, QStringLiteral("paneHeaderJump"));
+    REQUIRE(links.size() == 1);
+    auto* jump = accessibleAttachedOf(links.front());
+    REQUIRE(jump != nullptr);
+    CHECK(jump->property("role").toInt() == QAccessible::Button);
+    CHECK(jump->property("name").toString() == QStringLiteral("Jump to Command ↑"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

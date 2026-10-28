@@ -2877,6 +2877,12 @@ QVariantMap WindowController::activeStickyHeader() const
     return session != nullptr ? session->stickyHeader() : QVariantMap {};
 }
 
+void WindowController::jumpToActiveStickyHeader() const
+{
+    if (auto* const session = activeSession())
+        session->jumpToStickyHeader();
+}
+
 void WindowController::followActiveStickyHeader()
 {
     disconnect(_activeStickyHeaderConnection);

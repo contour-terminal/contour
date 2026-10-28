@@ -276,6 +276,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
     /// The QML names of secure input's values (window::SecureIndicator, window::SpotShown).
     Q_PROPERTY(QObject* secureInputs READ secureInputs CONSTANT)
+    /// The QML names of the command blocks' values (sticky header hosts and tick styles).
+    Q_PROPERTY(QObject* blocks READ blocks CONSTANT)
     /// A locked pane's lock as cell text, set between chipOpenGlyph and chipCloseGlyph (`secure` on the
     /// Terminal row); empty on the native rows, which draw the bundled lock icon.
     Q_PROPERTY(QString secureInputCellText READ secureInputCellText CONSTANT)
@@ -345,6 +347,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
     [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
     [[nodiscard]] QObject* secureInputs() noexcept { return &_secureInputs; }
+    [[nodiscard]] QObject* blocks() noexcept { return &_blocks; }
     [[nodiscard]] QString const& secureInputCellText() const noexcept { return _glyphs.secureInput; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
@@ -364,6 +367,15 @@ class UiStyleProvider: public QObject
     /// @return `{ content, actions, placement, emphasis }` as their names.
     [[nodiscard]] Q_INVOKABLE QVariantMap
     paneHeader(int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const;
+
+    /// Where a pane's sticky command header lives (window::stickyHeaderHostFor).
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers the grid host.
+    /// @param headerContent A window::PaneHeaderContent: what the pane's header shows, if anything.
+    /// @param visiblePanes  The panes visible in the pane's tab.
+    /// @param band          A window::TitleBandPresence: whether the window's band shows the title.
+    /// @return A window::StickyHeaderHost as its underlying value.
+    [[nodiscard]] Q_INVOKABLE int stickyHeaderHost(int headerContent, int visiblePanes, int band) const;
 
     /// Where the link pill goes (window::placeLinkPill), inset by this row's @c s4 from the top and @c s5
     /// from the right.
@@ -730,6 +742,15 @@ class UiStyleProvider: public QObject
     /// @return The ink; transparent for a role outside the table.
     [[nodiscard]] Q_INVOKABLE QColor statusMarkOn(int role, QColor const& background) const;
 
+    /// statusMarkOn()'s counterpart for words: the text ink of @p role (config::StatusInkUse::Text) for text
+    /// drawn on @p background, or black or white (onColor()) where that hue falls short of
+    /// config::MinimumTextContrast there. For a label on a surface of its own, such as the sticky header's
+    /// jump link on a pane's header. Running is the accent, as in statusColor().
+    /// @param role       A config::StatusColorRole as its underlying value.
+    /// @param background The opaque fill the text is drawn on.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusTextOn(int role, QColor const& background) const;
+
     /// The text colour to draw on statusColor(@p role).
     /// @param role A config::StatusColorRole as its underlying value.
     /// @return Black or white, see onColor().
@@ -854,6 +875,7 @@ class UiStyleProvider: public QObject
     ChromePaneStateNames _paneStates;
     ChromeHeaderOccupantNames _headerOccupants;
     ChromeSecureInputNames _secureInputs;
+    ChromeBlockNames _blocks;
     int _paletteRevision = 0;
 };
 

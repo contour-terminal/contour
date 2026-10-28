@@ -88,6 +88,9 @@ enum class PaneHeaderContent : uint8_t
     NameAndCwd, //!< The name and the working directory.
 };
 
+/// The number of window::PaneHeaderContent values.
+inline constexpr size_t PaneHeaderContentCount = static_cast<size_t>(PaneHeaderContent::NameAndCwd) + 1;
+
 /// Whether the header's action buttons show.
 enum class HeaderActions : uint8_t
 {

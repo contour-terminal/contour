@@ -34,6 +34,7 @@
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -1348,6 +1349,56 @@ using contour::config::TabBarVisibility;
     return item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint();
 }
 } // namespace
+
+TEST_CASE("the band's title is the sticky command header while it lives there (offscreen)",
+          "[contour][gui][qml][mainwindow][band][blocks]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto& title = named(*root, QStringLiteral("bandTitle"));
+    auto& jump = named(*root, QStringLiteral("bandJump"));
+    REQUIRE(title.isVisible());
+    CHECK(title.property("text").toString() == QStringLiteral("Tab 1"));
+    CHECK_FALSE(jump.isVisible());
+
+    auto const header = [](contour::window::StickyHeaderHost host) {
+        return QVariantMap { { QStringLiteral("glyph"), QStringLiteral("✓") },
+                             { QStringLiteral("command"), QStringLiteral("cmake --build") },
+                             { QStringLiteral("detail"), QStringLiteral("2m 14s") },
+                             { QStringLiteral("outcome"), 0 },
+                             { QStringLiteral("statusRole"), 0 },
+                             { QStringLiteral("host"), static_cast<int>(host) },
+                             { QStringLiteral("jumpLabel"), QStringLiteral("Jump to Command ↑") } };
+    };
+
+    // A header that lives in a pane header is that pane's: the band keeps the tab's title.
+    controller.setActiveStickyHeader(header(contour::window::StickyHeaderHost::PaneHeader));
+    QCoreApplication::processEvents();
+    CHECK(title.property("text").toString() == QStringLiteral("Tab 1"));
+    CHECK_FALSE(jump.isVisible());
+
+    controller.setActiveStickyHeader(header(contour::window::StickyHeaderHost::TitleBand));
+    QCoreApplication::processEvents();
+    CHECK(title.property("text").toString() == QStringLiteral("✓ cmake --build · 2m 14s"));
+    REQUIRE(jump.isVisible());
+    CHECK(jump.property("text").toString() == QStringLiteral("Jump to Command ↑"));
+
+    showWindow(*root);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(jump));
+    QCoreApplication::processEvents();
+    CHECK(controller.stickyJumps == 1);
+
+    controller.setActiveStickyHeader({});
+    QCoreApplication::processEvents();
+    CHECK(title.property("text").toString() == QStringLiteral("Tab 1"));
+    CHECK_FALSE(jump.isVisible());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 
 TEST_CASE("with one tab under Multiple, the macOS band shows the centred title (offscreen)",
           "[contour][gui][qml][mainwindow][band]")

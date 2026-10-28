@@ -1280,6 +1280,35 @@ TEST_CASE("UiStyleProvider: statusMarkOn inks a mark for the ground it sits on",
     CHECK(style.statusMarkOn(-1, black) == QColor(Qt::transparent));
 }
 
+TEST_CASE("UiStyleProvider: statusTextOn inks words for the ground they sit on", "[contour][uistyle]")
+{
+    using contour::config::StatusColorRole;
+    using contour::config::StatusInkUse;
+    auto const style = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto const warning = static_cast<int>(StatusColorRole::Warning);
+    auto const& hues = contour::config::StatusColors[static_cast<size_t>(warning)].hues(StatusInkUse::Text);
+
+    // The tone of the ground picks the hue, and it is the text hue, not the mark's.
+    auto const black = QColor(Qt::black);
+    CHECK(style.statusTextOn(warning, black) == QColor::fromRgb(hues.dark));
+    // Every answer reads at the text ratio on its ground, every status role over, falling back to black or
+    // white where the hue cannot.
+    auto fellBack = 0;
+    for (auto const& ground:
+         { QColor(Qt::black), QColor(Qt::white), QColor(0xD9, 0xDC, 0xE3), QColor(0x80, 0x80, 0x80) })
+        for (auto const role: std::views::iota(0, static_cast<int>(contour::config::StatusColorRoleCount)))
+        {
+            INFO("ground " << ground.name().toStdString() << ", role " << role);
+            auto const ink = style.statusTextOn(role, ground);
+            CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(ink),
+                                           contour::platform::toRGBColor(ground))
+                  >= contour::config::MinimumTextContrast);
+            fellBack += ink == style.onColor(ground) ? 1 : 0;
+        }
+    CHECK(fellBack > 0);
+    CHECK(style.statusTextOn(-1, black) == QColor(Qt::transparent));
+}
+
 TEST_CASE("chromeStyle names an ended pane's ends and the footers in QML", "[contour][uistyle][qml]")
 {
     using contour::session::EndReason;
@@ -1354,6 +1383,64 @@ TEST_CASE("UiStyleProvider: headerOccupants names every window::HeaderTrailingOc
     auto const& meta = contour::window::ChromeHeaderOccupantNames::staticMetaObject;
     auto const names = static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
     CHECK(names == contour::window::HeaderTrailingOccupantCount);
+}
+
+TEST_CASE("UiStyleProvider: the block names are the enums' values", "[contour][uistyle][blocks]")
+{
+    using namespace contour::window;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        return qmlExpression.evaluate();
+    };
+
+    CHECK(evaluate("chromeStyle.blocks.hostGrid").toInt() == static_cast<int>(StickyHeaderHost::Grid));
+    CHECK(evaluate("chromeStyle.blocks.hostPaneHeader").toInt()
+          == static_cast<int>(StickyHeaderHost::PaneHeader));
+    CHECK(evaluate("chromeStyle.blocks.hostTitleBand").toInt()
+          == static_cast<int>(StickyHeaderHost::TitleBand));
+    CHECK(evaluate("chromeStyle.blocks.headerHidden").toInt() == static_cast<int>(PaneHeaderContent::Hidden));
+    CHECK(evaluate("chromeStyle.blocks.headerShown").toInt() != static_cast<int>(PaneHeaderContent::Hidden));
+    CHECK(evaluate("chromeStyle.blocks.bandAbsent").toInt() == static_cast<int>(TitleBandPresence::Absent));
+    CHECK(evaluate("chromeStyle.blocks.bandShown").toInt() == static_cast<int>(TitleBandPresence::Shown));
+    CHECK(evaluate("chromeStyle.blocks.tickSolid").toInt()
+          == static_cast<int>(vtbackend::ScrollbarTickStyle::Solid));
+    CHECK(evaluate("chromeStyle.blocks.tickHollow").toInt()
+          == static_cast<int>(vtbackend::ScrollbarTickStyle::Hollow));
+}
+
+TEST_CASE("UiStyleProvider: stickyHeaderHost decides as stickyHeaderHostFor does",
+          "[contour][uistyle][blocks]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using namespace contour::window;
+
+    auto const provider = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
+    auto const hostOf = [&](PaneHeaderContent header, int panes, TitleBandPresence band) {
+        return provider.stickyHeaderHost(static_cast<int>(header), panes, static_cast<int>(band));
+    };
+    // Every combination the enums allow, against the pure decision it forwards to.
+    for (auto const header:
+         { PaneHeaderContent::Hidden, PaneHeaderContent::Name, PaneHeaderContent::NameAndCwd })
+        for (auto const panes: { 1, 2 })
+            for (auto const band: { TitleBandPresence::Absent, TitleBandPresence::Shown })
+            {
+                CAPTURE(static_cast<int>(header), panes, static_cast<int>(band));
+                CHECK(hostOf(header, panes, band)
+                      == static_cast<int>(stickyHeaderHostFor(
+                          StickyHeaderHostInputs { .header = header, .visiblePanes = panes, .band = band })));
+            }
+    CHECK(hostOf(PaneHeaderContent::Name, 2, TitleBandPresence::Shown)
+          == static_cast<int>(StickyHeaderHost::PaneHeader));
+    CHECK(hostOf(PaneHeaderContent::Hidden, 1, TitleBandPresence::Shown)
+          == static_cast<int>(StickyHeaderHost::TitleBand));
+    // A value past an enum's end, as QML could pass it, is the grid.
+    CHECK(provider.stickyHeaderHost(static_cast<int>(PaneHeaderContentCount), 1, 1)
+          == static_cast<int>(StickyHeaderHost::Grid));
+    CHECK(provider.stickyHeaderHost(0, 1, static_cast<int>(TitleBandPresenceCount))
+          == static_cast<int>(StickyHeaderHost::Grid));
 }
 
 TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")
@@ -2223,7 +2310,8 @@ TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header a
 {
     // The chrome inks the ✓/✗/▸ by its status role on the ground it sits on (statusMarkOn): a mark, so
     // 3:1, on every row, appearance and bundled scheme, in the pane header and on the band. Its command and
-    // detail are the header's own text, which "the pane text reads at 4.5:1" covers.
+    // detail are the header's own text, which "the pane text reads at 4.5:1" covers; its jump link is the
+    // accent's text ink (statusTextOn).
     using contour::config::ChromeColorRole;
     using contour::config::ChromeStyle;
     using contour::window::StickyHeaderGlyphRows;
@@ -2248,6 +2336,13 @@ TEST_CASE("UiStyleProvider: the sticky header's glyph reads in the pane header a
                     auto const header =
                         over(paneColorOn(provider, ChromeColorRole::PaneHeaderFill, background), background);
                     auto const band = provider.bandFill(0, 0, empty);
+                    // The jump link is words, in the accent: 4.5:1, on the header and on the band.
+                    for (auto const& ground: { header, band })
+                        CHECK(contrastOf(
+                                  provider.statusTextOn(
+                                      static_cast<int>(contour::config::StatusColorRole::Running), ground),
+                                  ground)
+                              >= contour::config::MinimumTextContrast);
                     for (auto const& row: StickyHeaderGlyphRows)
                     {
                         CAPTURE(static_cast<int>(row.outcome));

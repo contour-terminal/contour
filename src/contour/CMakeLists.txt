@@ -454,6 +454,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/StatusLinePreviewItem.qml
         qml/ColorSlotField.qml
         qml/Banner.qml
+        qml/BlockActionsButton.qml
         qml/Toast.qml
         qml/LinkPill.qml
         qml/SecureInputLock.qml

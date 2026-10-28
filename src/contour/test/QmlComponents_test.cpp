@@ -4536,6 +4536,132 @@ TEST_CASE("pane card: a split's cards have headers (offscreen)", "[contour][gui]
     }
 }
 
+namespace
+{
+/// A sticky header as TerminalSession::stickyHeader() binds it.
+[[nodiscard]] QVariantMap stickyEntry(int outcome, int host)
+{
+    using contour::config::StatusColorRole;
+    auto const role =
+        outcome == static_cast<int>(vtbackend::CommandBlockOutcome::Running)   ? StatusColorRole::Running
+        : outcome == static_cast<int>(vtbackend::CommandBlockOutcome::Failure) ? StatusColorRole::Danger
+                                                                               : StatusColorRole::Success;
+    return QVariantMap { { QStringLiteral("glyph"), QStringLiteral("✓") },
+                         { QStringLiteral("command"), QStringLiteral("cmake --build") },
+                         { QStringLiteral("detail"), QStringLiteral("2m 14s") },
+                         { QStringLiteral("outcome"), outcome },
+                         { QStringLiteral("statusRole"), static_cast<int>(role) },
+                         { QStringLiteral("host"), host },
+                         { QStringLiteral("jumpLabel"), QStringLiteral("Jump to Command ↑") } };
+}
+} // namespace
+
+TEST_CASE("pane card: the sticky header takes the pane header's name, and the card says where it lives",
+          "[contour][gui][qml][blocks][panecard]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::StickyHeaderHost;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(row));
+    auto setup = paneCardSetup();
+    setup.row = row;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    contour::test::QmlMessageCapture const warnings;
+
+    SECTION("in a split it is the pane header's")
+    {
+        auto panes = TwoPanes {};
+        host.show(panes.split, /*visiblePanes*/ 2);
+        auto const& card = host.cardOf(panes.left());
+        // The card told its session: its header is shown, so the header is the host.
+        REQUIRE_FALSE(panes.leftSession.stickyHosts.empty());
+        CHECK(panes.leftSession.stickyHosts.back() == static_cast<int>(StickyHeaderHost::PaneHeader));
+
+        auto& sticky = PaneTreeHost::partOf(card, "paneHeaderSticky");
+        auto& name = PaneTreeHost::partOf(card, "paneHeaderName");
+        CHECK_FALSE(sticky.isVisible());
+        CHECK(name.isVisible());
+
+        panes.leftSession.setStickyHeader(
+            stickyEntry(static_cast<int>(vtbackend::CommandBlockOutcome::Success),
+                        static_cast<int>(StickyHeaderHost::PaneHeader)));
+        QCoreApplication::processEvents();
+        CHECK(sticky.isVisible());
+        CHECK(sticky.property("text").toString() == QStringLiteral("✓ cmake --build · 2m 14s"));
+        CHECK_FALSE(name.isVisible());
+        CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
+
+        auto& jump = PaneTreeHost::partOf(card, "paneHeaderJump");
+        REQUIRE(jump.isVisible());
+        CHECK(jump.property("text").toString() == QStringLiteral("Jump to Command ↑"));
+        QTest::mouseClick(&host.window, Qt::LeftButton, Qt::NoModifier, centreOf(jump));
+        QCoreApplication::processEvents();
+        CHECK(panes.leftSession.stickyJumps == 1);
+
+        // The other pane has no header to swap.
+        CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "paneHeaderSticky").isVisible());
+
+        // Gone, and the name is back.
+        panes.leftSession.setStickyHeader({});
+        QCoreApplication::processEvents();
+        CHECK(name.isVisible());
+        CHECK_FALSE(sticky.isVisible());
+        CHECK_FALSE(jump.isVisible());
+    }
+
+    SECTION("running is the accent in the glyph, never yellow; failure is danger")
+    {
+        auto panes = TwoPanes {};
+        host.show(panes.split, /*visiblePanes*/ 2);
+        auto const& card = host.cardOf(panes.left());
+        auto& glyph = PaneTreeHost::partOf(card, "paneHeaderStickyGlyph");
+        auto& style = host.style();
+        auto const ground = [&] {
+            return panes.leftSession.backgroundColor();
+        };
+        auto const expectInk = [&](vtbackend::CommandBlockOutcome outcome,
+                                   contour::config::StatusColorRole role) {
+            panes.leftSession.setStickyHeader(
+                stickyEntry(static_cast<int>(outcome), static_cast<int>(StickyHeaderHost::PaneHeader)));
+            QCoreApplication::processEvents();
+            auto const ink = glyph.property("color").value<QColor>();
+            // Inked by its role on the pane's ground (the contrast of every such pair is looped in
+            // UiStyleProvider_test).
+            return std::pair { ink, style.statusMarkOn(static_cast<int>(role), ground()) };
+        };
+        auto const [running, runningExpected] =
+            expectInk(vtbackend::CommandBlockOutcome::Running, contour::config::StatusColorRole::Running);
+        auto const [failed, failedExpected] =
+            expectInk(vtbackend::CommandBlockOutcome::Failure, contour::config::StatusColorRole::Danger);
+        CHECK(running != QColor(Qt::yellow));
+        CHECK(running != failed);
+        if (row == ChromeStyle::MacOS)
+        {
+            CHECK(running == runningExpected);
+            CHECK(failed == failedExpected);
+        }
+    }
+
+    SECTION("a lone pane's header is the title band's, which the card announces")
+    {
+        MockSession session;
+        MockPaneProxy leaf { /*leaf*/ true };
+        leaf.setSession(&session);
+        leaf.setActive(true);
+        host.show(leaf, /*visiblePanes*/ 1);
+        // No band shown: the header lives over the grid.
+        REQUIRE_FALSE(session.stickyHosts.empty());
+        CHECK(session.stickyHosts.back() == static_cast<int>(StickyHeaderHost::Grid));
+
+        // The band shows the title (Main.qml's titleBandPresence reaches the card through PaneNode).
+        host.paneNode->setProperty("titleBand", static_cast<int>(contour::window::TitleBandPresence::Shown));
+        QCoreApplication::processEvents();
+        CHECK(session.stickyHosts.back() == static_cast<int>(StickyHeaderHost::TitleBand));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("pane card: the grid keeps clear of a rounded card's corners (offscreen)",
           "[contour][gui][qml][panecard]")
 {
@@ -7292,8 +7418,148 @@ TEST_CASE("link pill: the find bar in the header row keeps the pill out of the h
 }
 // }}}
 
-TEST_CASE("SessionChrome shows the command block tooltip only while a block is hovered",
-          "[contour][gui][qml][gutter]")
+TEST_CASE("ActionContextMenu shows a header row as a disabled label", "[contour][gui][qml][blocks]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const row = [](char const* kind, char const* title) {
+        return QVariantMap { { QStringLiteral("kind"), QString::fromLatin1(kind) },
+                             { QStringLiteral("title"), QString::fromLatin1(title) },
+                             { QStringLiteral("enabled"), true },
+                             { QStringLiteral("checkable"), false },
+                             { QStringLiteral("checked"), false },
+                             { QStringLiteral("actionId"), 0 } };
+    };
+    auto const model = QVariantList { row("header", "make"),
+                                      row("header", "Failed · exit 2"),
+                                      row("separator", ""),
+                                      row("command", "Copy Output") };
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> menu(component.createWithInitialProperties({ { "entries", model } }));
+    REQUIRE(menu != nullptr);
+    REQUIRE(menu->property("count").toInt() == model.size());
+
+    auto const itemAt = [&](int index) {
+        QQuickItem* item = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(
+            menu.get(), "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index)));
+        REQUIRE(item != nullptr);
+        return item;
+    };
+    auto const* subject = itemAt(0);
+    auto const* detail = itemAt(1);
+    CHECK(subject->objectName() == QStringLiteral("contextMenuHeader"));
+    CHECK(subject->property("text").toString() == QStringLiteral("make"));
+    CHECK_FALSE(subject->property("enabled").toBool());
+    CHECK(detail->objectName() == QStringLiteral("contextMenuHeader"));
+    CHECK_FALSE(detail->property("enabled").toBool());
+    // The subject is the larger face and the primary ink; the detail the smaller and the secondary one.
+    auto& style = providerOf(engine);
+    CHECK(subject->property("font").value<QFont>() == style.type()->property("footnote").value<QFont>());
+    CHECK(detail->property("font").value<QFont>() == style.type()->property("caption").value<QFont>());
+    CHECK(itemAt(3)->property("enabled").toBool());
+    CHECK(itemAt(3)->objectName() != QStringLiteral("contextMenuHeader"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome puts the block's ⋯ button in its strip, and the tooltip is gone",
+          "[contour][gui][qml][blocks]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(row));
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = row;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    auto* button = host.chrome->findChild<QQuickItem*>(QStringLiteral("blockActionsButton"));
+    REQUIRE(button != nullptr);
+    // The block's text lives in its menu now.
+    CHECK(host.chrome->findChild<QQuickItem*>(QStringLiteral("commandBlockTooltip")) == nullptr);
+    // No block hovered: no button.
+    CHECK_FALSE(button->isVisible());
+
+    auto const& size = providerOf(engine);
+    auto const edge = size.property("size").value<QObject*>()->property("blockActions").toReal();
+    auto const anchor = QRectF(6, 40, edge, 17);
+    session->setBlockHover(7, anchor);
+    QCoreApplication::processEvents();
+
+    SECTION("it sits in the strip, at its top, and does not go past it")
+    {
+        REQUIRE(button->isVisible());
+        CHECK(button->width() == Catch::Approx(edge));
+        CHECK(button->y() == Catch::Approx(anchor.y()));
+        CHECK(button->x() >= anchor.x());
+        CHECK(button->x() + button->width() <= anchor.right() + 1e-6);
+        // A square on the native rows; the Terminal row's is the cell.
+        if (row == ChromeStyle::Terminal)
+            CHECK(button->height() == Catch::Approx(anchor.height()));
+        else
+            CHECK(button->height() == Catch::Approx(button->width()));
+        if (row == ChromeStyle::MacOS)
+        {
+            // The canvas's `blocks` board: 22 x 22 at a radius of 6.
+            CHECK(button->width() == 22);
+            auto* face = button->findChild<QQuickItem*>(QStringLiteral("blockActionsFace"));
+            REQUIRE(face != nullptr);
+            CHECK(face->property("radius").toReal() == 6);
+        }
+    }
+
+    SECTION("a click asks the session for the block's menu, once")
+    {
+        auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+        REQUIRE(window != nullptr);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(*button));
+        QCoreApplication::processEvents();
+        CHECK(session->blockActionOpens == 1);
+    }
+
+    SECTION("no hovered block hides it again")
+    {
+        REQUIRE(button->isVisible());
+        session->setBlockHover(0, QRectF());
+        QCoreApplication::processEvents();
+        CHECK_FALSE(button->isVisible());
+    }
+
+    SECTION("a button beside the focused block is ringed, one beside another is not")
+    {
+        auto* ring = button->findChild<QQuickItem*>(QStringLiteral("blockActionsFocusRing"));
+        REQUIRE(ring != nullptr);
+        CHECK_FALSE(ring->isVisible());
+        session->setFocusedCommandBlock(3); // another block
+        QCoreApplication::processEvents();
+        CHECK_FALSE(ring->isVisible());
+        session->setFocusedCommandBlock(7); // the hovered one
+        QCoreApplication::processEvents();
+        CHECK(ring->isVisible());
+        session->setFocusedCommandBlock(0);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(ring->isVisible());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome draws a running tick hollow and a failure's solid", "[contour][gui][qml][blocks]")
 {
     QQmlEngine engine;
     MockTabController controller;
@@ -7302,50 +7568,32 @@ TEST_CASE("SessionChrome shows the command block tooltip only while a block is h
     contour::test::QmlMessageCapture const warnings;
 
     auto host = createChromeInWindow(engine);
+    auto* layer = host.bar->findChild<QQuickItem*>(QStringLiteral("scrollbarMarkLayer"));
+    REQUIRE(layer != nullptr);
     auto session = createScrollableSession();
+    session->setScrollbarMarks(QVariantList { markEntry(0.2, vtbackend::ScrollbarMarkKind::Running, 1),
+                                              markEntry(0.6, vtbackend::ScrollbarMarkKind::Failure, 2) },
+                               markColors());
     host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
     QCoreApplication::processEvents();
 
-    auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("commandBlockTooltip"));
-    REQUIRE(tip != nullptr);
-    CHECK(tip->property("tipText").toString().isEmpty());
-    // Sooner than the hyperlink tip: the gutter is where a pointer goes on purpose.
-    CHECK(tip->property("showDelay").toInt() == 300);
+    auto const ticks = markTicksOf(*layer);
+    REQUIRE(ticks.size() == 2);
+    auto const& tokens = providerOf(engine);
+    auto const* sizes = tokens.property("size").value<QObject*>();
+    REQUIRE(sizes != nullptr);
 
-    SECTION("a hovered block publishes its text, beside its gutter cell")
-    {
-        session->setCommandBlockHover("Exit code 2\n$ make", QRectF(4, 80, 8, 16));
-        QCoreApplication::processEvents();
+    auto const* running = ticks[0];
+    CHECK(running->property("color").value<QColor>().alpha() == 0);
+    CHECK(running->property("border").value<QObject*>()->property("width").toReal() >= 1);
+    CHECK(running->property("border").value<QObject*>()->property("color").value<QColor>()
+          == QColor(Qt::yellow));
+    CHECK(running->height() == Catch::Approx(sizes->property("scrollTick").toReal()));
 
-        CHECK(tip->property("tipText").toString() == "Exit code 2\n$ make");
-        CHECK(tip->x() == Catch::Approx(12)); // on the grid side of the cell, not over the strip
-    }
-
-    SECTION("another block entered at the same cell is read afresh")
-    {
-        // New output scrolls the page under a stationary pointer without moving the viewport, so the
-        // next block can be entered at the very cell the last one was: the anchor does not change, and
-        // the text must be read again all the same.
-        session->setCommandBlockHover("Exit code 2", QRectF(4, 80, 8, 16));
-        QCoreApplication::processEvents();
-        REQUIRE(tip->property("tipText").toString() == "Exit code 2");
-
-        session->setCommandBlockHover("Exit code 0", QRectF(4, 80, 8, 16));
-        QCoreApplication::processEvents();
-        CHECK(tip->property("tipText").toString() == "Exit code 0");
-    }
-
-    SECTION("leaving the block withdraws it")
-    {
-        session->setCommandBlockHover("Exit code 2", QRectF(4, 80, 8, 16));
-        QCoreApplication::processEvents();
-        REQUIRE_FALSE(tip->property("tipText").toString().isEmpty());
-
-        session->setCommandBlockHover(QString(), QRectF());
-        QCoreApplication::processEvents();
-        CHECK(tip->property("tipText").toString().isEmpty());
-    }
-
+    auto const* failure = ticks[1];
+    CHECK(failure->property("color").value<QColor>() == QColor(Qt::red));
+    CHECK(failure->property("border").value<QObject*>()->property("width").toReal() == 0);
+    CHECK(failure->height() == Catch::Approx(sizes->property("scrollTick").toReal()));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

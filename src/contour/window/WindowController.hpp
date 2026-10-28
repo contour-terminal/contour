@@ -593,6 +593,10 @@ class WindowController:
     /// @return The active session's sticky header for the title band (@see activeStickyHeader above); empty
     ///         without an active session.
     [[nodiscard]] QVariantMap activeStickyHeader() const;
+
+    /// Brings the active session's sticky header's command to the top of its pane: what the title band's jump
+    /// link does. Nothing without an active session or a header.
+    Q_INVOKABLE void jumpToActiveStickyHeader() const;
     [[nodiscard]] bool titleBarVisible() const noexcept;
     [[nodiscard]] bool isMultimediaReady() const noexcept;
     // }}}

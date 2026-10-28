@@ -37,6 +37,9 @@ Item {
     property bool lockInPane: false
     /// A window::HeaderReveal's value (WindowController.headerReveal).
     property int headerReveal: 0
+    /// A window::TitleBandPresence's value: whether the window's band shows the title (PaneNode.titleBand).
+    /// 0 is TitleBandPresence::Absent, as chromeStyle.blocks.bandAbsent.
+    property int titleBand: 0
 
     readonly property var session: node ? node.session : null
     readonly property bool isActive: node ? node.active : false
@@ -56,6 +59,21 @@ Item {
                                                          height)
     readonly property bool headerShown: policy.content !== undefined && policy.content !== "hidden"
     readonly property bool headerInline: headerShown && policy.placement === "inline"
+
+    // Where the pane's sticky command header lives (window::stickyHeaderHostFor): in this card's header while
+    // it shows one, else in the title band for the tab's only pane, else over the grid. The session keeps it
+    // and shows or withholds the header in its chrome accordingly.
+    readonly property int stickyHeaderHost: chromeStyle.stickyHeaderHost(
+        headerShown ? chromeStyle.blocks.headerShown : chromeStyle.blocks.headerHidden, visiblePanes, titleBand)
+    onStickyHeaderHostChanged: card.announceStickyHeaderHost()
+    onSessionChanged: card.announceStickyHeaderHost()
+    Component.onCompleted: card.announceStickyHeaderHost()
+
+    function announceStickyHeaderHost() {
+        // Guarded as the link pill is: a session stand-in without the member has no header to place.
+        if (session && typeof session.setStickyHeaderHost === "function")
+            session.setStickyHeaderHost(card.stickyHeaderHost)
+    }
 
     HoverHandler {
         id: hover

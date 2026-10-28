@@ -126,6 +126,10 @@ class MockMainController: public MainWindowControllerMock
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane CONSTANT)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
+    // Mirrors WindowController's active sticky header (TerminalSession::stickyHeader's keys); writable here
+    // so a test can say what the title band shows.
+    Q_PROPERTY(QVariantMap activeStickyHeader READ activeStickyHeader WRITE setActiveStickyHeader NOTIFY
+                   activeStickyHeaderChanged)
     // Mirrors WindowController's command-palette surface. Main.qml instantiates CommandPalette.qml
     // against this controller and Connections-targets its commandPaletteRequested signal, so the mock
     // must carry both — a missing signal is a QML warning, and the run-wide gate turns that into a
@@ -402,6 +406,19 @@ class MockMainController: public MainWindowControllerMock
     }
     [[nodiscard]] QObject* activeTabRootPane() const noexcept { return _scene.rootPane; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
+    [[nodiscard]] QVariantMap const& activeStickyHeader() const noexcept { return _activeStickyHeader; }
+    void setActiveStickyHeader(QVariantMap header)
+    {
+        if (_activeStickyHeader != header)
+        {
+            _activeStickyHeader = std::move(header);
+            emit activeStickyHeaderChanged();
+        }
+    }
+    /// Counts the clicks on the title band's jump link, which the production controller answers through
+    /// the active session.
+    Q_INVOKABLE void jumpToActiveStickyHeader() { ++stickyJumps; }
+    int stickyJumps = 0; ///< How often the band's jump link was clicked.
     [[nodiscard]] QObject* commandPalette() const noexcept { return _scene.commandPalette; }
     /// Records what the palette ran. ShowAbout is dispatched for real (WindowController::runCommand ->
     /// the manager -> showAbout()), so a test can watch a picked command open a dialog of its own.
@@ -416,7 +433,13 @@ class MockMainController: public MainWindowControllerMock
     /// OpenCommandPalette action, and what makes Main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
 
-    [[nodiscard]] QVariantList contextMenuModel() const { return {}; }
+    [[nodiscard]] QVariantList const& contextMenuModel() const { return _contextMenuModel; }
+    /// Publishes the rows the terminal's menu shows when opened, as WindowController republishes them.
+    void setContextMenuModel(QVariantList model)
+    {
+        _contextMenuModel = std::move(model);
+        emit contextMenuModelChanged();
+    }
     [[nodiscard]] QVariantList titleBarContextMenuModel() const { return {}; }
     Q_INVOKABLE void openTitleBarContextMenu() { emit titleBarContextMenuRequested(); }
     Q_INVOKABLE void triggerTitleBarContextMenuAction(int /*actionId*/) {}
@@ -644,6 +667,7 @@ class MockMainController: public MainWindowControllerMock
     void chromeHeightChanged();
     void multimediaReadyChanged();
     void hostingNoticeChanged();
+    void activeStickyHeaderChanged();
     void chromeFocusChanged();
     /// Closing a busy tab asks first: the tab's id, its label and the running program (empty when unknown).
     void closeTabConfirmationRequested(quint64 tab, QString const& tabLabel, QString const& program);
@@ -735,6 +759,8 @@ class MockMainController: public MainWindowControllerMock
     window::DaemonDriftModel _drift;
     bool _multimediaReady = false; // the background probe has not finished
     QString _hostingNotice;
+    QVariantMap _activeStickyHeader;
+    QVariantList _contextMenuModel;
 };
 
 /// Loads Main.qml offscreen against @p controller and returns the created root object: registers the

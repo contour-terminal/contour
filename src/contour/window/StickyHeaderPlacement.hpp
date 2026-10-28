@@ -5,6 +5,7 @@
 
 #include <vtbackend/core/StickyHeaderKind.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace contour::window
@@ -24,6 +25,9 @@ enum class TitleBandPresence : uint8_t
     Absent = 0, ///< No band: a native title bar, full screen with the band hidden, or none at all.
     Shown,
 };
+
+/// The number of window::TitleBandPresence values.
+inline constexpr size_t TitleBandPresenceCount = static_cast<size_t>(TitleBandPresence::Shown) + 1;
 
 /// What the host of a pane's sticky header is decided from.
 struct StickyHeaderHostInputs

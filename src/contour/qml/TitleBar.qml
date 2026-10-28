@@ -425,16 +425,56 @@ Item {
 
     // The active session's title, centred on the band while its middle holds no tabs: one tab on macOS.
     // Read from the active row's title role, so it is the label its tab would show.
-    Text {
-        id: bandTitle
-        objectName: "bandTitle"
+    //
+    // While the active session's sticky command header lives in the band (window::StickyHeaderHost::TitleBand:
+    // the tab's only pane, with no header of its own), the title is that header, `✓ cmake --build · 2m 14s`,
+    // with a link after it that jumps to the command.
+    readonly property var sticky: root.controller && root.controller.activeStickyHeader !== undefined
+                                  ? root.controller.activeStickyHeader : ({})
+    readonly property bool stickyShown: root.sticky.command !== undefined && root.sticky.command !== ""
+        && root.sticky.host === chromeStyle.blocks.hostTitleBand
+    readonly property string stickyText: root.stickyShown
+        ? root.sticky.glyph + " " + root.sticky.command
+          + (root.sticky.detail !== "" ? qsTr(" · ") + root.sticky.detail : "")
+        : ""
+
+    Row {
+        id: bandTitleRow
+        objectName: "bandTitleRow"
         visible: root.isBand && root.centre === "title"
         anchors.centerIn: parent
-        width: Math.min(implicitWidth, root.titleRoom)
-        text: titleRows.activeTitle
-        font: chromeStyle.type.bodyMedium
-        color: chromeStyle.colors.tabText
-        elide: Text.ElideMiddle
+        spacing: chromeStyle.space.s3
+
+        Text {
+            id: bandTitle
+            objectName: "bandTitle"
+            // The jump link keeps its room; the title gives way to it.
+            width: Math.min(implicitWidth, Math.max(0, root.titleRoom - (bandJump.visible ? bandJump.width + bandTitleRow.spacing : 0)))
+            text: root.stickyShown ? root.stickyText : titleRows.activeTitle
+            font: chromeStyle.type.bodyMedium
+            color: chromeStyle.colors.tabText
+            elide: Text.ElideMiddle
+        }
+
+        Text {
+            id: bandJump
+            objectName: "bandJump"
+            visible: root.stickyShown
+            anchors.verticalCenter: bandTitle.verticalCenter
+            text: root.stickyShown ? root.sticky.jumpLabel : ""
+            font: chromeStyle.type.footnote
+            color: chromeStyle.paletteRevision < 0 ? "transparent"
+                 : chromeStyle.statusTextOn(chromeStyle.statusRunning, root.fill)
+            Accessible.role: Accessible.Button
+            Accessible.name: text
+            Accessible.onPressAction: if (root.controller) root.controller.jumpToActiveStickyHeader()
+
+            TapHandler {
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: if (root.controller) root.controller.jumpToActiveStickyHeader()
+            }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+        }
     }
 
     // One object per tab, carrying its title and whether it is active, while the band shows a title.

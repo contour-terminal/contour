@@ -54,6 +54,8 @@ ContourMenu {
     // Objects this file created, so a rebuild can destroy exactly what it made. A sub-menu owns its own
     // children, so only the top-level ones are tracked here.
     property var _created: []
+    // Whether the rebuild in progress has made its first header row yet.
+    property bool _headerSeen: false
 
     // Rebuilt whenever the model changes, and the model is republished on every right-click — so the menu
     // that pops is the menu for the state the user actually clicked in. NOT rebuilt in an "about to show"
@@ -74,6 +76,27 @@ ContourMenu {
     Component {
         id: separatorEntry
         MenuSeparator {}
+    }
+
+    // A label that names what the rows below act on (a block's command, its outcome, when and where it ran).
+    // Never a choice: disabled, and read by assistive technology as the menu's text, not as an item. The first
+    // names the subject, in the primary ink; the rest are detail, in the secondary one.
+    Component {
+        id: headerEntry
+        MenuItem {
+            id: header
+            objectName: "contextMenuHeader"
+            property bool first: false
+            enabled: false
+            hoverEnabled: false
+            font: header.first ? chromeStyle.type.footnote : chromeStyle.type.caption
+            contentItem: Text {
+                text: header.text
+                font: header.font
+                elide: Text.ElideRight
+                color: header.first ? chromeStyle.colors.paletteText : chromeStyle.colors.paletteSecondaryText
+            }
+        }
     }
 
     Component {
@@ -110,6 +133,15 @@ ContourMenu {
                 const sep = separatorEntry.createObject(menu.contentItem);
                 menu.addItem(sep);
                 created.push(sep);
+            } else if (row.kind === "header") {
+                // The first header of the menu is its subject.
+                const item = headerEntry.createObject(menu.contentItem, {
+                    "text": row.title,
+                    "first": !root._headerSeen
+                });
+                root._headerSeen = true;
+                menu.addItem(item);
+                created.push(item);
             } else if (row.kind === "swatches") {
                 // An Item, created and added the way a separator is; it reports picks rather than
                 // triggering, so the menu's own close-on-trigger never sees it.
@@ -157,6 +189,7 @@ ContourMenu {
         for (let i = 0; i < root._created.length; ++i)
             root._created[i].destroy();
 
+        root._headerSeen = false;
         root._created = root.fillMenu(root, root.entries);
     }
 }

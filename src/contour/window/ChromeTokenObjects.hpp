@@ -12,7 +12,10 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/StickyHeaderPlacement.hpp>
 #include <contour/window/TabBadge.hpp>
+
+#include <vtbackend/shell/ScrollbarMarks.hpp>
 
 #include <QtCore/QObject>
 #include <QtGui/QColor>
@@ -1250,6 +1253,68 @@ class ChromeSecureInputNames: public QObject
     /// @return Each window::SpotShown as its underlying value.
     [[nodiscard]] static constexpr int spotHidden() noexcept { return static_cast<int>(SpotShown::No); }
     [[nodiscard]] static constexpr int spotShown() noexcept { return static_cast<int>(SpotShown::Yes); }
+};
+
+/// The QML names of the command blocks' values, `chromeStyle.blocks`: where a sticky header lives
+/// (window::StickyHeaderHost), what stickyHeaderHost() is asked about the pane's header and the title band,
+/// and how a scrollbar tick is drawn (vtbackend::ScrollbarTickStyle).
+class ChromeBlockNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int hostGrid READ hostGrid CONSTANT)
+    Q_PROPERTY(int hostPaneHeader READ hostPaneHeader CONSTANT)
+    Q_PROPERTY(int hostTitleBand READ hostTitleBand CONSTANT)
+    Q_PROPERTY(int headerHidden READ headerHidden CONSTANT)
+    Q_PROPERTY(int headerShown READ headerShown CONSTANT)
+    Q_PROPERTY(int bandAbsent READ bandAbsent CONSTANT)
+    Q_PROPERTY(int bandShown READ bandShown CONSTANT)
+    Q_PROPERTY(int tickSolid READ tickSolid CONSTANT)
+    Q_PROPERTY(int tickHollow READ tickHollow CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeBlockNames(QObject* parent);
+
+    /// @return Each window::StickyHeaderHost as its underlying value.
+    [[nodiscard]] static constexpr int hostGrid() noexcept
+    {
+        return static_cast<int>(StickyHeaderHost::Grid);
+    }
+    [[nodiscard]] static constexpr int hostPaneHeader() noexcept
+    {
+        return static_cast<int>(StickyHeaderHost::PaneHeader);
+    }
+    [[nodiscard]] static constexpr int hostTitleBand() noexcept
+    {
+        return static_cast<int>(StickyHeaderHost::TitleBand);
+    }
+    /// @return A pane header that shows nothing / something, as a window::PaneHeaderContent.
+    [[nodiscard]] static constexpr int headerHidden() noexcept
+    {
+        return static_cast<int>(PaneHeaderContent::Hidden);
+    }
+    [[nodiscard]] static constexpr int headerShown() noexcept
+    {
+        return static_cast<int>(PaneHeaderContent::Name);
+    }
+    /// @return Each window::TitleBandPresence as its underlying value.
+    [[nodiscard]] static constexpr int bandAbsent() noexcept
+    {
+        return static_cast<int>(TitleBandPresence::Absent);
+    }
+    [[nodiscard]] static constexpr int bandShown() noexcept
+    {
+        return static_cast<int>(TitleBandPresence::Shown);
+    }
+    /// @return Each vtbackend::ScrollbarTickStyle as its underlying value.
+    [[nodiscard]] static constexpr int tickSolid() noexcept
+    {
+        return static_cast<int>(vtbackend::ScrollbarTickStyle::Solid);
+    }
+    [[nodiscard]] static constexpr int tickHollow() noexcept
+    {
+        return static_cast<int>(vtbackend::ScrollbarTickStyle::Hollow);
+    }
 };
 
 } // namespace contour::window

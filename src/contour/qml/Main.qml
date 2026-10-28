@@ -86,6 +86,12 @@ ThemedWindow
                                          || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen
                                              && titleBar.tabsHostLock)
 
+    // Whether the title band is on screen with the active tab's title in its middle: where a single pane's sticky
+    // header lives (window::StickyHeaderHost), handed down by PaneNode like visiblePanes, as a
+    // window::TitleBandPresence value.
+    readonly property int titleBandPresence: appWindow.bandOnScreen && appWindow.band.centre === "title"
+                                             ? chromeStyle.blocks.bandShown : chromeStyle.blocks.bandAbsent
+
     // Whether a pane without a header draws the lock in itself (window::SecureIndicatorRules): neither the
     // tabs nor a band are on screen to hold it. Each pane adds its own header's presence (PaneCard); handed
     // down by PaneNode like visiblePanes; a bool by the QML-facing carve-out, the rule's answer.
@@ -415,6 +421,7 @@ ThemedWindow
                 visiblePanes: appWindow.win ? appWindow.win.visiblePaneCount : 1
                 headerReveal: appWindow.win ? appWindow.win.headerReveal : 0
                 lockInPane: appWindow.secureLockInPane
+                titleBand: appWindow.titleBandPresence
             }
         }
 
@@ -623,6 +630,7 @@ ThemedWindow
     // whole chain runs synchronously inside the mouse-press handler.
     ActionContextMenu {
         id: terminalContextMenu
+        objectName: "terminalContextMenu"
         entries: appWindow.win ? appWindow.win.contextMenuModel : []
         onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerContextMenuAction(actionId); }
     }

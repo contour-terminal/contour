@@ -58,12 +58,14 @@ class MockSession: public QObject
     Q_PROPERTY(QString linkTargetHint READ linkTargetHint NOTIFY linkTargetChanged)
     Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
     Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
-    // Mirrors TerminalSession's block-column tooltip: the anchor, and the invocable its text is read
-    // through whenever the anchor moves.
-    Q_PROPERTY(
-        QRectF commandBlockTooltipAnchor READ commandBlockTooltipAnchor NOTIFY commandBlockHoverChanged)
-    // Mirrors TerminalSession's scrollbar marks: ticks as { position, kind, targetLine } and one colour per
-    // kind. Both change together, so one signal serves them.
+    // Mirrors TerminalSession's command block surface: where the hovered block's ⋯ button goes, which
+    // block that is, the block the keyboard focuses (0 for none), and the sticky header the chrome shows.
+    Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
+    Q_PROPERTY(qulonglong hoveredCommandBlock READ hoveredCommandBlock NOTIFY blockActionsAnchorChanged)
+    Q_PROPERTY(qulonglong focusedCommandBlock READ focusedCommandBlock NOTIFY focusedCommandBlockChanged)
+    Q_PROPERTY(QVariantMap stickyHeader READ stickyHeader NOTIFY stickyHeaderChanged)
+    // Mirrors TerminalSession's scrollbar marks: ticks as { position, kind, style, targetLine } and one
+    // colour per kind. Both change together, so one signal serves them.
     Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
     Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
     // Mirrors TerminalSession's pane state (window::paneStateOf over the end and the connection), which the
@@ -170,16 +172,47 @@ class MockSession: public QObject
         ++_overlayClearanceRevision;
         emit overlayClearanceChanged();
     }
-    [[nodiscard]] QRectF commandBlockTooltipAnchor() const { return _commandBlockTooltipAnchor; }
-    Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const { return _commandBlockTooltipText; }
+    [[nodiscard]] QRectF blockActionsAnchor() const { return _blockActionsAnchor; }
+    [[nodiscard]] qulonglong hoveredCommandBlock() const { return _hoveredCommandBlock; }
+    [[nodiscard]] qulonglong focusedCommandBlock() const { return _focusedCommandBlock; }
+    [[nodiscard]] QVariantMap stickyHeader() const { return _stickyHeader; }
 
-    /// Publishes a hovered command block, the way TerminalSession does when the pointer reaches one.
-    void setCommandBlockHover(QString text, QRectF anchor)
+    /// Publishes the hovered command block and its button's anchor, the way TerminalSession does when the
+    /// pointer reaches one; an empty @p anchor and block 0 are the pointer leaving.
+    void setBlockHover(qulonglong block, QRectF anchor)
     {
-        _commandBlockTooltipText = std::move(text);
-        _commandBlockTooltipAnchor = anchor;
-        emit commandBlockHoverChanged();
+        _hoveredCommandBlock = block;
+        _blockActionsAnchor = anchor;
+        emit blockActionsAnchorChanged();
     }
+
+    /// Publishes the block the keyboard focuses, 0 for none.
+    void setFocusedCommandBlock(qulonglong block)
+    {
+        _focusedCommandBlock = block;
+        emit focusedCommandBlockChanged();
+    }
+
+    /// Publishes the sticky header the chrome shows, as TerminalSession::stickyHeader() binds it; empty for
+    /// none.
+    void setStickyHeader(QVariantMap header)
+    {
+        _stickyHeader = std::move(header);
+        emit stickyHeaderChanged();
+    }
+
+    /// Counts the clicks on the ⋯ button.
+    Q_INVOKABLE void openBlockActions() { ++blockActionOpens; }
+
+    /// Counts the clicks on the sticky header's jump link.
+    Q_INVOKABLE void jumpToStickyHeader() { ++stickyJumps; }
+
+    /// Records where the card says the sticky header lives, as window::StickyHeaderHost values.
+    Q_INVOKABLE void setStickyHeaderHost(int host) { stickyHosts.push_back(host); }
+
+    int blockActionOpens = 0;     ///< How often the ⋯ button asked for the block menu.
+    int stickyJumps = 0;          ///< How often the jump link was clicked.
+    std::vector<int> stickyHosts; ///< Every host the card announced, in order.
 
     [[nodiscard]] QVariantList scrollbarMarks() const { return _scrollbarMarks; }
     [[nodiscard]] QVariantList scrollbarMarkColors() const { return _scrollbarMarkColors; }
@@ -498,7 +531,9 @@ class MockSession: public QObject
     void linkTargetChanged();
     void secureIndicatorChanged();
     void overlayClearanceChanged();
-    void commandBlockHoverChanged();
+    void blockActionsAnchorChanged();
+    void focusedCommandBlockChanged();
+    void stickyHeaderChanged();
     void scrollbarMarksChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
@@ -536,8 +571,10 @@ class MockSession: public QObject
     bool _linkTargetShown = false;
     int _overlayClearanceRevision = 0;
     QVariantMap _overlayClearance;
-    QString _commandBlockTooltipText;
-    QRectF _commandBlockTooltipAnchor;
+    QRectF _blockActionsAnchor;
+    qulonglong _hoveredCommandBlock = 0;
+    qulonglong _focusedCommandBlock = 0;
+    QVariantMap _stickyHeader;
     QVariantList _scrollbarMarks;
     QVariantList _scrollbarMarkColors;
     QColor _background;

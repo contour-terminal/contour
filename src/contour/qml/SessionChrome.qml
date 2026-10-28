@@ -100,42 +100,11 @@ Item {
         linkPillAnchor: linkPill.visible ? linkPill.placement.anchor : "hidden"
     }
 
-    // The gutter's block-column tooltip: how the hovered command ended, how long it took, when and where it
-    // ran, and what it was. The anchor is a NOTIFY property; the text is read through the session's
-    // commandBlockTooltip() each time that property's signal fires, so a hover that never happens formats
-    // nothing. Guarded against mock sessions without the members, as LinkPill is.
-    Item {
-        id: blockTip
-        objectName: "commandBlockTooltip"
-
-        readonly property rect anchorRect: (chrome.session && chrome.session.commandBlockTooltipAnchor !== undefined)
-                                           ? chrome.session.commandBlockTooltipAnchor
-                                           : Qt.rect(0, 0, 0, 0)
-        // Bound to the SESSION's property, not to anchorRect: output scrolling under a stationary pointer
-        // lets the next block be entered at the very cell the last one was, and an anchor that did not
-        // change would leave this showing the last block's text.
-        readonly property string tipText: (chrome.session
-                                           && chrome.session.commandBlockTooltipAnchor !== undefined
-                                           && chrome.session.commandBlockTooltipAnchor.width > 0
-                                           && typeof chrome.session.commandBlockTooltip === "function")
-                                          ? chrome.session.commandBlockTooltip()
-                                          : ""
-        readonly property bool showAbove: anchorRect.y > height + 8
-        // Half the hyperlink tip's: a pointer brought to the gutter is there on purpose, where one crossing
-        // a link is usually on its way to something else.
-        readonly property int showDelay: 300
-
-        width: 1
-        height: 1
-        // On the grid side of the gutter cell: over the strip it would cover the column being read.
-        x: Math.max(0, Math.min(anchorRect.x + anchorRect.width, chrome.width - 1))
-        y: showAbove ? anchorRect.y : anchorRect.y + anchorRect.height
-
-        ToolTip.text: blockTip.tipText
-        ToolTip.visible: blockTip.tipText !== ""
-                         && chrome.Window.window !== null
-                         && chrome.Window.window.active
-        ToolTip.delay: blockTip.showDelay
+    // The hovered block's ⋯ button, beside its first row in the rail's strip (the block's menu holds what its
+    // tooltip once said).
+    BlockActionsButton {
+        id: blockActions
+        session: chrome.session
     }
 
     // Vertical scrollbar, bidirectionally bound to the VT viewport (drag -> viewport here; viewport ->
@@ -267,9 +236,9 @@ Item {
             width: vbar.availableWidth
             height: vbar.availableHeight
 
-            // A tick's drawn height, and how far past it the tick takes a press on either side: 3 + 2 * 3 makes a
-            // target nine pixels tall, where a two-pixel line taking one more on each side was a hard one.
-            readonly property int tickHeight: 3
+            // How far past a tick's drawn height (size.scrollTick) the tick takes a press on either side: a
+            // three-pixel line and 3 each side make a target nine pixels tall, where a two-pixel line taking
+            // one more on each side was a hard one.
             readonly property int hitMargin: 3
 
             Repeater {
@@ -287,9 +256,12 @@ Item {
                     y: Math.min(markLayer.height - tick.height,
                                 Math.round(tick.modelData.position * markLayer.height))
                     width: markLayer.width
-                    height: markLayer.tickHeight
-                    radius: 1
-                    color: chrome.markColor(tick.modelData.kind)
+                    height: chromeStyle.size.scrollTick
+                    // A mark of something still going on is an outline in its colour, not a fill.
+                    readonly property bool hollow: tick.modelData.style === chromeStyle.blocks.tickHollow
+                    color: tick.hollow ? "transparent" : chrome.markColor(tick.modelData.kind)
+                    border.width: tick.hollow ? chromeStyle.size.scrollTickOutline : 0
+                    border.color: chrome.markColor(tick.modelData.kind)
 
                     MouseArea {
                         // The hit area reaches past the line without moving what is drawn.
