@@ -3,8 +3,8 @@
 
 #include <utility>
 
-// Apple's factory lives in CocoaPlatformAppearance.mm.
-#ifndef __APPLE__
+// Apple's factory lives in CocoaPlatformAppearance.mm, Windows' in Win32Settings.cpp.
+#if !defined(__APPLE__) && !defined(_WIN32)
 namespace contour::platform
 {
 

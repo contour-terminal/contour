@@ -874,6 +874,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/NativeCaptionButtons_test.cpp
             platform/NativeWindowFrame_test.cpp
             platform/Win32CaptionButtons_test.cpp
+            platform/Win32Settings_test.cpp
             window/WindowPositionStore_test.cpp
             window/AppMenuBar_test.cpp
             window/ChromeFocusController_test.cpp

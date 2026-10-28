@@ -68,6 +68,7 @@ add_library(contour_platform STATIC
     PopupShadow.cpp PopupShadow.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
     Win32CaptionButtons.cpp Win32CaptionButtons.hpp
+    Win32Settings.cpp Win32Settings.hpp
     Win32SystemBackdrop.cpp Win32SystemBackdrop.hpp
     Win32TitleBandMaterial.cpp Win32TitleBandMaterial.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
@@ -85,7 +86,7 @@ add_library(contour_platform STATIC
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
 if(WIN32)
-    target_link_libraries(contour_platform PUBLIC comctl32 ole32 user32 uuid)
+    target_link_libraries(contour_platform PUBLIC advapi32 comctl32 ole32 user32 uuid)
 endif()
 
 # The Cocoa adapters use Objective-C++; the parent enables the language for these and the native tests
