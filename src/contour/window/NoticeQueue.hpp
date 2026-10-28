@@ -216,9 +216,12 @@ inline constexpr auto DropRefusalRows = std::array {
     DropRefusalRow { .error = DropTextError::UnknownShell,
                      .text = "Not inserted: a file name holds a character that could run as a command, and "
                              "this pane's shell is not known." },
+    DropRefusalRow { .error = DropTextError::LeadingDash,
+                     .text = "Not inserted: a name starts with a dash, which a program would read as an "
+                             "option." },
 };
 
-static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::UnknownShell) + 1U,
+static_assert(DropRefusalRows.size() == std::to_underlying(DropTextError::LeadingDash) + 1U,
               "DropRefusalRows must have a row for every drop error");
 
 /// What the toast says when a tab dropped on a pane of a daemon-hosted window cannot be merged: the daemon

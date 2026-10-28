@@ -177,6 +177,21 @@ TEST_CASE("droppedText.charactersThatDisguiseTheTypedTextRefuseTheWholeDrop", "[
         CHECK(one(std::string("/tmp/a") + fine + "b", ShellQuoting::PowerShell).has_value());
 }
 
+TEST_CASE("droppedText.aWordStartingWithADashNeverReachesAProgramAsAnOption", "[droppedtext]")
+{
+    // POSIX quoting puts `./` in front; no other quoting can tell a path from a link, so it refuses.
+    CHECK(one("-rf", ShellQuoting::Posix).value_or("") == "./-rf ");
+    for (auto const quoting: { ShellQuoting::PowerShell, ShellQuoting::Cmd, ShellQuoting::Unknown })
+    {
+        auto const text = one("-rf", quoting);
+        REQUIRE_FALSE(text.has_value());
+        CHECK(text.error() == DropTextError::LeadingDash);
+        // Only the start of a word is an option; a dash inside, or behind `./`, is a name.
+        CHECK(one("/tmp/-rf", quoting).has_value());
+        CHECK(one("./-rf", quoting).has_value());
+    }
+}
+
 TEST_CASE("droppedText.noPathsIsAnError", "[droppedtext]")
 {
     auto const text = droppedPathsText({}, ShellQuoting::Posix);

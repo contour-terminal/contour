@@ -40,4 +40,6 @@ run anything. Dropping plain text pastes it as text, as Ctrl+V does.
 - Under `cmd`, a name holding `%`, `"` or `!` cannot be quoted safely and is refused too.
 - Where the shell is not known, a name holding any of ``$ ` ; & | < > ( ) ' " \ ! % ^`` is refused, and the
   window says its shell is not known.
+- A name or link starting with `-` would be read as an option: a local file is typed as `./-name`, and a
+  link (which has no path to put `./` in front of) is refused except for a POSIX shell, which gets `./` too.
 - A pane whose program has ended ignores drops.

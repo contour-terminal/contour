@@ -2622,8 +2622,18 @@ void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)
     // in one would run when the shell reads the line.
     auto words = std::vector<std::string> {};
     for (auto const& url: urls)
-        words.push_back(url.isLocalFile() ? url.toLocalFile().toStdString()
-                                          : url.toString(QUrl::FullyEncoded).toStdString());
+    {
+        if (!url.isLocalFile())
+        {
+            words.push_back(url.toString(QUrl::FullyEncoded).toStdString());
+            continue;
+        }
+        // A relative path from the drag source (`file:-rf`) is a name, not an option: it is typed as `./-rf`.
+        auto path = url.toLocalFile().toStdString();
+        if (path.starts_with('-'))
+            path.insert(0, "./");
+        words.push_back(std::move(path));
+    }
 
     auto const typed = window::droppedPathsText(words, dropQuoting());
     if (!typed)

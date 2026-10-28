@@ -14457,6 +14457,36 @@ TEST_CASE("TerminalSession: a file name that could run something refuses the who
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 }
 
+TEST_CASE("TerminalSession: a dropped word that starts with a dash is never typed as an option",
+          "[contour][session][drop]")
+{
+    // The drag source chooses the uri-list, so `-rf` (a relative URL) and `file:-rf` (a local file whose path
+    // is `-rf`) are possible; neither may reach a program as an option.
+    TestApp testApp;
+    auto const link = QList<QUrl> { QUrl(QStringLiteral("-rf")) };
+    auto const file = QList<QUrl> { QUrl(QStringLiteral("file:-rf")) };
+
+    for (auto const* program: { "pwsh", "cmd", "nu", "zsh" })
+    {
+        CAPTURE(program);
+        auto session = makeDropSession(testApp, program, false);
+        session->insertDroppedUrls(file);
+        auto const typed = mockPtyOf(*session).stdinBuffer();
+        CHECK(typed.contains("./-rf"));
+        CHECK_FALSE(typed.contains("\"-rf")); // the quote does not open on the dash
+        CHECK_FALSE(typed.contains("'-rf"));
+    }
+
+    // A relative link has no path to put `./` in front of: cmd, PowerShell and an unknown shell refuse it.
+    for (auto const* program: { "pwsh", "cmd", "nu" })
+    {
+        CAPTURE(program);
+        auto session = makeDropSession(testApp, program, false);
+        session->insertDroppedUrls(link);
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
+}
+
 TEST_CASE("TerminalSession: a dropped URL list never types a shell expansion or a line break",
           "[contour][session][drop]")
 {

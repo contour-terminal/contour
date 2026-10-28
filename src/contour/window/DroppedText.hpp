@@ -112,6 +112,7 @@ enum class DropTextError : uint8_t
                       //!< that changes what the text looks like (a bidi control, U+2028, U+2029).
     Unquotable,       //!< The shell has no way to quote a character in a name (`%`, `"` or `!` under cmd).
     UnknownShell,     //!< The shell is not known, and a name holds a character some shell reads as syntax.
+    LeadingDash, //!< A name starts with `-` and the quoting has no way to keep it from reading as an option.
 };
 
 namespace detail
@@ -245,6 +246,9 @@ namespace detail
             return std::unexpected(DropTextError::Unquotable);
         if (quoting == ShellQuoting::Unknown && detail::isUnsafeForUnknownShell(path))
             return std::unexpected(DropTextError::UnknownShell);
+        // Posix quoting prefixes `./`; no other quoting can, as it cannot know the word is a path.
+        if (quoting != ShellQuoting::Posix && path.starts_with('-'))
+            return std::unexpected(DropTextError::LeadingDash);
     }
 
     auto text = std::string {};
