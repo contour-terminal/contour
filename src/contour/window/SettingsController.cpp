@@ -2125,6 +2125,12 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
             palette = config::parseColorSchemeYaml(
                 _config().configFile.parent_path() / config::relativePathOf(file), *bytes);
             _session->observe(file, bytes);
+            // A file that does not parse is a hand edit in progress, not a palette to carry over: the
+            // configuration's copy is an older version, and the removal below would drop the edit.
+            if (!palette)
+                return refuse(SettingsErrorKind::ChangedOnDisk,
+                              std::format("{} does not parse; fix it or open it before renaming.",
+                                          config::relativePathOf(file).generic_string()));
         }
         if (!palette)
             if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
