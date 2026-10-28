@@ -63,7 +63,7 @@ TEST_CASE("blockRail.segments", "[blockrail]")
         std::optional<uint32_t> block;
         std::optional<uint32_t> above;
         std::optional<uint32_t> below;
-        RailSegment expected;
+        RailSegment expected {};
     };
     for (auto const& [block, above, below, expected]: {
              Case { .block = 7, .above = std::nullopt, .below = 7, .expected = RailSegment::Head },

@@ -47,6 +47,9 @@ extend-ignore-re = [
     # Unicode codepoint notation. A terminal emulator cites these constantly, and the hex digits
     # spell words by accident -- U+E0BA and U+25BA both read as "BA".
     'U\+[0-9A-Fa-f]{4,6}',
+    # Abbreviated and full git commit hashes, which the ledgers and plans cite on every line; their hex
+    # digits spell words by accident (56caf3555 reads as "caf", b48ba9ebb as "ba").
+    '\b[0-9a-f]{7,40}\b',
 ]
 
 [default.extend-identifiers]
