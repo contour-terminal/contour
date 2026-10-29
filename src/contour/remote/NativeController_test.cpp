@@ -215,6 +215,8 @@ struct DaemonFixture
     uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
     /// The host's profiles, by name; none resolves every spawn to the host's own settings.
     std::shared_ptr<vthost::ProfileCatalog const> profiles;
+    /// The tabs the host opens on construction, as `default_layout` would; none opens none.
+    vtworkspace::Layout startupLayout;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -227,6 +229,7 @@ struct DaemonFixture
             vtbackend::Settings {},
             core::defaultEnvironment(),
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .startupLayout = startupLayout,
                                         .extensions = extensions,
                                         .profiles = profiles,
                                         .instance = instance });
@@ -236,14 +239,17 @@ struct DaemonFixture
     /// @param services What each native connection is served with: what its handshake admits.
     /// @param instance Which run of the daemon the first host is; 0 for one that states none.
     /// @param profiles The host's profiles; none by default.
+    /// @param startupLayout The tabs the host opens on construction; none by default.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
-                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {}):
+                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
+                           vtworkspace::Layout startupLayout = {}):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
-        profiles(std::move(profiles))
+        profiles(std::move(profiles)),
+        startupLayout(std::move(startupLayout))
     {
         host = makeHost();
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
@@ -2615,4 +2621,49 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(delegate.binds == 1);
     CHECK(delegate.boundPty == device);
     CHECK(delegate.boundTerminal == &terminal);
+}
+
+TEST_CASE("a client attaching to a titled multi-pane layout shows each tab's own title (#2187)",
+          "[attach][controller][sync-back]")
+{
+    auto const titled = [](std::string title) {
+        auto tab = vtworkspace::LayoutTab {};
+        tab.title = std::move(title);
+        tab.root.orientation = vtworkspace::SplitState::Vertical;
+        auto nested = vtworkspace::LayoutPane {};
+        nested.orientation = vtworkspace::SplitState::Horizontal;
+        nested.children = { vtworkspace::LayoutPane {}, vtworkspace::LayoutPane {} };
+        tab.root.children = { vtworkspace::LayoutPane {}, std::move(nested), vtworkspace::LayoutPane {} };
+        return tab;
+    };
+    auto capture = SharedLogCapture {};
+    auto daemon =
+        DaemonFixture { {}, {}, 1, {}, vtworkspace::Layout { .tabs = { titled("editor"), titled("logs") } } };
+
+    auto gui = AttachedGui { daemon };
+    requireConnected(*gui.controller);
+    REQUIRE(waitUntil([&] {
+        auto const layout = gui.controller->layout();
+        return layout && layout->tabs.size() == 2;
+    }));
+    gui.reconcile();
+
+    auto* const win = gui.app.manager().model().window(gui.window.id);
+    REQUIRE(win != nullptr);
+    REQUIRE(win->tabCount() == 2);
+    CHECK(win->tabAt(0)->runtimeTitle() == "editor");
+    CHECK(win->tabAt(1)->runtimeTitle() == "logs");
+
+    // Nothing the client applied went back to the daemon as an edit, and the daemon still has both titles.
+    gui.reconcile();
+    std::this_thread::sleep_for(100ms);
+    CHECK(editTabsReceived(capture.text()) == 0);
+    auto const titles = daemon.onDaemon([&daemon] {
+        auto const* window = daemon.host->model().window(daemon.host->windowId());
+        return window->tabAt(0)->runtimeTitle().value_or("") + ","
+               + window->tabAt(1)->runtimeTitle().value_or("");
+    });
+    CHECK(titles == "editor,logs");
+
+    gui.controller->stop();
 }
