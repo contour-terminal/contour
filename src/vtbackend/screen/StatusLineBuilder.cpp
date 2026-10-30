@@ -3,9 +3,13 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <crispy/ASCII.hpp>
 #include <crispy/InterpolatedString.hpp>
 
 #include <core/Utils.hpp>
@@ -15,10 +19,13 @@
 #include <algorithm>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -64,13 +71,172 @@ namespace // helper functions
         }
         core::unreachable();
     }
+
+    /// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
+    /// @param text The text, valid UTF-8.
+    /// @param maxWidth The widest the result may be, in columns.
+    /// @param policy How the status screen measures a grapheme cluster.
+    /// @return @p text itself, or its head and "…"; never cut inside a grapheme cluster.
+    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy)
+    {
+        if (columnsOnTheGrid(text, policy) <= maxWidth)
+            return std::string { text };
+
+        // The ellipsis is budgeted for, as elideMiddle() budgets for its own.
+        auto const budget = maxWidth - ColumnCount(1);
+        auto head = std::string {};
+        auto columns = ColumnCount(0);
+        for (auto const& cluster: graphemeClustersOf(text, policy))
+        {
+            columns += cluster.columns;
+            if (columns > budget)
+                break;
+            head += cluster.text;
+        }
+        return head + "…";
+    }
+
+    /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
+    /// @param segments The parts, outermost first.
+    /// @param separator What goes between two parts.
+    /// @param maxWidth The widest the result may be, in columns.
+    /// @param policy How the status screen measures a grapheme cluster.
+    /// @return The joined parts; the first, "…" and the last; or the last alone cut at its start.
+    [[nodiscard]] std::string elideMiddle(std::vector<std::string> const& segments,
+                                          std::string_view separator,
+                                          ColumnCount maxWidth,
+                                          ClusterWidthPolicy policy)
+    {
+        auto const join = [&](std::vector<std::string> const& parts) {
+            return core::joinWith(parts, separator);
+        };
+
+        auto candidate = join(segments);
+        if (columnsOnTheGrid(candidate, policy) <= maxWidth)
+            return candidate;
+
+        // Keep both ends: the first answers *where*, the last answers *who*.
+        if (segments.size() > 2)
+        {
+            auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
+            candidate = join(elided);
+            if (columnsOnTheGrid(candidate, policy) <= maxWidth)
+                return candidate;
+        }
+
+        // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
+        // identifies it -- survives.
+        //
+        // Cut by GRAPHEME CLUSTER, never by byte or codepoint: a byte cut leaves mojibake and an invalid
+        // sequence for writeToScreenInternal(), and a codepoint cut can keep a combining mark without its
+        // base, or half a ZWJ sequence or flag. The ellipsis is budgeted for rather than added afterwards,
+        // because prepending it to a string already at maxWidth overflows the width by exactly the column
+        // the caller allotted.
+        auto const budget = maxWidth - ColumnCount(1); // one column for the leading '…'
+        auto const clusters = graphemeClustersOf(segments.back(), policy);
+        auto kept = std::size_t { 0 };
+        auto columns = ColumnCount(0);
+        for (auto const& cluster: clusters | std::views::reverse)
+        {
+            columns += cluster.columns;
+            if (columns > budget)
+                break;
+            ++kept;
+        }
+        if (kept == 0)
+            return {};
+
+        auto tail = std::string { "…" };
+        for (auto const& cluster: clusters | std::views::drop(clusters.size() - kept))
+            tail += cluster.text;
+        return tail;
+    }
 } // namespace
 
-static std::optional<RGBColor> tryParseColorAttribute(crispy::StringInterpolation const& interpolation,
-                                                      std::string_view key)
+namespace
+{
+    /// Whether @p text spells @p name, ignoring ASCII case. An ASCII fold, not std::tolower: that reads the
+    /// locale, and a Turkish one does not fold 'I' to 'i'.
+    [[nodiscard]] bool spellsIgnoringAsciiCase(std::string_view text, std::string_view name) noexcept
+    {
+        return std::ranges::equal(text, name, {}, crispy::ascii::fold, crispy::ascii::fold);
+    }
+} // namespace
+
+namespace StatusLineDefinitions
+{
+    std::optional<ViMode> inputModeFrom(std::string_view name) noexcept
+    {
+        auto const spells = [&](InputModeName const& row) {
+            return spellsIgnoringAsciiCase(name, row.name);
+        };
+        if (auto const row = std::ranges::find_if(InputModeNames, spells); row != InputModeNames.end())
+            return row->mode;
+        return std::nullopt;
+    }
+
+    std::string_view inputModeName(ViMode mode) noexcept
+    {
+        return InputModeNames[static_cast<std::size_t>(mode)].name;
+    }
+
+    RGBColorPair modeChipColors(RGBColorPair modePair, ColorPalette const& palette) noexcept
+    {
+        if (contrastRatio(modePair.foreground, modePair.background) >= MinimumTextContrast)
+            return modePair;
+        return RGBColorPair { .foreground = legibleInkOn(palette, modePair.background),
+                              .background = modePair.background };
+    }
+
+    std::optional<ItemColor> parseItemColor(std::string_view text)
+    {
+        auto const spells = [&](ColorRoleName const& r) {
+            return spellsIgnoringAsciiCase(text, r.name);
+        };
+        if (auto const row = std::ranges::find_if(ColorRoleNames, spells); row != ColorRoleNames.end())
+            return ItemColor { row->role };
+        if (auto const rgb = parseColor(text))
+            return ItemColor { *rgb };
+        return std::nullopt;
+    }
+
+    std::string formatItemColor(ItemColor const& color)
+    {
+        if (auto const* const role = std::get_if<ColorRole>(&color))
+            return std::string { ColorRoleNames[static_cast<std::size_t>(*role)].name };
+        return formatColor(std::get<RGBColor>(color));
+    }
+
+    RGBColor roleColor(ColorRole role, ColorPalette const& palette) noexcept
+    {
+        return palette.indexedColor(ColorRoleNames[static_cast<std::size_t>(role)].paletteIndex);
+    }
+
+    RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette, RGBColor ground) noexcept
+    {
+        auto const* const role = std::get_if<ColorRole>(&color);
+        if (!role)
+            return std::get<RGBColor>(color);
+        auto const& row = ColorRoleNames[static_cast<std::size_t>(*role)];
+        if (auto const rgb = palette.indexedColor(row.paletteIndex);
+            contrastRatio(rgb, ground) >= row.minimumContrast)
+            return rgb;
+        return legibleInkOn(palette, ground);
+    }
+
+    RGBColor resolveItemBackground(ItemColor const& color, ColorPalette const& palette) noexcept
+    {
+        if (auto const* const role = std::get_if<ColorRole>(&color))
+            return roleColor(*role, palette);
+        return std::get<RGBColor>(color);
+    }
+} // namespace StatusLineDefinitions
+
+static std::optional<StatusLineDefinitions::ItemColor> tryParseColorAttribute(
+    crispy::StringInterpolation const& interpolation, std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
-        return parseColor(i->second);
+        return StatusLineDefinitions::parseItemColor(i->second);
 
     return std::nullopt;
 }
@@ -165,9 +331,15 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         if (auto const verbosity = tryParseStringAttribute(interpolation, "Verbosity"))
             item.verbosity = StatusLineDefinitions::contextVerbosityFrom(*verbosity);
         item.separator = tryParseStringAttribute(interpolation, "Separator");
-        if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
-            if (auto const columns = core::toInteger<10, int>(*width); columns && *columns > 0)
-                item.maxWidth = ColumnCount(*columns);
+        return item;
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::InputMode>)
+    {
+        auto item = StatusLineDefinitions::InputMode { styles };
+        if (auto const mode = tryParseStringAttribute(interpolation, "Hide"))
+            item.hiddenIn = StatusLineDefinitions::inputModeFrom(*mode);
+        if (interpolation.flags.contains("Chip"))
+            item.look = StatusLineDefinitions::InputModeLook::Chip;
         return item;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
@@ -181,6 +353,16 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
     }
     else
         return T { styles };
+}
+
+/// Reads @p interpolation's `MaxWidth=` into @p item; a missing, non-numeric or non-positive one keeps
+/// the default, so a typo cannot collapse the item to nothing.
+template <StatusLineDefinitions::HasMaxWidth T>
+static void readMaxWidth(T& item, crispy::StringInterpolation const& interpolation)
+{
+    if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
+        if (auto const columns = core::toInteger<10, int>(*width); columns && *columns > 0)
+            item.maxWidth = ColumnCount(*columns);
 }
 
 /// The item @p interpolation describes, or nullopt when it names no known placeholder (or names one but
@@ -207,6 +389,9 @@ static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
         if (result || interpolation.name != StatusLineDefinitions::ItemTraits<T>::Name)
             return;
         result = makeItemOfType<T>(styles, interpolation);
+        if constexpr (StatusLineDefinitions::HasMaxWidth<T>)
+            if (result)
+                readMaxWidth(std::get<T>(*result), interpolation);
     });
     return result;
 }
@@ -263,21 +448,56 @@ namespace
         StatusLineStyling styling;
         std::string result {};
 
-        std::string makeTextColor(std::optional<RGBColor> const& color, std::string_view defaultSequence = {})
+        /// What text drawn over @p background sits on: that background, or the bar's when there is none.
+        [[nodiscard]] RGBColor groundOf(
+            std::optional<StatusLineDefinitions::ItemColor> const& background) const
         {
-            if (!color)
-                return std::string(defaultSequence);
-
-            return std::format("\033[38:2:{}:{}:{}m", color->red, color->green, color->blue);
+            if (background)
+                return StatusLineDefinitions::resolveItemBackground(*background, vt.defaultColorPalette());
+            return vt.indicatorStatusLineColors().background;
         }
 
-        std::string makeBackgroundColor(std::optional<RGBColor> const& color,
-                                        std::string_view defaultSequence = {})
+        /// The SGR that selects @p color as the text colour over @p background. A role is resolved now,
+        /// against the scheme (the default palette: the status line is host chrome, which a program's OSC 4
+        /// does not recolour) and the ground it is drawn on. Empty when there is no colour.
+        [[nodiscard]] std::string makeTextColor(
+            std::optional<StatusLineDefinitions::ItemColor> const& color,
+            std::optional<StatusLineDefinitions::ItemColor> const& background) const
         {
             if (!color)
-                return std::string(defaultSequence);
+                return {};
 
-            return std::format("\033[48:2:{}:{}:{}m", color->red, color->green, color->blue);
+            auto const rgb = StatusLineDefinitions::resolveItemColor(
+                *color, vt.defaultColorPalette(), groundOf(background));
+            return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
+        }
+
+        /// The SGR that selects @p color as the background, a role resolved against the scheme; empty when
+        /// there is none.
+        [[nodiscard]] std::string makeBackgroundColor(
+            std::optional<StatusLineDefinitions::ItemColor> const& color) const
+        {
+            if (!color)
+                return {};
+
+            auto const rgb = StatusLineDefinitions::resolveItemBackground(*color, vt.defaultColorPalette());
+            return std::format("\033[48:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
+        }
+
+        /// The SGR that fills @p item as a chip in its mode's pair, which wraps its adornments and text
+        /// alike; empty when it is no chip, names a colour of its own (user colours win), or is drawn in an
+        /// unfocused pane -- only the focused pane carries a coloured chip.
+        [[nodiscard]] std::string chipColors(StatusLineDefinitions::InputMode const& item) const
+        {
+            if (item.look != StatusLineDefinitions::InputModeLook::Chip || item.foregroundColor
+                || item.backgroundColor || !vt.focused())
+                return {};
+
+            auto const chip = StatusLineDefinitions::modeChipColors(
+                vt.indicatorStatusLineColorsFor(vt.inputHandler().mode()), vt.defaultColorPalette());
+            auto const fill = std::optional { StatusLineDefinitions::ItemColor { chip.background } };
+            return makeTextColor(StatusLineDefinitions::ItemColor { chip.foreground }, fill)
+                   + makeBackgroundColor(fill);
         }
 
         void applyStyles(StatusLineDefinitions::Styles const& styles) // {{{
@@ -285,7 +505,7 @@ namespace
             if (styling == StatusLineStyling::Disabled)
                 return;
 
-            result += makeTextColor(styles.foregroundColor);
+            result += makeTextColor(styles.foregroundColor, styles.backgroundColor);
             result += makeBackgroundColor(styles.backgroundColor);
 
             result +=
@@ -329,6 +549,9 @@ namespace
                             {
                                 result += SGRSAVE();
                                 applyStyles(item);
+                                if constexpr (std::same_as<std::decay_t<decltype(item)>,
+                                                           StatusLineDefinitions::InputMode>)
+                                    result += chipColors(item);
                             }
                             result += item.textLeft;
                             result += text;
@@ -429,6 +652,19 @@ namespace
                 return std::format("{}", scrollable);
         }
 
+        /// How far the view is scrolled back, out of the same bound HistoryLineCount divides by; nothing at
+        /// the bottom, where every frame of ordinary use is, or while the view cannot scroll.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::Scroll const&) const
+        {
+            auto const& viewport = vt.viewport();
+            auto const offset = viewport.scrollOffset();
+            if (viewport.scrollingDisabled() || !offset.value)
+                return {};
+            return std::format("↑ {} / {}",
+                               groupDigits(unbox<std::uint64_t>(offset)),
+                               groupDigits(unbox<std::uint64_t>(viewport.scrollableLineCount())));
+        }
+
         std::string visit(StatusLineDefinitions::Hyperlink const&)
         {
             return describePointerCell([&](CellLocation cell) {
@@ -437,9 +673,13 @@ namespace
             });
         }
 
-        std::string visit(StatusLineDefinitions::InputMode const&)
+        /// The mode's name, or nothing in the mode the item hides in.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::InputMode const& item) const
         {
-            return std::string(modeString(vt.inputHandler().mode()));
+            auto const mode = vt.inputHandler().mode();
+            if (item.hiddenIn == mode)
+                return {};
+            return std::string(modeString(mode));
         }
 
         std::string visit(StatusLineDefinitions::ProtectedMode const&)
@@ -653,68 +893,6 @@ namespace
                    + sanitizeCommandLine(value, SanitizePurpose::Display);
         }
 
-        /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
-        [[nodiscard]] static std::string elide(std::vector<std::string> const& segments,
-                                               std::string const& separator,
-                                               ColumnCount maxWidth)
-        {
-            auto const widthOf = [](std::string_view text) {
-                // Counted in COLUMNS, not bytes: a CJK container name is two columns per codepoint and
-                // three bytes, and measuring bytes would elide text that fits.
-                auto columns = 0;
-                for (auto const codepoint: unicode::convert_to<char32_t>(text))
-                    columns += static_cast<int>(unicode::width(codepoint));
-                return columns;
-            };
-
-            auto const join = [&](std::vector<std::string> const& parts) {
-                return core::joinWith(parts, separator);
-            };
-
-            auto candidate = join(segments);
-            if (widthOf(candidate) <= unbox<int>(maxWidth))
-                return candidate;
-
-            // Keep both ends: the first answers *where*, the last answers *who*.
-            if (segments.size() > 2)
-            {
-                auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
-                candidate = join(elided);
-                if (widthOf(candidate) <= unbox<int>(maxWidth))
-                    return candidate;
-            }
-
-            // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
-            // identifies it -- survives.
-            //
-            // Cut by CODEPOINT, never by byte: a container name is UTF-8, and erasing one byte at a
-            // time leaves the string starting on a continuation byte, which is mojibake on screen and
-            // an invalid sequence handed to writeToScreenInternal(). The ellipsis is budgeted for
-            // rather than added afterwards, because prepending it to a string already at maxWidth
-            // overflows the width by exactly the column the caller allotted.
-            auto const codepoints = unicode::convert_to<char32_t>(std::string_view { segments.back() });
-            auto const budget = unbox<int>(maxWidth) - 1; // one column for the leading '…'
-            if (budget <= 0)
-                return {};
-
-            auto kept = size_t {};
-            auto columns = 0;
-            for (auto index = codepoints.size(); index-- > 0;)
-            {
-                columns += static_cast<int>(unicode::width(codepoints[index]));
-                if (columns > budget)
-                    break;
-                kept = codepoints.size() - index;
-            }
-            if (kept == 0)
-                return {};
-
-            auto tail = std::string { "…" };
-            unicode::convert_to<char>(std::u32string_view { codepoints }.substr(codepoints.size() - kept),
-                                      std::back_inserter(tail));
-            return tail;
-        }
-
         std::string visit(StatusLineDefinitions::Context const& item)
         {
             auto const& stack = vt.contexts();
@@ -743,7 +921,101 @@ namespace
             if (segments.empty())
                 return {};
 
-            return elide(segments, item.separator.value_or(" › "), item.maxWidth);
+            return elideMiddle(
+                segments, item.separator.value_or(" › "), item.maxWidth, vt.clusterWidthPolicy());
+        }
+
+        std::string visit(StatusLineDefinitions::Cwd const& item)
+        {
+            auto const directory = vt.resolveWorkingDirectory(CwdPurpose::Display);
+            if (!directory)
+                return {};
+
+            // Sanitized before it is cut, as the pane header's text is: a byte that is not UTF-8 or is a
+            // control becomes U+FFFD, so nothing the shell reports reaches writeToScreenInternal() as an
+            // escape.
+            auto const shown = sanitizeCommandLine(homeAbbreviatedPath(*directory, vt.homeDirectory()),
+                                                   SanitizePurpose::Display);
+            // A trailing separator names no further directory: without it, a long path would elide to "/…/",
+            // which names nothing. The root keeps its one.
+            auto path = std::string_view { shown };
+            while (path.size() > 1 && path.ends_with('/'))
+                path.remove_suffix(1);
+            auto parts = std::vector<std::string> {};
+            for (auto const part: std::views::split(path, '/'))
+                parts.emplace_back(std::string_view { part });
+            return elideMiddle(parts, "/", item.maxWidth, vt.clusterWidthPolicy());
+        }
+
+        /// The branch the terminal last read for the shell's directory: no I/O here, as on every frame.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::Git const&) const
+        {
+            return vt.gitBranch();
+        }
+
+        /// How the newest command that reported its end went; nothing while one runs, before any, or when
+        /// a newer prompt ended it without a report.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::LastCommand const& item) const
+        {
+            using StatusLineDefinitions::ColorRole;
+
+            auto const& blocks = vt.commandBlocks();
+            if (auto const* const current = blocks.current();
+                current && current->state == CommandBlockState::Running)
+                return {};
+            auto const* const last = blocks.lastFinished();
+            if (!last || last->end != CommandBlockEnd::Reported)
+                return {};
+
+            // The status and the duration carry their own colours, as the Tabs strip's active tab does --
+            // unless the item names a colour of its own, which then colours all of it.
+            auto const intrinsic = styling == StatusLineStyling::Enabled && !item.foregroundColor;
+            auto const run = [&](std::string text, ColorRole role) {
+                if (!intrinsic)
+                    return text;
+                return SGRSAVE()
+                       + makeTextColor(StatusLineDefinitions::ItemColor { role }, item.backgroundColor) + text
+                       + SGRRESTORE();
+            };
+
+            auto parts = std::vector<std::string> {};
+            if (auto const exitCode = last->exitCode)
+                parts.push_back(*exitCode == 0 ? run("✓", ColorRole::Success)
+                                               : run(std::format("✗ exit {}", *exitCode), ColorRole::Danger));
+            // On one line: a multi-line command's breaks and tabs read as spaces, not as the replacement
+            // character display() gives every control. Sanitized after the fold, so no byte of the command
+            // line reaches the status screen as an escape.
+            auto oneLine = last->commandLine.raw();
+            std::ranges::replace_if(oneLine, [](char c) { return c == '\n' || c == '\r' || c == '\t'; }, ' ');
+            if (auto command = elideEnd(sanitizeCommandLine(oneLine, SanitizePurpose::Display),
+                                        item.maxWidth,
+                                        vt.clusterWidthPolicy());
+                !command.empty())
+                parts.push_back(std::move(command));
+
+            auto text = core::joinWith(parts, " ");
+            if (last->duration)
+                text += run(
+                    std::format("{}{}", text.empty() ? "" : " · ", formatCommandDuration(*last->duration)),
+                    ColorRole::Muted);
+            return text;
+        }
+
+        /// How much the selection holds -- what `y` would copy; nothing before a selection is dragged.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::SelectionSize const&) const
+        {
+            auto const* const selection = vt.selector();
+            if (!selection || selection->state() == Selection::State::Waiting)
+                return {};
+
+            auto const counted = [](std::size_t count, std::string_view noun) {
+                return std::format("{} {}{}", groupDigits(count), noun, count == 1 ? "" : "s");
+            };
+            auto const extent = selection->extent();
+            auto text = counted(unbox<std::size_t>(extent.lines), "line");
+            if (extent.characters)
+                text += " · " + counted(*extent.characters, "char");
+            return text;
         }
 
         std::string visit(StatusLineDefinitions::Tabs const& tabs)
@@ -763,7 +1035,9 @@ namespace
                 if (activePositionStylized)
                 {
                     fragment += SGRSAVE();
-                    fragment += makeTextColor(tabs.activeColor);
+                    fragment +=
+                        makeTextColor(tabs.activeColor,
+                                      tabs.activeBackground ? tabs.activeBackground : tabs.backgroundColor);
                     fragment += makeBackgroundColor(tabs.activeBackground);
                 }
 
@@ -781,10 +1055,37 @@ namespace
     };
 } // namespace
 
-std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling)
+bool showsModeChip(StatusLineDefinition const& definition) noexcept
+{
+    auto const isChip = [](StatusLineDefinitions::Item const& item) {
+        auto const* const inputMode = std::get_if<StatusLineDefinitions::InputMode>(&item);
+        return inputMode && inputMode->look == StatusLineDefinitions::InputModeLook::Chip;
+    };
+    return std::ranges::any_of(definition.left, isChip) || std::ranges::any_of(definition.middle, isChip)
+           || std::ranges::any_of(definition.right, isChip);
+}
+
+std::string groupDigits(std::uint64_t value)
+{
+    auto const digits = std::to_string(value);
+    auto result = std::string {};
+    result.reserve(digits.size() + (digits.size() / 3));
+    for (auto const [index, digit]: core::views::enumerate(digits))
+    {
+        // A space before each group of three counted from the right, but never before the first digit.
+        if (index > 0 && (digits.size() - index) % 3 == 0)
+            result += ' ';
+        result += digit;
+    }
+    return result;
+}
+
+std::string serializeToVT(Terminal const& vt,
+                          std::span<StatusLineDefinitions::Item const> items,
+                          StatusLineStyling styling)
 {
     auto serializer = VTSerializer { .vt = vt, .styling = styling };
-    for (auto const& item: segment)
+    for (auto const& item: items)
         serializer(item);
     return serializer.result;
 }
@@ -820,14 +1121,14 @@ namespace
             out += value;
         }
 
-        /// Appends "key=#RRGGBB" when @p color holds a value; a no-op otherwise.
-        void addColor(std::string_view key, std::optional<RGBColor> color)
+        /// Appends "key=#RRGGBB" or "key=<role>" when @p color holds a value; a no-op otherwise.
+        void addColor(std::string_view key, std::optional<StatusLineDefinitions::ItemColor> const& color)
         {
-            // formatColor() is documented as the exact inverse of parseColor(), which is what
+            // formatItemColor() is the exact inverse of parseItemColor(), which is what
             // tryParseColorAttribute() reads these back with -- so the two ends of the round trip are
             // one function apart rather than two spellings that have to be kept agreeing.
             if (color)
-                add(key, formatColor(*color));
+                add(key, StatusLineDefinitions::formatItemColor(*color));
         }
     };
 
@@ -900,7 +1201,53 @@ namespace
         if (!styles.textRight.empty())
             attributes.add("Right", styles.textRight);
     }
+
+    /// Appends what an item of type @p T carries beyond its styles, after them: Context's verbosity and
+    /// separator, Tabs' active colours and separator, InputMode's look and hidden mode, and a MaxWidth off
+    /// its default.
+    template <typename T>
+    void appendOwnAttributes(AttributeWriter& attributes, T const& v)
+    {
+        if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
+        {
+            // Only what is NOT the default: a config Contour writes must be one Contour reads
+            // back, and one it wrote must not gain noise. The default is read off a
+            // default-constructed item rather than restated, so it cannot drift from the header.
+            if (auto const name = StatusLineDefinitions::contextVerbosityName(v.verbosity); !name.empty())
+                attributes.add("Verbosity", std::string { name });
+            if (v.separator)
+                attributes.add("Separator", *v.separator);
+        }
+
+        if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
+        {
+            attributes.addColor("ActiveColor", v.activeColor);
+            attributes.addColor("ActiveBackground", v.activeBackground);
+            if (v.separator)
+                attributes.add("Separator", *v.separator);
+        }
+
+        // After the styles, Left and Right among them, as Context's own attributes are.
+        if constexpr (std::same_as<T, StatusLineDefinitions::InputMode>)
+        {
+            if (v.look == StatusLineDefinitions::InputModeLook::Chip)
+                attributes.add("Chip");
+            if (v.hiddenIn)
+                attributes.add("Hide", StatusLineDefinitions::inputModeName(*v.hiddenIn));
+        }
+
+        // Last, so that Context keeps writing Verbosity, Separator, MaxWidth.
+        if constexpr (StatusLineDefinitions::HasMaxWidth<T>)
+            if (v.maxWidth != T {}.maxWidth)
+                attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
+    }
 } // namespace
+
+StatusLineItemKind StatusLineDefinitions::kindOf(Item const& item) noexcept
+{
+    auto const* const text = std::get_if<StatusLineDefinitions::Text>(&item);
+    return text && isUnstyled(*text) ? StatusLineItemKind::Separator : StatusLineItemKind::Item;
+}
 
 std::string serializeStatusLineSegment(StatusLineSegment const& segment)
 {
@@ -957,27 +1304,7 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
 
                 appendStyles(attributes, v);
 
-                if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
-                {
-                    // Only what is NOT the default: a config Contour writes must be one Contour reads
-                    // back, and one it wrote must not gain noise. The default is read off a
-                    // default-constructed item rather than restated, so it cannot drift from the header.
-                    if (auto const name = StatusLineDefinitions::contextVerbosityName(v.verbosity);
-                        !name.empty())
-                        attributes.add("Verbosity", std::string { name });
-                    if (v.separator)
-                        attributes.add("Separator", *v.separator);
-                    if (v.maxWidth != StatusLineDefinitions::Context {}.maxWidth)
-                        attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
-                }
-
-                if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
-                {
-                    attributes.addColor("ActiveColor", v.activeColor);
-                    attributes.addColor("ActiveBackground", v.activeBackground);
-                    if (v.separator)
-                        attributes.add("Separator", *v.separator);
-                }
+                appendOwnAttributes(attributes, v);
 
                 result += '}';
             },

@@ -110,6 +110,16 @@ enum class InputWriter : uint8_t
     ReaderThread,
 };
 
+/// How the text an input method is composing (the preedit) is drawn, at the cursor, or to its left when it
+/// would not fit (@see placePreedit).
+enum class PreeditStyle : uint8_t
+{
+    /// In the colour scheme's `input_method_editor` colours, bold and underlined.
+    Highlighted = 0,
+    /// In the terminal's default colours, with a thin underline: as the text will read once committed.
+    Inline,
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -125,6 +135,12 @@ struct Settings
     PageSize pageSize = PageSize { LineCount(25), ColumnCount(80) };
 
     HistoryLimits historyLimits;
+
+    /// The user's home directory, for abbreviating and expanding `~` in the paths this terminal shows and
+    /// recognizes, as the composition root reads it (the GUI's QDir::homePath(), which the pane header
+    /// abbreviates with too). Empty takes the environment's `HOME`.
+    std::string homeDirectory {};
+
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
 
@@ -175,6 +191,9 @@ struct Settings
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };
     std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
+    /// How the input method's preedit is drawn. Read where the render buffer is built, under the terminal's
+    /// lock, which a configuration reload assigning it holds too.
+    PreeditStyle preeditStyle = PreeditStyle::Highlighted;
 
     bool usePrivateColorRegisters = false;
 
@@ -236,8 +255,9 @@ struct Settings
     bool autoScrollOnUpdate = false;
 
     /// What the strip left of the grid shows. The window geometry must agree: the gutter's width --
-    /// gutterLayoutFor(gutter).totalColumns cells -- is taken out of the space available to cells, so a
-    /// page fitted for one layout and a renderer drawing another put the grid in two different places.
+    /// gutterLayoutFor(gutter).totalColumns cells, and under BlockColumnForm::Rail the rail's strip of the
+    /// chrome's pixels after them -- is taken out of the space available to cells, so a page fitted for one
+    /// layout and a renderer drawing another put the grid in two different places.
     /// @see GutterSettings
     GutterSettings gutter {};
 

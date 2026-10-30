@@ -248,3 +248,23 @@ TEST_CASE("Color.fadeKeepingContrast.stopsAtTheFloor", "[color]")
     auto const dim = RGBColor(0x30, 0x30, 0x30);
     CHECK(fadeKeepingContrast(dim, black, 0.45F, 3.0) == mixColor(dim, black, 0.45F));
 }
+
+TEST_CASE("Color.liftToContrast.movesTowardTheInkOnlyAsFarAsItMust", "[color]")
+{
+    using vtbackend::contrastRatio;
+    using vtbackend::liftToContrast;
+    using vtbackend::RGBColor;
+
+    auto const black = RGBColor(0, 0, 0);
+    auto const white = RGBColor(255, 255, 255);
+
+    // Already reading: unchanged.
+    auto const red = RGBColor(0xFF, 0x45, 0x3A);
+    CHECK(liftToContrast(red, white, black, 3.0) == red);
+
+    // Too dim on black: lifted toward white to the floor, and not much past it.
+    auto const dim = RGBColor(0x40, 0x30, 0x30);
+    auto const lifted = liftToContrast(dim, white, black, 3.0);
+    CHECK(contrastRatio(lifted, black) >= 3.0);
+    CHECK(contrastRatio(lifted, black) < 3.2);
+}

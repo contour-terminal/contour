@@ -907,7 +907,7 @@ TEST_CASE("MultiPage.DECPCCM_reset.theSearchFindsWhatIsOnThePageOnDisplay", "[sc
     auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
     auto const [primary, other] = pagesHolding(shown, "hay needle", "hay only");
     showOnePageOfTwo(mock, primary, other, shown);
-    (void) terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed).has_value());
     auto const match = CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) };
     auto const bottomRight = CellLocation { .line = LineOffset(2), .column = ColumnOffset(19) };
 
@@ -927,7 +927,7 @@ TEST_CASE("MultiPage.DECPCCM_reset.aSearchBackwardsReachesTheHistoryOfThePageOnD
     printLines(mock, "hay", 20);
     mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
     auto const history = boxed_cast<LineOffset>(terminal.primaryScreen().historyLineCount());
-    (void) terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed).has_value());
 
     CHECK(terminal.searchPrevMatch(CellLocation {})
           == CellLocation { .line = -history, .column = ColumnOffset(0) });

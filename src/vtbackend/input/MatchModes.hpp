@@ -20,6 +20,7 @@ class MatchModes
         Select = 0x10, // visual / visual-line / visual-block
         Search = 0x20, // something's in the search buffer
         Trace = 0x40,
+        BlockFocus = 0x80, // a command block holds the keyboard focus
     };
 
     enum class Status : uint8_t
@@ -129,6 +130,7 @@ struct std::formatter<vtbackend::MatchModes>: formatter<std::string>
         advance(vtbackend::MatchModes::Select, "Select");
         advance(vtbackend::MatchModes::Search, "Search");
         advance(vtbackend::MatchModes::Trace, "Trace");
+        advance(vtbackend::MatchModes::BlockFocus, "BlockFocus");
         if (s.empty())
             s = "Any";
         return formatter<std::string>::format(s, ctx);

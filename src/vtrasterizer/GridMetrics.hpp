@@ -1,16 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockPill.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 
 namespace vtrasterizer
 {
+
+/// The DPI Contour hands the renderer per unit of content scale (@see TerminalDisplay::fontDPI): what one
+/// logical point -- Qt's device-independent pixel -- is measured against.
+inline constexpr auto LogicalPointsDpi = 96.0;
+
+/// How many device pixels a length in logical points covers, at least one.
+///
+/// A logical point is Qt's device-independent pixel, the unit the window chrome is drawn in: one device
+/// pixel at 1x, two at 2x. It is not a typographic point (1/72 inch), which at Contour's 96 DPI per unit
+/// of scale would make every line a third thicker than the chrome's own.
+/// @param points The length, in logical points; not negative.
+/// @param dpi    The font's DPI, @ref LogicalPointsDpi times the content scale; not negative. Zero still
+///               yields one pixel.
+/// @return `max(1, round(points * dpi / 96))`, a half rounded up: 1.5x gives two pixels for one point.
+[[nodiscard]] constexpr int logicalPointsToPixels(double points, double dpi) noexcept
+{
+    // Rounded half up by hand: std::lround is not constexpr in every standard library this builds with.
+    auto const exact = points * dpi / LogicalPointsDpi;
+    auto const whole = static_cast<int>(exact);
+    return std::max(1, exact - whole >= 0.5 ? whole + 1 : whole);
+}
 
 /**
  * Uniform cell margin for the grid view.
@@ -35,6 +59,48 @@ struct PageMargin
     int bottom;
 };
 
+/// One pill style's geometry, in device pixels but for its type size, which is in points as the grid's is.
+struct PillMetrics
+{
+    double fontSize = 0.0; ///< The label's size in points; 0 takes the grid font's.
+    int weight = 400;      ///< The label's weight, on the CSS 100-900 scale.
+    int padX = 0;          ///< The padding left and right of the label.
+    int padY = 0;          ///< The padding above and below it, for a pill fitted to its label.
+    int height = 0;        ///< The pill's height, clamped to the row; 0 fits it to the label and padding.
+    int radius = 0;        ///< Its corners' radius, clamped to half its height.
+    int ring = 0;          ///< The ring's width inside its edge, where the style has one.
+
+    bool operator==(PillMetrics const&) const = default;
+};
+
+/// The native rows' block chips and rail marks, drawn in the UI font: what the chrome row's tokens say, at
+/// the display's scale. All zero on the Terminal row, which draws its chips in cells.
+struct BlockChipMetrics
+{
+    std::array<PillMetrics, vtbackend::PillStyleCount> pills {}; ///< By vtbackend::PillStyle.
+    int markEdge = 0;          ///< A rail mark's disc, and the box its glyph is centred in.
+    double markFontSize = 0.0; ///< The mark glyph's size in points.
+    int markWeight = 400;      ///< The mark glyph's weight.
+    int hoverRing = 0;         ///< The ring around a hovered block; 0 draws none.
+
+    bool operator==(BlockChipMetrics const&) const = default;
+};
+
+/// The block rail's strip after the gutter's cells, and the native rows' chips, in device pixels. The strip's
+/// fields are zero where there is no strip -- the Terminal row, whose block column is cells, or a gutter with
+/// nothing for the rail to show -- and the chips' on the Terminal row alone.
+struct GutterRailMetrics
+{
+    int strip = 0;    ///< The strip's width, ending at the grid's column 0.
+    int bar = 0;      ///< The bar's width.
+    int barInset = 0; ///< The bar's left edge within the strip.
+    int radius = 0;   ///< The radius of the bar's rounded ends; 0 draws them square.
+    int endInset = 0; ///< What the bar keeps clear of a block's first row's top and last row's bottom.
+    BlockChipMetrics chips {}; ///< The chips and marks drawn in the UI font, which the strip needs not.
+
+    bool operator==(GutterRailMetrics const&) const = default;
+};
+
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
@@ -49,8 +115,14 @@ struct GridMetrics
         int thickness = 1; // underline thickness
     } underline {};
 
+    /// How thick the input method preedit's underline is drawn, in pixels: one logical point at the font's
+    /// DPI, whatever the font says its own underline is. @see logicalPointsToPixels
+    int preeditUnderlineThickness = 1;
+
     CellMargin cellMargin {}; // TODO: implement respecting cell margins.
     PageMargin pageMargin {};
+
+    GutterRailMetrics rail {}; ///< The block rail's strip, left of column 0 and inside pageMargin.left.
 
     /// Maps screen coordinates to target surface coordinates.
     ///
@@ -123,15 +195,17 @@ struct std::formatter<vtrasterizer::GridMetrics>: formatter<std::string>
     auto format(vtrasterizer::GridMetrics const& v, auto& ctx) const
     {
         return formatter<std::string>::format(
-            std::format(
-                "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
-                v.pageSize,
-                v.cellSize,
-                v.baseline,
-                v.underline.position,
-                v.underline.thickness,
-                v.pageMargin.left,
-                v.pageMargin.bottom),
+            std::format("(pageSize={}, cellSize={}, baseline={}, underline={}@{}, preeditUnderline={}, "
+                        "margin=(left={}, "
+                        "bottom={}))",
+                        v.pageSize,
+                        v.cellSize,
+                        v.baseline,
+                        v.underline.position,
+                        v.underline.thickness,
+                        v.preeditUnderlineThickness,
+                        v.pageMargin.left,
+                        v.pageMargin.bottom),
             ctx);
     }
 };

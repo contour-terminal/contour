@@ -73,3 +73,15 @@ TEST_CASE("SearchMatchTally.empty", "[search]")
     // somewhere, just not where they are.
     CHECK(!SearchMatchTally { .total = 27, .ordinal = 0, .exactness = TallyExactness::Exact }.empty());
 }
+
+TEST_CASE("SearchOptions.defaultsAreZero", "[search]")
+{
+    // A value-initialized SearchOptions is what the terminal did before it had any: smart case, literal,
+    // anywhere. Zero is that default for every field, and for the first error and change.
+    auto const options = vtbackend::SearchOptions {};
+    CHECK(static_cast<int>(options.caseSensitivity) == 0);
+    CHECK(static_cast<int>(options.syntax) == 0);
+    CHECK(static_cast<int>(options.wordBoundary) == 0);
+    CHECK(static_cast<int>(vtbackend::SearchPatternError::InvalidSyntax) == 0);
+    CHECK(static_cast<int>(vtbackend::SearchChange::Unchanged) == 0);
+}

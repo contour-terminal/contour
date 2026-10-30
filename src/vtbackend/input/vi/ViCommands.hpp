@@ -45,7 +45,7 @@ class ViCommands: public ViInputHandler::Executor
     void yank(TextObjectScope scope, TextObject textObject) override;
     void yank(ViMotion motion) override;
     void open(TextObjectScope scope, TextObject textObject) override;
-    void paste(unsigned count, bool stripped) override;
+    void paste(unsigned count, PasteStrip strip) override;
 
     void searchStart() override;
 

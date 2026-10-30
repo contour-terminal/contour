@@ -122,6 +122,34 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
 
+    /// The shaper this renderer shapes and rasterizes through: what a face beside the grid's -- the block
+    /// chips' UI font -- is loaded into, so its glyphs share the grid's atlas.
+    [[nodiscard]] text::Shaper& textShaper() noexcept { return *_textShaper; }
+
+    /// @p text shaped in @p font as one label, cached as the grid's runs are: a block chip's, whose glyphs
+    /// are laid at their own advances rather than on the cell grid.
+    /// @param font The face, any key the shaper issued (the UI font's).
+    /// @param text The label.
+    /// @return Its glyphs, in order.
+    [[nodiscard]] text::ShapeResult const& shapeLabel(text::FontKey font, std::u32string_view text);
+
+    /// How wide @p text is in @p font, shaped as shapeLabel() shapes it.
+    /// @param font The face.
+    /// @param text The label.
+    /// @return The sum of its glyphs' advances, in pixels.
+    [[nodiscard]] int labelWidth(text::FontKey font, std::u32string_view text);
+
+    /// Draws @p text in @p font, its baseline's left end at @p origin, each glyph at its own advance: a
+    /// proportional label, from the grid's atlas, in no cell.
+    /// @param origin Where the baseline starts, in device pixels.
+    /// @param font The face.
+    /// @param text The label.
+    /// @param color Its colour.
+    void renderLabel(crispy::Point origin,
+                     text::FontKey font,
+                     std::u32string_view text,
+                     vtbackend::RGBAColor color);
+
     // TextClusterGrouper::Events overrides -- public, as in the base interface.
     //
     void renderTextGroup(std::u32string_view codepoints,

@@ -43,6 +43,7 @@ namespace
         pair { vtbackend::CellFlag::CrossedOut, Decorator::CrossedOut },
         pair { vtbackend::CellFlag::Framed, Decorator::Framed },
         pair { vtbackend::CellFlag::Encircled, Decorator::Encircle },
+        pair { vtbackend::CellFlag::InputMethodPreedit, Decorator::PreeditUnderline },
     };
 
     /// The direct-mapping index of the dotted underline's tile for @p phase.
@@ -182,24 +183,36 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                               FRAGMENT_SELECTOR_GLYPH_ALPHA);
     };
 
+    // A stroke grows down from the underline position, never up: thicker than the room below the position,
+    // it is cut to that room rather than reaching towards the baseline. One row at the least.
+    auto const rowsBelowTheUnderline = [&](unsigned thickness) {
+        return std::min(thickness, static_cast<unsigned>(max(1, underlinePosition())));
+    };
+
+    // A solid stroke @p wantedThickness rows high (as the room allows) whose top row is the underline
+    // position: the straight underline, and the preedit's line with a thickness of its own.
+    auto const straightStroke = [&](unsigned wantedThickness) {
+        auto const thickness = rowsBelowTheUnderline(wantedThickness);
+        auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness)));
+        auto const height = vtbackend::Height(y0 + thickness);
+        auto const imageSize = ImageSize { width, height };
+        return create(imageSize, [&]() -> atlas::Buffer {
+            auto image = atlas::Buffer(imageSize.area(), 0);
+            for (unsigned y = 1; y <= thickness; ++y)
+                for (auto x: core::times(unbox(width)))
+                    image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
+            return image;
+        });
+    };
+
     switch (decoration)
     {
         case Decorator::Encircle:
             // TODO (default to Underline for now)
             [[fallthrough]];
-        case Decorator::Underline: {
-            auto const thickness = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness)));
-            auto const height = vtbackend::Height(y0 + thickness);
-            auto const imageSize = ImageSize { width, height };
-            return create(imageSize, [&]() -> atlas::Buffer {
-                auto image = atlas::Buffer(imageSize.area(), 0);
-                for (unsigned y = 1; y <= thickness; ++y)
-                    for (auto x: core::times(unbox(width)))
-                        image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
-                return image;
-            });
-        }
+        case Decorator::Underline: return straightStroke(max(1u, unsigned(ceil(underlineThickness() / 2.0))));
+        case Decorator::PreeditUnderline:
+            return straightStroke(static_cast<unsigned>(max(1, _gridMetrics.preeditUnderlineThickness)));
         case Decorator::DoubleUnderline: {
             // Two thirds of the underline's thickness per stroke. The parentheses used to close
             // after ceil(), so this truncated instead of rounding up and an even thickness lost a
@@ -266,7 +279,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // Divides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
             auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = thicknessHalf * 2; // at least 2, thicknessHalf being at least 1
+            // At least 2, thicknessHalf being at least 1 -- unless the room below the position is one row.
+            auto const thickness = rowsBelowTheUnderline(thicknessHalf * 2);
             // Subtracting the whole thickness, not half of it: the dashes' top is the underline
             // position, as it is for every other decoration. Half left them one row higher, on the
             // baseline itself.
@@ -331,6 +345,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 return image;
             });
         }
+        case Decorator::Count: break; // not a decorator
     }
     (void) SoftRequire(false);
     return {};

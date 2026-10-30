@@ -3,7 +3,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <ranges>
+#include <string_view>
+#include <utility>
+#include <variant>
+
 using namespace vtbackend;
+using namespace std::string_view_literals;
 
 TEST_CASE("ColorPalette.foldMarker.derivesWhenUnset", "[ColorPalette]")
 {
@@ -127,9 +136,9 @@ TEST_CASE("ColorPalette.foldMarker.defaultSchemeMatchesTheDocumentedColors", "[C
     // words that uncommenting it changes nothing -- and both the fold_marker section and the default
     // scheme dump in docs/configuration/colors.md.
     //
-    // Nothing else checks that promise, and Config_test.cpp cannot: it tests literal PARSING, so it
-    // stays green while the documented colours drift. Retuning FoldMarkerRestFade fails
-    // here instead, naming the files that then have to be updated.
+    // Nothing else checks that promise, and the Config_test*.cpp files cannot: it tests literal PARSING, so
+    // it stays green while the documented colours drift. Retuning FoldMarkerRestFade fails here instead,
+    // naming the files that then have to be updated.
     auto const palette = ColorPalette {};
     auto const rest = palette.foldMarkerColors();
     auto const hover = palette.foldMarkerHoverColors();
@@ -145,10 +154,10 @@ TEST_CASE("ColorPalette.blockStatus.derivesWhenUnset", "[ColorPalette]")
     auto const palette = ColorPalette {};
 
     // A success looks like the fold column always did; a failure and a running command take the
-    // palette's own red and yellow, which every scheme already tunes to read on its background.
+    // palette's own red and blue, which every scheme already tunes to read on its background.
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == palette.foldMarkerColors().foreground);
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == palette.normalColor(1));
-    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == palette.normalColor(3));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == palette.normalColor(4));
 
     // Line numbers and timestamps are as quiet as the resting fold column.
     CHECK(palette.gutterTextColor() == palette.foldMarkerColors().foreground);
@@ -158,7 +167,7 @@ TEST_CASE("ColorPalette.blockStatus.followsThePalettesOwnColours", "[ColorPalett
 {
     auto palette = ColorPalette {};
     palette.palette[1] = RGBColor(0x11, 0x22, 0x33);
-    palette.palette[3] = RGBColor(0x44, 0x55, 0x66);
+    palette.palette[4] = RGBColor(0x44, 0x55, 0x66);
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0x11, 0x22, 0x33));
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x44, 0x55, 0x66));
 }
@@ -221,12 +230,12 @@ TEST_CASE("ColorPalette.gutterTextColors.putTheTextOnThePagesOwnBackground", "[C
 TEST_CASE("ColorPalette.blockStatus.defaultSchemeMatchesTheDocumentedColors", "[ColorPalette]")
 {
     // The commented examples `contour generate config` writes (ConfigDocumentation.hpp's BlockStatusConfig
-    // and GutterTextConfig) quote these values, and Config_test.cpp holds them to this palette. Naming the
-    // colours here as well means retuning a derivation fails in vtbackend's own suite too.
+    // and GutterTextConfig) quote these values, and the Config_test*.cpp files hold them to this palette.
+    // Naming the colours here as well means retuning a derivation fails in vtbackend's own suite too.
     auto const palette = ColorPalette {};
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == RGBColor(0x7E, 0x7C, 0x7C));
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0xC6, 0x39, 0x39));
-    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0xA0, 0xA0, 0x00));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x4D, 0x79, 0xFF));
     CHECK(palette.gutterTextColor() == RGBColor(0x7E, 0x7C, 0x7C));
 }
 
@@ -241,9 +250,9 @@ TEST_CASE("ColorPalette.stickyHeader.derivesWhenUnset", "[ColorPalette][stickyhe
     CHECK(palette.stickyHeaderSeparatorColor() != palette.stickyHeaderBackgroundColor());
 
     // The commented example `contour generate config` writes (ConfigDocumentation.hpp's
-    // StickyHeaderColorsConfig) and docs/configuration/colors.md quote these values, and Config_test.cpp
-    // holds the former to this palette. Naming them here as well means retuning a lift fails in vtbackend's
-    // own suite too.
+    // StickyHeaderColorsConfig) and docs/configuration/colors.md quote these values, and the Config_test*.cpp
+    // files hold the former to this palette. Naming them here as well means retuning a lift fails in
+    // vtbackend's own suite too.
     CHECK(palette.stickyHeaderBackgroundColor() == 0x2c2928_rgb);
     CHECK(palette.stickyHeaderSeparatorColor() == 0x595757_rgb);
 }
@@ -269,4 +278,271 @@ TEST_CASE("ColorPalette.stickyHeader.isDistinctInTheBuiltinSchemes", "[ColorPale
         CHECK(distance(palette.stickyHeaderBackgroundColor(), palette.defaultBackground) > 6.0);
         CHECK(distance(palette.stickyHeaderSeparatorColor(), palette.stickyHeaderBackgroundColor()) > 15.0);
     }
+}
+
+TEST_CASE("ColorPalette.stickyHeader.theChipAndTheTextReadOnTheBand", "[ColorPalette][stickyheader]")
+{
+    // The in-grid band's chip is drawn in its outcome's colour, the evicted placeholder in the gutter's
+    // text colour, both straight on the band: text, so 4.5:1, in every bundled scheme and for every outcome.
+    auto lifted = 0;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        INFO("scheme: " << name);
+        auto const band = palette.stickyHeaderBackgroundColor();
+        for (auto const outcome: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
+        {
+            INFO("outcome: " << outcome);
+            auto const hue = palette.blockStatusColor(static_cast<CommandBlockOutcome>(outcome));
+            auto const ink = legibleTintOn(palette, hue, band);
+            CHECK(contrastRatio(ink, band) >= MinimumTextContrast);
+            // A hue that already reads is left alone.
+            if (contrastRatio(hue, band) >= MinimumTextContrast)
+                CHECK(ink == hue);
+            lifted += ink == hue ? 0 : 1;
+        }
+        CHECK(contrastRatio(legibleTintOn(palette, palette.gutterTextColor(), band), band)
+              >= MinimumTextContrast);
+    }
+    // Not vacuous: the status hues fall short on the band in most schemes, and are lifted there.
+    CHECK(lifted > 0);
+}
+
+namespace
+{
+/// Resolves the built-in scheme @p name on top of a default-constructed palette.
+ColorPalette schemeNamed(std::string_view name)
+{
+    auto palette = ColorPalette {};
+    REQUIRE(defaultColorPalettes(name, palette));
+    return palette;
+}
+} // namespace
+
+TEST_CASE("ColorPalette.contourSchemesAreReadable", "[ColorPalette]")
+{
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO("scheme: " << name);
+        auto const p = schemeNamed(name);
+        CHECK(contrastRatio(p.defaultForeground, p.defaultBackground) >= 4.5);
+        for (auto const i: { 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14 })
+        {
+            INFO("palette index: " << i);
+            CHECK(contrastRatio(p.palette[i], p.defaultBackground) >= 4.5);
+        }
+    }
+    CHECK(schemeNamed("contour-dark").defaultBackground == 0x1C1E24_rgb);
+    CHECK(schemeNamed("contour-dark").defaultForeground == 0xD9DCE3_rgb);
+    CHECK(schemeNamed("contour-light").defaultBackground == 0xFAFAF8_rgb);
+    CHECK(schemeNamed("contour-light").palette[4] == 0x1F5FBF_rgb);
+    CHECK(schemeNamed("contour-dark").palette[4] == 0x6FA8F5_rgb);
+    CHECK(schemeNamed("contour-dark").palette[8] == 0x848DA2_rgb);
+    CHECK(schemeNamed("contour-light").palette[15] == 0x3A3F48_rgb);
+    // Bright black on dark is allowed at 5.0.
+    CHECK(contrastRatio(schemeNamed("contour-dark").palette[8], 0x1C1E24_rgb) >= 5.0);
+}
+
+TEST_CASE("ColorPalette.contourSchemes.cursorAndSelection", "[ColorPalette]")
+{
+    auto const dark = schemeNamed("contour-dark");
+    auto const light = schemeNamed("contour-light");
+    CHECK(dark.cursor.color == CellRGBColor { 0xE8C26E_rgb });
+    CHECK(light.cursor.color == CellRGBColor { 0x1F5FBF_rgb });
+    CHECK(dark.selection.background == CellRGBColor { 0x3A4A6B_rgb });
+    CHECK(light.selection.background == CellRGBColor { 0xC8D8F5_rgb });
+}
+
+TEST_CASE("ColorPalette.contourSchemes.indicatorStatusLinesAreReadable", "[ColorPalette]")
+{
+    struct IdlePair
+    {
+        std::string_view name;
+        RGBColor foreground;
+        RGBColor background;
+    };
+    // Dark: palette white on palette black. Light: a light bar one step off the page.
+    constexpr auto IdlePairs = std::array {
+        IdlePair { "contour-dark"sv, 0xC5CAD3_rgb, 0x2A2D35_rgb },
+        IdlePair { "contour-light"sv, 0x2B2E35_rgb, 0xECEDEA_rgb },
+    };
+    for (auto const& [name, idleForeground, idleBackground]: IdlePairs)
+    {
+        INFO("scheme: " << name);
+        auto const p = schemeNamed(name);
+        CHECK(p.indicatorStatusLineInactive.foreground == idleForeground);
+        CHECK(p.indicatorStatusLineInactive.background == idleBackground);
+        CHECK(p.indicatorStatusLineInsertMode.foreground == idleForeground);
+        CHECK(p.indicatorStatusLineInsertMode.background == idleBackground);
+        CHECK(p.indicatorStatusLineNormalMode.foreground == p.defaultBackground);
+        CHECK(p.indicatorStatusLineNormalMode.background == p.palette[4]);
+        CHECK(p.indicatorStatusLineVisualMode.foreground == p.defaultBackground);
+        CHECK(p.indicatorStatusLineVisualMode.background == p.palette[5]);
+
+        for (auto const& pair: { p.indicatorStatusLineInactive,
+                                 p.indicatorStatusLineInsertMode,
+                                 p.indicatorStatusLineNormalMode,
+                                 p.indicatorStatusLineVisualMode })
+            CHECK(contrastRatio(pair.foreground, pair.background) >= 4.5);
+    }
+}
+
+TEST_CASE("ColorPalette.contourSchemes.runningBlockIsBlue", "[ColorPalette]")
+{
+    // Yellow means search, so a running command is blue, by fallback and by explicit scheme choice.
+    CHECK(ColorPalette {}.blockStatusColor(CommandBlockOutcome::Running) == ColorPalette {}.normalColor(4));
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        auto const p = schemeNamed(name);
+        REQUIRE(p.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)].has_value());
+        CHECK(p.blockStatusColor(CommandBlockOutcome::Running) == p.palette[4]);
+    }
+}
+
+TEST_CASE("ColorPalette.classicIsTodaysPalette", "[ColorPalette]")
+{
+    // The old palette survives under both names.
+    auto const today = ColorPalette {};
+    CHECK(schemeNamed("contour-classic").palette == today.palette);
+    CHECK(schemeNamed("contour").palette == today.palette);
+    CHECK(schemeNamed("contour-classic").defaultBackground == today.defaultBackground);
+    CHECK(schemeNamed("contour-classic").indicatorStatusLineNormalMode
+          == today.indicatorStatusLineNormalMode);
+}
+
+TEST_CASE("ColorPalette.contourSchemes.areListed", "[ColorPalette]")
+{
+    auto const names = defaultColorPaletteNames();
+    for (auto const name: { "contour-dark"sv, "contour-light"sv, "contour-classic"sv })
+        CHECK(std::ranges::find(names, name) != names.end());
+}
+
+namespace
+{
+/// The Contour schemes that paint search matches in system yellow, the fill of their current match, and the
+/// ink each puts on it.
+struct YellowScheme
+{
+    std::string_view name;
+    RGBColor currentFill;
+    RGBColor currentInk;
+};
+
+constexpr auto YellowSchemes = std::array {
+    YellowScheme { .name = "contour-dark"sv,
+                   .currentFill = RGBColor { 0xFF, 0xD6, 0x0A },
+                   .currentInk = RGBColor { 0x1C, 0x1E, 0x24 } }, // its background
+    YellowScheme { .name = "contour-light"sv,
+                   .currentFill = RGBColor { 0x6B, 0x4B, 0x00 },
+                   .currentInk = RGBColor { 0xFA, 0xFA, 0xF8 } }, // its background
+};
+constexpr auto SearchYellow = RGBColor { 0xFF, 0xD6, 0x0A };
+
+/// What a fill at @p pair's alpha looks like over the page of @p palette.
+RGBColor composited(ColorPalette const& palette, CellRGBColorAndAlphaPair const& pair)
+{
+    return mixColor(palette.defaultBackground, std::get<RGBColor>(pair.background), pair.backgroundAlpha);
+}
+} // namespace
+
+TEST_CASE("ColorPalette.searchMatchIsYellowInTheContourSchemes", "[ColorPalette]")
+{
+    for (auto const& scheme: YellowSchemes)
+    {
+        INFO("scheme: " << scheme.name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
+        CHECK(palette.searchHighlight.background == CellRGBColor { SearchYellow });
+        CHECK(palette.searchHighlight.backgroundAlpha == 0.35f);
+        CHECK(palette.searchHighlight.foreground == CellRGBColor { palette.defaultForeground });
+        CHECK(palette.searchHighlightFocused.background == CellRGBColor { scheme.currentFill });
+        CHECK(palette.searchHighlightFocused.backgroundAlpha == 0.85f);
+        CHECK(palette.searchHighlightFocused.foreground == CellRGBColor { scheme.currentInk });
+    }
+}
+
+TEST_CASE("ColorPalette.searchMatchTextReadsAtFourAndAHalfToOne", "[ColorPalette]")
+{
+    // Each fill is drawn at its alpha over the page. Both set their own ink, which the renderer substitutes
+    // for the cell's colour (RenderBufferBuilder::paintSearchHighlight), so no ANSI colour has to read on
+    // them; over a cell that is not the page the renderer re-picks it ([renderbuffer] covers that).
+    for (auto const& scheme: YellowSchemes)
+    {
+        INFO("scheme: " << scheme.name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
+        auto const match = composited(palette, palette.searchHighlight);
+        auto const current = composited(palette, palette.searchHighlightFocused);
+        CHECK(contrastRatio(std::get<RGBColor>(palette.searchHighlight.foreground), match)
+              >= MinimumTextContrast);
+        CHECK(contrastRatio(std::get<RGBColor>(palette.searchHighlightFocused.foreground), current)
+              >= MinimumTextContrast);
+    }
+}
+
+TEST_CASE("ColorPalette.theCurrentSearchMatchStandsOutFromTheOthers", "[ColorPalette]")
+{
+    // The current match is a mark against the other matches around it: 3:1 against their fill. The other
+    // matches' fill is a tint, carried by its text, and exempt from the mark rule against the page.
+    for (auto const& scheme: YellowSchemes)
+    {
+        INFO("scheme: " << scheme.name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
+        CHECK(contrastRatio(composited(palette, palette.searchHighlightFocused),
+                            composited(palette, palette.searchHighlight))
+              >= MinimumMarkContrast);
+    }
+}
+
+TEST_CASE("ColorPalette.otherSchemesKeepTheirSearchColours", "[ColorPalette]")
+{
+    for (auto const name: { "contour-classic"sv, "monokai"sv })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK(palette.searchHighlight == ColorPalette {}.searchHighlight);
+        CHECK(palette.searchHighlightFocused == ColorPalette {}.searchHighlightFocused);
+    }
+}
+
+TEST_CASE("ColorPalette.hintLabels.contourSchemesReadAtAA", "[ColorPalette]")
+{
+    // Hint labels take the cursor colour, and a typed label the selection, in contour-dark and contour-light
+    // alone; both pairs read at 4.5:1 there. Every other scheme keeps the look it had.
+    auto const rgbOf = [](CellRGBColor const& color) {
+        REQUIRE(std::holds_alternative<RGBColor>(color));
+        return std::get<RGBColor>(color);
+    };
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK(rgbOf(palette.hintLabel.background) == rgbOf(palette.cursor.color));
+        CHECK(rgbOf(palette.hintLabel.foreground) == palette.defaultBackground);
+        CHECK(contrastRatio(rgbOf(palette.hintLabel.foreground), rgbOf(palette.hintLabel.background))
+              >= MinimumTextContrast);
+        REQUIRE(palette.hintLabelTyped.has_value());
+        CHECK(rgbOf(palette.hintLabelTyped->foreground) == palette.defaultForeground);
+        CHECK(contrastRatio(rgbOf(palette.hintLabelTyped->foreground),
+                            rgbOf(palette.hintLabelTyped->background))
+              >= MinimumTextContrast);
+        CHECK(palette.hintUnmatchedOpacity == 0.45f);
+    }
+
+    auto const unchanged = ColorPalette {};
+    for (auto const name: defaultColorPaletteNames())
+    {
+        if (name == "contour-dark"sv || name == "contour-light"sv)
+            continue;
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK_FALSE(palette.hintLabelTyped.has_value());
+        CHECK(palette.hintUnmatchedOpacity == unchanged.hintUnmatchedOpacity);
+    }
+    CHECK(unchanged.hintUnmatchedOpacity == 0.5f);
 }

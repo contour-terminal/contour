@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -41,6 +42,138 @@ namespace
         void (*apply)(ColorPalette&); ///< Applies it to @p palette.
     };
 
+    /// The data of one Contour-designed scheme: everything a row of that family sets.
+    ///
+    /// The idle (inactive and insert) status-line pair is stated per scheme, because a light scheme wants a
+    /// light bar, not its palette black. The normal and visual indicators and the running-block colour are
+    /// derived from the sixteen colors (see applyContourScheme()), so a scheme cannot leave them unreadable.
+    struct ContourScheme
+    {
+        RGBColor background;                 ///< The scheme's page color.
+        RGBColor foreground;                 ///< The scheme's text color.
+        RGBColor cursor;                     ///< The cursor color.
+        RGBColor selection;                  ///< The selection's background.
+        RGBColor idleForeground;             ///< Text of the inactive and insert indicators.
+        RGBColor idleBackground;             ///< Bar of the inactive and insert indicators.
+        RGBColor searchMatch;                ///< The fill of a search match: system yellow, as a tint.
+        RGBColor searchCurrentMatch;         ///< The current match's fill: a mark against the others' tint.
+        RGBColor searchMatchInk;             ///< The text of the current match, on its stronger fill.
+        std::array<RGBColor, 16> ansiColors; ///< Palette entries 0..15: normal, then bright.
+    };
+
+    constexpr auto ContourDark = ContourScheme {
+        .background = 0x1C1E24_rgb,
+        .foreground = 0xD9DCE3_rgb,
+        .cursor = 0xE8C26E_rgb,
+        .selection = 0x3A4A6B_rgb,
+        .idleForeground = 0xC5CAD3_rgb, // palette white
+        .idleBackground = 0x2A2D35_rgb, // palette black
+        .searchMatch = 0xFFD60A_rgb,
+        .searchCurrentMatch = 0xFFD60A_rgb,
+        .searchMatchInk = 0x1C1E24_rgb, // its background
+        .ansiColors = { 0x2A2D35_rgb,
+                        0xF0757A_rgb,
+                        0x8FCB7A_rgb,
+                        0xE6C06B_rgb,
+                        0x6FA8F5_rgb,
+                        0xC79BF2_rgb,
+                        0x5FC8C4_rgb,
+                        0xC5CAD3_rgb,
+                        0x848DA2_rgb,
+                        0xFF9095_rgb,
+                        0xA8DE94_rgb,
+                        0xF2D48A_rgb,
+                        0x93BEFF_rgb,
+                        0xD9B5FF_rgb,
+                        0x84DDD8_rgb,
+                        0xF4F6FA_rgb },
+    };
+
+    constexpr auto ContourLight = ContourScheme {
+        .background = 0xFAFAF8_rgb,
+        .foreground = 0x2B2E35_rgb,
+        .cursor = 0x1F5FBF_rgb,
+        .selection = 0xC8D8F5_rgb,
+        // A light bar one step off the page (about 12:1), not palette white on black (2.3:1).
+        .idleForeground = 0x2B2E35_rgb,
+        .idleBackground = 0xECEDEA_rgb,
+        .searchMatch = 0xFFD60A_rgb,
+        // On a light page the two yellows read as one (1.15:1): the current match is dark amber, in light
+        // text.
+        .searchCurrentMatch = 0x6B4B00_rgb,
+        .searchMatchInk = 0xFAFAF8_rgb, // its background
+        .ansiColors = { 0x2B2E35_rgb,
+                        0xB42D35_rgb,
+                        0x2A7A1F_rgb,
+                        0x8A6100_rgb,
+                        0x1F5FBF_rgb,
+                        0x8A3FB0_rgb,
+                        0x12757A_rgb,
+                        0x5F6670_rgb,
+                        0x6B7280_rgb,
+                        0xC9343D_rgb,
+                        0x277F1C_rgb,
+                        0x8F6400_rgb,
+                        0x2B6FD6_rgb,
+                        0x9B4CC2_rgb,
+                        0x0F7A80_rgb,
+                        0x3A3F48_rgb },
+    };
+
+    /// How much of its colour an unmatched cell keeps in hint mode, in the contour schemes: the canvas's 45
+    /// %, inactive content while the labels are up (@see ColorPalette::hintUnmatchedOpacity).
+    constexpr auto ContourHintUnmatchedOpacity = 0.45f;
+
+    /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line
+    /// indicators (inactive and insert: the scheme's idle pair; normal: page on blue; visual: page on
+    /// magenta), a running block in blue, and search matches in yellow, because yellow means search.
+    void applyContourScheme(ColorPalette& palette, ContourScheme const& scheme) noexcept
+    {
+        std::ranges::copy(scheme.ansiColors, palette.palette.begin());
+        palette.defaultForeground = scheme.foreground;
+        palette.defaultBackground = scheme.background;
+        palette.cursor.color = scheme.cursor;
+        palette.selection.background = scheme.selection;
+        palette.selection.backgroundAlpha = 1.0f;
+
+        constexpr auto Blue = 4;
+        constexpr auto Magenta = 5;
+        palette.indicatorStatusLineInactive = { .foreground = scheme.idleForeground,
+                                                .background = scheme.idleBackground };
+        palette.indicatorStatusLineInsertMode = palette.indicatorStatusLineInactive;
+        palette.indicatorStatusLineNormalMode = { .foreground = scheme.background,
+                                                  .background = palette.palette[Blue] };
+        palette.indicatorStatusLineVisualMode = { .foreground = scheme.background,
+                                                  .background = palette.palette[Magenta] };
+        palette.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)] = palette.palette[Blue];
+
+        // Yellow means search: a match at 35 %, the current one at 85 %. Both set their own ink: the cell's
+        // own colour does not read on either -- the sixteen ANSI colours fall to 2:1 on contour-dark's tint.
+        // The renderer picks that ink per cell (vtbackend::legibleInkOn) against the fill as mixed over the
+        // cell's own background; over the page it is the ink named here.
+        palette.searchHighlight = { .foreground = scheme.foreground,
+                                    .foregroundAlpha = 1.0f,
+                                    .background = scheme.searchMatch,
+                                    .backgroundAlpha = 0.35f };
+        palette.searchHighlightFocused = { .foreground = scheme.searchMatchInk,
+                                           .foregroundAlpha = 1.0f,
+                                           .background = scheme.searchCurrentMatch,
+                                           .backgroundAlpha = 0.85f };
+
+        // Hint labels: the scheme's background on its cursor, and once a prefix is typed its foreground on
+        // its selection; the rest keeps 45 %. The cursor colour is no search yellow: the one named exception
+        // to "nothing else is yellow-filled" (ruling Q1).
+        palette.hintLabel = { .foreground = scheme.background,
+                              .foregroundAlpha = 1.0f,
+                              .background = scheme.cursor,
+                              .backgroundAlpha = 1.0f };
+        palette.hintLabelTyped = CellRGBColorAndAlphaPair { .foreground = scheme.foreground,
+                                                            .foregroundAlpha = 1.0f,
+                                                            .background = scheme.selection,
+                                                            .backgroundAlpha = 1.0f };
+        palette.hintUnmatchedOpacity = ContourHintUnmatchedOpacity;
+    }
+
     /// Every built-in color scheme, as one table.
     ///
     /// The single source of truth for which names exist: defaultColorPalettes() looks a name up here,
@@ -51,6 +184,13 @@ namespace
     /// TODO add dim colors, do we need to adapt them to each of color palettes?
     constexpr auto BuiltinColorPalettes = std::array {
         BuiltinColorPalette { "contour", [](ColorPalette&) {} },
+        // The shipped palette under a name that stays valid now that "contour-dark" and "contour-light"
+        // exist; it must remain equal to "contour".
+        BuiltinColorPalette { "contour-classic", [](ColorPalette&) {} },
+        BuiltinColorPalette { "contour-dark",
+                              [](ColorPalette& palette) { applyContourScheme(palette, ContourDark); } },
+        BuiltinColorPalette { "contour-light",
+                              [](ColorPalette& palette) { applyContourScheme(palette, ContourLight); } },
         BuiltinColorPalette { "monokai",
                               [](ColorPalette& palette) {
                                   // Monokai dark colors
@@ -307,6 +447,41 @@ namespace
     }();
 
 } // namespace
+
+RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept
+{
+    auto const better = [ground](RGBColor a, RGBColor b) {
+        return contrastRatio(a, ground) >= contrastRatio(b, ground) ? a : b;
+    };
+    auto const inkOf = [&](InkSource source) {
+        switch (source)
+        {
+            case InkSource::SchemeEnd: return better(palette.defaultForeground, palette.defaultBackground);
+            case InkSource::BrightWhite: return palette.brightColor(7);
+            case InkSource::Mono: break;
+        }
+        return better(RGBColor { 0, 0, 0 }, RGBColor { 255, 255, 255 });
+    };
+    for (auto const source: InkFallbacks)
+        if (auto const ink = inkOf(source); contrastRatio(ink, ground) >= MinimumTextContrast)
+            return ink;
+    return inkOf(InkSource::Mono);
+}
+
+RGBColor legibleTintOn(ColorPalette const& palette, RGBColor ink, RGBColor ground) noexcept
+{
+    if (contrastRatio(ink, ground) >= MinimumTextContrast)
+        return ink;
+    auto const target = legibleInkOn(palette, ground);
+    for (auto const step: std::views::iota(1, LegibleTintSteps))
+    {
+        auto const tint =
+            mixColor(ink, target, static_cast<float>(step) / static_cast<float>(LegibleTintSteps));
+        if (contrastRatio(tint, ground) >= MinimumTextContrast)
+            return tint;
+    }
+    return target;
+}
 
 std::span<std::string_view const> defaultColorPaletteNames() noexcept
 {

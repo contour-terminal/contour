@@ -6,6 +6,7 @@
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/PreeditPlacement.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <gsl/pointers>
@@ -62,6 +63,11 @@ class RenderBufferBuilder
                         bool includeSelection,
                         FrameLinks links,
                         RenderedDisplay display);
+
+    /// Why the search's query could not be matched while this pass painted its highlights, so the terminal
+    /// can end the query (R-f): the builder reads the terminal as const, and cannot.
+    /// @return SearchPatternError::TooComplex where the regex engine gave up; nothing otherwise.
+    [[nodiscard]] std::optional<SearchPatternError> searchFailure() const noexcept { return _searchFailure; }
 
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
     /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
@@ -211,6 +217,21 @@ class RenderBufferBuilder
                                                  Color foregroundColor,
                                                  Color backgroundColor) const noexcept;
 
+    /// Whether a cell may be drawn in a block cursor's colours.
+    enum class CursorColours : uint8_t
+    {
+        Never = 0,   ///< A preedit cell: the cursor drawn after the preedit already marks the caret.
+        AtTheCursor, ///< Any grid cell: in them when the block cursor is on it.
+    };
+
+    /// The colours of a cell, as @ref makeColorsForCell gives them, but in a cursor's colours only as
+    /// @p cursorColours allows.
+    [[nodiscard]] RGBColorPair makeColorsForCell(CellLocation gridPosition,
+                                                 CellFlags cellFlags,
+                                                 Color foregroundColor,
+                                                 Color backgroundColor,
+                                                 CursorColours cursorColours) const noexcept;
+
     [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
                                               LineOffset lineOffset,
                                               std::u32string_view textOverride = {}) const;
@@ -219,6 +240,18 @@ class RenderBufferBuilder
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
     [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
+
+    /// The attributes the input method's preedit is drawn with, by @c Settings::preeditStyle.
+    [[nodiscard]] GraphicsAttributes preeditAttributes() const noexcept;
+
+    /// Draws the preedit over a row already emitted one render cell per column, when the cursor is on it.
+    ///
+    /// A uniform row is emitted whole by @c renderTrivialLine rather than cell by cell through
+    /// @c renderCell, so the preedit, which @c renderCell draws as it reaches the cursor, needs this to
+    /// reach it there too.
+    /// @param frontIndex The index of the row's first render cell.
+    /// @param line       The row, as a screen line.
+    void overlayInputMethodEditor(size_t frontIndex, LineOffset line);
 
     /// Emits one render cell per column for text taken from the grid.
     ///
@@ -234,13 +267,19 @@ class RenderBufferBuilder
                         GraphicsAttributes textAttributes,
                         std::u32string_view text);
 
-    /// Emits render cells for text whose cell boundaries are not yet known -- the IME preedit
-    /// string -- segmenting it into grapheme clusters and measuring each.
-    /// @see renderGridText for text that comes from the grid.
+    /// Emits the render cells of the preedit's clusters, from @p screenPosition on.
+    /// @see renderGridText for text that comes from the grid, whose cell boundaries the grid has decided.
     /// @return How many columns were covered.
-    ColumnCount renderUtf8Text(CellLocation screenPosition,
-                               GraphicsAttributes attributes,
-                               std::string_view text);
+    ColumnCount renderPreedit(CellLocation screenPosition,
+                              GraphicsAttributes attributes,
+                              std::span<PreeditCluster const> clusters);
+
+    /// The columns of the line being built: the page's, or half of them on a DECDWL line.
+    [[nodiscard]] ColumnCount currentLineColumns() const noexcept;
+
+    /// Where the preedit is drawn on the cursor's line, placed on first use in a frame.
+    /// @pre The cursor is set, and the line being built is the cursor's.
+    [[nodiscard]] PreeditPlacement const& preeditPlacement();
 
     /// The display column a grid column draws at.
     ///
@@ -270,9 +309,10 @@ class RenderBufferBuilder
 
     /// Works out which cells of grid row @p gridLine the search highlights, into _rowSearchHighlights.
     ///
-    /// The matches are the search's own (Grid::matchedTextEnd), found only among the rows a match reaching
-    /// this one can begin on: the rows rendered before it, and those above it in its logical line. Rows
-    /// arrive top to bottom, so each candidate start is tried once per pass.
+    /// The matches are the search query's own (SearchQuery::matchesIn), asked once per pass for the segment
+    /// holding the row: rows arrive top to bottom, and the rows of one segment ask once between them. A
+    /// match that ends past its segment -- a literal across a cut -- is kept until its last row is painted.
+    /// A query the engine finds too complex paints nothing, and is not asked again this pass.
     /// @param gridLine The grid row about to be rendered cell by cell.
     void prepareSearchHighlights(LineOffset gridLine);
 
@@ -335,6 +375,7 @@ class RenderBufferBuilder
     mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
     mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
+    std::optional<PreeditPlacement> _preeditPlacement; ///< @see preeditPlacement
 
     int _prevWidth = 0;
     bool _prevHasCursor = false;
@@ -366,8 +407,11 @@ class RenderBufferBuilder
     /// The search matches found so far this pass that may still reach the row being rendered.
     std::vector<SearchMatch> _searchMatches;
 
-    /// The last grid row whose cells have all been tried as the start of a match this pass.
-    std::optional<LineOffset> _searchScannedThrough;
+    /// The segment whose matches were last added to _searchMatches this pass.
+    std::optional<SearchSegment> _searchSegment;
+
+    /// Why the search query could not be matched this pass; nothing while it could. @see searchFailure
+    std::optional<SearchPatternError> _searchFailure;
 
     /// How each cell of the row being rendered is painted for the search, by column; empty for none.
     std::vector<SearchHighlight> _rowSearchHighlights;

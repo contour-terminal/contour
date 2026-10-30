@@ -78,7 +78,11 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) 
 
     // Only the writer thread swaps, so the buffer just put in front stays there while this reads it.
     auto const& front = buffers[(currentBackBufferIndex.load() + 1) % 2];
-    frontStickyHeaderBlock = front.stickyHeader ? front.stickyHeader->block : CommandBlockId {};
+    // Only a header drawn over the grid takes a press on the row it covers; one in the chrome covers none.
+    frontStickyHeaderBlock =
+        front.stickyHeader && front.stickyHeader->presentation == StickyHeaderPresentation::InGrid
+            ? front.stickyHeader->block
+            : CommandBlockId {};
 
     lastUpdate.store(now, std::memory_order_relaxed);
     state = RenderBufferState::WaitingForRefresh;

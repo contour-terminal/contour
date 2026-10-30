@@ -6,6 +6,7 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
@@ -16,6 +17,10 @@
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
+#include <vtbackend/shell/BlockChipPlacement.hpp>
+#include <vtbackend/shell/BlockPill.hpp>
+#include <vtbackend/shell/BlockRail.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
@@ -34,9 +39,9 @@
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/UserPaths.hpp>
 
 #include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
 #include <gsl/pointers>
@@ -286,9 +291,16 @@ Terminal::Terminal(Events& eventListener,
                    TerminalClocks clocks,
                    SemanticBlockTokenSource sessionTokens,
                    std::optional<LinkDetectionServices> linkServices,
-                   std::optional<StatusLineExtensionServices> extensionServices):
+                   std::optional<StatusLineExtensionServices> extensionServices,
+                   std::optional<GitHeadServices> gitServices):
     _eventListener { eventListener },
-    _homeDirectory { env.get("HOME").value_or("") },
+    // HOME, or Windows' USERPROFILE, when the composition root names none.
+    _homeDirectory { !factorySettings.homeDirectory.empty()
+                         ? factorySettings.homeDirectory
+                         : core::platform::homeDirectory(env)
+                               .transform(
+                                   [](std::filesystem::path const& home) { return core::pathToUtf8(home); })
+                               .value_or(std::string {}) },
     _fileSystem { fileSystem },
     _linkServices { std::move(linkServices) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
@@ -363,6 +375,14 @@ Terminal::Terminal(Events& eventListener,
                                                     onStatusLineCommandCompleted(output);
                                                 })
                                           : nullptr },
+    // The same contract as onStatusLineCommandCompleted(): on the executor, without the state lock.
+    _gitHead { gitServices
+                   ? std::make_unique<GitHeadCache>(*gitServices,
+                                                    [this] {
+                                                        breakLoopAndRefreshRenderBuffer();
+                                                        _eventListener.indicatorStatusLineItemChanged();
+                                                    })
+                   : nullptr },
     // Last: its redraw request reaches what every member above holds.
     _linkDetector { makeLinkDetector() }
 {
@@ -596,7 +616,8 @@ void Terminal::publishBindingModes() noexcept
     auto const flags = static_cast<uint8_t>(
         flagIf(displayedScreenType() == ScreenType::Alternate, Flag::AlternateScreen)
         | flagIf(applicationCursorKeys(), Flag::AppCursor) | flagIf(applicationKeypad(), Flag::AppKeypad)
-        | flagIf(selectionAvailable(), Flag::Select) | flagIf(!_search.pattern.empty(), Flag::Search));
+        | flagIf(selectionAvailable(), Flag::Select) | flagIf(!_search.pattern.empty(), Flag::Search)
+        | flagIf(_focusedCommandBlock.has_value(), Flag::BlockFocus));
     _publishedBindingModes.store(flags, std::memory_order_relaxed);
 }
 
@@ -614,6 +635,7 @@ void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
 
         // Under the lock, as every other thread moves the view: the view follows what was just written.
         followOutput();
+        reconcileCommandBlockFocus();
 
         // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
         // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
@@ -843,14 +865,7 @@ bool Terminal::indicatorStatusLineDrivenByExtensions() const noexcept
         return false;
     if (_takeOverName)
         return true;
-    auto const namesAnExtension = [](StatusLineSegment const& segment) {
-        return std::ranges::any_of(segment, [](StatusLineDefinitions::Item const& item) {
-            return std::holds_alternative<StatusLineDefinitions::Extension>(item);
-        });
-    };
-    auto const& definition = _indicatorStatusLineDefinition;
-    return namesAnExtension(definition.left) || namesAnExtension(definition.middle)
-           || namesAnExtension(definition.right);
+    return containsItem<StatusLineDefinitions::Extension>(_indicatorStatusLineDefinition);
 }
 
 void Terminal::setMirroredIndicatorStatusLine(std::optional<Line> row)
@@ -1145,6 +1160,11 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->displayedPage().cellWidthAt(pos);
 }
 
+bool Terminal::TheSelectionHelper::cellHoldsText(CellLocation pos) const noexcept
+{
+    return !terminal->displayedPage().at(pos).flags().any(NoTextCellFlags);
+}
+
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
     auto const composing = !preeditString.empty();
@@ -1160,6 +1180,11 @@ void Terminal::updateInputMethodPreeditString(std::string preeditString)
         scrollToBottomOnInput();
 
     screenUpdated();
+}
+
+std::string Terminal::inputMethodPreeditString() const
+{
+    return inputMethodData().preeditString;
 }
 
 InputMethodData Terminal::inputMethodData() const
@@ -1205,6 +1230,34 @@ void Terminal::detectLinks(FrameChange change)
     _linkScanDue.store(due ? now + *due : chrono::steady_clock::time_point::max(), std::memory_order_relaxed);
 }
 
+namespace
+{
+    /// What a sticky header in the chrome shows, hashed: its block, kind, outcome and every codepoint of its
+    /// text and chip. Zero for no header, or one drawn in the grid -- which the chrome shows nothing of.
+    [[nodiscard]] uint64_t chromeStickyHeaderKey(std::optional<RenderStickyHeader> const& header)
+    {
+        if (!header || header->presentation != StickyHeaderPresentation::Chrome)
+            return 0;
+        auto key = uint64_t { 0xcbf29ce484222325 }; // FNV-1a
+        auto const mix = [&key](uint64_t value) {
+            key ^= value;
+            key *= uint64_t { 0x100000001b3 };
+        };
+        mix(header->block.value);
+        mix(static_cast<uint64_t>(header->kind));
+        mix(static_cast<uint64_t>(header->outcome));
+        for (auto const* const cells: { &header->cells, &header->chip })
+        {
+            mix(cells->size());
+            for (auto const& cell: *cells)
+                for (auto const codepoint: cell.codepoints)
+                    mix(codepoint);
+        }
+        // Never zero for a header, which zero would take for none.
+        return key | 1;
+    }
+} // namespace
+
 void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
 {
     ZoneScoped;
@@ -1246,9 +1299,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // a hint session is active every line must take the per-cell path, or a label on a plain line —
     // the common case — would never be drawn. Grid::render reuses its search-highlight flag as that
     // per-cell switch.
-    auto const renderLinesPerCell = (!_search.pattern.empty() || isHintModeActive())
-                                        ? HighlightSearchMatches::Yes
-                                        : HighlightSearchMatches::No;
+    auto const renderLinesPerCell =
+        (_search.query || isHintModeActive()) ? HighlightSearchMatches::Yes : HighlightSearchMatches::No;
 
     auto const theCursorPosition = [&]() -> std::optional<CellLocation> {
         if (inputHandler().mode() == ViMode::Insert)
@@ -1293,14 +1345,37 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     else
         _lastRenderPassHints = displayedScreen.render(builder, _viewport.scrollOffset(), renderLinesPerCell);
 
+    // A query the highlighter found too complex to match is ended here, under the lock this pass holds, so
+    // the next frame runs no matcher at all and the find bar can say why (R-f).
+    if (auto const failure = builder.searchFailure())
+        endSearchQuery(*failure);
+
     // After both branches: the gutter and the fold labels belong to the main display whichever page it is
     // showing, and each is a no-op on a page folding does not apply to.
+    // Once per frame for all of them: each drawn row's block, and the collapsed folds' chips (m1).
+    fillDrawnRowBlocks();
+    auto const foldLabels = foldLabelPlacements();
     fillGutter(output, baseLine);
-    fillFoldLabels(output, baseLine);
+    fillFoldLabels(output, baseLine, foldLabels);
+    auto const chipStatus = fillBlockChips(output, baseLine, foldLabels);
+    fillBlockHighlight(output, baseLine);
 
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
     // status line put it.
     fillStickyHeader(output, baseLine);
+
+    // A running block's time on display -- a chip's, or the header's -- goes stale unless a frame is drawn
+    // again: what a frontend's once-a-second redraw asks before it draws one.
+    auto const* const headerBlock =
+        output.stickyHeader ? commandBlocks().find(output.stickyHeader->block) : nullptr;
+    auto const headerRunning = headerBlock != nullptr && headerBlock->state == CommandBlockState::Running;
+    auto const status =
+        chipStatus == RunningStatus::Shown || headerRunning ? RunningStatus::Shown : RunningStatus::Hidden;
+    if (_runningStatus.exchange(status, std::memory_order_relaxed) != status)
+        _eventListener.runningStatusChanged();
+    if (auto const key = chromeStickyHeaderKey(output.stickyHeader);
+        std::exchange(_chromeStickyHeaderKey, key) != key)
+        _eventListener.chromeStickyHeaderChanged();
     fillLineFlash(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
@@ -1337,6 +1412,15 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     // two displays would sweep across the page.
     if (output.cursor->display == RenderedDisplay::StatusLine)
         return;
+
+    // The first frame to draw the cursor has no earlier position to move it from.
+    if (_cursorMotion.tracking == CursorTracking::Unseen)
+    {
+        _cursorMotion.tracking = CursorTracking::Following;
+        _cursorMotion.toPosition = gridCursorPosition();
+        _cursorMotion.toColor = output.cursor->cursorColor;
+        return;
+    }
 
     // Effective animation duration: at least 3 frames at the current refresh rate
     // to guarantee visible interpolation.
@@ -1559,6 +1643,9 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 
 PageSize Terminal::indicatorStatusLinePageSize() const
 {
+    // The gutter's cells, not the rail's strip: the strip's width is the chrome's pixels, which the status
+    // line's cells cannot divide. Its text ends with the page's last column, its bar spans the window, and
+    // left of the page it reaches as far as the gutter's cells would without the strip.
     auto const gutterColumns = ColumnCount::cast_from(gutterLayoutFor(_settings.gutter).totalColumns);
     return PageSize { StatusLineHeight, _settings.pageSize.columns + gutterColumns };
 }
@@ -1567,8 +1654,14 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
 {
     if (!_focused)
         return colorPalette().indicatorStatusLineInactive;
+    if (showsModeChip(_indicatorStatusLineDefinition))
+        return colorPalette().indicatorStatusLineInsertMode;
+    return indicatorStatusLineColorsFor(_inputHandler.mode());
+}
 
-    switch (_inputHandler.mode())
+RGBColorPair Terminal::indicatorStatusLineColorsFor(ViMode mode) const noexcept
+{
+    switch (mode)
     {
         case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
         case ViMode::Normal:
@@ -1579,35 +1672,6 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
     }
     core::unreachable();
 }
-
-namespace
-{
-    /// The columns @p text takes when a screen writes it. libunicode measures each grapheme cluster; the grid
-    /// gives a cluster at least one column (appendCodepointToCluster, LineSoA.cpp), as wide as its first
-    /// codepoint, or, under ClusterWidthPolicy::ClusterAware, as the whole cluster where that is wider -- a
-    /// cluster widens and never narrows (Screen::applyClusterWidthChange).
-    /// @param text   UTF-8 text.
-    /// @param policy How the screen measures a cluster (DEC mode 2027).
-    /// @return The columns @p text takes.
-    [[nodiscard]] ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy)
-    {
-        auto columns = 0u;
-        for (auto const& cluster: unicode::utf8_grapheme_segmenter(text))
-        {
-            if (cluster.empty())
-                continue;
-            auto const first = std::max(1u, unicode::width(cluster.front()));
-            switch (policy)
-            {
-                case ClusterWidthPolicy::FirstCodepoint: columns += first; break;
-                case ClusterWidthPolicy::ClusterAware:
-                    columns += std::max(first, unicode::grapheme_cluster_width(cluster));
-                    break;
-            }
-        }
-        return ColumnCount::cast_from(columns);
-    }
-} // namespace
 
 void Terminal::updateIndicatorStatusLine()
 {
@@ -1668,6 +1732,8 @@ void Terminal::updateIndicatorStatusLine()
         return;
     }
 
+    refreshGitHead();
+
     // Every {Extension} item of this repaint reads one frame per name, so that two slots, and the measuring
     // of a slot, cannot see two generations.
     auto extensionFrame = StatusLineExtensionFrame {};
@@ -1677,48 +1743,67 @@ void Terminal::updateIndicatorStatusLine()
     using Styling = StatusLineStyling;
     auto const& definitions = _indicatorStatusLineDefinition;
 
-    // A segment is placed by the columns the screen lays its text out in, not by its bytes.
-    auto const widthOf = [&](StatusLineSegment const& segment) {
-        return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
-                                _indicatorStatusScreen.clusterWidthPolicy());
-    };
     auto const columns = _indicatorStatusScreen.pageSize().columns;
+    auto const policy = _indicatorStatusScreen.clusterWidthPolicy();
+    auto const sides = std::array {
+        std::pair { StatusLineSide::Left, &definitions.left },
+        std::pair { StatusLineSide::Middle, &definitions.middle },
+        std::pair { StatusLineSide::Right, &definitions.right },
+    };
 
-    // The columns, from the first, that the left segment and a middle one shown take.
-    auto taken = ColumnCount(0);
+    // Each item is visited once to measure it, its unstyled text kept: a segment's text is its items' texts
+    // joined, so a segment is measured as the grid lays it out -- by columns, not bytes, and with a cluster
+    // that joins across two items as one -- without visiting its items again.
+    auto texts = std::vector<std::string> {};
+    auto extents = std::vector<StatusLineItemExtent> {};
+    for (auto const& [side, segment]: sides)
+        for (auto const& item: *segment)
+        {
+            auto& text = texts.emplace_back(serializeToVT(*this, std::span { &item, 1 }, Styling::Disabled));
+            extents.push_back(StatusLineItemExtent { .side = side,
+                                                     .width = columnsOnTheGrid(text, policy),
+                                                     .priority = StatusLineDefinitions::priorityOf(item),
+                                                     .kind = StatusLineDefinitions::kindOf(item) });
+        }
+    auto const measureSegment = [&](StatusLineSide side, std::span<StatusLineItemFate const> fates) {
+        auto joined = std::string {};
+        for (auto const [index, extent]: core::views::enumerate(extents))
+            if (extent.side == side && fates[index] == StatusLineItemFate::Shown)
+                joined += texts[index];
+        return columnsOnTheGrid(joined, policy);
+    };
 
-    if (!definitions.left.empty())
+    // Too narrow for every item, the line drops whole ones by priority until each segment is placed.
+    auto const fates = collapseStatusLine(extents, columns, measureSegment);
+    auto const placement = placeStatusLineSegments(
+        StatusLineSegmentWidths { .left = measureSegment(StatusLineSide::Left, fates),
+                                  .middle = measureSegment(StatusLineSide::Middle, fates),
+                                  .right = measureSegment(StatusLineSide::Right, fates) },
+        columns);
+
+    // Draws the shown items of the segment on @p side, styled; an item's text does not depend on its
+    // neighbours, so they are drawn one by one, and nothing is copied for a line that dropped some.
+    auto const draw = [&](StatusLineSide side) {
+        auto text = std::string {};
+        auto index = std::size_t { 0 };
+        for (auto const& [segmentSide, segment]: sides)
+            for (auto const& item: *segment)
+                if (fates[index++] == StatusLineItemFate::Shown && segmentSide == side)
+                    text += serializeToVT(*this, std::span { &item, 1 }, Styling::Enabled);
+        writeToScreenInternal(_indicatorStatusScreen, text);
+    };
+
+    // The left segment starts in the first column, and one wider than the line is cut at its last.
+    draw(StatusLineSide::Left);
+    if (placement.middleStart)
     {
-        auto const leftVT = serializeToVT(*this, definitions.left, Styling::Enabled);
-        writeToScreenInternal(_indicatorStatusScreen, leftVT);
-        taken = widthOf(definitions.left);
+        _indicatorStatusScreen.moveCursorToColumn(*placement.middleStart);
+        draw(StatusLineSide::Middle);
     }
-
-    if (!definitions.middle.empty() || !definitions.right.empty())
+    if (placement.rightStart)
     {
-        // The middle segment is centred, and not shown if it is too wide, or where it would overlap what the
-        // left segment takes.
-        auto const middleWidth = widthOf(definitions.middle);
-        auto const middleStart = (columns - middleWidth) / ColumnCount(2);
-        if (!definitions.middle.empty()
-            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2)
-            && taken <= middleStart)
-        {
-            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(middleStart));
-            writeToScreenInternal(_indicatorStatusScreen,
-                                  serializeToVT(*this, definitions.middle, Styling::Enabled));
-            taken = std::max(taken, middleStart + middleWidth);
-        }
-
-        // The right segment ends in the last column, and is not shown if it is as wide as the line, or
-        // where it would overlap what the segments before it take.
-        auto const rightWidth = widthOf(definitions.right);
-        if (rightWidth < columns && taken + rightWidth <= columns)
-        {
-            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(columns - rightWidth));
-            writeToScreenInternal(_indicatorStatusScreen,
-                                  serializeToVT(*this, definitions.right, Styling::Enabled));
-        }
+        _indicatorStatusScreen.moveCursorToColumn(*placement.rightStart);
+        draw(StatusLineSide::Right);
     }
 
     // What the template printed may reset its rendition -- a {Command}'s output and an {Extension}'s text are
@@ -2058,7 +2143,9 @@ void Terminal::updateSelectionMatches()
         return;
 
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-    setNewSearchTerm(text32, SearchOrigin::DoubleClick);
+    // A double-clicked word is literal (R-g), and a literal always compiles: there is no error to report.
+    [[maybe_unused]] auto const installed = setNewSearchTerm(text32, SearchOrigin::DoubleClick);
+    assert(installed.has_value());
 }
 
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
@@ -2452,7 +2539,7 @@ bool Terminal::pastesUnchanged(string_view text) const
     return isUnchangedBySanitizing(text, purpose);
 }
 
-void Terminal::sendPasteFromClipboard(unsigned count, bool strip)
+void Terminal::sendPasteFromClipboard(unsigned count, PasteStrip strip)
 {
     runOutsideStateLock([this, count, strip] { _eventListener.pasteFromClipboard(count, strip); });
 }
@@ -3504,6 +3591,9 @@ void Terminal::setCursorShape(CursorShape shape)
 void Terminal::setWordDelimiters(string const& wordDelimiters)
 {
     _settings.wordDelimiters = unicode::from_utf8(wordDelimiters);
+    // A whole-word search reads the delimiters its query was compiled with, so a reload re-reads them.
+    if (!_search.pattern.empty())
+        compileSearch();
 }
 
 void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
@@ -3946,7 +4036,7 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     // Built per frame rather than cached: Settings is mutable through settings(), and the layout formats a
     // sample only when timestamps are on.
     auto const layout = gutterLayoutFor(_settings.gutter);
-    if (layout.totalColumns == 0)
+    if (layout.totalColumns == 0 && layout.rail == BlockRailPresence::Absent)
         return;
 
     auto const& gutter = _settings.gutter;
@@ -3989,6 +4079,68 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     auto const hoveredHead =
         _gutterHoverLine ? foldCovering(foldRanges(), grid.stableLineIdOf(*_gutterHoverLine)) : std::nullopt;
 
+    // The rail reads each drawn row's block, and those of the rows just beyond the page's two edges, as
+    // fillDrawnRowBlocks() looked them up for this frame.
+    auto const railBlocks = layout.rail == BlockRailPresence::Present
+                                ? std::span<CommandBlockRecord const* const> { _railBlocks }
+                                : std::span<CommandBlockRecord const* const> {};
+    auto const railRecordAt = [&](int y) {
+        return drawnRowBlockOf(railBlocks, y);
+    };
+    auto const railIdOf = [&](int y) -> std::optional<CommandBlockId> {
+        auto const* const record = railRecordAt(y);
+        return record ? std::optional { record->id } : std::nullopt;
+    };
+    // The block the pointer is over: on its rows (setHoveredCommandBlock), or on the strip beside them.
+    auto const* const gutterHoveredRecord = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr;
+    auto const attentionOf = [&](CommandBlockId id) {
+        if (_focusedCommandBlock == id)
+            return BlockAttention::Focused;
+        auto const hovered =
+            _hoveredCommandBlock == id || (gutterHoveredRecord != nullptr && gutterHoveredRecord->id == id);
+        return hovered ? BlockAttention::Hovered : BlockAttention::Rest;
+    };
+    // The rail's six colours, by outcome and attention, mixed once per frame rather than once per row.
+    auto railColors = std::array<std::array<RGBColor, BlockAttentionCount>, CommandBlockOutcomeCount> {};
+    if (!railBlocks.empty())
+        for (auto const outcome: std::views::iota(std::size_t { 0 }, CommandBlockOutcomeCount))
+            for (auto const attention:
+                 { BlockAttention::Rest, BlockAttention::Hovered, BlockAttention::Focused })
+                railColors.at(outcome).at(static_cast<std::size_t>(attention)) =
+                    railColor(_colorPalette, static_cast<CommandBlockOutcome>(outcome), attention);
+    auto const railRowAt = [&](int y, UserMarkPresence mark) {
+        auto row = GutterRow {};
+        if (railBlocks.empty())
+            return row;
+        auto const* const record = railRecordAt(y);
+        auto const facts =
+            RailRowFacts { .block = railIdOf(y),
+                           .above = railIdOf(y - 1),
+                           .below = railIdOf(y + 1),
+                           .state = record ? record->state : CommandBlockState::Prompting,
+                           // With exit status off the rail is neutral, as the glyph column is uncoloured.
+                           .outcome = record && gutter.exitStatus ? outcomeOf(*record)
+                                                                  : CommandBlockOutcome::Success,
+                           .mark = gutter.userMarks ? mark : UserMarkPresence::Absent,
+                           .attention = record ? attentionOf(record->id) : BlockAttention::Rest };
+        row.rail = railSegmentOf(facts);
+        row.railMark = railMarkOf(facts, row.rail);
+        if (record != nullptr)
+        {
+            row.outcome = facts.outcome;
+            row.railColor = railColors.at(static_cast<std::size_t>(facts.outcome))
+                                .at(static_cast<std::size_t>(facts.attention));
+        }
+        // A status mark is the rail's own ink; a user mark keeps the colour the glyph column gives it.
+        row.railMarkColor =
+            row.railMark == RailMark::UserMark
+                ? blockColumnColors(
+                      _colorPalette, BlockColumnGlyph::UserMark, std::nullopt, GutterHover::Rest)
+                      .foreground
+                : row.railColor;
+        return row;
+    };
+
     // Shifted by baseLine for the same reason every cell is: a status line at the top moves the main page
     // down, and a gutter left where it was would point at the wrong row.
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
@@ -4013,43 +4165,104 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                                ? GutterHover::Hovered
                                : GutterHover::Rest;
 
-        appendGutterCells(
-            layout,
-            GutterRow { .screenLine = baseLine + screenRow,
-                        .timestamp = timestampOf(line),
-                        .lineNumber = lineNumberOf(gridLine, y),
-                        .glyph = glyph,
-                        // Mixed only for a glyph there is: most rows have none.
-                        .glyphColors = glyph == BlockColumnGlyph::None
-                                           ? RGBColorPair {}
-                                           : blockColumnColors(_colorPalette, glyph, outcome, hover),
-                        .weight = foldWeightOf(facts, gutter, hover) },
-            textColors,
-            output.gutter);
+        auto row = railRowAt(y, facts.mark);
+        row.screenLine = baseLine + screenRow;
+        row.timestamp = timestampOf(line);
+        row.lineNumber = lineNumberOf(gridLine, y);
+        row.glyph = glyph;
+        // Mixed only for a glyph there is: most rows have none.
+        row.glyphColors = glyph == BlockColumnGlyph::None
+                              ? RGBColorPair {}
+                              : blockColumnColors(_colorPalette, glyph, outcome, hover);
+        row.weight = foldWeightOf(facts, gutter, hover);
+        appendGutterCells(layout, row, textColors, output.gutter);
     }
 }
 
-void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
+namespace
 {
-    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
-    for (auto const& placement: foldLabelPlacements())
-        layoutFoldLabel(output.annotations,
-                        baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine),
-                        placement.textColumns,
-                        pageSize().columns,
-                        placement.label,
-                        attributes);
+    /// Draws the cells of @p cells from @p first on as a double-width row draws its own: each cell at twice
+    /// its column, and twice as wide. What cells laid out in the row's own columns come to once drawn.
+    /// @param cells The frame's annotation cells.
+    /// @param first The index of the first cell laid out for the row.
+    void doubleCellsFrom(std::vector<RenderCell>& cells, std::size_t first)
+    {
+        for (auto& cell: std::span(cells).subspan(first))
+        {
+            cell.position.column = cell.position.column * 2;
+            cell.attributes.lineFlags = cell.attributes.lineFlags | LineFlag::DoubleWidth;
+        }
+    }
+} // namespace
+
+void Terminal::fillFoldLabels(RenderBuffer& output,
+                              LineOffset baseLine,
+                              std::span<FoldLabelPlacement const> placements) const
+{
+    if (placements.empty())
+        return;
+
+    // A native row's chip is a pill the renderer shapes: the label rides along, and no cell is laid out.
+    if (drawsPills())
+    {
+        for (auto const& placement: placements)
+        {
+            auto const* const block = commandBlockAt(placement.gridLine);
+            auto const inks =
+                pillInks(_colorPalette, PillStyle::Fold, block ? hoverUnderlayOf(block->id) : std::nullopt);
+            auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
+            if (auto const columns = foldLabelExtent(screenLine,
+                                                     placement.textColumns,
+                                                     shownColumnsOf(placement.width, pageSize().columns),
+                                                     unbox<std::size_t>(placement.labelColumns),
+                                                     ColumnCount(1)))
+                output.chips.push_back(RenderChip { .lineOffset = screenLine,
+                                                    .columns = drawnColumnsOf(*columns, placement.width),
+                                                    .style = PillStyle::Fold,
+                                                    .text = placement.label,
+                                                    .ink = inks.ink,
+                                                    .fill = inks.fill,
+                                                    .ring = inks.ring });
+        }
+        return;
+    }
+
+    auto const colors = foldChipColors(_colorPalette);
+    auto const attributes = gutterCellAttributes(
+        RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground });
+    auto const fill = RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F)));
+    for (auto const& placement: placements)
+    {
+        auto const screenLine = baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine);
+        auto const shown = shownColumnsOf(placement.width, pageSize().columns);
+        auto const firstCell = output.annotations.size();
+        layoutFoldLabel(
+            output.annotations, screenLine, placement.textColumns, shown, placement.label, attributes);
+        if (placement.width == LineWidth::Double)
+            doubleCellsFrom(output.annotations, firstCell);
+        // The band behind exactly the cells drawn: the extent of a hit no wider than the label.
+        if (auto const drawn = foldLabelExtent(screenLine,
+                                               placement.textColumns,
+                                               shown,
+                                               unbox<std::size_t>(placement.labelColumns),
+                                               ColumnCount(1)))
+            output.chipBands.push_back(RenderChipBand {
+                .lineOffset = screenLine, .columns = drawnColumnsOf(*drawn, placement.width), .fill = fill });
+    }
 }
 
-std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position) const
+std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position,
+                                                         ColumnCount minimumHitColumns) const
 {
     for (auto const& placement: foldLabelPlacements())
     {
         auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
                                             placement.textColumns,
-                                            pageSize().columns,
-                                            placement.label.size());
-        if (extent && extent->contains(position))
+                                            shownColumnsOf(placement.width, pageSize().columns),
+                                            unbox<std::size_t>(placement.labelColumns),
+                                            minimumHitColumns);
+        // The pointer is over drawn columns, which a doubled row's cells take two of.
+        if (extent && drawnColumnsOf(*extent, placement.width).contains(position))
             return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
     }
     return std::nullopt;
@@ -4102,10 +4315,26 @@ std::vector<Terminal::FoldLabelPlacement> Terminal::foldLabelPlacements() const
 
         auto const gridLine = LineOffset(*lastDrawn);
         auto const hidden = static_cast<uint64_t>(range.lastStableId - range.firstStableId + 1);
+        auto label = collapsedFoldLabel(hidden);
+        auto const labelColumns = chipColumns(PillStyle::Fold, label);
+
+        // After the command, in the blanks before an RPROMPT where they hold it (m6); else after the row's
+        // last text, clipped at the page's edge.
+        auto const& line = grid.lineAt(gridLine);
+        auto const runs = blankRunsOf(line, LineOffset(0), pageSize().columns);
+        auto const textEnd = foldChipTextEnd(
+            BlockChipRowFacts { .pageColumns = shownColumnsOf(lineWidthOf(line), pageSize().columns),
+                                .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
+                                                    ? line.promptEndOffset()
+                                                    : ColumnOffset(0),
+                                .blankRuns = runs },
+            labelColumns);
         placements.push_back(FoldLabelPlacement { .range = range,
                                                   .gridLine = gridLine,
-                                                  .textColumns = grid.lineAt(gridLine).trimmedColumns(),
-                                                  .label = collapsedFoldLabel(hidden) });
+                                                  .textColumns = textEnd.value_or(line.trimmedColumns()),
+                                                  .label = std::move(label),
+                                                  .labelColumns = labelColumns,
+                                                  .width = lineWidthOf(line) });
     }
     return placements;
 }
@@ -4203,6 +4432,211 @@ namespace
         core::unreachable();
     }
 } // namespace
+
+RunningStatus Terminal::fillBlockChips(RenderBuffer& output,
+                                       LineOffset baseLine,
+                                       std::span<FoldLabelPlacement const> foldLabels) const
+{
+    // The chip tells how a block ended, a job of exit status's; and only the primary page has blocks.
+    if (!_settings.gutter.exitStatus || !foldingAppliesToDisplayedPage())
+        return RunningStatus::Hidden;
+
+    auto const& grid = primaryScreen().grid();
+    auto const now = _clocks.wall.now();
+    auto status = RunningStatus::Hidden;
+    auto lastBlock = std::optional<CommandBlockId> {};
+
+    // Each block once, at its first drawn row: the chip goes on its command row, wherever that is drawn.
+    for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
+    {
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
+        if (record == nullptr || record->id == lastBlock)
+            continue;
+        lastBlock = record->id;
+        if (record->state == CommandBlockState::Prompting)
+            continue;
+
+        auto const head = headOffsetOf(grid, *record);
+        auto const input = head ? inputRowOf(StampedBlockRows { grid }, *head, record->id) : std::nullopt;
+        if (!input || !_viewport.isLineVisible(*input))
+            continue;
+        auto const text = unicode::convert_to<char32_t>(std::string_view { blockStatusText(*record, now) });
+        if (text.empty())
+            continue;
+
+        auto const screenRow = _viewport.translateGridToScreenCoordinate(*input);
+        auto const& line = grid.lineAt(*input);
+        // A doubled row shows half the page, in columns that are drawn twice as wide.
+        auto const width = lineWidthOf(line);
+        auto const pageColumns = shownColumnsOf(width, pageSize().columns);
+        auto runs = blankRunsOf(line, baseLine + screenRow, pageSize().columns);
+        // A collapsed fold's chip on the row is drawn over blanks too: those are taken.
+        for (auto const& label: foldLabels)
+            if (label.gridLine == *input)
+                if (auto const taken = foldLabelExtent(baseLine + screenRow,
+                                                       label.textColumns,
+                                                       pageColumns,
+                                                       unbox<std::size_t>(label.labelColumns),
+                                                       ColumnCount(1)))
+                    runs = withoutColumns(runs, *taken);
+        auto const outcome = outcomeOf(*record);
+        auto const style = pillStyleOf(outcome);
+        auto const placement =
+            placeBlockChip(BlockChipRowFacts { .pageColumns = pageColumns,
+                                               .commandStart = line.isFlagEnabled(LineFlag::PromptEnd)
+                                                                   ? line.promptEndOffset()
+                                                                   : ColumnOffset(0),
+                                               .blankRuns = runs },
+                           chipColumns(style, text));
+        if (placement.kind == BlockChipPlacementKind::CollapsedToRail)
+            continue;
+        if (record->state == CommandBlockState::Running)
+            status = RunningStatus::Shown;
+
+        // A native row's chip is a pill the renderer shapes, right-aligned in the columns placed for it.
+        if (drawsPills())
+        {
+            // Legible over the hovered block's tint as well as over the page.
+            auto const inks = pillInks(_colorPalette, style, hoverUnderlayOf(record->id));
+            output.chips.push_back(RenderChip { .lineOffset = placement.columns.line,
+                                                .columns = drawnColumnsOf(placement.columns, width),
+                                                .style = style,
+                                                .text = text,
+                                                .ink = inks.ink,
+                                                .fill = inks.fill,
+                                                .ring = inks.ring });
+            continue;
+        }
+
+        auto const colors = blockChipColors(_colorPalette, outcome);
+        auto const firstCell = output.annotations.size();
+        layoutRenderText(
+            output.annotations,
+            text,
+            gutterCellAttributes(
+                RGBColorPair { .foreground = colors.text, .background = _colorPalette.defaultBackground }),
+            CellLocation { .line = placement.columns.line, .column = placement.columns.fromColumn },
+            placement.columns.toColumn + ColumnOffset(1));
+        if (width == LineWidth::Double)
+            doubleCellsFrom(output.annotations, firstCell);
+        if (colors.band)
+            output.chipBands.push_back(RenderChipBand {
+                .lineOffset = placement.columns.line,
+                .columns = drawnColumnsOf(placement.columns, width),
+                .fill =
+                    RGBAColor(*colors.band, static_cast<uint8_t>(std::lround(colors.bandAlpha * 255.0F))) });
+    }
+    return status;
+}
+
+void Terminal::fillDrawnRowBlocks() const
+{
+    // Each drawn row's block and those of the rows just beyond the page's two edges, looked up once per row
+    // -- never by walking a block's rows, so a frame costs the drawn rows times a block lookup however tall
+    // the blocks are. Index 0 is the row above the page, index rows + 1 the row below it. Kept across
+    // frames, so a frame allocates only when the page grows.
+    _railBlocks.clear();
+    if (!foldingAppliesToDisplayedPage())
+        return;
+    auto const rows = unbox<int>(drawnRowLimit());
+    for (auto const y: std::views::iota(-1, rows + 1))
+        _railBlocks.push_back(commandBlockAt(_viewport.translateScreenToGridLine(LineOffset(y))));
+    // A row beyond an edge exists only where the translation moved past the edge row: at the top of the
+    // history, or below the last line, it is held to the edge row itself.
+    auto const edgeHeld = [&](int beyond, int edge) {
+        return _viewport.translateScreenToGridLine(LineOffset(beyond))
+               == _viewport.translateScreenToGridLine(LineOffset(edge));
+    };
+    if (rows > 0 && edgeHeld(-1, 0))
+        _railBlocks.front() = nullptr;
+    if (rows > 0 && edgeHeld(rows, rows - 1))
+        _railBlocks.back() = nullptr;
+}
+
+CommandBlockRecord const* Terminal::drawnRowBlockOf(std::span<CommandBlockRecord const* const> blocks,
+                                                    int y) noexcept
+{
+    if (y < -1)
+        return nullptr;
+    auto const index = static_cast<std::size_t>(y) + 1;
+    return index < blocks.size() ? blocks[index] : nullptr;
+}
+
+std::optional<CommandBlockId> Terminal::hoveredBlock() const
+{
+    if (_hoveredCommandBlock)
+        return _hoveredCommandBlock;
+    if (auto const* const record = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr)
+        return record->id;
+    return std::nullopt;
+}
+
+std::optional<RGBAColor> Terminal::hoverUnderlayOf(CommandBlockId block) const
+{
+    if (!drawsPills() || hoveredBlock() != block)
+        return std::nullopt;
+    return blockHoverInks(_colorPalette).tint;
+}
+
+void Terminal::fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) const
+{
+    // A native row's hover only, and only where blocks are: the primary page.
+    if (!drawsPills() || !foldingAppliesToDisplayedPage())
+        return;
+    auto const hovered = hoveredBlock();
+    if (!hovered)
+        return;
+
+    // The block's drawn rows: contiguous on screen, a collapsed fold's hidden ones not among them.
+    auto first = std::optional<int> {};
+    auto last = 0;
+    for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
+    {
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
+        if (record == nullptr || record->id != *hovered)
+            continue;
+        if (!first)
+            first = y;
+        last = y;
+    }
+    if (!first)
+        return;
+
+    // The page cuts an edge where the block's rows go on past it: the row beyond is still the block's.
+    auto continues = BlockContinuations {};
+    auto const continuesAt = [&](int y) {
+        auto const* const record = drawnRowBlockOf(_railBlocks, y);
+        return record != nullptr && record->id == *hovered;
+    };
+    if (continuesAt(*first - 1))
+        continues.enable(BlockContinues::Above);
+    if (continuesAt(last + 1))
+        continues.enable(BlockContinues::Below);
+
+    auto const inks = blockHoverInks(_colorPalette);
+    output.blockHighlight = RenderBlockHighlight { .top = baseLine + LineOffset(*first),
+                                                   .height = LineCount(last - *first + 1),
+                                                   .tint = inks.tint,
+                                                   .ring = inks.ring,
+                                                   .continues = continues };
+}
+
+ColumnCount Terminal::chipColumns(PillStyle style, std::u32string_view text) const noexcept
+{
+    if (drawsPills())
+        if (auto const columns = _pillLabelMetrics.columnsOf(style, text))
+            return *columns;
+    return ColumnCount::cast_from(text.size());
+}
+
+void Terminal::setPillLabelMetrics(PillLabelMetrics const& metrics)
+{
+    if (_pillLabelMetrics == metrics)
+        return;
+    _pillLabelMetrics = metrics;
+    // The pills' columns change with the face: the chips are placed afresh.
+    breakLoopAndRefreshRenderBuffer();
+}
 
 Terminal::GatheredStickyHeader Terminal::stickyHeaderInput() const
 {
@@ -4361,18 +4795,44 @@ void Terminal::fillLineFlash(RenderBuffer& output, LineOffset baseLine)
 void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
 {
     auto const gathered = stickyHeaderInput();
+    if (auto const decision = stickyHeaderFor(gathered.input))
+        layoutStickyHeader(output.showStickyHeader(), gathered, *decision, baseLine);
+}
+
+std::optional<RenderStickyHeader> Terminal::stickyHeaderSnapshot() const
+{
+    auto const gathered = stickyHeaderInput();
     auto const decision = stickyHeaderFor(gathered.input);
     if (!decision)
-        return;
+        return std::nullopt;
+    auto header = RenderStickyHeader {};
+    layoutStickyHeader(header, gathered, *decision, LineOffset(0));
+    return header;
+}
 
+void Terminal::setStickyHeaderPresentation(StickyHeaderPresentation presentation)
+{
+    if (_settings.stickyHeader.presentation == presentation)
+        return;
+    _settings.stickyHeader.presentation = presentation;
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::layoutStickyHeader(RenderStickyHeader& header,
+                                  GatheredStickyHeader const& gathered,
+                                  StickyHeaderDecision const& decision,
+                                  LineOffset baseLine) const
+{
     // A decision names the block it was handed, whose record the gathering kept.
     auto const* const record = gathered.record;
 
-    auto& header = output.showStickyHeader();
-    header.kind = decision->kind;
-    header.block = decision->block;
+    header.kind = decision.kind;
+    header.block = decision.block;
     header.background = _colorPalette.stickyHeaderBackgroundColor();
     header.separator = _colorPalette.stickyHeaderSeparatorColor();
+    header.presentation = _settings.stickyHeader.presentation;
+    header.outcome = outcomeOf(*record);
+    header.commandLine = stickyHeaderCommandLine(record->commandLine);
 
     // The page's own background, which the renderer leaves unpainted: the header's text sits on its opaque
     // band without a rectangle per cell repainting the band over the band.
@@ -4381,7 +4841,9 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
     // The chip first, as it decides how much room the text gets: right-aligned, StickyHeaderChipInset columns
     // short of the page's end (clear of the overlay scrollbar), and never pushed left of column 0 on a page
     // too narrow for it. The injected wall clock, so a test drives the running time.
-    auto const statusColor = _colorPalette.blockStatusColor(outcomeOf(*record));
+    // On the band, not the page: the outcome's colour, lifted toward a legible ink where it would not read.
+    auto const statusColor =
+        legibleTintOn(_colorPalette, _colorPalette.blockStatusColor(header.outcome), header.background);
     auto const chipStart = layoutRightAligned(
         header.chip,
         stickyHeaderChip(*record, _clocks.wall.now()),
@@ -4396,7 +4858,7 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
     // One blank column between the text and the chip, so a long command never runs into it.
     auto const textColumns = std::max(ColumnCount(0), boxed_cast<ColumnCount>(chipStart) - ColumnCount(1));
 
-    switch (decision->kind)
+    switch (decision.kind)
     {
         case StickyHeaderKind::Command: {
             // Decided only for a head above the viewport, whose input row the gathering found -- on the
@@ -4410,12 +4872,18 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
                                                           : std::span<LinkRowSpan const> {},
                                                     baseLine,
                                                     textColumns);
+            // The copied row's ink was chosen against the page, not against the band: lift it where it
+            // would not read there, as the chip and the placeholder are.
+            for (auto& cell: header.cells)
+                cell.attributes.foregroundColor =
+                    legibleTintOn(_colorPalette, cell.attributes.foregroundColor, header.background);
             break;
         }
         case StickyHeaderKind::Evicted: {
             // No row of the block's prompt survives to be copied, so the record speaks for it: the command
             // line it kept, sanitised, in the gutter's own quieter text colour.
-            auto const textColor = _colorPalette.gutterTextColor();
+            auto const textColor =
+                legibleTintOn(_colorPalette, _colorPalette.gutterTextColor(), header.background);
             layoutRenderText(header.cells,
                              evictedPlaceholderText(record->commandLine, textColumns),
                              RenderAttributes { .foregroundColor = textColor,
@@ -4445,15 +4913,109 @@ void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
         return range ? std::optional { range->headStableId } : std::nullopt;
     };
 
-    auto const before = headOf(_gutterHoverLine);
+    // The rail lights the block beside the pointer, which a row with no fold has too. Asked only where the
+    // gutter draws the rail: the glyph column lights folds alone.
+    auto const railDrawn = railPresenceFor(_settings.gutter) == BlockRailPresence::Present;
+    auto const blockOf = [this, railDrawn](std::optional<LineOffset> line) -> std::optional<CommandBlockId> {
+        auto const* const record = railDrawn && line ? commandBlockAt(*line) : nullptr;
+        return record ? std::optional { record->id } : std::nullopt;
+    };
+
+    auto const before = std::pair { headOf(_gutterHoverLine), blockOf(_gutterHoverLine) };
     _gutterHoverLine = gridLine;
-    if (before == headOf(gridLine))
+    if (before == std::pair { headOf(gridLine), blockOf(gridLine) })
         return;
 
     // The highlight lives only in the render buffer, so nothing else would notice it changed: without
     // this the tint appears on the next frame something else happens to dirty, which for an idle
     // terminal is never.
     breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::setHoveredCommandBlock(std::optional<CommandBlockId> block)
+{
+    if (_hoveredCommandBlock == block)
+        return;
+    _hoveredCommandBlock = block;
+    // Like the gutter's hover, the lit rail lives only in the render buffer.
+    breakLoopAndRefreshRenderBuffer();
+}
+
+std::optional<CommandBlockId> Terminal::focusCommandBlock(BlockStep step)
+{
+    reconcileCommandBlockFocus();
+    auto const& grid = primaryScreen().grid();
+
+    // The blocks one can focus, oldest first: a command was typed or run (not a bare prompt), and its head
+    // is a row the viewport can be brought to.
+    struct Candidate
+    {
+        CommandBlockId id;
+        LineOffset head;
+    };
+    auto candidates = std::vector<Candidate> {};
+    for (auto const& record: commandBlocks().records())
+        if (record.state != CommandBlockState::Prompting)
+            if (auto const head = headOffsetOf(grid, record))
+                candidates.push_back({ .id = record.id, .head = *head });
+
+    auto const focused = std::ranges::find(candidates, _focusedCommandBlock, &Candidate::id);
+    auto const target = [&]() -> std::optional<std::size_t> {
+        auto const count = candidates.size();
+        auto const index = [&](auto const position) {
+            return static_cast<std::size_t>(position - candidates.begin());
+        };
+        if (focused != candidates.end())
+        {
+            auto const at = index(focused);
+            if (step == BlockStep::Previous)
+                return at > 0 ? std::optional { at - 1 } : std::nullopt;
+            return at + 1 < count ? std::optional { at + 1 } : std::nullopt;
+        }
+        if (step == BlockStep::Previous)
+        {
+            auto const bottom =
+                _viewport.topLine() + boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
+            auto const above = std::ranges::find_if(candidates | std::views::reverse,
+                                                    [&](Candidate const& c) { return c.head <= bottom; });
+            return above != candidates.rend() ? std::optional { index(above.base()) - 1 } : std::nullopt;
+        }
+        auto const top = _viewport.topLine();
+        auto const below =
+            std::ranges::find_if(candidates, [&](Candidate const& c) { return c.head >= top; });
+        return below != candidates.end() ? std::optional { index(below) } : std::nullopt;
+    }();
+    if (!target)
+        return std::nullopt;
+
+    auto const& chosen = candidates[*target];
+    if (!_viewport.isLineVisible(chosen.head))
+        std::ignore = scrollToCommandBlockHead(chosen.id);
+    std::ignore = setCommandBlockFocus(chosen.id);
+    breakLoopAndRefreshRenderBuffer();
+    return chosen.id;
+}
+
+void Terminal::clearCommandBlockFocus()
+{
+    if (setCommandBlockFocus(std::nullopt))
+        breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::reconcileCommandBlockFocus()
+{
+    if (_focusedCommandBlock && _commandBlocks.find(*_focusedCommandBlock) == nullptr)
+        std::ignore = setCommandBlockFocus(std::nullopt);
+}
+
+bool Terminal::setCommandBlockFocus(std::optional<CommandBlockId> block)
+{
+    if (_focusedCommandBlock == block)
+        return false;
+    _focusedCommandBlock = block;
+    publishBindingModes();
+    _eventListener.commandBlockFocusChanged(block);
+    return true;
 }
 
 void Terminal::autoCollapseOnNewPrompt()
@@ -4748,6 +5310,16 @@ std::vector<ScrollbarMarkInput> Terminal::scrollbarMarkInputs() const
         inputs.push_back(ScrollbarMarkInput {
             .visibleRow = visibleRowOf(id), .kind = ScrollbarMarkKind::UserMark, .targetStableId = id });
 
+    // The rows of the published tally that are still where they were walked: a match on a row since evicted
+    // has no tick, and nor has one found under another numbering of the rows (a reflow) or on another page.
+    if (_searchMatchRows.page == displayedPageIndex()
+        && _searchMatchRows.idGeneration == grid.stableIdGeneration())
+        for (auto const id: _searchMatchRows.rows)
+            if (grid.lineOffsetOf(id))
+                inputs.push_back(ScrollbarMarkInput { .visibleRow = visibleRowOf(id),
+                                                      .kind = ScrollbarMarkKind::SearchMatch,
+                                                      .targetStableId = id });
+
     return inputs;
 }
 
@@ -4763,6 +5335,7 @@ uint64_t Terminal::scrollbarMarksRevision() const
         .blockRevision = blockRevision,
         .userMarkRevision = userMarkRevision,
         .foldRevision = _foldState.revision(),
+        .searchRevision = _searchMatchRowsRevision,
         .stableIdGeneration = grid.stableIdGeneration(),
         .stableFloor = grid.stableRangeFloor(),
         .displayedPage = _displayedPage,
@@ -4888,6 +5461,62 @@ std::expected<LivePromptSpan, PromptRegionError> Terminal::livePromptSpan() cons
     return primaryScreen().livePromptSpan();
 }
 
+OverlayClearance Terminal::overlayClearance() const
+{
+    auto const pageLines = unbox<int>(pageSize().lines);
+    auto const columns = unbox<int>(pageSize().columns);
+    auto const mainTop = unbox<int>(mainPageTopRow());
+    auto const drawnRows = pageLines + unbox<int>(statusLineHeight());
+
+    // Every drawn row starts as not blank, so the status line's row stays at 0: its text is drawn chrome.
+    auto clearance =
+        OverlayClearance { .columns = columns,
+                           .trailingBlankColumns = std::vector<int>(static_cast<size_t>(drawnRows), 0),
+                           .avoidRows = {} };
+
+    auto const& grid = displayedPage().grid();
+    auto const firstLine = -unbox<int>(grid.historyLineCount());
+    for (auto const row: std::views::iota(0, pageLines))
+    {
+        // Through the projection, so a row a collapsed fold stands in for reads as the row drawn there. Past
+        // the history's end the page shows no line, which is blank.
+        auto const line = viewport().translateScreenToGridLine(LineOffset(row));
+        auto const blank = unbox<int>(line) < firstLine || unbox<int>(line) >= pageLines
+                               ? columns
+                               : columns - unbox<int>(grid.lineAt(line).trimmedColumns());
+        auto const drawnRow = mainTop + row;
+        clearance.trailingBlankColumns[static_cast<size_t>(drawnRow)] = blank;
+    }
+
+    // A grid line, if it is drawn on the page, as a drawn row.
+    auto const avoid = [&](LineOffset line) {
+        if (!viewport().isLineVisible(line))
+            return;
+        auto const row = unbox<int>(viewport().translateGridToScreenCoordinate(line));
+        if (row >= 0 && row < pageLines)
+            clearance.avoidRows.push_back(mainTop + row);
+    };
+
+    // The live prompt is the primary screen's, and only where that screen is on display.
+    if (_displayedPage == PageIndex(0))
+        if (auto const prompt = livePromptSpan())
+            for (auto const line:
+                 std::views::iota(unbox<int>(prompt->firstLine), unbox<int>(prompt->lastLine) + 1))
+                avoid(LineOffset(line));
+    if (_cursorPage == _displayedPage && _activeStatusDisplay == ActiveStatusDisplay::Main)
+        avoid(currentScreen().cursor().position.line);
+    // The sticky command header, where this frame draws one over the grid, covers the page's top row with its
+    // command and its chip, whatever the grid row under it holds. One in the chrome covers nothing.
+    if (_settings.stickyHeader.presentation == StickyHeaderPresentation::InGrid
+        && stickyHeaderFor(stickyHeaderInput().input))
+        clearance.avoidRows.push_back(mainTop);
+
+    std::ranges::sort(clearance.avoidRows);
+    auto const duplicates = std::ranges::unique(clearance.avoidRows);
+    clearance.avoidRows.erase(duplicates.begin(), duplicates.end());
+    return clearance;
+}
+
 string Terminal::extractLastMarkRange() const
 {
     // -1 because we always want to start extracting one line above the cursor by default.
@@ -4919,9 +5548,9 @@ string Terminal::extractLastMarkRange() const
 }
 
 // {{{ screen events
-void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
+void Terminal::requestCaptureBuffer(LineCount lines, CaptureLineMode mode)
 {
-    _eventListener.requestCaptureBuffer(lines, logical);
+    _eventListener.requestCaptureBuffer(lines, mode);
 }
 
 void Terminal::requestShowHostWritableStatusLine()
@@ -4966,21 +5595,35 @@ void Terminal::rowsDropped(LineCount pageShift)
 
 void Terminal::screenUpdated()
 {
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.screenUpdated();
+}
+
+void Terminal::screenReplayed()
+{
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.screenReplayed();
+}
+
+Terminal::ScreenNotification Terminal::markScreenChanged()
+{
     ZoneScoped;
     // The screen changed whatever is drawn next, and the display's next frame tells link detection so: set
     // ahead of the returns, which skip only the notification. The same one store as after them.
     _screenDirty = true;
 
     if (isRenderingSuppressed())
-        return;
+        return ScreenNotification::Skipped;
 
-    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
-    {
-        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed));
-        return;
-    }
+    // A frame still waiting for its swap is the display's to show: retry it, and stay quiet while a paint
+    // holds the front buffer still. One that now succeeds is announced as any change is -- the display that
+    // built it may since have gone (a tab switched from), and this output is then the only news a background
+    // tab gets. A spurious announcement to a display that is still there costs nothing; it coalesces.
+    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers
+        && !_renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed)))
+        return ScreenNotification::Skipped;
 
-    _eventListener.screenUpdated();
+    return ScreenNotification::Due;
 }
 
 void Terminal::followOutput()
@@ -5087,9 +5730,15 @@ void Terminal::resetPointerShape()
     _eventListener.setPointerShape("");
 }
 
-void Terminal::copyToClipboard(string_view data)
+void Terminal::copyToClipboard(string_view data, ClipboardWriter writer)
 {
-    _eventListener.copyToClipboard(data);
+    if (writer == ClipboardWriter::User)
+    {
+        runOutsideStateLock(
+            [this, copied = string(data)] { _eventListener.copyToClipboard(copied, ClipboardWriter::User); });
+        return;
+    }
+    _eventListener.copyToClipboard(data, writer);
 }
 
 void Terminal::requestClipboardRead(string_view pc)
@@ -5418,9 +6067,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     auto const& hintMatch = _colorPalette.hintMatch;
     auto const labelFg = resolveColor(hintLabel.foreground);
     auto const labelBg = resolveColor(hintLabel.background);
-    // Dimmed version of label colors for the already-typed portion.
-    auto const typedLabelFg = mixColor(labelFg, _colorPalette.defaultBackground, 0.5f);
-    auto const typedLabelBg = mixColor(labelBg, _colorPalette.defaultBackground, 0.5f);
+    // The already-typed portion: the scheme's typed pair, where it sets one, for the whole label (once a
+    // prefix is typed every label on screen starts with it); else the label mixed halfway to the background.
+    auto const& typedPair = _colorPalette.hintLabelTyped;
+    auto const typedLabelFg = typedPair ? resolveColor(typedPair->foreground)
+                                        : mixColor(labelFg, _colorPalette.defaultBackground, 0.5f);
+    auto const typedLabelBg = typedPair ? resolveColor(typedPair->background)
+                                        : mixColor(labelBg, _colorPalette.defaultBackground, 0.5f);
+    auto const typedLength = typedPair && !filter.empty() ? std::string::npos : filter.size();
     auto const matchBg = resolveColor(hintMatch.background);
     auto const matchBgAlpha = hintMatch.backgroundAlpha;
 
@@ -5500,12 +6154,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
             // overruns a match shorter than its own label: a half-drawn label cannot be typed.
             if (auto const labelIdx = labelIndexAt(cell.position, match))
             {
-                // Replace codepoints with label character.
+                // Replace codepoints with label character, in one narrow cell: over a wide glyph's head or a
+                // scaled (OSC 66) cell it keeps neither their width nor their sizing, and draws over nothing.
                 cell.codepoints = std::u32string(1, static_cast<char32_t>(match.label[*labelIdx]));
                 cell.width = 1;
+                cell.sizing = GlyphSizing {};
 
                 // Distinguish the already-typed prefix from the characters still to type.
-                auto const typed = *labelIdx < filter.size();
+                auto const typed = *labelIdx < typedLength;
                 cell.attributes.foregroundColor = typed ? typedLabelFg : labelFg;
                 cell.attributes.backgroundColor = typed ? typedLabelBg : labelBg;
                 cell.attributes.flags |= CellFlag::Bold;
@@ -5526,7 +6182,8 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
 
         // Fade cells that belong to no match toward the default background, so labels stand out.
         if (!onMatch)
-            blendAttributesTo(cell.attributes, _colorPalette.defaultBackground, 0.5f);
+            blendAttributesTo(
+                cell.attributes, _colorPalette.defaultBackground, 1.0f - _colorPalette.hintUnmatchedOpacity);
     }
 }
 
@@ -5554,7 +6211,7 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
     auto const& matchedText = match.matchedText;
     switch (action)
     {
-        case HintAction::Copy: terminal._eventListener.copyToClipboard(matchedText); break;
+        case HintAction::Copy: terminal.copyToClipboard(matchedText, ClipboardWriter::User); break;
         case HintAction::Open:
             // As Ctrl+click opens it, with its refusals: a path with file_opener at its location, a URL as a
             // link is followed. Nothing, where the printed text chose a scheme no link may open (§7.6).
@@ -5563,7 +6220,7 @@ void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintActi
             break;
         case HintAction::Paste: typeHint(terminal, matchedText); break;
         case HintAction::CopyAndPaste:
-            terminal._eventListener.copyToClipboard(matchedText);
+            terminal.copyToClipboard(matchedText, ClipboardWriter::User);
             typeHint(terminal, matchedText);
             break;
         case HintAction::Select: {
@@ -6040,7 +6697,13 @@ void Terminal::adoptCommandBlock(CommandBlockRecord record, AdoptMode mode)
                 directory->locality = ContextLocality::Foreign;
     // Not through publishActiveBlock(): the rows' ids arrive with the rows.
     if (auto const summary = commandBlocks().adopt(std::move(record), mode))
+    {
         _eventListener.commandBlockFinished(*summary);
+        // A live command the host saw end, as endCommand() is told of one here: it may have switched
+        // branches.
+        if (_gitHead)
+            _gitHead->invalidate();
+    }
 }
 
 chrono::system_clock::time_point Terminal::sessionEpoch() const noexcept
@@ -6619,6 +7282,18 @@ void Terminal::endCommand(int exitCode, ContextOutcome outcome)
     // Raised from inside the parse, under _stateMutex, exactly as progressChanged() is.
     if (auto const summary = _commandBlocks.commandFinished(exitCode, outcome))
         _eventListener.commandBlockFinished(*summary);
+    // The command may have switched branches; the next frame asks.
+    if (_gitHead)
+        _gitHead->invalidate();
+}
+
+void Terminal::abandonRunningCommand()
+{
+    auto const* const current = _commandBlocks.current();
+    if (current == nullptr || current->state != CommandBlockState::Running)
+        return;
+    _commandBlocks.abandonRunning();
+    breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::commandContextStarted(ContextId started)
@@ -6651,6 +7326,9 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
                       core::escape(url));
         return;
     }
+    // Changed or not: a shell re-reports at every prompt, which is when a branch switch shows.
+    if (_gitHead)
+        _gitHead->invalidate();
     auto const changed = *parsed != _currentWorkingDirectory;
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
@@ -6658,6 +7336,27 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
         _eventListener.workingDirectoryChanged();
     _extensionEvents.post(
         [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
+}
+
+std::string Terminal::gitBranch() const
+{
+    return _gitHead ? _gitHead->branch() : std::string {};
+}
+
+void Terminal::refreshGitHead()
+{
+    if (!_gitHead || !containsItem<StatusLineDefinitions::Git>(_indicatorStatusLineDefinition))
+        return;
+    // Only a directory provably on this machine: another machine's path names another repository, or none.
+    _gitHead->refresh(
+        resolveWorkingDirectory(CwdPurpose::OpenLocally)
+            .and_then([](ResolvedWorkingDirectory const& resolved) -> std::optional<std::filesystem::path> {
+                // A path this platform cannot spell has no branch rather than a wrong one.
+                auto path = core::pathFromUtf8(resolved.path);
+                if (!path)
+                    return std::nullopt;
+                return *std::move(path);
+            }));
 }
 
 optional<ResolvedWorkingDirectory> Terminal::resolveWorkingDirectory(CwdPurpose purpose) const
@@ -7550,13 +8249,16 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
 
         auto const savedChanges = _changes.load();
         auto const savedFrameID = _lastFrameID.load();
+        auto const savedRunningStatus = _runningStatus.load(std::memory_order_relaxed);
 
-        // The build alone: no frame of the display's, so neither link detection nor _screenDirty sees it.
+        // The build alone: no frame of the display's, so neither link detection nor _screenDirty sees it --
+        // nor whether a running time is on display, which only a frame drawn says (m8).
         RenderBuffer snapshotBuffer;
         fillRenderBufferInternal(snapshotBuffer, false);
 
         _changes.store(savedChanges);
         _lastFrameID.store(savedFrameID);
+        _runningStatus.store(savedRunningStatus, std::memory_order_relaxed);
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
         _screenTransition.snapshotCursor = snapshotBuffer.cursor;
@@ -7779,8 +8481,9 @@ void Terminal::synchronizedOutput(bool enabled)
     {
         // Instrumentation only. This branch drops a repaint that the throttle would have allowed, and
         // nothing re-arms it: while this state lasts, the batch's screenUpdated() only retries the swap of
-        // the frame built before and tells the display nothing, so the block's end shows only with the next
-        // repaint something else asks for.
+        // the frame built before, and tells the display only when that retry succeeds, so while a paint
+        // still holds the front buffer the block's end shows only with the next repaint something else asks
+        // for.
         ZoneScopedN("syncOut.dropped.trySwap");
         return;
     }
@@ -8483,38 +9186,220 @@ void Terminal::setUserInputLock(UserInputLock lock)
     }
 }
 
-bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
+namespace
 {
+    /// The options @p origin reads a pattern with: a word taken from the screen is text, whatever the toggles
+    /// say (R-g), so a double-clicked `a+b` or a `*` on `f(x)` finds just that.
+    [[nodiscard]] SearchOptions effectiveSearchOptions(SearchOptions options, SearchOrigin origin) noexcept
+    {
+        switch (origin)
+        {
+            case SearchOrigin::Typed: break;
+            case SearchOrigin::DoubleClick:
+            case SearchOrigin::WordUnderCursor: options.syntax = SearchSyntax::Literal; break;
+        }
+        return options;
+    }
+} // namespace
+
+std::expected<SearchChange, SearchPatternError> Terminal::installSearch(std::u32string pattern,
+                                                                        SearchOptions options,
+                                                                        SearchOrigin origin)
+{
+    auto const patternChanged = _search.pattern != pattern;
+    auto const optionsChanged = _search.options != options;
+    auto const readingChanged =
+        effectiveSearchOptions(_search.options, _search.origin) != effectiveSearchOptions(options, origin);
+    _search.options = options;
     _search.origin = origin;
 
-    if (_search.pattern == text)
-        return false;
+    if (!patternChanged && !readingChanged)
+    {
+        if (_search.problem)
+            return std::unexpected { *_search.problem };
+        return optionsChanged ? SearchChange::Changed : SearchChange::Unchanged;
+    }
 
-    _search.pattern = std::move(text);
-    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
-    publishBindingModes();
-    return true;
+    _search.pattern = std::move(pattern);
+    compileSearch();
+    if (patternChanged)
+        publishBindingModes();
+
+    if (_search.problem)
+        return std::unexpected { *_search.problem };
+    return SearchChange::Changed;
 }
 
-bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
+void Terminal::compileSearch()
 {
-    if (_search.caseSensitivity == mode)
-        return false;
+    _search.query.reset();
+    _searchMatchMemo.clear();
+    dropSearchMatchRows();
+    _search.problem.reset();
+    if (_search.pattern.empty())
+        return;
+    auto compiled = SearchQuery::compile(
+        _search.pattern, effectiveSearchOptions(_search.options, _search.origin), _settings.wordDelimiters);
+    if (compiled)
+        _search.query = std::make_shared<SearchQuery const>(std::move(*compiled));
+    else
+        _search.problem = compiled.error();
+}
 
-    _search.caseSensitivity = mode;
-    _search.comparison = caseComparisonFor(_search.pattern, mode);
-    return true;
+std::expected<SearchChange, SearchPatternError> Terminal::setNewSearchTerm(std::u32string text,
+                                                                           SearchOrigin origin)
+{
+    return installSearch(std::move(text), _search.options, origin);
+}
+
+std::expected<SearchChange, SearchPatternError> Terminal::setSearchOptions(SearchOptions options)
+{
+    return installSearch(_search.pattern, options, _search.origin);
+}
+
+std::optional<CellLocation> Terminal::settleSearch(
+    std::expected<std::optional<CellLocation>, SearchPatternError> result)
+{
+    if (result)
+        return *result;
+    endSearchQuery(result.error());
+    return std::nullopt;
+}
+
+void Terminal::endSearchQuery(SearchPatternError error)
+{
+    _search.problem = error;
+    _search.query.reset();
+    _searchMatchMemo.clear();
+    dropSearchMatchRows();
+    _eventListener.searchQueryEnded();
+}
+
+std::optional<CellLocationRange> Terminal::focusedSearchMatch() const
+{
+    if (!_search.query)
+        return std::nullopt;
+    // Const, so a failure to match cannot end the query here; it reads as no match, and the next step or
+    // count that meets it ends the query.
+    // Through the memo the render pass fills: a walk step's refresh of the current match does not run a regex
+    // over the cursor's segment again.
+    return displayedPage()
+        .matchStartingAt(_search.query, normalModeCursorPosition(), _searchMatchMemo)
+        .value_or(std::nullopt);
 }
 
 SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
 {
-    return displayedPage().tallyMatches(
-        u32string_view(_search.pattern), position, _search.caseSensitivity, limit);
+    auto tally = beginSearchTally(position, limit);
+    if (!tally)
+        return SearchMatchTally {};
+    auto progress = continueSearchTally(*tally, displayedPage().grid().linesUsed());
+    while (progress && *progress == WalkProgress::Running)
+        progress = continueSearchTally(*tally, displayedPage().grid().linesUsed());
+    return progress ? tally->walk.tally() : SearchMatchTally {};
+}
+
+std::optional<TerminalSearchTally> Terminal::beginSearchTally(CellLocation position, size_t limit) const
+{
+    if (!_search.query)
+        return std::nullopt;
+    return TerminalSearchTally {
+        .walk = SearchTallyWalk { _search.query, displayedPage().grid(), position, limit },
+        .page = displayedPageIndex(),
+    };
+}
+
+void Terminal::publishSearchMatchRows(SearchTallyWalk const& walk, PageIndex page)
+{
+    auto const rows = walk.matchedRows();
+    auto const idGeneration = pageAt(page).grid().stableIdGeneration();
+    if (_searchMatchRows.page == page && _searchMatchRows.idGeneration == idGeneration
+        && std::ranges::equal(_searchMatchRows.rows, rows))
+        return;
+    _searchMatchRows = SearchMatchRows { .rows = std::vector(rows.begin(), rows.end()),
+                                         .idGeneration = idGeneration,
+                                         .page = page };
+    ++_searchMatchRowsRevision;
+}
+
+void Terminal::dropSearchMatchRows() noexcept
+{
+    if (_searchMatchRows.rows.empty())
+        return;
+    _searchMatchRows.rows.clear();
+    ++_searchMatchRowsRevision;
+}
+
+std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(TerminalSearchTally& tally,
+                                                                              LineCount budget)
+{
+    if (tally.page != displayedPageIndex())
+    {
+        tally.walk.restart(displayedPage().grid());
+        tally.page = displayedPageIndex();
+    }
+    auto const progress = tally.walk.step(displayedPage().grid(), budget);
+    // Only the query still active owns the ticks: a walk of one the user has since replaced says nothing
+    // about the new one.
+    if (tally.walk.query() == _search.query)
+        publishSearchMatchRows(tally.walk, tally.page);
+    // Only the query still active is ended: a walk of one the user has since replaced says nothing about it.
+    if (!progress && tally.walk.query() == _search.query)
+        endSearchQuery(progress.error());
+    return progress;
+}
+
+std::optional<CellLocation> Terminal::searchReverseWithin(CellLocation from, SearchReadBudget& read)
+{
+    if (!_search.query)
+        return std::nullopt;
+    return settleSearch(displayedPage().searchReverseFrom(*_search.query, from, read));
+}
+
+std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocation> match)
+{
+    if (match)
+        viewport().makeVisibleWithinSafeArea(match->line);
+    screenUpdated();
+    return match;
+}
+
+SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
+{
+    // A keystroke's read: rows bound it, and for a regex what it costs the engine (SearchReadBudget), so an
+    // ordinary page is still read whole while a long line is read a segment at a time; the walk finds the
+    // rest.
+    auto const readBudget = [&] {
+        return _search.query ? SearchReadBudget { *_search.query, budget, pageSize().columns }
+                             : SearchReadBudget::rowsOnly(budget);
+    };
+    auto aboveFrom = readBudget();
+    auto match = searchReverseWithin(from, aboveFrom);
+    auto wholeGridRead = false;
+    if (!match && !aboveFrom.exhausted())
+    {
+        // It reached the history's top: the grid may be small enough to answer for every row. The last match,
+        // below @p from, is where a finished walk would wrap to, and none at all is proved.
+        auto const bottomRight = CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - 1,
+                                                .column = boxed_cast<ColumnOffset>(pageSize().columns) - 1 };
+        auto wholeGrid = readBudget();
+        match = searchReverseWithin(bottomRight, wholeGrid);
+        wholeGridRead = !wholeGrid.exhausted();
+    }
+    revealSearchMatch(match);
+
+    if (match)
+        return SearchProbe { .outcome = SearchProbeOutcome::Found, .match = match };
+    // No query (none set, or ended by the probe itself) proves no absence.
+    if (wholeGridRead && _search.query)
+        return SearchProbe { .outcome = SearchProbeOutcome::Absent, .match = std::nullopt };
+    return SearchProbe {};
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
 {
-    if (!setNewSearchTerm(std::move(text), SearchOrigin::Typed))
+    auto const change = setNewSearchTerm(std::move(text), SearchOrigin::WordUnderCursor);
+    if (change && *change == SearchChange::Unchanged)
         return searchPosition;
 
     return searchReverse(searchPosition);
@@ -8522,17 +9407,11 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
 
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_search.pattern);
-    // Through the cached comparison rather than the policy: Search::comparison is kept in step with
-    // the pattern by this class's own setters, and re-deriving it here would put a UCD lookup per
-    // codepoint of the needle on every keystroke of an incremental search. @see Search::comparison.
-    auto const matchLocation = displayedPage().searchFrom(searchText, searchPosition, _search.comparison);
-
-    if (matchLocation)
-        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
-
-    screenUpdated();
-    return matchLocation;
+    // Through the compiled query: compiling it, and resolving its case policy, is done once per pattern by
+    // this class's own setters, never per keystroke of an incremental search.
+    return revealSearchMatch(_search.query
+                                 ? settleSearch(displayedPage().searchFrom(*_search.query, searchPosition))
+                                 : std::nullopt);
 }
 
 std::optional<CellLocation> Terminal::searchNextMatch(CellLocation cursorPosition)
@@ -8566,11 +9445,12 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
 void Terminal::clearSearch()
 {
     _search.pattern.clear();
+    _search.query.reset();
+    _searchMatchMemo.clear();
+    dropSearchMatchRows();
+    _search.problem.reset();
     publishBindingModes();
     _search.origin = SearchOrigin::Typed;
-    // Kept in step with the (now empty) pattern by the same rule the setters use, rather than pinned
-    // to a constant: an empty needle under a pinned Sensitive policy still compares exactly.
-    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
 
     // The highlights of the pattern just dropped are still in the render buffer, and nothing on this
     // path rebuilds it -- unlike search()/searchReverse(). Raised as its own event rather than as
@@ -8602,16 +9482,9 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_search.pattern);
-    // The cached comparison, for the reason Terminal::search() states.
-    auto const matchLocation =
-        displayedPage().searchReverseFrom(searchText, searchPosition, _search.comparison);
-
-    if (matchLocation)
-        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
-
-    screenUpdated();
-    return matchLocation;
+    // The probe's search, bounded by the grid itself: every row it has.
+    auto read = SearchReadBudget::rowsOnly(displayedPage().grid().linesUsed());
+    return revealSearchMatch(searchReverseWithin(searchPosition, read));
 }
 
 CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept
@@ -8776,9 +9649,12 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
 
 constexpr auto MagicStackTopId = size_t { 0 };
 
-void Terminal::setColorPalette(ColorPalette const& palette) noexcept
+void Terminal::setColorPalette(ColorPalette const& palette)
 {
+    auto const previousBackground = _colorPalette.defaultBackground;
     _colorPalette = palette;
+    if (_colorPalette.defaultBackground != previousBackground)
+        notifyDefaultBackgroundColorChanged();
 }
 
 void Terminal::resetColorPalette(ColorPalette const& colors)
@@ -8787,6 +9663,7 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
     // subscribed to the report has seen. It answers each report by querying its colours again and redrawing,
     // so a re-seed that changes nothing -- every reload re-seeds -- must not send one.
     auto const changed = _colorPalette != colors;
+    auto const backgroundChanged = _colorPalette.defaultBackground != colors.defaultBackground;
 
     _colorPalette = colors;
     _defaultColorPalette = colors;
@@ -8795,6 +9672,8 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
 
     if (changed && isModeEnabled(DECMode::ReportColorPaletteUpdated))
         _currentScreen->reportColorPaletteUpdate();
+    if (backgroundChanged)
+        notifyDefaultBackgroundColorChanged();
 }
 
 void Terminal::reconfigureFactorySettings(Settings configured)

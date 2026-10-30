@@ -403,6 +403,70 @@ TEST_CASE("ScrollbarMarks.terminal.blocksAreMarkedAtTheirHeads", "[scrollbar-mar
     }
 }
 
+TEST_CASE("ScrollbarMarks.terminal.searchMatchesAreMarkedOncePerRow", "[scrollbar-marks]")
+{
+    // Row 2 holds the pattern twice, row 5 once: two ticks, from the finished or the partial tally, and none
+    // once the search is gone.
+    auto mc = MockTerm { PageSize { LineCount(8), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("a\r\nb\r\nfoo and foo\r\nc\r\nd\r\nfoo\r\ne\r\nf");
+    REQUIRE(kindsOf(terminal.scrollbarMarkInputs()).empty());
+
+    auto const revision = terminal.scrollbarMarksRevision();
+    REQUIRE(terminal.setNewSearchTerm(U"foo", SearchOrigin::Typed).has_value());
+    auto tally = terminal.beginSearchTally(CellLocation {});
+    REQUIRE(tally.has_value());
+    CHECK(kindsOf(terminal.scrollbarMarkInputs()).empty()); // nothing walked yet
+
+    SECTION("a finished tally")
+    {
+        REQUIRE(terminal.continueSearchTally(*tally, LineCount(100)).value() == WalkProgress::Finished);
+        auto const inputs = terminal.scrollbarMarkInputs();
+        REQUIRE(kindsOf(inputs) == std::vector(2, ScrollbarMarkKind::SearchMatch));
+        CHECK(inputs[0].visibleRow == 2);
+        CHECK(inputs[1].visibleRow == 5);
+        for (auto const& input: inputs)
+            CHECK(lineTextOf(terminal, input.targetStableId).contains("foo"));
+        CHECK(terminal.scrollbarMarksRevision() != revision);
+
+        auto const after = terminal.scrollbarMarksRevision();
+        terminal.clearSearch();
+        CHECK(terminal.scrollbarMarkInputs().empty());
+        CHECK(terminal.scrollbarMarksRevision() != after);
+    }
+
+    SECTION("a partial tally shows what it has read")
+    {
+        REQUIRE(terminal.continueSearchTally(*tally, LineCount(1)).value() == WalkProgress::Running);
+        auto const partial = terminal.scrollbarMarkInputs().size();
+        CHECK(partial < 2);
+        REQUIRE(terminal.continueSearchTally(*tally, LineCount(100)).value() == WalkProgress::Finished);
+        CHECK(terminal.scrollbarMarkInputs().size() == 2);
+    }
+
+    SECTION("a new pattern drops the old one's ticks")
+    {
+        REQUIRE(terminal.continueSearchTally(*tally, LineCount(100)).value() == WalkProgress::Finished);
+        REQUIRE(terminal.scrollbarMarkInputs().size() == 2);
+        REQUIRE(terminal.setNewSearchTerm(U"zzz", SearchOrigin::Typed).has_value());
+        CHECK(terminal.scrollbarMarkInputs().empty());
+    }
+
+    SECTION("a match the scrollback evicted has no tick")
+    {
+        REQUIRE(terminal.continueSearchTally(*tally, LineCount(100)).value() == WalkProgress::Finished);
+        auto small = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, LineCount(3) };
+        small.writeToScreen("foo\r\n");
+        REQUIRE(small.terminal.setNewSearchTerm(U"foo", SearchOrigin::Typed).has_value());
+        auto walk = small.terminal.beginSearchTally(CellLocation {});
+        REQUIRE(walk.has_value());
+        REQUIRE(small.terminal.continueSearchTally(*walk, LineCount(100)).has_value());
+        REQUIRE(small.terminal.scrollbarMarkInputs().size() == 1);
+        test::printLines(small, "filler", 12);
+        CHECK(small.terminal.scrollbarMarkInputs().empty());
+    }
+}
+
 TEST_CASE("ScrollbarMarks.terminal.positionsCountFromTheOldestHistoryRow", "[scrollbar-marks]")
 {
     // Row 0 is the top of the scrollback, not of the page: the handle measures its range from there.

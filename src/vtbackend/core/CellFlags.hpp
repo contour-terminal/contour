@@ -50,7 +50,11 @@
     _(MulticellContinuation, 19)                                                                          \
     /* Structural: an empty cell a wide character left at the end of its row when it did not fit  \ \ \ \ \
        there and moved on to the next (foot's spacer). Not part of the text: a reflow drops it. */        \
-    _(WrapPadding, 20)
+    _(WrapPadding, 20)                                                                                    \
+    /* Render-only: a cell of the text an input method is composing, drawn inline (PreeditStyle::Inline). \
+       No control sequence sets it and the grid never stores it -- only RenderBufferBuilder puts it on    \
+       the preedit's render cells, for the rasterizer to underline them. */                               \
+    _(InputMethodPreedit, 21)
 
 namespace vtbackend
 {
@@ -67,6 +71,10 @@ enum class CellFlag : uint32_t
 };
 
 using CellFlags = core::Flags<CellFlag>;
+
+/// The flags only the render buffer puts on a cell, never a grid: a cell read from anywhere else -- the
+/// native wire, say -- that carries one is lying, and is read without it.
+inline constexpr auto RenderOnlyCellFlags = CellFlags { CellFlag::InputMethodPreedit };
 
 /// Every `CellFlag`, in declaration order, excluding `None`.
 ///

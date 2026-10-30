@@ -140,6 +140,12 @@ std::u32string stickyHeaderChip(CommandBlockRecord const& record, std::chrono::s
     return {};
 }
 
+std::string stickyHeaderCommandLine(CommandLineText const& commandLine)
+{
+    auto const cut = CommandLineText { truncateUtf8(commandLine.raw(), MaxStickyHeaderCommandLineBytes) };
+    return truncateUtf8(cut.display(), MaxStickyHeaderCommandLineBytes);
+}
+
 std::u32string evictedPlaceholderText(CommandLineText const& commandLine, ColumnCount budget)
 {
     // Four bytes a column: no codepoint that takes one is longer. Cut while still raw, so the sanitiser never

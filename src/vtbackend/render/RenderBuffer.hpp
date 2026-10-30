@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockPill.hpp>
+#include <vtbackend/core/BlockRailKinds.hpp>
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -11,6 +14,8 @@
 #include <vtbackend/core/TextScale.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
+
+#include <core/Flags.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -113,6 +118,13 @@ struct RenderGutterCell
     /// The column it is drawn at, relative to grid column 0: -1 is the cell beside the grid, and a
     /// gutter N columns wide spans -N .. -1.
     ColumnOffset column { -1 };
+
+    // A rail cell -- one per row beside which the block rail draws a segment or a mark -- is the strip after
+    // the gutter's cells, not a cell column: its codepoint is 0 and its column 0.
+    RailSegment rail = RailSegment::None;          ///< The rail segment it draws.
+    RailMark mark = RailMark::None;                ///< The mark on the bar.
+    std::optional<CommandBlockOutcome> outcome {}; ///< How its block reads; nullopt for a row of no block.
+    RGBColor railColor {};                         ///< The bar's colour.
 };
 
 /// The sticky command header drawn over the main page's first row.
@@ -134,6 +146,12 @@ struct RenderStickyHeader
     std::vector<RenderCell> chip {};
     RGBColor background {}; ///< The band's colour.
     RGBColor separator {};  ///< The one-pixel line along the band's bottom edge.
+    /// Where it is drawn: Chrome leaves it to the pane header or the title band, and the renderer skips it.
+    StickyHeaderPresentation presentation = StickyHeaderPresentation::InGrid;
+    CommandBlockOutcome outcome = CommandBlockOutcome::Success; ///< How its block reads (@see outcomeOf).
+    /// The block's command line in its display form, at most MaxStickyHeaderCommandLineBytes: what the
+    /// chrome names the block by. Empty when the record has none (a recovered prompt row speaks for it).
+    std::string commandLine {};
 };
 
 /// Lays @p text out as render cells from @p origin rightwards, appended to @p output, for host-drawn text
@@ -157,6 +175,58 @@ ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
                               RenderAttributes const& attributes,
                               CellLocation origin,
                               ColumnOffset end);
+
+/// A chip's band: a translucent fill behind an annotation's cells -- a status chip's, a fold chip's -- whose
+/// ends the renderer rounds as it rounds the rail's.
+struct RenderChipBand
+{
+    LineOffset lineOffset {}; ///< The screen row.
+    ColumnRange columns {};   ///< Its columns, both ends included.
+    RGBAColor fill {};        ///< The fill, its alpha the band's opacity.
+
+    bool operator==(RenderChipBand const&) const = default;
+};
+
+/// A block chip on a native row: a pill whose label the renderer shapes in the UI font, drawn over the
+/// blank columns the terminal placed it in.
+///
+/// The text rides along, not cells: the label is proportional, and only the renderer, which holds the
+/// face, knows where each glyph goes. The Terminal row's chips stay annotation cells over a RenderChipBand.
+struct RenderChip
+{
+    LineOffset lineOffset {};             ///< The screen row.
+    ColumnRange columns {};               ///< The columns it was placed in, both ends included.
+    PillStyle style = PillStyle::Success; ///< What it says: its weight, padding and pill.
+    std::u32string text {};               ///< Its label.
+    RGBColor ink {};                      ///< The label's colour, legible over the pill over the page.
+    std::optional<RGBAColor> fill {};     ///< The pill's fill; none draws the label alone.
+    std::optional<RGBAColor> ring {};     ///< The hairline inside the pill's edge; none draws no ring.
+
+    bool operator==(RenderChip const&) const = default;
+};
+
+/// Which edges of a block the page cuts: the block runs on past them, so its outline has no edge there.
+enum class BlockContinues : uint8_t
+{
+    Above = 1 << 0, ///< Its head is above the page's first row.
+    Below = 1 << 1, ///< Its tail is below the page's last row.
+};
+
+/// A set of BlockContinues; empty for a block the page shows whole.
+using BlockContinuations = core::Flags<BlockContinues>;
+
+/// The block the pointer hovers on a native row, as the canvas draws it: its rows tinted under their text,
+/// and a ring around them across the page -- the grid's first column to its last.
+struct RenderBlockHighlight
+{
+    LineOffset top {};               ///< The block's first drawn screen row.
+    LineCount height {};             ///< How many rows it spans on screen, clipped to the page.
+    RGBAColor tint {};               ///< Laid over its rows, under their text.
+    RGBAColor ring {};               ///< The one-pixel ring inside its outline.
+    BlockContinuations continues {}; ///< The edges the page cuts: the ring is not drawn along them.
+
+    bool operator==(RenderBlockHighlight const&) const = default;
+};
 
 /// Marks @p cells as one shaping group: the text shaper takes them as a single run, first to last.
 /// @param cells The cells, left to right; none is marked when it is empty.
@@ -222,12 +292,19 @@ struct RenderBuffer
     /// background.
     std::optional<RenderStatusBar> statusBar {};
 
-    /// Render-only text the terminal lays over the page -- a collapsed fold's `⋯ 1,234 lines` -- already
-    /// laid out (@see layoutRenderText), one shaping group per annotation.
+    /// Render-only text the terminal lays over the page -- a collapsed fold's `1,234 lines hidden ⌄` --
+    /// already laid out (@see layoutRenderText), one shaping group per annotation.
     ///
     /// Not in @ref cells, for the gutter's reason: selection, copying and the accessibility bridge walk
     /// those, and an annotation is something to read, never something to select.
     std::vector<RenderCell> annotations {};
+
+    /// The bands under the chips among @ref annotations, drawn before them.
+    std::vector<RenderChipBand> chipBands {};
+
+    /// The block chips of a native row, drawn as pills by the renderer: the Terminal row's are
+    /// @ref annotations over @ref chipBands instead.
+    std::vector<RenderChip> chips {};
 
     std::optional<RenderCursor> cursor {};
 
@@ -236,6 +313,9 @@ struct RenderBuffer
 
     /// The row a jump just landed on, while its flash fades; absent otherwise.
     std::optional<RenderLineFlash> lineFlash {};
+
+    /// The hovered block's tint and ring on a native row; absent while no block is hovered.
+    std::optional<RenderBlockHighlight> blockHighlight {};
 
     uint64_t frameID {};
 
@@ -257,8 +337,11 @@ struct RenderBuffer
         gutter.clear();
         statusBar.reset();
         annotations.clear();
+        chipBands.clear();
+        chips.clear();
         cursor.reset();
         lineFlash.reset();
+        blockHighlight.reset();
         if (stickyHeader)
         {
             _retiredStickyHeader = std::move(*stickyHeader);

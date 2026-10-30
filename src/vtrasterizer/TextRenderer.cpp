@@ -495,6 +495,84 @@ void TextRenderer::endFrame()
     _textClusterGrouper.endFrame();
 }
 
+text::ShapeResult const& TextRenderer::shapeLabel(text::FontKey font, std::u32string_view text)
+{
+    // Salted apart from the grid's runs, whose key multiplies a TextStyle in: a label shaped in the grid's
+    // own regular face (the UI font's fallback) is shaped without cell semantics and must not answer for
+    // a grid run of the same text.
+    auto constexpr LabelSalt = uint32_t { 0x4C41'424C };
+    auto const hash = StrongHash::compute(text) * font.value * LabelSalt;
+    auto const* cached =
+        _textShapingCache->getOrTryEmplace(hash, [&](auto) -> std::optional<text::ShapeResult> {
+            auto clusters =
+                std::ranges::to<std::vector>(std::views::iota(0u, static_cast<unsigned>(text.size())));
+            auto shaped = text::ShapeResult {};
+            auto run = unicode::run_segmenter::range {};
+            auto segmenter = unicode::run_segmenter(text);
+            while (segmenter.consume(out(run)))
+            {
+                auto const count = run.end - run.start;
+                _textShaper->shape(font,
+                                   text.substr(run.start, count),
+                                   gsl::span(clusters.data() + run.start, count),
+                                   get<unicode::Script>(run.properties),
+                                   get<unicode::PresentationStyle>(run.properties),
+                                   shaped);
+            }
+            if (shaped.empty() && !text.empty())
+            {
+                _uncachedShapeResult = std::move(shaped);
+                return std::nullopt;
+            }
+            return shaped;
+        });
+    return cached ? *cached : _uncachedShapeResult;
+}
+
+int TextRenderer::labelWidth(text::FontKey font, std::u32string_view text)
+{
+    auto width = 0;
+    for (auto const& glyph: shapeLabel(font, text))
+        width += glyph.advance.x;
+    return width;
+}
+
+void TextRenderer::renderLabel(crispy::Point origin,
+                               text::FontKey font,
+                               std::u32string_view text,
+                               vtbackend::RGBAColor color)
+{
+    ZoneScoped;
+    if (text.empty())
+        return;
+
+    _textRendererEvents.onBeforeRenderingText();
+    auto _ = core::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
+
+    // applyGlyphPositionToPen() takes a cell's bottom-left, the baseline that far above it.
+    auto pen = crispy::Point { .x = origin.x, .y = origin.y + _gridMetrics.baseline };
+    for (auto const& glyphPosition: shapeLabel(font, text))
+    {
+        auto const glyphHash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+        if (auto const* attributes =
+                getOrCreateRasterizedMetadata(glyphHash, glyphPosition.glyph, glyphPosition.presentation))
+        {
+            auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
+            renderRasterizedGlyph(pen1, color, *attributes);
+            // A glyph wider than a tile was sliced as it was rasterized, as the grid's are.
+            auto sliceX = pen1.x + unbox<int>(attributes->metadata.targetSize.width);
+            auto sliceKey = unbox(textureAtlas().tileSize().width);
+            while (AtlasTileAttributes const* slice = textureAtlas().tryGet(glyphHash * sliceKey))
+            {
+                renderTile(atlas::RenderTile::X { sliceX }, atlas::RenderTile::Y { pen1.y }, color, *slice);
+                sliceX += unbox<int>(slice->metadata.targetSize.width);
+                sliceKey += unbox(textureAtlas().tileSize().width);
+            }
+        }
+        pen.x += glyphPosition.advance.x;
+    }
+}
+
 Point TextRenderer::applyGlyphPositionToPen(Point pen,
                                             AtlasTileAttributes const& tileAttributes,
                                             text::GlyphPosition const& gpos) const noexcept

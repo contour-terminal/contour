@@ -106,6 +106,16 @@ std::string truncatedCommandLine(std::string_view text)
     return truncateUtf8(text, MaxRecordedCommandLineBytes);
 }
 
+bool isTruncatedCommandLine(std::string_view text) noexcept
+{
+    // A cut keeps a whole-code-point prefix of at most Max - |…| bytes (a code point is up to 4 bytes, so at
+    // least Max - |…| - 3 of them), then the ellipsis.
+    constexpr auto LongestCodePointTail = size_t { 3 };
+    constexpr auto ShortestCut = MaxRecordedCommandLineBytes - LongestCodePointTail;
+    return text.size() >= ShortestCut && text.size() <= MaxRecordedCommandLineBytes
+           && text.ends_with(Ellipsis);
+}
+
 std::optional<LineOffset> headOffsetOf(Grid const& grid, CommandBlockRecord const& record) noexcept
 {
     if (record.headIdGeneration != grid.stableIdGeneration())
@@ -273,6 +283,19 @@ std::optional<CommandBlockSummary> CommandBlockStore::commandFinished(int exitCo
     stamp(record->id, StampNotice::Told);
     ++_revision;
     return summaryOf(*record);
+}
+
+void CommandBlockStore::abandonRunning()
+{
+    auto* const record = running();
+    if (!record)
+        return;
+
+    record->state = CommandBlockState::Finished;
+    record->end = CommandBlockEnd::Abandoned;
+    endRun();
+    stamp(record->id, StampNotice::Told);
+    ++_revision;
 }
 
 void CommandBlockStore::commandContextStarted(ContextId started, ContextId parent)

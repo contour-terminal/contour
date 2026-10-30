@@ -10,11 +10,11 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
 #include <algorithm>
 #include <ranges>
+#include <span>
 #include <vector>
 
 using namespace std;
@@ -24,17 +24,6 @@ namespace vtbackend
 
 namespace
 {
-    /// Width of a grapheme cluster, in columns.
-    ///
-    /// This used to be a private copy of the rule that handled VS16 but not VS15, which meant the
-    /// renderer and the grid could disagree about how wide the same cluster was. Both now ask
-    /// libunicode.
-    ColumnCount graphemeClusterWidth(std::u32string_view cluster) noexcept
-    {
-        assert(!cluster.empty());
-        return ColumnCount::cast_from(unicode::grapheme_cluster_width(cluster));
-    }
-
     constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept
     {
         if (holds_alternative<CellForegroundColor>(configuredColor))
@@ -485,11 +474,22 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
                                                     Color foregroundColor,
                                                     Color backgroundColor) const noexcept
 {
+    return makeColorsForCell(
+        gridPosition, cellFlags, foregroundColor, backgroundColor, CursorColours::AtTheCursor);
+}
+
+RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
+                                                    CellFlags cellFlags,
+                                                    Color foregroundColor,
+                                                    Color backgroundColor,
+                                                    CursorColours cursorColours) const noexcept
+{
     auto const hasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     // clang-format off
     bool const paintCursor =
-        (hasCursor || (_prevHasCursor && _prevWidth == 2))
+        cursorColours == CursorColours::AtTheCursor
+            && (hasCursor || (_prevHasCursor && _prevWidth == 2))
             && _output->cursor.has_value()
             && _output->cursor->shape == CursorShape::Block
             && _output->cursor->animationProgress >= 1.0f;  // Don't invert cell during animation
@@ -697,6 +697,9 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
         }
     }
 
+    // The grid's text at the cursor gives way to what the input method is composing there.
+    overlayInputMethodEditor(frontIndex, lineOffset);
+
     auto const backIndex = _output->cells.size() - 1;
 
     _output->cells[frontIndex].groupStart = true;
@@ -710,54 +713,34 @@ void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
         return;
 
     auto const& search = _terminal->search();
-    if (search.pattern.empty())
+    if (!search.query || _searchFailure)
         return;
 
     auto const& grid = _screen->grid();
-    auto const pattern = u32string_view(search.pattern);
     auto const columns = unbox(grid.pageSize().columns);
 
-    // A match that reaches this row may begin on a row above it in the same logical line. Each row above
-    // that holds text gives it at least one codepoint of the needle, so it begins no further up than the
-    // needle has codepoints in rows that hold text. A row holding none -- all of it a tall block's lower
-    // part -- gives the match nothing, and costs nothing to cross.
-    auto const holdsText = [&grid](LineOffset row) {
-        auto const& line = grid.lineAt(row);
-        auto const& storage = line.storage();
-        return !line.isBlank()
-               && std::ranges::any_of(
-                   std::views::iota(size_t { 0 }, unbox<size_t>(line.size())), [&storage](size_t column) {
-                       return storage.clusterSize[column] != 0 && !holdsNoText(storage, column);
-                   });
-    };
-    auto firstRow = gridLine;
-    auto rowsWithText = size_t { 0 };
-    while (rowsWithText < pattern.size() && grid.continuesRowAbove(firstRow))
+    // Only once the rows leave the segment last asked about: finding a row's segment walks up to its logical
+    // line's head, which per row would cost a long line's length per row.
+    if (!_searchSegment || gridLine < _searchSegment->first || gridLine > _searchSegment->last)
     {
-        --firstRow;
-        if (holdsText(firstRow))
-            ++rowsWithText;
-    }
-    if (_searchScannedThrough)
-        firstRow = max(firstRow, *_searchScannedThrough + 1);
-
-    auto const cursor = _terminal->normalModeCursorPosition();
-    for (auto const row: std::views::iota(unbox(firstRow), unbox(gridLine) + 1))
-    {
-        for (auto const column: std::views::iota(0, columns))
+        auto const segment = searchSegmentAt(grid, gridLine, search.query->segmentCells());
+        _searchSegment = segment;
+        // Remembered across frames: a slow regex over a visible segment is paid once, not on every frame.
+        auto const matches = _terminal->searchMatchMemo().matchesIn(search.query, grid, segment);
+        if (!matches)
         {
-            auto const first = CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) };
-            if (auto const last = grid.matchedTextEnd(pattern, first, search.comparison))
-                _searchMatches.push_back(SearchMatch {
-                    .first = first,
-                    .last = *last,
-                    .highlight = CellLocationRange { .first = first, .second = *last }.contains(cursor)
-                                     ? SearchHighlight::FocusedMatch
-                                     : SearchHighlight::Match,
-                });
+            _searchFailure = matches.error();
+            _searchMatches.clear();
+            return;
         }
+        auto const cursor = _terminal->normalModeCursorPosition();
+        for (auto const& match: *matches)
+            _searchMatches.push_back(SearchMatch {
+                .first = match.first,
+                .last = match.second,
+                .highlight = match.contains(cursor) ? SearchHighlight::FocusedMatch : SearchHighlight::Match,
+            });
     }
-    _searchScannedThrough = max(_searchScannedThrough.value_or(gridLine), gridLine);
 
     // A match that ends above this row reaches no row still to come.
     std::erase_if(_searchMatches,
@@ -804,7 +787,11 @@ void RenderBufferBuilder::paintSearchHighlight(ColumnOffset column)
                                              .background = cellAttributes.backgroundColor };
     auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
     cellAttributes.backgroundColor = searchMatchColors.background;
-    cellAttributes.foregroundColor = searchMatchColors.foreground;
+    // A fill that sets its own ink is mixed over the cell's own background, which is not always the page --
+    // a reverse-video bar, a selection -- so the ink is picked against what the cell actually shows.
+    cellAttributes.foregroundColor = std::holds_alternative<RGBColor>(highlightColors.foreground)
+                                         ? legibleInkOn(palette, searchMatchColors.background)
+                                         : searchMatchColors.foreground;
 }
 
 void RenderBufferBuilder::prepareLinkOverlay(LineOffset gridLine)
@@ -932,27 +919,21 @@ void RenderBufferBuilder::renderGridText(CellLocation screenPosition,
     // on a wide glyph is not extended across that glyph's second column on this path.
 }
 
-ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
-                                                GraphicsAttributes textAttributes,
-                                                std::string_view text)
+ColumnCount RenderBufferBuilder::renderPreedit(CellLocation screenPosition,
+                                               GraphicsAttributes textAttributes,
+                                               std::span<PreeditCluster const> clusters)
 {
     auto columnCountRendered = ColumnCount(0);
 
-    auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
-    for (u32string const& graphemeCluster: graphemeClusterSegmenter)
+    for (auto const& [graphemeCluster, width]: clusters)
     {
         auto const gridPosition =
             gridPositionOf(screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
-                                                textAttributes.backgroundColor);
-        auto const width = graphemeClusterWidth(graphemeCluster);
-        // std::cout << std::format(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
-        //            columnOffset,
-        //            width,
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
+                                                textAttributes.backgroundColor,
+                                                CursorColours::Never);
 
         _output->cells.emplace_back(makeRenderCellExplicit(
             _terminal->colorPalette(),
@@ -982,7 +963,7 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
                 displayColumn(screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i))));
         }
 
-        columnCountRendered += ColumnCount::cast_from(width);
+        columnCountRendered += width;
         _lineNr = screenPosition.line;
         _prevWidth = 0;
         _prevHasCursor = false;
@@ -990,26 +971,103 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
     return columnCountRendered;
 }
 
+ColumnCount RenderBufferBuilder::currentLineColumns() const noexcept
+{
+    return preeditLineColumns(_screen->pageSize().columns, _currentLineFlags);
+}
+
+PreeditPlacement const& RenderBufferBuilder::preeditPlacement()
+{
+    // Placed once a frame, on the cursor's own line, whose flags are the current ones whenever this is asked.
+    if (!_preeditPlacement)
+        _preeditPlacement = placePreedit(_inputMethodData.preeditString,
+                                         _cursorPosition->column,
+                                         currentLineColumns(),
+                                         [this, line = _cursorPosition->line](ColumnOffset column) {
+                                             return _screen->continuesAWideGlyphAt(
+                                                 CellLocation { .line = line, .column = column });
+                                         });
+    return *_preeditPlacement;
+}
+
+GraphicsAttributes RenderBufferBuilder::preeditAttributes() const noexcept
+{
+    auto textAttributes = GraphicsAttributes {};
+    switch (_terminal->settings().preeditStyle)
+    {
+        case PreeditStyle::Highlighted: {
+            auto const colors = _terminal->colorPalette().inputMethodEditor;
+            textAttributes.foregroundColor = colors.foreground;
+            textAttributes.backgroundColor = colors.background;
+            textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
+            break;
+        }
+        case PreeditStyle::Inline:
+            // The default colours, which makeColorsForCell() resolves as for any cell -- reversed under
+            // DECSCNM, so the preedit reads as the text around it. The rasterizer draws the flag's underline
+            // in the foreground.
+            textAttributes.flags.enable(CellFlag::InputMethodPreedit);
+            break;
+    }
+    return textAttributes;
+}
+
+void RenderBufferBuilder::overlayInputMethodEditor(size_t frontIndex, LineOffset line)
+{
+    if (!_cursorPosition || _inputMethodData.preeditString.empty())
+        return;
+    if (gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line
+        != _cursorPosition->line)
+        return;
+
+    auto const screenPosition = CellLocation { .line = line, .column = preeditPlacement().start };
+    auto const rowCells = _output->cells.size() - frontIndex;
+    auto const preeditFront = _output->cells.size();
+    if (!tryRenderInputMethodEditor(screenPosition, gridPositionOf(screenPosition)))
+        return;
+    // This row is already emitted whole: nothing is left to skip.
+    auto const columns = unbox<size_t>(_inputMethodSkipColumns) + 1;
+    _inputMethodSkipColumns = ColumnCount(0);
+
+    // The preedit's cells take the place of the row's own from its first column on, one for one. Both sides
+    // emit one render cell per column, which is what makes that a move -- checked rather than assumed, for a
+    // row whose cells and columns disagree would come out with cells missing or doubled.
+    auto const at = frontIndex + unbox<size_t>(screenPosition.column);
+    auto const moved = _output->cells.size() - preeditFront;
+    if (moved != columns || at + moved > frontIndex + rowCells)
+    {
+        _output->cells.resize(preeditFront);
+        return;
+    }
+    auto const preedit = std::span(_output->cells).subspan(preeditFront);
+    std::ranges::move(preedit, _output->cells.begin() + static_cast<std::ptrdiff_t>(at));
+    _output->cells.resize(preeditFront);
+    _output->cells.back().groupEnd = true;
+    if (at > frontIndex)
+        _output->cells[at - 1].groupEnd = true;
+}
+
 bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition)
 {
-    // Render IME preeditString if available and screen position matches cursor position.
-    if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
+    // The preedit is drawn where it is placed on the cursor's line: at the cursor, or left of it when that is
+    // what keeps it on the line.
+    if (_cursorPosition && !_inputMethodData.preeditString.empty()
+        && gridPosition.line == _cursorPosition->line && gridPosition.column == preeditPlacement().start)
     {
-        auto const inputMethodEditorStyles = _terminal->colorPalette().inputMethodEditor;
-        auto textAttributes = GraphicsAttributes {};
-        textAttributes.foregroundColor = inputMethodEditorStyles.foreground;
-        textAttributes.backgroundColor = inputMethodEditorStyles.background;
-        textAttributes.flags.enable({ CellFlag::Bold, CellFlag::Underline });
+        auto const textAttributes = preeditAttributes();
 
         if (!_output->cells.empty())
             _output->cells.back().groupEnd = true;
 
-        _inputMethodSkipColumns =
-            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString);
+        _inputMethodSkipColumns = renderPreedit(screenPosition, textAttributes, preeditPlacement().clusters);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
+            // After the preedit, as an input method's caret is -- but never past the line's last cell, where
+            // a preedit that ends at the edge would put it.
             if (_output->cursor.has_value())
-                _output->cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
+                _output->cursor->position.column =
+                    std::min(screenPosition.column + ColumnOffset::cast_from(_inputMethodSkipColumns),
+                             boxed_cast<ColumnOffset>(currentLineColumns()) - 1);
             _output->cells.at(_output->cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart =
                 true;
             _output->cells.back().groupEnd = true;
