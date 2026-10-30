@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <utility>
 
 using namespace contour;
@@ -27,9 +28,13 @@ TEST_CASE("shortcutText renders a chord the way a user would type it", "[contour
     {
         // std::formatter<Modifiers> would give "Shift|Control" — ascending bit order, pipe-joined.
         // Neither is what a keyboard hint looks like, which is the whole reason this renderer exists.
-        CHECK(shortcutText(Modifiers { Modifier::Control, Modifier::Shift }, ShortcutInput { U'P' })
+        CHECK(shortcutText(Modifiers { Modifier::Control, Modifier::Shift },
+                           ShortcutInput { U'P' },
+                           ShortcutStyle::Text)
               == "Ctrl+Shift+P");
-        CHECK(shortcutText(Modifiers { Modifier::Shift, Modifier::Control }, ShortcutInput { U'P' })
+        CHECK(shortcutText(Modifiers { Modifier::Shift, Modifier::Control },
+                           ShortcutInput { U'P' },
+                           ShortcutStyle::Text)
               == "Ctrl+Shift+P");
     }
 
@@ -40,23 +45,28 @@ TEST_CASE("shortcutText renders a chord the way a user would type it", "[contour
         // user what to write in `input_mapping:` if they want to rebind it.
         auto const expected = std::string { "Ctrl+Alt+Shift+LeftArrow" };
         CHECK(shortcutText(Modifiers { Modifier::Shift, Modifier::Alt, Modifier::Control },
-                           ShortcutInput { Key::LeftArrow })
+                           ShortcutInput { Key::LeftArrow },
+                           ShortcutStyle::Text)
               == expected);
         CHECK(shortcutText(Modifiers { Modifier::Control, Modifier::Shift, Modifier::Alt },
-                           ShortcutInput { Key::LeftArrow })
+                           ShortcutInput { Key::LeftArrow },
+                           ShortcutStyle::Text)
               == expected);
     }
 
     SECTION("both halves of the input mappings render: a named key and a character")
     {
-        CHECK(shortcutText(Modifiers { Modifier::Alt }, ShortcutInput { Key::Enter }) == "Alt+Enter");
-        CHECK(shortcutText(Modifiers { Modifier::Control, Modifier::Shift }, ShortcutInput { U'T' })
+        CHECK(shortcutText(Modifiers { Modifier::Alt }, ShortcutInput { Key::Enter }, ShortcutStyle::Text)
+              == "Alt+Enter");
+        CHECK(shortcutText(Modifiers { Modifier::Control, Modifier::Shift },
+                           ShortcutInput { U'T' },
+                           ShortcutStyle::Text)
               == "Ctrl+Shift+T");
     }
 
     SECTION("an unmodified key is just the key")
     {
-        CHECK(shortcutText(Modifiers {}, ShortcutInput { Key::F3 }) == "F3");
+        CHECK(shortcutText(Modifiers {}, ShortcutInput { Key::F3 }, ShortcutStyle::Text) == "F3");
     }
 }
 
@@ -66,7 +76,7 @@ TEST_CASE("shortcutIndex advertises the built-in chords the user's bindings leav
 
     // Ctrl+Shift+G is in no default binding, so only the fallback table can name it.
     auto const defaults = config::Config {};
-    auto const index = shortcutIndex(defaults);
+    auto const index = shortcutIndex(defaults, ShortcutStyle::Text);
     REQUIRE(index.contains(openOutput));
     CHECK(index.at(openOutput) == "Ctrl+Shift+G");
 
@@ -79,14 +89,14 @@ TEST_CASE("shortcutIndex advertises the built-in chords the user's bindings leav
                                    .binding = { actions::ScrollToTop {} } });
     auto shadowing = config::Config {};
     shadowing.inputMappings = std::move(mappings);
-    auto const shadowed = shortcutIndex(shadowing);
+    auto const shadowed = shortcutIndex(shadowing, ShortcutStyle::Text);
     CHECK_FALSE(shadowed.contains(openOutput));
 }
 
 TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][palette]")
 {
     auto const& defaults = config::defaultInputMappings();
-    auto const index = shortcutIndex(defaults);
+    auto const index = shortcutIndex(defaults, ShortcutStyle::Text);
 
     SECTION("the default bindings are found under their command id")
     {
@@ -94,7 +104,12 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
         CHECK(index.at("CreateNewTab") == "Ctrl+Shift+T");
 
         REQUIRE(index.contains("SplitVertical"));
-        CHECK(index.at("SplitVertical") == "Ctrl+Shift+E");
+        CHECK(index.at("SplitVertical") == contour::test::paneChordText(actions::SplitVertical {}));
+
+        // Every pane action the palette and the menus list shows the chord that runs it.
+        for (auto const* id:
+             { "SplitHorizontal", "FocusPaneLeft", "FocusPaneRight", "FocusPaneUp", "FocusPaneDown" })
+            CHECK(index.contains(id));
 
         REQUIRE(index.contains("ToggleFullscreen"));
         CHECK(index.at("ToggleFullscreen") == "Alt+Enter");
@@ -133,7 +148,7 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
                                        .input = U'Q',
                                        .binding = { actions::ScrollToTop {}, actions::CancelSelection {} } });
 
-        auto const multi = shortcutIndex(mappings);
+        auto const multi = shortcutIndex(mappings, ShortcutStyle::Text);
         CHECK_FALSE(multi.contains("ScrollToTop"));
         CHECK_FALSE(multi.contains("CancelSelection"));
     }
@@ -151,7 +166,7 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
                                                                    .input = U'B',
                                                                    .binding = { actions::ScrollToTop {} } });
 
-        auto const twice = shortcutIndex(mappings);
+        auto const twice = shortcutIndex(mappings, ShortcutStyle::Text);
         CHECK(twice.at("ScrollToTop") == "Ctrl+A");
     }
 }
@@ -159,13 +174,102 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
 TEST_CASE("describeLinkGesture spells the follow gesture as the shortcut column spells a chord",
           "[contour][links]")
 {
-    CHECK(describeLinkGesture(config::Config {})
-          == "Ctrl+Click (Shift+Ctrl+Click inside applications that use the mouse)");
-    CHECK(describeLinkGesture(contour::test::loadConfigFromYaml(
-              "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"))
-          == "Alt+Click (Shift+Alt+Click inside applications that use the mouse)");
+    // Classic: the edition whose follow modifier is Ctrl on every platform (Native2026's is Command on
+    // macOS).
+    auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
+    CHECK(describeLinkGesture(classic, ShortcutStyle::Text)
+          == "Ctrl+Click (Ctrl+Shift+Click inside applications that use the mouse)");
+    CHECK(describeLinkGesture(
+              contour::test::loadConfigFromYaml(
+                  "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"),
+              ShortcutStyle::Text)
+          == "Alt+Click (Alt+Shift+Click inside applications that use the mouse)");
     CHECK(
         describeLinkGesture(contour::test::loadConfigFromYaml(
-                                "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n"))
+                                "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n"),
+                            ShortcutStyle::Text)
             .starts_with("No mouse binding follows links"));
+}
+
+TEST_CASE("Shortcut.macGlyphs", "[command]")
+{
+    using vtbackend::Modifier;
+    auto const cmdShift = Modifiers { Modifier::Super, Modifier::Shift };
+    CHECK(shortcutText(cmdShift, ShortcutInput { U'P' }, ShortcutStyle::MacGlyphs) == "⇧⌘P");
+    CHECK(
+        shortcutText(Modifiers { Modifier::Control }, ShortcutInput { Key::Enter }, ShortcutStyle::MacGlyphs)
+        == "⌃↩");
+    CHECK(shortcutText(cmdShift, ShortcutInput { U'P' }, ShortcutStyle::Text) == "Shift+Super+P");
+    // A modifier without a glyph falls back to its name, never vanishes.
+    CHECK(shortcutText(Modifiers { Modifier::Hyper }, ShortcutInput { U'K' }, ShortcutStyle::MacGlyphs)
+          == "Hyper+K");
+    // A key without a glyph keeps its name.
+    CHECK(shortcutText(Modifiers { Modifier::Alt }, ShortcutInput { Key::F3 }, ShortcutStyle::MacGlyphs)
+          == "⌥F3");
+}
+
+TEST_CASE("Shortcut.keyGlyphTable", "[command]")
+{
+    for (auto const& row: ShortcutKeyGlyphTable)
+        CHECK(shortcutText(Modifiers {}, ShortcutInput { row.key }, ShortcutStyle::MacGlyphs) == row.glyph);
+    CHECK(shortcutText(Modifiers {}, ShortcutInput { Key::PageDown }, ShortcutStyle::MacGlyphs) == "⇟");
+    CHECK(shortcutText(Modifiers {}, ShortcutInput { Key::Home }, ShortcutStyle::Text) == "Home");
+}
+
+TEST_CASE("Shortcut.indexAndLinkGestureFollowStyle", "[command]")
+{
+    auto const index = shortcutIndex(config::defaultInputMappings(), ShortcutStyle::MacGlyphs);
+    CHECK(index.at("CreateNewTab") == "⌃⇧T");
+    auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
+    CHECK(describeLinkGesture(classic, ShortcutStyle::MacGlyphs)
+          == "⌃Click (⌃⇧Click inside applications that use the mouse)");
+#ifdef __APPLE__
+    // The Native2026 defaults follow links with Command on macOS.
+    CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
+          == "⌘Click (⇧⌘Click inside applications that use the mouse)");
+#endif
+}
+
+TEST_CASE("shortcutIndex is the chord index rendered", "[contour][palette]")
+{
+    auto const configs = std::array {
+        config::Config {},
+        config::Config { .defaultsEdition = config::DefaultsEdition::Classic },
+    };
+    for (auto const& cfg: configs)
+    {
+        auto const chords = chordIndex(cfg);
+        for (auto const style: { ShortcutStyle::Text, ShortcutStyle::MacGlyphs })
+        {
+            auto const rendered = shortcutIndex(cfg, style);
+            REQUIRE(rendered.size() == chords.size());
+            for (auto const& [id, text]: rendered)
+            {
+                REQUIRE(chords.contains(id));
+                CHECK(text == shortcutText(chords.at(id), style));
+            }
+        }
+    }
+}
+
+TEST_CASE("linkOpenHint names the configured gesture", "[contour][palette]")
+{
+    using vtbackend::Modifier;
+    CHECK(linkOpenHint(Modifiers { Modifier::Super }, Modifiers {}, ShortcutStyle::MacGlyphs)
+          == "⌘-click to open");
+    CHECK(linkOpenHint(Modifiers { Modifier::Control }, Modifiers {}, ShortcutStyle::Text)
+          == "Ctrl+Click to open");
+    // While an application takes the clicks, the hint names the bypass chord too.
+    CHECK(linkOpenHint(Modifiers { Modifier::Super }, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs)
+          == "⇧⌘-click to open");
+    CHECK(linkOpenHint(Modifiers { Modifier::Control }, Modifiers { Modifier::Shift }, ShortcutStyle::Text)
+          == "Ctrl+Shift+Click to open");
+    // One set: the follow and bypass modifiers read in the table's order, and one held by both reads once.
+    CHECK(linkOpenHint(Modifiers { Modifier::Control, Modifier::Shift },
+                       Modifiers { Modifier::Shift },
+                       ShortcutStyle::Text)
+          == "Ctrl+Shift+Click to open");
+    // No binding follows links: no hint at all.
+    CHECK(linkOpenHint(std::nullopt, Modifiers {}, ShortcutStyle::Text).empty());
+    CHECK(linkOpenHint(std::nullopt, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs).empty());
 }

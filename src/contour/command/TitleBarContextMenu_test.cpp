@@ -4,6 +4,7 @@
 // rule about when a row is shown, greyed or ticked is decided — and asserted — with no window, no
 // terminal and no Qt behind it.
 
+#include <contour/command/Command.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,6 +18,8 @@
 using contour::command::buildTitleBarContextMenu;
 using contour::command::ContextMenuEntry;
 using contour::command::ContextMenuEntryKind;
+using contour::command::RowAvailability;
+using contour::command::RowCheck;
 using contour::command::TitleBarContextMenuState;
 namespace actions = contour::actions;
 
@@ -47,7 +50,7 @@ TEST_CASE("titleBarContextMenu: opening a tab is always offered", "[contour][tit
 
     auto const* newTab = find(entries, "New Tab");
     REQUIRE(newTab != nullptr);
-    CHECK(newTab->enabled);
+    CHECK(newTab->availability == RowAvailability::Enabled);
     CHECK(std::holds_alternative<actions::CreateNewTab>(newTab->action));
 }
 
@@ -69,7 +72,7 @@ TEST_CASE("titleBarContextMenu: each profile row opens a tab UNDER that profile"
         REQUIRE(create->profileName.has_value());
         CHECK(*create->profileName == child.title);
         // Nothing is "current" among these, so nothing may claim to be.
-        CHECK_FALSE(child.checkable);
+        CHECK(child.check == RowCheck::None);
     }
 }
 
@@ -93,7 +96,7 @@ TEST_CASE("titleBarContextMenu: closing rows track how many tabs there are", "[c
 
         auto const* closeTab = find(entries, "Close Tab");
         REQUIRE(closeTab != nullptr);
-        CHECK(closeTab->enabled);
+        CHECK(closeTab->availability == RowAvailability::Enabled);
 
         auto const* closeAll = find(entries, "Close All Tabs");
         REQUIRE(closeAll != nullptr);
@@ -118,7 +121,7 @@ TEST_CASE("titleBarContextMenu: closing rows track how many tabs there are", "[c
         auto const entries = buildTitleBarContextMenu(state);
         auto const* closeTab = find(entries, "Close Tab");
         REQUIRE(closeTab != nullptr);
-        CHECK_FALSE(closeTab->enabled);
+        CHECK(closeTab->availability == RowAvailability::Disabled);
     }
 }
 
@@ -141,13 +144,13 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
         // Every mode is offered. Asserted against the TABLE rather than a second literal list, which is
         // the point of generating the rows: a mode added there shows up here with neither file touched.
         auto const modeRows =
-            std::ranges::count_if(tabBar->children, [](auto const& e) { return e.checkable; });
+            std::ranges::count_if(tabBar->children, [](auto const& e) { return e.check != RowCheck::None; });
         CHECK(std::cmp_equal(modeRows, contour::config::configEnumValues<TabBarVisibility>().size()));
 
         // Exactly one is ticked, and it is the one in force.
         auto ticked = std::vector<std::string> {};
         for (auto const& child: tabBar->children)
-            if (child.checked)
+            if (child.check == RowCheck::Checked)
                 ticked.push_back(child.title);
         REQUIRE(ticked.size() == 1);
         CHECK(ticked.front() == live.label);
@@ -175,10 +178,10 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
 
         auto const* bottom = find(position->children, "Bottom");
         REQUIRE(bottom != nullptr);
-        CHECK(bottom->checked);
+        CHECK(bottom->check == RowCheck::Checked);
         auto const* top = find(position->children, "Top");
         REQUIRE(top != nullptr);
-        CHECK_FALSE(top->checked);
+        CHECK(top->check != RowCheck::Checked);
     }
 }
 
@@ -188,7 +191,7 @@ TEST_CASE("titleBarContextMenu: the permanent home for these choices is one clic
     // The rows above are a runtime override for one window. Without this the menu would be a setting
     // that quietly forgets on restart, with nothing saying where to make it stick.
     auto const entries = buildTitleBarContextMenu(populatedState());
-    auto const* settings = find(entries, "Tab Bar Settings…");
+    auto const* settings = find(entries, "Settings…");
     REQUIRE(settings != nullptr);
     CHECK(std::holds_alternative<actions::OpenConfiguration>(settings->action));
 }
@@ -259,4 +262,31 @@ TEST_CASE("no hosts, no Attach to Host submenu", "[menu][hosts]")
 {
     auto const menu = buildTitleBarContextMenu(populatedState());
     CHECK(find(menu, "Attach to Host") == nullptr);
+}
+
+TEST_CASE("the tab bar submenu is buildTabBarMenu", "[contour][titlebar][menu]")
+{
+    using contour::command::buildTabBarMenu;
+    using contour::command::commandId;
+    using contour::command::TabBarMenuState;
+    namespace config = contour::config;
+
+    auto state = populatedState();
+    state.tabBarVisibility = config::TabBarVisibility::Always;
+    state.tabBarPosition = config::TabBarPosition::Bottom;
+
+    auto const menu = buildTitleBarContextMenu(state);
+    auto const* tabBar = find(menu, "Tab Bar");
+    REQUIRE(tabBar != nullptr);
+
+    auto const expected = buildTabBarMenu(
+        TabBarMenuState { .visibility = state.tabBarVisibility, .position = state.tabBarPosition });
+    REQUIRE(tabBar->children.size() == expected.size());
+    for (auto const& [actual, wanted]: std::views::zip(tabBar->children, expected))
+    {
+        CHECK(actual.kind == wanted.kind);
+        CHECK(actual.title == wanted.title);
+        CHECK(commandId(actual.action) == commandId(wanted.action));
+        CHECK(actual.check == wanted.check);
+    }
 }

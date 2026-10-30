@@ -5,7 +5,9 @@
 
 #include <vtbackend/shell/CommandBlockAddress.hpp>
 
+#include <algorithm>
 #include <array>
+#include <iterator>
 #include <span>
 #include <string_view>
 
@@ -72,36 +74,6 @@ namespace
     {
         return state.foldLine.has_value();
     }
-
-    bool hasBlockUnderCursor(ContextMenuState const& state) noexcept
-    {
-        return state.blockUnderCursor.has_value();
-    }
-
-    /// The block rows show where the shell speaks OSC 133: a command has finished, or the click landed on
-    /// a block -- the first command still running, or the prompt ClearToPrompt left.
-    bool speaksShellIntegration(ContextMenuState const& state) noexcept
-    {
-        return hasLastCommand(state) || hasBlockUnderCursor(state);
-    }
-
-    bool hasOutputUnderCursor(ContextMenuState const& state) noexcept
-    {
-        return hasBlockUnderCursor(state) && state.blockUnderCursor->output == OutputPresence::Present;
-    }
-
-    bool hasCommandLineUnderCursor(ContextMenuState const& state) noexcept
-    {
-        return hasBlockUnderCursor(state)
-               && state.blockUnderCursor->commandLine == CommandLinePresence::Present;
-    }
-
-    /// A command line to run, and a prompt to run it at: typed while another command runs, it would be
-    /// that command's input.
-    bool canRerunUnderCursor(ContextMenuState const& state) noexcept
-    {
-        return hasCommandLineUnderCursor(state) && state.livePrompt == PromptPresence::Present;
-    }
     // }}}
 
     /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
@@ -114,43 +86,6 @@ namespace
             .actionFrom([](ContextMenuState const& state) -> actions::Action {
                 return HyperlinkAction { .uri = state.hyperlinkUnderCursor, .link = state.linkUnderCursor };
             });
-    }
-
-    /// A row acting on the block that was RIGHT-CLICKED, pinned by its id -- shown where the shell
-    /// speaks OSC 133, grayed where the click landed on no block, or on one without what the row acts on.
-    /// @param title The row's text.
-    /// @param enabled When the row can be picked.
-    template <typename BlockAction>
-    [[nodiscard]] Row blockCommand(std::string_view title, Table::Predicate enabled)
-    {
-        return Table::command(BlockAction {}, title)
-            .shownWhen(speaksShellIntegration)
-            .enabledWhen(enabled)
-            .actionFrom([](ContextMenuState const& state) -> actions::Action {
-                auto action = BlockAction {};
-                action.target = vtbackend::CommandBlockTarget::Pointer;
-                action.block =
-                    state.blockUnderCursor ? state.blockUnderCursor->id : vtbackend::CommandBlockId {};
-                return action;
-            });
-    }
-
-    /// One ChangeProfile row per configured profile, with the active one check-marked.
-    [[nodiscard]] std::vector<ContextMenuEntry> profileRows(ContextMenuState const& state)
-    {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::ChangeProfile { .name = name },
-                                                    .enabled = true,
-                                                    .checkable = true,
-                                                    .checked = name == state.activeProfile,
-                                                    .children = {} });
-
-        return entries;
     }
 
     /// The "Advanced" submenu — itself a table, so it goes through the very same row builder.
@@ -219,14 +154,6 @@ namespace
                     return ToggleFoldAt { .line = state.foldLine ? state.foldLine->value : 0 };
                 }),
 
-            // The block the user right-clicked. Pinned like the fold line above; its output part is
-            // what a user points at, so these are the output rows, with the command line beside them.
-            blockCommand<SelectCommandBlock>("Select Output", hasOutputUnderCursor),
-            blockCommand<CopyCommandBlock>("Copy Output", hasOutputUnderCursor),
-            blockCommand<CopyCommandLine>("Copy Command", hasCommandLineUnderCursor),
-            blockCommand<RerunCommand>("Rerun Command…", canRerunUnderCursor),
-            blockCommand<OpenCommandOutput>("Open Output in Pager", hasOutputUnderCursor),
-
             Table::separator(),
 
             hyperlinkCommand<FollowHyperlink>("Open Link"),
@@ -250,7 +177,7 @@ namespace
 
             Table::separator(),
 
-            Table::submenu("Change Profile", profileRows).shownWhen(hasProfiles),
+            Table::changeProfileSubmenu().shownWhen(hasProfiles),
             Table::attachToHostSubmenu(),
             Table::submenu("Advanced", advancedRows),
         };
@@ -262,7 +189,14 @@ namespace
 
 std::vector<ContextMenuEntry> buildContextMenu(ContextMenuState const& state)
 {
-    auto entries = Table::buildRows(contextMenuTemplate(), state);
+    // The block the click landed on comes first: its facts and what the menu can do for it, then the pane's.
+    auto entries = std::vector<ContextMenuEntry> {};
+    if (state.blockUnderCursor)
+    {
+        entries = buildBlockMenu(*state.blockUnderCursor);
+        entries.push_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator });
+    }
+    std::ranges::move(Table::buildRows(contextMenuTemplate(), state), std::back_inserter(entries));
     detail::dropRedundantSeparators(entries);
     return entries;
 }

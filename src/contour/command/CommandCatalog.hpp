@@ -6,6 +6,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace contour::command
@@ -20,6 +21,29 @@ namespace contour::command
 /// @param sources The sources to merge, in precedence order.
 /// @return Every distinct command, in no particular order (the palette sorts it).
 [[nodiscard]] std::vector<Command> collectCommands(std::span<CommandSource const* const> sources);
+
+/// One row of the palette's category column: which group a catalogue action is listed under.
+struct ActionCategory
+{
+    std::string_view name {};                         ///< The action's catalogue name, e.g. "SplitVertical".
+    CommandCategory category = CommandCategory::Pane; ///< The group it is listed under.
+};
+
+/// The category column, one row per catalogue action, in catalogue order.
+///
+/// Kept beside the catalogue rather than in it: `config/` sits below `command/`, and the grouping is
+/// the palette's vocabulary, not the key bindings'. A test pins row @c i to `actionCatalog()[i]`, so
+/// an action added without a category fails the suite instead of vanishing from the palette.
+/// @return The rows.
+[[nodiscard]] std::span<ActionCategory const> actionCategories() noexcept;
+
+/// The palette group @p action is listed under.
+///
+/// A direct index, as `actions::catalogEntry` is: the column is in the catalogue's own order.
+/// @pre `actionCategories()` has a row for @p action (the coverage test guarantees it).
+/// @param action The action to classify.
+/// @return Its category.
+[[nodiscard]] CommandCategory commandCategory(actions::Action const& action) noexcept;
 
 /// Every action that is runnable without an argument, straight from the action catalog.
 ///
