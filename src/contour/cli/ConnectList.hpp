@@ -6,7 +6,6 @@
 /// model, `contour connect --list` and the launchers' menus (the Dock menu, the jump list) all read one
 /// list and the decisions are tested without a window or a daemon.
 
-#include <contour/config/Config.hpp>
 #include <contour/config/LaunchTarget.hpp>
 
 #include <cstddef>

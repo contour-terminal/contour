@@ -2286,7 +2286,7 @@ TEST_CASE("Config: motionAdjusted zeroes the motion durations under Reduce Motio
     CHECK(reduced.smoothScrolling);
 
     auto const full = contour::config::motionAdjusted(settings, MotionPreference::Full);
-    for (auto const setting: contour::config::MotionSettings)
+    for (auto const setting: contour::config::motionSettings())
         CHECK(full.*setting == settings.*setting);
     CHECK(full.smoothScrolling);
 }

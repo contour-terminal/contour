@@ -7,7 +7,6 @@
 /// (platform/DockMenu, platform/Win32JumpList) only render what is decided here, so the decisions test
 /// without the OS.
 
-#include <contour/config/Config.hpp>
 #include <contour/config/LaunchTarget.hpp>
 
 #include <array>

@@ -91,6 +91,185 @@ namespace
     constexpr auto RequiresBlockFocus = vtbackend::MatchModes { vtbackend::MatchModes::BlockFocus, 0 };
 } // namespace
 
+namespace
+{
+    /// The 2026 redesign's indicator status line (DefaultsEdition::Native2026): where you are and how the
+    /// last command went.
+    ///
+    /// Left: the vi mode as a chip, hidden in Insert mode, then the privilege/machine context, the working
+    /// directory and the Git branch. Middle: the last command's outcome, the selection's size and the search
+    /// prompt. Right: progress, the scroll position and a faint clock. No {Tabs} and no {Title}, because the
+    /// chrome already shows both. Every colour is a role (`success`, `warning`, `accent`) or the scheme's
+    /// `indicatorStatusLine*` pairs, so the line follows a light or dark scheme; {Git} takes the plain
+    /// foreground, as no role names the canvas's magenta. Each segment is written in the serializer's
+    /// canonical form, so saving it from the settings page leaves it byte for byte as it is. 0.9.0 is
+    /// unreleased, so this replaces the interim template in place rather than adding an edition.
+    constexpr auto Native2026IndicatorTemplate = IndicatorTemplate {
+        .left = "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }"
+                "{Git:Left=  }",
+        .middle = "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }",
+        .right = "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }",
+    };
+
+#ifdef __APPLE__
+    constexpr std::string_view ClassicFontFamily = "Monaco";
+#else
+    constexpr std::string_view ClassicFontFamily = "monospace";
+#endif
+
+#ifdef _WIN32
+    constexpr std::string_view Native2026FontFamily = "Cascadia Mono";
+#else
+    // Bundled with Contour on macOS and Linux and registered before the first font lookup, so the
+    // name resolves on a machine that never installed it.
+    constexpr std::string_view Native2026FontFamily = "JetBrains Mono";
+#endif
+
+#ifdef __APPLE__
+    // macOS sets type a point larger at the same legibility, and opens links with Command (which
+    // Contour spells Super: Qt's Control/Meta swap is turned off, @see AA_MacDontSwapCtrlAndMeta).
+    constexpr double Native2026FontSize = 13.0;
+    constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Super;
+#else
+    constexpr double Native2026FontSize = 12.0;
+    constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Control;
+#endif
+
+    /// The rows of EditionDefaults, in enumerator order.
+    constexpr auto EditionDefaultsTable = std::array {
+        EditionDefaults {
+            .edition = DefaultsEdition::Classic,
+            .fontFamily = ClassicFontFamily,
+            .fontSize = 12.0,
+            .terminalSize = { .lines = vtbackend::LineCount(25), .columns = vtbackend::ColumnCount(80) },
+            .margins = { .horizontal = HorizontalMargin { 0u }, .vertical = VerticalMargin { 0u } },
+            .statusLine = ClassicIndicatorTemplate,
+            .linkDecoration = vtbackend::LinkDecorationMode::Always,
+            .dimUnfocused = 0.0,
+            .bellSound = "default",
+            .scrollback = vtbackend::LineCount(1000),
+            .insertCursorShape = vtbackend::CursorShape::Bar,
+            .screenTransitionDuration = std::chrono::milliseconds { 250 },
+            .darkColorScheme = "default",
+            .lightColorScheme = "default",
+            .tabBarVisibility = TabBarVisibility::Always,
+            .followHyperlinkModifier = vtbackend::Modifier::Control,
+            .theme = GuiTheme::System,
+            .chromeDensity = ChromeDensity::Comfortable,
+            .hyperlinkHoverTooltip = true,
+            .scrollBarMode = ScrollBarModePreference::Always,
+            .preeditStyle = vtbackend::PreeditStyle::Highlighted,
+            .secureInput = SecureInputMode::Off,
+            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
+                                vtbackend::ScrollbarMarkSource::Commands,
+                                vtbackend::ScrollbarMarkSource::Running,
+                                vtbackend::ScrollbarMarkSource::UserMarks },
+        },
+        EditionDefaults {
+            .edition = DefaultsEdition::Native2026,
+            .fontFamily = Native2026FontFamily,
+            .fontSize = Native2026FontSize,
+            .terminalSize = { .lines = vtbackend::LineCount(30), .columns = vtbackend::ColumnCount(100) },
+            .margins = { .horizontal = HorizontalMargin { 8u }, .vertical = VerticalMargin { 6u } },
+            .statusLine = Native2026IndicatorTemplate,
+            .linkDecoration = vtbackend::LinkDecorationMode::Modifier,
+            .dimUnfocused = 0.15,
+            .bellSound = "off",
+            .scrollback = vtbackend::LineCount(10000),
+            .insertCursorShape = vtbackend::CursorShape::Bar,
+            .screenTransitionDuration = std::chrono::milliseconds { 150 },
+            .darkColorScheme = "contour-dark",
+            .lightColorScheme = "contour-light",
+            .tabBarVisibility = TabBarVisibility::Always,
+            .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
+            .theme = GuiTheme::Terminal,
+            .chromeDensity = ChromeDensity::Comfortable,
+            .hyperlinkHoverTooltip = false,
+            .scrollBarMode = ScrollBarModePreference::System,
+            .preeditStyle = vtbackend::PreeditStyle::Inline,
+            .secureInput = SecureInputMode::Auto,
+            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
+                                vtbackend::ScrollbarMarkSource::Running,
+                                vtbackend::ScrollbarMarkSource::SearchMatches },
+        },
+    };
+
+    static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, EditionDefaultsTable.size()),
+                                      [](size_t i) {
+                                          return static_cast<size_t>(EditionDefaultsTable[i].edition) == i;
+                                      }),
+                  "EditionDefaultsTable must list one row per DefaultsEdition, in enumerator order");
+    static_assert(EditionDefaultsTable.size() == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs a row of defaults");
+
+    /// The indicator template's segments, so that a rule over them is one loop.
+    constexpr auto IndicatorSegments = std::array {
+        IndicatorSegment { .spelled = &IndicatorConfig::left, .shipped = &IndicatorTemplate::left },
+        IndicatorSegment { .spelled = &IndicatorConfig::middle, .shipped = &IndicatorTemplate::middle },
+        IndicatorSegment { .spelled = &IndicatorConfig::right, .shipped = &IndicatorTemplate::right },
+    };
+
+    /// The animation durations Reduce Motion zeroes.
+    constexpr auto MotionSettings = std::array {
+        &vtbackend::Settings::screenTransitionDuration,
+        &vtbackend::Settings::cursorMotionAnimationDuration,
+    };
+} // namespace
+
+EditionDefaults const& editionDefaults(DefaultsEdition edition) noexcept
+{
+    return EditionDefaultsTable[static_cast<size_t>(edition)];
+}
+
+std::string_view nameOf(vtbackend::StatusDisplayPosition value) noexcept
+{
+    switch (value)
+    {
+        case vtbackend::StatusDisplayPosition::Bottom: return "Bottom";
+        case vtbackend::StatusDisplayPosition::Top: return "Top";
+    }
+    return {};
+}
+
+std::string_view nameOf(vtbackend::StatusDisplayType value) noexcept
+{
+    switch (value)
+    {
+        case vtbackend::StatusDisplayType::None: return "none";
+        case vtbackend::StatusDisplayType::Indicator: return "indicator";
+        case vtbackend::StatusDisplayType::HostWritable: return "host writable";
+    }
+    return {};
+}
+
+std::string_view nameOf(ScrollBarPosition value) noexcept
+{
+    switch (value)
+    {
+        case ScrollBarPosition::Hidden: return "Hidden";
+        case ScrollBarPosition::Left: return "Left";
+        case ScrollBarPosition::Right: return "Right";
+    }
+    return {};
+}
+
+std::string formatBackgroundImage(vtbackend::BackgroundImage const& value)
+{
+    if (auto const* loc = std::get_if<std::filesystem::path>(&value.location))
+        return core::pathToUtf8(*loc);
+    return "Image";
+}
+
+std::span<IndicatorSegment const> indicatorSegments() noexcept
+{
+    return IndicatorSegments;
+}
+
+std::span<std::chrono::milliseconds vtbackend::Settings::* const> motionSettings() noexcept
+{
+    return MotionSettings;
+}
+
 std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
 {
     // These are fallbacks rather than defaults (see the declaration for why): every contour.yml written
@@ -1632,7 +1811,7 @@ vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreferenc
     {
         case MotionPreference::Full: break;
         case MotionPreference::Reduced:
-            for (auto const setting: MotionSettings)
+            for (auto const setting: motionSettings())
                 settings.*setting = std::chrono::milliseconds { 0 };
             break;
     }
@@ -2096,7 +2275,7 @@ IndicatorConfig indicatorForEdition(IndicatorConfig spelled, DefaultsEdition wri
         return spelled;
     auto const& before = editionDefaults(writtenFor).statusLine;
     auto const& after = editionDefaults(now).statusLine;
-    for (auto const& segment: IndicatorSegments)
+    for (auto const& segment: indicatorSegments())
         if (spelled.*segment.spelled == before.*segment.shipped)
             spelled.*segment.spelled = std::string { after.*segment.shipped };
     return spelled;

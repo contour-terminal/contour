@@ -1885,7 +1885,7 @@ void TerminalSession::applyMotionPreference(config::MotionPreference motion)
     // Locked: the render thread reads both durations as it animates. The factory settings follow too, so a
     // RIS returns to the durations the preference allows, as configureTerminal() hands them over.
     auto const _ = std::scoped_lock { _terminal };
-    for (auto const setting: config::MotionSettings)
+    for (auto const setting: config::motionSettings())
     {
         _terminal.settings().*setting = adjusted.*setting;
         _terminal.factorySettings().*setting = adjusted.*setting;

@@ -18,3 +18,8 @@
 src/contour/display/TerminalDisplay.hpp !src/contour/config/Actions.hpp
 src/contour/config/ActionsFwd.hpp !src/contour/config/Actions.hpp
 src/contour/config/Actions.hpp !src/vtbackend/input/vi/HintModeHandler.hpp
+src/contour/config/Config.hpp !<text_shaper/MockFontLocator.hpp>
+src/contour/cli/ConnectList.hpp !src/contour/config/Config.hpp
+src/contour/command/LauncherEntries.hpp !src/contour/config/Config.hpp
+src/contour/window/ConnectPickerController.hpp !src/contour/config/Config.hpp
+src/contour/window/NewDefaultsNotice.hpp !src/contour/config/Config.hpp

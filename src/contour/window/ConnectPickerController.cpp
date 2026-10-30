@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/Config.hpp>
 #include <contour/window/ConnectPickerController.hpp>
 
 #include <core/log/LogStore.hpp>
