@@ -256,6 +256,8 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 - `src/vthost` — the Qt-free serving path: the daemon, session hosting, the native protocol and
   the tmux control-mode gateway
 - `src/contour` — the application: the headless CLI, and the Qt/QML GUI frontend
+- `src/testing` — test support every suite shares, linked into no shipped binary: the case trace that
+  names each Catch2 case on stderr as it starts while `CONTOUR_TEST_TRACE` is set
 
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
 reach around `vtbackend`/`vtworkspace` into rendering internals.

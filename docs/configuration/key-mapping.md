@@ -22,6 +22,11 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
 | `Ctrl+Shift+G` | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
+| `Alt+Shift+Arrow` (Linux, Windows) / `Cmd+Option+Arrow` (macOS) | Move the focus to the pane on that side. Some desktops and keyboard-layout switchers grab `Alt+Shift`; if the chord never reaches Contour, bind another one to `FocusPaneLeft`/`Right`/`Up`/`Down` in `input_mapping` |
+| `Ctrl+Shift+E` / `Ctrl+Shift+O` (Linux, Windows) | Split the active pane side by side / stacked |
+| `Cmd+D` / `Cmd+Shift+D` (macOS) | Split the active pane side by side / stacked |
+| `Cmd+Shift+Enter` (macOS) | Zoom the active pane to fill the tab, and back |
+| `Ctrl+Shift+K` (Linux, Windows) / `Cmd+Shift+K` (macOS) | `NewWindowTo`: open the [Connect picker](../remote-hosts.md#choosing-where-a-window-lives-the-connect-picker) to choose where a new window's sessions live |
 | `Right` mouse button | Open the terminal's context menu |
 | `Ctrl` + triple-click with the `Left` mouse button | Select the output of the command under the pointer (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md); on the alternate screen, which has no commands, the click selects as usual) |
 | Horizontal wheel / two-finger sideways swipe | Switch tabs |

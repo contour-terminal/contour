@@ -31,6 +31,9 @@ The daemon and its protocols are documented separately in
 [Multiplexer & daemon mode](vthost.md), and measuring where the time goes in
 [Profiling with Tracy](profiling.md) and [what the daemon costs in latency](latency.md).
 
+The application's own chrome (title band, tabs, panes, menus, Settings) and the token tables behind it
+are described in [The native chrome](native-chrome.md).
+
 ### `crispy` library
 
 This library contains super generic helper functions that

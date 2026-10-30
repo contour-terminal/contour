@@ -38,3 +38,7 @@ background pane that has no window to ask in — is answered with the terminatin
 and nothing else. A refusal is therefore indistinguishable from capturing an empty screen, which is
 deliberate: the sequence has no way to report "no reply is coming", so a client that reads until the
 terminator is never left waiting.
+
+A pane hosted by `contour daemon` refuses every capture the same way: the daemon has nobody to ask and no
+configuration to answer with, so it replies with the terminating chunk alone rather than leaving the
+request unanswered.

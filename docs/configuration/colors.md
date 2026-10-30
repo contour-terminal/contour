@@ -247,8 +247,8 @@ color_schemes:
 The values shown are what the default scheme derives.
 
 ### `gutter_text`
-The color of the gutter's line numbers and timestamps, and of the label a collapsed fold carries
-(`⋯ 1,234 lines`). **Optional**, and unset by default: it is then this scheme's foreground faded toward its
+The color of the gutter's line numbers and timestamps, and of the chip a collapsed fold carries
+(`1,234 lines hidden ⌄`), lifted where it would not read on the chip's band. **Optional**, and unset by default: it is then this scheme's foreground faded toward its
 background, as the resting fold markers are, so the numbers stay quieter than the text beside them.
 
 ``` yaml

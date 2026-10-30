@@ -95,6 +95,7 @@ nav:
   - Configuration:
     - configuration/index.md
     - configuration/profiles.md
+    - configuration/settings.md
     - configuration/links.md
     - configuration/layouts.md
     - configuration/hosts.md
@@ -122,6 +123,9 @@ nav:
     - Hint mode: demo/hint-mode.md
     - Input modes: input-modes.md
     - Accessibility: accessibility.md
+    - Secure input: secure-input.md
+    - Drag and drop: demo/drag-and-drop.md
+    - Quick terminal: quick-terminal.md
     - Size indicator: demo/size_indicator.md
     - Git branch drawings: demo/git-branch-drawings.md
   - VT sequence reference:
@@ -147,6 +151,7 @@ nav:
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md
+    - internals/native-chrome.md
     - internals/vthost.md
     - internals/session-oom-isolation.md
     - internals/text-stack.md
