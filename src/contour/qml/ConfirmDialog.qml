@@ -76,7 +76,8 @@ Dialog {
                 }
                 contentItem: Label {
                     text: root.confirmText
-                    color: "#ffffff"
+                    // Reads paletteRevision so the binding re-evaluates on a light/dark flip (see UiStyleProvider).
+                    color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.onStatusColor(chromeStyle.statusDanger)
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -84,7 +85,10 @@ Dialog {
                     radius: 4
                     implicitWidth: 84
                     implicitHeight: 30
-                    color: parent.down ? "#a01f1f" : (parent.hovered ? "#d23b3b" : "#c62828")
+                    // Reads paletteRevision so the binding re-evaluates on a light/dark flip (see UiStyleProvider).
+                    readonly property color danger: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(chromeStyle.statusDanger)
+                    color: parent.down ? Qt.darker(danger, 1.3)
+                                       : (parent.hovered ? Qt.lighter(danger, 1.15) : danger)
                 }
             }
         }

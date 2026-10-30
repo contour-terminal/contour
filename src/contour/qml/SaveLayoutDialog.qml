@@ -1,92 +1,133 @@
 // vim:syntax=qml
-// The "save layout as" name prompt: a small modal popup with a single text field.
+// Save Layout: the kit dialog a nameless SaveLayout action opens -- the row the command palette offers, or a
+// key bound to bare SaveLayout. Both route through the session manager to THIS window's WindowController,
+// whose `saveLayoutRequested` signal Main.qml connects to open().
 //
-// Opened by a nameless SaveLayout action — the row the command palette offers, or a key bound to bare
-// SaveLayout. Both route through the session manager to THIS window's WindowController, whose
-// `saveLayoutRequested` signal Main.qml connects to open(). This is the exact mirror of how a colorless
-// SetTabColor opens TabColorFlyout: the bare action opens a surface that supplies the argument.
-//
-// The user types a layout name and presses Enter; the dialog hands it to WindowController::saveLayoutAs,
-// which persists the current window's tabs to layouts.yml. A blank name or Escape cancels.
+// It says what it saves (this window's tabs and panes, with their working directories and commands), takes a
+// name, and keeps Save disabled while the name is empty. A name a layout already has offers "Replace?"
+// inline; once confirmed, the accept button replaces it, painted as the destructive action it is. Typing
+// again withdraws the confirmation. The window's controller checks the name and saves; a sheet on macOS.
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
-Popup {
+KitDialog {
     id: root
+    objectName: "saveLayoutDialog"
 
     // The WindowController. Null-guarded EVERYWHERE below, for the same reason CommandPalette.qml guards
     // its controller: it is destroyed before the QML tree on window close, and QML re-evaluates dependent
-    // bindings once more against null during teardown — an unguarded `controller.` would raise a TypeError.
+    // bindings once more against null during teardown -- an unguarded `controller.` would raise a TypeError.
     required property var controller
-    // The ApplicationWindow, so closing the prompt can hand keyboard focus back to the terminal.
+    // The ApplicationWindow, so closing the dialog can hand keyboard focus back to the terminal.
     required property var window
 
-    modal: true
-    focus: true
-    // Insets the content (the label + field) from the border. On the Popup rather than the Column, since a
-    // Column is a bare positioner with no padding of its own; the Popup resizes its contentItem to the
-    // area left inside this padding.
-    padding: 12
+    // Whether the user confirmed replacing the layout the typed name already names.
+    property bool confirmedReplace: false
+    // What it saves, read as it opens: the window's tabs and panes change between openings, and the
+    // controller's summary notifies nothing.
+    property string summary: ""
 
-    // Centered and fixed-width: the prompt holds one short field, so it need not track the window size the
-    // way the command palette's list does.
-    anchors.centerIn: Overlay.overlay
-    width: Math.min(420, root.window ? root.window.width * 0.8 : 420)
+    // What the controller makes of the typed name. `typeof` for the reason the hosting notice guards with
+    // `||`: a lightweight mock `win` (the routing tests') lacks the save-layout surface.
+    readonly property bool _canCheck: !!root.controller && typeof root.controller.checkLayoutName === "function"
+    readonly property var check: root._canCheck
+                                 ? root.controller.checkLayoutName(nameField.text, root.confirmedReplace)
+                                 : ({ "nameState": "empty", "button": "disabled", "trimmed": "" })
+    readonly property bool _replacing: root.check.button === "replace"
 
-    // Live OS palette handle so the popup follows dark/light in realtime (see CommandPalette).
-    SystemPalette {
-        id: systemPalette
-        colorGroup: SystemPalette.Active
-    }
-
-    background: PopupSurface {}
+    heading: qsTr("Save Layout")
+    message: ""
+    acceptText: root._replacing ? qsTr("Replace") : qsTr("Save")
+    acceptRole: root._replacing ? chromeStyle.statusDanger : chromeStyle.statusRunning
+    acceptEnabled: root.check.button !== "disabled"
+    rejectText: qsTr("Cancel")
 
     // Start empty with the caret already in the field on every open, so the user can type immediately.
+    // What it saves is read before it shows, so the dialog never opens on the last opening's count.
+    onAboutToShow: root.summary = root._canCheck ? root.controller.layoutSummary() : ""
     onOpened: {
         nameField.clear();
+        root.confirmedReplace = false;
         nameField.forceActiveFocus();
     }
 
-    // Whatever closed the prompt — Enter, Escape, a click outside — the terminal must get the keyboard
-    // back, or the user is left typing into nothing (same law as CommandPalette.qml's onClosed). The save
-    // itself has already happened synchronously in accept(); nothing is deferred here because, unlike the
-    // palette, this prompt opens no further keyboard-driven surface for a restore to fight over.
+    onAccepted: {
+        if (!root.controller)
+            return;
+        if (root._replacing)
+            root.controller.replaceLayout(root.check.trimmed);
+        else
+            root.controller.saveLayoutAs(root.check.trimmed);
+    }
+
+    // Whatever closed the dialog -- Save, Cancel, Escape -- the terminal must get the keyboard back, or the
+    // user is left typing into nothing (same law as CommandPalette.qml's onClosed).
     onClosed: {
         if (root.window)
             root.window.restoreTerminalFocus();
     }
 
-    // Saves under the typed name and closes. A blank field is a no-op that keeps the prompt open, so Enter
-    // on an empty name never silently dismisses the dialog without saving — the user must type a name or
-    // press Escape. WindowController::saveLayoutAs trims and re-checks, so this is a UX guard, not the
-    // authority on emptiness.
-    function accept() {
-        if (nameField.text.trim().length === 0)
-            return;
-        if (root.controller)
-            root.controller.saveLayoutAs(nameField.text);
-        root.close();
-    }
-
-    contentItem: Column {
-        spacing: 6
-
+    bodyData: [
         Label {
-            text: qsTr("Save layout as:")
-            color: systemPalette.windowText
-        }
-
+            objectName: "saveLayoutNameLabel"
+            Layout.fillWidth: true
+            text: qsTr("Name")
+            font: chromeStyle.type.footnote
+            color: sys.windowText
+        },
         TextField {
             id: nameField
             objectName: "saveLayoutNameField"
-            // The Popup sizes this Column to the area inside its padding, so `parent.width` is that inset
-            // width — the field spans it without a second margin calculation.
-            width: parent.width
+            Layout.fillWidth: true
             placeholderText: qsTr("Layout name…")
+            Accessible.name: qsTr("Layout name")
+            // Another name is another question: a confirmation was for the name it confirmed.
+            onTextChanged: root.confirmedReplace = false
+            // Return saves only when Save can: the dialog's default button, never a disabled one.
+            Keys.onReturnPressed: root.pressDefault()
+            Keys.onEnterPressed: root.pressDefault()
+        },
+        Label {
+            objectName: "saveLayoutSummary"
+            Layout.fillWidth: true
+            text: root.summary
+            textFormat: Text.PlainText
+            font: chromeStyle.type.footnote
+            color: sys.windowText
+            wrapMode: Text.Wrap
+        },
+        RowLayout {
+            objectName: "saveLayoutTaken"
+            Layout.fillWidth: true
+            visible: root.check.nameState === "taken" && !root.confirmedReplace
+            spacing: chromeStyle.space.s4
 
-            Keys.onReturnPressed: root.accept()
-            Keys.onEnterPressed: root.accept()
-            Keys.onEscapePressed: root.close()
+            Label {
+                objectName: "saveLayoutTakenMessage"
+                Layout.fillWidth: true
+                text: qsTr("“%1” already exists.").arg(root.check.trimmed)
+                // A name the user typed: text, never markup. Wrapped, never cut beside Replace?.
+                textFormat: Text.PlainText
+                font: chromeStyle.type.footnote
+                color: sys.windowText
+                wrapMode: Text.Wrap
+            }
+
+            Button {
+                objectName: "saveLayoutReplace"
+                flat: true
+                text: qsTr("Replace?")
+                font: chromeStyle.type.footnote
+                palette.buttonText: sys.buttonText
+                Accessible.name: text
+                onClicked: root.confirmedReplace = true
+            }
         }
+    ]
+
+    SystemPalette {
+        id: sys
+        colorGroup: SystemPalette.Active
     }
 }

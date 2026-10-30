@@ -10,8 +10,17 @@ import QtQuick.Templates as T
 T.ComboBox {
     id: control
 
+    // The widest entry of the model, as the style's font sets it: the field fits every option, not just the
+    // one showing, so none is cut off.
+    readonly property real modelWidth: {
+        let widest = 0;
+        for (let index = 0; index < control.count; ++index)
+            widest = Math.max(widest, Math.ceil(modelMetrics.advanceWidth(control.textAt(index))));
+        return widest;
+    }
+
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
-                            implicitContentWidth + leftPadding + rightPadding)
+                            Math.max(implicitContentWidth, modelWidth) + leftPadding + rightPadding)
     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                              implicitContentHeight + topPadding + bottomPadding,
                              implicitIndicatorHeight + topPadding + bottomPadding)
@@ -22,6 +31,11 @@ T.ComboBox {
     bottomPadding: 0
     spacing: chromeStyle.labelGap
     font: chromeStyle.font
+
+    FontMetrics {
+        id: modelMetrics
+        font: control.font
+    }
 
     delegate: ItemDelegate {
         required property var model
@@ -72,8 +86,13 @@ T.ComboBox {
 
     popup: T.Popup {
         id: comboPopup
+        // The widest option's row: its text, the row's padding at both ends, and the list's.
+        // What a row pads its text with at one end: the delegate's own padding.
+        readonly property real rowSidePadding: chromeStyle.labelPadding
+        readonly property real widestRowWidth: control.modelWidth + comboPopup.leftPadding + comboPopup.rightPadding
+                                               + rowSidePadding + rowSidePadding
         y: control.height
-        width: control.width
+        width: Math.max(control.width, comboPopup.widestRowWidth)
         // Spelled out rather than left at QQuickPopup's default of -1, which means "do not push this
         // popup back inside the window" -- and, subtracted below, would ADD two pixels where the term
         // is there to reserve margin. One cell, so the gap to the window edge is on the grid too.
