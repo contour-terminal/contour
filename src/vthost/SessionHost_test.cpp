@@ -3,6 +3,7 @@
 #include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -18,6 +19,7 @@
 #include <crispy/BufferObject.hpp>
 
 #include <core/async/Task.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -268,7 +270,19 @@ class ExitingPty final: public vtpty::Pty
         return std::nullopt;
     }
 
-    [[nodiscard]] int write(std::string_view data) override { return static_cast<int>(data.size()); }
+    [[nodiscard]] int write(std::string_view data) override
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _written += data;
+        return static_cast<int>(data.size());
+    }
+
+    /// What was written to the program: the terminal's replies.
+    [[nodiscard]] std::string written() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _written;
+    }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _size; }
     void resizeScreen(vtpty::PageSize size, std::optional<vtpty::ImageSize>) override { _size = size; }
     void waitForClosed() override
@@ -283,6 +297,7 @@ class ExitingPty final: public vtpty::Pty
     vtpty::PtySlaveDummy _slave;
     vtpty::PageSize _size;
     std::string _output;
+    std::string _written;
     bool _closed = false;
     bool _exited = false;
 };
@@ -996,6 +1011,37 @@ TEST_CASE("a hosted session's process exit drops its working program status befo
     }
 }
 
+TEST_CASE("a hosted session refuses a buffer capture rather than dropping it", "[vthost][host][capture]")
+{
+    // XTCAPTURE for the whole page. Nobody on the daemon can grant it; a client reading until the terminating
+    // chunk must still get that chunk, or it blocks forever.
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) },
+        "capture me\r\n\033[>0,t");
+    auto* const pty = ownedPty.get();
+    auto closed = std::promise<void> {};
+    auto hosted = vthost::HostedSession { vtworkspace::SessionId { 1 },
+                                          core::defaultEnvironment(),
+                                          std::move(ownedPty),
+                                          vtbackend::Settings {},
+                                          vtbackend::HostIdentity {},
+                                          vtbackend::TerminalClocks::system(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          {},
+                                          {},
+                                          {},
+                                          {},
+                                          [&] { closed.set_value(); },
+                                          {} };
+    hosted.start();
+    pty->exitProcess();
+    REQUIRE(closed.get_future().wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+
+    auto const written = pty->written();
+    CHECK(written.contains("\033^314;\033\\"));
+    CHECK_FALSE(written.contains("capture me"));
+}
+
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
     auto capture = core::log::ScopedCapture {};
@@ -1679,6 +1725,88 @@ TEST_CASE("SessionHost.extension.repaintsOnlyForClients", "[vthost][host][extens
     host.unsubscribeStream(&watcher);
 }
 
+TEST_CASE("SessionHost.extension.hostRowCarriesTheGitBranch", "[vthost][host][extensions][git]")
+{
+    // A row an extension draws is the host's, {Git} included: the client mirrors it, and for a client on
+    // another machine it is the only place the branch can come from. A branch the host's lookup finds after
+    // the row was drawn is repainted and sent, as an extension's frame is.
+    struct Mirror final: vthost::SessionStreamEvents
+    {
+        int updates = 0;
+        void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
+    };
+
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(files.createDirectories("/r/src"));
+    auto git = vtbackend::test::InMemoryGitFileSystem { files };
+    auto lookups = core::async::testing::ManualExecutor {};
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    hosting->prepare = [](vtbackend::FakeStatusLineExtensions& fake) {
+        fake.publish("ext", vthost::testing::frameOf("E"));
+    };
+    auto settings = vtbackend::Settings {};
+    settings.statusDisplayType = vtbackend::StatusDisplayType::Indicator;
+    settings.indicatorStatusLine.left = "{Extension:ext} {Git}";
+    settings.indicatorStatusLine.middle.clear();
+    settings.indicatorStatusLine.right.clear();
+    auto host =
+        SessionHost { loop,
+                      [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                          return std::make_unique<vtpty::MockPty>(size);
+                      },
+                      std::move(settings),
+                      core::defaultEnvironment(),
+                      vthost::SessionHostConfig {
+                          .pumping = vthost::SessionPumping::Manual,
+                          .fileSystem = files,
+                          .git = vtbackend::GitHeadServices { .executor = lookups, .fileSystem = git },
+                          .extensions = hosting,
+                      } };
+    auto const* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto* terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    auto mirror = Mirror {};
+    host.subscribeStream(&mirror);
+
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const row = [&] {
+        auto const _ = std::lock_guard { *terminal };
+        return terminal->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).toUtf8Trimmed();
+    };
+    // The lookups the repaints asked for, run as the probe thread would, and what their answers ask of the
+    // loop.
+    auto const settle = [&] {
+        turn();
+        lookups.drain();
+        turn();
+    };
+
+    terminal->writeToScreen("\033]7;file:///r/src\033\\");
+    settle();
+    CHECK(row() == "E main");
+
+    // A branch switch the shell's next directory report reveals reaches the client too.
+    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    terminal->writeToScreen("\033]7;file:///r/src\033\\");
+    turn();
+    auto const before = mirror.updates;
+    CHECK(row() == "E main");
+    lookups.drain();
+    turn();
+    CHECK(row() == "E next");
+    CHECK(mirror.updates > before);
+
+    host.unsubscribeStream(&mirror);
+}
+
 TEST_CASE("SessionHost.extension.foregroundPollFollowsLoadedSubscriptions", "[vthost][host][extensions]")
 {
     // What an extension follows is known only once it has loaded on its lane -- after its build was swapped
@@ -2333,6 +2461,98 @@ TEST_CASE("a session spawned under a profile name runs that profile's shell and 
     CHECK(h.host.terminal(session)->settings().historyLimits.guaranteed
           == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
     CHECK(h.host.hostedSession(session)->profileName() == "build");
+}
+
+TEST_CASE("a client's light/dark preference re-seeds the session's palette from its profile",
+          "[vthost][profiles][colors]")
+{
+    auto h = ProfileHost { {}, std::make_shared<vthost::testing::FakeDualPaletteCatalog>() };
+    auto stream = StreamRecorder {};
+    h.host.subscribeStream(&stream);
+    auto const* tab = h.host.createTab({ .profileName = "main" });
+    REQUIRE(tab != nullptr);
+    auto const session = h.sessionOf(*tab);
+    auto& terminal = *h.host.terminal(session);
+    auto const perform = [&](vthost::proto::EngineOperation operation) {
+        return h.host.performOperation(
+            vthost::proto::PerformOperation { .session = session.value, .operation = operation });
+    };
+    constexpr auto OscSetBackground = std::string_view { "\033]11;rgb:12/34/56\033\\" };
+    REQUIRE(terminal.colorPalette().defaultBackground
+            == vthost::testing::FakeDualPaletteCatalog::LightBackground);
+    stream.screens.clear();
+
+    SECTION("dark colors swap in the profile's dark palette, and every mirror is told")
+    {
+        CHECK(perform(vthost::proto::EngineOperation::UseDarkColors).has_value());
+        CHECK(terminal.colorPalette().defaultBackground
+              == vthost::testing::FakeDualPaletteCatalog::DarkBackground);
+        CHECK(std::ranges::count(stream.screens, session.value) == 1);
+
+        CHECK(perform(vthost::proto::EngineOperation::UseLightColors).has_value());
+        CHECK(terminal.colorPalette().defaultBackground
+              == vthost::testing::FakeDualPaletteCatalog::LightBackground);
+    }
+
+    SECTION("the preference a session already shows leaves what a program set alone")
+    {
+        terminal.writeToScreen(OscSetBackground);
+        auto const programBackground = terminal.colorPalette().defaultBackground;
+        REQUIRE(programBackground != vthost::testing::FakeDualPaletteCatalog::LightBackground);
+
+        // The host's own preference: a client attaching in light mode must not wipe the program's color.
+        CHECK(perform(vthost::proto::EngineOperation::UseLightColors).has_value());
+        CHECK(terminal.colorPalette().defaultBackground == programBackground);
+
+        CHECK(perform(vthost::proto::EngineOperation::UseDarkColors).has_value());
+        CHECK(terminal.colorPalette().defaultBackground
+              == vthost::testing::FakeDualPaletteCatalog::DarkBackground);
+        // Stating dark again is no change either.
+        terminal.writeToScreen(OscSetBackground);
+        CHECK(perform(vthost::proto::EngineOperation::UseDarkColors).has_value());
+        CHECK(terminal.colorPalette().defaultBackground == programBackground);
+    }
+}
+
+TEST_CASE("two sessions of a dark client keep the dark palette across tab switches",
+          "[vthost][profiles][colors]")
+{
+    // The owner's sequence: the first tab is born under the host's light palette, a second one after the
+    // client knows it is dark; switching to the first and back to the second must leave both dark.
+    auto h = ProfileHost { {}, std::make_shared<vthost::testing::FakeDualPaletteCatalog>() };
+    auto stream = StreamRecorder {};
+    h.host.subscribeStream(&stream);
+    auto const* first = h.host.createTab({ .profileName = "main" });
+    REQUIRE(first != nullptr);
+    auto const* second = h.host.createTab({ .profileName = "main" });
+    REQUIRE(second != nullptr);
+    auto const firstId = h.sessionOf(*first);
+    auto const secondId = h.sessionOf(*second);
+    auto const background = [&](vtworkspace::SessionId id) {
+        return h.host.terminal(id)->colorPalette().defaultBackground;
+    };
+    auto const state = [&](vtworkspace::SessionId id, vthost::proto::EngineOperation operation) {
+        REQUIRE(h.host
+                    .performOperation(
+                        vthost::proto::PerformOperation { .session = id.value, .operation = operation })
+                    .has_value());
+    };
+
+    state(firstId, vthost::proto::EngineOperation::UseDarkColors);
+    state(secondId, vthost::proto::EngineOperation::UseDarkColors);
+
+    // Switching tabs: each pane states what it shows again as it is bound, a second client attaches and
+    // the screens redraw.
+    auto switching = StreamRecorder {};
+    for (auto const id: { firstId, secondId, firstId, secondId })
+    {
+        h.host.subscribeStream(&switching);
+        state(id, vthost::proto::EngineOperation::UseDarkColors);
+        h.host.terminal(id)->writeToScreen("redraw\r\n");
+        h.host.unsubscribeStream(&switching);
+        CHECK(background(firstId) == vthost::testing::FakeDualPaletteCatalog::DarkBackground);
+        CHECK(background(secondId) == vthost::testing::FakeDualPaletteCatalog::DarkBackground);
+    }
 }
 
 TEST_CASE("a profile's shell still learns the pane's own ids", "[vthost][profiles][ids]")

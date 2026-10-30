@@ -71,15 +71,38 @@ std::expected<void, std::string> OnDemandDaemonStarter::start()
     return {};
 }
 
+bool isSameSocketPath(std::filesystem::path const& lhs, std::filesystem::path const& rhs)
+{
+    auto const normalize = [](std::filesystem::path const& path) {
+        auto ec = std::error_code {};
+        auto result = std::filesystem::weakly_canonical(path, ec);
+        if (ec)
+            result = path;
+        result = result.lexically_normal();
+        // "dir/" normalizes to "dir/." -- drop the empty filename a trailing separator leaves.
+        if (!result.has_filename())
+            result = result.parent_path();
+        return result;
+    };
+    return normalize(lhs) == normalize(rhs);
+}
+
 std::unique_ptr<DaemonStarter> chooseDaemonStarter(std::optional<RegisteredService> registered,
+                                                   std::filesystem::path const& labelDefaultSocket,
                                                    OnDemandSpawn onDemand)
 {
     if (registered)
-        return std::make_unique<ServiceDaemonStarter>(
-            std::move(*registered),
-            onDemand.spawner,
-            onDemand.endpoint.socketPath,
-            std::chrono::duration_cast<std::chrono::milliseconds>(onDemand.timeout));
+    {
+        auto const status = registered->backend->status();
+        auto const served =
+            (status ? registeredSocketPath(status->commandLine) : std::nullopt).value_or(labelDefaultSocket);
+        if (isSameSocketPath(served, onDemand.endpoint.socketPath))
+            return std::make_unique<ServiceDaemonStarter>(
+                std::move(*registered),
+                onDemand.spawner,
+                onDemand.endpoint.socketPath,
+                std::chrono::duration_cast<std::chrono::milliseconds>(onDemand.timeout));
+    }
     return std::make_unique<OnDemandDaemonStarter>(std::move(onDemand));
 }
 

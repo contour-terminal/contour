@@ -128,6 +128,13 @@ class ModelEvents
     /// affected panes to their new sessions.
     virtual void paneSwapped(TabId tab, PaneId a, PaneId b) { (void) tab, (void) a, (void) b; }
 
+    /// The leaf @p leaf of @p tab carries a new session in place of its former one (a restart in the
+    /// same pane); its PaneId, the active pane and the zoom are unchanged.
+    ///
+    /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to re-bind the pane
+    /// to its new session.
+    virtual void paneSessionReplaced(TabId tab, PaneId leaf) { (void) tab, (void) leaf; }
+
     /// The zoom state of @p tab changed: @p zoomedLeaf names the leaf that now fills the whole tab
     /// area, or is nullopt if the tab returned to its tiled layout.
     ///

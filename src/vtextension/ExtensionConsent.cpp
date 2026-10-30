@@ -111,33 +111,38 @@ std::string displayedCommandLine(DeclaredCommand const& command)
     return line;
 }
 
-std::string consentText(ExtensionConsentRequest const& request)
+ConsentQuestion consentQuestion(ExtensionConsentRequest const& request)
 {
     auto const& manifest = request.manifest;
-    // The first line holds nothing the guest chose: a dialog that guesses whether its text is rich text reads
-    // only up to the first line break, and must never take the guest's `<b>` for markup.
-    auto text = std::format("{}\n\nExtension: \"{}\"\nModule: {}\n",
-                            manifest.control.empty() ? ConsentHeadline : ControlConsentHeadline,
-                            neutralizedForDisplay(manifest.name),
-                            neutralizedForDisplay(request.hostId));
+    auto const name = neutralizedForDisplay(manifest.name);
+    auto question = ConsentQuestion {
+        .title = manifest.control.empty() ? std::format("“{}” wants to run commands", name)
+                                          : std::format("“{}” wants to control Contour", name),
+        .lines = {},
+    };
+    auto const line = [&question](std::string text, vtcontrol::ConsentWeight weight) {
+        question.lines.push_back(ConsentLine { .text = std::move(text), .weight = weight });
+    };
+    line(std::format("Module: {}", neutralizedForDisplay(request.hostId)),
+         vtcontrol::ConsentWeight::Observes);
     // A manifest of control permissions alone has no commands to list.
     if (!manifest.commands.empty() || manifest.control.empty())
     {
-        text += "\nIt may run only these, exactly as written ({name} is filled in by the extension):\n";
+        line("It may run only these, exactly as written ({name} is filled in by the extension):",
+             vtcontrol::ConsentWeight::Observes);
         for (auto const& command: manifest.commands)
-            text += std::format(
-                "\n    {}: {}", neutralizedForDisplay(command.name), displayedCommandLine(command));
-        text += '\n';
+            line(std::format("{}: {}", neutralizedForDisplay(command.name), displayedCommandLine(command)),
+                 vtcontrol::ConsentWeight::Observes);
     }
-    if (!manifest.control.empty())
+    for (auto const permission: manifest.control)
     {
-        text += "\nIt may also control the terminal:\n";
-        for (auto const permission: manifest.control)
-            text += std::format("\n    May {}.", vtcontrol::consentPhraseOf(permission));
-        text += '\n';
+        auto const weight = vtcontrol::consentWeightOf(permission);
+        line(std::format("May {}{}.",
+                         vtcontrol::consentPhraseOf(permission),
+                         weight == vtcontrol::ConsentWeight::CanRunCommands ? " (can run commands)" : ""),
+             weight);
     }
-    text += "\nAllow it? The answer is remembered until the extension's manifest changes.";
-    return text;
+    return question;
 }
 
 ConsentPrompt ExtensionConsentQueue::offer(ExtensionConsentRequest request, IGrantStore& answers)

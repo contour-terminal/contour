@@ -167,7 +167,7 @@ TEST_CASE("capturePaneHistory closes a running block and drops a prompting one",
         CHECK(history.commandBlocks[0].state == std::to_underlying(vtbackend::CommandBlockState::Finished));
         CHECK(history.commandBlocks[1].commandLine == "sleep 9");
         CHECK(history.commandBlocks[1].state == std::to_underlying(vtbackend::CommandBlockState::Finished));
-        CHECK(history.commandBlocks[1].end == std::to_underlying(vtbackend::CommandBlockEnd::Implicit));
+        CHECK(history.commandBlocks[1].end == std::to_underlying(vtbackend::CommandBlockEnd::Abandoned));
         CHECK((history.commandBlocks[1].present & proto::CommandBlockHasExitCode) == 0);
         // The store itself is untouched: the program still runs.
         CHECK(terminal.commandBlocks().current()->state == vtbackend::CommandBlockState::Running);

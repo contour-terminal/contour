@@ -59,7 +59,7 @@ if(VTCONTROL_TESTING)
         Uuid_test.cpp
         Wit_test.cpp
     )
-    target_link_libraries(vtcontrol_test vtcontrol glaze::glaze core::platform core::testing Catch2::Catch2)
+    target_link_libraries(vtcontrol_test vtcontrol glaze::glaze core::platform core::testing Catch2::Catch2 contour_test_trace)
     # The control WIT package is generated from the catalog; the golden test reads it from the source tree,
     # and rewrites it when UPDATE_WIT=1 is set.
     target_compile_definitions(vtcontrol_test PRIVATE VTCONTROL_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/control")

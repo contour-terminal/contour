@@ -95,8 +95,8 @@ namespace vthost::testing
           proto::DecodedPdu {
               proto::SessionClipboard { .session = 4, .selection = "c", .data = "/home/user/secret" } } },
         { proto::PduType::LayoutState,
-          proto::DecodedPdu {
-              proto::LayoutState { .window = 1, .activeTab = 0, .tabs = std::vector<proto::WireTab>(2) } } },
+          proto::DecodedPdu { proto::LayoutState {
+              .window = 1, .activeTab = 0, .tabs = std::vector<proto::WireTab>(2), .servedEdit = 3 } } },
         { proto::PduType::CreateTab,
           proto::DecodedPdu { proto::CreateTab { .session = 4, .profileName = "work" } } },
         { proto::PduType::SplitPane,
@@ -158,6 +158,12 @@ namespace vthost::testing
                                                             .app = "cargo",
                                                             .title = "Tests",
                                                             .message = "Continue?" } } } } },
+        { proto::PduType::SessionInputEcho,
+          proto::DecodedPdu { proto::SessionInputEcho { .session = 4, .echo = 3 } } },
+        { proto::PduType::MergeTabIntoSplit,
+          proto::DecodedPdu {
+              proto::MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } } },
+        { proto::PduType::TabMergeRefused, proto::DecodedPdu { proto::TabMergeRefused { .reason = 3 } } },
     };
 }
 

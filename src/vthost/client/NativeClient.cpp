@@ -178,6 +178,18 @@ void RemoteScreen::apply(proto::SessionState const& state)
         dropped += dropCommandBlock(*this, id);
     if (dropped != 0)
         commandBlocksRetiredAt = ++commandBlocksRevision;
+
+    // After the table: the baseline is read off it. A newest record still at its prompt is the shell's own
+    // and belongs to what comes next, so the line stays standing until it, or one after it, has run.
+    interruptedCommand = vtbackend::truncatedCommandLine(state.interruptedCommand);
+    interruptedAfterBlock = 0;
+    if (!commandBlocks.empty())
+    {
+        auto const& [newestId, newest] = *commandBlocks.rbegin();
+        interruptedAfterBlock =
+            newest.wire.state == std::to_underlying(vtbackend::CommandBlockState::Prompting) ? newestId - 1
+                                                                                             : newestId;
+    }
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -289,6 +301,15 @@ void RemoteScreen::apply(proto::Delta const& delta)
     if (dropped != 0)
         commandBlocksRetiredAt = ++commandBlocksRevision;
 
+    if (!interruptedCommand.empty()
+        && std::ranges::any_of(
+            std::ranges::subrange(commandBlocks.upper_bound(interruptedAfterBlock), commandBlocks.end())
+                | std::views::values,
+            [](MirroredCommandBlock const& block) {
+                return block.wire.state != std::to_underlying(vtbackend::CommandBlockState::Prompting);
+            }))
+        interruptedCommand.clear();
+
     // Trim client-side scrollback. The server's floor is authoritative — a
     // `clear`/CSI 3 J jumps it up with no line changes, so honoring it is what
     // drops history the real terminal already discarded (otherwise the mirror
@@ -365,7 +386,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            SessionEventHandler onSessionEvent,
                            LayoutHandler onLayout,
                            PermissionHandler onPermissionRequest,
-                           LivenessPolicy liveness):
+                           LivenessPolicy liveness,
+                           TabMergeRefusedHandler onTabMergeRefused):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -377,6 +399,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onSessionEvent(std::move(onSessionEvent)),
     _onLayout(std::move(onLayout)),
     _onPermissionRequest(std::move(onPermissionRequest)),
+    _onTabMergeRefused(std::move(onTabMergeRefused)),
     _liveness(liveness)
 {
 }
@@ -522,7 +545,27 @@ void NativeClient::createTab(uint64_t beside, std::string profileName)
 Delivery NativeClient::editTab(proto::EditTab edit)
 {
     // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
-    if (!shares(proto::Capability::TabEdits) || send(proto::DecodedPdu { std::move(edit) }) == 0)
+    if (!shares(proto::Capability::TabEdits))
+        return Delivery::Unsupported;
+    auto const serial = send(proto::DecodedPdu { edit });
+    if (serial == 0)
+        return Delivery::Unsupported;
+    // Kept in force over the pushes the daemon composed before it read it; a daemon without acks never says
+    // which those are, so nothing is kept.
+    if (shares(proto::Capability::TabEditAcks))
+        _pendingEdits.sent(serial, std::move(edit));
+    return Delivery::Sent;
+}
+
+Delivery NativeClient::mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
+                                         uint64_t targetSession,
+                                         vtworkspace::SplitSide side)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request = proto::MergeTabIntoSplit { .tabSessions = { tabSessions.begin(), tabSessions.end() },
+                                                    .targetSession = targetSession,
+                                                    .side = std::to_underlying(side) };
+    if (!shares(proto::Capability::TabMerge) || send(proto::DecodedPdu { request }) == 0)
         return Delivery::Unsupported;
     return Delivery::Sent;
 }
@@ -706,14 +749,28 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
             if (auto const at = std::ranges::lower_bound(_followedWindows, layout->window);
                 at == _followedWindows.end() || *at != layout->window)
                 _followedWindows.insert(at, layout->window);
-        if (_onLayout)
+        if (!_onLayout)
+            return;
+        if (_pendingEdits.empty())
+        {
             _onLayout(*layout);
+            return;
+        }
+        auto shown = *layout;
+        _pendingEdits.apply(shown);
+        _onLayout(shown);
         return;
     }
     if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
     {
         if (_onPermissionRequest)
             _onPermissionRequest(*request);
+        return;
+    }
+    if (auto const* refused = std::get_if<proto::TabMergeRefused>(&pdu))
+    {
+        if (_onTabMergeRefused)
+            _onTabMergeRefused(*refused);
         return;
     }
     // A probe's echo: noted as life above, which is all it is for.
@@ -778,6 +835,10 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
     _daemonRelease = hello.releaseVersion;
     _daemonInstance = hello.daemonInstance;
+    _restoredCounts = hello.restoredWindows == 0 && hello.restoredTabs == 0
+                          ? std::nullopt
+                          : std::optional { RestoredCounts { .windows = hello.restoredWindows,
+                                                             .tabs = hello.restoredTabs } };
     _followedWindows = hello.followedWindows;
     _negotiated = std::move(*outcome);
     _handshakeTimer.reset();
@@ -814,7 +875,8 @@ core::async::Task<void> NativeClient::run()
                                                   .sessionSettings = _handshake.sessionSettings,
                                                   .clientArea = _handshake.clientArea,
                                                   .attachIntent = _handshake.attachIntent,
-                                                  .profileName = _handshake.profileName } });
+                                                  .profileName = _handshake.profileName,
+                                                  .colorPreference = _handshake.colorPreference } });
 
     auto outcome = co_await pumpPdus(
         _connection.get(),

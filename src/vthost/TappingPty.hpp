@@ -59,6 +59,10 @@ class TappingPty final: public vtpty::Pty
         _inner->resizeScreen(cells, pixels);
     }
 
+    /// @return What the wrapped PTY's terminal does with typed text: the hosted program's echo, which
+    ///         NativeSession reports to its viewers (Capability::InputEcho).
+    [[nodiscard]] vtpty::InputEcho inputEcho() const noexcept override { return _inner->inputEcho(); }
+
     /// @return The wrapped PTY (for diagnostics/tests reaching the concrete type).
     [[nodiscard]] vtpty::Pty& inner() noexcept { return *_inner; }
     [[nodiscard]] vtpty::Pty const& inner() const noexcept { return *_inner; }

@@ -261,7 +261,8 @@ TEST_CASE("the first write after a realized restore drops the kept restore file"
     auto h = PersistenceHarness {};
     REQUIRE(h.store.write(onePane()));
     auto report = std::vector<std::string> {};
-    auto restore = prepareRestore(h.store, {}, [&](std::string_view line) { report.emplace_back(line); });
+    auto restore =
+        prepareRestore(h.store, {}, [&](std::string_view line) { report.emplace_back(line); }, h.wallClock);
     REQUIRE(restore.has_value());
     CHECK(h.files.exists(RestoredFile));
     CHECK_FALSE(h.files.exists(SnapshotFile));
@@ -370,23 +371,25 @@ TEST_CASE("prepareRestore turns each verdict into a restore or nothing", "[vthos
         lines.emplace_back(line);
     };
     auto const config = WorkspacePersistenceConfig { .rerunPrograms = { "htop" } };
+    auto const takenAt = std::chrono::sys_seconds { 1'761'000'000s };
+    auto wallClock = core::platform::ManualWallClock { takenAt };
 
     SECTION("absent")
     {
-        CHECK_FALSE(prepareRestore(store, config, report));
+        CHECK_FALSE(prepareRestore(store, config, report, wallClock));
         CHECK(lines.empty());
     }
     SECTION("empty")
     {
         REQUIRE(store.clear());
-        CHECK_FALSE(prepareRestore(store, config, report));
+        CHECK_FALSE(prepareRestore(store, config, report, wallClock));
         REQUIRE(lines.size() == 1);
         CHECK(lines[0].contains("previous daemon left no workspace"));
     }
     SECTION("damaged")
     {
         REQUIRE(files.writeFile(SnapshotFile, "garbage"));
-        CHECK_FALSE(prepareRestore(store, config, report));
+        CHECK_FALSE(prepareRestore(store, config, report, wallClock));
         REQUIRE(lines.size() == 1);
         CHECK(lines[0].contains(std::string { SnapshotFile } + ".corrupt"));
     }
@@ -396,20 +399,33 @@ TEST_CASE("prepareRestore turns each verdict into a restore or nothing", "[vthos
         auto bytes = files.readFile(SnapshotFile).value();
         bytes[8] = '\x02';
         REQUIRE(files.writeFile(SnapshotFile, bytes));
-        CHECK_FALSE(prepareRestore(store, config, report));
+        CHECK_FALSE(prepareRestore(store, config, report, wallClock));
         CHECK(lines.size() == 1);
         CHECK(files.exists(SnapshotFile));
     }
     SECTION("restorable")
     {
-        auto const takenAt = std::chrono::sys_seconds { 1'761'000'000s };
         REQUIRE(store.write(onePane(takenAt)));
-        auto const restore = prepareRestore(store, config, report);
+        auto const restore = prepareRestore(store, config, report, wallClock);
         REQUIRE(restore.has_value());
         CHECK(restore->snapshot == onePane(takenAt));
         CHECK(restore->rerunPrograms == std::vector<std::string> { "htop" });
-        CHECK(restore->marker == restoredMarker(localTimeOf(takenAt)));
+        auto const endedAt = localTimeOf(takenAt);
+        CHECK(restore->divider
+              == RestoreDivider { .sessionEndedAt = endedAt,
+                                  .today = std::chrono::floor<std::chrono::days>(endedAt) });
         CHECK(restore->source == RestoreSource::Snapshot);
         CHECK(files.exists(RestoredFile));
+    }
+    SECTION("restorable, read the next day")
+    {
+        REQUIRE(store.write(onePane(takenAt)));
+        wallClock.advance(std::chrono::days { 1 });
+        auto const restore = prepareRestore(store, config, report, wallClock);
+        REQUIRE(restore.has_value());
+        auto const endedAt = localTimeOf(takenAt);
+        CHECK(restore->divider.today
+              == std::chrono::floor<std::chrono::days>(endedAt) + std::chrono::days { 1 });
+        CHECK(restoredDividerText(restore->divider).contains(std::format("{:%Y-%m-%d}", endedAt)));
     }
 }

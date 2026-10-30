@@ -148,7 +148,7 @@ if(VTEXTENSION_TESTING)
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
     # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2)
+    target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
 
     # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
     # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in

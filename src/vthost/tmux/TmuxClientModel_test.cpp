@@ -224,7 +224,10 @@ struct RecordingSink final: vthost::tmux::PaneSink
     int columns = 0;
     int lines = 0;
 
+    std::string replayed; ///< What arrived as a replay (feedReplay), not as output.
+
     void feed(std::string_view bytes) override { received.append(bytes); }
+    void feedReplay(std::string_view bytes) override { replayed.append(bytes); }
     void resize(int newColumns, int newLines) override
     {
         columns = newColumns;
@@ -313,6 +316,71 @@ TEST_CASE("injected sinks and observers see the mirrored structure", "[vthost][t
     model.unsubscribe(&events);
     model.windowAdded(9);
     CHECK(events.log == expected);
+}
+
+namespace
+{
+
+/// ModelHarness with the model's panes backed by RecordingSinks, as the GUI backs them with its own feeds.
+struct SinkModelHarness
+{
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
+    std::unique_ptr<ControlSession> server = std::make_unique<ControlSession>(
+        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first), [] {
+            return std::int64_t { 1000 };
+        });
+    RecordingSink* sink = nullptr; ///< The one pane's sink, once discovered.
+    TmuxClientModel model { [this](uint64_t /*pane*/, int /*columns*/, int /*lines*/) {
+        auto made = std::make_unique<RecordingSink>();
+        sink = made.get();
+        return made;
+    } };
+    std::unique_ptr<TmuxGateway> gateway = std::make_unique<TmuxGateway>(loop, std::move(pair.second), model);
+
+    SinkModelHarness() { model.bind(*gateway); }
+};
+
+Task<void> refillScenario(SinkModelHarness* h, vtworkspace::SessionId sessionId)
+{
+    co_await waitFor(&h->loop,
+                     [&] { return h->sink != nullptr && h->sink->replayed.contains("history-line"); });
+    // The refill is a replay: none of it is output.
+    CHECK_FALSE(h->sink->received.contains("history-line"));
+
+    h->host.subscribeStream(h->server.get());
+    h->server->sessionOutput(sessionId, "\r\nlive-line");
+    co_await waitFor(&h->loop, [&] { return h->sink->received.contains("live-line"); });
+    CHECK_FALSE(h->sink->replayed.contains("live-line"));
+
+    h->gateway->detach();
+}
+
+Task<void> driveSinks(SinkModelHarness* h, Task<void> scenario)
+{
+    co_await core::async::whenAll(h->server->run(), h->gateway->run(), std::move(scenario));
+}
+
+} // namespace
+
+TEST_CASE("a pane's capture-pane refill reaches its sink as a replay, and live output as output",
+          "[vthost][tmuxclient]")
+{
+    auto h = SinkModelHarness {};
+    h.host.createTab();
+    auto* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const sessionId = tab->rootPane()->session();
+    h.host.terminal(sessionId)->writeToScreen("history-line");
+
+    h.loop.blockOn(driveSinks(&h, refillScenario(&h, sessionId)));
 }
 
 TEST_CASE("a pane moved between windows survives either layout-change order", "[vthost][tmuxclient]")

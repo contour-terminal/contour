@@ -40,6 +40,35 @@ class FakeProfileCatalog final: public ProfileCatalog
     std::string _defaultProfile;
 };
 
+/// A catalog whose one profile has a palette per light/dark preference, as a dual color configuration does:
+/// the background is @ref DarkBackground under Dark and @ref LightBackground under Light.
+class FakeDualPaletteCatalog final: public ProfileCatalog
+{
+  public:
+    static constexpr auto DarkBackground =
+        vtbackend::RGBColor { 0x101010 }; ///< The dark scheme's background.
+    static constexpr auto LightBackground = vtbackend::RGBColor { 0xF0F0F0 }; ///< The light scheme's.
+
+    [[nodiscard]] ResolvedProfile resolve(std::string_view name) const override
+    {
+        auto profile = ResolvedProfile {};
+        profile.shell.program = "/bin/zsh";
+        profile.settings.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(1000));
+        profile.name = std::string { name };
+        profile.settings.colorPalette = colorPalette(name, HostedColorPreference);
+        return profile;
+    }
+
+    [[nodiscard]] vtbackend::ColorPalette colorPalette(std::string_view /*name*/,
+                                                       vtbackend::ColorPreference preference) const override
+    {
+        auto palette = vtbackend::ColorPalette {};
+        palette.defaultBackground =
+            preference == vtbackend::ColorPreference::Dark ? DarkBackground : LightBackground;
+        return palette;
+    }
+};
+
 /// @param program The shell the profile runs.
 /// @param history The scrollback its sessions keep.
 /// @return A profile running @p program with @p history lines of scrollback.

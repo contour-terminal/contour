@@ -431,3 +431,71 @@ TEST_CASE("presentationOf reads a daemon tab's panes by their leaf sessions", "[
     tab.color = 0x00FF00;
     CHECK(presentationOf(tab, TabActivity::Inactive) == TabPresentation { .color = 0x00FF00 });
 }
+
+namespace
+{
+/// Two tabs: the first split between sessions 1 (pane 11) and 2 (pane 12), pane 11 active; the second a
+/// lone session 3 (pane 13). The first tab is active; @p served names the last edit the daemon had seen.
+[[nodiscard]] proto::LayoutState twoTabs(std::optional<uint64_t> served)
+{
+    auto split = proto::WirePane { .paneId = 10, .split = 2 };
+    split.children = { proto::WirePane { .paneId = 11, .session = 1 },
+                       proto::WirePane { .paneId = 12, .session = 2 } };
+    return proto::LayoutState {
+        .window = 1,
+        .activeTab = 0,
+        .tabs = { proto::WireTab { .tabId = 1, .activePane = 11, .root = split },
+                  proto::WireTab { .tabId = 2,
+                                   .activePane = 13,
+                                   .root = proto::WirePane { .paneId = 13, .session = 3 } } },
+        .servedEdit = served,
+    };
+}
+} // namespace
+
+TEST_CASE("PendingTabEdits keeps an activation in force until a push has seen it",
+          "[vthost][layout][tab-edit-acks]")
+{
+    using proto::TabEditKind;
+    auto pending = vthost::client::PendingTabEdits {};
+    REQUIRE(pending.empty());
+    pending.sent(5, proto::EditTab { .session = 2, .kind = TabEditKind::ActivatePane });
+
+    // Composed before the daemon read serial 5: the pane the user activated stays active over it.
+    auto stale = twoTabs(4);
+    pending.apply(stale);
+    CHECK(stale.tabs[0].activePane == 12);
+    CHECK_FALSE(pending.empty());
+
+    // The echo has seen it: the daemon's word stands, and the edit is forgotten -- even when another client
+    // moved the focus again since.
+    auto moved = twoTabs(5);
+    pending.apply(moved);
+    CHECK(moved.tabs[0].activePane == 11);
+    CHECK(pending.empty());
+}
+
+TEST_CASE("PendingTabEdits lays a tab activation over a push, and leaves the other edits to the echo",
+          "[vthost][layout][tab-edit-acks]")
+{
+    using proto::TabEditKind;
+    auto pending = vthost::client::PendingTabEdits {};
+    pending.sent(3, proto::EditTab { .session = 3, .kind = TabEditKind::ActivateTab });
+    pending.sent(4, proto::EditTab { .session = 1, .kind = TabEditKind::SetTitle, .title = "build" });
+
+    auto stale = twoTabs(2);
+    pending.apply(stale);
+    CHECK(stale.activeTab == 1);
+    CHECK(stale.tabs[0].title.empty());
+}
+
+TEST_CASE("PendingTabEdits leaves a push from a daemon without acks as it is",
+          "[vthost][layout][tab-edit-acks]")
+{
+    auto pending = vthost::client::PendingTabEdits {};
+    pending.sent(5, proto::EditTab { .session = 2, .kind = proto::TabEditKind::ActivatePane });
+    auto unstamped = twoTabs(std::nullopt);
+    auto const before = unstamped;
+    pending.apply(unstamped);
+    CHECK(unstamped == before);
+}

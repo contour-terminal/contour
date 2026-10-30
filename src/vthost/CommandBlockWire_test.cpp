@@ -162,8 +162,8 @@ TEST_CASE("the last enumerator of each enum arrives as itself", "[vthost][wire][
     // change is most likely to have just added, is the one that reads as unknown.
     CHECK(vthost::commandBlockStateOf(2) == vtbackend::CommandBlockState::Finished);
     CHECK(vthost::commandBlockStateOf(3) == std::nullopt);
-    CHECK(vthost::commandBlockEndOf(1) == vtbackend::CommandBlockEnd::Implicit);
-    CHECK(vthost::commandBlockEndOf(2) == std::nullopt);
+    CHECK(vthost::commandBlockEndOf(2) == vtbackend::CommandBlockEnd::Abandoned);
+    CHECK(vthost::commandBlockEndOf(3) == std::nullopt);
     CHECK(vthost::commandLineSourceOf(2) == vtbackend::CommandLineSource::Recovered);
     CHECK(vthost::commandLineSourceOf(3) == std::nullopt);
     CHECK(vthost::contextLocalityOf(2) == vtbackend::ContextLocality::Foreign);

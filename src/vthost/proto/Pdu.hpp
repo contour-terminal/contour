@@ -78,6 +78,9 @@ enum class PduType : uint8_t
     ControlReply = 31,
     ControlEvent = 32,
     ProgramStatus = 33,
+    SessionInputEcho = 34,
+    MergeTabIntoSplit = 35,
+    TabMergeRefused = 36,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -182,6 +185,16 @@ enum class ConnectionRole : uint8_t
     Control = 1, ///< A probe or a command to the daemon itself.
 };
 
+/// The light/dark preference a ClientHello states for the sessions it follows: what the client's display
+/// shows, which the host builds each session's palette under. The numbering is the wire's; zero states none,
+/// so a hello that predates the field reads as unstated.
+enum class WireColorPreference : uint8_t
+{
+    Unstated = 0, ///< The client states none: the host keeps what it has.
+    Dark = 1,     ///< The client shows its profile's dark scheme.
+    Light = 2,    ///< The client shows its profile's light scheme.
+};
+
 /// The client area a ClientHello states, in cells: the whole content area the client renders the
 /// layout into, as a ResizeRequest would propose it.
 struct WireClientArea
@@ -249,6 +262,11 @@ struct ClientHello
     /// The profile the connection's sessions run under, resolved by the daemon in its own configuration;
     /// empty means the daemon's default. Honoured only with Capability::ProfileByName.
     std::string profileName = {};
+    /// The light/dark preference the client shows, applied to the sessions the connection follows before
+    /// their first snapshot and to those spawned afterwards. Informational like
+    /// Capability::InitialClientArea: the hello travels before the daemon says what it offers, so a daemon
+    /// predating it ignores the field.
+    WireColorPreference colorPreference = WireColorPreference::Unstated;
     bool operator==(ClientHello const&) const = default;
 };
 
@@ -293,6 +311,12 @@ struct ServerHello
     /// A daemon that restores a saved workspace after a restart (phase 6) is a new instance all the same: a
     /// client that stayed connected sees its old windows lost, and the restored ones arrive as new windows.
     uint64_t daemonInstance = 0;
+    /// The windows a restore of the daemon's saved workspace brought back, told once: to the first accepted
+    /// Attach connection after it, and zero to every other connection and in every refusal. Zero reads as
+    /// "nothing to tell", also from a daemon that predates the field. @see vthost::RestoredCounts
+    uint32_t restoredWindows = 0;
+    /// The tabs of those windows; zero as @ref restoredWindows is.
+    uint32_t restoredTabs = 0;
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -563,6 +587,10 @@ struct SessionState
     /// NativeSession::SnapshotChunkBytes). Any older remainder the receiver lacks follows as
     /// increments. Replaces what the receiver holds from `commandBlocksFloor` on.
     std::vector<WireCommandBlock> commandBlocks = {};
+    /// The command line a restart stopped in this session, for the footer a client shows over its fresh
+    /// shell (the host keeps it until the session's next command starts); empty means none. Untrusted text:
+    /// it came from a snapshot's OSC 133 command line, and a receiver bounds it before use.
+    std::string interruptedCommand = {};
     bool operator==(SessionState const&) const = default;
 };
 
@@ -954,10 +982,21 @@ struct ProgramStatus
     bool operator==(ProgramStatus const&) const = default;
 };
 
+/// Server→client push (Capability::InputEcho): what a session's terminal does with typed text, sent when it
+/// changes and in a snapshot. Raw on the wire: `echo` is a vtpty::InputEcho's value (0 Unknown, 1 Echoed,
+/// 2 Raw, 3 Hidden); a value this build does not know reads as Unknown (vthost::inputEchoFromWire).
+struct SessionInputEcho
+{
+    uint64_t session = 0; ///< The session whose terminal it is.
+    uint8_t echo = 0;     ///< A vtpty::InputEcho's value.
+    bool operator==(SessionInputEcho const&) const = default;
+};
+
 /// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
 /// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
 /// without enumerating the catalog's tags itself.
-using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus>;
+using SessionEventPdu =
+    std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus, SessionInputEcho>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -1002,6 +1041,10 @@ struct LayoutState
     uint64_t window = 0;
     uint32_t activeTab = 0; ///< The active tab's INDEX within `tabs`.
     std::vector<WireTab> tabs;
+    /// The serial of the last EditTab of this connection the daemon had served when it composed this push;
+    /// 0 for none yet. Appended by a later version (Capability::TabEditAcks), and written only to a client
+    /// that shares it: absent, nothing is known of which edits the push has seen.
+    std::optional<uint64_t> servedEdit = std::nullopt;
     bool operator==(LayoutState const&) const = default;
 };
 
@@ -1098,6 +1141,8 @@ enum class EngineOperation : uint8_t
     WriteScreen = 3,          ///< Parse the request's text as if the application had written it.
     SetUserMark = 4,          ///< Place the user mark (vi `mm`) on the logical line of the request's row.
     ClearUserMark = 5,        ///< Take the user mark off the logical line of the request's row.
+    UseDarkColors = 6,        ///< Re-seed the session's palette from its profile's dark scheme.
+    UseLightColors = 7,       ///< Re-seed the session's palette from its profile's light scheme.
 };
 
 /// A row of a hosted session's primary grid, as the host numbers it: a stable id, which names that row only
@@ -1246,6 +1291,37 @@ struct EditTab
     bool operator==(EditTab const&) const = default;
 };
 
+/// Client→server (Capability::TabMerge): graft the whole tab holding @p tabSessions beside the pane hosting
+/// @p targetSession, on @p side. Nothing is spawned or closed: the dragged tab's sessions keep running and
+/// move into the target tab, and every attached client is pushed the merged LayoutState -- once for each
+/// model event the merge fires, each push already showing the merged tree.
+///
+/// Both ends are named by session, like every other client→server layout verb, because tab and pane ids are
+/// minted per model and the two ends have their own.
+struct MergeTabIntoSplit
+{
+    /// EVERY session of the tab to merge, as the client sees the tab. The first names the tab; the daemon
+    /// refuses the request when the sessions its tab holds now are not exactly these, so a request made of a
+    /// stale view (the tab was merged elsewhere meanwhile) never drags in panes the user did not drag.
+    std::vector<uint64_t> tabSessions = {};
+    uint64_t targetSession = 0; ///< The pane to split, by the session it hosts.
+    /// A vtworkspace::SplitSide as the wire spells it. The codec carries any byte; the host refuses one it
+    /// does not know (@see vthost::splitSideFrom).
+    uint8_t side = 0;
+    bool operator==(MergeTabIntoSplit const&) const = default;
+};
+
+/// Server→client (Capability::TabMerge), under the serial of the MergeTabIntoSplit it answers: the daemon
+/// changed nothing, so the client can tell its user rather than leave a drop that did nothing unexplained.
+/// A merge the daemon performs is answered by the layout push alone.
+struct TabMergeRefused
+{
+    /// Why, as a vthost::TabMergeError's value. Carried, not judged: a value this build does not know is
+    /// still a refusal.
+    uint8_t reason = 0;
+    bool operator==(TabMergeRefused const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1323,7 +1399,10 @@ using DecodedPdu = std::variant<Invalid,
                                 ControlRequest,
                                 ControlReply,
                                 ControlEvent,
-                                ProgramStatus>;
+                                ProgramStatus,
+                                SessionInputEcho,
+                                MergeTabIntoSplit,
+                                TabMergeRefused>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

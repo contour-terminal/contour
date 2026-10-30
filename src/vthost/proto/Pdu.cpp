@@ -232,6 +232,10 @@ namespace
     {
         return std::to_underlying(PduType::EditTab);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(MergeTabIntoSplit const&) noexcept
+    {
+        return std::to_underlying(PduType::MergeTabIntoSplit);
+    }
     [[nodiscard]] constexpr uint64_t tagOf(Heartbeat const&) noexcept
     {
         return std::to_underlying(PduType::Heartbeat);
@@ -251,6 +255,15 @@ namespace
     [[nodiscard]] constexpr uint64_t tagOf(ProgramStatus const&) noexcept
     {
         return std::to_underlying(PduType::ProgramStatus);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SessionInputEcho const&) noexcept
+    {
+        return std::to_underlying(PduType::SessionInputEcho);
+    }
+
+    [[nodiscard]] constexpr uint64_t tagOf(TabMergeRefused const&) noexcept
+    {
+        return std::to_underlying(PduType::TabMergeRefused);
     }
 
     // --- body encoders ------------------------------------------------------
@@ -345,6 +358,7 @@ namespace
         for (auto const window: pdu.attachIntent.windows)
             fields.varint(window);
         fields.string(pdu.profileName);
+        fields.u8(std::to_underlying(pdu.colorPreference));
         out.blob(fields.view());
         out.u8(0);
     }
@@ -375,6 +389,8 @@ namespace
         for (auto const window: pdu.followedWindows)
             fields.varint(window);
         fields.varint(pdu.daemonInstance);
+        fields.varint(pdu.restoredWindows);
+        fields.varint(pdu.restoredTabs);
         out.blob(fields.view());
     }
 
@@ -543,6 +559,7 @@ namespace
         out.varint(pdu.commandBlocks.size());
         for (auto const& block: pdu.commandBlocks)
             encodeCommandBlock(out, block);
+        out.string(pdu.interruptedCommand);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -782,6 +799,20 @@ namespace
         out.u32(pdu.color);
     }
 
+    void encodeBody(Writer& out, MergeTabIntoSplit const& pdu)
+    {
+        out.varint(pdu.tabSessions.size());
+        for (auto const session: pdu.tabSessions)
+            out.varint(session);
+        out.varint(pdu.targetSession);
+        out.u8(pdu.side);
+    }
+
+    void encodeBody(Writer& out, TabMergeRefused const& pdu)
+    {
+        out.u8(pdu.reason);
+    }
+
     void encodeBody(Writer& out, Heartbeat const& pdu)
     {
         out.varint(pdu.nonce);
@@ -824,6 +855,12 @@ namespace
         }
     }
 
+    void encodeBody(Writer& out, SessionInputEcho const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(pdu.echo);
+    }
+
     void encodeBody(Writer& out, ResizeSplit const& pdu)
     {
         out.varint(pdu.firstSession);
@@ -858,6 +895,8 @@ namespace
             out.u32(tab.color);
             encodePane(out, tab.root);
         }
+        if (pdu.servedEdit.has_value())
+            out.varint(*pdu.servedEdit);
     }
 
     // --- body decoders (one table row each) ---------------------------------
@@ -1008,11 +1047,24 @@ namespace
         return assign(in.string(), pdu.profileName, error);
     }
 
+    [[nodiscard]] bool decodeHelloColorPreference(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        auto value = uint8_t {};
+        if (!assign(in.u8(), value, error))
+            return false;
+        // A value no enumerator names is a later version's: read as unstated, the host keeps what it has.
+        pdu.colorPreference = value <= std::to_underlying(WireColorPreference::Light)
+                                  ? static_cast<WireColorPreference>(value)
+                                  : WireColorPreference::Unstated;
+        return true;
+    }
+
     /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
     /// inserted.
-    constexpr auto ClientHelloFields = std::array<ClientHelloField, 6> {
-        decodeHelloToken,      decodeHelloSessionSettings, decodeHelloRole,
-        decodeHelloClientArea, decodeHelloAttachIntent,    decodeHelloProfileName,
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 7> {
+        decodeHelloToken,           decodeHelloSessionSettings, decodeHelloRole,
+        decodeHelloClientArea,      decodeHelloAttachIntent,    decodeHelloProfileName,
+        decodeHelloColorPreference,
     };
 
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the
@@ -1100,6 +1152,10 @@ namespace
                 return std::unexpected(followed.error());
         }
         if (inner.remaining() != 0 && !assign(inner.varint(), pdu.daemonInstance, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredWindows, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.restoredTabs, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -1279,6 +1335,9 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.commandBlocks, decodeCommandBlock); !decoded)
             return std::unexpected(decoded.error());
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0 && !assign(in.string(), pdu.interruptedCommand, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -1603,6 +1662,29 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeMergeTabIntoSplit(Reader& in)
+    {
+        auto pdu = MergeTabIntoSplit {};
+        auto error = DecodeError {};
+        // The side is carried, not judged: the host refuses a byte it does not know.
+        if (auto const sessions =
+                decodeVector(in, pdu.tabSessions, [](Reader& reader) { return reader.varint(); });
+            !sessions)
+            return std::unexpected(sessions.error());
+        if (!assign(in.varint(), pdu.targetSession, error) || !assign(in.u8(), pdu.side, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeTabMergeRefused(Reader& in)
+    {
+        auto pdu = TabMergeRefused {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), pdu.reason, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -1665,6 +1747,16 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.records, decodeProgramStatusRecord); !decoded)
             return std::unexpected(decoded.error());
+        return pdu;
+    }
+
+    DecodeResult decodeSessionInputEcho(Reader& in)
+    {
+        // The value is carried, not judged: one this build does not know reads as Unknown where it is used.
+        auto pdu = SessionInputEcho {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), pdu.echo, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -1740,6 +1832,14 @@ namespace
             tab.root = std::move(*root);
             pdu.tabs.push_back(std::move(tab));
         }
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0)
+        {
+            auto served = uint64_t { 0 };
+            if (!assign(in.varint(), served, error))
+                return std::unexpected(error);
+            pdu.servedEdit = served;
+        }
         return pdu;
     }
 
@@ -1784,6 +1884,9 @@ namespace
         DecodeRow { PduType::ControlReply, decodeControlReply },
         DecodeRow { PduType::ControlEvent, decodeControlEvent },
         DecodeRow { PduType::ProgramStatus, decodeProgramStatus },
+        DecodeRow { PduType::SessionInputEcho, decodeSessionInputEcho },
+        DecodeRow { PduType::MergeTabIntoSplit, decodeMergeTabIntoSplit },
+        DecodeRow { PduType::TabMergeRefused, decodeTabMergeRefused },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

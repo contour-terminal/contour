@@ -37,6 +37,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <algorithm>
+#include <coroutine>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -50,6 +51,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <vtcontrol/Catalog.hpp>
@@ -87,7 +89,11 @@ struct HandshakePolicy
                                                                    proto::Capability::TabEdits,
                                                                    proto::Capability::Heartbeat,
                                                                    proto::Capability::ProgramStatus,
-                                                                   proto::Capability::ControlPermissions });
+                                                                   proto::Capability::ControlPermissions,
+                                                                   proto::Capability::InputEcho,
+                                                                   proto::Capability::TabMerge,
+                                                                   proto::Capability::TabEditAcks,
+                                                                   proto::Capability::ColorPreference });
 };
 
 /// When a connection sends a session's program-status set.
@@ -422,6 +428,11 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
+    /// A viewer's keys for one of its sessions: written through the host, and the session's echo read again
+    /// at the next flush. Loop thread.
+    /// @param input The PDU.
+    void handleInput(proto::Input const& input);
+
     /// Whether a frame was a request to the daemon itself -- daemon control, or the control API -- which is
     /// served (or refused) before the frame would be dispatched on.
     enum class DaemonRequest : uint8_t
@@ -436,6 +447,20 @@ class NativeSession final: public SessionStreamEvents
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a request.
     [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// Whether a frame was a verb that changes how a tab is presented or where its panes are.
+    enum class TabVerb : uint8_t
+    {
+        None = 0,   ///< It was not one: the frame is dispatched on.
+        Served = 1, ///< It was, and it has been carried out or refused.
+    };
+
+    /// Serves @p frame if it is an EditTab (gated on Capability::TabEdits) or a MergeTabIntoSplit (gated on
+    /// Capability::TabMerge): applied to the daemon's model, whose events push the new layout to every
+    /// client, and answered Unsupported when the capability was not negotiated.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was such a verb.
+    [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
 
     /// What requireGrant() decided.
     enum class GrantCheck : uint8_t
@@ -579,6 +604,43 @@ class NativeSession final: public SessionStreamEvents
         Pending = 1, ///< A budget, a cap or a full send queue held records back for a later delta.
     };
 
+    /// A claim a flow this connection spawned holds on `this`, which run() waits out before it lets `this`
+    /// go (@see spawnedFlowsEnded). Given back exactly once, when the frame holding it lets go of it.
+    ///
+    /// Taken as a coroutine PARAMETER, and moved into a local as the body's first statement. The local gives
+    /// it back as the body ends, however it ends; the parameter gives it back when the loop destroys a frame
+    /// it never resumed -- parameters live in the frame from the call on, a body's locals only once it runs.
+    class SpawnedFlowClaim
+    {
+      public:
+        /// Undoes what the claim stands for on @p session; it runs in a destructor.
+        using Release = void (*)(NativeSession& session) noexcept;
+
+        /// @param session The connection claimed; it outlives the claim (run() waits for that).
+        /// @param release What gives the claim back.
+        SpawnedFlowClaim(NativeSession& session, Release release) noexcept:
+            _session(&session), _release(release)
+        {
+        }
+        SpawnedFlowClaim(SpawnedFlowClaim&& other) noexcept:
+            _session(std::exchange(other._session, nullptr)), _release(other._release)
+        {
+        }
+        SpawnedFlowClaim(SpawnedFlowClaim const&) = delete;
+        SpawnedFlowClaim& operator=(SpawnedFlowClaim const&) = delete;
+        SpawnedFlowClaim& operator=(SpawnedFlowClaim&&) = delete;
+        /// Gives the claim back, unless it moved on, and wakes run()'s wait once it was the last one.
+        ~SpawnedFlowClaim();
+
+      private:
+        NativeSession* _session; ///< The connection claimed; null once moved from.
+        Release _release;        ///< What gives the claim back.
+    };
+
+    /// What run() awaits before it lets `this` go: ready once spawnedFlowsEnded(), else parked until the
+    /// last SpawnedFlowClaim is given back. Defined in the source file.
+    struct SpawnedFlowsEnded;
+
     /// Whether @ref requeueOnSendRoom is parked on the send queue's watermark.
     enum class RoomWaiter : uint8_t
     {
@@ -638,6 +700,25 @@ class NativeSession final: public SessionStreamEvents
     /// @param when Whether an empty set is news (a change emptied it) or not worth a PDU (a snapshot).
     void pushProgramStatus(vtworkspace::SessionId session, ProgramStatusPush when);
 
+    /// Whether this connection is a viewer that mirrors the echo state (shares Capability::InputEcho).
+    [[nodiscard]] bool mirrorsInputEcho() const noexcept;
+
+    /// Sends what @p session's terminal does with typed text, when it differs from what this connection was
+    /// last told. Read from the hosted PTY on the loop thread, never under the terminal lock.
+    /// @param session The session.
+    void pushInputEcho(vtworkspace::SessionId session);
+
+    /// The idle check of the echo state (FlushPolicy::inputEchoCheck): once it is due, asks every followed
+    /// session's PTY for its echo, so a change with no output or input after it still reaches the client; and
+    /// arms the flush that makes the next one. Loop thread, from the flusher. A connection that does not
+    /// mirror the echo state does nothing.
+    void checkInputEchoWhenDue();
+
+    /// Opens (or extends) the window in which the idle check keeps itself armed
+    /// (FlushPolicy::inputEchoWindow): output of a followed session, an input, or the attach itself happened
+    /// just now.
+    void noteInputEchoActivity();
+
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
     /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
@@ -682,7 +763,8 @@ class NativeSession final: public SessionStreamEvents
 
     /// The one waiter for room for command-block records: parks until the send queue's backlog is under
     /// a piece, then queues an increment for every session in @ref _recordsAwaitingRoom.
-    [[nodiscard]] core::async::Task<void> requeueOnSendRoom();
+    /// @param claim The waiter's claim on `this` (@see claimRoomWaiter).
+    [[nodiscard]] core::async::Task<void> requeueOnSendRoom(SpawnedFlowClaim claim);
 
     /// Arms a delta flush due at @p deadline, unless one due no later is already armed or the connection
     /// is closing. An earlier deadline supersedes the armed one: its flusher wakes to find it moved, and
@@ -708,7 +790,8 @@ class NativeSession final: public SessionStreamEvents
     /// The single snapshot streamer: drains @ref _snapshotQueue, one session at a time, waiting
     /// for room in the send queue before each piece. One streamer rather than one coroutine per
     /// snapshot, so two runs for the same session can never interleave on the wire.
-    [[nodiscard]] core::async::Task<void> streamSnapshots();
+    /// @param claim The streamer's claim on `this` (@see claimStreamer).
+    [[nodiscard]] core::async::Task<void> streamSnapshots(SpawnedFlowClaim claim);
 
     /// Emits @p delta as one PDU, or as a run of @ref _snapshotPieceBytes-sized ones when its rows
     /// exceed that, waiting for room before each.
@@ -813,8 +896,22 @@ class NativeSession final: public SessionStreamEvents
     }
 
     /// Flushes every pending increment at @p deadline, unless an earlier deadline superseded it by then.
+    /// @param claim The flush's claim on `this` (@see claimFlush).
     /// @param deadline The deadline scheduleFlush() armed it for.
-    [[nodiscard]] core::async::Task<void> flushAt(core::platform::SteadyTimePoint deadline);
+    [[nodiscard]] core::async::Task<void> flushAt(SpawnedFlowClaim claim,
+                                                  core::platform::SteadyTimePoint deadline);
+
+    /// @return A claim counted in @ref _flushesInFlight until a flushAt() frame gives it back.
+    [[nodiscard]] SpawnedFlowClaim claimFlush();
+    /// @param session The session the streamer starts on.
+    /// @return A claim that holds @ref _streamingSession set until a streamSnapshots() frame gives it back.
+    [[nodiscard]] SpawnedFlowClaim claimStreamer(vtworkspace::SessionId session);
+    /// @return A claim that holds @ref _roomWaiter Parked until a requeueOnSendRoom() frame gives it back.
+    [[nodiscard]] SpawnedFlowClaim claimRoomWaiter();
+
+    /// @return Whether no flow this connection spawned holds `this` any more: no flush, no snapshot
+    ///         streamer, no waiter for send room.
+    [[nodiscard]] bool spawnedFlowsEnded() const noexcept;
 
     core::net::EventLoop& _loop;
     SessionHost& _host;
@@ -831,6 +928,9 @@ class NativeSession final: public SessionStreamEvents
     /// What the handshake agreed on, the shared capabilities among it; engaged once a ClientHello was
     /// accepted.
     std::optional<proto::Negotiated> _negotiated;
+    /// The serial of the last EditTab this connection served; 0 before one. Stamped on every LayoutState
+    /// pushed to a client sharing Capability::TabEditAcks (proto::LayoutState::servedEdit).
+    uint64_t _servedEdit = 0;
     /// The send-queue bound, half of which is where control events start to be dropped.
     std::size_t _maxWriteQueueBytes;
     /// Where this connection's control events are delivered. @see deliverControlEvent
@@ -859,6 +959,16 @@ class NativeSession final: public SessionStreamEvents
     std::unordered_set<uint64_t> _pendingSessions;
     /// Sessions whose program-status records changed since the last flush. @see sessionSignal
     std::unordered_set<uint64_t> _programStatusPending;
+    /// Sessions whose echo state is to be read at the next flush, beside those with new output: one that took
+    /// typed input, whose program may have turned echo back on without printing. @see pushInputEcho
+    std::unordered_set<uint64_t> _inputEchoPending;
+    /// What this connection was last told of each session's echo, as its wire byte; absent is Unknown, which
+    /// a client assumes before it is told anything.
+    std::unordered_map<uint64_t, uint8_t> _inputEchoSent;
+    /// When the idle check of the echo state is next due. @see checkInputEchoWhenDue
+    core::platform::SteadyTimePoint _nextInputEchoCheck {};
+    /// Until when the idle check keeps itself armed. @see noteInputEchoActivity
+    core::platform::SteadyTimePoint _inputEchoActiveUntil {};
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer
@@ -879,6 +989,8 @@ class NativeSession final: public SessionStreamEvents
     /// The flushAt() coroutines live, superseded ones included: what @ref run waits out before it lets
     /// `this` go, since a superseded flusher still sleeps with `this` in its frame.
     std::size_t _flushesInFlight = 0;
+    /// run(), while it waits for spawnedFlowsEnded(): what the last SpawnedFlowClaim given back resumes.
+    std::coroutine_handle<> _spawnedFlowsWaiter;
     bool _closed = false;
     /// The session this connection's input backed up in, past the high-water mark: the connection is read
     /// no further until it drains. @see awaitInputRoom

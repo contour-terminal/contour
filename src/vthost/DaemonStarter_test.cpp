@@ -104,6 +104,7 @@ TEST_CASE("a registered service is started instead of spawning on demand", "[vth
         vthost::RegisteredService { .backend =
                                         std::make_unique<FakeServiceBackend>(ServiceRunState::Stopped, log),
                                     .name = "contour-daemon" },
+        SocketPath,
         fixture.spawn(std::chrono::seconds { 1 }));
     REQUIRE(starter);
     CHECK(starter->start().has_value());
@@ -129,10 +130,55 @@ TEST_CASE("a started service that never serves is an error naming the socket", "
     CHECK(log.starts == 1);
 }
 
+TEST_CASE("a registered service is not started for a socket it does not serve", "[vthost][starter]")
+{
+    auto log = FakeServiceLog {};
+    auto fixture = OnDemandFixture {};
+    // $CONTOUR_MUX or --socket points elsewhere than the label's default the service serves.
+    auto starter = vthost::chooseDaemonStarter(
+        vthost::RegisteredService { .backend =
+                                        std::make_unique<FakeServiceBackend>(ServiceRunState::Stopped, log),
+                                    .name = "contour-daemon" },
+        "/nonexistent/contour/default",
+        fixture.spawn(std::chrono::seconds { 0 }));
+    REQUIRE(starter);
+    CHECK_FALSE(starter->start().has_value());
+    CHECK(log.starts == 0);
+    CHECK(fixture.spawner.spawns == 1);
+    CHECK(fixture.binary.calls == 1);
+}
+
+TEST_CASE("a registration that pins its socket is compared by that socket", "[vthost][starter]")
+{
+    auto log = FakeServiceLog {};
+    auto fixture = OnDemandFixture {};
+    fixture.spawner.presence = DaemonPresence::Serving;
+    auto const pinned = std::string { "/usr/bin/contour daemon --socket=" } + SocketPath;
+    auto starter = vthost::chooseDaemonStarter(
+        vthost::RegisteredService { .backend = std::make_unique<FakeServiceBackend>(
+                                        ServiceRunState::Stopped, log, DaemonLaunchStyle::Foreground, pinned),
+                                    .name = "contour-daemon" },
+        "/nonexistent/contour/default",
+        fixture.spawn(std::chrono::seconds { 1 }));
+    REQUIRE(starter);
+    CHECK(starter->start().has_value());
+    CHECK(log.starts == 1);
+    CHECK(fixture.spawner.spawns == 0);
+}
+
+TEST_CASE("socket paths compare regardless of separators and dot segments", "[vthost][starter]")
+{
+    CHECK(vthost::isSameSocketPath("/nonexistent/a/b", "/nonexistent/a/b"));
+    CHECK(vthost::isSameSocketPath("/nonexistent/a/b", "/nonexistent/a/b/"));
+    CHECK(vthost::isSameSocketPath("/nonexistent/a/./c/../b", "/nonexistent/a/b"));
+    CHECK_FALSE(vthost::isSameSocketPath("/nonexistent/a/b", "/nonexistent/a/c"));
+}
+
 TEST_CASE("without a registration the daemon is spawned on demand", "[vthost][starter]")
 {
     auto fixture = OnDemandFixture {};
-    auto starter = vthost::chooseDaemonStarter(std::nullopt, fixture.spawn(std::chrono::seconds { 0 }));
+    auto starter =
+        vthost::chooseDaemonStarter(std::nullopt, SocketPath, fixture.spawn(std::chrono::seconds { 0 }));
     REQUIRE(starter);
     auto const result = starter->start();
     REQUIRE_FALSE(result.has_value());

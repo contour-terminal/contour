@@ -139,4 +139,32 @@ template <std::ranges::input_range Roots>
 [[nodiscard]] std::vector<proto::EditTab> tabEditsToReport(TabPresentation const& local,
                                                            TabPresentation const& lastFromDaemon);
 
+/// The EditTabs a client sent that the daemon had not served yet, kept in force over the layouts it pushes
+/// meanwhile (proto::Capability::TabEditAcks).
+///
+/// The daemon pushes a layout on every model change, so one composed before it read the client's edit -- a
+/// title another pane set, say -- still shows the presentation the edit changed, and undoes it here until the
+/// echo arrives. Each push names the last edit it has seen (proto::LayoutState::servedEdit): the edits after
+/// it are laid over the push, and the ones up to it are forgotten, the push being the daemon's word on them.
+/// Only the edits a row of the overlay table knows are laid over; the rest wait for the echo as before.
+class PendingTabEdits
+{
+  public:
+    /// Records @p edit, sent under @p serial. Serials grow, as a connection's frames are numbered.
+    /// @param serial The frame serial the edit went out under.
+    /// @param edit   The edit.
+    void sent(uint64_t serial, proto::EditTab edit);
+
+    /// Lays the edits @p layout has not seen over it, and forgets the ones it has.
+    /// @param layout A pushed layout; left as it is when it names no served edit (a daemon without acks).
+    void apply(proto::LayoutState& layout);
+
+    /// @return Whether no edit awaits the daemon.
+    [[nodiscard]] bool empty() const noexcept { return _pending.empty(); }
+
+  private:
+    /// The unserved edits, by ascending serial.
+    std::vector<std::pair<uint64_t, proto::EditTab>> _pending;
+};
+
 } // namespace vthost::client

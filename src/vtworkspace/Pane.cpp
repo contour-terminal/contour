@@ -2,6 +2,7 @@
 #include <vtworkspace/Pane.hpp>
 
 #include <cassert>
+#include <utility>
 
 namespace vtworkspace
 {
@@ -28,6 +29,37 @@ std::pair<Pane*, Pane*> Pane::split(
     _second = std::move(secondChild);
 
     return { _first.get(), _second.get() };
+}
+
+Pane* Pane::graft(
+    std::unique_ptr<Pane> subtree, PaneId splitNodeId, SplitState state, GraftOrder order, double ratio)
+{
+    assert(isLeaf() && "graft() must be called on a leaf");
+    assert(subtree != nullptr && "graft() needs a subtree");
+    assert(state != SplitState::None && "graft direction must be Horizontal or Vertical");
+
+    // The leaf's session moves into a child that keeps the leaf's old id, so the surviving terminal's
+    // identity is preserved, exactly as in split().
+    auto existing = std::make_unique<Pane>(_id, _session);
+    existing->_parent = this;
+    subtree->_parent = this;
+    auto* const grafted = subtree.get();
+
+    _id = splitNodeId;
+    _session = SessionId {};
+    _splitState = state;
+    setRatio(ratio);
+    if (order == GraftOrder::GraftFirst)
+    {
+        _first = std::move(subtree);
+        _second = std::move(existing);
+    }
+    else
+    {
+        _first = std::move(existing);
+        _second = std::move(subtree);
+    }
+    return grafted;
 }
 
 SessionId Pane::closeChild(Pane* child)
@@ -71,6 +103,12 @@ void Pane::swapLeafPayload(Pane* other) noexcept
     // Only the sessions trade places; the PaneIds — the stable identity hosts address a node by —
     // stay put. So the two terminals swap slots without any node being renamed or re-parented.
     std::swap(_session, other->_session);
+}
+
+SessionId Pane::replaceSession(SessionId session) noexcept
+{
+    assert(isLeaf() && "replaceSession() must be called on a leaf");
+    return std::exchange(_session, session);
 }
 
 void Pane::swapChildren() noexcept

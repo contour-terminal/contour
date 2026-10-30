@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// A file system whose writes and renames fail where a test says, as a full or read-only disk does.
+/// A file system whose writes, renames and removals fail where a test says, as a full or read-only disk does.
 
 #include <cstdint>
 #include <filesystem>
@@ -21,13 +21,14 @@ enum class FaultOp : std::uint8_t
 {
     WriteFile = 0,
     Rename,
+    Remove,
 };
 
 /// Forwards to the in-memory files, except for the calls its predicate selects, which fail.
 class FaultyFileSystem final: public ForwardingFileSystem
 {
   public:
-    /// Selects the calls to fail: the operation, and the path written or renamed to.
+    /// Selects the calls to fail: the operation, and the path written, renamed to or removed.
     using Fault = std::function<bool(FaultOp, std::filesystem::path const&)>;
 
     /// @param fault Which calls fail.
@@ -47,6 +48,13 @@ class FaultyFileSystem final: public ForwardingFileSystem
         if (_fault(FaultOp::Rename, to))
             return std::unexpected("Permission denied: " + to.string());
         return ForwardingFileSystem::rename(from, to);
+    }
+
+    [[nodiscard]] std::expected<bool, std::string> remove(std::filesystem::path const& path) const override
+    {
+        if (_fault(FaultOp::Remove, path))
+            return std::unexpected("Permission denied: " + path.string());
+        return ForwardingFileSystem::remove(path);
     }
 
   private:

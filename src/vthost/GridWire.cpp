@@ -64,6 +64,9 @@ namespace
         std::pair { vtbackend::CellFlag::CharacterProtectedISO, 18 },
         std::pair { vtbackend::CellFlag::MulticellContinuation, 19 },
         std::pair { vtbackend::CellFlag::WrapPadding, 20 },
+        // Render-only: the grid never stores it, so it never travels. Pinned all the same, so that a later
+        // flag cannot take its bit while some peer still treats it as this one.
+        std::pair { vtbackend::CellFlag::InputMethodPreedit, 21 },
     };
 
     template <typename Flag, std::size_t N>
@@ -90,6 +93,17 @@ static_assert(bitsAreAsPinned(PinnedCellFlagBits),
 static_assert(PinnedCellFlagBits.size() == vtbackend::CellFlagList.size(),
               "A CellFlag was added or removed. Add (or drop) its row in PinnedCellFlagBits, which is "
               "what freezes the wire encoding.");
+
+namespace
+{
+    /// The cell flags @p raw names, less those a grid never holds (vtbackend::RenderOnlyCellFlags).
+    [[nodiscard]] vtbackend::CellFlags cellFlagsFromWire(uint32_t raw) noexcept
+    {
+        auto flags = vtbackend::CellFlags::fromValue(raw);
+        flags.disable(vtbackend::RenderOnlyCellFlags);
+        return flags;
+    }
+} // namespace
 
 uint32_t rawColor(vtbackend::Color color) noexcept
 {
@@ -148,7 +162,7 @@ vtbackend::GraphicsAttributes fillAttrsOf(proto::WireLine const& line)
     attrs.foregroundColor = colorFromRaw(line.fillForeground);
     attrs.backgroundColor = colorFromRaw(line.fillBackground);
     attrs.underlineColor = colorFromRaw(line.fillUnderlineColor);
-    attrs.flags = vtbackend::CellFlags::fromValue(line.fillFlags);
+    attrs.flags = cellFlagsFromWire(line.fillFlags);
     return attrs;
 }
 
@@ -160,7 +174,7 @@ void applyWireCell(vtbackend::LineSoA& soa,
     auto const attrs = vtbackend::GraphicsAttributes { .foregroundColor = colorFromRaw(cell.foreground),
                                                        .backgroundColor = colorFromRaw(cell.background),
                                                        .underlineColor = colorFromRaw(cell.underlineColor),
-                                                       .flags = vtbackend::CellFlags::fromValue(cell.flags) };
+                                                       .flags = cellFlagsFromWire(cell.flags) };
     vtbackend::writeCellToSoA(soa, column, cell.codepoint, cell.width, attrs, hyperlink);
     for (auto const extra: cell.clusterExtras)
         vtbackend::appendCodepointToCluster(

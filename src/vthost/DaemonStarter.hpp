@@ -129,10 +129,23 @@ class OnDemandDaemonStarter final: public DaemonStarter
     OnDemandSpawn _spawn;
 };
 
+/// @param lhs One socket path.
+/// @param rhs Another.
+/// @return Whether both name the same socket file: compared after weak canonicalization (symlinks, `..`,
+///         a trailing separator), falling back to lexical normalization where the file system cannot say.
+[[nodiscard]] bool isSameSocketPath(std::filesystem::path const& lhs, std::filesystem::path const& rhs);
+
 /// @param registered The registered service, if any.
+/// @param labelDefaultSocket The socket the label serves by default (muxSocketPath with no explicit path and
+///        no `$CONTOUR_MUX`); what a registration serves when its command line pins no `--socket`.
 /// @param onDemand What spawning on demand needs, should there be none.
-/// @return A registration wins; spawning on demand is the fallback for when no service is installed.
-[[nodiscard]] std::unique_ptr<DaemonStarter> chooseDaemonStarter(std::optional<RegisteredService> registered,
-                                                                 OnDemandSpawn onDemand);
+/// @return A registration wins only when it serves the endpoint asked for: the socket its command line
+///         names, else @p labelDefaultSocket. Any other endpoint (`$CONTOUR_MUX`, `--socket`) and the
+///         absence of a registration both spawn on demand, since starting a service that serves another
+///         socket would never produce a daemon at the requested one.
+[[nodiscard]] std::unique_ptr<DaemonStarter> chooseDaemonStarter(
+    std::optional<RegisteredService> registered,
+    std::filesystem::path const& labelDefaultSocket,
+    OnDemandSpawn onDemand);
 
 } // namespace vthost

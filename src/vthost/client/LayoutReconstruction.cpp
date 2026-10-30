@@ -2,6 +2,7 @@
 #include <vthost/client/LayoutReconstruction.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <ranges>
 
@@ -46,6 +47,46 @@ namespace
             return first;
         return leafSessionOf(node.children[1], paneId);
     }
+
+    /// @return The id of the leaf of @p node that hosts @p session; 0 when none does.
+    [[nodiscard]] uint64_t leafPaneOf(proto::WirePane const& node, uint64_t session) noexcept
+    {
+        if (!node.isSplit())
+            return node.session == session ? node.paneId : 0;
+        if (auto const first = leafPaneOf(node.children[0], session); first != 0)
+            return first;
+        return leafPaneOf(node.children[1], session);
+    }
+
+    /// Lays an unserved ActivatePane over @p layout: the tab hosting its session shows that pane active.
+    void overlayActivatePane(proto::LayoutState& layout, proto::EditTab const& edit)
+    {
+        for (auto& tab: layout.tabs)
+            if (auto const pane = leafPaneOf(tab.root, edit.session); pane != 0)
+                tab.activePane = pane;
+    }
+
+    /// Lays an unserved ActivateTab over @p layout: the tab hosting its session is the window's active one.
+    void overlayActivateTab(proto::LayoutState& layout, proto::EditTab const& edit)
+    {
+        for (auto const [index, tab]: std::views::zip(std::views::iota(uint32_t { 0 }), layout.tabs))
+            if (paneTreeHosts(tab.root, edit.session))
+                layout.activeTab = index;
+    }
+
+    /// How one kind of unserved edit is laid over a push.
+    struct EditOverlayRow
+    {
+        proto::TabEditKind kind;
+        void (*overlay)(proto::LayoutState&, proto::EditTab const&);
+    };
+
+    /// The edits kept in force until the daemon has served them: the focus a click moves, which a push in
+    /// flight would otherwise move back.
+    constexpr auto EditOverlays = std::array {
+        EditOverlayRow { .kind = proto::TabEditKind::ActivatePane, .overlay = overlayActivatePane },
+        EditOverlayRow { .kind = proto::TabEditKind::ActivateTab, .overlay = overlayActivateTab },
+    };
 } // namespace
 
 vtworkspace::LayoutPane wireToLayoutPane(proto::WirePane const& pane)
@@ -151,6 +192,23 @@ std::optional<vtpty::PageSize> composeClientArea(proto::WirePane const& root, Le
                                  .columns = std::max(first->columns, second->columns) };
     };
     return compose(compose, root);
+}
+
+void PendingTabEdits::sent(uint64_t serial, proto::EditTab edit)
+{
+    _pending.emplace_back(serial, std::move(edit));
+}
+
+void PendingTabEdits::apply(proto::LayoutState& layout)
+{
+    if (!layout.servedEdit.has_value())
+        return;
+    auto const served = *layout.servedEdit;
+    std::erase_if(_pending, [served](auto const& entry) { return entry.first <= served; });
+    for (auto const& entry: _pending)
+        if (auto const row = std::ranges::find(EditOverlays, entry.second.kind, &EditOverlayRow::kind);
+            row != EditOverlays.end())
+            row->overlay(layout, entry.second);
 }
 
 } // namespace vthost::client

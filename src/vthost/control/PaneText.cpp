@@ -85,6 +85,7 @@ vtcontrol::BlockState blockStateOf(vtbackend::CommandBlockRecord const& record) 
         case vtbackend::CommandBlockState::Prompting: return vtcontrol::BlockState::Prompting;
         case vtbackend::CommandBlockState::Running: return vtcontrol::BlockState::Running;
         case vtbackend::CommandBlockState::Finished:
+            // An abandoned block -- its session ended while it ran -- reads as finished, with no exit code.
             return record.end == vtbackend::CommandBlockEnd::Implicit ? vtcontrol::BlockState::Superseded
                                                                       : vtcontrol::BlockState::Finished;
     }

@@ -47,8 +47,10 @@
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/HostIdentity.hpp>
+#include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/control/ControlService.hpp>
@@ -1078,10 +1080,7 @@ struct NativeSessionFollowTester
     static void letGo(NativeSession& session, core::net::EventLoop& loop)
     {
         session._closed = true;
-        loop.blockOn(core::net::pollUntil(&loop, [&session] {
-            return session._flushesInFlight == 0 && !session._streamingSession
-                   && session._roomWaiter == NativeSession::RoomWaiter::Idle;
-        }));
+        loop.blockOn(core::net::pollUntil(&loop, [&session] { return session.spawnedFlowsEnded(); }));
     }
 };
 
@@ -1095,8 +1094,35 @@ struct NativeSessionFlushTester
         return session._flushDeadline;
     }
 
+    /// @return Whether @p id has an echo state this connection last sent or still owes.
+    static bool tracksInputEcho(NativeSession const& session, vtworkspace::SessionId id)
+    {
+        return session._inputEchoSent.contains(id.value) || session._inputEchoPending.contains(id.value);
+    }
+
     /// @return How many flush coroutines are live, superseded ones included.
     static std::size_t flushesInFlight(NativeSession const& session) { return session._flushesInFlight; }
+
+    /// Makes each flow the connection spawns -- a flush, the snapshot streamer, the waiter for send room --
+    /// with its claim on @p session, and destroys it without ever resuming it, as a loop freeing a flow it
+    /// never started does.
+    /// @return Whether each had given back its claim once its frame was gone, while it held it before.
+    [[nodiscard]] static bool unstartedFlowsGiveBackClaims(NativeSession& session,
+                                                           vtworkspace::SessionId streamed)
+    {
+        auto const releasedAfter = [&session](auto makeFlow) {
+            auto heldWhileAlive = false;
+            {
+                auto const flow = makeFlow();
+                heldWhileAlive = !session.spawnedFlowsEnded();
+            }
+            return heldWhileAlive && session.spawnedFlowsEnded();
+        };
+        return releasedAfter(
+                   [&] { return session.flushAt(session.claimFlush(), session._loop.clock().now()); })
+               && releasedAfter([&] { return session.streamSnapshots(session.claimStreamer(streamed)); })
+               && releasedAfter([&] { return session.requeueOnSendRoom(session.claimRoomWaiter()); });
+    }
 
     /// @return Whether @p id's snapshot is queued or streaming.
     static bool snapshotPending(NativeSession const& session, vtworkspace::SessionId id)
@@ -1104,10 +1130,11 @@ struct NativeSessionFlushTester
         return session.snapshotPending(id);
     }
 
-    /// Accepts a bare ClientHello as if it had arrived: the connection attaches and queues its snapshots.
-    static void handshake(NativeSession& session)
+    /// Accepts @p hello as if it had arrived: the connection attaches and queues its snapshots.
+    static void handshake(NativeSession& session, proto::ClientHello hello = {})
     {
-        REQUIRE(session.completeHandshake(proto::DecodedFrame { .pdu = proto::ClientHello {} }));
+        auto const accepted = session.completeHandshake(proto::DecodedFrame { .pdu = std::move(hello) });
+        REQUIRE(accepted);
     }
 
     /// Lets go of @p session as run() does when its client leaves, advancing @p clock past every deadline
@@ -1120,8 +1147,7 @@ struct NativeSessionFlushTester
         session._closed = true;
         for ([[maybe_unused]] auto const turn: std::views::iota(0, 1000))
         {
-            if (session._flushesInFlight == 0 && !session._streamingSession
-                && session._roomWaiter == NativeSession::RoomWaiter::Idle)
+            if (session.spawnedFlowsEnded())
                 return true;
             clock.advance(session._services.flush.coalesceDelay);
             std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
@@ -2102,6 +2128,112 @@ TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][p
     }
 }
 
+namespace
+{
+/// The SessionInputEcho frames among @p frames, and where each stands.
+std::vector<std::pair<std::size_t, proto::SessionInputEcho>> inputEchoFrames(
+    std::vector<proto::DecodedFrame> const& frames)
+{
+    auto found = std::vector<std::pair<std::size_t, proto::SessionInputEcho>> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, frames.size()))
+        if (auto const* echo = std::get_if<proto::SessionInputEcho>(&frames[index].pdu))
+            found.emplace_back(index, *echo);
+    return found;
+}
+
+/// How many Delta frames @p frames holds.
+std::size_t deltaCount(std::vector<proto::DecodedFrame> const& frames)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(frames, [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::Delta>(frame.pdu);
+    }));
+}
+
+/// A hello from a viewer that mirrors the echo state.
+proto::ClientHello inputEchoHello()
+{
+    return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::InputEcho }) };
+}
+
+/// The hosted session @p id's mock PTY.
+vtpty::MockPty& mockPtyOf(NativeHarness& h, vtworkspace::SessionId id)
+{
+    // The host taps every device it makes; the factory's MockPty is the tap's inner one.
+    return dynamic_cast<vtpty::MockPty&>(
+        dynamic_cast<vthost::TappingPty&>(h.host.terminal(id)->device()).inner());
+}
+
+/// Writes @p bytes into @p id and kicks the debounced flush, then waits past the debounce, so the next step
+/// earns a flush of its own.
+Task<void> writeAndSettle(NativeHarness* h, vtworkspace::SessionId id, std::string bytes)
+{
+    h->host.terminal(id)->writeToScreen(bytes);
+    h->session->sessionScreenUpdated(id);
+    co_await h->loop.delay(30ms);
+}
+
+/// Once @p gate holds: a password prompt as sudo shows one -- echo off, then the prompt; more output while
+/// it waits; echo back on, then the newline that ends it; and output after.
+Task<void> promptAndAnswer(NativeHarness* h, vtworkspace::SessionId id, StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    mockPtyOf(*h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    co_await writeAndSettle(h, id, "Password:");
+    co_await writeAndSettle(h, id, "*");
+    mockPtyOf(*h, id).setInputEcho(vtpty::InputEcho::Echoed);
+    co_await writeAndSettle(h, id, "\r\n");
+    co_await writeAndSettle(h, id, "$ ");
+}
+} // namespace
+
+TEST_CASE("a viewer sharing InputEcho is told what the hosted terminal does with typed text",
+          "[vthost][native][inputecho]")
+{
+    constexpr auto Writes = std::size_t { 4 };
+
+    SECTION("each change once, before the output that follows it, and nothing while unchanged")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { inputEchoHello() } },
+            [&](auto const& got) { return deltaCount(got) >= 1 + Writes; },
+            promptAndAnswer(&h, sessionId, holdsFrames(&h.received, AttachSnapshotFrames)));
+        auto const echoes = inputEchoFrames(received);
+        REQUIRE(echoes.size() == 2);
+        CHECK(echoes[0].second.session == sessionId.value);
+        CHECK(echoes[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+        CHECK(echoes[1].second.echo == std::to_underlying(vtpty::InputEcho::Echoed));
+        // Ahead of the prompt's delta, so a client's mirror has the state when the output lands.
+        REQUIRE(echoes[0].first + 1 < received.size());
+        CHECK(std::holds_alternative<proto::Delta>(received[echoes[0].first + 1].pdu));
+    }
+
+    SECTION("a viewer without the capability gets none")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { proto::ClientHello {} } },
+            [&](auto const& got) { return deltaCount(got) >= 1 + Writes; },
+            promptAndAnswer(&h, sessionId, holdsFrames(&h.received, AttachSnapshotFrames)));
+        CHECK(deltaCount(received) >= 1 + Writes);
+        CHECK(inputEchoFrames(received).empty());
+    }
+
+    SECTION("a viewer attaching to a waiting prompt is told in its snapshot")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        mockPtyOf(h, sessionId).setInputEcho(vtpty::InputEcho::Hidden);
+        auto const received =
+            h.exchange({ proto::DecodedPdu { inputEchoHello() } }, AttachSnapshotFrames + 1);
+        auto const echoes = inputEchoFrames(received);
+        REQUIRE(echoes.size() == 1);
+        CHECK(echoes[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+    }
+}
+
 TEST_CASE("program status waits for a client that stopped reading instead of costing the connection",
           "[vthost][native][programstatus]")
 {
@@ -2159,6 +2291,74 @@ TEST_CASE("a debounce flush pending at disconnect resolves before run() returns"
     h.session.reset();
     h.loop.blockOn(core::net::testing::sleepFor(&h.loop, 30ms));
     SUCCEED("the debounce flush settled before the session was destroyed");
+}
+
+namespace
+{
+
+/// Sends @p hello and decodes the attach snapshot, leaving the connection open.
+Task<void> attachAndStay(NativeHarness* h, std::vector<std::byte> const* hello)
+{
+    auto frames = std::vector<proto::DecodedFrame> {};
+    co_await feedBytes(h->pair.second.get(), hello);
+    co_await core::net::testing::anyOf(
+        decodeUntil(h->pair.second.get(),
+                    [](auto const& got) { return got.size() >= AttachSnapshotFrames; },
+                    &frames,
+                    {}),
+        core::net::testing::sleepFor(&h->loop, CollectBudget));
+}
+
+/// Runs @p session to its end, however it ends, and records how many flushes it left behind then: the
+/// daemon frees a connection the moment its run() ends.
+Task<void> runThenCountFlushes(NativeSession* session, std::optional<std::size_t>* flushesLeft)
+{
+    // However run() ends: a stopped loop ends it by throwing.
+    auto const count = core::Finally { [session, flushesLeft]() noexcept {
+        *flushesLeft = vthost::NativeSessionFlushTester::flushesInFlight(*session);
+    } };
+    co_await session->run();
+}
+
+} // namespace
+
+TEST_CASE("a flow the loop frees before it ever ran gives back its claim on the connection",
+          "[vthost][native]")
+{
+    // Otherwise run()'s barrier would wait for a flow that is gone, and the connection would never end.
+    auto h = NativeHarness {};
+    auto const sessionId = newSession(h.host);
+    CHECK(vthost::NativeSessionFlushTester::unstartedFlowsGiveBackClaims(*h.session, sessionId));
+}
+
+TEST_CASE("a stopped loop ends a connection only once the flushes it armed have", "[vthost][native]")
+{
+    auto options = HarnessOptions {};
+    // Long enough that the flush is still asleep when the loop stops.
+    options.services.flush.coalesceDelay = std::chrono::hours { 1 };
+    auto h = NativeHarness { std::move(options) };
+    auto const sessionId = newSession(h.host);
+    auto flushesLeft = std::optional<std::size_t> {};
+    h.loop.spawn(runThenCountFlushes(h.session.get(), &flushesLeft));
+    auto const hello = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    h.loop.blockOn(attachAndStay(&h, &hello));
+    // The first increment after the snapshot goes at once; the second coalesces, and sleeps.
+    for ([[maybe_unused]] auto const update: std::views::iota(0, 2))
+    {
+        h.host.terminal(sessionId)->writeToScreen("output");
+        h.session->sessionScreenUpdated(sessionId);
+        h.loop.blockOn(core::net::testing::sleepFor(&h.loop, 10ms));
+    }
+    CHECK(vthost::NativeSessionFlushTester::flushesInFlight(*h.session) > 0);
+
+    // Every wait throws on a stopped loop, the connection's barrier included; a flush it armed must not
+    // outlive it all the same, or the daemon frees the session under the flush.
+    h.loop.requestStop();
+    {
+        auto const drain = vthost::LoopDrain { h.loop };
+    }
+    REQUIRE(flushesLeft.has_value());
+    CHECK(*flushesLeft == 0);
 }
 
 TEST_CASE("a closed session's follow state is pruned", "[vthost][native]")
@@ -4488,11 +4688,12 @@ struct FlushHarness
 
     /// Connects a client, accepts its hello and lets its attach snapshots stream to it.
     /// @param id The session whose snapshot is waited for.
+    /// @param hello What the client says of itself.
     /// @return The client, past its attach snapshots.
-    FlushClient& attach(vtworkspace::SessionId id)
+    FlushClient& attach(vtworkspace::SessionId id, proto::ClientHello hello = {})
     {
         auto& client = connect();
-        NativeSessionFlushTester::handshake(*client.session);
+        NativeSessionFlushTester::handshake(*client.session, std::move(hello));
         CHECK(turnUntil(h.loop, [&] {
             return !NativeSessionFlushTester::snapshotPending(*client.session, id)
                    && std::ranges::any_of(client.received, endsSnapshotRun);
@@ -5293,6 +5494,121 @@ TEST_CASE("an EditTab from a client without TabEdits is answered Unsupported", "
     CHECK_FALSE(tab->runtimeTitle());
 }
 
+TEST_CASE("a MergeTabIntoSplit grafts the tab, keeps its sessions running and pushes the merged layout",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const targetSession = target->rootPane()->session();
+    auto const draggedSession = dragged->rootPane()->session();
+    auto const window = h.host.windowId().value;
+    auto const tabCount = [&] {
+        return h.host.model().window(h.host.windowId())->tabCount();
+    };
+    auto const tabsBefore = tabCount();
+    REQUIRE(tabsBefore >= 2);
+
+    auto const merging =
+        proto::ClientHello { .capabilities = proto::CapabilitySet::of(
+                                 { proto::Capability::TabMerge, proto::Capability::Heartbeat }) };
+    // The verb is served in order, so the heartbeat's echo arrives after every push the merge made.
+    auto const received = h.exchangeUntil(
+        { merging,
+          proto::MergeTabIntoSplit { .tabSessions = { draggedSession.value },
+                                     .targetSession = targetSession.value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) },
+          proto::Heartbeat { .nonce = 1 } },
+        [&](auto const& got) {
+            return std::ranges::any_of(
+                got, [](auto const& frame) { return std::holds_alternative<proto::Heartbeat>(frame.pdu); });
+        });
+    auto const pushesOfMergedLayout = std::ranges::count_if(received, [&](auto const& frame) {
+        auto const* layout = std::get_if<proto::LayoutState>(&frame.pdu);
+        return layout != nullptr && layout->window == window
+               && std::cmp_equal(layout->tabs.size(), tabsBefore - 1);
+    });
+    INFO("pushes of the merged layout: " << pushesOfMergedLayout);
+    // Not one: every model event the merge fires pushes the window's layout (the tab closed, the active tab
+    // and pane changed, the tree restructured, ...), each of them already the merged one. A change to the
+    // number is a decision about the clients' reconciliation, not an accident.
+    constexpr auto MergePushCount = 5;
+    CHECK(pushesOfMergedLayout == MergePushCount);
+
+    CHECK(std::cmp_equal(tabCount(), tabsBefore - 1));
+    auto const [mergedWindow, mergedTab, mergedLeaf] = h.host.model().findSessionLeaf(draggedSession);
+    CHECK(mergedTab == target);
+    CHECK(mergedLeaf != nullptr);
+    CHECK(target->paneCount() == 2);
+    // Moved, not re-created: both sessions are the ones that were already running.
+    CHECK(h.host.terminal(targetSession) != nullptr);
+    CHECK(h.host.terminal(draggedSession) != nullptr);
+    CHECK_FALSE(std::ranges::any_of(
+        received, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); }));
+}
+
+TEST_CASE("a MergeTabIntoSplit the daemon refuses is answered TabMergeRefused, under its serial",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+
+    // The request names a tab as holding a session it does not: a stale view of it.
+    auto const isRefusal = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::TabMergeRefused>(frame.pdu);
+    };
+    auto const received = h.exchangeUntil(
+        { proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) },
+          proto::MergeTabIntoSplit { .tabSessions = { dragged->rootPane()->session().value, 9999 },
+                                     .targetSession = target->rootPane()->session().value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+        [&](auto const& got) { return std::ranges::any_of(got, isRefusal); });
+    auto const refusal = std::ranges::find_if(received, isRefusal);
+    REQUIRE(refusal != received.end());
+    CHECK(refusal->serial == 2); // the merge's: the second frame the client sent
+    CHECK(std::get<proto::TabMergeRefused>(refusal->pdu).reason
+          == std::to_underlying(vthost::TabMergeError::StaleTab));
+    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(target->paneCount() == 1);
+}
+
+TEST_CASE("a MergeTabIntoSplit from a client without TabMerge is answered Unsupported and changes nothing",
+          "[vthost][native][tab-merge][daemon]")
+{
+    auto h = NativeHarness {};
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const tabsBefore = h.host.model().window(h.host.windowId())->tabCount();
+
+    // An older client's hello offers nothing, and a daemon of today still refuses what it did not negotiate.
+    auto const received = h.exchangeUntil(
+        { proto::ClientHello {},
+          proto::MergeTabIntoSplit { .tabSessions = { dragged->rootPane()->session().value },
+                                     .targetSession = target->rootPane()->session().value,
+                                     .side = std::to_underlying(vtworkspace::SplitSide::Right) } },
+        [](auto const& got) {
+            return std::ranges::any_of(
+                got, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); });
+        });
+    auto const refused = std::ranges::find_if(
+        received, [](auto const& frame) { return std::holds_alternative<proto::Unsupported>(frame.pdu); });
+    REQUIRE(refused != received.end());
+    CHECK(std::get<proto::Unsupported>(refused->pdu).ident
+          == std::to_underlying(proto::PduType::MergeTabIntoSplit));
+    CHECK(h.host.model().window(h.host.windowId())->tabCount() == tabsBefore);
+    CHECK(target->paneCount() == 1);
+}
+
+TEST_CASE("the daemon's default handshake offers TabMerge", "[vthost][native][tab-merge][daemon]")
+{
+    CHECK(vthost::HandshakePolicy {}.capabilities.contains(proto::Capability::TabMerge));
+}
+
 TEST_CASE("the daemon echoes a heartbeat under its serial", "[vthost][native][liveness]")
 {
     auto h = NativeHarness {};
@@ -5806,4 +6122,102 @@ TEST_CASE("an AF_UNIX connection holds every grant", "[vthost][native][grants]")
     REQUIRE(h.session->grants() == vtcontrol::ControlGrants::none());
     std::ignore = h.exchange({ controlApiHello(), controlCall(1, "workspace.list") }, 2);
     CHECK(h.session->grants() == vtcontrol::ControlGrants::all());
+}
+
+TEST_CASE("an echo change with no output after it reaches a viewer by the idle check",
+          "[vthost][native][flush][inputecho]")
+{
+    // sudo may turn echo off after it printed its prompt: nothing prints, nothing is typed, and only the
+    // idle check (FlushPolicy::inputEchoCheck) can tell the viewer. On a ManualClock, so no wait is real.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto const interval = f.h.options.services.flush.inputEchoCheck;
+    auto& client = f.attach(id, inputEchoHello());
+    REQUIRE(inputEchoFrames(client.received).empty());
+
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    // Not before the interval: the check is coarse, not a poll of every flush.
+    f.clock.advance(interval - 1ms);
+    turnIdle(f.h.loop);
+    CHECK(inputEchoFrames(client.received).empty());
+
+    f.clock.advance(1ms);
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    CHECK(inputEchoFrames(client.received)[0].second.session == id.value);
+    CHECK(inputEchoFrames(client.received)[0].second.echo == std::to_underlying(vtpty::InputEcho::Hidden));
+
+    // Unchanged across many intervals: nothing more is sent, and the check keeps itself armed.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 4))
+    {
+        f.clock.advance(interval);
+        turnIdle(f.h.loop);
+    }
+    CHECK(inputEchoFrames(client.received).size() == 1);
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // Back on, again with no output: told at the next check.
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Echoed);
+    f.clock.advance(interval);
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 2; }));
+    CHECK(inputEchoFrames(client.received)[1].second.echo == std::to_underlying(vtpty::InputEcho::Echoed));
+}
+
+TEST_CASE("the idle check of the echo state runs only within the activity window",
+          "[vthost][native][flush][inputecho]")
+{
+    // An idle connection wakes nothing: the check keeps itself armed for FlushPolicy::inputEchoWindow after
+    // the attach, an output or an input, then stays off until the next of them. On a ManualClock.
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto const& flush = f.h.options.services.flush;
+    auto& client = f.attach(id, inputEchoHello());
+    REQUIRE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // Quiet past the window: the check that finds it over arms nothing.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 12))
+    {
+        f.clock.advance(flush.inputEchoCheck);
+        turnIdle(f.h.loop);
+    }
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // An echo change with no activity is not told ...
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.clock.advance(flush.inputEchoCheck * 4);
+    turnIdle(f.h.loop);
+    CHECK(inputEchoFrames(client.received).empty());
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+
+    // ... until output opens the window: the echo rides the output's flush, and the check is armed again.
+    f.update(client, id, "Password:");
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    CHECK(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+}
+
+TEST_CASE("a closed session's echo bookkeeping is dropped with the rest of its per-session state",
+          "[vthost][native][flush][inputecho]")
+{
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attach(id, inputEchoHello());
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.update(client, id, "Password:");
+    REQUIRE(turnUntil(f.h.loop, [&] { return inputEchoFrames(client.received).size() == 1; }));
+    REQUIRE(NativeSessionFlushTester::tracksInputEcho(*client.session, id));
+
+    client.session->sessionClosed(id);
+    CHECK_FALSE(NativeSessionFlushTester::tracksInputEcho(*client.session, id));
+}
+
+TEST_CASE("a viewer that does not mirror the echo state arms no idle check",
+          "[vthost][native][flush][inputecho]")
+{
+    auto f = FlushHarness {};
+    auto const id = newSession(f.h.host);
+    auto& client = f.attach(id);
+    mockPtyOf(f.h, id).setInputEcho(vtpty::InputEcho::Hidden);
+    f.clock.advance(f.h.options.services.flush.inputEchoCheck * 4);
+    turnIdle(f.h.loop);
+    CHECK_FALSE(NativeSessionFlushTester::armedDeadline(*client.session).has_value());
+    CHECK(inputEchoFrames(client.received).empty());
 }

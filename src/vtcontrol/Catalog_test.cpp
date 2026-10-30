@@ -81,3 +81,17 @@ TEST_CASE("a request-grant rule without a predicate never applies", "[vtcontrol]
         vtcontrol::requestGrantOf(std::optional { vtcontrol::CommandNeedsInput<vtcontrol::CreateTabRequest> },
                                   vtcontrol::CreateTabRequest { .command = { "make" } }));
 }
+
+TEST_CASE("a permission that can type or open shells can run commands", "[vtcontrol][catalog]")
+{
+    using vtcontrol::ConsentWeight;
+    using vtcontrol::consentWeightOf;
+    using vtcontrol::Permission;
+    CHECK(consentWeightOf(Permission::Input) == ConsentWeight::CanRunCommands);
+    CHECK(consentWeightOf(Permission::Write) == ConsentWeight::CanRunCommands);
+    CHECK(consentWeightOf(Permission::Read) == ConsentWeight::Observes);
+    CHECK(consentWeightOf(Permission::Screen) == ConsentWeight::Observes);
+    // One row per permission, in enumerator order: the static_assert beside the table holds it.
+    for (auto const& row: vtcontrol::PermissionPhrases)
+        CHECK(consentWeightOf(row.permission) == row.weight);
+}

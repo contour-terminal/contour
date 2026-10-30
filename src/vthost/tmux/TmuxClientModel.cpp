@@ -354,7 +354,7 @@ void TmuxClientModel::replayHistory(uint64_t pane)
                               // page's worth of rows into a history's, which would be thousands of
                               // locks and wakeups per attach. @see joinReplayRows for the join.
                               if (ok)
-                                  entry->sink->feed(joinReplayRows(body));
+                                  entry->sink->feedReplay(joinReplayRows(body));
                               // Only now does buffered live output land on top. Exchanged rather
                               // than cleared: the buffer's peak is whatever arrived during the
                               // capture round trip, which `-S -` made a good deal longer, and

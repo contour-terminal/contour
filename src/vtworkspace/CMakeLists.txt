@@ -34,7 +34,7 @@ if(VTWORKSPACE_TESTING)
         Tab_test.cpp
         SessionModel_test.cpp
     )
-    target_link_libraries(vtworkspace_test vtworkspace core::testing Catch2::Catch2)
+    target_link_libraries(vtworkspace_test vtworkspace core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtworkspace_test COMMAND $<TARGET_FILE:vtworkspace_test>)
     set_tests_properties(vtworkspace_test PROPERTIES LABELS daemon)
 

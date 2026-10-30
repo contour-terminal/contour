@@ -152,6 +152,25 @@ class SessionModel
     /// @param toIndex The destination position, clamped into the destination's tab range.
     void moveTabToWindow(WindowId from, TabId tab, WindowId to, int toIndex);
 
+    /// Grafts the whole of tab @p source (in window @p from) beside the leaf @p leaf of tab @p target (in
+    /// window @p to), on @p side, at ratio 0.5. The source's panes and sessions travel with it (none is
+    /// closed); the source tab is removed; the grafted tree's active pane becomes @p target's active
+    /// pane, and @p target becomes the active tab of @p to. Zoom state is dropped: a zoomed source shows
+    /// all its panes, and so does the target.
+    ///
+    /// Hosts see the source tab leave (tabAboutToBeRemoved, tabClosed), then the target tab activate, and
+    /// the target's tree restructure (paneTreeRestructured, activePaneChanged).
+    /// @param from   The window holding @p source (may equal @p to).
+    /// @param source The tab to merge.
+    /// @param to     The window holding @p target.
+    /// @param target The tab receiving it.
+    /// @param leaf   A leaf of @p target to split.
+    /// @param side   The side of @p leaf the merged tab goes on.
+    /// @return The root of the grafted tree; nullptr, and nothing changed, when @p source equals
+    ///         @p target, an id is unknown, or @p leaf is not a leaf of @p target.
+    [[nodiscard]] Pane* mergeTabIntoSplit(
+        WindowId from, TabId source, WindowId to, TabId target, PaneId leaf, SplitSide side);
+
     // }}}
     // {{{ Panes
 
@@ -196,6 +215,16 @@ class SessionModel
     /// Toggles zoom on @p tab's active pane: zoomed, that pane alone fills the tab area (see Tab's
     /// zoom block). No-op on a single-pane tab.
     void toggleActivePaneZoom(TabId tab);
+
+    /// Puts @p session into @p tab's leaf @p leaf in place of the one it carries (a restart in the same
+    /// pane). The leaf keeps its PaneId, so the active pane and a zoom on it are unchanged; raises
+    /// ModelEvents::paneSessionReplaced once.
+    /// @param tab     The tab holding the leaf.
+    /// @param leaf    The leaf whose session is replaced.
+    /// @param session The session the leaf carries from now on.
+    /// @return The session the leaf carried before, or an empty id (and no event) when @p tab has no
+    ///         leaf @p leaf.
+    SessionId replaceLeafSession(TabId tab, PaneId leaf, SessionId session);
 
     // }}}
     // {{{ Title & color (authoritative state lives here, below the GUI)
@@ -292,7 +321,10 @@ class SessionModel
     /// Locates the window owning @p tab. Returns {window, index-of-tab} or {nullptr, -1}.
     [[nodiscard]] std::pair<Window*, int> locateTab(TabId tab) const noexcept;
 
-    void closeTabAt(Window& window, int index);
+    /// Removes the tab at @p index of @p window, announcing it. @p beforeErase, when given, runs after the
+    /// "about to be removed" announcement and before the tab is destroyed, for a caller that must take
+    /// something out of the tab first.
+    void closeTabAt(Window& window, int index, std::function<void()> const& beforeErase = {});
 
     /// Announces everything that follows from @p tab's zoom having changed during a mutation, given
     /// the zoomed leaf captured @p zoomedLeafBefore it ran. Every pane mutator ends with this call.
