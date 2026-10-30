@@ -297,6 +297,12 @@ if(CONTOUR_TESTING)
         # plan rather than be skipped.
         contour_add_lint_gate(tidy_diff_plan_selftest tidy-diff-plan.py --self-test)
 
+        # The headers kept light stay light: scripts/include-budget.txt rows say which header must not
+        # transitively include which, and a failure prints the include chain. A row naming a header that
+        # no longer exists fails too, so a rename cannot make a row pass vacuously.
+        contour_add_lint_gate(check_include_budget check-include-budget.py)
+        contour_add_lint_gate(check_include_budget_selftest check-include-budget.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)

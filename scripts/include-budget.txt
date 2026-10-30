@@ -1,0 +1,17 @@
+# Include budget: headers that must stay light, and what they must not pull in.
+#
+# One row per forbidden include:
+#
+#     <header> !<forbidden>
+#
+# <header> is a repository-relative path (src/contour/window/WindowController.hpp). <forbidden> is
+# either a repository-relative header path, or a spelling in angle brackets (!<QtDBus/QDBusVariant>)
+# for a header outside the first-party roots, matched by the spelling the #include uses. The check
+# is transitive. Blank lines and lines starting with # are ignored.
+#
+# scripts/check-include-budget.py fails a row when the forbidden header is reachable (printing the
+# include chain), and also when either named header does not exist, so a rename cannot turn a row
+# into a vacuous pass.
+#
+# Rows are added by the tasks that earn them: a header-dependency cut lands together with the row
+# that stops it from growing back. This file starts empty on purpose.
