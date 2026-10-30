@@ -215,7 +215,10 @@ jobs:
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
+              -D CONTOUR_LINK_JOBS=1 \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
+    # One link at a time (CONTOUR_LINK_JOBS above): the runner was shut down three runs in a row at the
+    # same step, while contour and contour_test linked side by side -- memory, not time (see #2186).
     - name: "build"
       run: cmake --build build --target contour contour_test
     # ...and that the linked result carries no Qt either, which the configure-time gate above cannot
@@ -545,7 +548,9 @@ jobs:
       - name: Test in FreeBSD
         id: test
         uses: vmactions/freebsd-vm@v1
-        timeout-minutes: 60
+        # The VM builds every target from scratch with no compiler cache; master's run of
+        # 2026-10-25 hit 60 minutes while still compiling, so the limit only bounds a hang.
+        timeout-minutes: 120
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
@@ -875,8 +880,16 @@ jobs:
         # Registering a new test target must not require editing this file.
         #
         # 15 rather than 10: with tmux installed the four oracles now actually run instead of
-        # skipping, and each drives a real tmux server over a pty.
-        timeout-minutes: 15
+        # skipping, and each drives a real tmux server over a pty. 30 rather than 15: the GUI suite
+        # runs once per Quick Controls style (Fusion, Fluent, ContourLinux, ContourTui), each 4-7 minutes
+        # on this runner, and the fourth was cut off at 15 with every earlier test passing.
+        #
+        # A hang fails one test, not the step: the preset gives every test 10 minutes (the longest GUI
+        # run takes 7), vthost_test its own 5, and ctest shows a timed-out test's output. The trace
+        # names each Catch2 case on stderr as it starts, so that output ends with the case that hung.
+        timeout-minutes: 30
+        env:
+          CONTOUR_TEST_TRACE: "1"
         run: ctest --preset macos-package
       - name: "verify the tmux oracles actually ran"
         # @see the identical assertion on the Linux matrix for why a green suite is not enough:
@@ -903,6 +916,21 @@ jobs:
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then
             echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised on macOS"
+            exit 1
+          fi
+      - name: "verify the macOS menu bar's key seam on the cocoa platform"
+        # The ctest above runs contour_gui_test offscreen, where every [display] case SKIPs: the menu bar
+        # needs Qt Widgets on the cocoa plugin, so the chords the terminal leaves to the menu (Cmd-Q, Cmd-,,
+        # Cmd-M, Cmd-H) and what AppKit does with them reach no assertion there. The runner has a
+        # logged-in Aqua session, so this runs them on the real platform. Gating, and checked for SKIPs
+        # like the steps above: a Catch2 SKIP exits 0.
+        run: |
+          set -o pipefail
+          binary=out/macos-package/src/contour/contour_gui_test
+          output=$(CONTOUR_TEST_DISPLAY=1 "$binary" '[shortcutoverride],[menubar]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::$binary [shortcutoverride],[menubar] reported SKIPPED; the menu bar's key seam is not being exercised on macOS"
             exit 1
           fi
       - name: "Create Package(s)"
@@ -986,13 +1014,24 @@ jobs:
           # A downloaded image carries this; the copy must clear Gatekeeper with it set.
           xattr -w com.apple.quarantine "0081;00000000;Safari;" "$INSTALLED"
 
+          # stapler asks Apple's CloudKit for the ticket record, and a dropped connection there
+          # fails the step with error 68 although nothing is wrong with the ticket; retry that
+          # (and only that) before failing.
+          staple_check() {
+            for attempt in 1 2 3; do
+              xcrun stapler validate "$1" && return 0
+              sleep $((attempt * 10))
+            done
+            return 1
+          }
+
           # The ticket is embedded in the copy, so first launch needs no network at all.
-          xcrun stapler validate "$INSTALLED"
+          staple_check "$INSTALLED"
           # The exact decision Gatekeeper makes when that copy is first launched.
           spctl --assess --verbose=4 --type exec "$INSTALLED"
 
           # And the same for the image a browser just downloaded.
-          xcrun stapler validate "$DMG"
+          staple_check "$DMG"
           spctl --assess --verbose=4 --type install "$DMG"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v4
@@ -1198,6 +1237,32 @@ jobs:
             exit 1
           }
           if ($status -ne 0) { exit 1 }
+      - name: "verify the Win32 chrome tests actually ran"
+        # @see "verify the PowerShell integration tests actually ran": the [win32] cases SKIP off the native
+        # Windows platform, and a SKIP exits 0, so a run that never reached the native plugin would read as a
+        # pass. windows-latest has a desktop, so a skip here is a regression. The [win11-22h2] cases are left
+        # out: they SKIP on a Windows older than 22H2 (a pinned runner image), which is no regression.
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          QT_QUICK_BACKEND: software
+          CONTOUR_TEST_DISPLAY: "1"
+        run: |
+          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_gui_test.exe"
+          # A missing binary must not read as "nothing skipped".
+          if (-not (Test-Path $binary)) {
+            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+            exit 1
+          }
+          Write-Output "--- $binary [win32]~[win11-22h2]"
+          $output = & $binary '[win32]~[win11-22h2]' 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Output $output
+          if ($output -match 'skipped') {
+            Write-Output "::error::$binary [win32] reported SKIPPED; the Win32 chrome is not being exercised on Windows"
+            exit 1
+          }
+          if ($status -ne 0) { exit 1 }
       - name: "Install Wix Toolset"
         run: |
           # Use this to list all available versions
@@ -1252,6 +1317,28 @@ jobs:
               Write-Host "::error::the zip holds no share/contour/extensions/$extension.wasm"
               exit 1
             }
+          }
+      - name: "Check that the package ships the FluentWinUI3 style"
+        # The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
+        # quickControlsStyle token), which windeployqt's --qmldir scan cannot see. Assert the style module
+        # is in the zip: without it Qt falls back silently and the Fluent row's controls lose their look.
+        # contour.exe must be found too, or the check would pass on a zip it cannot read.
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
+          try {
+            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
+          } finally {
+            $zip.Dispose()
+          }
+          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
+            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
+            exit 1
+          }
+          if (-not ($entries | Where-Object { $_ -like '*qml/QtQuick/Controls/FluentWinUI3/qmldir' })) {
+            Write-Host "::error::the zip holds no qml/QtQuick/Controls/FluentWinUI3/qmldir"
+            exit 1
           }
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
@@ -1477,8 +1564,27 @@ jobs:
         # app runs and contour_gui_test dominate it (~20-30s each); the unit suites are all under
         # 3s. The two vtconformance gates would add ~3 minutes, but they self-skip on a runner
         # that has not fetched vttest/esctest. Keep an eye on this ceiling when adding an e2e run.
-        timeout-minutes: 5
+        # Raised to 10 on 2026-10-27: the native redesign's suites brought the run to 309 s, so 5 minutes
+        # cut off a fully passing suite. Raised to 20 on 2026-10-28: the per-style GUI variants (Fluent,
+        # ContourLinux) each rerun the GUI suite, and on the arm runner contour_gui_test alone takes 311 s.
+        # Raised to 30 on 2026-10-30: the four GUI variants take ~1080 s on the arm runner, and the whole
+        # passing suite reached 1210 s, past the 20-minute ceiling (run 40985430645).
+        timeout-minutes: 30
         run: cmake --build --preset gcc-debug --target test
+      - name: "portal settings adapter (private session bus)"
+        # Gating, unlike the weston steps: it needs a bus, not a compositor. The [portal-settings] and
+        # [globalhotkey][portal] cases SKIP off a private bus (the offscreen suite above), so a SKIP here is a
+        # failure, as for the tmux oracles: it would mean a D-Bus adapter never met its fake portal.
+        run: |
+          set -o pipefail
+          sudo apt-get install -qy dbus-daemon
+          output=$(QT_QPA_PLATFORM=offscreen ./scripts/run-display-tests.sh --run \
+              out/gcc-debug/src/contour/contour_gui_test "[portal-settings],[globalhotkey][portal]" 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::[portal-settings],[globalhotkey][portal] reported SKIPPED; the D-Bus portal adapters are not being exercised"
+            exit 1
+          fi
       - name: "verify the tmux oracles actually ran"
         # ctest prints nothing for a passing test, and a Catch2 SKIP exits 0 — so "the suite is
         # green" cannot distinguish "the oracle agreed with us" from "no tmux, nothing ran". That
@@ -1563,6 +1669,22 @@ jobs:
         # private headless weston instance provides a stable Wayland compositor without GPU or X.
         continue-on-error: true
         run: ./scripts/run-display-tests.sh out/gcc-debug/src/contour/contour_gui_test
+      - name: "chrome snapshots (headless weston)"
+        # Review artefacts, never acceptance: every chrome row, edition and appearance as a PNG.
+        # Non-gating like the display step above.
+        if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        continue-on-error: true
+        # grabWindow() can wait forever for a frame callback; continue-on-error does not end a hang.
+        timeout-minutes: 20
+        run: ./scripts/run-chrome-snapshots.sh out/gcc-debug/src/contour/contour_gui_test chrome-snapshots
+      - name: "Upload chrome snapshots"
+        if: ${{ always() && matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-snapshots
+          path: chrome-snapshots/
+          if-no-files-found: warn
+          retention-days: 14
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
@@ -1686,8 +1808,10 @@ jobs:
       - name: "tests"
         # Same reasoning as the matrix job's cap: a hung test must fail this job fast rather than
         # stall it for hours. Release rather than debug, so the budget is more generous than the
-        # ~2 minutes measured there.
-        timeout-minutes: 10
+        # ~2 minutes measured there. Raised to 30 on 2026-10-30: the four GUI variants rerun the GUI suite here
+        # too, contour_gui_test alone took 253 s and ContourLinux 155 s, and the step hit 10 minutes at test
+        # 41 of 54 (run 41044717252).
+        timeout-minutes: 30
         run: cmake --build --preset gcc-release --target test
       - name: "CPack: Creating DEB package"
         run: |

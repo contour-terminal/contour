@@ -1,0 +1,4 @@
+# Colour literals the QML colour gate (check-qml-colors.py) lets through, one `path:fragment` per line.
+# Only protocol-defined colours that are data belong here; everything else comes from the palette or
+# from chromeStyle. The macOS traffic-light colours are not listed: they are read from the window
+# control tokens (WindowControlStyle.hpp), not written in QML.

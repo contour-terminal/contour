@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/ImageSize.hpp>
+#include <vtpty/InputEcho.hpp>
 #include <vtpty/PageSize.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -12,9 +13,11 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -88,6 +91,13 @@ struct StartOutcome
 /// The result of starting a PTY and whatever is attached to it.
 using StartResult = std::expected<StartOutcome, StartFailure>;
 
+/// Where the output a pty last handed its reader came from.
+enum class ReadOrigin : std::uint8_t
+{
+    Live = 0, ///< The program on the other end wrote it.
+    Replay,   ///< A mirror refilled the pane with what its program wrote before: not news.
+};
+
 class Pty
 {
   public:
@@ -159,6 +169,31 @@ class Pty
 
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) = 0;
+
+    /// Where the output the last read() returned came from. Asked by the reader, after the read.
+    /// @return Live, unless the device is fed by a mirror that marks its refills
+    /// (vtpty::ChannelPty::feedReplay).
+    [[nodiscard]] virtual ReadOrigin lastReadOrigin() const { return ReadOrigin::Live; }
+
+    /// The name of the program leading the device's foreground process group.
+    /// @return The name; none for a device with no local process to ask, as a mirrored pane's.
+    [[nodiscard]] virtual std::optional<std::string> foregroundProcessName() const { return std::nullopt; }
+
+    /// What the terminal does with typed text now. GUI-thread safe; a device that cannot tell answers
+    /// Unknown.
+    /// @return The echo state, as the program in the terminal last set it.
+    [[nodiscard]] virtual InputEcho inputEcho() const noexcept { return InputEcho::Unknown; }
+
+    /// Called when a device that learns of its echo state from elsewhere (a mirrored pane, told by its
+    /// daemon) is told a different one. Runs on the thread that learned it, never under the terminal lock; it
+    /// only posts to its owner, and must not call back into the device.
+    using InputEchoObserver = std::function<void()>;
+
+    /// Installs @p observer, replacing any earlier one; an empty one removes it. The owner removes its own
+    /// before it goes: once this returns with an empty observer, none is running. A device that cannot be
+    /// told of a change (a local PTY, which is only ever asked) never calls it.
+    /// @param observer What to run on a change of inputEcho().
+    virtual void setInputEchoObserver(InputEchoObserver const& /*observer*/) {}
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);

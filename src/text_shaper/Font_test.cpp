@@ -132,6 +132,33 @@ TEST_CASE("Font.namesMatch")
     }
 }
 
+TEST_CASE("Font.platformFontFamily")
+{
+    // A concrete family passes through, as does every family on a platform whose fontconfig knows
+    // the generic names.
+    CHECK(platformFontFamily("Fira Code"sv) == "Fira Code"sv);
+    CHECK(platformFontFamily(""sv).empty());
+#ifdef _WIN32
+    CHECK(platformFontFamily("monospace"sv) == "Consolas"sv);
+#elifdef __APPLE__
+    CHECK(platformFontFamily("monospace"sv) == "Menlo"sv);
+#else
+    CHECK(platformFontFamily("monospace"sv) == "monospace"sv);
+#endif
+}
+
+TEST_CASE("Font.systemUiFamily")
+{
+    // The block chips' UI font: Segoe UI, CoreText's system font, or fontconfig's sans-serif.
+#ifdef _WIN32
+    CHECK(platformFontFamily(SystemUiFontFamily) == "Segoe UI"sv);
+#elifdef __APPLE__
+    CHECK(platformFontFamily(SystemUiFontFamily) == ".AppleSystemUIFont"sv);
+#else
+    CHECK(platformFontFamily(SystemUiFontFamily) == "sans-serif"sv);
+#endif
+}
+
 // Every attribute name travels a round trip: std::formatter writes it into the config that
 // `contour generate config` produces, and makeFont*()/makeRenderMode() read that config back. The
 // writer's table and the parser's table were written independently and agreed on nothing -- the

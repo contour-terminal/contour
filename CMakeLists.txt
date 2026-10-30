@@ -45,10 +45,10 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
     set(CMAKE_JOB_POOL_LINK contour_link_pool)
 endif()
 
-# The same for a handful of COMPILE steps: the test sources a recent GCC needs gigabytes for at -O2 -g,
-# Config_test.cpp about 8 GB alone. Two of them compiling at once, beside the other jobs, ran the 16 GB
-# arm64 GCC runner out of memory. They compile in a pool of their own, one at a time by default, while every
-# other source still uses every core; src/contour/CMakeLists.txt names them, and how they were chosen.
+# The same for a handful of COMPILE steps: the test sources a recent GCC needs 3 to 4 GB for at -O2 -g. Two of
+# them compiling at once, beside the other jobs, ran the 16 GB arm64 GCC runner out of memory. They compile in a pool of
+# their own, one at a time by default, while every other source still uses every core;
+# src/contour/CMakeLists.txt names them, and how they were chosen.
 # CONTOUR_HEAVY_COMPILE_JOBS raises or lowers the pool's depth for a machine that wants something else.
 set(CONTOUR_HEAVY_COMPILE_JOBS "1"
     CACHE STRING "Maximum number of concurrent compiles of the heaviest test sources (Ninja generators)")
@@ -272,6 +272,18 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
         contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
 
+        # The chrome QML takes every colour from the palette or from chromeStyle. This gate fails on a hex
+        # literal or an all-numeric Qt.rgba( in src/contour/qml and src/contour/styles, so a hardcoded
+        # colour cannot return; the self-test keeps the scanner itself honest.
+        contour_add_lint_gate(check_qml_colors check-qml-colors.py)
+        contour_add_lint_gate(check_qml_colors_selftest check-qml-colors.py --self-test)
+
+        # The same QML takes its sizes from chromeStyle. This gate counts numeric size literals per file
+        # against scripts/qml-size-literal-baseline.txt, which only shrinks: a new literal fails, and so
+        # does a file below its baseline.
+        contour_add_lint_gate(check_qml_sizes check-qml-sizes.py)
+        contour_add_lint_gate(check_qml_sizes_selftest check-qml-sizes.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
@@ -279,7 +291,7 @@ if(CONTOUR_TESTING)
         # A warning, not a status line: losing both lint gates is exactly the silent gap this
         # change set out to close, and it must not scroll past in a wall of configure output.
         message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows, "
-                        "check_wasm_runtime_containment) "
+                        "check_wasm_runtime_containment, check_qml_colors, check_qml_sizes) "
                         "are not registered.")
     endif()
 endif()

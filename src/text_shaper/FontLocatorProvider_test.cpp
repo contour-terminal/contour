@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <text_shaper/BundledFonts.hpp>
+#include <text_shaper/FontLocatorProvider.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <filesystem>
+#include <string>
+#include <variant>
+
+using namespace text;
+
+namespace
+{
+FontDescription description(std::string family)
+{
+    auto result = FontDescription {};
+    result.familyName = std::move(family);
+    result.fontFallback = FontFallbackNone {};
+    return result;
+}
+
+std::filesystem::path bundledFontsSourceDir()
+{
+    return std::filesystem::path { CONTOUR_BUNDLED_FONTS_SOURCE_DIR };
+}
+} // namespace
+
+TEST_CASE("FontLocator.registerBundledFonts reports a missing directory and keeps lookup working",
+          "[bundled-fonts]")
+{
+    auto const missing = bundledFontsSourceDir() / "does-not-exist";
+    auto const result = registerBundledFonts(BundledFontDirectories { .paths = { missing } });
+    REQUIRE(!result);
+    CHECK(result.error() == FontRegistrationError::DirectoryMissing);
+
+    auto& locator = FontLocatorProvider::get().native();
+    CHECK(!locator.locate(description("monospace")).empty());
+}
+
+TEST_CASE("FontLocator.listBundledFontFiles finds the shipped fonts", "[bundled-fonts]")
+{
+    auto const files = listBundledFontFiles(bundledFontsSourceDir());
+    REQUIRE(files);
+    CHECK(files->size() == 2);
+    CHECK(!listBundledFontFiles(bundledFontsSourceDir() / "nope"));
+}
+
+#ifndef _WIN32
+TEST_CASE("FontLocator.registerBundledFonts makes JetBrains Mono resolvable", "[bundled-fonts]")
+{
+    REQUIRE(registerBundledFonts(BundledFontDirectories { .paths = { bundledFontsSourceDir() } }));
+    // Registering twice is harmless.
+    REQUIRE(registerBundledFonts(BundledFontDirectories { .paths = { bundledFontsSourceDir() } }));
+
+    auto& locator = FontLocatorProvider::get().native();
+    auto const fonts = locator.locate(description("JetBrains Mono"));
+    REQUIRE(!fonts.empty());
+    // A system-wide install of the same family may sort first; the bundled file only has to be among them.
+    auto const expected = (bundledFontsSourceDir() / "JetBrainsMono[wght].ttf").lexically_normal();
+    CHECK(std::ranges::any_of(fonts, [&](FontSource const& source) {
+        auto const* path = std::get_if<FontPath>(&source);
+        return path != nullptr && std::filesystem::path { path->value }.lexically_normal() == expected;
+    }));
+}
+#endif

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <text_shaper/FontconfigLocator.hpp>
 
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/Font.hpp>
 
 #include <core/Assert.hpp>
@@ -166,11 +167,29 @@ namespace
                      (char const*) file);
     }
 
+    /// Initializes fontconfig and returns a new reference to its process-wide configuration, logging
+    /// how long that took.
+    ///
+    /// The configuration is shared rather than built privately, so fonts registered through
+    /// registerBundledFonts() (which adds them to that configuration) are visible to the locator.
+    FcConfig* referenceSharedConfig()
+    {
+        auto const start = std::chrono::steady_clock::now();
+        FcInit();
+        auto* const config = FcConfigReference(nullptr);
+
+        auto const elapsed = std::chrono::steady_clock::now() - start;
+        auto const ms =
+            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
+            / 1000.0;
+        locatorLog()("FcInit: {:.1f} ms", ms);
+        return config;
+    }
+
 } // namespace
 
 struct FontconfigLocator::PrivateTag
 {
-    // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
     /// Union of every installed font's charset, built once on first use.
@@ -229,17 +248,7 @@ struct FontconfigLocator::PrivateTag
         return installedCoverage.get();
     }
 
-    PrivateTag(): ftConfig(FcInitLoadConfigAndFonts())
-    {
-        auto const start = std::chrono::steady_clock::now();
-        FcInit();
-
-        auto const elapsed = std::chrono::steady_clock::now() - start;
-        auto const ms =
-            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
-            / 1000.0;
-        locatorLog()("FcInitLoadConfigAndFonts: {:.1f} ms", ms);
-    }
+    PrivateTag(): ftConfig { referenceSharedConfig() } {}
 
     ~PrivateTag()
     {
@@ -269,8 +278,10 @@ FontSourceList FontconfigLocator::locate(FontDescription const& description)
     // bool const color = true;
     // FcPatternAddBool(pat.get(), FC_COLOR, color);
 
-    if (!description.familyName.empty())
-        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) description.familyName.c_str());
+    // A generic name fontconfig may not know (`system-ui`) as the family it means here.
+    auto const family = std::string(platformFontFamily(description.familyName));
+    if (!family.empty())
+        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) family.c_str());
 
     if (description.spacing != FontSpacing::Proportional)
     {
@@ -548,6 +559,25 @@ FontSourceList FontconfigLocator::resolve(gsl::span<char32_t const> codepoints)
 
     locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.size(), codepoints.size());
     return output;
+}
+
+std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const& directories)
+{
+    FcInit();
+    auto result = std::expected<void, FontRegistrationError> {};
+    for (auto const& directory: directories.paths)
+    {
+        auto const files = listBundledFontFiles(directory);
+        if (!files)
+        {
+            if (result)
+                result = std::unexpected { files.error() };
+            continue;
+        }
+        if (!FcConfigAppFontAddDir(nullptr, (FcChar8 const*) directory.c_str()) && result)
+            result = std::unexpected { FontRegistrationError::RegistrationFailed };
+    }
+    return result;
 }
 
 } // namespace text

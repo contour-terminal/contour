@@ -157,7 +157,7 @@ class [[nodiscard]] Process: public Pty
     /// the program it runs otherwise. Linux and macOS only.
     /// @return The name, as the operating system shortens it; none without a child, on another platform, or
     ///         on a Pty that is not a UnixPty.
-    [[nodiscard]] std::optional<std::string> foregroundProcessName() const;
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override;
 
     /// How terminate() asks the child to end.
     enum class TerminationHint : uint8_t
@@ -188,6 +188,7 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
+    [[nodiscard]] InputEcho inputEcho() const noexcept override { return pty().inputEcho(); }
     // clang-format on
 
   private:

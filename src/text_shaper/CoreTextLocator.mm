@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/CoreTextLocator.hpp>
 
 #include <ft2build.h>
@@ -61,14 +62,33 @@ namespace
         return NSFontWeightRegular;
     }
 
+    /// The system's user-interface font at @p description's weight and slant: CoreText's own, which no
+    /// family name reliably reaches.
+    [[nodiscard]] CFObject<CTFontRef> systemUiFont(FontDescription const& description)
+    {
+        auto const base = CFObject<CTFontRef>(CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, 16.0, nullptr));
+        if (!base)
+            return {};
+        auto const descriptor = CFObject<CTFontDescriptorRef>(CTFontCopyFontDescriptor(base.get()));
+        auto const styled = CFObject<CTFontDescriptorRef>(CTFontDescriptorCreateCopyWithAttributes(
+            descriptor.get(),
+            (__bridge CFDictionaryRef) @{
+                (id) kCTFontTraitsAttribute: @ {
+                    (id) kCTFontWeightTrait: [NSNumber numberWithDouble:makeFontWeight(description.weight)],
+                    (id) kCTFontSlantTrait:
+                        [NSNumber numberWithDouble:description.slant == FontSlant::Normal ? 0.0 : 1.0],
+                },
+            }));
+        return CFObject<CTFontRef>(CTFontCreateWithFontDescriptor(styled.get(), 16.0, nullptr));
+    }
+
     [[nodiscard]] CFObject<CTFontRef> matchFamily(std::string const& family,
                                                   FontDescription const& description)
     {
-        auto nativeFamily = family;
-        if (family == "emoji")
-            nativeFamily = "Apple Color Emoji";
-        else if (family == "monospace")
-            nativeFamily = "Menlo";
+        if (family == SystemUiFontFamily)
+            return systemUiFont(description);
+        auto nativeFamily = family == "emoji" ? std::string("Apple Color Emoji")
+                                              : std::string(platformFontFamily(family));
         auto const name = CFObject<CFStringRef>(
             CFStringCreateWithCString(kCFAllocatorDefault, nativeFamily.c_str(), kCFStringEncodingUTF8));
         if (!name)
@@ -340,4 +360,38 @@ FontSourceList CoreTextLocator::resolve(gsl::span<char32_t const> codepoints)
         return fonts;
     }
 }
+
+std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const& directories)
+{
+    auto result = std::expected<void, FontRegistrationError> {};
+    for (auto const& directory: directories.paths)
+    {
+        auto const files = listBundledFontFiles(directory);
+        if (!files)
+        {
+            if (result)
+                result = std::unexpected { files.error() };
+            continue;
+        }
+        for (auto const& file: *files)
+        {
+            auto const url = CFObject<CFURLRef>(CFURLCreateFromFileSystemRepresentation(
+                kCFAllocatorDefault,
+                reinterpret_cast<UInt8 const*>(file.c_str()),
+                static_cast<CFIndex>(file.native().size()),
+                false));
+            CFErrorRef rawError = nullptr;
+            auto const registered =
+                url && CTFontManagerRegisterFontsForURL(url.get(), kCTFontManagerScopeProcess, &rawError);
+            auto const error = CFObject<CFErrorRef>(rawError);
+            // Registering the same file twice is harmless: the font is already usable.
+            auto const alreadyRegistered =
+                error && CFErrorGetCode(error.get()) == kCTFontManagerErrorAlreadyRegistered;
+            if (!registered && !alreadyRegistered && result)
+                result = std::unexpected { FontRegistrationError::RegistrationFailed };
+        }
+    }
+    return result;
+}
+
 } // namespace text
