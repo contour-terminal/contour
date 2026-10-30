@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/ContextMenu.hpp>
-#include <contour/config/Actions.hpp>
+#include <contour/command/ContextMenuState.hpp>
+#include <contour/config/ActionsFwd.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
@@ -2088,7 +2088,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void postToManager(Change change);
 
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
-    int executeAllActions(std::vector<actions::Action> const& actions);
+    int executeAllActions(actions::ActionList const& actions);
     /// Opens a new window: a new process or an in-process window, or -- attached -- one the daemon hosts.
     /// @param requestedProfile The profile the action named; std::nullopt runs this session's own locally,
     ///        and the one this client named in its hello on a daemon.

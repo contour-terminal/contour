@@ -335,21 +335,47 @@ std::span<FallbackCharMapping const> paneCharChords(PaneChordHost host)
     return tables[std::to_underlying(host)];
 }
 
-std::vector<ChromeFocusChord> native2026ChromeFocusChords()
+namespace
 {
-    return {
-        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
-          .key = vtbackend::Key::F6,
-          .action = actions::FocusNextArea {} },
-        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
-          .key = vtbackend::Key::F6,
-          .action = actions::FocusPreviousArea {} },
-#ifdef __APPLE__
-        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
-          .key = vtbackend::Key::F5,
-          .action = actions::FocusToolbar {} },
-#endif
+    /// One chrome-focus chord of the Native2026 defaults.
+    struct ChromeFocusChord
+    {
+        vtbackend::Modifiers modifiers; ///< The chord's modifiers.
+        vtbackend::Key key;             ///< The chord's key.
+        actions::Action action;         ///< What the chord does.
     };
+
+    /// The chords that move keyboard focus through a window's chrome (Native2026 only, so a Classic user's
+    /// Ctrl+F6 still reaches the shell). A bare F6 is never bound: mc, vim and htop use it.
+    ///
+    /// macOS: Control+F6 between areas (Shift reversed) and Control+F5 for the toolbar -- the chords AppKit's
+    /// own "move focus to the toolbar" and "next window" use; our toolbar is drawn by QML, so the app answers
+    /// them. Elsewhere the canvas names Ctrl+F6 alone, so there is no toolbar chord.
+    /// @return The rows, built afresh.
+    [[nodiscard]] std::vector<ChromeFocusChord> native2026ChromeFocusChords()
+    {
+        return {
+            { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
+              .key = vtbackend::Key::F6,
+              .action = actions::FocusNextArea {} },
+            { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+              .key = vtbackend::Key::F6,
+              .action = actions::FocusPreviousArea {} },
+#ifdef __APPLE__
+            { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
+              .key = vtbackend::Key::F5,
+              .action = actions::FocusToolbar {} },
+#endif
+        };
+    }
+} // namespace
+
+actions::OutputFormat outputFormatFor(actions::OpenCommandOutput const& action,
+                                      CommandBlocksConfig const& commandBlocks) noexcept
+{
+    if (action.format)
+        return *action.format;
+    return action.program.empty() ? commandBlocks.pagerFormat : actions::OutputFormat::Sgr;
 }
 
 InputMappings makeDefaultInputMappings(DefaultsEdition edition, PaneChordHost paneHost)

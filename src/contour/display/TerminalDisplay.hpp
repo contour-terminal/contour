@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Actions.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/ImeQueryRect.hpp>

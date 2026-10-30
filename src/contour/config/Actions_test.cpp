@@ -109,7 +109,7 @@ TEST_CASE("actions::fromString names the three chrome focus actions", "[actions]
 
 TEST_CASE("actions::filterRepeatableActions drops ClosePane on auto-repeat", "[actions][repeat]")
 {
-    std::vector<actions::Action> const held {
+    actions::ActionList const held {
         actions::ClosePane {},
         actions::ScrollUp {},
     };
@@ -124,7 +124,7 @@ TEST_CASE("actions::filterRepeatableActions drops ClosePane on auto-repeat", "[a
 TEST_CASE("actions::filterRepeatableActions keeps order and the other non-repeatables out",
           "[actions][repeat]")
 {
-    std::vector<actions::Action> const held {
+    actions::ActionList const held {
         actions::ScrollUp {},        // repeatable
         actions::CloseTab {},        // dropped
         actions::SplitVertical {},   // dropped (structural: forks a shell)
@@ -142,7 +142,7 @@ TEST_CASE("actions::filterRepeatableActions keeps order and the other non-repeat
 
 TEST_CASE("actions::filterRepeatableActions on an all-repeatable list is identity-sized", "[actions][repeat]")
 {
-    std::vector<actions::Action> const held { actions::ScrollUp {}, actions::ScrollUp {} };
+    actions::ActionList const held { actions::ScrollUp {}, actions::ScrollUp {} };
     CHECK(actions::filterRepeatableActions(held).size() == 2);
 }
 
@@ -397,7 +397,7 @@ TEST_CASE("Actions: the tab-menu actions map by name", "[actions][catalog]")
 
 TEST_CASE("Actions: the tab-menu actions are dropped on key repeat", "[actions][repeat]")
 {
-    std::vector<actions::Action> const held {
+    actions::ActionList const held {
         actions::CloseOtherTabs {},
         actions::CloseTabsToRight {},
         actions::MoveTabToNewWindow {},
@@ -460,4 +460,31 @@ TEST_CASE("actions: the block focus actions round-trip and are Blocks", "[action
         auto const steps = name.starts_with("Focus") || name.starts_with("Select");
         CHECK(actions::isNonRepeatable(action) == !steps);
     }
+}
+
+TEST_CASE("actions::ActionList copies, moves and appends like the vector it wraps", "[actions][list]")
+{
+    auto original = actions::ActionList { actions::ScrollUp {}, actions::ChangeProfile { .name = "dark" } };
+    REQUIRE(original.size() == 2);
+    CHECK_FALSE(original.empty());
+    CHECK(std::holds_alternative<actions::ScrollUp>(original.front()));
+
+    auto copy = original;
+    copy.push_back(actions::Quit {});
+    CHECK(original.size() == 2);
+    REQUIRE(copy.size() == 3);
+    CHECK(std::get<actions::ChangeProfile>(copy[1]).name == "dark");
+    CHECK(std::holds_alternative<actions::Quit>(copy.at(2)));
+
+    auto assigned = actions::ActionList {};
+    CHECK(assigned.empty());
+    assigned = copy;
+    CHECK(assigned.size() == 3);
+
+    assigned.clear();
+    CHECK(assigned.empty());
+
+    auto const moved = std::move(copy);
+    CHECK(moved.size() == 3);
+    CHECK(std::ranges::distance(moved) == 3);
 }

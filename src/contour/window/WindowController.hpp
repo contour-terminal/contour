@@ -1461,8 +1461,8 @@ class WindowController:
     [[nodiscard]] bool runChromeCommand(window::ChromeCommand command);
     /// The actions the active session's key bindings give a key press while the chrome has focus.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
-    [[nodiscard]] std::vector<actions::Action> const* boundActionsFor(int qtKey,
-                                                                      Qt::KeyboardModifiers modifiers) const;
+    [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
+                                                             Qt::KeyboardModifiers modifiers) const;
     /// Closes the tab at @p row, asking first unless every pane is known to be idle (a pane whose program
     /// cannot be known asks too: window::closeConfirmationFor).
     void closeTabAskingIfBusy(int row);

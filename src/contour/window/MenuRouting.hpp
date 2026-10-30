@@ -29,8 +29,7 @@ using ActionPicked = std::function<void(actions::Action const& action)>;
 /// @param shown The presented tree's actions, by MenuNode::actionIndex.
 /// @param onAction Called with the picked action; not called for an index @p shown does not hold.
 /// @return The callback to hand the presenter.
-[[nodiscard]] inline platform::MenuPicked pickFromShown(std::vector<actions::Action> shown,
-                                                        ActionPicked onAction)
+[[nodiscard]] inline platform::MenuPicked pickFromShown(actions::ActionList shown, ActionPicked onAction)
 {
     return [shown = std::move(shown), onAction = std::move(onAction)](std::size_t index) {
         if (index < shown.size())

@@ -9,6 +9,7 @@
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/ShellIntegration.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 
 #include <vtbackend/screen/LocalTime.hpp>

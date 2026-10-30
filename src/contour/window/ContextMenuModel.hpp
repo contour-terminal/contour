@@ -52,8 +52,8 @@ namespace contour::window
 /// -- a menu the user may still have open, so every menu surface holds one of these rather than sharing.
 struct PublishedContextMenu
 {
-    QVariantList model {};                   ///< What QML renders.
-    std::vector<actions::Action> actions {}; ///< What the rows run, indexed by their `actionId`.
+    QVariantList model {};          ///< What QML renders.
+    actions::ActionList actions {}; ///< What the rows run, indexed by their `actionId`.
 
     /// Replaces the published rows with @p tree.
     /// @param tree The resolved menu; its actions are taken over.

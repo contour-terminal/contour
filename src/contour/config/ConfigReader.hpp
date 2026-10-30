@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/ConfigEnumReader.hpp>
 
@@ -292,7 +293,7 @@ struct YAMLConfigReader
         {
             if (match(binding, modes, modifier, input, clickCount))
             {
-                binding.binding.emplace_back(std::move(action));
+                binding.binding.push_back(std::move(action));
                 return;
             }
         }

@@ -7550,7 +7550,7 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
     return true;
 }
 
-int TerminalSession::executeAllActions(std::vector<actions::Action> const& actions)
+int TerminalSession::executeAllActions(actions::ActionList const& actions)
 {
     if (_allowKeyMappings)
     {

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ActionsFwd.hpp>
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
-#include <vtbackend/input/vi/HintModeHandler.hpp>
+#include <vtbackend/input/vi/HintTypes.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
 
 #include <core/Assert.hpp>
@@ -187,135 +188,54 @@ struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal
 struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 // clang-format on
 
-using Action = std::variant<CancelSelection,
-                            ChangeProfile,
-                            ClearHistoryAndReset,
-                            CopyPreviousMarkRange,
-                            CopySelection,
-                            CreateDebugDump,
-                            CreateSelection,
-                            DecreaseFontSize,
-                            DecreaseOpacity,
-                            FocusNextSearchMatch,
-                            FocusPreviousSearchMatch,
-                            FollowHyperlink,
-                            HintMode,
-                            IncreaseFontSize,
-                            IncreaseOpacity,
-                            NewTerminal,
-                            NewWindowTo,
-                            NoSearchHighlight,
-                            OpenCommandPalette,
-                            OpenConfiguration,
-                            OpenFileManager,
-                            OpenSelection,
-                            PasteClipboard,
-                            PasteSelection,
-                            Quit,
-                            ReloadConfig,
-                            ResetConfig,
-                            ResetFontSize,
-                            ScreenshotVT,
-                            SaveScreenshot,
-                            CopyScreenshot,
-                            CollapseAllFolds,
-                            CollapseLastFold,
-                            ExpandAllFolds,
-                            ScrollDown,
-                            ScrollMarkDown,
-                            ScrollMarkUp,
-                            ScrollOneDown,
-                            ScrollOneUp,
-                            ScrollPageDown,
-                            ScrollPageUp,
-                            ScrollToBottom,
-                            ScrollToTop,
-                            ToggleFold,
-                            ToggleFoldAt,
-                            ToggleLastFold,
-                            FocusPreviousCommand,
-                            FocusNextCommand,
-                            SelectPreviousCommandOutput,
-                            SelectNextCommandOutput,
-                            OpenBlockMenu,
-                            ClearCommandBlockFocus,
-                            ScrollUp,
-                            SearchReverse,
-                            SearchSelection,
-                            SendChars,
-                            ToggleAllKeyMaps,
-                            ToggleFullscreen,
-                            ToggleInputMethodHandling,
-                            ToggleInputProtection,
-                            ToggleStatusLine,
-                            ToggleTitleBar,
-                            TraceBreakAtEmptyQueue,
-                            TraceEnter,
-                            TraceLeave,
-                            TraceStep,
-                            ViNormalMode,
-                            WriteScreen,
-                            CreateNewTab,
-                            CloseTab,
-                            MoveTabTo,
-                            MoveTabToLeft,
-                            MoveTabToRight,
-                            SwitchToTab,
-                            SwitchToPreviousTab,
-                            SwitchToTabLeft,
-                            SwitchToTabRight,
-                            SetTabTitle,
-                            SplitVertical,
-                            SplitHorizontal,
-                            ClosePane,
-                            FocusPaneLeft,
-                            FocusPaneRight,
-                            FocusPaneUp,
-                            FocusPaneDown,
-                            SwapPaneLeft,
-                            SwapPaneRight,
-                            SwapPaneUp,
-                            SwapPaneDown,
-                            MovePaneLeft,
-                            MovePaneRight,
-                            MovePaneUp,
-                            MovePaneDown,
-                            ToggleSplitOrientation,
-                            TogglePaneZoom,
-                            ResizePane,
-                            LaunchLayout,
-                            SaveLayout,
-                            AttachToHost,
-                            OpenContextMenu,
-                            SelectAll,
-                            SoftReset,
-                            CopyLastCommandPrompt,
-                            CopyLastCommandOutput,
-                            CopyLastCommandBlock,
-                            CopyHyperlink,
-                            SetTabColor,
-                            ResetTabColor,
-                            CloseAllTabs,
-                            SetTabBarVisibility,
-                            SetTabBarPosition,
-                            SpeakSelection,
-                            StopSpeaking,
-                            SelectCommandBlock,
-                            CopyCommandBlock,
-                            CopyCommandLine,
-                            RerunCommand,
-                            ToggleCommandFold,
-                            ClearToPrompt,
-                            OpenCommandOutput,
-                            CloseOtherTabs,
-                            CloseTabsToRight,
-                            MoveTabToNewWindow,
-                            ShowAbout,
-                            MinimizeWindow,
-                            ZoomWindow,
-                            FocusNextArea,
-                            FocusPreviousArea,
-                            FocusToolbar>;
+inline ActionList::iterator ActionList::begin() noexcept
+{
+    return _actions.begin();
+}
+inline ActionList::iterator ActionList::end() noexcept
+{
+    return _actions.end();
+}
+inline ActionList::const_iterator ActionList::begin() const noexcept
+{
+    return _actions.begin();
+}
+inline ActionList::const_iterator ActionList::end() const noexcept
+{
+    return _actions.end();
+}
+inline std::size_t ActionList::size() const noexcept
+{
+    return _actions.size();
+}
+inline bool ActionList::empty() const noexcept
+{
+    return _actions.empty();
+}
+inline Action& ActionList::operator[](std::size_t index)
+{
+    return _actions[index];
+}
+inline Action const& ActionList::operator[](std::size_t index) const
+{
+    return _actions[index];
+}
+inline Action& ActionList::at(std::size_t index)
+{
+    return _actions.at(index);
+}
+inline Action const& ActionList::at(std::size_t index) const
+{
+    return _actions.at(index);
+}
+inline Action& ActionList::front()
+{
+    return _actions.front();
+}
+inline Action const& ActionList::front() const
+{
+    return _actions.front();
+}
 
 /// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
 /// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
@@ -403,7 +323,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
 /// tab/pane closes).
 /// @param actions The actions bound to the key being repeated.
 /// @return A copy containing only the repeatable actions, preserving order.
-[[nodiscard]] std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions);
+[[nodiscard]] ActionList filterRepeatableActions(ActionList const& actions);
 
 /// Actions that carry a REQUIRED argument, so a default-constructed instance of them is not runnable.
 ///

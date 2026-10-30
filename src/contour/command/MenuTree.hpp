@@ -37,7 +37,7 @@ struct MenuNode
 struct MenuTree
 {
     std::vector<MenuNode> nodes {};
-    std::vector<actions::Action> actions {};
+    actions::ActionList actions {};
 };
 
 /// Resolves @p entries into a tree of rows, chords and actions.

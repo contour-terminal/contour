@@ -14,6 +14,28 @@ using core::toLower;
 namespace contour::actions
 {
 
+// The special members of ActionList live here, and only here: the vector's copy, move and destruction
+// over the 129-way variant are instantiated in this translation unit, not in every includer.
+ActionList::ActionList() = default;
+ActionList::ActionList(std::initializer_list<Action> actions): _actions(actions)
+{
+}
+ActionList::ActionList(ActionList const& other) = default;
+ActionList::ActionList(ActionList&& other) noexcept = default;
+ActionList& ActionList::operator=(ActionList const& other) = default;
+ActionList& ActionList::operator=(ActionList&& other) noexcept = default;
+ActionList::~ActionList() = default;
+
+void ActionList::push_back(Action action)
+{
+    _actions.push_back(std::move(action));
+}
+
+void ActionList::clear() noexcept
+{
+    _actions.clear();
+}
+
 optional<Action> fromString(string const& name)
 {
     // Case-insensitive, so `input_mapping:` may spell an action however it reads best.
@@ -161,10 +183,9 @@ bool isNonRepeatable(Action const& action) noexcept
                       action);
 }
 
-std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions)
+ActionList filterRepeatableActions(ActionList const& actions)
 {
-    std::vector<Action> result;
-    result.reserve(actions.size());
+    ActionList result;
     for (auto const& action: actions)
         if (!isNonRepeatable(action))
             result.push_back(action);

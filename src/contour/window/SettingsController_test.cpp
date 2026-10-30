@@ -150,8 +150,8 @@ struct Fixture
     config::HostPlatform shellHost = config::HostPlatform::Other; ///< The host the Install rows run on.
     command::MenuBarPlacement menuBar = command::MenuBarPlacement::None; ///< Where the host's menu bar lives.
     std::unique_ptr<SettingsController> controller;
-    QStringList errors; ///< What the controller reported through errorOccurred, in order.
-    std::vector<actions::Action> ranActions;         ///< What Settings ran as the app's own commands.
+    QStringList errors;             ///< What the controller reported through errorOccurred, in order.
+    actions::ActionList ranActions; ///< What Settings ran as the app's own commands.
     std::optional<std::filesystem::path> chosenFile; ///< What the file dialog answers; nullopt cancels.
     std::vector<std::string> fileDialogTitles;       ///< The title of each file dialog asked for.
 

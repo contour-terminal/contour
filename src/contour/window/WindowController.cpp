@@ -1230,8 +1230,7 @@ namespace
     }
 
     /// The first of @p bound that is a focus action.
-    [[nodiscard]] std::optional<window::ChromeFocusAction> focusActionOf(
-        std::vector<actions::Action> const& bound)
+    [[nodiscard]] std::optional<window::ChromeFocusAction> focusActionOf(actions::ActionList const& bound)
     {
         for (auto const& action: bound)
             for (auto const& row: chromeFocusRows())
@@ -1321,8 +1320,7 @@ void WindowController::clampChromeFocus()
     emit chromeFocusChanged();
 }
 
-std::vector<actions::Action> const* WindowController::boundActionsFor(int qtKey,
-                                                                      Qt::KeyboardModifiers modifiers) const
+actions::ActionList const* WindowController::boundActionsFor(int qtKey, Qt::KeyboardModifiers modifiers) const
 {
     auto const* session = activeSession();
     if (session == nullptr)

@@ -16,7 +16,7 @@
 /// (vthost::proto::EngineOperation, which contour::remote::toWireOperation pins to this one) and its row in
 /// the host's own table (vthost::SessionHost).
 
-#include <contour/config/Actions.hpp>
+#include <contour/config/ActionsFwd.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 

@@ -2,7 +2,7 @@
 #pragma once
 
 #include <contour/config/AccessibilityPreferences.hpp>
-#include <contour/config/Actions.hpp>
+#include <contour/config/ActionsFwd.hpp>
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ConfigDocumentationTags.hpp>
@@ -103,7 +103,7 @@ namespace contour::config
 // describes them: an action carrying one of these modes is declared in Actions.h, which cannot
 // include this header (this header includes Actions.h).
 
-using ActionList = std::vector<actions::Action>;
+using ActionList = actions::ActionList;
 using KeyInputMapping = vtbackend::InputBinding<vtbackend::Key, ActionList>;
 using CharInputMapping = vtbackend::InputBinding<char32_t, ActionList>;
 using MouseInputMapping = vtbackend::InputBinding<vtbackend::MouseButton, ActionList>;
@@ -309,11 +309,11 @@ namespace helper
 /// @param clickCount The press's multi-click count for a click-count lookup; nullopt for an ordinary one.
 template <typename Input, std::ranges::input_range Mappings>
     requires std::same_as<std::ranges::range_value_t<Mappings>, vtbackend::InputBinding<Input, ActionList>>
-std::vector<actions::Action> const* apply(Mappings&& mappings,
-                                          Input input,
-                                          vtbackend::Modifiers modifiers,
-                                          uint8_t actualModeFlags,
-                                          std::optional<uint8_t> clickCount = std::nullopt)
+actions::ActionList const* apply(Mappings&& mappings,
+                                 Input input,
+                                 vtbackend::Modifiers modifiers,
+                                 uint8_t actualModeFlags,
+                                 std::optional<uint8_t> clickCount = std::nullopt)
 {
     // Forwarded rather than taken by const&: std::views::filter is not const-iterable, so a filtered
     // view over the gated fallback table could not be walked through a const reference.
@@ -576,13 +576,8 @@ struct CommandBlocksConfig
 /// @param action The action.
 /// @param commandBlocks The configured pager and its format.
 /// @return The format.
-[[nodiscard]] constexpr actions::OutputFormat outputFormatFor(
-    actions::OpenCommandOutput const& action, CommandBlocksConfig const& commandBlocks) noexcept
-{
-    if (action.format)
-        return *action.format;
-    return action.program.empty() ? commandBlocks.pagerFormat : actions::OutputFormat::Sgr;
-}
+[[nodiscard]] actions::OutputFormat outputFormatFor(actions::OpenCommandOutput const& action,
+                                                    CommandBlocksConfig const& commandBlocks) noexcept;
 
 /// The largest `command_blocks.max_records` the reader accepts; a larger value is clamped to it.
 constexpr inline int64_t MaxCommandBlockRecords = 1'000'000;
@@ -1293,23 +1288,6 @@ struct TerminalProfile
     ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
     ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
-
-/// One chrome-focus chord of the Native2026 defaults.
-struct ChromeFocusChord
-{
-    vtbackend::Modifiers modifiers; ///< The chord's modifiers.
-    vtbackend::Key key;             ///< The chord's key.
-    actions::Action action;         ///< What the chord does.
-};
-
-/// The chords that move keyboard focus through a window's chrome (Native2026 only, so a Classic user's
-/// Ctrl+F6 still reaches the shell). A bare F6 is never bound: mc, vim and htop use it.
-///
-/// macOS: Control+F6 between areas (Shift reversed) and Control+F5 for the toolbar -- the chords AppKit's
-/// own "move focus to the toolbar" and "next window" use; our toolbar is drawn by QML, so the app answers
-/// them. Elsewhere the canvas names Ctrl+F6 alone, so there is no toolbar chord.
-/// @return The rows, built afresh.
-[[nodiscard]] std::vector<ChromeFocusChord> native2026ChromeFocusChords();
 
 /// The built-in key/mouse bindings of @p edition, built afresh.
 /// @param edition The edition whose bindings to build; only the FollowHyperlink modifier differs.
