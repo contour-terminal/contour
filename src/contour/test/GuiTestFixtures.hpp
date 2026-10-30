@@ -4,15 +4,25 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/command/MenuTree.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/Notifier.hpp>
+#include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/LauncherFixtures.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMocks.hpp>
+#include <contour/test/RecordingShellRcEditor.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
@@ -33,10 +43,12 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtCore/QTemporaryDir>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -51,10 +63,13 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <vtworkspace/Primitives.hpp>
@@ -92,12 +107,15 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         std::optional<std::string> profileName = std::nullopt) override
     {
         requestedCwds.push_back(std::move(cwd));
+        boundForReconnect = false;
         // Record the size the manager asked for (nullopt == "use the profile default"), so a test can
         // assert that a new tab/split inherited the running window size instead of the default.
         requestedPageSizes.push_back(pageSize);
         requestedCommandOverrides.push_back(std::move(commandOverride));
         requestedProfileNames.push_back(std::move(profileName));
         auto const initialSize = pageSize.value_or(DefaultPageSize);
+        if (makePty)
+            return makePty(initialSize);
         auto pty = std::make_unique<vtpty::MockPty>(initialSize);
         createdPtys.push_back(pty.get());
         return pty;
@@ -106,6 +124,26 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
     {
         return reportedHosting;
+    }
+
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return reportedTabMergeSupport.value_or(SessionFactory::tabMergeSupport());
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
+    {
+        requestedTabMerges.push_back(TabMergeRequest {
+            .tabPtys = { tabPtys.begin(), tabPtys.end() }, .targetPty = targetPty, .side = side });
+        if (reportedTabMergeRouting)
+            return *reportedTabMergeRouting;
+        return reportedHosting == contour::session::SessionHosting::Remote
+                       && tabMergeSupport() == contour::session::TabMergeSupport::Supported
+                   ? contour::session::RemoteRouting::Routed
+                   : contour::session::RemoteRouting::Local;
     }
 
     [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
@@ -120,6 +158,113 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         return hostedOperationRoute;
     }
 
+    /// Records the request; routes it to the host when remoteRouting says so, as an attach-mode factory does.
+    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* /*actingPty*/,
+                                        contour::session::RemoteSpawn const& spawn) override
+    {
+        requestedRemoteTabs.push_back(spawn);
+        return remoteTabs == RemoteTabRouting::ToHost;
+    }
+
+    /// Records the request; routes it to the host when remoteTabs says so.
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* /*actingPty*/,
+                                          bool /*vertical*/,
+                                          contour::session::RemoteSpawn const& /*spawn*/) override
+    {
+        ++requestedRemoteSplits;
+        return remoteTabs == RemoteTabRouting::ToHost;
+    }
+
+    /// Records the call, as a host would be told a session was ended for good.
+    void requestRemoteClose(vtpty::Pty const* /*pty*/) override { ++requestedRemoteCloses; }
+
+    /// The factory of sessions that run here whatever the host. Under Remote hosting it is a view of this
+    /// mock that allows creation, hosts locally and routes nothing, as the app's own factory does behind
+    /// an attached host; else it is this mock.
+    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
+    {
+        return reportedHosting == contour::session::SessionHosting::Remote
+                   ? static_cast<contour::session::SessionFactory&>(_localView)
+                   : *this;
+    }
+
+    /// Whether requestRemoteTab() and requestRemoteSplit() hand the request to the host.
+    enum class RemoteTabRouting : uint8_t
+    {
+        Local = 0, ///< No: the manager builds the tab or split itself.
+        ToHost,    ///< Yes: an attach-mode factory authoring it on its daemon.
+    };
+    RemoteTabRouting remoteTabs = RemoteTabRouting::Local;
+    /// Every requestRemoteTab() call, in order.
+    std::vector<contour::session::RemoteSpawn> requestedRemoteTabs;
+    /// How often requestRemoteSplit() was asked.
+    int requestedRemoteSplits = 0;
+    /// How often requestRemoteClose() was called.
+    int requestedRemoteCloses = 0;
+    /// How many ptys localSessions() made, a subset of createdPtys.
+    int localCreations = 0;
+
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return reportedReconnectSupport;
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        ++reconnects;
+        return reconnectResult;
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        if (!std::ranges::contains(namedForReconnect, endedPty))
+            return contour::session::ReconnectBinding::Gone;
+        boundForReconnect = true;
+        return contour::session::ReconnectBinding::Bound;
+    }
+
+    void cancelReconnectBinding() override { boundForReconnect = false; }
+
+    [[nodiscard]] bool canCreateSession() const noexcept override
+    {
+        return creation == SessionCreation::Allowed;
+    }
+
+    /// Whether canCreateSession() answers yes.
+    enum class SessionCreation : uint8_t
+    {
+        Refused = 0,
+        Allowed,
+    };
+    SessionCreation creation = SessionCreation::Allowed;
+    /// Whether a bindForReconnect() is pending: createPty() consumes it, cancelReconnectBinding() drops it.
+    bool boundForReconnect = false;
+
+    /// What reconnectSupport() reports: Supported stands in for an app attached to a daemon.
+    contour::session::ReconnectSupport reportedReconnectSupport =
+        contour::session::ReconnectSupport::Unsupported;
+    /// What reconnect() answers: success starts the supervised run a real controller would.
+    std::expected<void, contour::session::ReconnectError> reconnectResult {};
+    /// How often reconnect() was asked.
+    int reconnects = 0;
+    /// The ptys of the ended panes the returned layout still names: bindForReconnect() binds exactly these.
+    std::vector<vtpty::Pty const*> namedForReconnect;
+
+    /// What tabMergeSupport() reports instead of what the hosting implies: Supported stands in for a daemon
+    /// that serves the merge, Unsupported for one that does not.
+    std::optional<contour::session::TabMergeSupport> reportedTabMergeSupport = std::nullopt;
+    /// What requestRemoteTabMerge() answers instead of what the hosting and support imply: Refused stands in
+    /// for a daemon that cannot take the merge now.
+    std::optional<contour::session::RemoteRouting> reportedTabMergeRouting = std::nullopt;
+    /// One requestRemoteTabMerge() call.
+    struct TabMergeRequest
+    {
+        std::vector<vtpty::Pty const*> tabPtys = {};
+        vtpty::Pty const* targetPty = nullptr;
+        vtworkspace::SplitSide side = vtworkspace::SplitSide::Left;
+    };
+    /// Every request requestRemoteTabMerge() was asked about, in order.
+    std::vector<TabMergeRequest> requestedTabMerges;
     /// What hosting() reports: Remote stands in for an attach-mode factory, which runs no command here.
     contour::session::SessionHosting reportedHosting = contour::session::SessionHosting::Local;
     /// How createNotifier() makes each session's notifier: makeTestNotifier() unless a test says
@@ -138,8 +283,40 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<std::optional<vtpty::Process::ExecInfo>> requestedCommandOverrides;
     /// The @c profileName argument of each createPty() call.
     std::vector<std::optional<std::string>> requestedProfileNames;
-    /// Non-owning observation pointers; valid while the owning session lives.
+    /// Non-owning observation pointers; valid while the owning session lives. Empty for the ptys makePty
+    /// made.
     std::vector<vtpty::MockPty*> createdPtys;
+    /// Makes each pty instead of a MockPty when set -- a ChannelPty, for a test that feeds a mirror's bytes.
+    std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)> makePty {};
+
+  private:
+    /// What localSessions() hands out under Remote hosting: a local factory over this mock's ptys.
+    class LocalView final: public contour::session::SessionFactory
+    {
+      public:
+        explicit LocalView(MockPtySessionFactory& owner): _owner { owner } {}
+
+        [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
+            std::optional<std::string> cwd,
+            std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+            std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+            std::optional<std::string> profileName = std::nullopt) override
+        {
+            ++_owner.localCreations;
+            return _owner.createPty(
+                std::move(cwd), pageSize, std::move(commandOverride), std::move(profileName));
+        }
+
+        [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
+        {
+            return _owner.createNotifier();
+        }
+
+      private:
+        MockPtySessionFactory& _owner;
+    };
+
+    LocalView _localView { *this };
 };
 
 /// A TerminalSession a test builds itself, outside any session factory: over @p pty, raising through
@@ -205,6 +382,25 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->hosting();
     }
 
+    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
+    {
+        auto& local = _factory->localSessions();
+        return &local == _factory.get() ? *this : local;
+    }
+
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return _factory->tabMergeSupport();
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
+    {
+        return _factory->requestRemoteTabMerge(tabPtys, targetPty, side);
+    }
+
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,
                                         contour::session::RemoteSpawn const& spawn) override
     {
@@ -241,10 +437,29 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->requestHostedOperation(pty, request);
     }
 
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override
     {
-        _factory->bindTerminal(pty, terminal);
+        _factory->bindTerminal(pty, terminal, interruptions);
     }
+
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return _factory->reconnectSupport();
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        return _factory->reconnect();
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        return _factory->bindForReconnect(endedPty);
+    }
+
+    void cancelReconnectBinding() override { _factory->cancelReconnectBinding(); }
 
   private:
     std::unique_ptr<contour::session::SessionFactory> _factory;
@@ -450,6 +665,59 @@ class InMemoryWindowPositionStore final: public contour::window::WindowPositionS
     }
 };
 
+/// Records the manager's native taskbar output without reaching the OS shell.
+class RecordingTaskbar final: public contour::platform::TaskbarProgressSink
+{
+  public:
+    /// Whether this test adapter supports publishing progress.
+    enum class Support : uint8_t
+    {
+        Unavailable, ///< Models a platform without a native adapter.
+        Available,   ///< Records scheduled updates.
+    };
+
+    /// @param support Whether this adapter accepts scheduled updates.
+    /// @param scope   Whether it models a per-window or a per-application indicator.
+    explicit RecordingTaskbar(
+        Support support = Support::Available,
+        contour::platform::TaskbarProgressScope scope = contour::platform::TaskbarProgressScope::Window):
+        _support(support), _scope(scope)
+    {
+    }
+    [[nodiscard]] bool isSupported() const noexcept override { return _support == Support::Available; }
+    [[nodiscard]] contour::platform::TaskbarProgressScope scope() const noexcept override { return _scope; }
+    void setApplicationProgress(contour::platform::TaskbarProgress progress) override
+    {
+        application = progress;
+    }
+    void setApplicationAttention(contour::platform::TaskbarAttention attention) override
+    {
+        applicationAttention.push_back(attention);
+    }
+    void bindWindow(uint64_t, QWindow&) override {}
+    void setProgress(uint64_t window, contour::platform::TaskbarProgress progress) override
+    {
+        windows[window] = progress;
+    }
+    void setAttention(uint64_t window, contour::platform::TaskbarAttention attention) override
+    {
+        windowAttention.emplace_back(window, attention);
+    }
+    void removeWindow(uint64_t window) override { windows.erase(window); }
+
+    std::unordered_map<uint64_t, contour::platform::TaskbarProgress>
+        windows;                                    ///< The last progress per window.
+    contour::platform::TaskbarProgress application; ///< The last application progress.
+    /// Every count the application indicator was told, in order.
+    std::vector<contour::platform::TaskbarAttention> applicationAttention;
+    /// Every count a window's button was told, in order, with the window.
+    std::vector<std::pair<uint64_t, contour::platform::TaskbarAttention>> windowAttention;
+
+  private:
+    Support _support;
+    contour::platform::TaskbarProgressScope _scope;
+};
+
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already
 /// seeds a "main" profile and a "default" colorscheme, so no config file is needed. The app's real
@@ -475,14 +743,27 @@ class TestApp
     ///                fixture's own in-memory one, fileSystem(). Borrowed.
     /// @param environment The environment variables the app reads as the test sets them.
     /// @param taskbarProgress Optional native taskbar sink override.
-    explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
-                     std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
-                     std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
-                     std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
-                     vtbackend::HostIdentity identity = testHostIdentity(),
-                     core::platform::FileSystem const* fileSystem = nullptr,
-                     TestEnvironment::Overrides environment = {},
-                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr):
+    /// @param appearance The OS accessibility and appearance sources. The null ones by default, so a test
+    ///                never reads the host's settings; pass test::appearanceServicesWith() to drive them.
+    /// @param shellRcEditor The editor of the shells' startup files. A RecordingShellRcEditor by default,
+    ///                so no test run reaches a real rc file; @see shellRcEditor().
+    /// @param attachedHostLabel The remote host the app counts as attached to; empty: this machine.
+    /// @param shellHost The host the shell-integration offer decides on. A POSIX one by default, so the offer
+    ///                behaves the same on every machine running the tests; pass HostPlatform::Windows to see
+    ///                it refuse.
+    explicit TestApp(
+        std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
+        std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
+        std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
+        std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
+        vtbackend::HostIdentity identity = testHostIdentity(),
+        core::platform::FileSystem const* fileSystem = nullptr,
+        TestEnvironment::Overrides environment = {},
+        std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
+        contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
+        std::unique_ptr<contour::platform::IShellRcEditor> shellRcEditor = nullptr,
+        std::string attachedHostLabel = {},
+        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
@@ -498,7 +779,11 @@ class TestApp
              nullptr,
              linkServices(),
              std::move(taskbarProgress),
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             appearance,
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory(),
+             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel), shellHost))
     {
         parseTerminalVerb();
     }
@@ -528,7 +813,11 @@ class TestApp
              std::move(placement),
              linkServices(),
              nullptr,
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             contour::platform::nullAppearanceServices(),
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory(),
+             shellIntegrationServices())
     {
         parseTerminalVerb();
     }
@@ -575,7 +864,11 @@ class TestApp
              nullptr,
              linkServices(),
              nullptr,
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             contour::platform::nullAppearanceServices(),
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory(),
+             shellIntegrationServices())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -601,6 +894,19 @@ class TestApp
         REQUIRE(_launcher != nullptr); // not on an app built with the default launcher
         return *_launcher;
     }
+
+    /// The recording editor of the shells' startup files wired into this app.
+    [[nodiscard]] RecordingShellRcEditor& shellRcEditor() noexcept
+    {
+        REQUIRE(_shellRcEditor != nullptr); // not on an app handed another editor
+        return *_shellRcEditor;
+    }
+
+    /// What the app's GUI state remembers, in memory.
+    [[nodiscard]] InMemoryGuiStateStore& guiState() noexcept { return *_guiState; }
+
+    /// The binary a test app's rc line names.
+    static constexpr std::string_view ContourBinary = "/opt/contour/bin/contour";
 
     /// Where OpenCommandOutput's files go in a test app: a directory on the in-memory filesystem.
     static constexpr std::string_view OutputDirectory = "/run/contour-test-output";
@@ -649,6 +955,14 @@ class TestApp
     /// (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
     void parseTerminalVerb()
     {
+        // The GUI suite drives mechanisms (link following, the bell, page sizing, ...) from the app's
+        // configuration before any file is loaded, and it was written against the defaults every release
+        // before the 2026 redesign shipped: Ctrl follows links, the bell sounds, a page is 80x25. A plain
+        // Config is DefaultsEdition::Native2026, so the fixture states the edition its expectations are
+        // in. The Native2026 values themselves are pinned by Config.firstLaunchDefaults.
+        _app.config() =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+
         char const* argv[] = { "contour", "terminal" };
         REQUIRE(_app.parseParametersForTesting(2, argv));
     }
@@ -714,7 +1028,44 @@ class TestApp
         return launcher;
     }
 
+    /// What the offer to install shell integration reads and writes in a test app: a recording editor (or the
+    /// one a test handed), the in-memory GUI state, a fixed binary and, optionally, a remote host.
+    /// Runs in the member-initializer list, so the raw pointers are set before _app is constructed.
+    [[nodiscard]] contour::ShellIntegrationServices shellIntegrationServices(
+        std::unique_ptr<contour::platform::IShellRcEditor> own = nullptr,
+        std::string attachedHostLabel = {},
+        contour::config::HostPlatform shellHost = contour::config::HostPlatform::Other)
+    {
+        auto editor = own ? std::move(own) : std::make_unique<RecordingShellRcEditor>();
+        _shellRcEditor = dynamic_cast<RecordingShellRcEditor*>(editor.get());
+        return contour::ShellIntegrationServices { .editor = std::move(editor),
+                                                   .state = _guiState,
+                                                   .contourBinary = std::filesystem::path { ContourBinary },
+                                                   .attachedHostLabel = std::move(attachedHostLabel),
+                                                   .host = shellHost };
+    }
+
+    /// Builds the app's Settings window offscreen, on an engine of the fixture's own: the app never builds
+    /// its own engine in a test. The engine is made on the first show, with the chrome tokens installed.
+    /// Runs in the member-initializer list; what it returns is called only once _app exists.
+    [[nodiscard]] contour::window::SettingsWindowFactory settingsWindowFactory()
+    {
+        return [this](contour::window::SettingsWindowHost& host) {
+            if (!_settingsEngine)
+            {
+                _settingsEngine = std::make_unique<QQmlEngine>();
+                installChromeStyle(*_settingsEngine);
+                // The preview is a terminal display, which only the GUI action registers: without the stub
+                // the window fails to load whenever no earlier case of the run registered one.
+                qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+            }
+            return contour::window::loadSettingsWindow(*_settingsEngine, host);
+        };
+    }
+
     RecordingExternalLauncher* _launcher = nullptr;
+    RecordingShellRcEditor* _shellRcEditor = nullptr;
+    std::shared_ptr<InMemoryGuiStateStore> _guiState = std::make_shared<InMemoryGuiStateStore>();
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,
     /// TestEnvironment::Overrides)).
@@ -737,17 +1088,37 @@ class TestApp
     /// Where the app's sessions look up paths, its link detection too: _fileSystem unless the test chose
     /// another. Declared before _app, which borrows it.
     core::platform::FileSystem const* _sessionFiles = nullptr;
+    /// The engine the app's Settings window is built on; see settingsWindowFactory(). Declared before _app,
+    /// so the window the app owns goes before the engine it was built on.
+    std::unique_ptr<QQmlEngine> _settingsEngine;
     contour::ContourGuiApp _app;
 };
 
 /// A TestApp whose configuration is a file of its own, in a directory that lives as long as the app: what a
-/// test that reloads the configuration from disk needs.
+/// test that reloads the configuration from disk needs. Its sessions look up paths in the fixture's own
+/// in-memory file system unless the test chooses this machine's: what a test of Settings needs, because
+/// Settings writes its side files through the app's file system, and the configuration loader reads them back
+/// from the disk.
 class ConfiguredTestApp
 {
   public:
     /// @param factory Optional PTY factory override, as TestApp takes it.
-    explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
-        _testApp { std::move(factory) },
+    /// @param appearance The OS accessibility and appearance sources, as TestApp takes them.
+    /// @param files      Where the app's sessions look up paths, and Settings writes its side files.
+    explicit ConfiguredTestApp(
+        std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
+        contour::platform::AppearanceServices const& appearance = contour::platform::nullAppearanceServices(),
+        TestApp::SessionFiles files = TestApp::SessionFiles::Fixture):
+        _testApp { std::move(factory),
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   TestApp::testHostIdentity(),
+                   files == TestApp::SessionFiles::ThisMachine ? &core::platform::NativeFileSystem::instance()
+                                                               : nullptr,
+                   {},
+                   nullptr,
+                   appearance },
         _configFile { std::filesystem::path(_configDir.path().toStdU16String()) / "contour.yml" }
     {
         REQUIRE(_configDir.isValid());
@@ -759,6 +1130,9 @@ class ConfiguredTestApp
 
     /// @return The file the app's configuration is read from.
     [[nodiscard]] std::filesystem::path const& configFile() const noexcept { return _configFile; }
+
+    /// @return What the app opened URLs and programs with, as TestApp::launcher() gives it.
+    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return _testApp.launcher(); }
 
   private:
     QTemporaryDir _configDir; ///< First, so it outlives the app that reads from it.
@@ -778,6 +1152,12 @@ struct ScopedController
 
     explicit ScopedController(contour::session::TerminalSessionManager& m):
         manager(m), controller(m.createWindowController()), id(controller->windowId())
+    {
+    }
+    /// A controller whose menus open as @p menuPresentation says, whatever the app's style says.
+    ScopedController(contour::session::TerminalSessionManager& m,
+                     contour::config::MenuPresentation menuPresentation):
+        manager(m), controller(m.createWindowController(menuPresentation)), id(controller->windowId())
     {
     }
     ~ScopedController()
@@ -814,6 +1194,63 @@ inline void closeAllTabs(contour::window::WindowController& window)
 {
     for (auto const row: std::views::iota(0, window.count()) | std::views::reverse)
         window.closeTabAtIndex(row);
+}
+
+/// Tabs that each have a real (mock-PTY) session: their ids and session ids in row order.
+struct SessionTabs
+{
+    std::vector<vtworkspace::TabId> tabs {};
+    std::vector<vtworkspace::SessionId> sessions {};
+};
+
+/// Opens @p n tabs in @p controller's window, each with a session of its own.
+/// @param manager    The session manager owning @p controller.
+/// @param controller The window to open the tabs in.
+/// @param n          How many tabs to open.
+/// @return The tabs and their sessions, in row order.
+[[nodiscard]] inline SessionTabs createSessionTabs(contour::session::TerminalSessionManager& manager,
+                                                   contour::window::WindowController& controller,
+                                                   int n)
+{
+    auto result = SessionTabs {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, n))
+    {
+        controller.createNewTab();
+        auto const* tab = manager.model().window(controller.windowId())->activeTab();
+        REQUIRE(tab != nullptr);
+        REQUIRE(controller.activeSession() != nullptr);
+        result.tabs.push_back(tab->id());
+        result.sessions.push_back(controller.activeSession()->modelSessionId());
+    }
+    return result;
+}
+
+/// The node titled @p title in @p nodes, searching submenus too.
+/// @param nodes The nodes to search.
+/// @param title The title to find.
+/// @return The node, or nullptr if there is none.
+[[nodiscard]] inline contour::command::MenuNode const* nodeTitled(
+    std::span<contour::command::MenuNode const> nodes, std::string_view title)
+{
+    for (auto const& node: nodes)
+    {
+        if (node.title == title)
+            return &node;
+        if (auto const* nested = nodeTitled(node.children, title))
+            return nested;
+    }
+    return nullptr;
+}
+
+/// Runs the menu bar row titled @p title of @p tree through the app's own menu bar path, at the row's scope.
+/// @param app   The test app whose app() runs the row.
+/// @param tree  The menu bar's tree.
+/// @param title The row's title; the row must exist.
+inline void runMenuBarRow(TestApp& app, contour::command::MenuTree const& tree, std::string_view title)
+{
+    auto const* row = nodeTitled(tree.nodes, title);
+    REQUIRE(row != nullptr);
+    app.app().runMenuBarAction(tree.actions[row->actionIndex], row->scope);
 }
 
 /// Whether an action ran to its end while another thread held a lock.

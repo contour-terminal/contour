@@ -7,8 +7,10 @@
 // because these are what contour_test links: a build configured without the GUI frontend has no
 // Qt to test against, and that is exactly why it used to have no unit tests at all.
 
+#include <contour/command/Command.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/test/TempDir.hpp>
 
@@ -47,6 +49,26 @@ namespace contour::test
     auto config = contour::config::Config {};
     contour::config::loadConfigFromFile(config, path);
     return config;
+}
+
+/// The text a shortcut column shows for a pane character chord (the split chords) on the host this was
+/// built for, read from the same per-host table the defaults are built from and spelled by the same
+/// formatter the code under test uses -- so a test names no literal that differs between hosts.
+/// @param action The action the chord runs, e.g. actions::SplitVertical {}.
+/// @param style  How to spell it; Text unless the code under test renders glyphs.
+/// @return The chord's text, e.g. "Ctrl+Shift+E" on Linux and "Super+D" on macOS.
+[[nodiscard]] inline std::string paneChordText(
+    contour::actions::Action const& action,
+    contour::command::ShortcutStyle style = contour::command::ShortcutStyle::Text)
+{
+    auto const wanted = contour::command::commandId(action);
+    for (auto const& row: contour::config::paneCharChords(contour::config::BuildPaneChordHost))
+        if (row.mapping.binding.size() == 1
+            && contour::command::commandId(row.mapping.binding.front()) == wanted)
+            return contour::command::shortcutText(
+                row.mapping.modifiers, contour::command::ShortcutInput { row.mapping.input }, style);
+    FAIL("no pane chord on this host runs " << wanted);
+    return {};
 }
 
 /// A configuration file's text: @p sections, then @p profile as the default profile and the only one.

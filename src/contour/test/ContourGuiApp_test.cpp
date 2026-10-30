@@ -6,10 +6,19 @@
 // the offscreen e2e app runs, not here.
 
 #include <contour/ContourGuiApp.hpp>
+#include <contour/config/ChromeTokenRows.hpp>
+#include <contour/config/UiStyle.hpp>
+#include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/AppearanceServices.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/WindowController.hpp>
+
+#include <vtbackend/core/Color.hpp>
 
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
@@ -18,7 +27,10 @@
 #include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QMetaObject>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -84,7 +96,7 @@ TEST_CASE("ContourGuiApp early-exit threshold falls back to the documented defau
     // With no --early-exit-threshold override (parameter defaults to -1) and the config at its
     // default, the accessor returns the documented default threshold.
     auto const threshold = app.app().earlyExitThreshold();
-    CHECK(threshold == std::chrono::seconds(contour::config::documentation::DefaultEarlyExitThreshold));
+    CHECK(threshold == std::chrono::seconds(contour::config::DefaultEarlyExitThreshold));
 }
 
 TEST_CASE("ContourGuiApp writes command output through the files it was given",
@@ -397,3 +409,503 @@ TEST_CASE("ContourGuiApp places what it starts through the placement it was give
     CHECK(placement->pids().size() == 1);
 }
 #endif
+
+TEST_CASE("ContourGuiApp reads accessibility through its injected source", "[contour][app][appearance]")
+{
+    using contour::config::AccessibilityPreferences;
+    using contour::config::ContrastPreference;
+    using contour::config::MotionPreference;
+    using contour::config::TransparencyPreference;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    accessibility.preferences.motion = MotionPreference::Reduced;
+
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    CHECK(app.app().accessibilityPreferences().motion == MotionPreference::Reduced);
+
+    // Before the GUI exists there is no chromeStyle to rebuild; the change must still be safe.
+    accessibility.set(AccessibilityPreferences { .motion = MotionPreference::Full,
+                                                 .transparency = TransparencyPreference::Allowed,
+                                                 .contrast = ContrastPreference::Standard });
+    CHECK(app.app().accessibilityPreferences().motion == MotionPreference::Full);
+    CHECK(static_cast<bool>(accessibility.notify));
+}
+
+TEST_CASE("a contrast theme hands the chrome to the OS palette, and back", "[contour][app][appearance]")
+{
+    using contour::config::GuiTheme;
+    using contour::platform::ContrastTheme;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto testApp = TestApp(nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           TestApp::testHostIdentity(),
+                           nullptr,
+                           {},
+                           nullptr,
+                           contour::test::appearanceServicesWith(accessibility, appearance));
+    auto& app = testApp.app();
+    app.config().theme = GuiTheme::Terminal;
+    app.applyGuiTheme(GuiTheme::Terminal, app.defaultProfileColors());
+    REQUIRE(app.appliedGuiScheme().has_value());
+
+    // A contrast theme comes on: no scheme is forced, so the OS's (the contrast theme's) palette shows.
+    appearance.set({ .contrastTheme = ContrastTheme::Active });
+    CHECK(app.appliedGuiScheme() == std::nullopt);
+
+    // And goes again: the terminal scheme's chrome is back.
+    appearance.set({});
+    CHECK(app.appliedGuiScheme().has_value());
+
+    // Back to the OS palette, so no later case inherits a forced one.
+    app.applyGuiTheme(GuiTheme::System, app.defaultProfileColors());
+}
+
+TEST_CASE("leaving a contrast theme brings back the live background's chrome", "[contour][app][appearance]")
+{
+    using contour::config::GuiTheme;
+    using contour::platform::ContrastTheme;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto testApp = TestApp(nullptr,
+                           nullptr,
+                           nullptr,
+                           nullptr,
+                           TestApp::testHostIdentity(),
+                           nullptr,
+                           {},
+                           nullptr,
+                           contour::test::appearanceServicesWith(accessibility, appearance));
+    auto& app = testApp.app();
+    app.config().theme = GuiTheme::Terminal;
+    app.applyGuiTheme(GuiTheme::Terminal, app.defaultProfileColors());
+    auto const profileScheme = app.appliedGuiScheme();
+    REQUIRE(profileScheme.has_value());
+
+    // The focused session sets a background (OSC 11) on the other side of the threshold from the profile's.
+    auto const live = profileScheme == Qt::ColorScheme::Dark ? vtbackend::RGBColor { 0xFF, 0xFF, 0xFF }
+                                                             : vtbackend::RGBColor { 0x00, 0x00, 0x00 };
+    app.followLiveBackground(live);
+    auto const liveScheme = app.appliedGuiScheme();
+    REQUIRE(liveScheme.has_value());
+    REQUIRE(liveScheme != profileScheme);
+
+    appearance.set({ .contrastTheme = ContrastTheme::Active });
+    CHECK(app.appliedGuiScheme() == std::nullopt);
+    // The live background is the chrome's again, not the profile's.
+    appearance.set({});
+    CHECK(app.appliedGuiScheme() == liveScheme);
+
+    // Back to the OS palette, so no later case inherits a forced one.
+    app.applyGuiTheme(GuiTheme::System, app.defaultProfileColors());
+}
+
+TEST_CASE("the app builds its title-band material through its services", "[contour][app][appearance]")
+{
+    // Declared before the app, so the record and the switches outlive the material and sources.
+    auto record = contour::test::TitleBandRecord {};
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance, record));
+
+    auto window = QWindow {};
+    CHECK(app.app().titleBandMaterial().apply(window, {}).has_value());
+    CHECK(record.applied.size() == 1);
+    CHECK(record.applied.front() == contour::platform::TitleBandRequest {});
+}
+
+TEST_CASE("A default TestApp never reads the host's accessibility settings", "[contour][app][appearance]")
+{
+    auto app = TestApp {};
+    CHECK(app.app().accessibilityPreferences() == contour::config::AccessibilityPreferences {});
+    CHECK(app.app().platformAppearance() == contour::platform::PlatformAppearance {});
+}
+
+TEST_CASE("no OS appearance source is built until one is read", "[contour][app][appearance]")
+{
+    // Review Focus 2's daemon half (ruling R-i): a source on D-Bus would open the session bus in every
+    // verb, before the QGuiApplication exists, were the app to build its sources when it is constructed.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto builds = contour::test::SourceBuilds {};
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::countingAppearanceServicesWith(accessibility, appearance, builds));
+    CHECK(builds.accessibility == 0);
+    CHECK(builds.appearance == 0);
+
+    [[maybe_unused]] auto const preferences = app.app().accessibilityPreferences();
+    CHECK(builds.accessibility == 1);
+    CHECK(builds.appearance == 0);
+    [[maybe_unused]] auto const again = app.app().accessibilityPreferences();
+    CHECK(builds.accessibility == 1);
+
+    [[maybe_unused]] auto const look = app.app().platformAppearance();
+    CHECK(builds.appearance == 1);
+    [[maybe_unused]] auto const lookAgain = app.app().platformAppearance();
+    CHECK(builds.appearance == 1);
+    CHECK(builds.accessibility == 1);
+}
+
+TEST_CASE("a source that cannot be built yet is asked for again on the next read",
+          "[contour][app][appearance]")
+{
+    // On Linux a read before the Qt application object exists gets no source (the bus is out of reach); the
+    // app answers with the defaults then, and builds the real source on a later read instead of keeping none.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto builds = contour::test::SourceBuilds {};
+    auto services = contour::test::countingAppearanceServicesWith(accessibility, appearance, builds);
+    services.accessibility = [&builds, build = std::move(services.accessibility)](
+                                 contour::platform::AccessibilityPreferencesChanged onChange)
+        -> std::unique_ptr<contour::platform::IAccessibilityPreferenceSource> {
+        if (builds.accessibility == 0)
+        {
+            ++builds.accessibility;
+            return nullptr;
+        }
+        return build(std::move(onChange));
+    };
+    services.appearance = [&builds, build = std::move(services.appearance)](
+                              contour::platform::PlatformAppearanceChanged onChange)
+        -> std::unique_ptr<contour::platform::IPlatformAppearance> {
+        if (builds.appearance == 0)
+        {
+            ++builds.appearance;
+            return nullptr;
+        }
+        return build(std::move(onChange));
+    };
+    auto app = TestApp(
+        nullptr, nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr, services);
+    auto preferences = contour::config::AccessibilityPreferences {};
+    preferences.motion = contour::config::MotionPreference::Reduced;
+    accessibility.set(preferences);
+    auto published = contour::platform::PlatformAppearance {};
+    published.buttonLayout =
+        contour::config::WindowButtonLayout { .leading = { contour::config::WindowControlKind::Close },
+                                              .trailing = {} };
+    appearance.set(published);
+
+    CHECK(app.app().accessibilityPreferences() == contour::config::AccessibilityPreferences {});
+    CHECK(app.app().platformAppearance() == contour::platform::PlatformAppearance {});
+    CHECK(builds.accessibility == 1);
+    CHECK(builds.appearance == 1);
+
+    CHECK(app.app().accessibilityPreferences() == preferences);
+    CHECK(app.app().platformAppearance() == published);
+    CHECK(builds.accessibility == 2);
+    CHECK(builds.appearance == 2);
+
+    // Built, it is kept.
+    [[maybe_unused]] auto const again = app.app().platformAppearance();
+    CHECK(builds.appearance == 2);
+}
+
+TEST_CASE("the desktop's button layout reaches the app", "[contour][app][appearance]")
+{
+    using contour::config::WindowControlKind;
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    // A desktop that says nothing gets the fallback (Review Focus 2).
+    CHECK(app.app().desktopButtonLayout() == contour::config::fallbackButtonLayout());
+
+    auto published = contour::platform::PlatformAppearance {};
+    published.buttonLayout =
+        contour::config::WindowButtonLayout { .leading = { WindowControlKind::Close }, .trailing = {} };
+    appearance.set(published);
+    CHECK(app.app().desktopButtonLayout() == *published.buttonLayout);
+    // The Linux controls are placed by it; a style with an order of its own is not.
+    CHECK(app.app().windowControlPlacement(contour::config::WindowControlStyle::Linux)
+          == *published.buttonLayout);
+    CHECK(app.app().windowControlPlacement(contour::config::WindowControlStyle::Windows)
+          == contour::config::fallbackButtonLayout());
+}
+
+TEST_CASE("the OS's published light/dark moves the terminal's preference", "[contour][app][appearance]")
+{
+    using contour::platform::PlatformAppearance;
+    using vtbackend::ColorPreference;
+
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    REQUIRE(app.app().config().theme.value() == contour::config::GuiTheme::System);
+    // Attach the source: the app builds it on its first read.
+    [[maybe_unused]] auto const initial = app.app().platformAppearance();
+
+    auto published = PlatformAppearance {};
+    published.colorScheme = ColorPreference::Dark;
+    appearance.set(published);
+    CHECK(app.app().colorPreference() == ColorPreference::Dark);
+    published.colorScheme = ColorPreference::Light;
+    appearance.set(published);
+    CHECK(app.app().colorPreference() == ColorPreference::Light);
+    published.colorScheme = ColorPreference::Dark;
+    appearance.set(published);
+    CHECK(app.app().colorPreference() == ColorPreference::Dark);
+
+    SECTION("a pinned theme moves the terminal with the chrome, and the OS takes over again when unpinned")
+    {
+        using contour::config::GuiTheme;
+        // The OS says dark; pinning the chrome light must turn the terminal light with it, so the grid
+        // never contradicts the chrome the user picked.
+        REQUIRE(app.app().colorPreference() == ColorPreference::Dark);
+        app.app().applyGuiTheme(GuiTheme::Light, app.app().defaultProfileColors());
+        auto const pinnedLight = app.app().colorPreference();
+
+        // While pinned, the OS flipping the other way is not followed ...
+        published.colorScheme = ColorPreference::Light;
+        appearance.set(published);
+        app.app().applyGuiTheme(GuiTheme::Dark, app.app().defaultProfileColors());
+        auto const pinnedDark = app.app().colorPreference();
+
+        // ... and unpinning returns to what the OS says now.
+        published.colorScheme = ColorPreference::Dark;
+        appearance.set(published);
+        app.app().applyGuiTheme(GuiTheme::System, app.app().defaultProfileColors());
+        auto const unpinned = app.app().colorPreference();
+
+        // The pin is global to the Qt application: it is lifted above, so no later test inherits it.
+        CHECK(pinnedLight == ColorPreference::Light);
+        CHECK(pinnedDark == ColorPreference::Dark);
+        CHECK(unpinned == ColorPreference::Dark);
+    }
+}
+
+TEST_CASE("every tab keeps the dark scheme through new tabs and tab switches under a dark OS",
+          "[contour][app][appearance][colors]")
+{
+    using contour::platform::PlatformAppearance;
+    using vtbackend::ColorPreference;
+
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto app = TestApp(std::make_unique<contour::test::MockPtySessionFactory>(),
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    // A fresh configuration: the native2026 defaults, whose default profile pairs the dark and light schemes.
+    app.app().config() =
+        contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Native2026 };
+    [[maybe_unused]] auto const initial = app.app().platformAppearance();
+    auto const background = [](vtbackend::ColorPreference preference) {
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(
+            preference == ColorPreference::Dark ? "contour-dark" : "contour-light", palette));
+        return palette.defaultBackground;
+    };
+    REQUIRE(background(ColorPreference::Dark) != background(ColorPreference::Light));
+
+    // The owner's sequence: the app starts under a light reading, the OS settles on dark, a new tab opens,
+    // and the user goes to tab 1, then back to tab 2.
+    auto published = PlatformAppearance {};
+    published.colorScheme = ColorPreference::Light;
+    appearance.set(published);
+    contour::test::ScopedController const window { app.manager() };
+    window->createNewTab();
+    auto const* first = window->activeSession();
+    published.colorScheme = ColorPreference::Dark;
+    appearance.set(published);
+    window->createNewTab();
+    auto const* second = window->activeSession();
+    REQUIRE(window->count() == 2);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    auto const dark = background(ColorPreference::Dark);
+    CHECK(first->terminal().colorPalette().defaultBackground == dark);
+    CHECK(second->terminal().colorPalette().defaultBackground == dark);
+
+    for (auto const position: { 1, 2, 1, 2 })
+    {
+        INFO("switched to tab " << position);
+        app.manager().switchToTab(position, window->activeSession());
+        CHECK(window->activeSession()->terminal().colorPalette().defaultBackground == dark);
+        CHECK(first->terminal().colorPalette().defaultBackground == dark);
+        CHECK(second->terminal().colorPalette().defaultBackground == dark);
+    }
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixel per unit",
+          "[contour][app][splitchrome]")
+{
+    // Before the GUI publishes a provider there is no cell to measure: the solver gets, at the window's
+    // device-pixel ratio, the row the configured style resolves to on the app's host -- the app resolves it
+    // at construction -- at the configured density. The host is pinned to a Linux one: the Fluent row's
+    // square-ish cards inset as far at 1.25 as at 1, so on Windows the two ratios below could not be told
+    // apart.
+    constexpr auto Host = contour::config::HostPlatform::Other;
+    auto services = contour::platform::nullAppearanceServices();
+    services.hostPlatform = Host;
+    auto app = TestApp(
+        nullptr, nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr, services);
+    auto const row = contour::config::resolveChromeStyle(app.app().config().uiStyle.value(), Host);
+    auto const expected = contour::window::splitChromeOf(
+        contour::config::resolveChromeTokens(
+            row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
+        1.0,
+        1.0,
+        1.25);
+    CHECK(app.app().splitChrome(1.25) == expected);
+    // And the ratio is the one asked about: the card's inset is counted on that device grid, which at
+    // 1.25 is not what it is at 1.
+    auto const atOne = contour::window::splitChromeOf(
+        contour::config::resolveChromeTokens(
+            row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
+        1.0,
+        1.0,
+        1.0);
+    REQUIRE(atOne != expected);
+    CHECK(app.app().splitChrome(1.0) == atOne);
+    // A card's header and inset are part of it, so a split leaf's window grows by more than the gap.
+    CHECK(expected.leafHeader > 0);
+    CHECK(expected.rootInset > 0);
+}
+
+namespace
+{
+/// The font size session @p session draws in.
+[[nodiscard]] double fontSizeOf(contour::session::TerminalSession const* session)
+{
+    REQUIRE(session != nullptr);
+    return session->profile().fonts.value().size.pt;
+}
+
+/// A configured app on this machine's file system: Settings writes its side files through the app's file
+/// system, and the configuration loader reads them back from the disk.
+[[nodiscard]] contour::test::ConfiguredTestApp configuredWithTheDisk()
+{
+    return contour::test::ConfiguredTestApp { std::make_unique<contour::test::MockPtySessionFactory>(),
+                                              contour::platform::nullAppearanceServices(),
+                                              contour::test::TestApp::SessionFiles::ThisMachine };
+}
+
+/// A configured app whose profile `main` is a GUI side file and whose `other` is defined in contour.yml.
+/// @param testApp The app.
+void writeSideFileProfiles(contour::test::ConfiguredTestApp& testApp)
+{
+    contour::test::writeConfigFile(testApp.configFile(),
+                                   "default_profile: main\n"
+                                   "profiles:\n"
+                                   "    other:\n"
+                                   "        shell: /bin/sh\n");
+    auto const profiles = testApp.configFile().parent_path() / "profiles";
+    std::filesystem::create_directories(profiles);
+    contour::test::writeConfigFile(profiles / "main.yml", "shell: /bin/sh\nfont:\n    size: 12\n");
+    REQUIRE(testApp.manager().reloadAllSessions().has_value());
+    REQUIRE(testApp.app().config().profileOrigins.at("main") == contour::config::SettingsOrigin::SideFile);
+}
+} // namespace
+
+TEST_CASE("a Settings commit reaches the panes of every window using that profile",
+          "[contour][settings][liveapply]")
+{
+    // Review Focus 4: one commit, every pane on that profile in every window; another profile's pane keeps
+    // what it had.
+    auto testApp = configuredWithTheDisk();
+    writeSideFileProfiles(testApp);
+    auto& manager = testApp.manager();
+    contour::test::ScopedController const first { manager };
+    contour::test::ScopedController const second { manager };
+    contour::test::ScopedController const third { manager };
+    first->createNewTab(QStringLiteral("main"));
+    second->createNewTab(QStringLiteral("main"));
+    third->createNewTab(QStringLiteral("other"));
+    auto const otherBefore = fontSizeOf(third->activeSession());
+    REQUIRE(fontSizeOf(first->activeSession()) != 17.0);
+
+    auto& settings = testApp.app().settingsController();
+    settings.editProfile(QStringLiteral("main"));
+    REQUIRE_FALSE(settings.editingReadOnly());
+    settings.commitProfileField(QStringLiteral("font_size"), 17.0);
+    settings.flushPendingChanges();
+
+    CHECK(fontSizeOf(first->activeSession()) == 17.0);
+    CHECK(fontSizeOf(second->activeSession()) == 17.0);
+    CHECK(fontSizeOf(third->activeSession()) == otherBefore);
+
+    contour::test::closeAllTabs(*first);
+    contour::test::closeAllTabs(*second);
+    contour::test::closeAllTabs(*third);
+}
+
+TEST_CASE("quitting flushes a pending Settings edit", "[contour][settings][liveapply]")
+{
+    auto testApp = configuredWithTheDisk();
+    writeSideFileProfiles(testApp);
+    auto& settings = testApp.app().settingsController();
+    settings.editProfile(QStringLiteral("main"));
+    // Every kind of side file at once, none of them written yet: nothing may be lost with the timer.
+    settings.commitProfileField(QStringLiteral("font_size"), 19.0);
+    settings.commitGlobalField(QStringLiteral("reflow_on_resize"), false);
+    settings.duplicateScheme(QStringLiteral("default"));
+    settings.commitSchemeColor(QStringLiteral("background"), QStringLiteral("#102030"));
+    REQUIRE(settings.hasChanges());
+    auto const scheme = settings.editingScheme().toStdString();
+
+    testApp.app().flushForQuit();
+
+    auto const& config = testApp.app().config();
+    auto const* main = config.findProfile("main");
+    REQUIRE(main != nullptr);
+    CHECK(main->fonts.value().size.pt == 19.0);
+    CHECK(config.reflowOnResize.value() == false);
+    auto const written = contour::config::loadColorSchemeFile(
+        testApp.configFile().parent_path() / "colorschemes" / contour::config::sideFileName(scheme));
+    REQUIRE(written.has_value());
+    CHECK(written->defaultBackground == vtbackend::RGBColor { 0x10, 0x20, 0x30 });
+}
