@@ -6,6 +6,7 @@
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ShortcutOverride.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -16,6 +17,7 @@
 #include <contour/platform/QtPath.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
+#include <contour/window/FindBarPlacement.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -243,6 +245,9 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     display::displayLog()("TerminalDisplay::setSession: {} -> {}\n", (void*) _session, (void*) newSession);
     if (_session == newSession)
         return;
+
+    // The cell the candidate window was anchored at belongs to the session it was answered for.
+    _lastImeAnchor.reset();
 
     // A null newSession means "detach": the split-pane QML binding (PaneNode.qml
     // `session: root.node ? root.node.session : null`) transiently resolves to null while a pane's Loader
@@ -481,9 +486,14 @@ void TerminalDisplay::geometryChange(QRectF const& newGeometry, QRectF const& ol
         applyDisplaySizeToGrid();
 
     // A position-only move DOES matter here, though: a magnifier tracks the caret by screen rectangle,
-    // and every rectangle we hand out is mapped through this item's origin.
+    // and every rectangle we hand out is mapped through this item's origin. So does an open candidate
+    // window, which the platform places from the rectangle it last asked for: a split dragged or a sibling
+    // closed while composing must move it with the cell.
     if (newGeometry != oldGeometry)
+    {
         reportAccessibleLocation();
+        reannounceInputMethodRectangle();
+    }
 }
 
 void TerminalDisplay::handleWindowChanged(QQuickWindow* newWindow)
@@ -938,7 +948,8 @@ void TerminalDisplay::createRenderer()
             gridMetrics().cellSize,
             marginsDevicePx,
             [this](auto page) { return _session->terminal().clampedTotalPageSize(page); },
-            session::configuredGutterWidth(_session->config(), gridMetrics().cellSize, devicePixelRatio()));
+            session::configuredGutterWidth(
+                _session->config(), gridMetrics().cellSize, devicePixelRatio(), _session->gutterChrome()));
         _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
@@ -1448,6 +1459,8 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
     if (!_session)
         return;
     terminal().updateInputMethodPreeditString(event->preeditString().toStdString());
+    // Composing scrolls the viewport to the cursor first, which may move the cell the platform has.
+    reannounceInputMethodRectangle();
 
     if (!event->commitString().isEmpty())
     {
@@ -1492,17 +1505,38 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             //
             // One locked GridMetrics copy, for this case only: it yields the cell size AND the page
             // margin tear-free, where two separate reads could straddle a concurrent font apply.
+            //
+            // Never an empty rectangle: that sends the candidate window to the pane's origin. While
+            // composing, the anchor is the preedit's first cell, which is left of the cursor where the
+            // preedit is moved to fit the line. A cursor that names no cell (scrolled out of the viewport, or
+            // outside a page a resize just shrank) answers the cell anchored at last, and before any answer
+            // the first cell.
             auto const metrics = _renderer->gridMetrics();
             auto const lock = std::lock_guard { term };
             auto const& screen = term.currentScreen();
-            auto const cursor = screen.cursor().position;
-            if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
-                return imeCursorRectangle(metrics.pageMargin,
-                                          metrics.cellSize,
-                                          cursor,
-                                          screen.cellWidthAt(cursor),
-                                          devicePixelRatio());
-            return QRectF();
+            auto const pageSize = term.pageSize();
+            if (auto const cell = term.isCursorInViewport()
+                                      ? imeAnchorCell(screen.cursor().position, pageSize)
+                                      : std::nullopt)
+            {
+                // The preedit is placed in the line's own cells -- half the page's on a DECDWL line -- and
+                // the anchor then drawn where those cells are, as the render buffer draws them.
+                auto const lineFlags = screen.lineFlags(cell->line);
+                auto const anchorInLine = imePreeditAnchor(
+                    *cell,
+                    term.inputMethodPreeditString(),
+                    vtbackend::preeditLineColumns(pageSize.columns, lineFlags),
+                    screen.cellWidthAt(*cell),
+                    [&screen, line = cell->line](vtbackend::ColumnOffset column) {
+                        return screen.continuesAWideGlyphAt({ .line = line, .column = column });
+                    });
+                _lastImeAnchor = imeDrawnAnchor(anchorInLine, lineFlags);
+            }
+            auto const anchor = _lastImeAnchor && imeCursorAddressable(_lastImeAnchor->cell, pageSize)
+                                    ? *_lastImeAnchor
+                                    : ImeAnchor {};
+            return imeCursorRectangle(
+                metrics.pageMargin, metrics.cellSize, anchor.cell, anchor.width, devicePixelRatio());
         }
         case Qt::ImCursorPosition: {
             // Qt contract: the cursor's CHARACTER index within ImSurroundingText (the current
@@ -1540,6 +1574,20 @@ bool TerminalDisplay::event(QEvent* event)
             assert(_session);
             _session->pty().close();
             emit terminated();
+        }
+
+        // A chord the terminal keeps is accepted here, ahead of every shortcut and menu; only a chord a
+        // global menu bar owns is left ignored for the menu. The placement is read through the session
+        // rather than injected, because QML constructs this item (the framework-constructed carve-out).
+        if (event->type() == QEvent::ShortcutOverride && _session)
+        {
+            auto* const keyEvent = static_cast<QKeyEvent*>(event);
+            if (shortcutOverrideClaim(*keyEvent, _session->app().menuBarPlacement())
+                == ShortcutOverrideClaim::Terminal)
+            {
+                keyEvent->accept();
+                return true;
+            }
         }
 
         return QQuickItem::event(event);
@@ -1598,6 +1646,11 @@ void TerminalDisplay::notifyCellGeometryChanged()
     // so all three of this seam's callers (font size, DPI/content scale, profile margins) move the caret
     // on screen without moving this item -- geometryChange() stays silent for them.
     reportAccessibleLocation();
+    reannounceInputMethodRectangle();
+
+    // And every row band: the find bar re-reads where the current match lies (SearchBar's _band).
+    ++_cellGeometryRevision;
+    emit cellGeometryChanged();
 }
 // }}}
 
@@ -1630,7 +1683,8 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         _session->terminal().totalPageSize(),
         cellSize,
         geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), devicePixelRatio()),
-        session::configuredGutterWidth(_session->config(), cellSize, devicePixelRatio()));
+        session::configuredGutterWidth(
+            _session->config(), cellSize, devicePixelRatio(), _session->gutterChrome()));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1715,13 +1769,18 @@ namespace
     }
 } // namespace
 
-void TerminalDisplay::reportCursorMoved()
+void TerminalDisplay::reannounceInputMethodRectangle()
 {
 #if QT_CONFIG(im)
     // No-op unless this item has active focus; the platform re-queries inputMethodQuery()
     // synchronously, which is why this must only ever run on the GUI thread.
     updateInputMethod(Qt::ImCursorRectangle);
 #endif
+}
+
+void TerminalDisplay::reportCursorMoved()
+{
+    reannounceInputMethodRectangle();
     if (TerminalAccessible::isActive())
         reportAccessibleCaret();
 }
@@ -2013,8 +2072,9 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
     // Neither state below is a programmer error, so neither may be a Require (which std::abort()s in
     // release too). This is a DISPATCH-TIME entry point: configureDisplay() is posted and
-    // applyPendingFontChange() is the tail of a permission dialog, so the pane can close or the scene
-    // graph be invalidated before it runs. An OSC 50 answered late must not take the process down.
+    // applyPendingFontChange(PermissionDecision, PermissionMemory) is the tail of a permission dialog, so the
+    // pane can close or the scene graph be invalidated before it runs. An OSC 50 answered late must not take
+    // the process down.
     if (!_session)
         return;
 
@@ -2109,7 +2169,7 @@ void TerminalDisplay::setWindowNormal()
 
 void TerminalDisplay::setBlurBehind(bool enable)
 {
-    platform::setBlurBehind(window(), enable);
+    platform::setBlurBehind(window(), enable ? platform::BlurBehindWish::On : platform::BlurBehindWish::Off);
 }
 
 void TerminalDisplay::toggleFullScreen()
@@ -2236,5 +2296,19 @@ void TerminalDisplay::discardImage(vtbackend::Image const& image)
 }
 
 // }}}
+
+QVariantMap TerminalDisplay::rowBand(int first, int last) const
+{
+    if (!_renderer)
+        return {};
+    // The grid's metrics are device pixels; the item's coordinates are logical ones.
+    auto const metrics = gridMetrics();
+    auto const dpr = devicePixelRatio();
+    auto const band = window::rowBandOf(first,
+                                        last,
+                                        static_cast<double>(metrics.pageMargin.top) / dpr,
+                                        unbox<double>(metrics.cellSize.height) / dpr);
+    return { { QStringLiteral("top"), band.top }, { QStringLiteral("bottom"), band.bottom } };
+}
 
 } // namespace contour::display

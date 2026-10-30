@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/Logging.hpp>
+#include <contour/session/SizeIndicator.hpp>
 #include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/screen/Terminal.hpp>
@@ -10,7 +12,10 @@
 #include <vtrasterizer/Renderer.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <mutex>
+#include <ranges>
 
 using std::string;
 
@@ -79,34 +84,95 @@ bool applyFontDescription(text::DPI dpi,
     return true;
 }
 
-vtbackend::GutterLayout configuredGutterLayout(config::Config const& config)
+vtbackend::GutterLayout configuredGutterLayout(config::Config const& config, GutterChrome const& chrome)
 {
-    return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config));
+    return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config, chrome.form));
 }
 
 geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                        vtbackend::ImageSize cellSize,
-                                       double scale)
+                                       double scale,
+                                       GutterChrome const& chrome)
 {
     auto const columns = gutterWidthFor(layout, cellSize);
-    if (columns == 0)
+    auto const rail = gutterRailMetricsFor(layout, chrome, scale).strip;
+    if (columns + rail == 0)
         return {};
-    return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale), .columns = columns };
+    return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale),
+                                    .columns = columns,
+                                    .rail = rail };
+}
+
+vtrasterizer::BlockChipMetrics blockChipMetricsFor(GutterChrome const& chrome, double scale) noexcept
+{
+    auto metrics =
+        vtrasterizer::BlockChipMetrics { .markEdge = chromeDevicePixels(chrome.markPoints, scale),
+                                         .markFontSize = chrome.chips.markType,
+                                         .markWeight = chrome.chips.markWeight,
+                                         .hoverRing = chromeDevicePixels(chrome.chips.hoverRing, scale) };
+    for (auto const index: std::views::iota(std::size_t { 0 }, vtbackend::PillStyleCount))
+    {
+        auto const& tokens = chrome.chips.pills[index];
+        metrics.pills[index] = vtrasterizer::PillMetrics {
+            .fontSize = tokens.type,
+            .weight = tokens.weight,
+            .padX = chromeDevicePixels(tokens.padX, scale),
+            .padY = chromeDevicePixels(tokens.padY, scale),
+            .height = chromeDevicePixels(tokens.height, scale),
+            .radius = chromeDevicePixels(tokens.radius, scale),
+            // A hairline: at least a pixel where there is one at all.
+            .ring = tokens.ring > 0.0 ? std::max(1, static_cast<int>(std::lround(tokens.ring * scale))) : 0,
+        };
+    }
+    return metrics;
+}
+
+vtrasterizer::GutterRailMetrics gutterRailMetricsFor(vtbackend::GutterLayout const& layout,
+                                                     GutterChrome const& chrome,
+                                                     double scale) noexcept
+{
+    // The chips are the native rows' wherever the block column is the rail, strip or none.
+    auto metrics = vtrasterizer::GutterRailMetrics {};
+    if (chrome.form == vtbackend::BlockColumnForm::Rail)
+        metrics.chips = blockChipMetricsFor(chrome, scale);
+    if (layout.rail == vtbackend::BlockRailPresence::Absent)
+        return metrics;
+    metrics.strip = chromeDevicePixels(chrome.stripPoints, scale);
+    metrics.bar = chromeDevicePixels(chrome.barPoints, scale);
+    metrics.barInset = chromeDevicePixels(chrome.barInsetPoints, scale);
+    metrics.radius = chromeDevicePixels(chrome.barRadiusPoints, scale);
+    metrics.endInset = chromeDevicePixels(chrome.barEndPoints, scale);
+    return metrics;
 }
 
 geometry::GutterExtent configuredGutterExtent(config::Config const& config,
                                               vtbackend::ImageSize cellSize,
-                                              double scale)
+                                              double scale,
+                                              GutterChrome const& chrome)
 {
-    return gutterExtentFor(configuredGutterLayout(config), cellSize, scale);
+    return gutterExtentFor(configuredGutterLayout(config, chrome), cellSize, scale, chrome);
 }
 
 geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                             vtbackend::ImageSize cellSize,
-                                            double scale)
+                                            double scale,
+                                            GutterChrome const& chrome)
 {
-    auto const extent = configuredGutterExtent(config, cellSize, scale);
-    return extent.leadIn + extent.columns;
+    auto const extent = configuredGutterExtent(config, cellSize, scale, chrome);
+    return extent.leadIn + extent.columns + extent.rail;
+}
+
+void announcePageSize(TerminalSession& session, vtbackend::PageSize oldPage, vtbackend::PageSize newPage)
+{
+    auto const linesChanged = oldPage.lines != newPage.lines;
+    auto const columnsChanged = oldPage.columns != newPage.columns;
+    if (linesChanged || columnsChanged)
+        platform::postToObject(&session, [&session, newPage, linesChanged, columnsChanged]() {
+            if (linesChanged)
+                emit session.lineCountChanged(newPage.lines.as<int>());
+            if (columnsChanged)
+                emit session.columnsCountChanged(newPage.columns.as<int>());
+        });
 }
 
 void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
@@ -138,15 +204,19 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
         cellSize,
         marginsDevicePx,
         [&](auto page) { return terminal.clampedTotalPageSize(page); },
-        configuredGutterWidth(session.config(), cellSize, devicePixelRatio));
+        configuredGutterWidth(session.config(), cellSize, devicePixelRatio, session.gutterChrome()));
 
-    renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
+    // The strip the fit reserved, from the same layout, for the renderer to draw the rail in.
+    renderer.applyResize(
+        newPixelSize,
+        fit.pageSize,
+        fit.pageMargin,
+        gutterRailMetricsFor(configuredGutterLayout(session.config(), session.gutterChrome()),
+                             session.gutterChrome(),
+                             devicePixelRatio));
 
-    if (oldPageSize.lines != fit.pageSize.lines)
-        emit session.lineCountChanged(fit.pageSize.lines.as<int>());
-
-    if (oldPageSize.columns != fit.pageSize.columns)
-        emit session.columnsCountChanged(fit.pageSize.columns.as<int>());
+    // This runs on the render thread too (TerminalDisplay::createRenderer()).
+    announcePageSize(session, oldPageSize, fit.pageSize);
 
     // What the child is told, which is not the same question as how big the window is: the profile
     // decides whether the display's content scale is divided out first, and margins are excluded
@@ -159,19 +229,34 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
                           oldPageSize,
                           fit.pageSize);
 
-    // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is echoed
-    // and parses, taking the lock again. The lock holds the report back and sends it once it is released.
-    auto const _ = std::scoped_lock { terminal };
+    // fit.pageSize is already clamped (see above), so resizeToFit()'s direct comparison decides the
+    // early-out.
+    resizeToFit(session, fit.pageSize, viewSize);
+}
 
-    // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
-    if (fit.pageSize == terminal.totalPageSize())
+void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, ImageSize viewSize)
+{
+    auto& terminal = session.terminal();
     {
-        display::displayLog()("No resize necessary. New size is same as old size of {}.", fit.pageSize);
-        return;
+        // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is
+        // echoed and parses, taking the lock again. The lock holds the report back and sends it once it is
+        // released.
+        auto const _ = std::scoped_lock { terminal };
+        if (totalPageSize == terminal.totalPageSize())
+        {
+            display::displayLog()("No resize necessary. New size is same as old size of {}.", totalPageSize);
+            return;
+        }
+
+        terminal.resizeScreen(totalPageSize, viewSize);
+        terminal.clearSelection();
     }
 
-    terminal.resizeScreen(fit.pageSize, viewSize);
-    terminal.clearSelection();
+    // Once per change, not per dimension. Posted: the indicator is GUI-thread state, and this runs on the
+    // render thread when createRenderer() fits a window that lost its render target. Dispatched outside the
+    // lock, it reads the newest main page; postToObject drops it if the session is gone by then.
+    platform::postToObject(&session,
+                           [&session]() { session.requestSizeIndicator(SizeIndicatorKind::PageSize); });
 }
 
 } // namespace contour::session

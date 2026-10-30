@@ -91,6 +91,8 @@ static_assert(
             std::pair { HostedOperation::WriteScreen, EngineOperation::WriteScreen },
             std::pair { HostedOperation::SetUserMark, EngineOperation::SetUserMark },
             std::pair { HostedOperation::ClearUserMark, EngineOperation::ClearUserMark },
+            std::pair { HostedOperation::UseDarkColors, EngineOperation::UseDarkColors },
+            std::pair { HostedOperation::UseLightColors, EngineOperation::UseLightColors },
         };
         return Pairs.size() == contour::session::HostedOperationTable.size()
                && std::ranges::all_of(Pairs, [](auto const& pair) {
@@ -123,6 +125,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///        after a configuration reload gets the reloaded settings; empty to keep @p attachSettings.
     ///        When it fails, the settings last stated stay in force. Neither is defaulted, so a caller
     ///        with no preference says so.
+    /// @param colorPreference The light/dark preference the app shows now, stated in every hello so the
+    ///        daemon builds the sessions this client follows under it; none states none. Later changes
+    ///        arrive through requestHostedOperation(), and are re-stated on every reconnect.
     /// @param clock What the connect budget is measured on (@see RemoteController::awaitConnected).
     ///        Borrowed: it must outlive the controller.
     /// @param timeline Where the connect, the layout and the first session are stamped. Borrowed: it must
@@ -132,6 +137,7 @@ class NativeController final: public QObject, public contour::session::SessionFa
                      std::string profileName,
                      std::optional<vtbackend::Settings> attachSettings,
                      SessionSettingsSource sessionSettings,
+                     std::optional<vtbackend::ColorPreference> colorPreference,
                      core::platform::IClock const& clock,
                      vthost::latency::StartupTimeline& timeline);
 
@@ -306,6 +312,18 @@ class NativeController final: public QObject, public contour::session::SessionFa
         return true;
     }
 
+    /// SessionFactory: whether the daemon serves proto::MergeTabIntoSplit (Capability::TabMerge shared).
+    /// Unsupported before the handshake and against an older daemon: a tab dropped on a pane then tears off.
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override;
+
+    /// SessionFactory: a tab dropped on a pane's edge is merged into the split by the daemon, which moves its
+    /// sessions and re-pushes the layout. Refused when a pty is not bound to a daemon session, or the daemon
+    /// does not serve the merge; Local only while the reconciler applies a push.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override;
+
     /// SessionFactory: the user moved a divider, so the daemon's model — what a re-attaching client
     /// rebuilds from — is told the new ratio. @see proto::ResizeSplit.
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override;
@@ -341,7 +359,39 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     /// SessionFactory: the terminal built around one of our ptys arrived, so the session's mirror
     /// can be created and primed with whatever the daemon has already told us about it.
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override;
+    /// The mirror also reports the command a restart stopped in the daemon's session to @p interruptions,
+    /// posted to its context's (the session's, the GUI) thread.
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override;
+
+    /// @return Why the last connection ended for good, as the connection said it; empty when it did not (or
+    ///         was stopped). Any thread.
+    [[nodiscard]] std::string failure() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _failure;
+    }
+
+    /// SessionFactory: Supported -- this controller is the attach to a daemon a pane's Reconnect seeks again.
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return contour::session::ReconnectSupport::Supported;
+    }
+
+    /// SessionFactory: starts a new supervised run once the last one ended (refused, failed, or stopped),
+    /// resuming the windows followed. The outcome arrives as connectionStateChanged() and, when it ends for
+    /// good again, connectionClosed(). GUI thread.
+    /// @return Nothing once started; AlreadyConnected while a run is up or being sought, NotAttached when
+    ///         this controller never connected.
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override;
+
+    /// SessionFactory: when the layout the daemon pushed names the remote session @p endedPty mirrored, makes
+    /// the next createPty() bind to it again. GUI thread.
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override;
+
+    /// SessionFactory: forgets the session bindForReconnect() named, when no pty was made for it. GUI thread.
+    void cancelReconnectBinding() override;
 
   signals:
     /// A remote session appeared that has no local tab yet (fires on the
@@ -362,6 +412,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param daemonWindows The lost windows' ids, as the lost connection named them.
     void windowsLost(std::vector<uint64_t> daemonWindows);
 
+    /// The daemon says it restored its saved workspace before this client attached, and how much came back
+    /// (fires on the reactor thread, once per connection whose hello carries it; connect queued). Only the
+    /// first Attach connection after a restore is told, so a second client never raises it, nor does a
+    /// reconnect to the same daemon run; a reconnect to a restarted daemon that itself restored does.
+    /// @param windows How many windows came back.
+    /// @param tabs How many tabs.
+    void workspaceRestored(quint32 windows, quint32 tabs);
+
     /// The daemon's tab/pane layout changed (fires on the reactor thread; connect
     /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
     void layoutChanged();
@@ -369,6 +427,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// A daemon's status-line extension asks this client's user something (fires on the reactor thread;
     /// connect queued). The GUI takes the questions with takePermissionRequests().
     void extensionPermissionRequested();
+
+    /// The daemon refused a tab merge this client asked for, and changed nothing (fires on the reactor
+    /// thread; connect queued). The GUI tells the user.
+    void tabMergeRefused();
 
   private:
     /// One discovered remote session awaiting a local tab.
@@ -395,6 +457,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
         vtpty::ChannelPty* pty = nullptr;
         vtbackend::Terminal* terminal = nullptr;
         std::unique_ptr<vthost::client::ScreenMirror> mirror;
+        /// Where the session is told what a restart stopped in it; empty until bindTerminal().
+        contour::session::InterruptionSink interruptions {};
+        /// What @ref interruptions was last told, so only a change is posted. Reactor thread, under _mutex.
+        std::string interruptionTold {};
     };
 
   protected:
@@ -411,6 +477,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
         return true;
     }
     void closeReactorBindings() override { closeAllBindings(); }
+    /// A reactor that died mid-run never reaches the supervisor's own Failed, so this reports it: without
+    /// connectionClosed() the GUI never stop()s the controller, and Reconnect is refused for good.
+    void reactorDied(std::string const& reason) override;
     [[nodiscard]] std::string connectTimeoutMessage() const override
     {
         return "timed out waiting for the daemon's snapshot";
@@ -421,6 +490,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     }
 
   private:
+    /// Reactor-side, _mutex held: posts what @p binding's mirror knows of a restart's stopped command to its
+    /// session, when that differs from what the session was last told.
+    /// @param binding The binding whose mirror was just applied.
+    static void tellInterruption(Binding& binding);
+
     /// Reactor-side: builds the client of one connection.
     /// @param loop The reactor's loop.
     /// @param connection The connection it runs over.
@@ -434,6 +508,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// @param state Where the connection stands now.
     /// @param reason Why, for a lost, failed or refused one.
     void onConnectionState(vthost::client::ConnectionState state, std::string const& reason);
+
+    /// Reactor-side: states the light/dark preference last stated, if any, for @p session to the daemon.
+    /// @param client The connection.
+    /// @param session The session to state it for.
+    void stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const;
 
     /// Reactor-side, under _mutex: a reconnect was accepted. Judges which windows were lost, and makes the
     /// bindings ready for the new connection's snapshots: restarted mirrors when the same daemon answered,
@@ -542,8 +621,14 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::string _daemonRelease; ///< @see daemonRelease(). Guarded by _mutex.
     /// Takes the handshake's outcome from the client once it has one. Call under _mutex.
     void captureHandshake();
+    /// Forgets what the daemon said of each session's echo, and tells every bound pane it is Unknown. Call
+    /// under _mutex, on the reactor thread, while the connection is down.
+    void forgetInputEchoes();
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
+    /// What the daemon last said each session's terminal does with typed text (SessionInputEcho), kept so a
+    /// pane bound after it arrived starts from it. Guarded by _mutex.
+    std::unordered_map<uint64_t, vtpty::InputEcho> _inputEchoes;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
     /// yields a stable ascending order (the primary window is the lowest id).
     std::map<uint64_t, vthost::proto::LayoutState> _layouts;
@@ -555,6 +640,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// The remote session the NEXT createPty() binds to, set by the layout
     /// executor before each pane's backing session is created (GUI thread).
     std::optional<uint64_t> _nextBindSession;
+    /// The light/dark preference the app last stated, whether or not the daemon was reachable to hear it:
+    /// every hello carries it, and a reconnect or a new binding states it again for the sessions it mirrors,
+    /// so a change made while the connection was down, or before a pane existed, is not lost. Atomic: written
+    /// on the GUI thread, read on the reactor.
+    std::atomic<vthost::proto::WireColorPreference> _statedColors {
+        vthost::proto::WireColorPreference::Unstated
+    };
     bool _realizingLayout = false; ///< canCreateSession() is true while a layout is being realized.
     /// Session ids this client is done with: a pane the user closed or ended, released while still
     /// attached. Their remote sessions can outlive the local pane by a round trip — the daemon has

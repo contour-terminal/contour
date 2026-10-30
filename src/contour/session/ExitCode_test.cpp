@@ -84,3 +84,30 @@ TEST_CASE("sessionExitStatusOf: a device that runs no process reports no status"
     auto const pty = vtpty::MockPty { vtpty::PageSize { vtpty::LineCount(5), vtpty::ColumnCount(20) } };
     CHECK_FALSE(sessionExitStatusOf(pty).has_value());
 }
+
+TEST_CASE("endOf: an exit names its code, a signal its number, and an unknown end nothing",
+          "[contour][exitcode]")
+{
+    using contour::session::endOf;
+    using contour::session::EndReason;
+    using vtpty::Process;
+    CHECK(endOf(Process::ExitStatus { Process::NormalExit { 1 } })
+          == contour::session::SessionEndReport { .reason = EndReason::Exited, .detail = "1" });
+    CHECK(endOf(Process::ExitStatus { Process::SignalExit { 9 } })
+          == contour::session::SessionEndReport { .reason = EndReason::Signalled, .detail = "9" });
+    // A device that cannot tell how its program ended (a mock, a mirror) still ended: it exited.
+    CHECK(endOf(SessionExitStatus {}) == contour::session::SessionEndReport { .reason = EndReason::Exited });
+}
+
+#ifdef VTPTY_LIBSSH2
+TEST_CASE("endOf: an SSH session's remote end counts the same", "[contour][exitcode]")
+{
+    using contour::session::endOf;
+    using contour::session::EndReason;
+    using vtpty::SshSession;
+    CHECK(endOf(SshSession::ExitStatus { SshSession::NormalExit { 2 } })
+          == contour::session::SessionEndReport { .reason = EndReason::Exited, .detail = "2" });
+    CHECK(endOf(SshSession::ExitStatus { SshSession::SignalExit { "TERM", "", "" } })
+          == contour::session::SessionEndReport { .reason = EndReason::Signalled, .detail = "TERM" });
+}
+#endif

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <vthost/HostIdentity.hpp>
+#include <vthost/InputEchoWire.hpp>
 
 namespace contour::remote
 {
@@ -22,6 +23,26 @@ using vthost::client::RemoteScreen;
 namespace
 {
     auto const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
+
+    /// @return Whether @p state ends a run: nothing but a new run's Connecting follows it.
+    [[nodiscard]] constexpr bool isEnding(vthost::client::ConnectionState state) noexcept
+    {
+        using vthost::client::ConnectionState;
+        return state == ConnectionState::Failed || state == ConnectionState::Refused
+               || state == ConnectionState::Stopped;
+    }
+} // namespace
+
+namespace
+{
+    /// @param preference The preference a client shows.
+    /// @return Its wire form.
+    [[nodiscard]] constexpr vthost::proto::WireColorPreference wireOf(
+        vtbackend::ColorPreference preference) noexcept
+    {
+        return preference == vtbackend::ColorPreference::Dark ? vthost::proto::WireColorPreference::Dark
+                                                              : vthost::proto::WireColorPreference::Light;
+    }
 } // namespace
 
 NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
@@ -29,6 +50,7 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
                                    std::string profileName,
                                    std::optional<vtbackend::Settings> attachSettings,
                                    SessionSettingsSource sessionSettings,
+                                   std::optional<vtbackend::ColorPreference> colorPreference,
                                    core::platform::IClock const& clock,
                                    vthost::latency::StartupTimeline& timeline):
     RemoteController(clock),
@@ -39,6 +61,8 @@ NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> tr
     _sessionSettings(std::move(sessionSettings)),
     _timeline(timeline)
 {
+    if (colorPreference)
+        _statedColors = wireOf(*colorPreference);
 }
 
 void NativeController::postSessionCreation(std::function<void(NativeClient&)> create)
@@ -94,7 +118,12 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // the hello and every spawning verb name a profile for the daemon to resolve in its own
             // configuration. TabEdits because the user's changes to a tab's presentation are reported
             // (reportTabPresentation). ProgramStatus because the mirrors take the OSC 7501 records the daemon
-            // pushes, for the tab strip to show.
+            // pushes, for the tab strip to show. InputEcho because a pane at a password prompt is locked, and
+            // turns secure keyboard entry on, only when the daemon says its terminal hides typing. TabMerge
+            // so that a tab dropped on a pane's edge is merged into the split by the daemon
+            // (requestRemoteTabMerge) instead of torn off. TabEditAcks so that a pane or tab the user
+            // activates stays active over a layout the daemon pushed before it read the change, rather than
+            // flipping back until the echo arrives.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -103,7 +132,11 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::Heartbeat,
                                                    vthost::proto::Capability::ProfileByName,
                                                    vthost::proto::Capability::TabEdits,
-                                                   vthost::proto::Capability::ProgramStatus }),
+                                                   vthost::proto::Capability::ProgramStatus,
+                                                   vthost::proto::Capability::InputEcho,
+                                                   vthost::proto::Capability::TabMerge,
+                                                   vthost::proto::Capability::TabEditAcks,
+                                                   vthost::proto::Capability::ColorPreference }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = _attachSettings.transform([](auto const& s) {
@@ -112,6 +145,7 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             }),
             .attachIntent = std::move(intent),
             .profileName = _profileName,
+            .colorPreference = _statedColors.load(),
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
@@ -129,7 +163,10 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
         NativeClient::LayoutHandler {
             [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } },
         NativeClient::PermissionHandler {
-            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } });
+            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } },
+        vthost::client::LivenessPolicy {},
+        NativeClient::TabMergeRefusedHandler {
+            [this](vthost::proto::TabMergeRefused const&) { emit tabMergeRefused(); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -175,9 +212,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
     auto settled = false;
     {
         auto const lock = std::lock_guard { _mutex };
-        settled = _connection == vthost::client::ConnectionState::Failed
-                  || _connection == vthost::client::ConnectionState::Refused
-                  || _connection == vthost::client::ConnectionState::Stopped;
+        settled = isEnding(_connection);
     }
     if (!settled)
         onConnectionState(vthost::client::ConnectionState::Stopped, {});
@@ -189,8 +224,15 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     auto const where = _transport->describe();
     auto closed = false;
     auto missingWindows = false;
+    auto restored = std::optional<vthost::RestoredCounts> {};
     {
         auto const lock = std::lock_guard { _mutex };
+        // The first ending of a run is its ending, and only reconnect() starts the next run. A reactor
+        // that died reports Failed at once -- possibly before its supervisor has even started -- and that
+        // supervisor's Connecting and its cancelled Stopped must neither revive the run nor close the
+        // connection a second time.
+        if (isEnding(_connection))
+            return;
         _connection = state;
         switch (state)
         {
@@ -200,6 +242,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 // Each connection's own: a reconnect can reach an upgraded or downgraded daemon.
                 _negotiated.reset();
                 captureHandshake();
+                if (_client != nullptr)
+                    restored = _client->restoredCounts();
                 if (_acceptedConnections != 0)
                     adoptReconnect();
                 else if (_client != nullptr)
@@ -217,6 +261,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Reconnecting:
                 _client = nullptr;
                 _inputConnection = 0;
+                forgetInputEchoes();
                 // Before the first session arrived the attach still waits; awaitConnected() sees it through.
                 if (_state == State::Ready)
                     _state = State::Reconnecting;
@@ -227,6 +272,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Stopped:
                 _client = nullptr;
                 _inputConnection = 0;
+                forgetInputEchoes();
                 if (state == ConnectionState::Stopped)
                 {
                     if (_state == State::Connecting || _state == State::Ready
@@ -247,9 +293,39 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
     _connected.notify_all();
     if (missingWindows)
         failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.windows)));
+    // After the lock is released, and ahead of the layout that follows the hello, so the GUI holds the
+    // summary by the time it realizes the windows it is for.
+    if (restored)
+        emit workspaceRestored(restored->windows, restored->tabs);
     emit connectionStateChanged();
     if (closed)
         emit connectionClosed();
+}
+
+void NativeController::reactorDied(std::string const& reason)
+{
+    using vthost::client::ConnectionState;
+    auto ended = false;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        ended = isEnding(_connection);
+    }
+    // A connection that already ended told its owner so.
+    if (ended)
+        failConnect(reason);
+    else
+        onConnectionState(ConnectionState::Failed, reason);
+}
+
+void NativeController::forgetInputEchoes()
+{
+    // With the connection down, typed input is dropped and nothing reads the program's reply: a stale Hidden
+    // would keep the lock, and the OS's secure input, on for a prompt nobody is answering. The reconnect's
+    // snapshot states each pane's echo again.
+    _inputEchoes.clear();
+    for (auto const& binding: _bindings | std::views::values)
+        if (binding.pty != nullptr)
+            binding.pty->setInputEcho(vtpty::InputEcho::Unknown);
 }
 
 void NativeController::adoptReconnect()
@@ -270,6 +346,8 @@ void NativeController::adoptReconnect()
         // Every binding is detached, its pty left to the window closing it: a new session with the same id
         // must not reach the old pane, nor the old pane's input the new session.
         _bindings.clear();
+        // The new run's sessions count from 1 again: an old Hidden is no pane's of this run.
+        _inputEchoes.clear();
         _closedSessions.clear();
         _pending.clear();
         // Closes of the old run's sessions: the ids name the new run's, if anything.
@@ -314,6 +392,10 @@ void NativeController::adoptReconnect()
             _geometryAnchor.reset();
         }
     }
+    // What the panes show, stated again to the daemon for every session mirrored: a change made while down
+    // was refused, and the host ignores a preference it already has.
+    for (auto const session: _bindings | std::views::keys)
+        stateColorPreference(*client, session);
     // Up again. One lost before its first session arrived is still being waited for, as a first attach is.
     if (_state == State::Reconnecting)
         _state = State::Ready;
@@ -365,7 +447,10 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
         // The mirror is absent only in the window between createPty() and the priming bindTerminal()
         // posts; that replay picks the session up from whatever arrived meanwhile.
         if (binding->second.mirror)
+        {
             binding->second.mirror->apply(screen, delta);
+            tellInterruption(binding->second);
+        }
         return;
     }
     if (_closedSessions.contains(screen.session))
@@ -459,6 +544,70 @@ vthost::client::WireLayout NativeController::wireLayout() const
                             : vthost::client::wireToLayout(_layouts.begin()->second);
 }
 
+std::expected<void, contour::session::ReconnectError> NativeController::reconnect()
+{
+    using contour::session::ReconnectError;
+    if (!_connectStartedAt)
+        return std::unexpected(ReconnectError::NotAttached);
+    // Only once stop() has run: a run that failed is Failed before the GUI handles its connectionClosed, and
+    // a new run started in that gap would be stopped by the old run's handler.
+    if (!isStopped())
+        return std::unexpected(isConnecting() ? ReconnectError::AlreadyConnected
+                                              : ReconnectError::ConnectionEnding);
+    {
+        // The windows this client showed, as a reconnect inside one run resumes them; a client that follows
+        // every window keeps doing so (@see ClientSupervisor::resumeIntent).
+        auto const lock = std::lock_guard { _mutex };
+        // The new run is Connecting from here on: a reactor that dies before it enters Connecting itself
+        // must not find the previous run's Failed and swallow its own death (@see reactorDied).
+        _connection = vthost::client::ConnectionState::Connecting;
+        if (_intent.kind != vthost::proto::AttachIntentKind::AllWindows)
+            _intent = vthost::proto::AttachIntent {
+                .kind = vthost::proto::AttachIntentKind::Resume,
+                .windows = std::ranges::to<std::vector>(_layouts | std::views::keys),
+            };
+    }
+    restartConnecting();
+    return {};
+}
+
+namespace
+{
+    /// @param pane A node of a layout.
+    /// @param session A daemon session id.
+    /// @return Whether a leaf at or under @p pane carries @p session.
+    [[nodiscard]] bool paneNames(vthost::proto::WirePane const& pane, uint64_t session)
+    {
+        if (!pane.isSplit())
+            return pane.session == session;
+        return std::ranges::any_of(pane.children,
+                                   [session](auto const& child) { return paneNames(child, session); });
+    }
+} // namespace
+
+contour::session::ReconnectBinding NativeController::bindForReconnect(vtpty::Pty const* endedPty)
+{
+    using contour::session::ReconnectBinding;
+    auto const session = sessionForPty(endedPty);
+    if (!session)
+        return ReconnectBinding::Gone;
+    auto const lock = std::lock_guard { _mutex };
+    auto const named = std::ranges::any_of(_layouts | std::views::values, [&](auto const& layout) {
+        return std::ranges::any_of(layout.tabs,
+                                   [&](auto const& tab) { return paneNames(tab.root, *session); });
+    });
+    if (!named)
+        return ReconnectBinding::Gone;
+    _nextBindSession = session;
+    return ReconnectBinding::Bound;
+}
+
+void NativeController::cancelReconnectBinding()
+{
+    auto const lock = std::lock_guard { _mutex };
+    _nextBindSession.reset();
+}
+
 void NativeController::setNextBindSession(uint64_t session)
 {
     auto const lock = std::lock_guard { _mutex };
@@ -537,6 +686,41 @@ void NativeController::requestSplitPane(vtpty::Pty const* actingPty,
             NativeClient& client) mutable {
             client.splitPane(session, orientation, ratio, std::move(profile));
         });
+}
+
+contour::session::TabMergeSupport NativeController::tabMergeSupport() const noexcept
+{
+    auto const agreed = negotiated();
+    return agreed && agreed->shared.contains(vthost::proto::Capability::TabMerge)
+               ? contour::session::TabMergeSupport::Supported
+               : contour::session::TabMergeSupport::Unsupported;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteTabMerge(
+    std::span<vtpty::Pty const* const> tabPtys, vtpty::Pty const* targetPty, vtworkspace::SplitSide side)
+{
+    // A merge the reconciler itself applies came FROM the daemon; asking for it again would loop.
+    if (isRealizingLayout())
+        return contour::session::RemoteRouting::Local;
+    auto tabSessions = std::vector<uint64_t> {};
+    auto const allBound = std::ranges::all_of(tabPtys, [&](vtpty::Pty const* pty) {
+        auto const session = sessionForPty(pty);
+        if (session)
+            tabSessions.push_back(*session);
+        return session.has_value();
+    });
+    auto const targetSession = sessionForPty(targetPty);
+    // The daemon owns this layout: a merge it cannot take is no merge, not one made here that it never hears
+    // of.
+    if (tabPtys.empty() || !allBound || !targetSession
+        || tabMergeSupport() == contour::session::TabMergeSupport::Unsupported)
+        return contour::session::RemoteRouting::Refused;
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, tabs = std::move(tabSessions), target = *targetSession, side] {
+        if (_client != nullptr)
+            std::ignore = _client->mergeTabIntoSplit(tabs, target, side);
+    });
+    return contour::session::RemoteRouting::Routed;
 }
 
 void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio)
@@ -769,6 +953,18 @@ std::optional<vtpty::PageSize> NativeController::composedClientArea() const
     return vthost::client::composeAnchoredClientArea(roots, _geometryAnchor, resolve);
 }
 
+void NativeController::stateColorPreference(vthost::client::NativeClient& client, uint64_t session) const
+{
+    auto const stated = _statedColors.load();
+    if (stated == vthost::proto::WireColorPreference::Unstated)
+        return;
+    client.performOperation(vthost::proto::PerformOperation {
+        .session = session,
+        .operation = stated == vthost::proto::WireColorPreference::Dark
+                         ? vthost::proto::EngineOperation::UseDarkColors
+                         : vthost::proto::EngineOperation::UseLightColors });
+}
+
 void NativeController::primeBinding(uint64_t session)
 {
     if (_client == nullptr)
@@ -784,6 +980,9 @@ void NativeController::primeBinding(uint64_t session)
     binding->second.mirror = std::make_unique<vthost::client::ScreenMirror>(
         terminal, vthost::daemonMachineOf(_client->daemonIdentity(), terminal.localIdentity()));
 
+    // What the app shows, for a session whose pane was bound before the connection could take the request.
+    stateColorPreference(*_client, session);
+
     // The daemon may already have described this session before its pane existed.
     auto const screen = _client->screens().find(session);
     if (screen == _client->screens().end())
@@ -791,9 +990,29 @@ void NativeController::primeBinding(uint64_t session)
     // Discard: this pane's mirror terminal is brand new, so there is no local
     // scrollback of its own to preserve.
     binding->second.mirror->fullReplay(screen->second, vthost::client::LocalHistory::Discard);
+    tellInterruption(binding->second);
 }
 
-void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal)
+void NativeController::tellInterruption(Binding& binding)
+{
+    if (!binding.mirror || binding.interruptions.context == nullptr)
+        return;
+    auto const& commandLine = binding.mirror->interruptedCommand();
+    if (commandLine == binding.interruptionTold)
+        return;
+    binding.interruptionTold = commandLine;
+    auto told = commandLine.empty() ? std::optional<vtbackend::CommandLineText> {}
+                                    : std::optional { vtbackend::CommandLineText { commandLine } };
+    // The reactor thread: the session's state is the GUI thread's, so the news is posted there.
+    platform::postToObject(binding.interruptions.context,
+                           [deliver = binding.interruptions.deliver, told = std::move(told)]() mutable {
+                               deliver(std::move(told));
+                           });
+}
+
+void NativeController::bindTerminal(vtpty::Pty const* pty,
+                                    vtbackend::Terminal& terminal,
+                                    contour::session::InterruptionSink const& interruptions)
 {
     auto const session = sessionForPty(pty);
     if (!session)
@@ -806,6 +1025,7 @@ void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& 
         if (binding == _bindings.end())
             return;
         binding->second.terminal = &terminal;
+        binding->second.interruptions = interruptions;
         asked = std::ranges::any_of(_permissionRequests,
                                     [&](auto const& request) { return request.session == *session; });
     }
@@ -827,6 +1047,17 @@ void NativeController::onImage(RemoteScreen const& screen, uint32_t imageId)
 void NativeController::onSessionEvent(RemoteScreen const& screen, vthost::proto::SessionEventPdu const& event)
 {
     auto const lock = std::lock_guard { _mutex };
+    // On the reactor thread. Stored on the pane's device, which the session reads on the GUI thread when the
+    // output that follows it lands (TerminalSession::refreshInputEcho); never applied to the grid.
+    if (auto const* echo = std::get_if<vthost::proto::SessionInputEcho>(&event))
+    {
+        auto const value = vthost::inputEchoFromWire(echo->echo);
+        _inputEchoes.insert_or_assign(screen.session, value);
+        if (auto const binding = _bindings.find(screen.session);
+            binding != _bindings.end() && binding->second.pty != nullptr)
+            binding->second.pty->setInputEcho(value);
+        return;
+    }
     if (auto const binding = _bindings.find(screen.session);
         binding != _bindings.end() && binding->second.mirror)
         binding->second.mirror->applyEvent(event);
@@ -850,6 +1081,9 @@ contour::session::HostedOperationRoute NativeController::requestHostedOperation(
     vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request)
 {
     using contour::session::HostedOperationRoute;
+    // Remembered before anything can refuse it, for the hello and the reconnect to state again.
+    if (auto const preference = contour::session::colorPreferenceOf(request.operation))
+        _statedColors = wireOf(*preference);
     // First, and for every pty: each pane this factory made mirrors a daemon session, and a mirror whose
     // daemon is out of reach has nowhere to run the operation that would stick.
     if (!isConnected())
@@ -908,6 +1142,7 @@ void NativeController::unbind(uint64_t session, uint64_t serial)
     if (binding == _bindings.end() || binding->second.serial != serial)
         return;
     _bindings.erase(binding);
+    _inputEchoes.erase(session); // a session id is never reused within a run
     // The pane is gone: its grid must not keep contributing to a composed client area, and the
     // sent-size bookkeeping for it is meaningless (a session id is never reused).
     {
@@ -957,7 +1192,8 @@ bool NativeController::canCreateSession() const noexcept
     auto const lock = std::lock_guard { _mutex };
     // During a layout realization the panes are bound by setNextBindSession (not
     // the FIFO queue), so allow creation even with nothing pending.
-    return _realizingLayout || !_pending.empty();
+    // A pane taken back after a reconnect names its session by the same hook (bindForReconnect).
+    return _realizingLayout || _nextBindSession.has_value() || !_pending.empty();
 }
 
 std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::string> /*cwd*/,
@@ -1045,6 +1281,9 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
         },
         [this, session, serial] { unbind(session, serial); });
     _bindings[session] = Binding { .serial = serial, .pty = pty.get(), .terminal = nullptr, .mirror = {} };
+    // A prompt that was waiting before this pane was bound.
+    if (auto const echo = _inputEchoes.find(session); echo != _inputEchoes.end())
+        pty->setInputEcho(echo->second);
     // The birth size is this pane's first known grid, so the composition is complete from the
     // moment the pane exists rather than only once something resizes it.
     {

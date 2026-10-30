@@ -8,11 +8,11 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
 
 #include <vtpty/MockPty.hpp>
 
 #include <QtCore/QCoreApplication>
-#include <QtGui/QTextDocument>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,7 +27,6 @@
 #include <utility>
 #include <vector>
 
-#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/ExtensionConsent.hpp>
@@ -36,7 +35,10 @@
 #include <vtextension/testing/TestModules.hpp>
 
 using contour::config::ExtensionConfig;
+using contour::session::PermissionDecision;
+using contour::session::PermissionMemory;
 using contour::session::TerminalSession;
+using contour::test::answerShown;
 using contour::test::TestApp;
 using vtextension::GrantState;
 
@@ -117,6 +119,26 @@ constexpr auto GoneNotice = std::string_view { "⚠ gone disabled: extension mod
             .argvTemplate = { "git", "-C", "{dir}", "status", "--porcelain=v2", "--branch" } } },
         .digest = "d1",
     };
+}
+
+/// What @p session's permission dialog shows now: the title, then each line, one per line; empty while
+/// nothing is asked.
+[[nodiscard]] std::string pendingText(TerminalSession const& session)
+{
+    auto const prompt = session.pendingPermission();
+    if (prompt.isEmpty())
+        return {};
+    auto text = prompt.value(QStringLiteral("title")).toString().toStdString();
+    for (auto const& line: prompt.value(QStringLiteral("lines")).toList())
+        text += "\n" + line.toMap().value(QStringLiteral("text")).toString().toStdString();
+    return text;
+}
+
+/// Counts into @p asks each time @p session shows an extension's question.
+void countConsentAsks(TerminalSession& session, int& asks)
+{
+    contour::test::countAsks(
+        session, contour::session::PermissionAsk { contour::session::ExtensionConsentAsk {} }, asks);
 }
 
 /// Asks @p session for permission as an extension's lane does: from a thread of its own.
@@ -378,18 +400,19 @@ TEST_CASE("TerminalSession: an extension asks before it runs its commands", "[co
     // The build thread probes the in-memory filesystem, which takes no lock: it must be done before an answer
     // writes the grants file there.
     REQUIRE(showsEventually(*session, GoneNotice));
-    auto asked = QSignalSpy { session.get(), &TerminalSession::requestPermissionForExtension };
-    REQUIRE(session->pendingExtensionPermissionText().isEmpty());
+    auto asked = 0;
+    countConsentAsks(*session, asked);
+    REQUIRE(pendingText(*session).empty());
 
     // Posted, never called on the lane: the lane does not wait for the GUI thread (A1).
     askFromAnotherThread(*session);
-    CHECK(asked.count() == 0);
+    CHECK(asked == 0);
     QCoreApplication::sendPostedEvents(session.get());
-    REQUIRE(asked.count() == 1);
+    REQUIRE(asked == 1);
 
     // The prompt says who asks, from which module, and every command verbatim.
-    auto const text = session->pendingExtensionPermissionText().toStdString();
-    CHECK(text.contains("\"git\""));
+    auto const text = pendingText(*session);
+    CHECK(text.contains("“git” wants to run commands"));
     CHECK(text.contains(GitHostId));
     CHECK(text.contains("status: git -C {dir} status --porcelain=v2 --branch"));
 
@@ -398,9 +421,9 @@ TEST_CASE("TerminalSession: an extension asks before it runs its commands", "[co
 
     SECTION("Allow is recorded for that manifest, in the grants file too")
     {
-        session->allowPendingExtension();
+        answerShown(*session, PermissionDecision::Allow, PermissionMemory::Persistent);
         CHECK(grants.lookup(GitHostId, "d1") == GrantState::Granted);
-        CHECK(session->pendingExtensionPermissionText().isEmpty());
+        CHECK(pendingText(*session).empty());
         auto const written = testApp.fileSystem().readFile(grantsFile);
         REQUIRE(written.has_value());
         CHECK(written->contains(std::format("granted\td1\t{}", GitHostId)));
@@ -408,20 +431,31 @@ TEST_CASE("TerminalSession: an extension asks before it runs its commands", "[co
         // Answered: asking again shows nothing.
         askFromAnotherThread(*session);
         QCoreApplication::sendPostedEvents(session.get());
-        CHECK(asked.count() == 1);
+        CHECK(asked == 1);
     }
 
     SECTION("Deny is recorded")
     {
-        session->denyPendingExtension();
+        answerShown(*session, PermissionDecision::Deny, PermissionMemory::Persistent);
         CHECK(grants.lookup(GitHostId, "d1") == GrantState::Denied);
     }
 
     SECTION("dismissing records nothing")
     {
-        session->dismissPendingExtension();
+        answerShown(*session, PermissionDecision::Deny, PermissionMemory::Once);
         CHECK(grants.lookup(GitHostId, "d1") == GrantState::Pending);
         CHECK_FALSE(testApp.fileSystem().exists(grantsFile));
+        CHECK(pendingText(*session).empty());
+    }
+
+    SECTION("Allow just this once is no answer: nothing is recorded, and the question stays")
+    {
+        answerShown(*session, PermissionDecision::Allow, PermissionMemory::Once);
+        CHECK(grants.lookup(GitHostId, "d1") == GrantState::Pending);
+        CHECK_FALSE(testApp.fileSystem().exists(grantsFile));
+        CHECK(session->pendingPermissionAsk()
+              == contour::session::PermissionAsk { contour::session::ExtensionConsentAsk {} });
+        CHECK(pendingText(*session) == text);
     }
 }
 
@@ -454,7 +488,8 @@ TEST_CASE("TerminalSession: a daemon's extension asks through the pane's prompt"
     TestApp testApp;
     installFiles(testApp);
     auto const session = makeSession(testApp.app());
-    auto asked = QSignalSpy { session.get(), &TerminalSession::requestPermissionForExtension };
+    auto asked = 0;
+    countConsentAsks(*session, asked);
     auto daemon = RecordedAnswers {};
     constexpr auto DaemonHostId = std::string_view { "git@/usr/share/contour/extensions/git.wasm" };
 
@@ -462,17 +497,89 @@ TEST_CASE("TerminalSession: a daemon's extension asks through the pane's prompt"
         vtextension::ExtensionConsentRequest { .hostId = std::string { DaemonHostId },
                                                .manifest = gitManifest() },
         daemon);
-    REQUIRE(asked.count() == 1);
-    auto const text = session->pendingExtensionPermissionText().toStdString();
+    REQUIRE(asked == 1);
+    auto const text = pendingText(*session);
     CHECK(text.contains(DaemonHostId));
     CHECK(text.contains("status: git -C {dir} status --porcelain=v2 --branch"));
 
-    session->allowPendingExtension();
+    answerShown(*session, PermissionDecision::Allow, PermissionMemory::Persistent);
     CHECK(daemon.answers
           == std::vector<std::string> {
               std::format("{} d1 {}", DaemonHostId, std::to_underlying(GrantState::Granted)) });
-    CHECK(session->pendingExtensionPermissionText().isEmpty());
+    CHECK(pendingText(*session).empty());
     CHECK(testApp.app().startedExtensionRuntime() == nullptr);
+}
+
+TEST_CASE("TerminalSession: an extension waits behind a guarded role", "[contour][session][extensions]")
+{
+    using contour::session::ExtensionConsentAsk;
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+    TestApp testApp;
+    installFiles(testApp);
+    auto const session = makeSession(testApp.app());
+    // Displayed: a capture without a display is refused at once, never asked.
+    auto surface = contour::test::FakeDisplaySurface {};
+    surface.attachedSession = session.get();
+    session->attachDisplay(surface);
+    auto daemon = RecordedAnswers {};
+
+    session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    session->askForHostedExtension(vtextension::ExtensionConsentRequest { .hostId = std::string { GitHostId },
+                                                                          .manifest = gitManifest() },
+                                   daemon);
+    CHECK(session->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+
+    // The capture's answer is the capture's alone; the extension is asked next.
+    auto const captureQuestion = session->pendingPermission().value(QStringLiteral("id")).toInt();
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Once);
+    QCoreApplication::processEvents();
+    CHECK(daemon.answers.empty());
+    REQUIRE(session->pendingPermissionAsk() == PermissionAsk { ExtensionConsentAsk {} });
+    CHECK(pendingText(*session).contains("“git” wants to run commands"));
+
+    // A second answer aimed at the capture -- its old id -- grants the extension nothing.
+    session->answerPermission(captureQuestion, PermissionDecision::Allow, PermissionMemory::Persistent);
+    CHECK(daemon.answers.empty());
+    REQUIRE(session->pendingPermissionAsk() == PermissionAsk { ExtensionConsentAsk {} });
+
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Persistent);
+    CHECK(daemon.answers
+          == std::vector<std::string> {
+              std::format("{} d1 {}", GitHostId, std::to_underlying(GrantState::Denied)) });
+    CHECK_FALSE(session->pendingPermissionAsk().has_value());
+    session->detachDisplay(surface);
+}
+
+TEST_CASE("TerminalSession: the next extension is asked once the answered one's dialog has gone",
+          "[contour][session][extensions]")
+{
+    // Answering one consent while another waits must not put the next one up inside the answer: the dialog
+    // that answered still has to close, and would close the next question with it -- stranding it, and every
+    // question behind it in the pane. The next one comes on the next turn of the event loop, as a guarded
+    // role's does.
+    TestApp testApp;
+    installFiles(testApp);
+    auto const session = makeSession(testApp.app());
+    auto daemon = RecordedAnswers {};
+    constexpr auto OtherHostId = std::string_view { "other@/usr/share/contour/extensions/other.wasm" };
+    session->askForHostedExtension(vtextension::ExtensionConsentRequest { .hostId = std::string { GitHostId },
+                                                                          .manifest = gitManifest() },
+                                   daemon);
+    session->askForHostedExtension(
+        vtextension::ExtensionConsentRequest { .hostId = std::string { OtherHostId },
+                                               .manifest = gitManifest() },
+        daemon);
+    REQUIRE(pendingText(*session).contains(GitHostId));
+    auto const first = session->pendingPermission().value(QStringLiteral("id")).toInt();
+
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Persistent);
+    CHECK(pendingText(*session).empty());
+
+    QCoreApplication::processEvents();
+    auto const text = pendingText(*session);
+    CHECK(text.contains(OtherHostId));
+    CHECK(session->pendingPermission().value(QStringLiteral("id")).toInt() != first);
 }
 
 TEST_CASE("TerminalSession: a guest's manifest cannot turn the prompt into rich text",
@@ -494,11 +601,11 @@ TEST_CASE("TerminalSession: a guest's manifest cannot turn the prompt into rich 
     askFromAnotherThread(*session, manifest);
     QCoreApplication::sendPostedEvents(session.get());
 
-    auto const text = session->pendingExtensionPermissionText();
-    REQUIRE_FALSE(text.isEmpty());
-    CHECK_FALSE(Qt::mightBeRichText(text));
-    CHECK(text.contains(QStringLiteral("<b>git</b>")));
-    CHECK(text.contains(QStringLiteral("git <br> '<span style=\"font-size:1px\">x</span>'")));
+    // Shown as plain text (every Label of the dialog is Text.PlainText), and verbatim.
+    auto const text = pendingText(*session);
+    REQUIRE_FALSE(text.empty());
+    CHECK(text.contains("“<b>git</b>” wants to run commands"));
+    CHECK(text.contains("git <br> '<span style=\"font-size:1px\">x</span>'"));
 }
 
 TEST_CASE("TerminalSession: a font change costs a pane without extensions nothing",
@@ -627,15 +734,16 @@ TEST_CASE("TerminalSession: an extension's command runs once the user allows it"
     profile.extensions.value() = { extensionAt("spawner", moduleDirectory() / "spawner.wasm") };
     profile.statusLine.value().indicator.left = "[{Extension:spawner}]";
     auto const session = makeSession(testApp.app());
-    auto asked = QSignalSpy { session.get(), &TerminalSession::requestPermissionForExtension };
+    auto asked = 0;
+    countConsentAsks(*session, asked);
 
-    REQUIRE(QTest::qWaitFor([&] { return asked.count() == 1; }, ExtensionTimeout));
-    auto const text = session->pendingExtensionPermissionText().toStdString();
-    CHECK(text.contains("\"spawner\""));
+    REQUIRE(QTest::qWaitFor([&] { return asked == 1; }, ExtensionTimeout));
+    auto const text = pendingText(*session);
+    CHECK(text.contains("“spawner”"));
     CHECK(text.contains("echo: echo {word}"));
     CHECK(showsEventually(*session, "[err:pending]"));
 
-    session->allowPendingExtension();
+    answerShown(*session, PermissionDecision::Allow, PermissionMemory::Persistent);
     // A resize is what renders the guest again, and its render runs the command.
     session->terminal().resizeScreen(
         vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(90) });

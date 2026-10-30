@@ -4,7 +4,7 @@
 // mapping functions every key/mouse event flows through before reaching a terminal session.
 
 #include <contour/ContourGuiApp.hpp>
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/QtPath.hpp>
@@ -24,14 +24,35 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <optional>
 #include <ranges>
 
 using contour::input::makeModifiers;
 using contour::input::makeMouseButton;
+
+TEST_CASE("namedKeyOf names the keys that are terminal keys and no character", "[contour][input]")
+{
+    using contour::input::namedKeyOf;
+    using contour::input::NamedKeyRows;
+
+    // Every row answers for its own Qt key, and no Qt key is listed twice.
+    for (auto const& row: NamedKeyRows)
+    {
+        REQUIRE(namedKeyOf(row.qt) == std::optional { row.key });
+        CHECK(std::ranges::count(NamedKeyRows, row.qt, &contour::input::NamedKeyRow::qt) == 1);
+    }
+
+    CHECK(namedKeyOf(Qt::Key_F6) == std::optional { vtbackend::Key::F6 });
+    CHECK(namedKeyOf(Qt::Key_Home) == std::optional { vtbackend::Key::Home });
+    // A character key is matched by the char mappings, not by name.
+    CHECK_FALSE(namedKeyOf(Qt::Key_A).has_value());
+    CHECK_FALSE(namedKeyOf(Qt::Key_Space).has_value());
+}
 
 TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[session][input]")
 {
@@ -62,6 +83,69 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[sessio
 
     // Qt's modifier mask never yields a lock key; those come from the native mask only.
     CHECK(combined.locks.none());
+}
+
+TEST_CASE("macOS Command chords reach the tab actions as Qt delivers them", "[session][input]")
+{
+    // The macOS host: Qt's Control/Meta swap is off, so Command is Qt::MetaModifier, which makeModifiers()
+    // reads as Super; Shift+[ arrives as '{' and is retried under its unshifted base, as TerminalSession
+    // does.
+    using vtbackend::Modifier;
+    auto const command = Qt::MetaModifier;
+    auto const commandShift = Qt::MetaModifier | Qt::ShiftModifier;
+    auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
+        auto const modifiers = makeModifiers(qtModifiers).chord;
+        auto const folded = contour::config::foldedBindingCodepoint(input);
+        auto const& table = contour::config::macTabChords();
+        return std::ranges::find_if(table, [&](auto const& row) {
+            return row.mapping.input == contour::input::unshiftedCodepoint(folded)
+                   && row.mapping.modifiers == modifiers;
+        });
+    };
+    auto const& table = contour::config::macTabChords();
+
+    auto const newTab = lookUp(command, U't');
+    REQUIRE(newTab != table.end());
+    CHECK(std::holds_alternative<contour::actions::CreateNewTab>(newTab->mapping.binding.front()));
+
+    auto const third = lookUp(command, U'3');
+    REQUIRE(third != table.end());
+    CHECK(std::get<contour::actions::SwitchToTab>(third->mapping.binding.front()).position == 3);
+
+    auto const previous = lookUp(commandShift, U'{');
+    REQUIRE(previous != table.end());
+    CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(previous->mapping.binding.front()));
+
+    // Control is not Command: Ctrl+T stays with the application.
+    CHECK(lookUp(Qt::ControlModifier, U't') == table.end());
+}
+
+TEST_CASE("macOS Command+D and Command+Shift+D reach the split actions as Qt delivers them",
+          "[session][input][panes]")
+{
+    // Command is Qt::MetaModifier on macOS, which makeModifiers() reads as Super; the letter arrives folded,
+    // as TerminalSession folds it before the lookup.
+    using contour::config::PaneChordHost;
+    auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
+        auto const modifiers = makeModifiers(qtModifiers).chord;
+        auto const folded = contour::config::foldedBindingCodepoint(input);
+        auto const table = contour::config::paneCharChords(PaneChordHost::Mac);
+        return std::ranges::find_if(table, [&](auto const& row) {
+            return row.mapping.input == folded && row.mapping.modifiers == modifiers;
+        });
+    };
+    auto const table = contour::config::paneCharChords(PaneChordHost::Mac);
+
+    auto const side = lookUp(Qt::MetaModifier, U'd');
+    REQUIRE(side != table.end());
+    CHECK(std::holds_alternative<contour::actions::SplitVertical>(side->mapping.binding.front()));
+
+    auto const stacked = lookUp(Qt::MetaModifier | Qt::ShiftModifier, U'D');
+    REQUIRE(stacked != table.end());
+    CHECK(std::holds_alternative<contour::actions::SplitHorizontal>(stacked->mapping.binding.front()));
+
+    // Control+Shift+E is the desktop's chord, not a Mac one.
+    CHECK(lookUp(Qt::ControlModifier | Qt::ShiftModifier, U'e') == table.end());
 }
 
 TEST_CASE("ctrlAltRoleOf tells AltGr from a Ctrl+Alt chord by the text produced", "[session][input]")
@@ -194,6 +278,59 @@ using contour::test::mockPtyOf;
 }
 #endif
 } // namespace
+
+TEST_CASE("optionKeySideOf reads macOS's device-dependent Option bits", "[session][input]")
+{
+    using contour::config::OptionKeySide;
+    using contour::input::optionKeySideOf;
+
+    STATIC_CHECK(optionKeySideOf(0x20) == OptionKeySide::Left);
+    STATIC_CHECK(optionKeySideOf(0x40) == OptionKeySide::Right);
+    STATIC_CHECK(optionKeySideOf(0x60) == OptionKeySide::Both);
+    // The device-independent Option flag says Option is held, not which one.
+    STATIC_CHECK(optionKeySideOf(0x80000) == OptionKeySide::None);
+    STATIC_CHECK(optionKeySideOf(0) == OptionKeySide::None);
+    // The other device bits around them are not Option keys.
+    STATIC_CHECK(optionKeySideOf(0x80000 | 0x20 | 0x01 | 0x08) == OptionKeySide::Left);
+    STATIC_CHECK(optionKeySideOf(0x80000 | 0x40 | 0x02 | 0x10) == OptionKeySide::Right);
+}
+
+TEST_CASE("Option as Alt applies to the configured side only", "[session][input]")
+{
+#ifndef __APPLE__
+    SKIP("Qt delivers macOS's device-dependent Option bits on macOS only");
+#else
+    using contour::config::OptionAsAlt;
+    constexpr auto OptionLeft = quint32 { 0x80000 | contour::input::MacLeftOptionBit };
+    constexpr auto OptionRight = quint32 { 0x80000 | contour::input::MacRightOptionBit };
+
+    // What reaches the PTY for Option+E with @p option held, under @p setting.
+    auto const typed = [](OptionAsAlt setting, quint32 option) {
+        contour::test::TestApp app;
+        app.app().config().profile().optionAsAlt.value() = setting;
+        auto session = makeSession(app.app());
+        auto& pty = mockPtyOf(*session);
+        auto ev =
+            QKeyEvent(QEvent::KeyPress, Qt::Key_E, Qt::AltModifier, 0, 0, option, QStringLiteral("\u00e9"));
+        pty.stdinBuffer().clear();
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        return pty.stdinBuffer();
+    };
+    auto const alt = std::string { "\x1b"
+                                   "e" };
+    auto const composed = std::string { "\xc3\xa9" };
+
+    CHECK(typed(OptionAsAlt::Left, OptionLeft) == alt);
+    CHECK(typed(OptionAsAlt::Left, OptionRight) == composed);
+    CHECK(typed(OptionAsAlt::Right, OptionRight) == alt);
+    CHECK(typed(OptionAsAlt::Right, OptionLeft) == composed);
+    CHECK(typed(OptionAsAlt::Both, OptionLeft) == alt);
+    CHECK(typed(OptionAsAlt::Both, OptionRight) == alt);
+    CHECK(typed(OptionAsAlt::Off, OptionLeft) == composed);
+    CHECK(typed(OptionAsAlt::Off, OptionRight) == composed);
+#endif
+}
 
 TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[session][input]")
 {
@@ -451,6 +588,54 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     // also pass if key handling were broken outright and nothing were ever encoded.
     CHECK(reachedThePty(Qt::Key_PageDown, Qt::NoModifier));
 }
+
+#ifndef __APPLE__
+TEST_CASE("the pane chords are claimed before the terminal encodes them", "[session][input][panes]")
+{
+    contour::test::TestApp app;
+
+    // The tab-switch test above explains why the table is emptied for the second pass: a user whose
+    // contour.yml enumerates the defaults of an older release has none of the rows added since, and only
+    // the fallback table can reach them. The first pass is the freshly generated configuration.
+    auto const emptyTables = GENERATE(false, true);
+    if (emptyTables)
+    {
+        app.app().config().inputMappings.value().keyMappings.clear();
+        app.app().config().inputMappings.value().charMappings.clear();
+    }
+
+    auto session = makeSession(app.app());
+    auto& pty = mockPtyOf(*session);
+
+    auto const reachedThePty = [&](Qt::Key key, Qt::KeyboardModifiers modifiers, QString const& text) {
+        QKeyEvent ev(QEvent::KeyPress, key, modifiers, text);
+        pty.stdinBuffer().clear();
+        contour::session::sendKeyEvent(
+            &ev, vtbackend::KeyboardEventType::Press, *session, passthroughLayout());
+        return !pty.stdinBuffer().empty();
+    };
+
+    SECTION("Alt+Shift+arrow moves the focus between panes")
+    {
+        for (auto const key: { Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down })
+            CHECK_FALSE(reachedThePty(key, Qt::AltModifier | Qt::ShiftModifier, QString()));
+    }
+
+    SECTION("a bare Alt+arrow stays the shell's word motion")
+    {
+        for (auto const key: { Qt::Key_Left, Qt::Key_Right })
+            CHECK(reachedThePty(key, Qt::AltModifier, QString()));
+    }
+
+    SECTION("Ctrl+Shift+E and Ctrl+Shift+O split")
+    {
+        CHECK_FALSE(
+            reachedThePty(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("\x05")));
+        CHECK_FALSE(
+            reachedThePty(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier, QStringLiteral("\x0f")));
+    }
+}
+#endif
 
 TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][input][semanticblocks]")
 {

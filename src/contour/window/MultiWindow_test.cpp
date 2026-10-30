@@ -11,22 +11,33 @@
 // untouched.
 
 #include <contour/ContourGuiApp.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/RecordingAnnouncer.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/WindowController.hpp>
+
+#include <vtpty/MockPty.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 #include <QtTest/QSignalSpy>
@@ -41,44 +52,7 @@ namespace
 using contour::test::ScopedController;
 using contour::test::TestApp;
 
-/// Records the manager's window-scoped native output without reaching the Windows shell.
-class RecordingTaskbar final: public contour::platform::TaskbarProgressSink
-{
-  public:
-    /// Whether this test adapter supports publishing progress.
-    enum class Support : uint8_t
-    {
-        Unavailable, ///< Models a platform without a native adapter.
-        Available,   ///< Records scheduled updates.
-    };
-
-    /// @param support Whether this adapter accepts scheduled updates.
-    explicit RecordingTaskbar(
-        Support support = Support::Available,
-        contour::platform::TaskbarProgressScope scope = contour::platform::TaskbarProgressScope::Window):
-        _support(support), _scope(scope)
-    {
-    }
-    [[nodiscard]] bool isSupported() const noexcept override { return _support == Support::Available; }
-    [[nodiscard]] contour::platform::TaskbarProgressScope scope() const noexcept override { return _scope; }
-    void setApplicationProgress(contour::platform::TaskbarProgress progress) override
-    {
-        application = progress;
-    }
-    void bindWindow(uint64_t, QWindow&) override {}
-    void setProgress(uint64_t window, contour::platform::TaskbarProgress progress) override
-    {
-        windows[window] = progress;
-    }
-    void removeWindow(uint64_t window) override { windows.erase(window); }
-
-    std::unordered_map<uint64_t, contour::platform::TaskbarProgress> windows;
-    contour::platform::TaskbarProgress application;
-
-  private:
-    Support _support;
-    contour::platform::TaskbarProgressScope _scope;
-};
+using contour::test::RecordingTaskbar;
 
 /// Mints @p n model tabs in the controller's window (no backing sessions).
 void createTabs(contour::session::TerminalSessionManager& manager,
@@ -115,6 +89,44 @@ TEST_CASE("a window's hosting notice shows until it is dismissed", "[contour][mu
     controller.dismissHostingNotice();
     CHECK(controller.hostingNotice().isEmpty());
     CHECK(changes.count() == 2);
+}
+
+TEST_CASE("a window says its notices only while accessibility_announcements allows",
+          "[contour][multiwindow][notices]")
+{
+    contour::test::TestApp app;
+    auto& manager = app.manager();
+    auto* said = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
+    auto const recording =
+        [&said](
+            std::function<QObject*()> const& /*anchor*/) -> std::unique_ptr<contour::platform::Announcer> {
+        auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+        said = announcer.get();
+        return announcer;
+    };
+    auto const* backing = manager.model().createWindow();
+    auto controller = contour::window::WindowController { manager,
+                                                          backing->id(),
+                                                          contour::config::MenuPresentation::InScene,
+                                                          std::nullopt,
+                                                          core::platform::defaultSteadyClock(),
+                                                          recording };
+    REQUIRE(said != nullptr);
+    using contour::window::Notice;
+    using contour::window::NoticeKind;
+
+    // Off, the notice still shows; nobody is told it.
+    app.app().config().accessibilityAnnouncements = false;
+    controller.notices().post(Notice { .kind = NoticeKind::Copied, .text = "Copied 3 lines" });
+    CHECK(controller.notices().toastText() == QStringLiteral("Copied 3 lines"));
+    CHECK(said->said.empty());
+
+    // On again -- as a reload sets it -- the next one is said.
+    app.app().config().accessibilityAnnouncements = true;
+    controller.notices().post(
+        Notice { .kind = NoticeKind::ConfigReloadFailed, .text = "Contour could not reload" });
+    REQUIRE(said->said.size() == 1);
+    CHECK(said->said.front().message == QStringLiteral("Contour could not reload"));
 }
 
 TEST_CASE("a local window names no host in its chrome", "[contour][multiwindow][window][hosts]")
@@ -438,18 +450,19 @@ TEST_CASE("tab strip Always/Never gates ignore the tab count", "[contour][multiw
     }
 }
 
-TEST_CASE("settings tab: no terminal tab reads active while the settings page is open",
-          "[contour][multiwindow][settings]")
+TEST_CASE("the active tab stays active while Settings is open", "[contour][multiwindow][settings]")
 {
-    // The settings page is shown as a pinned "tab" in the strip (TabStrip.qml); while it is the active
-    // view, IsActiveRole must report false for every terminal tab so the strip does not highlight two
-    // tabs at once. Closing settings re-highlights the previously active terminal tab.
+    // Settings is a window of its own: opening it covers no tab, so the strip keeps highlighting the
+    // active one.
+    constexpr auto Tabs = 2;
     TestApp app;
     auto& manager = app.manager();
     ScopedController window { manager };
     REQUIRE(window.controller != nullptr);
-    createTabs(manager, *window, 2);
+    createTabs(manager, *window, Tabs);
     window->activateTab(1);
+
+    app.app().openSettings(nullptr);
 
     auto const isActive = [&](int row) {
         return window
@@ -457,21 +470,10 @@ TEST_CASE("settings tab: no terminal tab reads active while the settings page is
                    static_cast<int>(contour::window::WindowController::Roles::IsActiveRole))
             .toBool();
     };
-
-    // A terminal tab is active to begin with.
-    REQUIRE_FALSE(window->settingsActive());
-    CHECK(isActive(window->activeTabIndex()));
-
-    // Opening settings de-highlights every terminal tab.
-    window->openSettings();
-    CHECK(window->settingsActive());
+    CHECK(isActive(1));
     CHECK_FALSE(isActive(0));
-    CHECK_FALSE(isActive(1));
-
-    // Closing settings restores the active terminal tab's highlight.
-    window->closeSettings();
-    CHECK_FALSE(window->settingsActive());
-    CHECK(isActive(window->activeTabIndex()));
+    CHECK(window->rowCount() == window->count());
+    CHECK(window->count() == Tabs);
 }
 
 TEST_CASE("REGRESSION: tab operations from a second window target that window, not the first",
@@ -746,6 +748,41 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("a tab whose label comes out empty is named after the program in front",
+          "[contour][multiwindow][model][tablabel]")
+{
+    // A blank tab names nothing: the label falls back to the session's foreground process, and only while
+    // it is empty.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    factoryOwned->makePty = [](vtbackend::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+        auto pty = std::make_unique<vtpty::MockPty>(size);
+        pty->setForegroundProcessName("vim");
+        return pty;
+    };
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    auto const titleAt = [&](int row) {
+        return window
+            ->data(window->index(row), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString();
+    };
+    auto* session =
+        manager.sessionForId(manager.model().window(window.id)->tabAt(0)->activePane()->session());
+    REQUIRE(session != nullptr);
+    REQUIRE(session->resolvedWindowTitle().empty()); // the premise: the default label comes out empty
+
+    CHECK(titleAt(0) == QStringLiteral("vim"));
+
+    session->setTitle(QStringLiteral("build"));
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("build"));
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab",
           "[contour][multiwindow][model]")
 {
@@ -955,6 +992,74 @@ TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the
 
         window->saveLayoutAs(QStringLiteral("   ")); // a blank field must never write a nameless layout
         CHECK(store->savedPaths.size() == 1);        // still just the one save
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("Save Layout checks the name, refuses a taken one, and replaces only when asked",
+          "[contour][multiwindow][layout]")
+{
+    auto storeOwned = std::make_unique<contour::test::InMemoryLayoutStore>();
+    auto* store = storeOwned.get();
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>(),
+                                 std::move(storeOwned) };
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    CHECK(window->layoutSummary() == "1 tab · 1 pane · working directories and commands");
+
+    SECTION("a name the configuration holds is taken, as typed and trimmed")
+    {
+        app.app().config().layouts.value()["dev"] = contour::config::Layout {};
+        auto const check = window->checkLayoutName(QStringLiteral("  dev "), false);
+        CHECK(check.value("nameState").toString() == "taken");
+        CHECK(check.value("button").toString() == "disabled");
+        CHECK(check.value("trimmed").toString() == "dev");
+        CHECK(window->checkLayoutName(QStringLiteral("dev"), true).value("button").toString() == "replace");
+        CHECK(window->checkLayoutName(QStringLiteral("web"), false).value("button").toString() == "save");
+    }
+
+    SECTION("a name the layouts file holds is taken too, once the dialog opens")
+    {
+        store->layouts["filed"] = contour::config::Layout {};
+        window->beginSaveLayoutPrompt();
+        CHECK(window->checkLayoutName(QStringLiteral("filed"), false).value("nameState").toString()
+              == "taken");
+        CHECK(window->checkLayoutName(QStringLiteral("filed"), true).value("button").toString() == "replace");
+    }
+
+    SECTION("a name taken in the store since the check is not overwritten")
+    {
+        store->layouts["dev"] = contour::config::Layout {};
+        auto const before = store->layouts;
+        window->saveLayoutAs(QStringLiteral("dev"));
+        CHECK(store->savedPaths.empty());
+        CHECK(store->layouts.size() == before.size());
+        CHECK(window->notices().toastText().toStdString()
+              == contour::window::layoutSaveFailedNoticeText("dev",
+                                                             contour::config::LayoutSaveError::NameTaken));
+    }
+
+    SECTION("Replace rewrites it, and says so")
+    {
+        store->layouts["dev"] = contour::config::Layout {};
+        window->replaceLayout(QStringLiteral("dev"));
+        REQUIRE(store->savedPaths.size() == 1);
+        REQUIRE(store->layouts.contains("dev"));
+        CHECK(store->layouts.at("dev").tabs.size() == 1);
+        CHECK(window->notices().toastText() == QStringLiteral("Saved layout “dev”"));
+    }
+
+    SECTION("an unreadable store says why in a toast")
+    {
+        store->loadError = "bad yaml";
+        window->saveLayoutAs(QStringLiteral("web"));
+        CHECK(store->savedPaths.empty());
+        auto const expected =
+            std::format("{}.", contour::config::describe(contour::config::LayoutSaveError::StoreUnreadable));
+        CHECK(window->notices().toastText().toStdString().ends_with(expected));
     }
 
     contour::test::closeAllTabs(*window);
@@ -1562,3 +1667,440 @@ TEST_CASE("WindowController: minimised state, restoring it, and the attention re
         CHECK(alerts.count() == 1);
     }
 }
+
+// {{{ Drops onto a pane
+
+namespace
+{
+using contour::window::DropPayload;
+using contour::window::DropZone;
+
+/// A pane card's extent in the tests below.
+constexpr auto PaneWidth = 1000.0;
+constexpr auto PaneHeight = 500.0;
+
+/// The `application/x-contour-tab` payload TabItem.qml writes for the tab at @p row of window @p window,
+/// from the process that holds @p token (this one unless a test says another started the drag).
+[[nodiscard]] QString tabPayload(vtworkspace::WindowId window,
+                                 int row,
+                                 QString const& token = contour::window::processToken())
+{
+    return QString::fromStdString(std::format(
+        R"({{"windowId":{},"tabIndex":{},"token":"{}"}})", window.value, row, token.toStdString()));
+}
+
+/// What @p controller says a drop of @p payload at (@p x, @p y) over @p session's pane does.
+[[nodiscard]] DropZone zoneAt(contour::window::WindowController const& controller,
+                              contour::session::TerminalSession* session,
+                              DropPayload payload,
+                              double x,
+                              double y,
+                              QString const& tab = {})
+{
+    return static_cast<DropZone>(
+        controller.dropZoneAt(session, static_cast<int>(payload), x, y, PaneWidth, PaneHeight, tab));
+}
+} // namespace
+
+TEST_CASE("a drop onto a pane whose shell is not known refuses a name that could run, with a toast",
+          "[contour][multiwindow][drop]")
+{
+    // The mock pty has no foreground process to name, as a Windows or daemon-hosted pane has none.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    ScopedController window { app.manager() };
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    REQUIRE(pane != nullptr);
+    REQUIRE_FALSE(window->notices().toastShown());
+
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/x%24%28id%29")) }); // /tmp/x$(id)
+    REQUIRE(window->notices().toastShown());
+    CHECK(window->notices().toastText().contains(QStringLiteral("shell is not known")));
+}
+
+TEST_CASE("a QML call reaches the real dropZoneAt and dropTabOnPane with a session object",
+          "[contour][multiwindow][drop][qml]")
+{
+    // Every other QML test runs against a controller mock that takes a QObject*. The real controller takes a
+    // session::TerminalSession const*: if the engine did not convert, the call would fail and the zone
+    // would be `undefined` -- which PaneCard must refuse, not accept.
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    ScopedController window { app.manager() };
+    window->createNewTab();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    REQUIRE(pane != nullptr);
+
+    auto engine = QQmlEngine {};
+    engine.rootContext()->setContextProperty("controller", window.controller);
+    engine.rootContext()->setContextProperty("pane", pane);
+    auto component = QQmlComponent { &engine };
+    component.setData(R"(
+        import QtQml
+        QtObject {
+            function zone(payload, x, y, tab) {
+                return controller.dropZoneAt(pane, payload, x, y, 1000, 500, tab)
+            }
+            function drop(zone, tab) { controller.dropTabOnPane(pane, zone, tab) }
+        })",
+                      QUrl {});
+    REQUIRE(component.isReady());
+    auto const probe = std::unique_ptr<QObject> { component.create() };
+    REQUIRE(probe != nullptr);
+    auto const zoneFromQml = [&](DropPayload payload, double x, double y, QString const& tab) {
+        auto answer = QVariant {};
+        REQUIRE(QMetaObject::invokeMethod(probe.get(),
+                                          "zone",
+                                          Q_RETURN_ARG(QVariant, answer),
+                                          Q_ARG(QVariant, static_cast<int>(payload)),
+                                          Q_ARG(QVariant, x),
+                                          Q_ARG(QVariant, y),
+                                          Q_ARG(QVariant, tab)));
+        return answer;
+    };
+
+    auto const fromOtherTab = tabPayload(window.id, 0);
+    // A number, not undefined: the call was made, and it is the C++ answer.
+    auto const files = zoneFromQml(DropPayload::Files, 500, 250, {});
+    REQUIRE(files.isValid());
+    CHECK(files.toInt() == static_cast<int>(zoneAt(*window, pane, DropPayload::Files, 500, 250)));
+    CHECK(files.toInt() == static_cast<int>(DropZone::InsertText));
+    auto const split = zoneFromQml(DropPayload::Tab, 950, 250, fromOtherTab);
+    REQUIRE(split.isValid());
+    CHECK(split.toInt() == static_cast<int>(DropZone::SplitRight));
+
+    // And the drop reaches the model: the dragged tab is merged beside the pane.
+    REQUIRE(window->count() == 2);
+    QMetaObject::invokeMethod(probe.get(),
+                              "drop",
+                              Q_ARG(QVariant, static_cast<int>(DropZone::SplitRight)),
+                              Q_ARG(QVariant, fromOtherTab));
+    CHECK(window->count() == 1);
+
+    window->closeTabAtIndex(0);
+}
+
+TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const dragged = window->activeSession();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    REQUIRE(dragged != pane);
+    auto const fromOtherTab = tabPayload(window.id, 0);
+    auto const fromOwnTab = tabPayload(window.id, 1);
+
+    SECTION("a tab from another tab splits on the outer edges and is left alone elsewhere")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 50, 250, fromOtherTab) == DropZone::SplitLeft);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 20, fromOtherTab) == DropZone::SplitTop);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 480, fromOtherTab) == DropZone::SplitBottom);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
+    }
+
+    SECTION("a tab from the pane's own tab is never split")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOwnTab) == DropZone::PassThrough);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOwnTab) == DropZone::PassThrough);
+    }
+
+    SECTION("files and text insert anywhere over the pane")
+    {
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 500, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*window, pane, DropPayload::Text, 50, 20) == DropZone::InsertText);
+    }
+
+    SECTION("a payload that names no tab of this process is no drop")
+    {
+        // Review: the JSON comes from whatever started the drag.
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(vtworkspace::WindowId { 9999 }, 0))
+              == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, 7)) == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, -1)) == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, QStringLiteral("not json"))
+              == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":"1","tabIndex":0,"token":"%1"})")
+                         .arg(contour::window::processToken()))
+              == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":1.5,"tabIndex":0,"token":"%1"})")
+                         .arg(contour::window::processToken()))
+              == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250) == DropZone::None);
+    }
+
+    SECTION("a drag that another process started, or that names no process, is not one of ours")
+    {
+        // The same window and row, which in THAT process are some other tab.
+        auto const foreign = tabPayload(window.id, 0, contour::window::processToken() + QStringLiteral("x"));
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, foreign) == DropZone::None);
+        // The old payload named the process by its PID, which is public and, under Flatpak, shared by
+        // instances: it is no token.
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"pid":%1})")
+                         .arg(QCoreApplication::applicationPid()))
+              == DropZone::None);
+        CHECK(zoneAt(
+                  *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":1,"tabIndex":0})"))
+              == DropZone::None);
+        CHECK(zoneAt(*window,
+                     pane,
+                     DropPayload::Tab,
+                     950,
+                     250,
+                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"token":%1})")
+                         .arg(QCoreApplication::applicationPid()))
+              == DropZone::None);
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
+    }
+
+    SECTION("no session, and nothing out of range, is a target")
+    {
+        CHECK(window->dropZoneAt(
+                  nullptr, static_cast<int>(DropPayload::Files), 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(window->dropZoneAt(pane, -1, 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(window->dropZoneAt(pane, 99, 10, 10, PaneWidth, PaneHeight, {})
+              == static_cast<int>(DropZone::None));
+        CHECK(zoneAt(*window, pane, DropPayload::Files, 1500, 250) == DropZone::None);
+    }
+
+    SECTION("the ghost's label is the zone's row")
+    {
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitRight))
+              == QStringLiteral("Tab → split right"));
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitTop))
+              == QStringLiteral("Tab → split up"));
+        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::InsertText)).isEmpty());
+        CHECK(window->dropGhostLabel(-1).isEmpty());
+        CHECK(window->dropGhostLabel(99).isEmpty());
+    }
+
+    SECTION("the ghost is the half on the zone's side, and a zone that is not a split has none")
+    {
+        constexpr auto Inset = 6.0;
+        auto const rect = [&](DropZone zone) {
+            return window->dropGhostRect(static_cast<int>(zone), PaneWidth, PaneHeight, Inset);
+        };
+        auto const half = contour::window::dropGhostOf(
+            DropZone::SplitRight,
+            contour::window::DropExtent { .width = PaneWidth, .height = PaneHeight },
+            Inset);
+        REQUIRE(half.has_value());
+        CHECK(rect(DropZone::SplitRight) == QRectF { half->x, half->y, half->width, half->height });
+        for (auto const zone:
+             { DropZone::SplitLeft, DropZone::SplitRight, DropZone::SplitTop, DropZone::SplitBottom })
+            CHECK_FALSE(rect(zone).isNull());
+        for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
+            CHECK(rect(zone).isNull());
+        CHECK(window->dropGhostRect(-1, PaneWidth, PaneHeight, Inset).isNull());
+        CHECK(window->dropGhostRect(99, PaneWidth, PaneHeight, Inset).isNull());
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a daemon-hosted window offers no split unless its daemon merges tabs",
+          "[contour][multiwindow][drop]")
+{
+    // Review Focus 4: a split made here would be undone by the daemon's next layout push, so a tab is
+    // left alone at every band; files still insert.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    for (auto const [x, y]:
+         { std::pair { 950.0, 250.0 }, { 50.0, 250.0 }, { 500.0, 20.0 }, { 500.0, 480.0 }, { 500.0, 250.0 } })
+        CHECK(zoneAt(*window, pane, DropPayload::Tab, x, y, fromOtherTab) == DropZone::PassThrough);
+    CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
+
+    // And performing a split drop anyway changes nothing.
+    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+    CHECK(window->count() == 2);
+    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+
+    factory->reportedHosting = contour::session::SessionHosting::Local;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE(
+    "WindowController: a daemon that merges tabs gets the drop, and the tab stays until its layout arrives",
+    "[contour][multiwindow][drop]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    factory->reportedTabMergeSupport = contour::session::TabMergeSupport::Supported;
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
+    CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
+
+    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+    REQUIRE(factory->requestedTabMerges.size() == 1);
+    CHECK(factory->requestedTabMerges.front().side == vtworkspace::SplitSide::Right);
+    CHECK(window->count() == 2);
+    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+
+    factory->reportedHosting = contour::session::SessionHosting::Local;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: dropTabOnPane merges on a split zone and changes nothing otherwise",
+          "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const dragged = window->activeSession();
+    window->createNewTab(); // [t0 (dragged), t1], t1 active
+    auto* const pane = window->activeSession();
+    auto const draggedId = dragged->modelSessionId();
+    auto const paneId = pane->modelSessionId();
+    auto const fromOtherTab = tabPayload(window.id, 0);
+
+    SECTION("a split zone grafts the dragged tab on that side")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+        REQUIRE(window->count() == 1);
+        auto const* const tab = manager.model().window(window.id)->activeTab();
+        REQUIRE(tab != nullptr);
+        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+        CHECK(tab->rootPane()->first()->session() == paneId);
+        CHECK(tab->rootPane()->second()->session() == draggedId);
+    }
+
+    SECTION("the zone names the side")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitTop), fromOtherTab);
+        auto const* const tab = manager.model().window(window.id)->activeTab();
+        REQUIRE(tab != nullptr);
+        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
+        CHECK(tab->rootPane()->first()->session() == draggedId);
+    }
+
+    SECTION("a zone that is not a split changes nothing")
+    {
+        for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
+            window->dropTabOnPane(pane, static_cast<int>(zone), fromOtherTab);
+        window->dropTabOnPane(pane, -1, fromOtherTab);
+        window->dropTabOnPane(pane, 99, fromOtherTab);
+        CHECK(window->count() == 2);
+    }
+
+    SECTION("the pane's own tab, and a forged window or row, change nothing")
+    {
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 1));
+        window->dropTabOnPane(
+            pane, static_cast<int>(DropZone::SplitRight), tabPayload(vtworkspace::WindowId { 9999 }, 0));
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 7));
+        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), QStringLiteral("{}"));
+        window->dropTabOnPane(nullptr, static_cast<int>(DropZone::SplitRight), fromOtherTab);
+        // Another process's drag, naming the same window and row: its tab is not ours to merge.
+        window->dropTabOnPane(
+            pane,
+            static_cast<int>(DropZone::SplitRight),
+            tabPayload(window.id, 0, contour::window::processToken() + QStringLiteral("x")));
+        CHECK(window->count() == 2);
+        CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a pane that has ended takes no files", "[contour][multiwindow][drop]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const live = window->activeSession();
+
+    // The next tab's session fails to start, which ends the pane where it stands.
+    factory->makePty = [](vtbackend::PageSize size) {
+        return std::make_unique<contour::test::ConfigurableStartPty>(
+            size, contour::test::ConfigurableStartPty::StartBehavior::Fail);
+    };
+    window->createNewTab();
+    auto* const ended = window->activeSession();
+    REQUIRE(ended != nullptr);
+    ended->start(); // a display would have started it
+    REQUIRE(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::StartFailed));
+
+    CHECK(zoneAt(*window, live, DropPayload::Files, 500, 250) == DropZone::InsertText);
+    CHECK(zoneAt(*window, ended, DropPayload::Files, 500, 250) == DropZone::None);
+    CHECK(zoneAt(*window, ended, DropPayload::Text, 500, 250) == DropZone::None);
+    // A tab may still split an ended pane: nothing is typed to it.
+    CHECK(zoneAt(*window, ended, DropPayload::Tab, 950, 250, tabPayload(window.id, 0))
+          == DropZone::SplitRight);
+
+    factory->makePty = nullptr;
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: a refused drop tells the window", "[contour][multiwindow][drop]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto* const pane = window->activeSession();
+    REQUIRE(window->notices().toastText().isEmpty());
+
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("file:///tmp/a%0Ab")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a file name holds a control or text-direction character."));
+
+    // A text drop with a line break onto a pane without bracketed paste says why nothing was typed.
+    pane->insertDroppedText(QStringLiteral("a\nb"));
+    CHECK(window->notices().toastText().contains(QStringLiteral("line break")));
+
+    // The toast names what was dropped: a link is not a file name.
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("https://a/b;c")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a link holds a character that could run as a command, and this "
+                            "pane's shell is not known."));
+    pane->insertDroppedUrls({ QUrl(QStringLiteral("https://a/b;c")), QUrl(QStringLiteral("file:///tmp/x")) });
+    CHECK(window->notices().toastText()
+          == QStringLiteral("Not inserted: a name holds a character that could run as a command, and this "
+                            "pane's shell is not known."));
+
+    contour::test::closeAllTabs(*window);
+}
+
+// }}}

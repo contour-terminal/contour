@@ -4,6 +4,8 @@
 #include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
+#include <vtbackend/testing/TestHelpers.hpp>
+
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 
@@ -14,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -31,6 +34,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include <QtTest/QSignalSpy>
 
 #ifndef _WIN32
     #include <unistd.h>
@@ -59,6 +64,7 @@
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshot.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/StdioChild.hpp>
@@ -89,11 +95,13 @@ struct TestTimeline
 /// @param endpoint The daemon to attach to, over TLS.
 /// @param timeline What the controller stamps; it must outlive the controller.
 /// @param sessionSettings Asked before each session the controller creates; empty to keep none.
+/// @param colorPreference The light/dark preference its first hello states; none states none.
 /// @return The controller, not yet connecting.
 [[nodiscard]] std::unique_ptr<contour::remote::NativeController> makeNativeController(
     vthost::TcpEndpoint endpoint,
     TestTimeline& timeline,
-    contour::remote::NativeController::SessionSettingsSource sessionSettings = {})
+    contour::remote::NativeController::SessionSettingsSource sessionSettings = {},
+    std::optional<vtbackend::ColorPreference> colorPreference = std::nullopt)
 {
     return std::make_unique<contour::remote::NativeController>(
         std::make_shared<vthost::TlsTransportFactory>(std::move(endpoint)),
@@ -101,6 +109,7 @@ struct TestTimeline
         std::string {},
         std::nullopt,
         std::move(sessionSettings),
+        colorPreference,
         core::platform::defaultSteadyClock(),
         timeline.timeline);
 }
@@ -215,6 +224,8 @@ struct DaemonFixture
     uint64_t instance = 1;  ///< Which run of the daemon @c host is; 0 states none.
     /// The host's profiles, by name; none resolves every spawn to the host's own settings.
     std::shared_ptr<vthost::ProfileCatalog const> profiles;
+    /// The workspace the first host restores as it starts; none restores nothing.
+    std::optional<vthost::WorkspaceRestore> restore;
 
     /// @return A host of the fixture's run @c instance, serving MockPty sessions.
     [[nodiscard]] std::unique_ptr<vthost::SessionHost> makeHost()
@@ -229,21 +240,26 @@ struct DaemonFixture
             vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                         .extensions = extensions,
                                         .profiles = profiles,
-                                        .instance = instance });
+                                        .instance = instance,
+                                        .restore = std::exchange(restore, std::nullopt) });
     }
 
     /// @param extensions The status-line extensions the hosted sessions run; none by default.
     /// @param services What each native connection is served with: what its handshake admits.
     /// @param instance Which run of the daemon the first host is; 0 for one that states none.
     /// @param profiles The host's profiles; none by default.
+    /// @param restore The workspace the first host restores as it starts; none by default. Only that host:
+    ///        restartHost()'s is a run with nothing to restore.
     explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
                            vthost::NativeSessionServices services = {},
                            uint64_t instance = 1,
-                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {}):
+                           std::shared_ptr<vthost::ProfileCatalog const> profiles = {},
+                           std::optional<vthost::WorkspaceRestore> restore = std::nullopt):
         extensions(std::move(extensions)),
         services(std::move(services)),
         instance(instance),
-        profiles(std::move(profiles))
+        profiles(std::move(profiles)),
+        restore(std::move(restore))
     {
         host = makeHost();
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
@@ -484,7 +500,10 @@ struct MirrorPane
 
     /// @param factory The ROUTER, not the controller — @see AttachRoute.
     /// @param pty The pty that factory handed out.
-    MirrorPane(contour::session::SessionFactory& factory, std::unique_ptr<vtpty::Pty> pty)
+    /// @param interruptions Where the session is told what a restart stopped; none by default.
+    MirrorPane(contour::session::SessionFactory& factory,
+               std::unique_ptr<vtpty::Pty> pty,
+               contour::session::InterruptionSink const& interruptions = {})
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pty->pageSize();
@@ -497,7 +516,7 @@ struct MirrorPane
                                                          std::nullopt,
                                                          vtbackend::TerminalClocks::system(),
                                                          vtbackend::randomSemanticBlockTokens());
-        factory.bindTerminal(device, *terminal);
+        factory.bindTerminal(device, *terminal, interruptions);
     }
 
     [[nodiscard]] vtpty::Pty& pty() const noexcept { return terminal->device(); }
@@ -610,6 +629,67 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pane.pty().isClosed());
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+TEST_CASE("NativeController.interruption.postedToTheSessionsThread", "[attach][controller][interrupted]")
+{
+    // The daemon restored a pane over the command its restart stopped. The mirror learns it on the reactor
+    // thread; the session it belongs to is told on the GUI thread (this one), by a posted call.
+    auto const snapshot = vthost::WorkspaceSnapshot {
+        .takenAt = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } },
+        .windows = { vthost::WindowSnapshot {
+            .tabs = { vthost::TabSnapshot {
+                .root = vthost::PaneNode { .pane = vthost::PaneSnapshot { .runningCommandLine =
+                                                                              "make test" } } } } } }
+    };
+    auto daemon =
+        DaemonFixture { {}, {}, 1, {}, vthost::WorkspaceRestore { .snapshot = snapshot, .divider = {} } };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(controller.pendingCount() == 1);
+    auto route = AttachRoute { controller };
+    auto pty = route.router.createPty(std::nullopt);
+    REQUIRE(pty != nullptr);
+
+    auto context = QObject {}; // the session's stand-in: it lives on this thread, the GUI's
+    auto told = std::vector<std::optional<vtbackend::CommandLineText>> {};
+    auto threads = std::vector<std::thread::id> {};
+    auto pane = MirrorPane { route.router,
+                             std::move(pty),
+                             contour::session::InterruptionSink {
+                                 .context = &context,
+                                 .deliver = [&](std::optional<vtbackend::CommandLineText> commandLine) {
+                                     told.push_back(std::move(commandLine));
+                                     threads.push_back(std::this_thread::get_id());
+                                 } } };
+
+    REQUIRE(waitUntil([&] { return !told.empty(); }));
+    REQUIRE(told.size() == 1);
+    CHECK(told.front() == vtbackend::CommandLineText { "make test" });
+    // Posted, not called from the reactor.
+    CHECK(threads.front() == std::this_thread::get_id());
+
+    // The shell's next command starts on the daemon: the daemon forgets it, the mirror follows, and the
+    // session is told it is gone -- once.
+    auto const session = vtworkspace::SessionId { 1 };
+    std::ignore = daemon.onDaemon([&] {
+        auto& terminal = *daemon.host->terminal(session);
+        auto& device = dynamic_cast<vthost::TappingPty&>(terminal.device());
+        dynamic_cast<vtpty::MockPty&>(device.inner())
+            .appendStdOutBuffer("\033]133;A\033\\$ \033]133;B\033\\\033]133;C\033\\");
+        std::ignore = terminal.processInputOnce();
+        return 0;
+    });
+    CHECK(waitUntil([&] { return told.size() == 2; }));
+    REQUIRE(told.size() == 2);
+    CHECK_FALSE(told.back().has_value());
+    CHECK_FALSE(waitUntil([&] { return told.size() > 2; }, /*attempts*/ 20));
+
+    controller.stop();
+    pane.terminal.reset();
 }
 
 TEST_CASE("NativeController.extension.permission", "[attach][controller][extensions]")
@@ -1152,6 +1232,44 @@ TEST_CASE("a vi mark on an attached pane is the daemon's, and the mirror shows i
     ac->stop();
 }
 
+TEST_CASE("the vi z keys fold an attached pane's command output", "[attach][controller][vi][folding]")
+{
+    // Folding is the client's view of the mirrored grid, as it is a local session's of its own: the keys
+    // never leave the client. What they need from the daemon is the shell's marks, carried as row flags.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession(vtbackend::test::commandRun("ls", { "one", "two", "three" }) + "$ ");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value(); }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto* pane = win->activeSession();
+    REQUIRE(pane != nullptr);
+    auto& terminal = pane->terminal();
+    // Under the terminal lock: the controller writes the mirror from its reactor thread.
+    auto const hidden = [&] {
+        auto const guard = std::lock_guard { terminal };
+        return terminal.hiddenLineCount();
+    };
+    REQUIRE(waitUntil([&] {
+        auto const guard = std::lock_guard { terminal };
+        return terminal.primaryScreen().grid().renderMainPageText().contains("three");
+    }));
+
+    (*pane)(contour::actions::ViNormalMode {});
+    typeKeys(*pane, "zM");
+    CHECK(hidden() > vtbackend::LineCount(0));
+
+    typeKeys(*pane, "zR");
+    CHECK(hidden() == vtbackend::LineCount(0));
+
+    ac->stop();
+}
+
 // Regression: what a client reports upstream after a split. `proto::ResizeRequest` names the whole
 // CLIENT AREA — the daemon projects the tab's pane tree into it (SessionHost::reprojectLayouts ->
 // vtworkspace::layoutInCells). Reporting one PANE's grid there halved the area on every split: a
@@ -1300,6 +1418,100 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
     CHECK(app.manager().model().window(win.id)->tabAt(0)->paneCount() == 2);
     CHECK(app.manager().model().window(win.id)->tabCount() == 1);
+
+    ac->stop();
+}
+
+// A tab dropped on a pane's edge is merged into the split BY THE DAEMON: it moves the tab's sessions into the
+// target tab and re-pushes its layout, and the reconciler grafts the same tab here. Nothing is spawned or
+// closed, so both sessions keep running on the daemon.
+TEST_CASE("attach merges a tab into a split on the daemon, and the sessions live on",
+          "[attach][controller][merge][daemon]")
+{
+    auto daemon = DaemonFixture {};
+    auto const target = daemon.seedSession("target");
+    auto const dragged = daemon.seedSession("dragged");
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 2; }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto& manager = app.manager();
+    auto* const localWindow = manager.model().window(win.id);
+    REQUIRE(localWindow->tabCount() == 2);
+    REQUIRE(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Supported);
+
+    // The tabs in the daemon's order: [target, dragged]; drop the second on the first's right edge.
+    auto* const targetTab = localWindow->tabAt(0);
+    manager.mergeTabIntoSplit(
+        win.id, 1, win.id, targetTab->id(), targetTab->rootPane()->id(), vtworkspace::SplitSide::Right);
+
+    // Authored on the daemon, not made here: nothing moved until its layout arrives.
+    CHECK(localWindow->tabCount() == 2);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 1; }));
+    contour::remote::applyRemoteLayout(manager, win.id, *ac);
+
+    REQUIRE(localWindow->tabCount() == 1);
+    auto* const merged = localWindow->tabAt(0);
+    CHECK(merged->paneCount() == 2);
+    CHECK(merged->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+    REQUIRE(manager.sessionsOfTab(merged).size() == 2);
+    // And on the daemon both sessions are still running, in one tab.
+    CHECK(daemon.onDaemon([&] { return daemon.host->terminal(target) != nullptr; }));
+    CHECK(daemon.onDaemon([&] { return daemon.host->terminal(dragged) != nullptr; }));
+    CHECK(daemon.onDaemon([&] {
+        return std::get<1>(daemon.host->model().findSessionLeaf(target))
+               == std::get<1>(daemon.host->model().findSessionLeaf(dragged));
+    }));
+
+    ac->stop();
+}
+
+TEST_CASE("a tab dropped against a daemon without TabMerge is not offered a split",
+          "[attach][controller][merge][compat][daemon]")
+{
+    using vthost::proto::Capability;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("one");
+    std::ignore = daemon.seedSession("two");
+    daemon.whileDisconnected([&] {
+        daemon.services.handshake.capabilities = vthost::proto::CapabilitySet::of(
+            { Capability::ExtensionPermissions, Capability::InitialClientArea, Capability::AttachIntent });
+    });
+
+    auto timeline = TestTimeline {};
+    auto acOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value() && ac->layout()->tabs.size() == 2; }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto& manager = app.manager();
+
+    REQUIRE(ac->negotiated().has_value());
+    CHECK_FALSE(ac->negotiated()->shared.contains(Capability::TabMerge));
+    // The tab is left to tear off, as it was before the verb existed: the window offers no split and the
+    // controller routes nothing.
+    CHECK(manager.tabMergeSupport(win.id, win.id) == contour::session::TabMergeSupport::Unsupported);
+    auto* const first = manager.model().window(win.id)->tabAt(0);
+    auto* const second = manager.model().window(win.id)->tabAt(1);
+    auto const* const firstPty = &manager.sessionsOfTab(first).front()->terminal().device();
+    auto const* const secondPty = &manager.sessionsOfTab(second).front()->terminal().device();
+    // And a request made anyway is refused, never left for the manager to merge here: the daemon owns this
+    // layout and would never hear of it.
+    CHECK(ac->requestRemoteTabMerge(std::array { secondPty }, firstPty, vtworkspace::SplitSide::Right)
+          == contour::session::RemoteRouting::Refused);
+    // A pane that is not bound to a daemon session (yet) is no pane the daemon can name.
+    CHECK(ac->requestRemoteTabMerge(
+              std::array<vtpty::Pty const*, 1> { nullptr }, firstPty, vtworkspace::SplitSide::Right)
+          == contour::session::RemoteRouting::Refused);
 
     ac->stop();
 }
@@ -1931,6 +2143,73 @@ TEST_CASE("a restarted listener re-snapshots the same sessions into the same pan
     pane.terminal.reset();
 }
 
+TEST_CASE("a dark app's controller shows its first pane dark, never the host's light palette",
+          "[attach][controller][colors]")
+{
+    using vthost::testing::FakeDualPaletteCatalog;
+    auto daemon = DaemonFixture { {}, {}, 1, std::make_shared<FakeDualPaletteCatalog>() };
+    std::ignore = daemon.seedSession("first");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned =
+        makeNativeController(daemon.endpoint(), timeline, {}, vtbackend::ColorPreference::Dark);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("first"));
+    {
+        auto const guard = std::lock_guard { *pane.terminal };
+        CHECK(pane.terminal->colorPalette().defaultBackground == FakeDualPaletteCatalog::DarkBackground);
+    }
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a preference stated while disconnected reaches the daemon once it answers again",
+          "[attach][controller][reconnect][colors]")
+{
+    // The client states light, the connection drops, the OS goes dark while it is down, and the reconnect
+    // must leave the mirror dark: the request made while down is refused, so the reconnect states it again.
+    using contour::session::HostedOperation;
+    using contour::session::HostedOperationRequest;
+    using contour::session::HostedOperationRoute;
+    using vthost::client::ConnectionState;
+    using vthost::testing::FakeDualPaletteCatalog;
+    auto daemon = DaemonFixture { {}, {}, 1, std::make_shared<FakeDualPaletteCatalog>() };
+    std::ignore = daemon.seedSession("colors");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("colors"));
+    auto const backgroundIsDark = [&] {
+        auto const guard = std::lock_guard { *pane.terminal };
+        return pane.terminal->colorPalette().defaultBackground == FakeDualPaletteCatalog::DarkBackground;
+    };
+    REQUIRE_FALSE(backgroundIsDark());
+
+    CHECK(controller.requestHostedOperation(
+              &pane.pty(), HostedOperationRequest { .operation = HostedOperation::UseLightColors })
+          == HostedOperationRoute::RunOnHost);
+
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    CHECK(controller.requestHostedOperation(
+              &pane.pty(), HostedOperationRequest { .operation = HostedOperation::UseDarkColors })
+          == HostedOperationRoute::Unreachable);
+
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }, 1000));
+    CHECK(waitUntil(backgroundIsDark));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
 TEST_CASE("keys typed while reconnecting are dropped", "[attach][controller][reconnect]")
 {
     // Review focus 5: never replayed into whatever shell answers after the reconnect.
@@ -2022,6 +2301,12 @@ struct NativeControllerTestAccess
         done.get_future().wait();
     }
 
+    /// Makes the reactor's run end with an exception, as a decode error escaping the root task would.
+    static void killReactor(contour::remote::NativeController& controller)
+    {
+        controller._reactor.post([] { throw std::runtime_error("reactor died"); });
+    }
+
     /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.
     static void closeWhileEnding(contour::remote::NativeController& controller, uint64_t session)
     {
@@ -2069,6 +2354,118 @@ TEST_CASE("a pane closed as its connection ends is closed once the same daemon a
 
     controller.stop();
     pane.terminal.reset();
+}
+
+TEST_CASE("the daemon's echo report reaches the pane's device and its observer, with no output after it",
+          "[attach][controller][inputecho]")
+{
+    // sudo may turn echo off after its prompt printed: nothing follows, so the daemon's idle check tells the
+    // client (FlushPolicy::inputEchoCheck, short here: it is a setting, not a sleep), and the controller
+    // routes the report to the pane's device and wakes its owner (vtpty::Pty::setInputEchoObserver).
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("prompt");
+    auto const setEchoOnDaemon = [&](vtpty::InputEcho echo) {
+        daemon.onDaemon([&] {
+            auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+            dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(echo);
+            return 0;
+        });
+    };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("prompt"));
+    REQUIRE(controller.isBound(session.value));
+
+    auto woken = std::atomic<int> { 0 };
+    pane.pty().setInputEchoObserver([&woken] { ++woken; }); // runs on the reactor thread
+    CHECK(pane.pty().inputEcho() == vtpty::InputEcho::Unknown);
+
+    setEchoOnDaemon(vtpty::InputEcho::Hidden);
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+    CHECK(woken.load() == 1);
+
+    setEchoOnDaemon(vtpty::InputEcho::Echoed);
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Echoed; }));
+    CHECK(woken.load() == 2);
+
+    pane.pty().setInputEchoObserver({}); // before the counter goes
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a pane's echo state is not trusted while the connection is down",
+          "[attach][controller][inputecho][reconnect]")
+{
+    // Review M1: with typed input dropped and nothing reading, a stale Hidden would keep the lock and secure
+    // input on. The pane reads Unknown while reconnecting; the reconnect's snapshot states the real one.
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("prompt");
+    daemon.onDaemon([&] {
+        auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+        dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(vtpty::InputEcho::Hidden);
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(pane.shows("prompt"));
+    REQUIRE(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+
+    daemon.refuseConnections();
+    CHECK(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Unknown; }));
+    daemon.serveAgain();
+    CHECK(waitUntil([&] { return pane.pty().inputEcho() == vtpty::InputEcho::Hidden; }, 3000));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a restarted daemon's new pane does not inherit the old run's echo state",
+          "[attach][controller][inputecho][reconnect]")
+{
+    // Review M1: session ids count from 1 in every run of a daemon, so a new pane with the old id must not
+    // be handed the old pane's Hidden -- the daemon says nothing of a PTY that reads Unknown.
+    auto services = vthost::NativeSessionServices {};
+    services.flush.inputEchoCheck = std::chrono::milliseconds { 2 };
+    auto daemon = DaemonFixture { {}, services };
+    auto const session = daemon.seedSession("old run");
+    daemon.onDaemon([&] {
+        auto& tapped = dynamic_cast<vthost::TappingPty&>(daemon.host->terminal(session)->device());
+        dynamic_cast<vtpty::MockPty&>(tapped.inner()).setInputEcho(vtpty::InputEcho::Hidden);
+        return 0;
+    });
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto old = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    REQUIRE(old.shows("old run"));
+    REQUIRE(waitUntil([&] { return old.pty().inputEcho() == vtpty::InputEcho::Hidden; }));
+
+    daemon.restartHost();
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 1; }, 3000));
+    auto fresh = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    CHECK(fresh.pty().inputEcho() == vtpty::InputEcho::Unknown);
+
+    controller.stop();
+    fresh.terminal.reset();
+    old.terminal.reset();
 }
 
 TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attach][controller][reconnect]")
@@ -2260,6 +2657,7 @@ TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][contro
         std::string {},
         std::nullopt,
         {},
+        std::nullopt,
         core::platform::defaultSteadyClock(),
         timeline.timeline
     };
@@ -2312,6 +2710,202 @@ TEST_CASE("NativeController shows the refusal text", "[contour][remote]")
                              daemon.port));
         controller.stop();
     }
+}
+
+TEST_CASE("NativeController.reconnect.afterARefusal", "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectError;
+    using vthost::client::ConnectionState;
+    // A daemon that wants another token refuses the attach for good; once it accepts, a reconnect from the
+    // footer reaches it on a new supervised run.
+    auto daemon = DaemonFixture {
+        {}, vthost::NativeSessionServices { .handshake = { .acceptedTokens = { { .token = "right" } } } }
+    };
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    CHECK(controller.reconnectSupport() == contour::session::ReconnectSupport::Supported);
+
+    auto const refused = controller.connectAndWait(10s);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(controller.connectionState() == ConnectionState::Failed); // a first connect is not retried
+    CHECK_FALSE(controller.failure().empty());
+
+    // The reactor has recorded the failure, but the GUI has not yet handled connectionClosed: its stop() has
+    // not run, and a reconnect now would start a run that the stale handler then stops.
+    daemon.serveAgain([&] { daemon.services = {}; });
+    auto const early = controller.reconnect();
+    REQUIRE_FALSE(early.has_value());
+    CHECK(early.error() == ReconnectError::ConnectionEnding);
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+
+    controller.stop(); // what the GUI's connectionClosed handler does
+    auto const started = controller.reconnect();
+    REQUIRE(started.has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    CHECK(controller.failure().empty());
+
+    // While the run is up there is nothing to start.
+    auto const again = controller.reconnect();
+    REQUIRE_FALSE(again.has_value());
+    CHECK(again.error() == ReconnectError::AlreadyConnected);
+
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.afterTheReactorDied", "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // A reactor that dies tells its owner the connection closed, so the owner stop()s the controller and
+    // Reconnect is not refused for good.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto closed = std::atomic<int> { 0 };
+    auto const connection = QObject::connect(
+        &controller,
+        &contour::remote::NativeController::connectionClosed,
+        &controller,
+        [&] { ++closed; },
+        Qt::DirectConnection);
+
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    REQUIRE(waitUntil([&] { return closed.load() == 1; }));
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+    CHECK_FALSE(controller.failure().empty());
+
+    controller.stop(); // what the GUI's connectionClosed handler does
+    QObject::disconnect(connection);
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.restartedReactorDiesBeforeConnecting",
+          "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // A restarted run is Connecting from the moment Reconnect returns: a reactor that dies before it enters
+    // Connecting itself must still tell its owner the connection closed, not hide behind the old Failed.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    auto closed = std::atomic<int> { 0 };
+    auto const connection = QObject::connect(
+        &controller,
+        &contour::remote::NativeController::connectionClosed,
+        &controller,
+        [&] { ++closed; },
+        Qt::DirectConnection);
+
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    REQUIRE(waitUntil([&] { return closed.load() == 1; }));
+    CHECK(controller.connectionState() == ConnectionState::Failed);
+    controller.stop(); // what the GUI's connectionClosed handler does
+
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(controller.connectionState() != ConnectionState::Failed);
+    contour::remote::NativeControllerTestAccess::killReactor(controller);
+    CHECK(waitUntil([&] { return closed.load() == 2; }));
+
+    controller.stop();
+    QObject::disconnect(connection);
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.afterAStop", "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // The app stops the controller when its connection ends for good (closing every mirror pty); a
+    // reconnect after that starts the run again on a fresh reactor.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    controller.stop();
+    CHECK(controller.connectionState() == ConnectionState::Stopped);
+
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.neverAttached", "[attach][controller][reconnect][manual]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto const result = controllerOwned->reconnect();
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == contour::session::ReconnectError::NotAttached);
+}
+
+TEST_CASE("NativeController.reconnect.takesAPaneBackByItsRemoteSession",
+          "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectBinding;
+    // The layout the daemon pushes names the session a lost pane mirrored: the next pty binds to it again,
+    // keeping the id. A pane whose session the daemon no longer has is Gone.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto const session = controller.sessionForPty(&pane.pty());
+    REQUIRE(session.has_value());
+
+    CHECK(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
+    // Bound for the next pty, which therefore may be made though nothing is pending.
+    CHECK(controller.canCreateSession());
+    auto replacement = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    CHECK(controller.sessionForPty(&replacement.pty()) == session);
+    CHECK_FALSE(controller.canCreateSession());
+
+    // A pty the controller never handed out names no session.
+    auto stranger = vtpty::MockPty { cells(80, 24) };
+    CHECK(controller.bindForReconnect(&stranger) == ReconnectBinding::Gone);
+
+    controller.stop();
+    replacement.terminal.reset();
+    pane.terminal.reset();
+}
+
+TEST_CASE("NativeController.reconnect.cancelledBindingLeavesNothingForTheNextPty",
+          "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectBinding;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+
+    REQUIRE(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
+    REQUIRE(controller.canCreateSession());
+    controller.cancelReconnectBinding();
+    CHECK_FALSE(controller.canCreateSession());
+
+    controller.stop();
+    pane.terminal.reset();
 }
 
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
@@ -2392,6 +2986,7 @@ TEST_CASE("NativeController names the transport of a failure once", "[attach][co
             std::string {},
             std::nullopt,
             {},
+            std::nullopt,
             core::platform::defaultSteadyClock(),
             timeline.timeline
         };
@@ -2459,6 +3054,7 @@ TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as a
         std::string {},
         std::nullopt,
         {},
+        std::nullopt,
         core::platform::defaultSteadyClock(),
         timeline.timeline
     };
@@ -2569,7 +3165,9 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
             return true;
         }
         void requestRemoteClose(vtpty::Pty const*) override { ++closes; }
-        void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+        void bindTerminal(vtpty::Pty const* pty,
+                          vtbackend::Terminal& terminal,
+                          contour::session::InterruptionSink const& /*interruptions*/) override
         {
             ++binds;
             boundPty = pty;
@@ -2602,7 +3200,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(router.requestRemoteWindow({}));
     router.requestRemoteClose(device);
     router.reportSplitRatio(device, device, 0.7);
-    router.bindTerminal(device, terminal);
+    router.bindTerminal(device, terminal, {});
 
     CHECK(delegate.ptys == 1);
     CHECK(delegate.tabs == 1);
@@ -2615,4 +3213,111 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     CHECK(delegate.binds == 1);
     CHECK(delegate.boundPty == device);
     CHECK(delegate.boundTerminal == &terminal);
+}
+
+namespace
+{
+
+/// @return A restore of two windows holding three and four single-pane tabs.
+[[nodiscard]] vthost::WorkspaceRestore twoWindowsSevenTabs()
+{
+    auto snapshot = vthost::WorkspaceSnapshot {};
+    for (auto const tabs: { 3, 4 })
+    {
+        auto window = vthost::WindowSnapshot {};
+        window.tabs.resize(static_cast<size_t>(tabs));
+        snapshot.windows.push_back(std::move(window));
+    }
+    return vthost::WorkspaceRestore { .snapshot = std::move(snapshot) };
+}
+
+} // namespace
+
+TEST_CASE("a controller attached after a daemon restore is told what came back, once",
+          "[attach][controller][restore]")
+{
+    auto daemon = DaemonFixture { {}, {}, 1, {}, twoWindowsSevenTabs() };
+    auto timeline = TestTimeline {};
+
+    auto const firstOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& first = *firstOwned;
+    // The signals fire on the reactor thread; queued delivery keeps what they record on this thread, in
+    // the order they were raised.
+    auto const context = QObject {};
+    auto restoredTold = std::vector<std::pair<quint32, quint32>> {};
+    auto stateSignals = size_t { 0 };
+    auto stateSeenByLastSignal = vthost::client::ConnectionState::Connecting;
+    QObject::connect(
+        &first,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { restoredTold.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
+    QObject::connect(
+        &first,
+        &contour::remote::NativeController::connectionStateChanged,
+        &context,
+        [&] {
+            ++stateSignals;
+            stateSeenByLastSignal = first.connectionState();
+        },
+        Qt::QueuedConnection);
+    REQUIRE(first.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return restoredTold.size() == 1; }));
+    CHECK(restoredTold.front() == std::pair<quint32, quint32> { 2, 7 });
+
+    // A second client of the same daemon run is told nothing.
+    auto const secondOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& second = *secondOwned;
+    auto untold = std::vector<std::pair<quint32, quint32>> {};
+    QObject::connect(
+        &second,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { untold.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
+    REQUIRE(second.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return second.layout().has_value(); }));
+    CHECK(untold.empty());
+
+    // Nor does the first one's reconnect to it raise the summary again. The reactor raises the summary (if
+    // it were to) just before the state signal that announces Connected, and queued signals arrive in
+    // order, so once this thread has seen that state signal the summary has had its chance. A reconnect
+    // raises at least two state signals: Reconnecting, then Connected.
+    REQUIRE(waitUntil([&] {
+        return first.connectionState() == vthost::client::ConnectionState::Connected
+               && stateSeenByLastSignal == vthost::client::ConnectionState::Connected;
+    }));
+    auto const signalsBeforeDrop = stateSignals;
+    daemon.dropConnections();
+    REQUIRE(waitUntil([&] {
+        return stateSignals >= signalsBeforeDrop + 2
+               && first.connectionState() == vthost::client::ConnectionState::Connected
+               && stateSeenByLastSignal == vthost::client::ConnectionState::Connected;
+    }));
+    CHECK(restoredTold.size() == 1);
+
+    first.stop();
+    second.stop();
+}
+
+TEST_CASE("a hello that restored nothing raises no summary", "[attach][controller][restore]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("plain");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const context = QObject {};
+    auto told = std::vector<std::pair<quint32, quint32>> {};
+    QObject::connect(
+        &controller,
+        &contour::remote::NativeController::workspaceRestored,
+        &context,
+        [&](quint32 windows, quint32 tabs) { told.emplace_back(windows, tabs); },
+        Qt::QueuedConnection);
+    REQUIRE(controller.connectAndWait(10s).has_value());
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    CHECK(told.empty());
+    controller.stop();
 }

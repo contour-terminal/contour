@@ -7,7 +7,7 @@
 // Why this needs its own file. Qt fires NO focus event on a tab switch: PaneNode.qml's leaf Loader
 // stays active, so the same TerminalDisplay item is reused and only its `session:` property rebinds.
 // TerminalSessionManager::syncFocusForWindow is the compensating seam, and it is reached from the
-// model's activeTabChanged / activePaneChanged. TerminalSession_test covers the setFocusedSession
+// model's activeTabChanged / activePaneChanged. The TerminalSession tests cover the setFocusedSession
 // PRIMITIVE; these cases cover the CHAIN, down to the bytes in the PTY.
 //
 // These are also the regression pins for the focus-ownership refactor. syncFocusForWindow used to
@@ -35,6 +35,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -336,4 +337,38 @@ TEST_CASE("focus: a background window's tab activation cannot steal focus", "[co
 
     closeAllTabs(*windowA);
     closeAllTabs(*windowB);
+}
+
+TEST_CASE("focus: an application command never lands in the quick terminal",
+          "[contour][focus][quickterminal]")
+{
+    using contour::window::WindowRole;
+    TestApp app { std::make_unique<MockPtySessionFactory>() };
+    ScopedController const normal { app.manager() };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *normal, 1);
+
+    // The quick terminal is made last, so it holds the focus as a spawned window does.
+    app.manager().stageWindowRole(WindowRole::QuickTerminal);
+    ScopedController const quick { app.manager() };
+    std::ignore = contour::test::createSessionTabs(app.manager(), *quick, 1);
+    REQUIRE(quick->role() == WindowRole::QuickTerminal);
+    REQUIRE(app.manager().focusedWindow() == quick->windowId());
+
+    // Focused, hidden after, or the last to hold the focus: the ordinary window is where it goes.
+    CHECK(app.manager().applicationController() == normal.controller);
+    app.manager().clearFocusedWindow(quick->windowId());
+    CHECK(app.manager().applicationController() == normal.controller);
+
+    // It does not displace the window that held the focus before it.
+    app.manager().setFocusedWindow(normal->windowId());
+    app.manager().clearFocusedWindow(normal->windowId());
+    app.manager().setFocusedWindow(quick->windowId());
+    app.manager().clearFocusedWindow(quick->windowId());
+    CHECK(app.manager().applicationController() == normal.controller);
+
+    // With no ordinary window left there is none to run it in, rather than the hidden one.
+    app.manager().removeWindowController(normal->windowId());
+    CHECK(app.manager().applicationController() == nullptr);
+
+    contour::test::closeAllTabs(*quick);
 }

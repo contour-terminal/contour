@@ -8,6 +8,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <ranges>
+
+using contour::display::imeAnchorCell;
 using contour::display::imeCursorAddressable;
 using contour::display::imeCursorRectangle;
 using vtbackend::CellLocation;
@@ -103,4 +106,85 @@ TEST_CASE("imeCursorAddressable.negative coordinates are refused", "[contour][im
     // The lexicographic CellLocation ordering alone would admit {0, -1} — the guard must not.
     CHECK_FALSE(imeCursorAddressable(cursorAt(-1, 0), page(24, 80)));
     CHECK_FALSE(imeCursorAddressable(cursorAt(0, -1), page(24, 80)));
+}
+
+TEST_CASE("imeAnchorCell.interiorCellsAnchorAtThemselves", "[contour][ime]")
+{
+    auto const pageSize = page(3, 4);
+    for (auto const line: std::views::iota(0, 3))
+        for (auto const column: std::views::iota(0, 4))
+            CHECK(imeAnchorCell(cursorAt(line, column), pageSize) == cursorAt(line, column));
+}
+
+TEST_CASE("imeAnchorCell.clampsTheSentinelColumn", "[contour][ime]")
+{
+    // Column == page width, one past the last cell, which Terminal::contains() admits. It names no cell; the
+    // line's last cell stands in. (The grid keeps a wrap-pending cursor on the last cell itself.)
+    CHECK(imeAnchorCell(cursorAt(2, 4), page(3, 4)) == cursorAt(2, 3));
+    CHECK(imeAnchorCell(cursorAt(0, 4), page(3, 4)) == cursorAt(0, 3));
+}
+
+TEST_CASE("imePreeditAnchor.anchorsAtThePreeditsFirstCell", "[contour][ime]")
+{
+    using contour::display::imePreeditAnchor;
+    auto constexpr Columns = ColumnCount(10);
+
+    SECTION("nothing composed: the cursor's cell, as wide as the grid's glyph")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 4), "", Columns, 2);
+        CHECK(anchor.cell == cursorAt(1, 4));
+        CHECK(anchor.width == 2);
+    }
+
+    SECTION("a preedit that fits: the cursor's cell, as wide as its first cluster")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 4), "にほ", Columns, 1);
+        CHECK(anchor.cell == cursorAt(1, 4));
+        CHECK(anchor.width == 2);
+    }
+
+    SECTION("a preedit moved left to fit: where it is drawn")
+    {
+        auto const anchor = imePreeditAnchor(cursorAt(1, 9), "にほ", Columns, 1);
+        CHECK(anchor.cell == cursorAt(1, 6));
+        CHECK(anchor.width == 2);
+    }
+}
+
+TEST_CASE("imeAnchorCell.outsideThePageHasNoAnchor", "[contour][ime]")
+{
+    auto const pageSize = page(3, 4);
+    CHECK_FALSE(imeAnchorCell(cursorAt(3, 0), pageSize).has_value()); // the line below the page
+    CHECK_FALSE(imeAnchorCell(cursorAt(3, 4), pageSize).has_value()); // wrap-pending, but below the page
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, 5), pageSize).has_value()); // past the wrap-pending column
+    CHECK_FALSE(imeAnchorCell(cursorAt(-1, 0), pageSize).has_value());
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, -1), pageSize).has_value());
+    CHECK_FALSE(imeAnchorCell(cursorAt(0, 0), page(3, 0)).has_value()); // a page without columns
+}
+
+TEST_CASE("imePreeditAnchor.agreesWithTheRenderBufferOnAWideGlyph", "[contour][ime]")
+{
+    // The render buffer starts a preedit moved onto a wide glyph's right half one column further left; the
+    // candidate window anchors there too, from the same test of the line.
+    auto const continuesAWideGlyph = [](ColumnOffset column) {
+        return column == ColumnOffset(4);
+    };
+    auto const anchor =
+        contour::display::imePreeditAnchor(cursorAt(0, 9), "にほん", ColumnCount(10), 1, continuesAWideGlyph);
+    CHECK(anchor.cell == cursorAt(0, 3));
+}
+
+TEST_CASE("imeDrawnAnchor.aDoubleWidthLineDrawsTheAnchorTwiceAsFarAndAsWide", "[contour][ime]")
+{
+    using contour::display::ImeAnchor;
+    using contour::display::imeDrawnAnchor;
+    auto const anchor = ImeAnchor { .cell = cursorAt(2, 5), .width = 2 };
+
+    auto const single = imeDrawnAnchor(anchor, vtbackend::LineFlags {});
+    CHECK(single.cell == cursorAt(2, 5));
+    CHECK(single.width == 2);
+
+    auto const doubled = imeDrawnAnchor(anchor, vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth });
+    CHECK(doubled.cell == cursorAt(2, 10));
+    CHECK(doubled.width == 4);
 }

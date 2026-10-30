@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -58,45 +59,89 @@ class ReactorThread
     ///        on the loop (e.g. NativeClient::runClient or
     ///        TmuxClientModel::runControlMode).
     /// @param onFailure Invoked ON THE REACTOR THREAD, once, with the reason when the root task
-    ///        ends by an exception other than cancellation — so the owner can settle its own
+    ///        ends by an exception other than cancellation, or as soon as a posted callback throws
+    ///        (@see post) — so the owner can settle its own
     ///        connection state and wake whoever waits on it. Without it a dead reactor is
     ///        indistinguishable from a slow one until the caller's timeout expires. Optional.
     void start(std::function<core::async::Task<void>(core::net::EventLoop*)> rootTask,
                std::function<void(std::string const&)> onFailure = {})
     {
-        _thread =
-            std::thread { [this, rootTask = std::move(rootTask), onFailure = std::move(onFailure)]() mutable {
-                // EVERYTHING is caught here, because an exception leaving a std::thread's function is
-                // unconditional std::terminate: no unwind, no handler, the whole Contour process gone —
-                // every local, non-daemon tab in every window with it. And the reactor is where remote
-                // input is decoded: PDU frames up to proto::MaxFrameSize, vectors and strings grown to
-                // peer-named lengths, image data allocated from a daemon announcement. bad_alloc and
-                // length_error are therefore reachable from the wire. The daemon side already isolates
-                // each flow for precisely this reason (@see ConnectionAcceptor::superviseConnection);
-                // one malformed peer must not take the GUI down either.
-                try
-                {
-                    _loop.blockOn(rootTask(&_loop));
-                }
-                catch (core::async::OperationCancelled const&)
-                {
-                    // requestStop() unwound the root task — the intended shutdown.
-                    _cancelled.store(true, std::memory_order_release);
-                }
-                catch (std::exception const& e)
-                {
-                    recordFailure(e.what(), onFailure);
-                }
-                catch (...)
-                {
-                    recordFailure("unknown exception", onFailure);
-                }
-                {
-                    auto const lock = std::lock_guard { _exitMutex };
-                    _exited = true;
-                }
-                _exitCondition.notify_all();
-            } };
+        auto* const loop = currentLoop();
+        _onFailure = std::move(onFailure);
+        _thread = std::thread { [this, loop, rootTask = std::move(rootTask)]() mutable {
+            // EVERYTHING is caught here, because an exception leaving a std::thread's function is
+            // unconditional std::terminate: no unwind, no handler, the whole Contour process gone —
+            // every local, non-daemon tab in every window with it. And the reactor is where remote
+            // input is decoded: PDU frames up to proto::MaxFrameSize, vectors and strings grown to
+            // peer-named lengths, image data allocated from a daemon announcement. bad_alloc and
+            // length_error are therefore reachable from the wire. The daemon side already isolates
+            // each flow for precisely this reason (@see ConnectionAcceptor::superviseConnection);
+            // one malformed peer must not take the GUI down either.
+            auto failure = std::optional<std::string> {};
+            auto cancelled = false;
+            try
+            {
+                loop->blockOn(rootTask(loop));
+            }
+            catch (core::async::OperationCancelled const&)
+            {
+                // requestStop() unwound the root task — the intended shutdown, unless a posted
+                // callback's throw is what asked for it (below).
+                cancelled = true;
+            }
+            catch (std::exception const& e)
+            {
+                failure = e.what();
+            }
+            catch (...)
+            {
+                failure = "unknown exception";
+            }
+            // A posted callback that threw stopped the loop and has already been reported: that throw
+            // is why the run ended, not the cancellation it caused.
+            if (_postFailure)
+                _postFailure.reset();
+            else if (failure)
+                recordFailure(*failure);
+            else if (cancelled)
+                _cancelled.store(true, std::memory_order_release);
+            {
+                auto const lock = std::lock_guard { _exitMutex };
+                _exited = true;
+            }
+            _exitCondition.notify_all();
+        } };
+    }
+
+    /// Runs @p rootTask on a fresh loop after the last one ended: joins the finished thread, replaces the
+    /// cancelled loop (a stopped loop cannot run again) and starts the thread again.
+    ///
+    /// Only for a root task that has ended or is about to (a connection that failed or was stopped): it joins
+    /// first, so a task still running blocks the call. Posts that race with the replacement go to whichever
+    /// loop is current; one that reached the old loop is dropped with it.
+    /// @param rootTask The coroutine factory that produces the root task to run on the new loop.
+    /// @param onFailure As for start().
+    void restart(std::function<core::async::Task<void>(core::net::EventLoop*)> rootTask,
+                 std::function<void(std::string const&)> onFailure = {})
+    {
+        join();
+        {
+            auto const lock = std::lock_guard { _loopMutex };
+            _loop.reset(); // before its backend
+            _backend = core::net::makeDefaultBackend();
+            _loop = std::make_unique<core::net::EventLoop>(*_backend);
+        }
+        {
+            auto const lock = std::lock_guard { _exitMutex };
+            _exited = false;
+        }
+        _cancelled.store(false, std::memory_order_release);
+        _postFailure.reset(); // the joined thread was its last user
+        {
+            auto const lock = std::lock_guard { _failureMutex };
+            _failure.clear();
+        }
+        start(std::move(rootTask), std::move(onFailure));
     }
 
     /// Waits until the root task has ended, for at most @p bound. Thread-safe.
@@ -127,14 +172,40 @@ class ReactorThread
     }
 
     /// Marshals @p fn onto the loop thread. Thread-safe.
+    ///
+    /// A throw out of @p fn ends the run as a failure of the root task does -- recorded, and handed to
+    /// start()'s onFailure, there and then -- but in order: it is caught inside the turn and the loop is
+    /// stopped, so every flow unwinds by cancellation. Let out of the turn instead, it ended blockOn with the
+    /// root task still suspended, and destroying that root freed frames the same turn had queued to resume;
+    /// the loop's teardown then resumed them, a use-after-free and a double free.
     /// @param fn The work to marshal onto the reactor thread.
-    void post(std::function<void()> fn) { _loop.post(std::move(fn)); }
+    void post(std::function<void()> fn)
+    {
+        auto const lock = std::lock_guard { _loopMutex };
+        auto* const loop = _loop.get();
+        _loop->post([this, loop, fn = std::move(fn)] {
+            try
+            {
+                fn();
+            }
+            catch (std::exception const& e)
+            {
+                failFromPost(*loop, e.what());
+            }
+            catch (...)
+            {
+                failFromPost(*loop, "unknown exception");
+            }
+        });
+    }
 
     /// Cancels every flow on the loop (marshaled onto it), so a task parked
     /// in connect/read unwinds and the thread becomes joinable.
     void requestStop()
     {
-        _loop.post([this] { _loop.requestStop(); });
+        auto const lock = std::lock_guard { _loopMutex };
+        auto* const loop = _loop.get();
+        loop->post([loop] { loop->requestStop(); });
     }
 
     /// Waits for the root task (and thus the thread) to finish. Idempotent.
@@ -145,34 +216,57 @@ class ReactorThread
     }
 
   private:
-    /// Records @p reason and hands it to @p onFailure. Runs on the reactor thread, from the
-    /// catch arms above, so it must not throw its way out of them — the sink is invoked inside a
-    /// nested try for that reason alone.
+    /// Reports the first posted callback's failure and stops @p loop, so the root task unwinds by
+    /// cancellation. Reported before the unwind, so the owner hears of the failure ahead of whatever the
+    /// cancelled flows report on their way out. Reactor thread only, inside a turn.
+    /// @param loop The loop the throwing callback ran on.
+    /// @param reason What the callback threw.
+    void failFromPost(core::net::EventLoop& loop, char const* reason)
+    {
+        if (!_postFailure)
+        {
+            _postFailure = reason;
+            recordFailure(*_postFailure);
+        }
+        loop.requestStop();
+    }
+
+    /// Records @p reason and hands it to start()'s onFailure. Runs on the reactor thread -- in the thread
+    /// body after its catch arms, or in a turn on behalf of a posted callback -- where nothing may escape;
+    /// the sink is invoked inside a nested try for that reason alone.
     /// @param reason What ended the root task.
-    /// @param onFailure The owner's sink (may be empty).
-    void recordFailure(char const* reason, std::function<void(std::string const&)> const& onFailure) noexcept
+    void recordFailure(std::string const& reason) noexcept
     {
         {
             auto const lock = std::lock_guard { _failureMutex };
             _failure = reason;
         }
-        if (!onFailure)
+        if (!_onFailure)
             return;
         try
         {
-            onFailure(reason);
+            _onFailure(reason);
         }
         catch (...)
         {
-            // Nothing may leave this function — it runs from the thread-body catch arms, where an
-            // escape IS std::terminate. Record the double fault rather than swallowing it.
+            // Nothing may leave this function — it runs in the thread body, where an escape IS
+            // std::terminate. Record the double fault rather than swallowing it.
             auto const lock = std::lock_guard { _failureMutex };
             _failure += " (the failure sink threw as well)";
         }
     }
 
+    /// @return The loop posts go to now. The pointer is stable until restart(), which only runs once the
+    ///         thread of the previous one has been joined.
+    [[nodiscard]] core::net::EventLoop* currentLoop()
+    {
+        auto const lock = std::lock_guard { _loopMutex };
+        return _loop.get();
+    }
+
+    mutable std::mutex _loopMutex; ///< Guards the _loop pointer against restart().
     std::unique_ptr<core::net::IoBackend> _backend = core::net::makeDefaultBackend();
-    core::net::EventLoop _loop { *_backend };
+    std::unique_ptr<core::net::EventLoop> _loop = std::make_unique<core::net::EventLoop>(*_backend);
     std::thread _thread;
     std::atomic<bool> _cancelled { false };
     std::mutex _exitMutex;                  ///< Guards _exited.
@@ -180,6 +274,11 @@ class ReactorThread
     bool _exited = false;                   ///< Whether the thread body has finished its root task.
     mutable std::mutex _failureMutex;       ///< Guards _failure (written on the reactor, read by the owner).
     std::string _failure;
+    /// start()'s onFailure. Written before the thread starts, read only by it.
+    std::function<void(std::string const&)> _onFailure;
+    /// What a posted callback threw, the first time one did. Reactor thread only; restart() resets it once
+    /// that thread has been joined.
+    std::optional<std::string> _postFailure;
 };
 
 } // namespace contour::remote

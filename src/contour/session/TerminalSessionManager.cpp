@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/PreviewTranscript.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
-#include <contour/window/SettingsController.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 
+#include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.hpp>
@@ -24,13 +33,18 @@
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
+#include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace std::string_literals;
 
@@ -58,12 +72,14 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                config::LayoutStore& layouts,
                                                command::CommandHistoryStore& commands,
                                                std::string homeDirectory,
-                                               platform::TaskbarProgressSink& taskbarProgressSink):
+                                               platform::TaskbarProgressSink& taskbarProgressSink,
+                                               platform::ISecureInput& secureInput):
     _app { app },
     _sessionFactory { factory },
     _layoutStore { layouts },
     _commandHistoryStore { commands },
     _taskbarProgressSink { taskbarProgressSink },
+    _secureInputGate { secureInput },
     _homeDirectory { std::move(homeDirectory) },
     // Not seeded here, and capacity deliberately left at 0: the config file has not been loaded yet at
     // this point (ContourGuiApp constructs the manager before it reads the file), so the configured
@@ -157,12 +173,21 @@ int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
 
 window::WindowController* TerminalSessionManager::createWindowController()
 {
+    return createWindowController(_app.menuPresentation());
+}
+
+window::WindowController* TerminalSessionManager::createWindowController(
+    config::MenuPresentation menuPresentation)
+{
     // Every OS window gets its own vtworkspace::Window; the controller adapts exactly that window (all its
     // reads and writes are keyed by the WindowId).
     auto* window = _model->createWindow();
+    auto const role = std::exchange(_stagedRole, window::WindowRole::Normal);
     auto initialPosition = std::optional<window::WindowPosition> {};
-    // Restore only the first window. Additional windows keep the existing spawn-screen policy.
-    if (_app.config().rememberWindowPosition.value() && _controllersByWindow.empty()
+    // Restore only the first window, and never a placed one (the quick terminal, R-g). Additional windows
+    // keep the existing spawn-screen policy.
+    if (window::windowRoleRow(role).memory == window::PositionMemory::Remembered
+        && _app.config().rememberWindowPosition.value() && _controllersByWindow.empty()
         && !_app.config().configFile.empty() && QGuiApplication::platformName() != QStringLiteral("wayland"))
     {
         if (auto saved = _app.windowPositionStore().load(_app.config().configFile.parent_path()
@@ -171,7 +196,14 @@ window::WindowController* TerminalSessionManager::createWindowController()
         else
             errorLog()("Failed to load window position: {}", saved.error());
     }
-    auto* controller = new window::WindowController(*this, window->id(), initialPosition);
+    auto* controller = new window::WindowController(*this,
+                                                    window->id(),
+                                                    menuPresentation,
+                                                    initialPosition,
+                                                    core::platform::defaultSteadyClock(),
+                                                    window::qtNoticeAnnouncer(),
+                                                    window::processToken(),
+                                                    role);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than
@@ -221,7 +253,8 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // TODO: Remove dependency on app-knowledge and pass shell / terminal-size instead.
     // The GuiApp *or* (Global)Config could be made a global to be accessible from within QML.
 
-    if (!_sessionFactory.canCreateSession())
+    auto& factory = factoryFor(window);
+    if (!factory.canCreateSession())
     {
         managerLog()("Refusing to create a session: the session factory cannot back one right now.");
         return nullptr;
@@ -259,8 +292,13 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // Pre-mint the session id so the model's allocator (see ctor) hands it back, keeping the model
     // tab/pane and the Qt session on one id.
     auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(
-        sessionId, paneWorkingDirectory(command, std::move(ptyPath)), pageSize, command, profileName, role);
+    auto* session = createBackingSession(factory,
+                                         sessionId,
+                                         paneWorkingDirectory(command, std::move(ptyPath)),
+                                         pageSize,
+                                         command,
+                                         profileName,
+                                         role);
 
     // Mirror this new session into the vtworkspace model as a new single-pane tab.
     if (auto* tab = _model->createTab(window))
@@ -270,6 +308,7 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
 }
 
 TerminalSession* TerminalSessionManager::createBackingSession(
+    SessionFactory& factory,
     vtworkspace::SessionId sessionId,
     std::optional<std::string> cwd,
     std::optional<vtbackend::PageSize> pageSize,
@@ -282,7 +321,7 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     // mint a backing pty the factory refuses (e.g. a local shell inside an
     // attach-mode mirror window). The entry points keep their earlier checks
     // for whole-operation fail-fast semantics.
-    if (!_sessionFactory.canCreateSession())
+    if (!factory.canCreateSession())
     {
         managerLog()("Refusing to create a backing session: the factory cannot back one right now.");
         return nullptr;
@@ -301,14 +340,14 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     // a display still holds the right size.
     auto* session =
         new TerminalSession(this,
-                            _sessionFactory.createPty(std::move(cwd), pageSize, commandOverride, profileName),
+                            factory.createPty(std::move(cwd), pageSize, commandOverride, profileName),
                             _app,
                             profileName.value_or(std::string {}),
                             pageSize,
                             std::move(launchedCommand),
-                            _sessionFactory.createNotifier(),
+                            factory.createNotifier(),
                             role,
-                            _sessionFactory.hosting());
+                            factory.hosting());
     // The manager owns what it makes: removeSession() frees a session that has ended, and those still
     // running go with the manager, along with whatever they had queued for themselves.
     session->setParent(this);
@@ -318,7 +357,14 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                  _sessionsById.size());
     // Close the cycle the constructor could not: the factory handed out a pty, and a
     // daemon-backed one needs the terminal built around it to populate its grid.
-    _sessionFactory.bindTerminal(&session->terminal().device(), session->terminal());
+    factory.bindTerminal(&session->terminal().device(),
+                         session->terminal(),
+                         InterruptionSink { .context = session, .deliver = [session](auto commandLine) {
+                                               session->noteInterruption(std::move(commandLine));
+                                           } });
+
+    // A daemon's session starts under its own preference, so the mirror is first told which one is shown.
+    session->stateHostedColorPreference();
 
     _pendingSessionId = sessionId;
     _sessionsById[sessionId.value] = session;
@@ -331,6 +377,31 @@ TerminalSession* TerminalSessionManager::createBackingSession(
     // they were still in use.
     QQmlEngine::setObjectOwnership(session, QQmlEngine::CppOwnership);
 
+    return session;
+}
+
+std::unique_ptr<TerminalSession> TerminalSessionManager::createPreviewSession(config::Config const& config,
+                                                                              std::string const& profileName)
+{
+    // Not through createBackingSession(): the session is the caller's, so it is not registered, not
+    // parented to the manager and not watched for closing, and it needs no pty from the factory. Its device
+    // is a MockPty that never has a program on it, so the transcript is written to the screen directly. A
+    // display that shows it does call start() (TerminalDisplay::setSession), which is harmless here: the
+    // mock opens nothing, its read loop gets no bytes and ends, and the session's end path runs with the
+    // Preview role, which shows no footer.
+    auto session = std::make_unique<TerminalSession>(this,
+                                                     std::make_unique<vtpty::MockPty>(PreviewPageSize),
+                                                     _app,
+                                                     std::string {},
+                                                     PreviewPageSize,
+                                                     std::nullopt,
+                                                     std::make_unique<platform::NullNotifier>(),
+                                                     SessionRole::Preview,
+                                                     SessionHosting::Local);
+    // Its owner destroys it; QML must not collect what it is bound to.
+    QQmlEngine::setObjectOwnership(session.get(), QQmlEngine::CppOwnership);
+    session->applyReloadedConfig(config, profileName);
+    session->terminal().writeToScreen(PreviewTranscript);
     return session;
 }
 
@@ -376,11 +447,29 @@ void TerminalSessionManager::setFocusedSession(TerminalSession* next)
 {
     if (next == _focusedSession)
         return;
+    // With `theme: terminal` the chrome follows the focused session's live background. Read before the
+    // focus moves, under that session's terminal lock, on this (the GUI) thread; under any other theme
+    // it is not read at all.
+    auto const nextBackground = next != nullptr && _app.config().theme.value() == config::GuiTheme::Terminal
+                                    ? std::optional { next->liveBackground() }
+                                    : std::nullopt;
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusOutEvent();
     _focusedSession = next;
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusInEvent();
+    if (nextBackground.has_value())
+        _app.followLiveBackground(*nextBackground);
+    refreshSecureInput();
+}
+
+void TerminalSessionManager::sessionBackgroundChanged(vtworkspace::SessionId id, vtbackend::RGBColor color)
+{
+    // An unregistered session carries the empty id, which must not match a focused one that also does.
+    if (_focusedSession == nullptr || id == vtworkspace::SessionId {}
+        || _focusedSession->modelSessionId() != id)
+        return;
+    _app.followLiveBackground(color);
 }
 
 void TerminalSessionManager::clearFocusIfCurrent(TerminalSession* session)
@@ -395,6 +484,8 @@ void TerminalSessionManager::setFocusedWindow(vtworkspace::WindowId window)
     // that one implementation rather than a second copy of it.
     _focusedWindow = window;
     syncFocusForWindow(controllerFor(window));
+    // The app came to the front with focus where it was: no focus-in moved the session to refresh.
+    refreshSecureInput();
 
     // Activated with focus where it already was, as after a window manager that kept it through a
     // minimise: no focus-in tells the pane it is being looked at.
@@ -405,6 +496,16 @@ void TerminalSessionManager::windowStateChanged(vtworkspace::WindowId window)
 {
     if (_focusedWindow == window)
         focusedSessionSeen();
+    // A restore puts the window's sessions back on screen, which is the tab badges' "seen" too.
+    markVisibleSessionsSeen(window);
+    // A minimise or a restore changes what a display's frames are for: the running times redraw only while it
+    // is on screen.
+    notifyDisplaysExposureChanged(window);
+}
+
+void TerminalSessionManager::windowExposed(vtworkspace::WindowId window)
+{
+    notifyDisplaysExposureChanged(window);
 }
 
 void TerminalSessionManager::focusedSessionSeen()
@@ -418,8 +519,60 @@ void TerminalSessionManager::clearFocusedWindow(vtworkspace::WindowId window)
 {
     if (_focusedWindow != window) // guarded like clearFocusIfCurrent
         return;
-    _focusedWindow.reset();
+    auto const lost = std::exchange(_focusedWindow, std::nullopt);
+    // A panel (the quick terminal) is never where an application command lands, so its leaving focus does
+    // not displace the window that held it before.
+    if (isNormalWindow(window))
+        _lastFocusedWindow = lost;
+    // Another application in front, or the window closing: setFocusedSession() re-decides the OS's secure
+    // input, now with no window of ours in front, so it turns off.
     setFocusedSession(nullptr);
+}
+
+bool TerminalSessionManager::isPanelWindow(vtworkspace::WindowId window) const noexcept
+{
+    auto const* const controller = controllerFor(window);
+    return controller != nullptr
+           && window::windowRoleRow(controller->role()).level == window::WindowLevel::Panel;
+}
+
+bool TerminalSessionManager::isPanelSession(TerminalSession const& session) const noexcept
+{
+    auto const [tab, win, controller] = hostOf(&session);
+    return controller != nullptr
+           && window::windowRoleRow(controller->role()).level == window::WindowLevel::Panel;
+}
+
+SessionFactory& TerminalSessionManager::factoryFor(vtworkspace::WindowId window) const noexcept
+{
+    return isPanelWindow(window) ? _sessionFactory.localSessions() : _sessionFactory;
+}
+
+bool TerminalSessionManager::isNormalWindow(vtworkspace::WindowId window) const noexcept
+{
+    auto const* const controller = controllerFor(window);
+    return controller != nullptr
+           && window::windowRoleRow(controller->role()).level == window::WindowLevel::Normal;
+}
+
+window::WindowController* TerminalSessionManager::applicationController() const noexcept
+{
+    // Panels, the hidden quick terminal among them, are skipped throughout: an application command run
+    // in a window the user cannot see would do its work out of sight.
+    for (auto const& window: { _focusedWindow, _lastFocusedWindow })
+        if (window && isNormalWindow(*window))
+            return controllerFor(*window);
+    // The oldest window left: ids are minted ascending, and the map has no order of its own.
+    auto* oldest = static_cast<window::WindowController*>(nullptr);
+    auto oldestId = uint64_t {};
+    for (auto const& [id, controller]: _controllersByWindow)
+        if (window::windowRoleRow(controller->role()).level == window::WindowLevel::Normal
+            && (oldest == nullptr || id < oldestId))
+        {
+            oldest = controller;
+            oldestId = id;
+        }
+    return oldest;
 }
 
 void TerminalSessionManager::syncFocusForWindow(window::WindowController* controller)
@@ -441,16 +594,11 @@ platform::SessionVisibility TerminalSessionManager::sessionVisibility(TerminalSe
     auto const paneShown =
         tab != nullptr && (!tab->isZoomed() || tab->activePane()->session() == session.modelSessionId());
 
-    // The settings page replaces the window's whole content area, so while it shows, no tab is the one
-    // on screen and no terminal is what the user is typing into -- the rule the strip's IsActiveRole
-    // applies too. A session no window hosts has no settings page to be covered by.
-    auto const contentShown = controller == nullptr || !controller->settingsActive();
-
     return platform::sessionVisibilityFor(platform::SessionPlacement {
-        .focus = contentShown && &session == _focusedSession ? platform::SessionFocus::Here
-                                                             : platform::SessionFocus::Elsewhere,
-        .tab = contentShown && win != nullptr && win->activeTab() == tab ? platform::TabSelection::Active
-                                                                         : platform::TabSelection::Background,
+        .focus =
+            &session == _focusedSession ? platform::SessionFocus::Here : platform::SessionFocus::Elsewhere,
+        .tab = win != nullptr && win->activeTab() == tab ? platform::TabSelection::Active
+                                                         : platform::TabSelection::Background,
         .pane = paneShown ? platform::PaneExposure::Shown : platform::PaneExposure::Covered,
         .window = controller != nullptr && controller->isMinimized() ? platform::WindowPresence::Minimized
                                                                      : platform::WindowPresence::Shown,
@@ -475,11 +623,6 @@ void TerminalSessionManager::revealSession(TerminalSession const& session)
     // previously active pane on the way, and a DECSET 1004 application there would read a CSI I and then
     // a CSI O for a pane the user never looked at.
     activateSessionPane(*tab, session);
-
-    // The settings page covers every tab, so it closes before the tab becomes the one on screen -- as
-    // the strip's own activateTab does.
-    if (controller != nullptr)
-        controller->closeSettings();
 
     _model->activateTab(win->id(), tab->id());
 
@@ -546,7 +689,8 @@ bool TerminalSessionManager::applyLayoutToWindow(
         managerLog()("Layout has no tabs; nothing to apply.");
         return false;
     }
-    if (!_sessionFactory.canCreateSession())
+    auto& factory = factoryFor(window);
+    if (!factory.canCreateSession())
     {
         managerLog()("Refusing to apply a layout: the session factory cannot back new sessions right now.");
         return false;
@@ -586,7 +730,8 @@ bool TerminalSessionManager::applyLayoutToWindow(
             // Report whether the backing session was actually created: a nullptr (the factory
             // refused, e.g. an attach-mode pool that ran dry) stops the realizer before it
             // allocates a pane with no session behind it — the same guard the split path uses.
-            return createBackingSession(sessionId, std::move(cwd), pageSize, command, profileName) != nullptr;
+            return createBackingSession(factory, sessionId, std::move(cwd), pageSize, command, profileName)
+                   != nullptr;
         };
 
         auto* modelTab = vtworkspace::realizeLayoutTab(*_model, window, tabSpec, seeder);
@@ -652,7 +797,8 @@ void TerminalSessionManager::saveLayout(std::string const& name, TerminalSession
     auto* win = windowHostingSession(acting);
     if (win == nullptr)
         return;
-    if (auto const saved = saveWindowLayout(win->id(), name); !saved)
+    // A name configured into a SaveLayout binding is the intent: it replaces the layout that has it.
+    if (auto const saved = saveWindowLayout(win->id(), name, window::LayoutReplace::Replace); !saved)
         managerLog()("SaveLayout '{}' failed ({}).", name, describe(saved.error()));
 }
 
@@ -664,6 +810,18 @@ std::filesystem::path TerminalSessionManager::configSiblingPath(std::string_view
     // file was loaded: fall back to the config home the loader would have used.
     auto const& configFile = _app.config().configFile;
     return (configFile.empty() ? config::configHome() : configFile.parent_path()) / fileName;
+}
+
+std::vector<std::string> TerminalSessionManager::savedLayoutNames() const
+{
+    auto names = std::vector<std::string> {};
+    for (auto const& name: _app.config().layouts.value() | std::views::keys)
+        names.push_back(name);
+    if (auto const stored = _layoutStore.load(layoutsFilePath()); stored)
+        for (auto const& name: *stored | std::views::keys)
+            if (std::ranges::find(names, name) == names.end())
+                names.push_back(name);
+    return names;
 }
 
 std::filesystem::path TerminalSessionManager::layoutsFilePath() const
@@ -712,11 +870,156 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
 
 void TerminalSessionManager::openSettings(TerminalSession* acting)
 {
-    auto* controller = controllerHostingSession(acting);
-    if (controller == nullptr)
+    auto const* const controller = controllerHostingSession(acting);
+    _app.openSettings(controller != nullptr ? controller->screen() : nullptr);
+}
+
+void TerminalSessionManager::openConnectPicker(TerminalSession* acting)
+{
+    auto const* const controller = controllerHostingSession(acting);
+    _app.openConnectPicker(ContourGuiApp::PickerPresentation::Sheet,
+                           controller != nullptr ? controller->screen() : nullptr);
+}
+
+void TerminalSessionManager::postNotice(window::Notice notice, TerminalSession const* acting)
+{
+    if (auto* const controller = controllerHostingSession(acting); controller != nullptr)
+        controller->notices().post(std::move(notice));
+    else
+        managerLog()("No window to tell: {}", notice.text);
+}
+
+namespace
+{
+    /// What @p session's shell is started with that decides where its startup files live: the profile's
+    /// own `env` entries, and an empty value for a variable the profile removes from the inherited
+    /// environment. The command override of a one-off pane is not visible here.
+    [[nodiscard]] platform::RcEnvironment rcEnvironmentOf(TerminalSession const& session)
+    {
+        return platform::rcEnvironmentOf(session.profile().shell.value().env,
+                                         session.profile().shell.value().removedEnvironment);
+    }
+} // namespace
+
+void TerminalSessionManager::offerShellIntegration(TerminalSession& session, config::ShellKind shell)
+{
+    // An ended pane's footer owns its bottom rows, so such a pane takes no card (and so no slot).
+    if (session.endReason() != EndReason::None)
         return;
 
-    controller->openSettings();
+    auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session));
+    if (!inspection)
+    {
+        managerLog()("Not offering shell integration: {}.", platform::describe(inspection.error()));
+        return;
+    }
+
+    auto dismissal = window::OfferDismissal::Open;
+    if (auto const state = _app.guiState()->load())
+        if (std::ranges::contains(state->dismissedShellIntegrations, shell))
+            dismissal = window::OfferDismissal::Dismissed;
+
+    auto const binary = _app.locatedContourBinary();
+    auto const offer =
+        window::offerFor({ .shell = shell,
+                           .locality = _app.attachedHostLabel().empty() ? window::RcLocality::ThisMachine
+                                                                        : window::RcLocality::Remote,
+                           .host = _app.shellHostPlatform(),
+                           .binary = binary.reach,
+                           .dismissal = dismissal,
+                           .rc = inspection->state,
+                           .slot = _shellCardSlot });
+    if (offer != window::ShellIntegrationOffer::Card)
+        return;
+
+    auto line = window::shellRcLine(shell, binary.path);
+    if (!line)
+    {
+        managerLog()("Not offering shell integration: no safe line for {}.", binary.path.string());
+        return;
+    }
+    _shellCardSlot = window::CardSlot::Taken;
+    session.showShellIntegrationCard(shell, inspection->file, *std::move(line));
+}
+
+std::expected<platform::RcInstall, platform::ShellRcError> TerminalSessionManager::installShellIntegration(
+    TerminalSession& session, config::ShellKind shell, std::string_view line)
+{
+    auto const installed = _app.shellRcEditor().install(shell, line, rcEnvironmentOf(session));
+
+    // The file as the user would say it: asked of the editor again, so the toast names the very file written.
+    auto const* const row = config::shellRow(shell);
+    auto const shellName = row != nullptr ? row->name : std::string_view {};
+    auto rc = std::string { shellName };
+    if (auto const inspection = _app.shellRcEditor().inspect(shell, rcEnvironmentOf(session)))
+        rc = window::displayRcPath(inspection->file, _homeDirectory);
+
+    if (installed)
+        postNotice(
+            window::Notice { .kind = window::NoticeKind::ShellIntegrationAdded,
+                             .text = window::shellIntegrationInstalledText(*installed, rc, shellName) },
+            &session);
+    else
+        postNotice(window::Notice { .kind = window::NoticeKind::ShellIntegrationFailed,
+                                    .text = window::shellIntegrationFailedText(rc, installed.error()) },
+                   &session);
+    return installed;
+}
+
+void TerminalSessionManager::dismissShellIntegration(config::ShellKind shell)
+{
+    auto const saved = _app.guiState()->update([shell](config::GuiState& state) {
+        if (!std::ranges::contains(state.dismissedShellIntegrations, shell))
+            state.dismissedShellIntegrations.push_back(shell);
+    });
+    if (!saved)
+        errorLog()("Could not remember declining shell integration: {}", config::describe(saved.error()));
+}
+
+void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notice)
+{
+    for (auto* const controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notices().post(notice);
+}
+
+void TerminalSessionManager::noteWorkspaceRestored(vthost::RestoredCounts counts)
+{
+    _pendingRestoreSummary = counts;
+}
+
+void TerminalSessionManager::deliverRestoreSummaryTo(vtworkspace::WindowId window)
+{
+    if (!_pendingRestoreSummary)
+        return;
+    auto* const controller = controllerFor(window);
+    if (controller == nullptr)
+        return;
+    controller->notices().post(window::Notice {
+        .kind = window::NoticeKind::RestoreSummary,
+        .text = window::restoreSummaryText(_pendingRestoreSummary->windows, _pendingRestoreSummary->tabs) });
+    _pendingRestoreSummary.reset();
+}
+
+void TerminalSessionManager::expireRestoreSummary() noexcept
+{
+    _pendingRestoreSummary.reset();
+}
+
+void TerminalSessionManager::clearNoticeInEveryWindow(window::NoticeKind kind)
+{
+    for (auto* const controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notices().clear(kind);
+}
+
+void TerminalSessionManager::openConfigFile()
+{
+    auto const url = QUrl::fromLocalFile(QString::fromStdString(core::pathToUtf8(_app.config().configFile)));
+    if (auto const opened = _app.externalLauncher().openUrl(url); !opened)
+        errorLog()("Could not open the configuration file {}: {}.",
+                   core::pathToUtf8(_app.config().configFile),
+                   platform::describe(opened.error()));
 }
 
 std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
@@ -725,7 +1028,14 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
     // and every session as they were rather than half-replaced.
     auto loaded = config::tryLoadConfigFromFile(_app.config().configFile);
     if (!loaded)
+    {
+        // Said in every window, until a reload succeeds: the file is the application's, not a session's.
+        postNoticeToEveryWindow(
+            window::Notice { .kind = window::NoticeKind::ConfigReloadFailed,
+                             .text = window::configReloadFailedNoticeText(loaded.error()) });
         return std::unexpected { std::move(loaded.error()) };
+    }
+    clearNoticeInEveryWindow(window::NoticeKind::ConfigReloadFailed);
 
     // The master config first, so the app — the next new tab, and the settings page that reads it — sees
     // the new file and side files immediately. Then each live session applies it under its own profile,
@@ -736,16 +1046,21 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
         if (session != nullptr)
             session->applyReloadedConfig(_app.config(), session->profileName());
 
-    // The settings page reads through the app config just reloaded above, but each OS window owns its
-    // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered
-    // the save refreshes itself; refresh every OTHER window's too, so a settings page open in a second
-    // window reflects the change immediately instead of serving stale caches until it is reopened.
+    // Once per reload, not per session: with `theme: terminal` the chrome's light/dark follows the
+    // terminal background, so a hand-edited colour change must re-evaluate it as well as the terminals.
+    // Over the focused session's live background, which an OSC 11 may have moved off the configured one.
+    _app.applyGuiTheme(_app.config().theme.value(),
+                       _app.defaultProfileColors(),
+                       _focusedSession != nullptr ? std::optional { _focusedSession->liveBackground() }
+                                                  : std::nullopt);
+    // And what else derives from the configuration: the chrome tokens (a reload may change the chrome font
+    // and the scheme the Terminal row paints with) and the new-defaults banner (it may change the edition).
+    _app.onConfigurationReloaded();
+    secureInputModeChanged();
+
     for (auto& [windowId, controller]: _controllersByWindow)
         if (controller != nullptr)
         {
-            if (auto* settings = controller->settingsController(); settings != nullptr)
-                settings->refresh();
-
             // The tab bar is window state, seeded first-write-wins so a session rebind cannot reset a
             // runtime override. That latch also swallowed a reload, so changing tab_bar_visibility did
             // nothing until restart. A reload is the one moment the configured value must win.
@@ -803,6 +1118,23 @@ void TerminalSessionManager::openContextMenu(TerminalSession* acting)
     controller->openContextMenu();
 }
 
+void TerminalSessionManager::openBlockMenu(TerminalSession* acting,
+                                           vtbackend::CommandBlockId block,
+                                           std::optional<QPointF> anchor)
+{
+    emit blockMenuRequested(acting, block);
+
+    auto* controller = controllerHostingSession(acting);
+    if (controller == nullptr)
+        return;
+
+    // The menu's rows run against this pane, so it is the active one while the menu stands.
+    if (auto const* tab = paneActionTargetTab(acting); tab != nullptr)
+        activateSessionPane(*tab, *acting);
+
+    controller->openBlockMenu(*acting, block, anchor);
+}
+
 void TerminalSessionManager::recordCommand(std::string const& id)
 {
     // Prepared here too, not just in openCommandPalette(). Depending on the palette having been opened
@@ -823,7 +1155,7 @@ void TerminalSessionManager::recordCommand(std::string const& id)
 }
 
 std::expected<void, config::LayoutSaveError> TerminalSessionManager::saveWindowLayout(
-    vtworkspace::WindowId windowId, std::string const& name)
+    vtworkspace::WindowId windowId, std::string const& name, window::LayoutReplace replace)
 {
     if (name.empty())
         return std::unexpected(config::LayoutSaveError::EmptyName);
@@ -875,6 +1207,9 @@ std::expected<void, config::LayoutSaveError> TerminalSessionManager::saveWindowL
                      storedLayouts.error());
         return std::unexpected(config::LayoutSaveError::StoreUnreadable);
     }
+    if (replace == window::LayoutReplace::Keep
+        && (storedLayouts->contains(name) || _app.config().layouts.value().contains(name)))
+        return std::unexpected(config::LayoutSaveError::NameTaken);
     (*storedLayouts)[name] = layout;
 
     if (auto const written = _layoutStore.save(path, *storedLayouts); !written)
@@ -943,6 +1278,40 @@ void TerminalSessionManager::beginTabTitleEdit(TerminalSession* acting)
         controller->beginActiveTabTitleEdit();
 }
 
+void TerminalSessionManager::runTabAction(actions::Action const& action, TerminalSession* acting)
+{
+    auto* controller = controllerHostingSession(acting);
+    auto const* tab = tabHostingSession(acting);
+    if (controller != nullptr && tab != nullptr)
+        controller->runTabAction(tab->id(), action);
+}
+
+void TerminalSessionManager::showAbout(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->showAbout();
+}
+
+void TerminalSessionManager::minimizeWindow(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->minimizeWindow();
+}
+
+void TerminalSessionManager::zoomWindow(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->toggleMaximized();
+}
+
+window::FocusMove TerminalSessionManager::moveChromeFocus(TerminalSession const& session,
+                                                          window::ChromeFocusAction action)
+{
+    if (auto* controller = controllerHostingSession(&session); controller != nullptr)
+        return controller->moveChromeFocus(action);
+    return window::FocusMove::Stayed;
+}
+
 void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)
 {
     if (auto* controller = controllerHostingSession(acting); controller != nullptr)
@@ -1009,6 +1378,7 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WindowId window
         _sessionsById.clear();
         _tabBySession.clear();
     }
+    emit windowRemoved();
 }
 
 void TerminalSessionManager::closeTab(TerminalSession* acting)
@@ -1100,6 +1470,8 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     // session that is already tearing down), so _focusedSession can never dangle.
     if (_focusedSession == &thatSession)
         _focusedSession = nullptr;
+    // The prompt's pane is gone: the OS's secure input must not outlive it.
+    refreshSecureInput();
 
     // And forget whatever progress it was reporting: with no expiry configured (the default) a
     // report is kept until it is withdrawn, so a pane closed mid-operation would otherwise keep
@@ -1116,6 +1488,9 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
             _model->closePane(_model->windowOfTab(tab->id()), tab->id(), leaf->id());
     _sessionsById.erase(sessionId.value);
     _tabBySession.erase(sessionId.value);
+    _attention.forget(sessionId);
+    for (auto* controller: _controllersByWindow | std::views::values)
+        controller->forgetSession(sessionId);
     scheduleTaskbarProgress();
 
     // Session->display ownership is the pane tree's; there is no per-display map to scrub. The pane's
@@ -1134,6 +1509,27 @@ void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference co
 {
     for (auto* session: _sessionsById | std::views::values)
         session->updateColorPreference(preference);
+}
+
+void TerminalSessionManager::updateMotionPreference(config::MotionPreference motion)
+{
+    for (auto* session: _sessionsById | std::views::values)
+        session->applyMotionPreference(motion);
+}
+
+void TerminalSessionManager::updateSystemScrollBars(std::optional<config::ScrollBarMode> system)
+{
+    for (auto* session: _sessionsById | std::views::values)
+        session->applySystemScrollBars(system);
+}
+
+void TerminalSessionManager::refreshChromeDependents()
+{
+    for (auto* controller: _controllersByWindow | std::views::values)
+    {
+        controller->refreshHeaderFollowers();
+        controller->refreshTitleBand();
+    }
 }
 
 vtworkspace::Tab* TerminalSessionManager::tabAtRow(vtworkspace::WindowId window, int index) const noexcept
@@ -1181,8 +1577,9 @@ void TerminalSessionManager::tabAboutToBeRemoved(vtworkspace::WindowId window, i
         c->onTabAboutToBeRemoved(index);
 }
 
-void TerminalSessionManager::tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int)
+void TerminalSessionManager::tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int)
 {
+    _paneActivations.erase(tab.value);
     if (auto* c = controllerFor(window))
         c->onTabClosed();
 }
@@ -1234,6 +1631,8 @@ void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtwo
         // also covers cross-window moves, which route through activeTabChanged on the destination.
         syncFocusForWindow(c);
     }
+    // The tab now in front is seen, which clears its badge's marks.
+    markVisibleSessionsSeen(window);
     reportTabPresentation(tab);
 }
 
@@ -1261,6 +1660,10 @@ void TerminalSessionManager::paneClosed(vtworkspace::TabId tab, vtworkspace::Pan
 
 void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId)
 {
+    // A FocusPane* move is the keyboard's; anything else that moves the active pane -- a split, a close, a
+    // swap, a revealed session -- is not. Written before the proxies below are told.
+    _paneActivations[tab.value] =
+        _keyboardPaneMove == tab ? window::PaneActivation::Keyboard : window::PaneActivation::Pointer;
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::TitleRole });
@@ -1286,7 +1689,7 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
                                               double ratio)
 {
     auto* split = _model->findPane(tab, splitNode);
-    if (split == nullptr || split->isLeaf())
+    if (split == nullptr || split->isLeaf() || isPanelWindow(_model->windowOfTab(tab)))
         return;
 
     // Name the split by ANY leaf from each side — the daemon resolves their lowest common ancestor,
@@ -1306,7 +1709,7 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
 void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
 {
     // Every model event below reaches here, local tabs' included: nothing is computed for those.
-    if (_sessionFactory.hosting() != SessionHosting::Remote)
+    if (_sessionFactory.hosting() != SessionHosting::Remote || isPanelWindow(_model->windowOfTab(tabId)))
         return;
     auto const* tab = _model->findTab(tabId);
     auto const* window = tab != nullptr ? _model->window(_model->windowOfTab(tabId)) : nullptr;
@@ -1348,6 +1751,18 @@ void TerminalSessionManager::paneSwapped(vtworkspace::TabId tab, vtworkspace::Pa
     // `session`, so the two affected panes render their new terminals.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->rebuildActiveTabPaneProxies();
+    // Defensive: a swap in a zoomed tab ends the zoom (vtworkspace::Tab), so paneZoomChanged() reports it
+    // and marks the uncovered panes seen already. Marking here as well keeps the session now in front seen
+    // whichever seam reports the swap, and whatever the model does about zoom in the future.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
+}
+
+void TerminalSessionManager::paneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf)
+{
+    // A restart: one leaf carries a new session under the same id. Re-reading that leaf's `session` is
+    // all the view needs -- QML rebinds the pane's display to it -- so this is no proxy rebuild.
+    if (auto* c = controllerFor(_model->windowOfTab(tab)))
+        c->notifyPaneSessionReplaced(tab, leaf);
 }
 
 void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId>)
@@ -1364,6 +1779,8 @@ void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::option
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ZoomedRole });
         c->refreshActiveTabLayoutRoot();
     }
+    // A zoom that ends uncovers the siblings it hid: they are seen now.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
     reportTabPresentation(tab);
 }
 
@@ -1377,6 +1794,8 @@ void TerminalSessionManager::paneTreeRestructured(vtworkspace::TabId tab)
             { window::WindowController::Roles::TitleRole, window::WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
+    // A move may bring a covered pane in front, as a swap does.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
 }
 
 void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
@@ -1439,17 +1858,176 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
         recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
 }
 
-void TerminalSessionManager::refreshTabProgramStatusForSession(vtworkspace::SessionId session)
+void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId session)
+{
+    // The records changed: the pane's own status may have, as well as the tab's.
+    if (auto* s = sessionForId(session))
+        refreshPaneProgramStatus(*s);
+    refreshTabBadgeOf(session);
+}
+
+void TerminalSessionManager::refreshTabBadgeOf(vtworkspace::SessionId session)
 {
     // Only the badge's roles, for the reason refreshTabProgressForSession gives.
-    auto* tab = findTabHostingSession(session);
-    if (tab == nullptr)
+    if (auto* tab = findTabHostingSession(session))
+        refreshTabBadge(*tab);
+}
+
+void TerminalSessionManager::refreshPaneProgramStatus(TerminalSession& session)
+{
+    auto const badge = [&] {
+        // The lock the parser thread holds while it changes the records.
+        auto const& terminal = session.terminal();
+        auto const _ = std::lock_guard { terminal };
+        return window::paneStatusBadgeOf(window::resolvedRecords(terminal.programStatus()));
+    }();
+    session.setPaneProgramStatus(badge.kind, QString::fromStdString(badge.text));
+}
+
+void TerminalSessionManager::refreshTabBadge(vtworkspace::Tab const& tab)
+{
+    scheduleTaskbarProgress(); // the waiting-tab count follows the badges
+    if (auto* c = controllerFor(_model->windowOfTab(tab.id())))
+        c->notifyTabRowChanged(tab.id(),
+                               { window::WindowController::Roles::BadgeRole,
+                                 window::WindowController::Roles::BadgeTextRole,
+                                 window::WindowController::Roles::BadgeProgressRole });
+}
+
+void TerminalSessionManager::noteInputEchoChanged(TerminalSession const& session)
+{
+    // A session that was already removed (an end announced while it awaits deletion) has no tab to repaint,
+    // and the gate was refreshed when it went.
+    if (sessionForId(session.modelSessionId()) != &session)
         return;
-    if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
-        c->notifyTabRowChanged(tab->id(),
-                               { window::WindowController::Roles::ProgramStatusRole,
-                                 window::WindowController::Roles::ProgramStatusTextRole,
-                                 window::WindowController::Roles::ProgramStatusProgressRole });
+    notifySecureTab(session);
+    refreshSecureInput();
+}
+
+void TerminalSessionManager::notifySecureTab(TerminalSession const& session)
+{
+    if (auto* tab = findTabHostingSession(session.modelSessionId()))
+        if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
+            c->notifyTabRowChanged(tab->id(), { window::WindowController::Roles::SecureRole });
+}
+
+void TerminalSessionManager::refreshSecureInput()
+{
+    auto const app =
+        _focusedWindow.has_value() ? window::AppActivity::Foreground : window::AppActivity::Background;
+    auto const focusedEcho =
+        _focusedSession != nullptr ? _focusedSession->inputEcho() : vtpty::InputEcho::Unknown;
+    _secureInputGate.apply(window::desiredSecureInput(_app.config().secureInput.value(), app, focusedEcho));
+
+    // The one pane the OS secures now. The words of every lock claim it only for that pane, so the pane that
+    // had it and the pane that has it are re-announced, with their tabs.
+    auto const secured =
+        _secureInputGate.state() == platform::SecureInputState::On && _focusedSession != nullptr
+            ? std::optional { _focusedSession->modelSessionId() }
+            : std::nullopt;
+    if (secured == _securedSession)
+        return;
+    for (auto const id: { _securedSession, secured })
+        if (id.has_value())
+            if (auto* session = sessionForId(*id); session != nullptr)
+            {
+                emit session->secureIndicatorChanged();
+                notifySecureTab(*session);
+            }
+    _securedSession = secured;
+}
+
+void TerminalSessionManager::secureInputModeChanged()
+{
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr)
+            emit session->secureIndicatorChanged();
+    for (auto* controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notifyAllTabRowsChanged({ window::WindowController::Roles::SecureRole });
+    refreshSecureInput();
+}
+
+void TerminalSessionManager::noteSessionOutput(vtworkspace::SessionId session, window::OutputOrigin origin)
+{
+    auto const* s = sessionForId(session);
+    if (s == nullptr)
+        return;
+    // Asked of the ledger first: a session that is on screen, or already marked, repaints nothing.
+    if (_attention.noteOutput(session, sessionVisibility(*s), origin) == window::AttentionChange::Changed)
+        refreshTabBadgeOf(session);
+}
+
+void TerminalSessionManager::noteBell(vtworkspace::SessionId session, window::OutputOrigin origin)
+{
+    auto const* s = sessionForId(session);
+    if (s == nullptr)
+        return;
+    if (_attention.noteBell(session, sessionVisibility(*s), origin) == window::AttentionChange::Changed)
+        refreshTabBadgeOf(session);
+}
+
+void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
+                                                 vtbackend::CommandEnding ending)
+{
+    // A finish queued before the session was removed may arrive after, while it awaits deletion: it must not
+    // mark a session the ledger has forgotten.
+    if (sessionForId(session.modelSessionId()) != &session)
+        return;
+    if (_attention.noteFinished(session.modelSessionId(), sessionVisibility(session), ending)
+        == window::AttentionChange::Changed)
+        refreshTabBadgeOf(session.modelSessionId());
+}
+
+void TerminalSessionManager::notifyDisplaysExposureChanged(vtworkspace::WindowId window)
+{
+    auto const* win = _model->window(window);
+    if (win == nullptr)
+        return;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto const* tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (auto* const s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr; s != nullptr)
+                s->displayExposureChanged();
+        });
+    }
+}
+
+void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WindowId window)
+{
+    auto const* win = _model->window(window);
+    if (win == nullptr)
+        return;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto const* tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        auto changed = window::AttentionChange::Unchanged;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            auto const* s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr;
+            if (s != nullptr && sessionVisibility(*s) != platform::SessionVisibility::Hidden
+                && _attention.noteSeen(pane.session()) == window::AttentionChange::Changed)
+                changed = window::AttentionChange::Changed;
+        });
+        if (changed == window::AttentionChange::Changed)
+            refreshTabBadge(*tab);
+    }
+}
+
+void TerminalSessionManager::setHostConnection(vthost::client::ConnectionState state)
+{
+    auto const chipChanged = window::hostChipStateOf(state) != window::hostChipStateOf(_hostConnection);
+    _hostConnection = state;
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr)
+            session->setHostConnection(state);
+    if (chipChanged)
+        for (auto* controller: _controllersByWindow | std::views::values)
+            controller->notifyHostConnectionChanged();
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
@@ -1473,6 +2051,10 @@ platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
 void TerminalSessionManager::bindTaskbarWindow(vtworkspace::WindowId window, QWindow& nativeWindow)
 {
     _taskbarProgressSink.bindWindow(window.value, nativeWindow);
+    // A (re)bound window starts with no overlay, so what it was last told no longer holds: forget it, and
+    // the next refresh tells it its count again.
+    std::erase_if(_publishedAttention.perWindow,
+                  [&](auto const& told) { return told.first == window.value; });
     scheduleTaskbarProgress();
 }
 
@@ -1490,8 +2072,37 @@ void TerminalSessionManager::refreshTaskbarProgress()
     else
         for (auto const& [window, controller]: _controllersByWindow)
             _taskbarProgressSink.setProgress(window, taskbarProgress(vtworkspace::WindowId { window }, now));
+    publishTaskbarAttention();
     if (auto const expiry = _taskbarProgress.nextExpiry(now, _app.config().progressTimeout.value()))
         _taskbarProgressTimer.start(std::chrono::ceil<std::chrono::milliseconds>(*expiry - now));
+}
+
+void TerminalSessionManager::publishTaskbarAttention()
+{
+    auto tabs = std::vector<std::pair<uint64_t, window::TabBadgeKind>> {};
+    for (auto const& [window, controller]: _controllersByWindow)
+    {
+        // Listed even with no tab, so that a window that just lost its last one is told it waits for nothing.
+        tabs.emplace_back(window, window::TabBadgeKind::None);
+        for (auto const kind: controller->tabBadgeKinds())
+            tabs.emplace_back(window, kind);
+    }
+    auto tally = window::tallyWaitingTabs(tabs);
+
+    if (_taskbarProgressSink.scope() == platform::TaskbarProgressScope::Application)
+    {
+        if (tally.total != _publishedAttention.total)
+            _taskbarProgressSink.setApplicationAttention({ .waiting = tally.total });
+    }
+    else
+        for (auto const& [window, waiting]: tally.perWindow)
+        {
+            auto const known = std::ranges::find(
+                _publishedAttention.perWindow, window, &std::pair<uint64_t, unsigned>::first);
+            if (known == _publishedAttention.perWindow.end() ? waiting != 0 : known->second != waiting)
+                _taskbarProgressSink.setAttention(window, { .waiting = waiting });
+        }
+    _publishedAttention = std::move(tally);
 }
 
 void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)
@@ -1573,6 +2184,81 @@ void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
     closeWindowIfEmpty(from);
 }
 
+void TerminalSessionManager::postTabMergeRefused(TerminalSession const* acting)
+{
+    auto notice = window::Notice { .kind = window::NoticeKind::DropRefused,
+                                   .text = std::string { window::TabMergeRefusedText } };
+    if (acting != nullptr)
+        postNotice(std::move(notice), acting);
+    else
+        postNoticeToEveryWindow(notice);
+}
+
+void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
+                                               int fromIndex,
+                                               vtworkspace::WindowId to,
+                                               vtworkspace::TabId target,
+                                               vtworkspace::PaneId leaf,
+                                               vtworkspace::SplitSide side)
+{
+    auto* source = tabAtRow(from, fromIndex);
+    if (source == nullptr)
+        return;
+    auto const sourceId = source->id();
+
+    // A daemon owns the layout: it is asked to graft the tab, and its re-push reconciles the merge in. Only a
+    // merge issued BY the reconciler itself (while realizing that re-push) is the local half of one the
+    // daemon already made, and the factory answers Local for it. Anything else the daemon does not take is
+    // refused, never made here: it would leave this window showing a layout the daemon does not have.
+    if (_sessionFactory.hosting() == SessionHosting::Remote)
+    {
+        auto* const targetTab = _model->findTab(target);
+        auto const* const targetLeaf = targetTab != nullptr ? targetTab->rootPane()->findPane(leaf) : nullptr;
+        auto* const targetSession = targetLeaf != nullptr ? sessionForId(targetLeaf->session()) : nullptr;
+        // The whole tab is named, so the daemon can tell a request made of a stale view from this one.
+        auto tabSessions = std::vector<TerminalSession*> {};
+        auto tabPtys = std::vector<vtpty::Pty const*> {};
+        source->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (!pane.isLeaf())
+                return;
+            auto* const session = sessionForId(pane.session());
+            tabSessions.push_back(session);
+            tabPtys.push_back(session != nullptr ? &session->terminal().device() : nullptr);
+        });
+        // A session that is not found is asked about as no pane at all, so the factory decides (a
+        // reconciler's merge is let through, any other is refused).
+        switch (_sessionFactory.requestRemoteTabMerge(
+            tabPtys, targetSession != nullptr ? &targetSession->terminal().device() : nullptr, side))
+        {
+            case RemoteRouting::Routed: return;
+            case RemoteRouting::Refused:
+                postTabMergeRefused(targetSession != nullptr ? targetSession : tabSessions.front());
+                return;
+            case RemoteRouting::Local: break;
+        }
+    }
+
+    // The merge's own events look sessions up by their tab (focus follows the grafted active pane), so
+    // the index names the target before they fire; a refused merge puts it back.
+    auto sessions = std::vector<vtworkspace::SessionId> {};
+    source->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (pane.isLeaf())
+            sessions.push_back(pane.session());
+    });
+    for (auto const session: sessions)
+        _tabBySession[session.value] = target;
+
+    if (_model->mergeTabIntoSplit(from, sourceId, to, target, leaf, side) == nullptr)
+    {
+        for (auto const session: sessions)
+            _tabBySession[session.value] = sourceId;
+        return;
+    }
+    updateStatusLine();
+    // Merging a window's LAST tab elsewhere empties it: close the now-empty source window.
+    closeWindowIfEmpty(from);
+}
+
 void TerminalSessionManager::tearOffTabToNewWindow(vtworkspace::WindowId from,
                                                    int fromIndex,
                                                    QScreen* targetScreen)
@@ -1634,7 +2320,8 @@ std::vector<TerminalSession*> TerminalSessionManager::sessionsInTab(vtworkspace:
 
 void TerminalSessionManager::authorRemoteEnd(TerminalSession* session)
 {
-    if (session != nullptr)
+    // A panel's sessions run here and the host never heard of them.
+    if (session != nullptr && !isPanelSession(*session))
         _sessionFactory.requestRemoteClose(&session->terminal().device());
 }
 
@@ -1722,7 +2409,7 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // reconciles the new pane in. A reconciliation-driven split (during realization)
     // returns false and builds locally below, as does a local factory.
     // No profile is named: a local split runs the default profile too.
-    if (acting != nullptr
+    if (acting != nullptr && !isPanelSession(*acting)
         && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical, RemoteSpawn {}))
         return;
 
@@ -1736,15 +2423,16 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
                                                    std::optional<vtpty::Process::ExecInfo> const& command,
                                                    SessionRole role)
 {
-    if (!_sessionFactory.canCreateSession())
+    auto* tab = paneActionTargetTab(acting);
+    if (tab == nullptr)
+        return nullptr;
+
+    auto& factory = factoryFor(_model->windowOfTab(tab->id()));
+    if (!factory.canCreateSession())
     {
         managerLog()("Refusing to split: the session factory cannot back a new session right now.");
         return nullptr;
     }
-
-    auto* tab = paneActionTargetTab(acting);
-    if (tab == nullptr)
-        return nullptr;
 
     // Split beside the pane the keybinding actually fired from. _model->splitActivePane splits the tab's
     // model-active pane, so if the acting session's pane is not already the active one (focus vs.
@@ -1778,8 +2466,13 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
     // _pendingSessionId, so the model allocator (invoked inside splitActivePane) hands back exactly
     // this id — same backing-session-first order as createSessionInBackground/createTab.
     auto const newSessionId = vtworkspace::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(
-        newSessionId, paneWorkingDirectory(command, std::move(cwd)), pageSize, command, std::nullopt, role);
+    auto* session = createBackingSession(factory,
+                                         newSessionId,
+                                         paneWorkingDirectory(command, std::move(cwd)),
+                                         pageSize,
+                                         command,
+                                         std::nullopt,
+                                         role);
     if (session == nullptr)
         return nullptr; // no backing session, no split
 
@@ -1800,6 +2493,130 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
 
     // The new leaf joins the same tab as the pane it split from.
     _tabBySession[newSessionId.value] = tab->id();
+    return session;
+}
+
+std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSession(TerminalSession& ended)
+{
+    if (ended.endAction() != FooterAction::Restart)
+        return std::unexpected(RestartError::NotOffered);
+    return replaceEndedSession(ended);
+}
+
+void TerminalSessionManager::reconnectHost()
+{
+    // A failure of an earlier try is not this one's.
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            session->noteReconnectFailure({});
+    auto const started = _sessionFactory.reconnect();
+    if (!started)
+    {
+        managerLog()("Not reconnecting: {}.", describe(started.error()));
+        _reconnectRun = ReconnectRun::Running;
+        // The connection that just failed reports itself through connectionClosed(), with its own reason:
+        // that is the one to show, so the run is left for it to end.
+        if (started.error() != ReconnectError::ConnectionEnding)
+            reconnectFailed(describe(started.error()));
+        return;
+    }
+    _reconnectRun = ReconnectRun::Running;
+    // Ahead of the controller's own report of it, which comes queued: the pill shows as the button is
+    // pressed.
+    setHostConnection(vthost::client::ConnectionState::Reconnecting);
+}
+
+void TerminalSessionManager::rebindDisconnected()
+{
+    if (_reconnectRun == ReconnectRun::Idle)
+        return;
+    auto lost = std::vector<TerminalSession*> {};
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            lost.push_back(session);
+    for (auto* session: lost)
+        if (_sessionFactory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
+            if (auto const rebound = replaceEndedSession(*session); !rebound)
+            {
+                managerLog()("Not taking a pane back: {}.", describe(rebound.error()));
+                // Left set, the binding would hand the ended pane's remote session to the next one made.
+                _sessionFactory.cancelReconnectBinding();
+            }
+    // The daemon pushes one layout per window and each arrives in its own turn: the run stays up for the
+    // windows still to come, and ends once no pane is left to take back (or on reconnectFailed()).
+    auto const isLost = [](auto const* session) {
+        return session != nullptr && session->endReason() == EndReason::Disconnected;
+    };
+    if (std::ranges::none_of(_sessionsById | std::views::values, isLost))
+        _reconnectRun = ReconnectRun::Idle;
+}
+
+void TerminalSessionManager::reconnectFailed(std::string_view reason)
+{
+    if (std::exchange(_reconnectRun, ReconnectRun::Idle) == ReconnectRun::Idle)
+        return;
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            session->noteReconnectFailure(std::string { reason });
+}
+
+void TerminalSessionManager::connectionClosed(std::string_view reason)
+{
+    reconnectFailed(reason);
+    noteTransportLost();
+}
+
+std::expected<TerminalSession*, RestartError> TerminalSessionManager::replaceEndedSession(
+    TerminalSession& ended)
+{
+    auto const endedId = ended.modelSessionId();
+    auto* tab = sessionForId(endedId) == &ended ? findTabHostingSession(endedId) : nullptr;
+    auto const* leaf = tab != nullptr ? tab->rootPane()->findLeaf(endedId) : nullptr;
+    if (leaf == nullptr)
+        return std::unexpected(RestartError::NotHosted);
+    auto const tabId = tab->id();
+    auto const leafId = leaf->id();
+
+    // Where its shell said it was (OSC 3008/7, filtered for spawning here), else where it was started.
+    auto cwd =
+        ended.resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn)
+            .transform([](vtbackend::ResolvedWorkingDirectory const& resolved) { return resolved.path; })
+            .value_or(ended.workingDirectory());
+
+    // The id is minted here and handed to the model explicitly, so the allocator never consumes the
+    // _pendingSessionId createBackingSession stages: clear it, or the next model-made session would be
+    // handed this live id a second time.
+    auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
+    auto* session = createBackingSession(factoryFor(_model->windowOfTab(tabId)),
+                                         sessionId,
+                                         std::move(cwd),
+                                         ended.restartPageSize(),
+                                         ended.launchedCommand(),
+                                         ended.profileOverride(),
+                                         ended.role());
+    _pendingSessionId.reset();
+    if (session == nullptr)
+        return std::unexpected(RestartError::NoSession);
+
+    // Indexed before the model raises paneSessionReplaced, so whatever the view resolves from it finds
+    // the new session's tab -- and so the new session's own end later prunes this leaf.
+    _tabBySession[sessionId.value] = tabId;
+    (void) _model->replaceLeafSession(tabId, leafId, sessionId);
+
+    // The focus follows the pane, not the dead session; dropped first, so no focus-out reaches the
+    // ended one's closed device.
+    if (_focusedSession == &ended)
+    {
+        _focusedSession = nullptr;
+        setFocusedSession(session);
+    }
+
+    // No leaf carries the ended session any more, so removeSession() drops only its bookkeeping and
+    // frees it later, leaving the leaf to the new one.
+    removeSession(ended);
+    // It forgot the ended session's marks but found no tab to repaint, as no leaf carries that session now:
+    // the badge is repainted through the new one, which its tab now hosts.
+    refreshTabBadgeForSession(sessionId);
     return session;
 }
 
@@ -1881,7 +2698,18 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting, SessionEnd
 void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
 {
     if (auto* tab = paneActionTargetTab(acting))
+    {
+        // Only a move that lands reads as the keyboard's: activePaneChanged() records how the pane it fires
+        // for was reached, and a move with no neighbour fires nothing.
+        // Cleared on the way out however it is left, or a throw from the model's observers would leave every
+        // later activation of this tab keyboard-made.
+        _keyboardPaneMove = tab->id();
+        auto const clear =
+            std::unique_ptr<std::optional<vtworkspace::TabId>, decltype([](auto* move) { move->reset(); })> {
+                &_keyboardPaneMove
+            };
         _model->focusDirection(tab->id(), direction);
+    }
 }
 
 void TerminalSessionManager::swapPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
@@ -1938,6 +2766,43 @@ void TerminalSessionManager::activatePane(vtworkspace::TabId tab, vtworkspace::P
 {
     if (_model->findTab(tab) != nullptr)
         _model->setActivePane(tab, id);
+}
+
+void TerminalSessionManager::notePaneActivation(vtworkspace::TabId tab, window::PaneActivation activation)
+{
+    if (lastPaneActivation(tab) == activation)
+        return;
+    _paneActivations[tab.value] = activation;
+    // The active pane may stay where it is (a click on the pane the keyboard reached), so no active-pane
+    // change would tell the proxies their focus moved.
+    if (auto* c = controllerFor(_model->windowOfTab(tab)))
+        c->notifyActivePaneChanged();
+}
+
+window::PaneActivation TerminalSessionManager::lastPaneActivation(vtworkspace::TabId tab) const noexcept
+{
+    auto const found = _paneActivations.find(tab.value);
+    return found != _paneActivations.end() ? found->second : window::PaneActivation::Pointer;
+}
+
+void TerminalSessionManager::runPaneHeaderAction(vtworkspace::TabId tab,
+                                                 vtworkspace::PaneId leaf,
+                                                 window::PaneHeaderAction action)
+{
+    if (static_cast<size_t>(action) >= window::PaneHeaderActions.size())
+        return;
+    auto* const model = _model->findTab(tab);
+    auto* const pane = model != nullptr ? model->rootPane()->findPane(leaf) : nullptr;
+    auto* const session = pane != nullptr && pane->isLeaf() ? sessionForId(pane->session()) : nullptr;
+    if (session == nullptr)
+        return;
+
+    // The button acts on its own pane, which a split or a zoom finds as the active one.
+    notePaneActivation(tab, window::PaneActivation::Pointer);
+    activatePane(tab, leaf);
+    auto const& row = window::PaneHeaderActions[static_cast<size_t>(action)];
+    if (auto const parsed = actions::fromString(std::string { row.commandName }))
+        session->executeAction(*parsed);
 }
 
 // }}}

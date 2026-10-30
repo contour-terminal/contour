@@ -36,7 +36,6 @@
 #include <memory>
 
 #include <QtTest/QTest>
-#include <vtworkspace/PaneLayout.hpp>
 
 namespace
 {
@@ -96,8 +95,11 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(int pageLineCount READ pageLineCount CONSTANT)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount CONSTANT)
     Q_PROPERTY(int historyLineCount READ historyLineCount CONSTANT)
-    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator CONSTANT)
-    Q_PROPERTY(int upTime READ upTime CONSTANT)
+    Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText CONSTANT)
+    Q_PROPERTY(QString linkTargetText READ linkTargetText CONSTANT)
+    Q_PROPERTY(QString linkTargetHint READ linkTargetHint CONSTANT)
+    Q_PROPERTY(bool linkTargetShown READ linkTargetShown CONSTANT)
+    Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision CONSTANT)
     Q_PROPERTY(float opacity READ opacity CONSTANT)
     Q_PROPERTY(float dimUnfocused READ dimUnfocused CONSTANT)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor CONSTANT)
@@ -109,16 +111,56 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
     Q_PROPERTY(QString pathToBackground READ pathToBackground CONSTANT)
     Q_PROPERTY(QString title READ title CONSTANT)
+    // What a pane header reads.
+    Q_PROPERTY(QString displayWorkingDirectory READ displayWorkingDirectory CONSTANT)
+    Q_PROPERTY(QString foregroundProcessName READ foregroundProcessName CONSTANT)
+    Q_PROPERTY(int programStatus READ programStatus CONSTANT)
+    // What an ended pane's footer reads: a running session.
+    Q_PROPERTY(int sessionEnd READ sessionEnd CONSTANT)
+    Q_PROPERTY(QString endMessage READ endMessage CONSTANT)
+    Q_PROPERTY(int paneFooter READ paneFooter CONSTANT)
+    Q_PROPERTY(QString footerMessage READ footerMessage CONSTANT)
+    Q_PROPERTY(QString footerActionLabel READ footerActionLabel CONSTANT)
+    Q_PROPERTY(QString footerDismissLabel READ footerDismissLabel CONSTANT)
+    Q_PROPERTY(int footerTakesReturn READ footerTakesReturn CONSTANT)
+    // What the shell integration card reads: no offer.
+    Q_PROPERTY(int shellIntegrationCard READ shellIntegrationCard CONSTANT)
+    Q_PROPERTY(QString shellIntegrationTitle READ shellIntegrationTitle CONSTANT)
+    Q_PROPERTY(QString shellIntegrationBody READ shellIntegrationBody CONSTANT)
+    Q_PROPERTY(QString shellIntegrationPrimary READ shellIntegrationPrimary CONSTANT)
+    Q_PROPERTY(QString shellIntegrationSecondary READ shellIntegrationSecondary CONSTANT)
+    Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError CONSTANT)
+    Q_PROPERTY(QString fontFamily READ fontFamily CONSTANT)
 
   public:
     [[nodiscard]] int pageLineCount() const { return 25; }
     [[nodiscard]] int pageColumnsCount() const { return 80; }
     [[nodiscard]] int historyLineCount() const { return 0; }
-    [[nodiscard]] bool showResizeIndicator() const { return false; }
-    [[nodiscard]] int upTime() const { return 5; }
+    [[nodiscard]] QString sizeIndicatorText() const { return {}; }
+    [[nodiscard]] QString linkTargetText() const { return {}; }
+    [[nodiscard]] QString linkTargetHint() const { return {}; }
+    [[nodiscard]] bool linkTargetShown() const { return false; } // a bool, as its QML property is
+    [[nodiscard]] int overlayClearanceRevision() const { return 0; }
+    Q_INVOKABLE [[nodiscard]] QVariantMap overlayClearance() const { return {}; }
+    /// What the pane calls once its size indicator settled; nothing to record here.
+    Q_INVOKABLE void sizeIndicatorSettled(bool /*paneActive*/) {}
     [[nodiscard]] float opacity() const { return 1.0F; }
     [[nodiscard]] float dimUnfocused() const { return 0.0F; }
     [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] int sessionEnd() const { return 0; }
+    [[nodiscard]] QString endMessage() const { return {}; }
+    [[nodiscard]] int paneFooter() const { return 0; }
+    [[nodiscard]] QString footerMessage() const { return {}; }
+    [[nodiscard]] QString footerActionLabel() const { return {}; }
+    [[nodiscard]] QString footerDismissLabel() const { return {}; }
+    [[nodiscard]] int footerTakesReturn() const { return 0; }
+    [[nodiscard]] int shellIntegrationCard() const { return 0; }
+    [[nodiscard]] QString shellIntegrationTitle() const { return {}; }
+    [[nodiscard]] QString shellIntegrationBody() const { return {}; }
+    [[nodiscard]] QString shellIntegrationPrimary() const { return {}; }
+    [[nodiscard]] QString shellIntegrationSecondary() const { return {}; }
+    [[nodiscard]] QString shellIntegrationError() const { return {}; }
+    [[nodiscard]] QString fontFamily() const { return {}; }
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }
@@ -127,6 +169,9 @@ class RoutingMockSession: public QObject
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
     [[nodiscard]] QString pathToBackground() const { return {}; }
     [[nodiscard]] QString title() const { return QStringLiteral("mock"); }
+    [[nodiscard]] QString displayWorkingDirectory() const { return {}; }
+    [[nodiscard]] QString foregroundProcessName() const { return {}; }
+    [[nodiscard]] int programStatus() const { return 0; } // window::TabBadgeKind::None
 };
 
 /// Dynamic PaneProxy stand-in (leaf or split) with settable session/active/children, so a test can
@@ -141,6 +186,8 @@ class RoutingMockPane: public QObject
     Q_PROPERTY(RoutingMockPane* second READ second NOTIFY changed)
     Q_PROPERTY(QObject* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY changed)
+    // A window::PaneFocus's value, as PaneProxy's focus gives it.
+    Q_PROPERTY(int focus READ focus NOTIFY changed)
 
   public:
     explicit RoutingMockPane(bool leaf = true): _leaf { leaf } {}
@@ -152,6 +199,7 @@ class RoutingMockPane: public QObject
     [[nodiscard]] RoutingMockPane* second() const { return _second; }
     [[nodiscard]] QObject* session() const { return _session; }
     [[nodiscard]] bool active() const { return _active; }
+    [[nodiscard]] int focus() const { return _active ? 1 : 0; } // Focused or Unfocused
 
     Q_INVOKABLE void activate()
     {
@@ -207,7 +255,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     // layout identical to production without needing to vary them.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
-    Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
@@ -235,9 +282,9 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
         ZoomedRole = Qt::UserRole + 7,
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9,
-        ProgramStatusRole = Qt::UserRole + 10,
-        ProgramStatusTextRole = Qt::UserRole + 11,
-        ProgramStatusProgressRole = Qt::UserRole + 12,
+        BadgeRole = Qt::UserRole + 10,
+        BadgeTextRole = Qt::UserRole + 11,
+        BadgeProgressRole = Qt::UserRole + 12,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -245,10 +292,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     [[nodiscard]] bool titleBarVisible() const noexcept { return false; }
     [[nodiscard]] int tabBarPosition() const noexcept { return 0; }       // Top
     [[nodiscard]] bool tabBarShouldShow() const noexcept { return true; } // shown
-    [[nodiscard]] constexpr int splitHandleThickness() const noexcept
-    {
-        return vtworkspace::DefaultSplitHandleThickness;
-    }
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
     void setChromeHeight(int height)
     {
@@ -306,6 +349,7 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     Q_INVOKABLE void activateTab(int) {}
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
+    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::mockProcessToken(); }
     Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
     Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
@@ -338,10 +382,10 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
             case Roles::ProgressPercentageRole: return 0;
-            // 0 = BadgeKind::None: no program status, so TabItem paints no badge.
-            case Roles::ProgramStatusRole: return 0;
-            case Roles::ProgramStatusTextRole: return QString {};
-            case Roles::ProgramStatusProgressRole: return -1;
+            // 0 = TabBadgeKind::None: nothing competes for the slot, so TabItem paints no badge.
+            case Roles::BadgeRole: return 0;
+            case Roles::BadgeTextRole: return QString {};
+            case Roles::BadgeProgressRole: return -1;
             default: return {};
         }
     }
@@ -358,9 +402,9 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
             { static_cast<int>(Roles::ZoomedRole), "zoomed" },
             { static_cast<int>(Roles::ProgressStateRole), "progressState" },
             { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
-            { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-            { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
-            { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" },
+            { static_cast<int>(Roles::BadgeRole), "badge" },
+            { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
+            { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         };
     }
     // }}}

@@ -190,6 +190,11 @@ class RemoteController
     /// @return Nothing on success; a human-readable reason on failure.
     [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
 
+    /// Starts a new connect, on a fresh reactor, after the last one ended -- failed, was refused, or was
+    /// stopped. The phase goes back to Connecting and the budget of awaitConnected() counts from now.
+    /// A run that is still going must not be restarted: the caller asks first (@see isConnecting).
+    void restartConnecting();
+
     /// Detaches the live client (`detachOnReactor`, posted onto the reactor) and joins the reactor
     /// thread. Idempotent; `closeReactorBindings()` runs once, on the first stop.
     void stop();
@@ -221,6 +226,21 @@ class RemoteController
     /// thread.
     /// @param reason What went wrong, verbatim into `_failure`.
     void failConnect(std::string reason);
+
+    /// The reactor's run ended with an exception, on the reactor thread. The default settles the connection
+    /// phase to Failed (@see failConnect); a controller that tells its owner when a connection ends
+    /// overrides it to say so too, since nothing else will.
+    /// @param reason The exception's message.
+    virtual void reactorDied(std::string const& reason) { failConnect(reason); }
+
+    /// @return Whether a run of the connection is in progress: connecting, up, or lost and being sought
+    /// again,
+    ///         and not stopped. Safe from any thread.
+    [[nodiscard]] bool isConnecting() const;
+
+    /// @return Whether stop() has ended the run and no restartConnecting() has begun another. Safe from any
+    ///         thread.
+    [[nodiscard]] bool isStopped() const;
 
     /// @return Whether the connection is up: the handshake completed, and neither the remote end nor a
     ///         stop() has ended it since. Safe from any thread; a request sent on a true answer can still

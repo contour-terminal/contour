@@ -32,6 +32,9 @@ class PaneProxy: public QObject
     Q_PROPERTY(contour::session::PaneProxy* second READ second NOTIFY changed)
     Q_PROPERTY(contour::session::TerminalSession* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
+    // A window::PaneFocus's value: Unfocused unless active, KeyboardFocused when a FocusPane* action reached
+    // it. Notified with `active`: the manager re-announces it when only the way it was reached changed.
+    Q_PROPERTY(int focus READ focus NOTIFY activeChanged)
     Q_PROPERTY(int paneId READ paneId CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -52,11 +55,21 @@ class PaneProxy: public QObject
     [[nodiscard]] TerminalSession* session() const noexcept;
     [[nodiscard]] bool active() const noexcept;
 
+    /// @return This pane's window::PaneFocus, as its value. @see TerminalSessionManager::lastPaneActivation
+    [[nodiscard]] int focus() const noexcept;
+
     /// Writes a new splitter ratio back to the model (called from the QML drag handle).
     Q_INVOKABLE void setRatio(double ratio);
 
-    /// Makes this pane the active pane of its tab (called on focus-in / click).
+    /// Makes this pane the active pane of its tab, reached by the pointer: called on TerminalPane.qml's tap
+    /// (relayed by PaneNode.qml) only, which is why it records PaneActivation::Pointer -- a keyboard move
+    /// goes through TerminalSessionManager::focusPane(), and the model's own activations through
+    /// activePaneChanged().
     Q_INVOKABLE void activate();
+
+    /// Runs a pane header button's action on this pane: called by PaneHeader.qml's buttons.
+    /// @param action A window::PaneHeaderAction as its underlying value; one out of range does nothing.
+    Q_INVOKABLE void runHeaderAction(int action);
 
     // {{{ Manager-side wiring (not for QML)
     [[nodiscard]] vtworkspace::PaneId modelId() const noexcept { return _id; }

@@ -18,6 +18,8 @@
 
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/core/ColorPalette.hpp>
+
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -40,6 +42,8 @@ enum class HostedOperation : uint8_t
     WriteScreen = 3,          ///< Parse text as if the application wrote it (actions::WriteScreen).
     SetUserMark = 4,          ///< Place the user mark (vi `mm`) on a row's logical line.
     ClearUserMark = 5,        ///< Take the user mark off a row's logical line.
+    UseDarkColors = 6,        ///< Re-seed the palette from the profile's dark scheme (the OS went dark).
+    UseLightColors = 7,       ///< Re-seed the palette from the profile's light scheme.
 };
 
 /// A row of the session's own terminal, as its primary grid names it: a stable id, which names that row only
@@ -124,6 +128,14 @@ constexpr auto HostedOperationTable = std::array {
     HostedOperationRow { .operation = HostedOperation::ClearUserMark,
                          .description = "unmark the line",
                          .runs = { HostedOperationRoute::RunOnHost, HostedOperationRoute::RunHere } },
+    // The daemon's session holds the palette its mirror shows the default colors of; a tmux tab's terminal
+    // holds its own.
+    HostedOperationRow { .operation = HostedOperation::UseDarkColors,
+                         .description = "use the dark colors",
+                         .runs = { HostedOperationRoute::RunOnHost, HostedOperationRoute::RunHere } },
+    HostedOperationRow { .operation = HostedOperation::UseLightColors,
+                         .description = "use the light colors",
+                         .runs = { HostedOperationRoute::RunOnHost, HostedOperationRoute::RunHere } },
 };
 
 static_assert(
@@ -156,6 +168,37 @@ static_assert(
 [[nodiscard]] constexpr HostedOperationRoute routeOf(HostedOperation operation, RemoteHostKind host) noexcept
 {
     return rowOf(operation).runs.at(static_cast<std::size_t>(host));
+}
+
+/// @param preference A light/dark preference a client shows.
+/// @return The operation that states it to a host.
+[[nodiscard]] constexpr HostedOperation colorOperationOf(vtbackend::ColorPreference preference) noexcept
+{
+    switch (preference)
+    {
+        case vtbackend::ColorPreference::Dark: return HostedOperation::UseDarkColors;
+        case vtbackend::ColorPreference::Light: return HostedOperation::UseLightColors;
+    }
+    return HostedOperation::UseLightColors;
+}
+
+/// @param operation Any operation.
+/// @return The preference @p operation states, or std::nullopt for an operation that states none.
+[[nodiscard]] constexpr std::optional<vtbackend::ColorPreference> colorPreferenceOf(
+    HostedOperation operation) noexcept
+{
+    switch (operation)
+    {
+        case HostedOperation::UseDarkColors: return vtbackend::ColorPreference::Dark;
+        case HostedOperation::UseLightColors: return vtbackend::ColorPreference::Light;
+        case HostedOperation::ClearToPrompt:
+        case HostedOperation::ClearHistoryAndReset:
+        case HostedOperation::SoftReset:
+        case HostedOperation::WriteScreen:
+        case HostedOperation::SetUserMark:
+        case HostedOperation::ClearUserMark: break;
+    }
+    return std::nullopt;
 }
 
 /// One row of the table: an action, and the hosted operation it is.

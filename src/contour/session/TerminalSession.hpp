@@ -4,6 +4,7 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ScrollBarMode.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/MouseMapping.hpp>
@@ -13,10 +14,27 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
+#include <contour/session/EndReason.hpp>
+#include <contour/session/GutterChrome.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/session/PastePreview.hpp>
+#include <contour/session/Permission.hpp>
+#include <contour/session/PermissionPrompt.hpp>
+#include <contour/session/PermissionQueue.hpp>
+#include <contour/session/ScrollbarVisibility.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/session/SizeIndicator.hpp>
+#include <contour/window/ChromeKeys.hpp>
+#include <contour/window/DroppedText.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneState.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/StickyHeaderChrome.hpp>
+#include <contour/window/StickyHeaderPlacement.hpp>
+#include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -31,15 +49,21 @@
 
 #include <crispy/Point.hpp>
 
+#include <core/Flags.hpp>
+
 #include <QtCore/QAbstractItemModel>
+#include <QtCore/QList>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QVariant>
+#include <QtCore/QVariantMap>
 #include <QtQml/QJSValue>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <deque>
@@ -91,24 +115,6 @@ namespace contour::session
 
 class TerminalSessionManager;
 
-/**
- * A set of user-facing activities that are guarded behind a permission-check wall.
- */
-enum class GuardedRole : uint8_t
-{
-    ChangeFont,
-    CaptureBuffer,
-    ShowHostWritableStatusLine,
-    BigPaste,
-    RerunCommand,
-};
-
-/**
- * Trivial cache to remember the interactive choice when the user has to be asked
- * and the user decided to permanently decide for the current session.
- */
-using PermissionCache = std::map<GuardedRole, bool>;
-
 /// Whether the gutter took an input event, and the grid must therefore not also see it.
 ///
 /// Named rather than left to a bool because the call sites read as a question about routing, not about
@@ -138,7 +144,21 @@ enum class PressOwner : uint8_t
     None = 0,     ///< Nobody: the grid's presses and releases go the normal way.
     Gutter,       ///< The gutter took the press.
     StickyHeader, ///< The sticky command header took the press.
-    FoldLabel,    ///< A collapsed fold's `⋯ N lines` label took the press, and expanded its fold.
+    FoldLabel,    ///< A collapsed fold's `N lines hidden ⌄` chip took the press, and expanded its fold.
+};
+
+/// Whether a request to run a command line again put its question to the user.
+enum class RerunAsk : uint8_t
+{
+    Refused = 0, ///< Nothing was asked: the shell is not at a prompt, or the line cannot be typed as it is.
+    Asked,       ///< The dialog is up.
+};
+
+/// Whether stepping the block focus also selects the block's output.
+enum class BlockOutputSelection : uint8_t
+{
+    Leave = 0, ///< The selection stays as it was.
+    Select,    ///< The focused block's output becomes the selection.
 };
 
 /// What a session's program is to the user. Fixed at construction: it decides how the session's end is
@@ -153,6 +173,10 @@ enum class SessionRole : uint8_t
     /// closes when it ends; a layout does not save its command, which names a private file that is gone by
     /// the time the layout is restored.
     CommandOutput,
+    /// The terminal Settings shows the profile being edited in: over a canned transcript on a mock device, so
+    /// no shell runs and nothing is notified. It is in no window and no layout, has no pane to close and
+    /// takes no focus; its owner (SettingsPreview) applies the configuration to it and destroys it.
+    Preview,
 };
 
 /// What became of an action that changes engine state, in a session whose terminal may be hosted elsewhere.
@@ -178,6 +202,14 @@ enum class LinkFollow : uint8_t
     Probing,          ///< A path is being looked for on the probe thread; it opens once found.
 };
 
+/// Who follows the program in front of a session's shell, which its foreground-process poll serves. A
+/// bitmask: the two combine freely, and the poll runs while any is set (core::Flags; empty is none).
+enum class ProcessNameFollower : uint8_t
+{
+    Extension = 0b01, ///< A status-line extension subscribed to the foreground process.
+    Header = 0b10,    ///< The pane's header is visible and shows the name.
+};
+
 /// Where a pointer over the gutter is: the row it names and the segment it is over.
 struct GutterHit
 {
@@ -200,7 +232,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int id READ id)
     Q_PROPERTY(int pageLineCount READ pageLineCount NOTIFY lineCountChanged)
     Q_PROPERTY(int pageColumnsCount READ pageColumnsCount NOTIFY columnsCountChanged)
-    Q_PROPERTY(bool showResizeIndicator READ showResizeIndicator)
     Q_PROPERTY(int historyLineCount READ historyLineCount NOTIFY historyLineCountChanged)
     Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY titleChanged)
@@ -213,17 +244,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QColor backgroundColor READ getBackgroundColor NOTIFY backgroundColorChanged)
     Q_PROPERTY(bool isScrollbarRight READ getIsScrollbarRight NOTIFY isScrollbarRightChanged)
     Q_PROPERTY(bool isScrollbarVisible READ getIsScrollbarVisible NOTIFY isScrollbarVisibleChanged)
+    // What the size indicator says: "100 × 30" or "13 pt". Its signal fires on every request the gate lets
+    // through, so the pill restarts its hold.
+    Q_PROPERTY(QString sizeIndicatorText READ sizeIndicatorText NOTIFY sizeIndicatorRequested)
     Q_PROPERTY(int fontSize READ getFontSize)
-    Q_PROPERTY(int upTime READ getUptime)
     Q_PROPERTY(QString bellSource READ getBellSource NOTIFY onBell)
-    // The OSC 8 hyperlink under the pointer. Empty means no tooltip. Both change together, so one
-    // signal serves them: the anchor without its text describes nothing.
-    Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
-    Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
-    // The command block under the pointer in the gutter's block column; an empty anchor means no tooltip.
-    // The text is read through commandBlockTooltip() whenever the anchor's signal fires.
-    Q_PROPERTY(
-        QRectF commandBlockTooltipAnchor READ commandBlockTooltipAnchor NOTIFY commandBlockHoverChanged)
+    // The link under the pointer, for the link pill: what it opens (linkPillText()), how a click opens it
+    // (linkOpenHint()), and whether the pill shows (linkPillVisibility(); a bool, the QML carve-out). One
+    // signal serves the three: they change together.
+    Q_PROPERTY(QString linkTargetText READ linkTargetText NOTIFY linkTargetChanged)
+    Q_PROPERTY(QString linkTargetHint READ linkTargetHint NOTIFY linkTargetChanged)
+    Q_PROPERTY(bool linkTargetShown READ linkTargetShown NOTIFY linkTargetChanged)
+    // Bumped while the pill shows and the page changes under it, so QML asks overlayClearance() again.
+    Q_PROPERTY(int overlayClearanceRevision READ overlayClearanceRevision NOTIFY overlayClearanceChanged)
+    // Where the attended block's ⋯ button sits: the rail's strip beside the block's first visible row, in the
+    // display's item-local logical pixels. Empty with no block under the pointer, on the alternate screen,
+    // and with nothing to anchor to.
+    Q_PROPERTY(QRectF blockActionsAnchor READ blockActionsAnchor NOTIFY blockActionsAnchorChanged)
+    // The block the keyboard focuses (⌘↑ / ⌘↓), as its id; 0 while none is. What a focus ring binds to.
+    Q_PROPERTY(qulonglong focusedCommandBlock READ focusedCommandBlock NOTIFY focusedCommandBlockChanged)
+    // The block the pointer is over, as its id; 0 while none is. The block blockActionsAnchor belongs to.
+    Q_PROPERTY(qulonglong hoveredCommandBlock READ hoveredCommandBlock NOTIFY blockActionsAnchorChanged)
+    // The sticky command header while it lives in the chrome (@see setStickyHeaderHost): { glyph, command,
+    // detail, outcome: a CommandBlockOutcome as an int, statusRole: the config::StatusColorRole that inks the
+    // glyph, host: the window::StickyHeaderHost it lives in, as an int, jumpLabel }. Empty with no header,
+    // and always while the header is drawn over the grid.
+    Q_PROPERTY(QVariantMap stickyHeader READ stickyHeader NOTIFY stickyHeaderChanged)
 
     // The scrollbar's tick marks, top first: { position: 0..1 down the track, kind: a ScrollbarMarkKind as
     // an int, targetLine: what scrollToScrollbarMark() takes }. Empty with nothing to mark, on the
@@ -239,30 +285,98 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
-    // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
-    // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
-    // read backwards. @see contour::session::describeSearchCase.
-    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
-    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
-    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
-    // Whether the daemon connection this pane mirrors through is being sought again: a QML-facing property,
-    // the documented bool exception (AGENT.md), read by TerminalPane.qml's reconnecting overlay.
-    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
+    // The find bar's toggles, one map per SearchToggleRows row: toggle (int), glyph, checked, tooltip,
+    // accessibleName and objectName. Each says what it SHOWS rather than an enumerator QML would have to
+    // interpret: the bar once spoke raw ints and inverted every one of them, and a glyph and a lit flag
+    // cannot be read backwards. @see contour::session::SearchToggleRows.
+    Q_PROPERTY(QVariantList searchToggles READ searchToggles NOTIFY searchStateChanged)
+    // The viewport rows the current match covers, { first, last }; empty when there is none on screen. The
+    // find bar reads it to move out of the match's way (window::placeFindBar).
+    Q_PROPERTY(QVariantMap searchFocusedRows READ searchFocusedRows NOTIFY searchFocusedRowsChanged)
+    // What the pane shows over and around its terminal (a window::PaneState's value, chromeStyle.paneStates
+    // names them): window::paneStateOf over the session's end and its host connection, so the card's
+    // reconnecting pill and the ended pane's footer read one decision instead of making it again. An int,
+    // not the enum, until it is registered with the meta-object system (AGENT.md, QML-facing exception).
+    Q_PROPERTY(int paneState READ getPaneState NOTIFY paneStateChanged)
+    // Whether the pane shows the lock (a window::SecureIndicator's value): the program in it hides what is
+    // typed. An int, not the enum, for the QML-facing exception paneState takes.
+    Q_PROPERTY(int secureIndicator READ secureIndicator NOTIFY secureIndicatorChanged)
+    // How the session ended while its pane waits (an EndReason's value; 0 while it runs) and what the pane's
+    // footer says about it. Ints, not the enums, until they are registered with the meta-object system
+    // (AGENT.md, QML-facing exception).
+    Q_PROPERTY(int sessionEnd READ getSessionEnd NOTIFY sessionEndChanged)
+    Q_PROPERTY(QString endMessage READ getEndMessage NOTIFY sessionEndChanged)
+    // The footer the pane shows (a window::PaneFooterKind's value, chromeStyle.paneEnds.footer* name them)
+    // and what it says and offers: window::paneFooterOf over the session's end and the interruption a restart
+    // left. The action label is empty while the footer offers no primary button; the dismiss label is the
+    // dismissing button's word ("Close" or "Dismiss"), without its chord; footerTakesReturn is 1 where Return
+    // answers the footer (an ended pane) and 0 where it belongs to the shell.
+    Q_PROPERTY(int paneFooter READ getPaneFooter NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerMessage READ getFooterMessage NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerActionLabel READ getFooterActionLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(QString footerDismissLabel READ getFooterDismissLabel NOTIFY paneFooterChanged)
+    Q_PROPERTY(int footerTakesReturn READ getFooterTakesReturn NOTIFY paneFooterChanged)
+    // {{{ Panes
+    // What the pane header shows: the directory the shell reported (OSC 7 / OSC 3008), home-abbreviated and
+    // made safe to show, and this pane's own program status (a window::TabBadgeKind's value, as the tab
+    // strip's BadgeRole gives it) with its text. Each is notified only when it changes.
+    Q_PROPERTY(
+        QString displayWorkingDirectory READ getDisplayWorkingDirectory NOTIFY displayWorkingDirectoryChanged)
+    Q_PROPERTY(int programStatus READ getProgramStatus NOTIFY paneProgramStatusChanged)
+    Q_PROPERTY(QString programStatusText READ getProgramStatusText NOTIFY paneProgramStatusChanged)
+    // The program in front of the shell, as the foreground-process poll last read it: notified on a change,
+    // and only while someone follows it (a visible header, an extension).
+    Q_PROPERTY(
+        QString foregroundProcessName READ getForegroundProcessName NOTIFY foregroundProcessNameChanged)
+    // }}}
+    // The card that offers to install shell integration, in the pane's bottom chrome (window::CardStage as an
+    // int; Hidden while there is no offer) and the words of its stage.
+    Q_PROPERTY(int shellIntegrationCard READ shellIntegrationCard NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationTitle READ shellIntegrationTitle NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationBody READ shellIntegrationBody NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationPrimary READ shellIntegrationPrimary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(
+        QString shellIntegrationSecondary READ shellIntegrationSecondary NOTIFY shellIntegrationCardChanged)
+    Q_PROPERTY(QString shellIntegrationError READ shellIntegrationError NOTIFY shellIntegrationCardChanged)
+    // The profile's regular font family, in which the card sets the line it would add.
+    Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY shellIntegrationCardChanged)
+    // The question this session asks its user now, as the permission dialog shows it; empty while nothing is
+    // asked. See pendingPermission().
+    Q_PROPERTY(QVariantMap pendingPermission READ pendingPermission NOTIFY pendingPermissionChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
   public:
     // {{{ Model property helper
 
-    int getUptime() const noexcept
+    /// @return Whole seconds since the session started, by the app's injected steady clock.
+    int getUptime() const noexcept;
+
+    /// What the link under the pointer opens, as the pill says it (linkPillText()); empty over none. GUI
+    /// thread.
+    [[nodiscard]] QString linkTargetText() const { return _linkTarget.text; }
+
+    /// How a click opens the link under the pointer (command::linkOpenHint()); empty where no binding follows
+    /// links. GUI thread.
+    [[nodiscard]] QString linkTargetHint() const { return _linkTarget.hint; }
+
+    /// Whether the link pill shows (linkPillVisibility()). A bool for QML, the documented carve-out. GUI
+    /// thread.
+    [[nodiscard]] bool linkTargetShown() const noexcept
     {
-        auto const now = std::chrono::steady_clock::now();
-        auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
-        return static_cast<int>(diff.count());
+        return _linkTarget.visibility == LinkPillVisibility::Shown;
     }
 
-    /// What the hyperlink tooltip should say, or empty for "show nothing".
-    [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
+    /// How often the page changed under a shown pill; QML re-reads overlayClearance() when it moves.
+    [[nodiscard]] int overlayClearanceRevision() const noexcept { return _overlayClearanceRevision; }
+
+    /// Where an overlay over the grid may go (vtbackend::Terminal::overlayClearance()), with the display's
+    /// geometry in logical pixels: `marginLeft`, `marginTop` (the first drawn row's top), `cellWidth`,
+    /// `cellHeight`, `columns`, `trailingBlank` (one entry per drawn row) and `avoidRows`. GUI thread; takes
+    /// the terminal lock.
+    /// @return The map window::UiStyleProvider::linkPillPlacement() reads; empty without a display.
+    Q_INVOKABLE [[nodiscard]] QVariantMap overlayClearance() const;
 
     // {{{ Find bar
     /// The active search pattern, or empty when nothing is being searched for.
@@ -271,10 +385,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The label beside the field: "3 of 27", "No results", "" while idle.
     [[nodiscard]] QString searchSummary() const { return _searchSummary; }
 
-    /// Whether the active pattern matches anything. Drives the field's error tint.
+    /// Whether the active pattern may match anything: false once proved to match nothing, or refused. Drives
+    /// the field's error tint; a walk still under way is not an error.
     [[nodiscard]] bool searchHasMatches() const noexcept
     {
-        return _searchStatus.outcome != SearchOutcome::NoMatch;
+        return _searchStatus.outcome != SearchOutcome::NoMatch
+               && _searchStatus.outcome != SearchOutcome::Invalid;
     }
 
     /// Whether previous/next would go anywhere. @see MatchNavigation.
@@ -283,18 +399,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _searchStatus.navigation == MatchNavigation::Available;
     }
 
-    [[nodiscard]] QString searchCaseGlyph() const
-    {
-        return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
-    }
-    [[nodiscard]] QString searchCaseTooltip() const { return _searchCaseTooltip; }
-    [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
+    /// The find bar's toggles, as maps. @see Q_PROPERTY searchToggles
+    [[nodiscard]] QVariantList searchToggles() const { return _searchToggles; }
+
+    /// The viewport rows of the current match, { first, last }, or an empty map. @see focusedSearchMatch
+    [[nodiscard]] QVariantMap searchFocusedRows() const { return _searchFocusedRows; }
 
     /// Installs @p pattern as the search term and moves to its nearest match, live as the user types.
     Q_INVOKABLE void setSearchPattern(QString const& pattern);
 
-    /// Moves to the next case policy and re-runs the search in place. @see nextSearchCase.
-    Q_INVOKABLE void cycleSearchCaseSensitivity();
+    /// Presses the find bar's toggle @p toggle (a SearchToggle's value): its option moves on, and the search
+    /// re-runs as for a new pattern. Out-of-range values do nothing.
+    /// @param toggle A SearchToggle, as an int (QML-facing).
+    Q_INVOKABLE void toggleSearchOption(int toggle);
 
     /// The find bar opened, or closed. Told rather than inferred: only the bar knows, and a tally is
     /// worth computing only while something displays it.
@@ -305,10 +422,37 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void searchNext();
     Q_INVOKABLE void searchPrevious();
 
-    /// Re-reads the tally and re-derives the summary. Called after anything that can change either.
+    /// Re-derives the summary and, where the pattern, the options or the cursor changed or no walk is under
+    /// way, starts the count over. Called after anything that can change either.
     void refreshSearchStatus();
 
+    /// Reads one step of the count's walk (the terminal locked for that step only), publishes what it found,
+    /// and posts the next step while rows remain. GUI thread; public so a test can drive the walk without an
+    /// event loop, as refreshSearchStatus() is.
+    void runSearchTallyStep();
+
+    /// @return Whether a count is being walked.
+    [[nodiscard]] bool searchTallyRunning() const noexcept { return _searchWalk.has_value(); }
+
+    /// Re-reads the current match's viewport rows, under the terminal's lock, and notifies a change. GUI
+    /// thread; the scroll callback posts it, because it runs with the lock held.
+    void refreshSearchFocusedRows();
+
   private:
+    /// Whether the count's walk has rows left after a step.
+    enum class WalkStepOutcome : uint8_t
+    {
+        Done = 0, ///< Finished, failed, or there is no walk.
+        More,     ///< Rows remain: post the next step.
+    };
+
+    /// Whether the cursor jumps once the walk ends: set when the keystroke probe found nothing (R-e).
+    enum class PendingSearchJump : uint8_t
+    {
+        None = 0,  ///< The cursor stays.
+        ToNearest, ///< To the nearest match at or before it, else the last one, if it has not moved since.
+    };
+
     /// Which end of the scrollback a wrapped search restarts from.
     enum class SearchWrapEdge : uint8_t
     {
@@ -319,6 +463,43 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
+
+    /// Whether a walk is under way and the vi cursor is still on the cell it began at, however output has
+    /// scrolled that cell since: a pending jump applies, and a status refresh continues the walk, only then.
+    /// Under the lock.
+    [[nodiscard]] bool searchWalkBegunAtCursorLocked() const;
+
+    /// Drops the count being walked: its posted steps find the ticket moved on, and the jump it was to make
+    /// goes with it.
+    void abandonSearchWalk();
+
+    /// Installs what the active search's pattern and options say into the bar's state, under the lock: a
+    /// refused pattern as Invalid, otherwise the bounded probe (R-e), moving the vi cursor onto what it
+    /// found.
+    void probeSearchLocked();
+
+    /// Begins the count's walk at the vi cursor and reads its first step inline, so a scrollback within one
+    /// step settles at once; posts the next step while rows remain. Under the lock; bar open only.
+    void startSearchTallyLocked();
+
+    /// Reads one step of _searchWalk under the lock and publishes it into _searchStatus.
+    /// @return Whether more steps remain.
+    [[nodiscard]] WalkStepOutcome stepSearchTallyLocked();
+
+    /// Posts the walk's next step, guarded by the current ticket and the bar being open.
+    void postSearchTallyStep();
+
+    /// Re-derives _searchToggles and the case affordance from @p options.
+    void publishSearchToggles(vtbackend::SearchOptions options);
+
+    /// Re-derives _searchFocusedRows under the lock.
+    void refreshSearchFocusedRowsLocked();
+
+    /// Emits searchFocusedRowsChanged where the rows differ from the ones last announced. Outside the lock.
+    void announceSearchFocusedRows();
+
+    /// Emits searchStateChanged, and searchFocusedRowsChanged where the rows changed. Outside the lock.
+    void publishSearchState();
 
     /// Renders @p status as the label the bar shows, translated.
     ///
@@ -338,23 +519,62 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// One step of the find bar's navigation, wrapping at @p edge when it cannot go further.
     void stepSearch(SearchWrapEdge edge);
 
+    /// Find Next (@p edge Top) or Find Previous (Bottom): steps and wraps as the bar does, or, with no
+    /// pattern, asks for the find bar.
+    void focusOrOpenSearch(SearchWrapEdge edge);
+
+    /// One step towards @p edge's direction, without wrapping: what vi's `n` and `N` do.
+    /// @return Whether a match was stepped to; a bool, as the action handlers it backs return one.
+    [[nodiscard]] bool focusAdjacentSearchMatch(SearchWrapEdge edge);
+
   public:
     // }}}
 
-    /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
-    ///
-    /// The ENTRY cell, so the tooltip stays put while the pointer traces the link rather than sliding
-    /// along with it.
-    [[nodiscard]] QRectF hyperlinkTooltipAnchor() const noexcept { return _hyperlinkTooltipAnchor; }
+    /// The strip beside the first visible row of the block under the pointer, in the display's item-local
+    /// logical coordinates; empty while none is (@see blockActionsAnchor above). Under the glyph column of
+    /// the Terminal row it is the one cell at the block column's head.
+    [[nodiscard]] QRectF blockActionsAnchor() const noexcept { return _blockActionsAnchor; }
 
-    /// The gutter cell the hovered command block was entered at, in the display's item-local logical
-    /// coordinates; empty while no block is hovered. The ENTRY cell, so the tooltip stays put while the
-    /// pointer traces the block's rows.
-    [[nodiscard]] QRectF commandBlockTooltipAnchor() const noexcept { return _commandBlockTooltipAnchor; }
+    /// @return The id of the block under the pointer; 0 while none is. GUI thread.
+    [[nodiscard]] qulonglong hoveredCommandBlock() const noexcept
+    {
+        return _hoveredBlock ? static_cast<qulonglong>(_hoveredBlock->value) : 0;
+    }
 
-    /// What the block-column tooltip says about the hovered command block, or empty for "show nothing"
-    /// (@see commandBlockTooltipText). Reads the record under the terminal lock, at the moment it is asked.
-    Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const;
+    /// Opens the menu of the block under the pointer, below its ⋯ button: what the button does.
+    /// Nothing without a block under the pointer.
+    Q_INVOKABLE void openBlockActions();
+
+    /// The block the keyboard focuses, mirrored on the GUI thread from the terminal's
+    /// commandBlockFocusChanged() (@see focusedCommandBlock above). GUI thread.
+    /// @return Its id; 0 while none is focused.
+    [[nodiscard]] qulonglong focusedCommandBlock() const noexcept
+    {
+        return _focusedBlock ? static_cast<qulonglong>(_focusedBlock->value) : 0;
+    }
+
+    /// Where this pane's sticky header lives (window::stickyHeaderHostFor): domain state the pane's card
+    /// decides from its header policy, handed to the terminal as its presentation and kept across a
+    /// configuration reload. Grid until a card says otherwise, which is the in-grid band of before. GUI
+    /// thread.
+    /// @param host The pane header, the title band, or the grid.
+    void setStickyHeaderHost(window::StickyHeaderHost host);
+
+    /// setStickyHeaderHost() for QML, which passes the host as its underlying value (the QML-facing carve-out
+    /// of enum class over int). A value outside window::StickyHeaderHost is ignored.
+    /// @param host A window::StickyHeaderHost as an int.
+    Q_INVOKABLE void setStickyHeaderHost(int host);
+
+    /// @return Where this pane's sticky header lives.
+    [[nodiscard]] window::StickyHeaderHost stickyHeaderHost() const noexcept { return _stickyHeaderHost; }
+
+    /// The sticky header as the chrome shows it; empty under window::StickyHeaderHost::Grid or with no
+    /// header. @see the stickyHeader Q_PROPERTY for its keys. GUI thread.
+    [[nodiscard]] QVariantMap stickyHeader() const;
+
+    /// Scrolls the block the chrome's sticky header names to the top, as a press on the in-grid band does
+    /// (vtbackend::Terminal::scrollToCommandBlockHead). Nothing without a header in the chrome.
+    Q_INVOKABLE void jumpToStickyHeader();
 
     /// Withdraws the hyperlink tooltip, whatever the pointer is over.
     ///
@@ -387,14 +607,39 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
   private:
     /// Feeds the hovered-link tracker and publishes any change to QML.
     ///
-    /// @param uri  The hyperlink under the pointer, or empty when there is none.
-    /// @param cell Where the pointer is, in viewport coordinates.
-    void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
+    /// @param link The link under the pointer; std::monostate over none.
+    void updateHyperlinkHover(HoveredLink const& link);
 
-    /// What the tooltip says for the detected link under the pointer (detectedLinkTooltip()). The caller
-    /// holds the terminal lock.
-    /// @return The text; empty over no detected link, or one printed as it opens. Valid until the next call.
-    [[nodiscard]] std::string const& hoveredDetectedLinkTooltip();
+    /// What the pill says for the detected link under the pointer (linkPillText()). The caller holds the
+    /// terminal lock.
+    /// @return The text; empty over no detected link. Valid until the next call.
+    [[nodiscard]] std::string const& hoveredDetectedLinkText();
+
+    /// Re-decides whether the link pill shows and what its hint says, from the link under the pointer, the
+    /// held modifiers and whether an application takes the mouse; emits linkTargetChanged on a change. GUI
+    /// thread; takes the terminal lock.
+    /// @param text The link target's text (linkPillText()); empty over none.
+    void refreshLinkTarget(QString text);
+
+    /// Arranges for overlayClearanceChanged on the GUI thread within a frame. Callable from the parser
+    /// thread, the lock held or not: it only posts, at most one post in flight.
+    void requestOverlayClearanceRefresh();
+
+    /// Re-decides the link pill (refreshLinkTarget()), then bumps overlayClearanceRevision and emits
+    /// overlayClearanceChanged: the frame timer's half of requestOverlayClearanceRefresh(). GUI thread.
+    void publishOverlayClearance();
+
+    /// Arms the once-a-second redraw while the terminal shows a running block's time, and stops it once it
+    /// does not. GUI thread.
+    void updateRunningStatusRefresh();
+
+    /// Whether a running block's time should be redrawn once a second now: the terminal shows one, on a
+    /// display whose window is exposed. GUI thread.
+    [[nodiscard]] bool wantsRunningStatusRedraw() const;
+
+    /// The fewest columns a click on a fold chip spans, for the display's cell: @c size.foldChipHit of the
+    /// session's chrome row in cells (R-k). One without a display. GUI thread.
+    [[nodiscard]] vtbackend::ColumnCount foldChipHitColumns() const;
 
   public:
     QString getBellSource() const noexcept
@@ -464,22 +709,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return false;
     }
 
+    /// What the size indicator says, as the last request let through set it. GUI thread.
+    [[nodiscard]] QString sizeIndicatorText() const { return _sizeIndicatorText; }
+
+    /// Raises the size indicator for @p event, unless the session has no display to draw it (then no burst
+    /// opens), is in its first second, or the profile turned it off (@see sizeIndicatorGate). A font zoom's
+    /// text survives the page resize it causes while its burst lasts (@see nextSizeIndicatorKind). Emits
+    /// sizeIndicatorRequested. GUI thread, outside the terminal lock.
+    /// @param event What changed: the page, or the font size.
+    void requestSizeIndicator(SizeIndicatorKind event);
+
+    /// Ends the size indicator's burst, once its pill has been still for its hold, and announces the settled
+    /// size, Polite, when @p paneActive. Does nothing outside a burst, so a burst is announced once.
+    /// @param paneActive Whether the pane is the active one: only it is announced. A `bool` because QML
+    ///        calls this (the documented Q_INVOKABLE carve-out).
+    Q_INVOKABLE void sizeIndicatorSettled(bool paneActive);
+
     bool getIsScrollbarRight() const noexcept
     {
         return profile().scrollbar.value().position == config::ScrollBarPosition::Right;
     }
 
+    /// Whether the scrollbar is drawn, decided by resolveScrollbarVisibility() and computed on every read, so
+    /// it is right whether or not the change was announced yet (@see refreshScrollbarVisibility). GUI thread.
     bool getIsScrollbarVisible() const noexcept
     {
-        if (profile().scrollbar.value().position == config::ScrollBarPosition::Hidden)
-            return false;
-
-        // The page on display: with DECPCCM reset the cursor may write to another page, under nobody's view.
-        if ((_terminal.displayedScreenType() == vtbackend::ScreenType::Alternate)
-            && profile().scrollbar.value().hideScrollbarInAltScreen)
-            return false;
-
-        return true;
+        return resolveScrollbarVisibility(scrollbarVisibilityInputs()) == ScrollbarVisibility::Shown;
     }
 
     /// Accumulates a wheel event towards whole-cell scroll steps.
@@ -513,8 +768,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// The main page's columns, read without the terminal lock. @see vtbackend::Terminal::mainPageSize()
     int pageColumnsCount() const noexcept { return unbox(_terminal.mainPageSize().columns); }
-
-    bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
     /// How far the scrollbar can scroll up, in rows the user can actually reach.
     ///
@@ -563,6 +816,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// were published; the refresh that change scheduled replaces the tick anyway.
     /// @param targetLine A tick's targetLine.
     Q_INVOKABLE void scrollToScrollbarMark(qint64 targetLine);
+    /// Types dropped URLs at this pane's prompt, as one paste. Local files become their paths, escaped for
+    /// the shell the pane runs; any other URL is its encoded form, quoted the same way, so a link a web page
+    /// chose never reaches the shell as an expansion. A name that cannot be typed safely (a control
+    /// character, or what the shell has no way to quote) refuses the WHOLE drop and the window says so. A
+    /// pane whose session has ended takes nothing. Goes through the paste path of a clipboard paste:
+    /// bracketed when the application asked for it, and with its size limits.
+    /// @param urls What was dropped.
+    Q_INVOKABLE void insertDroppedUrls(QList<QUrl> const& urls);
+    /// Types dropped text at this pane's prompt, as one paste (see insertDroppedUrls()).
+    /// @param text What was dropped.
+    Q_INVOKABLE void insertDroppedText(QString const& text);
 
     /// Publishes the scrollbar's travel (announceScrollableLineCount()), and rebuilds the ticks if anything
     /// they depend on moved, and announces them.
@@ -671,6 +935,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The raw window title (empty if none has been set).
     [[nodiscard]] std::string resolvedWindowTitle() const { return terminal().resolvedWindowTitle(); }
 
+    /// @return The cursor's line on the cursor's page, counted from its top, read under the terminal lock:
+    ///         what keeps a toast at the content's top off the prompt row. GUI thread.
+    [[nodiscard]] int cursorLine() const;
+
     /// Starts the PTY device and, if it came up, the VT background threads.
     ///
     /// Total: a device that cannot be started is REPORTED into this session's screen, never
@@ -703,14 +971,253 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param state Where the connection stands now.
     void setHostConnection(vthost::client::ConnectionState state);
 
-    /// @return Whether this pane's connection to its host is lost and being sought again.
+    /// How the session ended, while its pane waits for Restart or Close, as an EndReason's value for QML;
+    /// 0 (None) while it runs. GUI thread only (see _end).
+    [[nodiscard]] int getSessionEnd() const noexcept { return static_cast<int>(_end); }
+
+    /// How the session ended; EndReason::None while it runs. GUI thread only (see _end).
+    [[nodiscard]] EndReason endReason() const noexcept { return _end; }
+
+    // {{{ Panes
+    /// @return The working directory the pane header shows, as refreshDisplayWorkingDirectory() last
+    ///         computed it. GUI thread.
+    [[nodiscard]] QString const& getDisplayWorkingDirectory() const noexcept
+    {
+        return _shownWorkingDirectory;
+    }
+
+    /// Recomputes the header's working directory (shownWorkingDirectory() against the manager's home) and
+    /// notifies displayWorkingDirectoryChanged() when it differs. GUI thread; takes the terminal lock.
+    void refreshDisplayWorkingDirectory();
+
+    /// The working directory to show, abbreviated as a shell prompt writes it, but only for a directory on
+    /// this machine: this machine's home says nothing about another machine's paths. Made safe to show.
+    /// Takes the terminal lock.
+    /// @param home The user's home directory; empty abbreviates nothing.
+    /// @return The directory; empty when none can be determined.
+    [[nodiscard]] std::string shownWorkingDirectory(std::string_view home) const;
+
+    /// @return This pane's program status, a window::TabBadgeKind's value. GUI thread.
+    [[nodiscard]] int getProgramStatus() const noexcept { return static_cast<int>(_paneProgramStatus); }
+
+    /// @return What this pane's program status says (its record's title, message or app). GUI thread.
+    [[nodiscard]] QString const& getProgramStatusText() const noexcept { return _paneProgramStatusText; }
+
+    /// Sets this pane's program status, decided by the manager (window::paneStatusBadgeOf), and notifies
+    /// paneProgramStatusChanged() when either part differs. Domain state, not configuration. GUI thread.
+    /// @param kind The badge this pane's own records earn.
+    /// @param text What it says.
+    void setPaneProgramStatus(window::TabBadgeKind kind, QString text);
+
+    /// @return The program in front of the shell, as pollForegroundProcess() last read it; empty before it
+    ///         read one, and always for a remote-hosted pane. GUI thread.
+    [[nodiscard]] QString getForegroundProcessName() const
+    {
+        return QString::fromStdString(_polledForegroundProcessName);
+    }
+
+    /// Adds @p who to those following the program in front. The first follower makes the one-second poll
+    /// and polls at once, so a header never waits a second for its name. A remote-hosted pane follows
+    /// nothing: its program runs on the host, which this machine's device knows nothing of. Nor does an
+    /// ended pane's header, whose footer stands where the program ran. GUI thread.
+    /// @param who The follower.
+    void startFollowingForegroundProcess(ProcessNameFollower who);
+
+    /// Removes @p who from those following the program in front; the poll stops with the last. GUI thread.
+    /// @param who The follower.
+    void stopFollowingForegroundProcess(ProcessNameFollower who);
+
+    /// Reads the program in front of the shell from the device. On a change it remembers it, notifies
+    /// foregroundProcessNameChanged() and, while an extension follows, tells the terminal. The poll's tick,
+    /// public for the tests to tick it. GUI thread.
+    void pollForegroundProcess();
+
+    /// @return The program the extensions were last told is in front (once per name, only while one
+    ///         follows); empty before any was told, and always in a build without extensions. GUI thread.
+    [[nodiscard]] std::string_view foregroundProcessToldToExtensions() const noexcept;
+    // }}}
+
+    /// @return The ended pane's footer text; empty while the session runs.
+    [[nodiscard]] QString getEndMessage() const;
+
+    /// The primary button an ended pane offers: its end allows one and this session's hosting can do it.
+    /// @return The row's action; None while the session runs.
+    [[nodiscard]] FooterAction endAction() const noexcept;
+
+    /// The page size a restart starts its session at: the pane's size once the ended pane's footer hides,
+    /// which is the page now with the rows the footer took given back. GUI thread.
+    /// @return The current page size, its lines grown by the footer's rows.
+    [[nodiscard]] vtbackend::PageSize restartPageSize() const;
+
+    /// Starts this ended session again in the same pane (the footer's Restart, or Return), through the
+    /// manager. A no-op unless endAction() is Restart and a manager hosts the session.
+    Q_INVOKABLE void restart();
+
+    /// @return The stage of the shell-integration card as a window::CardStage; Hidden (zero) without an
+    /// offer.
+    [[nodiscard]] int shellIntegrationCard() const noexcept { return std::to_underlying(_shellCard.stage); }
+
+    /// @return The card's title in its current stage; empty while hidden.
+    [[nodiscard]] QString shellIntegrationTitle() const;
+
+    /// @return The card's body: the offer's sentence, or on Confirm the exact line to be added.
+    [[nodiscard]] QString shellIntegrationBody() const;
+
+    /// @return The label of the card's accent button.
+    [[nodiscard]] QString shellIntegrationPrimary() const;
+
+    /// @return The label of the card's other button.
+    [[nodiscard]] QString shellIntegrationSecondary() const;
+
+    /// @return The profile's regular font family, in which the card sets the line on Confirm. Notified
+    /// with the card, which reads it whenever it changes stage.
+    [[nodiscard]] QString fontFamily() const;
+
+    /// @return Why the last install failed, shown under the line on Confirm; empty otherwise.
+    [[nodiscard]] QString shellIntegrationError() const { return QString::fromStdString(_shellCard.error); }
+
+    /// The card's accent button: on Offer it shows the line (Confirm); on Confirm it adds the line to the
+    /// shell's startup file through the manager, which hides the card on success and keeps it, with the
+    /// reason, on failure. GUI thread.
+    Q_INVOKABLE void acceptShellIntegrationCard();
+
+    /// The card's other button: on Offer it remembers "Not Now" for this shell and hides the card; on
+    /// Confirm it hides the card for this run, remembering nothing. GUI thread.
+    Q_INVOKABLE void declineShellIntegrationCard();
+
+    /// Shows the card on its Offer stage. Called by the manager once it decided to offer; a no-op once the
+    /// session has ended, as the footer owns the pane's bottom then. GUI thread.
+    /// @param shell The shell the card names.
+    /// @param rcFile The startup file the line would go into.
+    /// @param line The line that would be added.
+    void showShellIntegrationCard(config::ShellKind shell,
+                                  std::filesystem::path const& rcFile,
+                                  std::string line);
+
+    /// Closes this ended pane (the footer's Close): prunes it from the model, then lets the display go. A
+    /// no-op while the session runs; idempotent once it has ended.
+    Q_INVOKABLE void dismiss();
+
+    /// Which footer the pane shows. GUI thread only (see _end).
+    /// @return window::paneFooterOf over the end and the interruption.
+    [[nodiscard]] window::PaneFooterKind paneFooter() const noexcept;
+
+    /// @return paneFooter() as its enumerator value, for QML.
+    [[nodiscard]] int getPaneFooter() const noexcept { return static_cast<int>(paneFooter()); }
+
+    /// @return What the footer says: the end's message while ended, the interruption's while it stands;
+    ///         empty with no footer. The command line is shown through its display form.
+    [[nodiscard]] QString getFooterMessage() const;
+
+    /// The primary button the footer offers now.
+    /// @return None while no footer shows, and for an interruption until the shell has shown a prompt.
+    [[nodiscard]] FooterAction footerAction() const noexcept;
+
+    /// @return The primary button's word, glyph-free; empty while footerAction() is None.
+    [[nodiscard]] QString getFooterActionLabel() const;
+
+    /// @return The dismissing button's word, without its chord: "Close" for an ended pane, "Dismiss" over a
+    ///         live shell.
+    [[nodiscard]] QString getFooterDismissLabel() const;
+
+    /// @return 1 where Return answers the footer (an ended pane), 0 where it reaches the shell.
+    [[nodiscard]] int getFooterTakesReturn() const noexcept;
+
+    /// Runs the footer's primary button: Restart restarts the pane, Run Again asks whether to type the
+    /// command a restart stopped. Nothing while footerAction() is None.
+    Q_INVOKABLE void runFooterAction();
+
+    /// The footer's dismissing button: Close closes the ended pane, Dismiss takes the interruption's footer
+    /// away in this client alone.
+    Q_INVOKABLE void dismissFooter();
+
+    /// Tells an ended session that a Reconnect did not bring the daemon back: its footer then says "Could not
+    /// reconnect: {reason}." -- or its own words again, for an empty @p reason. GUI thread.
+    /// @param reason Why it failed, as the connection says; empty for none.
+    void noteReconnectFailure(std::string reason);
+
+    /// Tells the session what a restart stopped in its shell, or that it stands no more: the command line a
+    /// daemon's snapshot recorded, empty or nullopt for none. Posted to the GUI thread by whoever mirrors
+    /// the daemon's session (NativeController, from the reactor); this is the thread's seam, so the
+    /// interruption stays GUI-only state like _end.
+    /// @param commandLine The stopped command line, untrusted; nullopt or empty for none.
+    void noteInterruption(std::optional<vtbackend::CommandLineText> commandLine);
+
+    /// Asks whether to type @p commandLine at the shell's prompt and run it, through the same dialog as
+    /// RerunCommand: it shows the line, defaults to Deny, and types nothing before the answer. Not asked
+    /// when the line cannot be typed as it is or the shell is not at a prompt.
+    /// @param commandLine What to run; untrusted, as the shell or a snapshot reported it.
+    /// @return Whether the question was asked.
+    [[nodiscard]] RerunAsk requestRerun(vtbackend::CommandLineText commandLine);
+
+    /// Whether this pane's connection to its host is being sought, folded as the window's host chip folds
+    /// it (window::hostChipStateOf), so the pane's pill and the chip never disagree.
+    /// @return Whether the chip would say Reconnecting.
     [[nodiscard]] bool isReconnecting() const noexcept
     {
-        return _hostConnection == vthost::client::ConnectionState::Reconnecting;
+        return window::hostChipStateOf(_hostConnection) == window::HostChipState::Reconnecting;
     }
+
+    /// What this pane shows over and around its terminal. GUI thread only (see _end).
+    /// @return window::paneStateOf(_end, _hostConnection).
+    [[nodiscard]] window::PaneState paneState() const noexcept
+    {
+        return window::paneStateOf(_end, _hostConnection);
+    }
+
+    /// @return paneState() as its enumerator value, for QML.
+    [[nodiscard]] int getPaneState() const noexcept { return static_cast<int>(paneState()); }
+
+    /// What the terminal did with typed text when last read (refreshInputEcho). GUI thread.
+    /// @return The last read; Unknown before the first, after the session ended, or where the device
+    ///         cannot tell.
+    [[nodiscard]] vtpty::InputEcho inputEcho() const noexcept { return _inputEcho; }
+
+    /// Whether the pane shows the lock, from the configured `secure_input` and inputEcho(). GUI thread.
+    /// @return A window::SecureIndicator's value: LockedSecured only for the focused pane while the OS's
+    ///         secure input is on (window::secureIndicatorUnder).
+    [[nodiscard]] int secureIndicator() const noexcept;
+
+    /// Notes that output reached the pane or a key went in, and starts the echo poll if it is not running:
+    /// a local program may turn echo off after its prompt, or on again without printing, and the poll is
+    /// what tells the lock then. Does nothing for a mirrored pane or under `secure_input: off`. GUI thread.
+    void noteInputActivity();
+
+    /// Re-reads what the terminal does with typed text from the device. On a change, announces the lock
+    /// (secureIndicatorChanged) and tells the manager, which re-decides the OS's secure input. GUI thread
+    /// only, and never under the terminal lock: the device's read takes its own. Called when output was
+    /// noticed, after input reached the PTY, on focus-in, and at the session's end.
+    void refreshInputEcho();
+
+    /// One tick of the echo poll: re-reads the echo when this is the focused pane, and stops the poll once
+    /// window::InputEchoPollWindow has passed since the last activity. GUI thread; public so a test can tick
+    /// it on the injected clock.
+    void pollInputEcho();
+
+    /// @return Whether the echo poll's timer is running; it is not while the pane has been quiet.
+    [[nodiscard]] bool inputEchoPollArmed() const noexcept { return _inputEchoPollTimer.isActive(); }
+
+    /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked
+    /// of the device now (vtpty::Pty::foregroundProcessName). GUI thread. One query of the process table per
+    /// call, so a caller asking often caches it, or reads the polled getForegroundProcessName().
+    /// @return The name; empty for a remote-hosted pane, a device with no process group, or when unknown.
+    [[nodiscard]] std::string foregroundProcessName() const;
+
+    /// Whether a program other than the shell is in front of this session's shell, which decides if closing
+    /// its tab asks first. GUI thread; one query of the process table.
+    /// @return Unknown for a remote-hosted pane or a device that cannot name its foreground process; closing
+    /// a
+    ///         tab asks about such a pane, since it may be running anything.
+    [[nodiscard]] window::PaneActivity paneActivity() const;
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
+
+    /// How this session's chrome row draws the gutter's block column: what its page fit reserves, its
+    /// hit-test reads and its terminal draws. Fixed at construction from ContourGuiApp::chromeStyle(),
+    /// which no reload changes, so the render thread's page fit may read it without a lock.
+    /// @return The session's gutter chrome.
+    [[nodiscard]] GutterChrome const& gutterChrome() const noexcept { return _gutterChrome; }
 
     /// Resolves @p button through the BUILT-IN fallback mouse mappings alone and runs what it binds.
     ///
@@ -820,37 +1327,73 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept;
 
-    Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
-    Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
-    Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
-    Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
+    // The guarded roles' executors: each answers its role's pending request, remembers the answer for the
+    // session unless @p memory is Once (see executeRole()), and settles the role's question if it is asked.
+    // answerPermission() reaches them for the question shown; public for the tests that answer directly.
 
-    /// Runs the command RerunCommand asked about, if @p allow: typed at the prompt and entered -- unless
-    /// the prompt went away while the dialog was up, or the line can no longer be typed as it is.
-    /// The two bools are the dialog's answer as every permission wall here gives it to QML.
-    /// @param allow Whether the user allowed it.
-    /// @param remember Whether the answer stands for the rest of the session.
-    Q_INVOKABLE void applyPendingRerun(bool allow, bool remember);
+    /// Applies the font change a program asked for, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    void applyPendingFontChange(contour::session::permission::PermissionDecision decision,
+                                contour::session::permission::PermissionMemory memory);
 
-    /// The command RerunCommand asks to run, made safe to show; empty while none is waiting.
-    /// @return The command line, for the dialog that asks.
-    [[nodiscard]] Q_INVOKABLE QString pendingRerunCommandLine() const;
+    /// Sends the large paste that waits for the user's verdict, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    void applyPendingPaste(contour::session::permission::PermissionDecision decision,
+                           contour::session::permission::PermissionMemory memory);
+
+    /// Answers every buffer capture outstanding: with the capture if @p decision allows it, else with the
+    /// terminating chunk alone.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    void executePendingBufferCapture(contour::session::permission::PermissionDecision decision,
+                                     contour::session::permission::PermissionMemory memory);
+
+    /// Shows the host-writable status line a program asked for, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    void executeShowHostWritableStatusLine(contour::session::permission::PermissionDecision decision,
+                                           contour::session::permission::PermissionMemory memory);
+
+    /// Runs the command RerunCommand asked about, if @p decision allows it: typed at the prompt and entered
+    /// -- unless the prompt went away while the dialog was up, or the line can no longer be typed as it is.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    void applyPendingRerun(contour::session::permission::PermissionDecision decision,
+                           contour::session::permission::PermissionMemory memory);
+
+    /// The answer the user asked to stand for the session for @p role, if any.
+    /// @param role The guarded role.
+    /// @return The remembered decision; nothing when every request still asks (or follows the configuration).
+    [[nodiscard]] std::optional<PermissionDecision> rememberedDecision(GuardedRole role) const;
+
+    /// The question this session asks now, for QML: empty while nothing is asked; else `id` (int, what
+    /// answerPermission() is handed back; a new one for each question shown), `title` (QString),
+    /// `lines` (a list of `{text, weight, style}` maps), `denyText`, `allowText`, `rememberText`,
+    /// `rememberScope`, `initialMemory`, `defaultDecision`, `allowOnce`, and each line's `weight` and `style`
+    /// -- every enum as its underlying int, which QML compares with Permission.* (a uint8_t-based enum inside
+    /// a QVariant does not reach JavaScript as a number) -- and `allowHeld` (AllowHeldKey), true for
+    /// RepresentedAllowHold after the question is re-presented and absent otherwise. Changes are notified by
+    /// pendingPermissionChanged(). GUI thread.
+    /// @return The question, as the dialog shows it.
+    [[nodiscard]] QVariantMap pendingPermission() const { return _pendingPermission; }
+
+    /// Answers the question shown: runs its role with @p decision and @p memory, and, when another waits, has
+    /// it shown on the next turn of the event loop, once the dialog that answered this one has closed. An
+    /// answer naming any other question -- a doubled click, or one that something else settled meanwhile --
+    /// is ignored: nothing is granted or refused for a question the user did not see. So is an Allow while
+    /// `allowHeld` is set (RepresentedAllowHold after a re-presentation); a Deny is taken.
+    /// @param questionId The `id` of the pendingPermission() answered (an int: QML passes it back).
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void answerPermission(int questionId,
+                                      contour::session::permission::PermissionDecision decision,
+                                      contour::session::permission::PermissionMemory memory);
+
+    /// @return The question shown now, if any.
+    [[nodiscard]] std::optional<PermissionAsk> pendingPermissionAsk() const;
     Q_INVOKABLE void resizeTerminalToDisplaySize();
-
-    /// What the prompt asking requestPermissionForExtension() says: which extension asks, from which module,
-    /// and every command its manifest declares, made safe to show. Empty while nothing is asked, and always
-    /// in a build without extensions.
-    /// @return The prompt's text.
-    [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const;
-
-    /// Answers the extension prompt: Allow is remembered (in the grants file) for that extension's manifest.
-    Q_INVOKABLE void allowPendingExtension();
-
-    /// Answers the extension prompt: Deny is remembered too.
-    Q_INVOKABLE void denyPendingExtension();
-
-    /// Closes the extension prompt unanswered: nothing is remembered, and a new pane asks again.
-    Q_INVOKABLE void dismissPendingExtension();
 
     // The extension members below are declared, and the class laid out, the same with and without
     // CONTOUR_EXTENSIONS: translation units that see no such definition (ContourTerminalDisplay's) include
@@ -858,7 +1401,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Asks the user whether an extension may run its declared commands. Callable from any thread -- it is
     /// what an extension's lane calls -- and never waits: the question is posted to the GUI thread, where
-    /// requestPermissionForExtension() is emitted once it is the one to show.
+    /// it waits in the session's permission queue (pendingPermission) until it is the one to show.
     /// @param hostId Which installed extension asks.
     /// @param manifest What it declares.
     void requestExtensionPermission(std::string_view hostId, vtextension::Manifest const& manifest);
@@ -878,20 +1421,54 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Whether any status-line extension runs in the pane; false in a build without extensions.
     [[nodiscard]] bool runsStatusLineExtensions() const noexcept;
 
-    /// @return Whether the pane polls which program is in its foreground: only while one of its status-line
-    ///         extensions follows it. GUI thread.
+    /// @return Whether the pane polls which program is in its foreground: while one of its status-line
+    ///         extensions or its visible header follows it. GUI thread.
     [[nodiscard]] bool pollsForegroundProcess() const noexcept;
+
+    /// @return Whether the pane redraws once a second for a running block's time on display. GUI thread.
+    [[nodiscard]] bool refreshesRunningStatus() const noexcept { return _runningStatusTimer.isActive(); }
+
+    /// The display's window became visible, or stopped being: re-decides whether a running block's time is
+    /// redrawn, which only an exposed display wants. Called on every window-state change. GUI thread.
+    void displayExposureChanged();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 
+    /// Tells the host of an attached session which palette this client shows: a daemon's session is born
+    /// under a fixed preference (vthost::HostedColorPreference) and the mirror takes its default colors from
+    /// it. A host that re-seeds only on a change leaves a palette alone when it already is the preference's.
+    /// Nothing for a local session or a tmux tab. GUI thread.
+    void stateHostedColorPreference();
+
+    /// Applies the OS motion preference to the running terminal: under Reduce Motion the cursor glide and
+    /// the screen transition take no time, otherwise they take what the profile configures. The
+    /// configuration itself is left as it is.
+    /// @param motion The OS motion preference.
+    void applyMotionPreference(config::MotionPreference motion);
+
+    /// Records the system's scroller style, which a `scrollbar.mode: system` profile resolves against
+    /// (@see config::resolveScrollBarMode), and announces the scrollbar's visibility if that moved it. Live
+    /// reconfiguration, as applyMotionPreference() is: the user switches the style, or plugs in a mouse,
+    /// while the session runs. GUI thread.
+    /// @param system The system's scroller style, or nullopt where the platform publishes none.
+    void applySystemScrollBars(std::optional<config::ScrollBarMode> system);
+
     // vtbackend::Events
     //
-    void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
+    void requestCaptureBuffer(vtbackend::LineCount lines, vtbackend::CaptureLineMode mode) override;
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void extensionFramePublished() override;
     void screenUpdated() override;
+    /// Posts updateRunningStatusRefresh() to the session's thread: raised by the frame build, under the lock.
+    void runningStatusChanged() override;
+    /// Posts refreshStickyHeader() to the session's thread: raised by the frame build, under the lock.
+    void chromeStickyHeaderChanged() override;
+    /// Posts the focus to the session's thread, where focusedCommandBlock() reads it: raised under the
+    /// lock, on the GUI or the parser thread.
+    void commandBlockFocusChanged(std::optional<vtbackend::CommandBlockId> focused) override;
+    void screenReplayed() override;
     void pageResized() override;
 
     /// New output brings a scrolled-back view down to it, except where the user parked the view on a search
@@ -901,7 +1478,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     vtbackend::FontDef getFontDef() override;
     void setFontDef(vtbackend::FontDef const& fontDef) override;
-    void copyToClipboard(std::string_view data) override;
+    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter writer) override;
     void setPointerShape(std::string_view cssName) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
     /// Opens a resolved link: a URL or a template's expansion as a hyperlink, a path through openLocalPath().
@@ -926,7 +1503,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Called by the exit watcher on its own thread, strictly before it posts onClosed().
     void deviceClosed();
 
-    void pasteFromClipboard(unsigned count, bool strip) override;
+    void pasteFromClipboard(unsigned count, vtbackend::PasteStrip strip) override;
+
+    /// The most a paste may hold: anything larger is refused, and the window says so.
+    static constexpr auto PasteHardLimitBytes = std::size_t { 1024 } * 1024;
+    /// A paste larger than this asks first.
+    static constexpr auto PasteAskLimitBytes = std::size_t { 512 } * 1024;
     void onSelectionCompleted() override;
     void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
     void requestWindowResize(vtbackend::Width, vtbackend::Height) override;
@@ -934,10 +1516,25 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setTabName(std::string_view name) override;
     void setWindowFrameColor(vtbackend::RGBColor color) override;
     void resetWindowFrameColor() override;
+    /// Runs on whichever thread holds the terminal lock (the parser thread, or the GUI thread for a
+    /// re-seed); posts the change to the manager on the GUI thread either way.
+    void defaultBackgroundColorChanged(vtbackend::RGBColor color) override;
+
+    /// The terminal's current default background, OSC 11 included. Takes the terminal lock, so it
+    /// must not be called while holding it.
+    /// @return The live default background.
+    [[nodiscard]] vtbackend::RGBColor liveBackground() const;
     void progressChanged(vtbackend::Progress progress) override;
     /// OSC 7501: posted to the GUI thread as progressChanged() is, where the tab strip reads the records
     /// back.
     void programStatusChanged(vtbackend::ProgramStatusChange const& change) override;
+
+    /// OSC 7 reported another directory. Parser thread, terminal lock held: only posts
+    /// refreshDisplayWorkingDirectory() to the GUI thread.
+    void workingDirectoryChanged() override;
+
+    /// OSC 3008 changed the context ancestry, whose cwd the header may show. As workingDirectoryChanged().
+    void contextChanged(vtbackend::ContextId activeContext) override;
 
     /// A shell command block finished (OSC 133;D, or an OSC 3008 end while OSC 3008 owns the marks).
     ///
@@ -969,6 +1566,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void userMarkRequested(vtbackend::UserMarkRequest const& request) override;
     void searchPromptRequested() override;
     void searchCleared() override;
+    void searchQueryEnded() override;
     void updateHighlights() override;
     void playSound(vtbackend::Sequence::Parameters const& params) override;
     void requestShowHostWritableStatusLine() override;
@@ -1115,6 +1713,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::NewTerminal const&);
     bool operator()(actions::NoSearchHighlight);
     bool operator()(actions::OpenCommandPalette);
+    bool operator()(actions::NewWindowTo);
     bool operator()(actions::OpenConfiguration);
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::OpenSelection);
@@ -1142,8 +1741,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleFold);
     bool operator()(actions::ToggleFoldAt);
     bool operator()(actions::ToggleLastFold);
+    bool operator()(actions::FocusPreviousCommand);
+    bool operator()(actions::FocusNextCommand);
+    bool operator()(actions::SelectPreviousCommandOutput);
+    bool operator()(actions::SelectNextCommandOutput);
+    bool operator()(actions::OpenBlockMenu);
+    bool operator()(actions::ClearCommandBlockFocus);
     bool operator()(actions::ScrollUp);
     bool operator()(actions::SearchReverse);
+    bool operator()(actions::SearchSelection);
     bool operator()(actions::SendChars const& event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
@@ -1160,6 +1766,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CreateNewTab const&);
     bool operator()(actions::CloseTab);
     bool operator()(actions::CloseAllTabs);
+    bool operator()(actions::CloseOtherTabs const& action);
+    bool operator()(actions::CloseTabsToRight const& action);
+    bool operator()(actions::MoveTabToNewWindow const& action);
+    bool operator()(actions::ShowAbout);
+    bool operator()(actions::MinimizeWindow);
+    bool operator()(actions::ZoomWindow);
+    bool operator()(actions::FocusNextArea);
+    bool operator()(actions::FocusPreviousArea);
+    bool operator()(actions::FocusToolbar);
     bool operator()(actions::SpeakSelection);
     bool operator()(actions::StopSpeaking);
     bool operator()(actions::SetTabBarVisibility);
@@ -1206,6 +1821,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyCommandBlock const& action);
     bool operator()(actions::CopyCommandLine const& action);
     bool operator()(actions::RerunCommand const& action);
+    bool operator()(actions::ToggleCommandFold const& action);
     bool operator()(actions::OpenCommandOutput const& action);
 
     /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.
@@ -1217,6 +1833,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The snapshot, with `hasSplits` left for the window to fill in (a session does not know
     ///         whether its tab holds siblings).
     [[nodiscard]] command::ContextMenuState contextMenuState();
+
+    /// The menu state of @p block: its header lines, and what its rows may act on. Takes the terminal lock.
+    /// @param block The block, resolved from the store: it needs no rows on the grid.
+    /// @return The state; nullopt where the store holds no such block (evicted, or never there).
+    [[nodiscard]] std::optional<command::BlockMenuState> blockMenuState(vtbackend::CommandBlockId block);
 
     /// Runs @p action against this session — the same dispatch a key binding takes.
     ///
@@ -1238,14 +1859,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     std::chrono::steady_clock::time_point startTime() const noexcept { return _startTime; }
 
-    float uptime() const noexcept
-    {
-        using namespace std::chrono;
-        auto const now = steady_clock::now();
-        auto const uptimeMsecs = duration_cast<milliseconds>(now - _startTime).count();
-        auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
-        return uptimeSecs;
-    }
+    /// @return Seconds since the session started, by the app's injected steady clock.
+    float uptime() const noexcept;
+
+    /// @return How long the session has run, by the app's injected steady clock.
+    [[nodiscard]] std::chrono::steady_clock::duration elapsed() const noexcept;
 
     /// The permission the active profile configures for @p role.
     ///
@@ -1258,7 +1876,67 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void postPermissionRequest(GuardedRole role);
 
     void requestPermission(config::Permission allowedByConfig, GuardedRole role);
-    void executeRole(GuardedRole role, bool allow, bool remember);
+
+    /// Runs @p role's executor with the answer it was given.
+    ///
+    /// Once remembers nothing; Session stores @p decision in _rememberedPermissions; Persistent is stored as
+    /// Session, since a guarded role has nowhere persistent to keep an answer (its prompt never offers it).
+    /// A configured allow/deny, or a remembered answer, executes as (decision, Once).
+    /// @param role The role to run.
+    /// @param decision Whether it may run.
+    /// @param memory How long the answer stands.
+    void executeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
+
+    /// What every executor does first: records @p decision for @p role for the rest of the session, unless
+    /// @p memory is Once, and withdraws @p role's question, which this answer settles.
+    void concludeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
+
+    /// Puts @p ask in line: shown at once, and announced, if it is now the one to show; republished if it is
+    /// the one shown, asked again.
+    void offerPermissionAsk(PermissionAsk const& ask);
+
+    /// Takes @p ask out of line, settled: the next question is shown on the next turn of the event loop.
+    void withdrawPermissionAsk(PermissionAsk const& ask);
+
+    /// Builds the prompt of the question shown, from its role's pending state; nothing while none is asked.
+    [[nodiscard]] std::optional<PermissionPrompt> currentPermissionPrompt();
+
+    /// Republishes pendingPermission() from the question shown, notifying if it changed.
+    void publishPendingPermission();
+
+    /// @return Whether Allow is withheld for the question shown now (RepresentedAllowHold).
+    [[nodiscard]] bool isAllowHeld() const;
+
+    /// Withholds Allow for the question just re-presented, and schedules its giving back.
+    void holdAllow();
+
+    /// Gives Allow back once its hold has run out on the clock, or checks again when it will have.
+    void releaseAllowHoldWhenDue();
+
+    /// Shows the question now at the front: publishes it and announces its title politely.
+    void showNextPermission();
+
+    /// Forgets the remembered answer of every role whose configured permission differs between
+    /// @p previous and the active profile's, and settles a question the configuration now answers.
+    /// @param previous The permission settings before the profile was replaced.
+    void reconcilePermissions(config::PermissionsConfig const& previous);
+
+    /// Copies @p text to the clipboard as an explicit copy action does, and tells the window "Copied N
+    /// lines"; copying nothing posts nothing. Copy-on-select and a program's own clipboard writes do not come
+    /// here.
+    void copyExplicitly(std::string_view text);
+
+    /// Pastes @p text -- the clipboard's, or what was dropped -- as one paste, repeated @p count times:
+    /// refused above PasteHardLimitBytes (the window says so), held for the user's answer above
+    /// PasteAskLimitBytes, otherwise sent now.
+    /// @param text The text, as read.
+    /// @param count How many times to paste it.
+    /// @param strip Whether whitespace runs become single spaces.
+    void pasteText(QString const& text, unsigned count, vtbackend::PasteStrip strip);
+
+    /// The quoting for the shell this pane runs: the foreground process's, or, where that is not known (a
+    /// pane hosted on a daemon), the profile's shell program.
+    [[nodiscard]] window::ShellQuoting dropQuoting() const;
 
     /// Sends @p text to the application as one paste, repeated @p count times.
     void sendPasteRepeatedly(std::string const& text, unsigned count);
@@ -1271,16 +1949,44 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void updateImageCanvasCeiling();
 
   signals:
-    void hyperlinkHoverChanged();
-    /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
-    void commandBlockHoverChanged();
+    /// @see getDisplayWorkingDirectory
+    void displayWorkingDirectoryChanged();
+    /// @see getProgramStatus. Not programStatusChanged(), which is the terminal event this session hears.
+    void paneProgramStatusChanged();
+    /// @see getForegroundProcessName
+    void foregroundProcessNameChanged();
+    /// The shell-integration card's stage, words or error changed.
+    void shellIntegrationCardChanged();
+    /// The link target's text, hint or visibility changed.
+    void linkTargetChanged();
+    /// The page under a shown link pill changed: re-read overlayClearance().
+    void overlayClearanceChanged();
+    /// The block under the pointer changed, or the row its button sits beside moved: re-read
+    /// blockActionsAnchor().
+    void blockActionsAnchorChanged();
+    /// focusedCommandBlock() changed.
+    void focusedCommandBlockChanged();
+    /// stickyHeader() changed.
+    void stickyHeaderChanged();
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
     /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
     void searchBarRequested();
-    /// The pattern, its tally, or the case policy changed.
+    /// The pattern, its tally, or the toggles changed.
     void searchStateChanged();
+    /// searchFocusedRows() changed: the current match moved, or scrolled.
+    void searchFocusedRowsChanged();
     /// isReconnecting() changed.
     void reconnectingChanged();
+    /// paneState() changed: the host connection was lost or regained, or the session ended.
+    void paneStateChanged();
+    /// The session ended and its pane now waits (sessionEnd and endMessage changed). Raised once per end, on
+    /// the GUI thread, after _onClosedMutex is released.
+    void sessionEndChanged();
+    /// secureIndicator() may have changed: the echo, or the configured `secure_input`. GUI thread.
+    void secureIndicatorChanged();
+    /// What paneFooter() and the footer's message and buttons say changed: the session ended, a restart's
+    /// stopped command was noted or went, or its Run Again became possible. GUI thread.
+    void paneFooterChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -1297,17 +2003,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void backgroundColorChanged();
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
+    /// The size indicator is to show, or to restart its hold, with sizeIndicatorText().
+    void sizeIndicatorRequested();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell(float volume);
     void onAlert();
-    void requestPermissionForFontChange();
-    void requestPermissionForPasteLargeFile();
-    void requestPermissionForBufferCapture();
-    void requestPermissionForShowHostWritableStatusLine();
-    void requestPermissionForRerunCommand();
-    /// A status-line extension asks to run its commands; pendingExtensionPermissionText() says what to show.
-    void requestPermissionForExtension();
+    /// pendingPermission() changed: another question is shown, the one shown was answered, or what it asks
+    /// changed while it is shown.
+    void pendingPermissionChanged();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
 
@@ -1327,6 +2031,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param config The reloaded configuration.
     /// @param profileName The profile to run under: the session's own, unless it is switching.
     void applyReloadedConfig(config::Config const& config, std::string const& profileName);
+
+    /// Runs the actions of a binding the window matched for a key the chrome had focus for: what a press of
+    /// the chord does in the terminal, minus the PTY. GUI thread.
+    /// @param actions The bound actions.
+    /// @return How many actions ran.
+    [[nodiscard]] int executeBoundActions(config::ActionList const& actions);
 
   public slots:
     void onHighlightUpdate();
@@ -1388,10 +2098,34 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// notice is, so the user reads them where the shell's output would have been.
     void writeNotice(std::span<std::string const> lines);
 
-    /// Reports a PTY device that failed to start, and leaves the pane in the state the early-exit
-    /// notice already defines: the reason on screen, the device closed, and the pane pruned by the
-    /// next key press (see sendKeyEvent) or by closing the tab (see terminate).
+    /// Reports a PTY device that failed to start, and leaves the pane in the state an early exit
+    /// defines: the end recorded as StartFailed with the reason, the device closed, and the pane waiting
+    /// for Restart or Close (see dismiss, terminate).
     void reportDeviceStartFailure(vtpty::StartFailure const& failure);
+
+    /// Handles the device's close; onClosed() with _onClosedMutex held.
+    void handleDeviceClosedLocked();
+
+    /// Records how the session ended, so its pane waits rather than closes. Caller holds _onClosedMutex.
+    /// @param reason How it ended (not None).
+    /// @param detail What the footer names: an exit code, a signal, a failure; empty for none.
+    void recordEndLocked(EndReason reason, std::string detail);
+
+    /// Re-decides whether the Interrupted footer can offer Run Again -- the shell has shown a prompt since
+    /// it was last decided -- and notifies paneFooterChanged() when that changed. GUI thread.
+    void refreshInterruptionOffer();
+
+    /// Has refreshInterruptionOffer() run on the GUI thread, once however many updates arrive first, while an
+    /// interruption stands. Called from screenUpdated() and screenReplayed(): the parser thread, maybe under
+    /// the state lock, so it reads and takes nothing.
+    void askAboutInterruptionOffer();
+
+    /// @return Whether the shell has shown a prompt. Takes the terminal lock.
+    [[nodiscard]] window::ShellPromptPresence shellPromptPresence() const;
+
+    /// Announces the end recorded (sessionEndChanged()), and has the pane's header stop following the
+    /// program in front, which has gone. GUI thread, outside _onClosedMutex.
+    void announceSessionEnd();
 
     /// Ends a gutter hover, if one is in effect.
     ///
@@ -1410,12 +2144,49 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// too. The one place that says so, for every way off the grid.
     void leaveGrid();
 
-    /// Points the block-column tooltip at @p block, entered at screen row @p screenRow, or withdraws it.
-    /// Announces only a change of BLOCK: tracing one block's rows keeps the tooltip where it was entered.
-    /// @param block The block under the pointer, or nullopt when there is none to describe.
-    /// @param screenRow The screen row the pointer entered @p block at, a top status line counted.
+    /// Points the block actions anchor at @p block, which the pointer is over at screen row @p screenRow, or
+    /// withdraws it. Announces only a change of the block or of its first visible row: tracing one block's
+    /// rows keeps the button where it is.
+    /// @param block The block under the pointer, or nullopt when there is none.
+    /// @param screenRow The screen row the pointer is at, a top status line counted.
     void updateCommandBlockHover(std::optional<vtbackend::CommandBlockId> block,
                                  vtbackend::LineOffset screenRow);
+
+    /// Withdraws the block hover, the terminal's as well as the anchor.
+    void clearBlockHover();
+
+    /// Decides the block under @p screenRow afresh, as after a scroll slid another one under a stationary
+    /// pointer, and points the anchor at it.
+    /// @param screenRow The screen row the pointer stands at.
+    void refreshBlockHoverAt(vtbackend::LineOffset screenRow);
+
+    /// Moves the keyboard's block focus one block in @p step's direction, scrolls the block into view and
+    /// announces how it went: the command's short name, then its status as VoiceOver says it, Polite.
+    /// @param step Which way to move.
+    /// @param output Whether to select the block's output as well.
+    /// @return Whether a block is focused now; false where there is none that way (the focus stays).
+    bool stepBlockFocus(vtbackend::BlockStep step, BlockOutputSelection output);
+
+    /// Takes the keyboard's block focus away when typing, with the terminal locked only if there is one.
+    ///
+    /// Called by every key that is about to reach the PTY: the focus describes what the keyboard acts on, and
+    /// typing is the keyboard acting on the shell.
+    void dropBlockFocusOnInput();
+
+    /// The anchor of @p block's button, with the terminal locked: the rail's strip beside its first visible
+    /// row.
+    /// @param block The block.
+    /// @return The rectangle in the display's item-local logical coordinates; empty where nothing shows.
+    [[nodiscard]] QRectF blockActionsAnchorLocked(vtbackend::CommandBlockId block) const;
+
+    /// Re-binds stickyHeader() from the terminal (Terminal::stickyHeaderSnapshot, under its lock), and
+    /// emits stickyHeaderChanged() when what it shows changed. Empty under the grid host. GUI thread.
+    void refreshStickyHeader();
+
+    /// The session ended -- its shell exited or was killed, its connection lost --: a command it was running
+    /// will never report its end, so its block stops running (Terminal::abandonRunningCommand), and nothing
+    /// wakes the session once a second for a time that can no longer move (N5, R-n). GUI thread.
+    void abandonRunningCommand();
 
     /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved. GUI thread only.
     ///
@@ -1430,6 +2201,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// @param scrollable The scrollable line count, computed by the caller under the terminal lock.
     void announceScrollableLineCount(vtbackend::LineCount scrollable);
+
+    /// What the scrollbar's visibility is decided from: the profile, the system's scroller style, the screen
+    /// on display, the published history count, the scroll offset and the published marks above. GUI thread.
+    [[nodiscard]] ScrollbarVisibilityInputs scrollbarVisibilityInputs() const noexcept;
+
+    /// Emits isScrollbarVisibleChanged when the visibility moved since it was last announced. GUI thread
+    /// only: a change raised on the terminal thread posts it (bufferChanged()).
+    void refreshScrollbarVisibility();
 
     /// Arranges for refreshScrollbarMarks() to run on the GUI thread within a frame.
     ///
@@ -1552,6 +2331,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Decides on, and delivers, the finish notification for @p summary. GUI thread.
     /// @param summary The finished block.
     void handleCommandBlockFinished(vtbackend::CommandBlockSummary const& summary);
+    /// Tells the manager, on the GUI thread, that output arrived, for the tab badge's unseen-output dot.
+    /// Called on the parser (or mirror) thread by screenUpdated() and screenReplayed(); at most one call is
+    /// queued at a time.
+    /// @param origin Whether the frame was output or a mirror's replay.
+    void noteOutputForTab(window::OutputOrigin origin);
+    /// Tells the manager, on the GUI thread, that the bell rang, for the tab badge's bell mark. Called on the
+    /// parser thread by bell(); at most one call is queued at a time, however many bells ring meanwhile.
+    void noteBellForTab();
+    /// The origin a queued note reports, once on the GUI thread.
+    /// @param origins The origins gathered meanwhile, one bit per window::OutputOrigin.
+    /// @return Live when any was live and, for a mirror, the connection is not in its resync; Resync
+    /// otherwise.
+    [[nodiscard]] window::OutputOrigin resolveOutputOrigin(uint8_t origins) const;
+    /// What a changed screen does to the display: the part of screenUpdated() and screenReplayed() that
+    /// needs one.
+    void repaintChangedScreen();
 
     /// Handles every block event gathered since the last call, in the order they were raised: each finish,
     /// then what the changes ask -- the hovered block's tooltip re-read, a `clear_on: next` notice
@@ -1634,14 +2429,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                                vtextension::IGrantStore& answers);
 
     /// Records the answer to the extension prompt, and asks the next question, if any.
-    void answerExtensionConsent(vtextension::ConsentAnswer answer);
+    /// Answers the extension consent shown with @p decision and @p memory (consentVerdictFor()), and puts the
+    /// next extension's question in line. An answer consent cannot take is logged and changes nothing.
+    void answerExtensionConsent(PermissionDecision decision, PermissionMemory memory);
 
-    /// Tells the extensions when the program in the foreground changed. Ticks only while one follows it.
-    void pollForegroundProcess();
+    /// The prompt of the extension consent shown; nothing without one (or in a build without extensions).
+    [[nodiscard]] std::optional<PermissionPrompt> consentPermissionPrompt() const;
 
-    /// Starts the foreground poll if an extension follows the foreground process, and stops it if none does.
+    /// Has the extensions follow the foreground process while one subscribes to it, and stop when none does.
     /// GUI thread.
     void armForegroundProcessPoll();
+
+    /// Tells the terminal, and so the extensions, the program in front, once per name. Without
+    /// CONTOUR_EXTENSIONS, nothing. GUI thread.
+    void tellExtensionsForegroundProcess();
 
     /// Has the engines and modules that runners retired released a moment from now, once their lanes ran
     /// their last jobs.
@@ -1703,6 +2504,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     TerminalSessionManager* _manager;
     int _id;
     vtworkspace::SessionId _modelSessionId {};
+    /// When the session started, read from the app's injected steady clock (TerminalClocks::steady), which
+    /// every reader of it reads too.
     std::chrono::steady_clock::time_point _startTime;
     config::Config _config;
     std::string _profileName;
@@ -1714,11 +2517,30 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Where the session's program runs: here, or on a daemon or tmux server the pane mirrors. A mirrored
     /// pane runs no status-line extension of its own -- they run where its terminal does, on the remote end.
     SessionHosting _hosting;
+    /// What the terminal did with typed text when last read. GUI thread. @see refreshInputEcho
+    vtpty::InputEcho _inputEcho = vtpty::InputEcho::Unknown;
+    /// When output last reached this pane or a key last went in (the injected steady clock); none before.
+    /// GUI thread. @see noteInputActivity
+    std::optional<std::chrono::steady_clock::time_point> _lastInputActivity;
+    /// Polls the echo while the pane is active. GUI thread. @see noteInputActivity
+    QTimer _inputEchoPollTimer;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
+    /// When the resync grace ends -- armed at construction for a mirrored pane, and by each return of the
+    /// connection to Connected: live-looking output before then repaints the mirror and is not news
+    /// (window::outputOriginOf). The fallback behind the mirror's own marking (screenReplayed(), a pty's
+    /// ReadOrigin::Replay). Runtime state, GUI thread.
+    std::optional<std::chrono::steady_clock::time_point> _resyncGraceEnd;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
+    /// The chrome row's gutter form and rail metrics, fixed for the session's life: the chrome row is
+    /// resolved before any session exists and no reload changes it. Declared before _terminal, whose
+    /// settings are built from it. Read on the GUI and the render thread; never written after construction.
+    GutterChrome _gutterChrome;
+    /// The system's scroller style: read from the app when the session is made, then as
+    /// applySystemScrollBars() reports it; nullopt where the platform publishes none. GUI thread.
+    std::optional<config::ScrollBarMode> _systemScrollBars;
     /// This machine's identity, as the app read it once (ContourGuiApp::hostIdentity): neither half changes
     /// while the process runs, and both are asked on the parser thread and on the GUI thread under the
     /// terminal lock. A copy rather than a reference into the app, which a session may outlive at exit.
@@ -1734,34 +2556,86 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::Point _accumulatedAngleScroll;
     input::HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
-    /// The tooltip last worked out for a detected link, by the link's id and the index holding it, so that
-    /// tracing one link along its cells reads nothing from the index (hoveredDetectedLinkTooltip()). GUI
+    /// The pill text last worked out for a detected link, by the link's id and the index holding it, so that
+    /// tracing one link along its cells reads nothing from the index (hoveredDetectedLinkText()). GUI
     /// thread only. Also reset when a configuration reload may have replaced the detector, whose ids start
     /// over: a new index may reuse the old one's address.
-    struct DetectedLinkTooltip
+    struct HoveredDetectedLink
     {
         vtbackend::LinkIndex const* index = nullptr; ///< The index it was read from; none at first.
         vtbackend::LinkId link {};                   ///< The link it was worked out for; none at first.
-        /// detectedLinkTooltip() of that link, elided as the tooltip shows it; empty for none.
+        /// linkPillText() of that link; empty for none.
         std::string text;
     };
-    DetectedLinkTooltip _detectedLinkTooltip {};
+    HoveredDetectedLink _hoveredDetectedLink {};
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
-    QString _hyperlinkTooltipText;
-    QRectF _hyperlinkTooltipAnchor;
 
-    /// The command block whose tooltip is showing, if any (@see commandBlockTooltip).
+    /// What the link pill says and whether it shows. GUI thread.
+    struct LinkTarget
+    {
+        QString text; ///< linkPillText() of the link; empty over none.
+        QString hint; ///< command::linkOpenHint().
+        LinkPillVisibility visibility = LinkPillVisibility::Hidden; ///< linkPillVisibility().
+
+        [[nodiscard]] bool operator==(LinkTarget const&) const = default;
+    };
+    LinkTarget _linkTarget {};
+
+    /// _linkTarget's visibility, mirrored for screenUpdated() on the parser thread, which asks for a
+    /// clearance refresh only while the pill shows. Written on the GUI thread alone.
+    std::atomic<LinkPillVisibility> _linkTargetVisibility = LinkPillVisibility::Hidden;
+
+    /// Collapses repeated clearance refresh requests to at most one post in flight.
+    std::atomic_flag _overlayClearancePostPending = ATOMIC_FLAG_INIT;
+
+    /// Fires publishOverlayClearance() a frame after the first request, so a burst of output under a shown
+    /// pill costs one placement per frame. GUI thread.
+    QTimer _overlayClearanceTimer;
+
+    /// Redraws once a second while a running block's time is on display -- a status chip or the sticky
+    /// header -- which no output would move on (@see vtbackend::Terminal::hasVisibleRunningStatus). Armed
+    /// and stopped on the session's thread only, by updateRunningStatusRefresh(). GUI thread.
+    QTimer _runningStatusTimer;
+
+    /// What overlayClearanceRevision reports. GUI thread.
+    int _overlayClearanceRevision = 0;
+
+    /// The command block under the pointer, if any (@see blockActionsAnchor). GUI thread.
     std::optional<vtbackend::CommandBlockId> _hoveredBlock {};
-    QRectF _commandBlockTooltipAnchor {};
+
+    /// The screen row the block hover was decided at; nullopt while the pointer is over no block. GUI thread.
+    std::optional<vtbackend::LineOffset> _blockHoverRow {};
+
+    QRectF _blockActionsAnchor {}; ///< @see blockActionsAnchor
+
+    /// The block the keyboard focuses, as the terminal last told (@see focusedCommandBlock). GUI thread.
+    std::optional<vtbackend::CommandBlockId> _focusedBlock {};
+
+    /// Where the sticky header lives (@see setStickyHeaderHost). GUI thread.
+    window::StickyHeaderHost _stickyHeaderHost = window::StickyHeaderHost::Grid;
+
+    /// What the chrome shows of the sticky header; nullopt for nothing (@see stickyHeader). GUI thread.
+    std::optional<window::StickyHeaderChrome> _stickyHeaderChrome {};
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
-    SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
     QString _searchPatternText;
     QString _searchSummary;
-    QString _searchCaseTooltip;
+    QVariantList _searchToggles;
+    /// @see searchFocusedRows. GUI thread only.
+    QVariantMap _searchFocusedRows;
+    /// The rows searchFocusedRowsChanged last announced: a change is told by comparing. GUI thread only.
+    QVariantMap _announcedSearchFocusedRows;
+    /// Collapses the scroll callback's refresh posts to at most one in flight.
+    std::atomic_flag _searchFocusedRowsPostPending = ATOMIC_FLAG_INIT;
+    /// The count being walked, between its steps; nothing while none is. GUI thread only.
+    std::optional<vtbackend::TerminalSearchTally> _searchWalk;
+    /// Bumped by every walk begun, so a posted step of an older walk does nothing.
+    uint64_t _searchWalkTicket = 0;
+    /// @see PendingSearchJump
+    PendingSearchJump _pendingSearchJump = PendingSearchJump::None;
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;
@@ -1816,11 +2690,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ExtensionStatePtr _extensionState;
 
     vtbackend::Terminal _terminal;
-    /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,
-    /// the device never started, or the daemon connection went away. It is also what makes
-    /// onClosed() idempotent for those exits, which arrive from two callers (see onClosed()), so it
-    /// is written and read under _onClosedMutex wherever more than the GUI thread can see it.
-    bool _terminatedAndWaitingForKeyPress = false;
+    /// How the session ended while its pane stays, waiting for Restart or Close: the shell exited too
+    /// early, the device never started, or the daemon connection went away; None while it runs (and for
+    /// every other end, which closes the pane). It is also what makes onClosed() idempotent for those
+    /// exits, which arrive from two callers (see onClosed()).
+    ///
+    /// Written on the GUI thread only -- onClosed() is always posted there, and start() runs there --
+    /// under _onClosedMutex, which serializes onClosed() with terminate()/dismiss(). Read on the GUI
+    /// thread WITHOUT the lock by the QML getters: a binding may re-read them from inside onClosed()'s
+    /// locked prune, and the mutex is not recursive.
+    EndReason _end = EndReason::None;
+    /// What the footer names about _end: an exit code, a signal, a start failure. Guarded as _end is.
+    std::string _endDetail;
+    /// The page's lines when the end was announced, before the footer took any of them. GUI thread.
+    std::optional<vtbackend::LineCount> _linesAtEnd;
+    /// The rows the footer took, measured at the first page resize on the GUI thread after the end (the
+    /// footer's own layout); none before. GUI thread: pageResized() may run on the parser thread too.
+    std::optional<vtbackend::LineCount> _footerLines;
     DisplaySurface* _display = nullptr;
 
     std::atomic<bool> _terminating { false };
@@ -1875,9 +2761,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                             vtbackend::Modifiers modifiers,
                             vtbackend::CommandBlockId block);
 
-    /// Opens the context menu of @p block: what a click on its status mark in the gutter does.
+    /// Opens the menu of @p block at the pointer: what a click on its status mark in the gutter does.
     /// @param block The block.
     void openBlockMenu(vtbackend::CommandBlockId block);
+
+    /// blockMenuState() for a record already found, with the terminal locked.
+    /// @param block The block's record.
+    /// @return The state.
+    [[nodiscard]] command::BlockMenuState blockMenuStateLocked(vtbackend::CommandBlockRecord const& block);
+
+    /// Opens the menu of @p block at @p anchor, given in this session's display's coordinates.
+    /// @param block The block.
+    /// @param anchor Where the menu opens; the pointer when absent.
+    void openBlockMenuAt(vtbackend::CommandBlockId block, std::optional<QPointF> anchor);
 
     /// Runs @p action with @p block as the block a context menu it opens describes (_contextMenuBlock), and
     /// forgets it afterwards.
@@ -1942,6 +2838,37 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The track's height in logical pixels, as the QML last reported it. GUI thread only.
     int _scrollbarMarkTrackPixels = 0;
 
+    /// What marksAbove() was last computed from. Apart from ScrollbarMarksKey, because it does not depend on
+    /// the track: the marks hold the bar before QML has published one. GUI thread only.
+    struct MarksAboveKey
+    {
+        uint64_t marksRevision = 0;                 ///< Terminal::scrollbarMarksRevision()
+        int64_t firstVisibleRow = 0;                ///< The viewport's top at the bottom: the scrollable rows
+        vtbackend::ScrollbarMarkSources sources {}; ///< The kinds drawn
+
+        [[nodiscard]] bool operator==(MarksAboveKey const&) const noexcept = default;
+    };
+
+    /// The key _marksAbove was computed from; nullopt before the first refresh. GUI thread only.
+    std::optional<MarksAboveKey> _marksAboveKey;
+
+    /// Whether a mark that holds an overlay scrollbar is above the bottom of the scrollback, as
+    /// refreshScrollbarMarks() last computed it. GUI thread only.
+    vtbackend::MarksAbove _marksAbove = vtbackend::MarksAbove::None;
+
+    /// The visibility isScrollbarVisibleChanged last announced. Hidden to begin with: a new session has no
+    /// history. GUI thread only.
+    ScrollbarVisibility _announcedScrollbarVisibility = ScrollbarVisibility::Hidden;
+
+    /// Whether the size indicator shows, from its first request until sizeIndicatorSettled(). GUI thread.
+    SizeIndicatorBurst _sizeIndicatorBurst = SizeIndicatorBurst::Idle;
+
+    /// What the size indicator reports during its burst. GUI thread.
+    SizeIndicatorKind _sizeIndicatorKind = SizeIndicatorKind::PageSize;
+
+    /// What the size indicator says. GUI thread.
+    QString _sizeIndicatorText;
+
     /// The key the published ticks were built from; nullopt before the first refresh. GUI thread only.
     std::optional<ScrollbarMarksKey> _scrollbarMarksKey;
 
@@ -1959,20 +2886,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     struct CaptureBufferRequest
     {
         vtbackend::LineCount lines;
-        bool logical;
+        vtbackend::CaptureLineMode mode;
     };
 
     /// Capture requests accepted but not yet answered, oldest first.
     ///
-    /// A queue rather than one slot, and mutex-guarded, because the two ends sit on different threads:
-    /// requestCaptureBuffer() is a Terminal::Events hook and appends from the terminal thread, while
-    /// the permission gate drains it on the GUI thread. A single slot silently dropped whichever
-    /// request arrived while another was outstanding, and every dropped request is a client blocked
-    /// forever -- the protocol has no way to say "no reply is coming".
+    /// A queue rather than one slot: a single slot silently dropped whichever request arrived while another
+    /// was outstanding, and every dropped request is a client blocked forever -- the protocol has no way to
+    /// say "no reply is coming". GUI thread only, so unlocked: requestCaptureBuffer(), a Terminal::Events
+    /// hook raised on the parser thread, appends in the request it posts to the GUI thread, so a request and
+    /// the question about it arrive in one step; the prompt and the executor read it there too.
     /// @see docs/vt-extensions/buffer-capture.md
     std::vector<CaptureBufferRequest> _pendingBufferCaptures;
-    std::mutex _pendingBufferCaptureMutex;
 
+    /// The font a program asked for, while its question waits. GUI thread only: setFontDef() writes it in the
+    /// request it posts there.
     std::optional<vtbackend::FontDef> _pendingFontChange;
 
     /// A paste that exceeded the soft limit and is waiting for the user's verdict.
@@ -1986,13 +2914,44 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         std::string text;
         unsigned count;
+        /// What the prompt shows of it: made once, as the paste is held, never from the whole text again.
+        PastePreview preview {};
     };
     std::optional<BigPasteRequest> _pendingBigPaste;
 
     /// The command line RerunCommand asked to run, while its dialog is up. Kept, not read again when the
     /// answer comes: the block's record may have gone by then, and what runs is what was shown.
     std::optional<vtbackend::CommandLineText> _pendingRerun;
+    /// The command a restart stopped in this shell, while its footer stands (noteInterruption()). GUI
+    /// thread only.
+    std::optional<vtbackend::CommandLineText> _interruption;
+    /// Why the last Reconnect from this ended pane's footer failed; empty for none. GUI thread.
+    std::string _reconnectFailure;
+    /// Whether the shell had shown a prompt when the footer's buttons were last decided. GUI thread.
+    window::ShellPromptPresence _interruptionPrompt = window::ShellPromptPresence::Absent;
+    /// Whether an interruption stands, readable from the parser thread, which re-asks about the prompt on
+    /// each screen update until it has appeared.
+    std::atomic<bool> _isInterruptionStanding = false;
+    /// Set while a re-ask is queued on the GUI thread, so one update's worth is one call, not one per read.
+    std::atomic_flag _interruptionRefreshPosted;
     PermissionCache _rememberedPermissions;
+    /// The questions asked, one shown at a time. GUI thread.
+    PermissionQueue _permissionQueue;
+    /// @see pendingPermission. GUI thread.
+    QVariantMap _pendingPermission;
+    /// The id of the question at the front of _permissionQueue: a new one each time another question becomes
+    /// the one to show. GUI thread.
+    int _shownQuestionId = 0;
+    /// The last question announced, so each is said once. GUI thread.
+    int _announcedQuestionId = 0;
+    /// Allow withheld after a re-presentation (RepresentedAllowHold): for which question, and until when.
+    struct AllowHold
+    {
+        int questionId = 0;                    ///< The re-presented question's id.
+        core::platform::SteadyTimePoint until; ///< When Allow is given back, on the terminal's steady clock.
+    };
+    /// @see AllowHold. Empty once given back. GUI thread.
+    std::optional<AllowHold> _allowHold;
     std::unique_ptr<QThread> _exitWatcherThread;
 
     std::atomic<bool> _onClosedHandled = false;
@@ -2006,6 +2965,62 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Whether a tab-strip refresh for this session's program status is queued on the GUI thread, so that
     /// a program reporting in a loop queues one. Set on the parser thread, cleared on the GUI thread.
     std::atomic<bool> _isProgramStatusRefreshPending = false;
+    /// Whether a refreshDisplayWorkingDirectory() is queued on the GUI thread, so that OSC 7 and OSC 3008
+    /// arriving together queue one. Set on the parser thread, cleared on the GUI thread.
+    std::atomic<bool> _isWorkingDirectoryRefreshPending = false;
+    /// @see getDisplayWorkingDirectory. GUI thread.
+    QString _shownWorkingDirectory;
+    /// @see getProgramStatus. GUI thread.
+    window::TabBadgeKind _paneProgramStatus = window::TabBadgeKind::None;
+    /// @see getProgramStatusText. GUI thread.
+    QString _paneProgramStatusText;
+    /// Asks the device which program is in front, once a second; exists only while someone follows it
+    /// (@ref _processNameFollowers). GUI thread.
+    std::unique_ptr<QTimer> _foregroundProcessTimer;
+    /// Who follows the program in front. GUI thread.
+    core::Flags<ProcessNameFollower> _processNameFollowers;
+    /// The program in front, as the poll last read it. GUI thread.
+    std::string _polledForegroundProcessName;
+
+    /// What the shell-integration card shows. GUI thread.
+    struct ShellIntegrationCardState
+    {
+        window::CardStage stage = window::CardStage::Hidden;
+        config::ShellKind shell = config::ShellKind::Unknown;
+        std::string rcDisplay {}; ///< The startup file as the user would say it, `~/.zshrc`.
+        std::string line {};      ///< The line that would be added.
+        std::string error {};     ///< Why the last install failed.
+    };
+
+    /// Decides when the lack of OSC 133 marks is worth an offer. GUI thread.
+    window::ShellIntegrationProbe _shellProbe;
+    ShellIntegrationCardState _shellCard;
+
+    /// Counts an unmodified Return the session is about to write to the PTY, and asks the manager to offer
+    /// shell integration when the probe says so. GUI thread; takes the terminal lock briefly.
+    void noteCommandEntered();
+
+    /// Which shell this session runs, from the program in front of it; for a pane hosted by a local daemon,
+    /// which has no process group of its own, from the profile's shell program.
+    ///
+    /// Known limit: a pane of a local tmux server (control mode) is "hosted" the same way, and tmux runs its
+    /// `default-shell` there, not the profile's. When the two differ, the card offers the profile's shell.
+    /// The edit is still guarded, appended and local, so it is wrong rather than harmful; the answer would
+    /// have to come from tmux (`#{pane_current_command}`).
+    [[nodiscard]] config::ShellKind runningShell() const;
+
+    /// @param pattern A window::CardStageRow text.
+    /// @return It, filled in with the card's shell, startup file and line.
+    [[nodiscard]] QString shellCardText(std::string_view pattern) const;
+
+    /// Hides the card; emits shellIntegrationCardChanged() when it was showing. GUI thread.
+    void hideShellIntegrationCard();
+    /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
+    /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
+    std::atomic<uint8_t> _pendingOutputOrigins = 0;
+    /// The origins of the bells gathered for the queued bell notice, like @ref _pendingOutputOrigins
+    /// (@see noteBellForTab). Set on the parser thread, cleared on the GUI thread.
+    std::atomic<uint8_t> _pendingBellOrigins = 0;
 
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;
@@ -2085,24 +3100,3 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 } // namespace contour::session
 
 Q_DECLARE_INTERFACE(contour::session::TerminalSession, "org.contour.TerminalSession")
-
-template <>
-struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string_view>
-{
-    template <typename FormatContext>
-    auto format(contour::session::GuardedRole value, FormatContext& ctx) const
-    {
-        std::string_view output;
-        // clang-format off
-        switch (value)
-        {
-            case contour::session::GuardedRole::ChangeFont: output = "Change Font"; break;
-            case contour::session::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
-            case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
-            case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
-            case contour::session::GuardedRole::RerunCommand: output = "run a command again"; break;
-        }
-        // clang-format on
-        return formatter<string_view>::format(output, ctx);
-    }
-};
