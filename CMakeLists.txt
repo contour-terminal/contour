@@ -284,6 +284,10 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_qml_sizes check-qml-sizes.py)
         contour_add_lint_gate(check_qml_sizes_selftest check-qml-sizes.py --self-test)
 
+        # The compile-time measurement script's aggregator, checked on embedded fixture traces in both
+        # Source event shapes Clang emits; the measurement itself is run by hand (docs/internals/build-times.md).
+        contour_add_lint_gate(measure_compile_times_selftest measure-compile-times.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
