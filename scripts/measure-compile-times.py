@@ -301,8 +301,10 @@ def self_test() -> int:
     words = command_words({"command": "ccache /usr/bin/clang++ -DX=\\\"abc\\\" -c f.cpp -o f.o"})
     check(words == ["/usr/bin/clang++", '-DX="abc"', "-c", "f.cpp", "-o", "f.o"],
           f"launcher stripped, quoting preserved: {words}")  # fmt: skip
-    rewritten = trace_command(words, Path("/t/o.o"))
-    check("f.o" not in rewritten and rewritten[-2:] == ["-o", "/t/o.o"], f"output rewritten: {rewritten}")
+    trace_output = Path("/t/o.o")  # str() spells it with the platform's separators, as trace_command does
+    rewritten = trace_command(words, trace_output)
+    check("f.o" not in rewritten and rewritten[-2:] == ["-o", str(trace_output)], f"output rewritten: {rewritten}")
+    check(f"-ftime-trace={trace_output}.json" in rewritten, f"trace file next to the output: {rewritten}")
 
     if failures:
         for failure in failures:

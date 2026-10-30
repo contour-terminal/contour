@@ -1475,7 +1475,7 @@ jobs:
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
     env:
-      # python3-yaml is installed below; see scripts/check-workflows.py.
+      # PyYAML is pip-installed below; see scripts/check-workflows.py.
       CHECK_WORKFLOWS_REQUIRE_YAML: 1
     outputs:
       id: "${{ matrix.runner }} ${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
@@ -1492,11 +1492,6 @@ jobs:
         run: sudo ./scripts/apt-update.sh
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
-      # PyYAML lets check_workflows run its required-checks rule against the real workflow files;
-      # CHECK_WORKFLOWS_REQUIRE_YAML (job env below) makes a missing PyYAML a failure, so a pull
-      # request cannot pass with that rule silently skipped.
-      - name: Installing PyYAML for the workflow lint
-        run: sudo apt -qy install python3-yaml
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -1588,6 +1583,13 @@ jobs:
         with:
           version: "6.11.1"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
+      # PyYAML lets check_workflows run its required-checks rule against the real workflow files;
+      # CHECK_WORKFLOWS_REQUIRE_YAML (job env above) makes a missing PyYAML a failure, so a pull
+      # request cannot pass with that rule silently skipped. It goes into the python3 that is on
+      # PATH NOW, after the Qt action has put its own first: that is the one CMake finds at
+      # configure time, and the distro's python3-yaml would only serve /usr/bin/python3.
+      - name: Installing PyYAML for the workflow lint
+        run: python3 -m pip install pyyaml
       # Ubuntu 24.04 packages GCC up to 14; newer releases come from the toolchain PPA, which
       # builds them for noble on amd64 and arm64.
       - name: Install GCC
