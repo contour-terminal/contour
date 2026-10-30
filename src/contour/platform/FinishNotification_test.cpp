@@ -7,6 +7,7 @@
 #include <contour/platform/FinishNotification.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/shell/BlockStatusText.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
@@ -97,6 +98,19 @@ TEST_CASE("FinishNotification.every way of ending has one wording row", "[notifi
         CHECK(wordingOf(ending).ending == ending);
 }
 
+TEST_CASE("FinishNotification.the block chip names the same detail per ending", "[notification]")
+{
+    // One fact, two surfaces (F28): the chip "Failed · exit 8" and the notification "make failed (exit 8)"
+    // add the same detail to each ending. Their words differ in case only: the chip starts a phrase, a title
+    // continues one.
+    for (auto const i: std::views::iota(std::size_t { 0 }, vtbackend::CommandEndingCount))
+    {
+        auto const ending = static_cast<vtbackend::CommandEnding>(i);
+        CAPTURE(i);
+        CHECK(vtbackend::BlockStatusWordingRows.at(i).detail == contour::platform::wordingOf(ending).detail);
+    }
+}
+
 TEST_CASE("FinishNotification.titles name the command and how it ended", "[notification]")
 {
     using vtbackend::ContextExit;
@@ -168,6 +182,14 @@ TEST_CASE("FinishNotification.the body says how long, where and in which tab", "
     SECTION("a directory on another machine is not shortened against this one's home")
     {
         summary.workingDirectory.locality = vtbackend::ContextLocality::Foreign;
+        CHECK(finishNotificationBody(summary, "build", Home)
+              == "took 3m 12s · /home/bob/src/contour · build");
+    }
+
+    SECTION("a directory not known to be on this machine is not shortened either")
+    {
+        // The rule of the pane header and the status line's {Cwd}: only a Local path is this home's.
+        summary.workingDirectory.locality = vtbackend::ContextLocality::Unknown;
         CHECK(finishNotificationBody(summary, "build", Home)
               == "took 3m 12s · /home/bob/src/contour · build");
     }
@@ -399,4 +421,29 @@ TEST_CASE("FinishNotification.no OSC 99 identifier names a finish notification",
     auto const identifier = finishNotificationIdentifier(3);
     CHECK(vtbackend::parseOSC99(std::format("i={}:p=close;", identifier)).identifier != identifier);
     CHECK(vtbackend::parseOSC99(std::format("i={};title", identifier)).identifier != identifier);
+}
+
+TEST_CASE("FinishNotification.a finish notice chimes only for notify with an audible bell", "[notification]")
+{
+    using contour::platform::BellAudibility;
+    using contour::platform::finishNoticeSound;
+    using vtbackend::NotificationSound;
+
+    CHECK(finishNoticeSound(NotifyAction::Notify, BellAudibility::Audible) == NotificationSound::Chime);
+    CHECK(finishNoticeSound(NotifyAction::Notify, BellAudibility::Muted) == NotificationSound::Silent);
+    // The bell is the sound there, so the notification must not chime a second time.
+    CHECK(finishNoticeSound(NotifyAction::NotifyBell, BellAudibility::Audible) == NotificationSound::Silent);
+    CHECK(finishNoticeSound(NotifyAction::NotifyBell, BellAudibility::Muted) == NotificationSound::Silent);
+    CHECK(finishNoticeSound(NotifyAction::Bell, BellAudibility::Audible) == NotificationSound::Silent);
+}
+
+TEST_CASE("FinishNotification.the bell is audible unless off or at zero volume", "[notification]")
+{
+    using contour::platform::BellAudibility;
+    using contour::platform::bellAudibilityOf;
+
+    CHECK(bellAudibilityOf("off", 1.0f) == BellAudibility::Muted);
+    CHECK(bellAudibilityOf("default", 0.0f) == BellAudibility::Muted);
+    CHECK(bellAudibilityOf("default", -1.0f) == BellAudibility::Muted);
+    CHECK(bellAudibilityOf("default", 0.5f) == BellAudibility::Audible);
 }

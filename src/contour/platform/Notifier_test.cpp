@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <array>
 #include <chrono>
 #include <functional>
 #include <string>
@@ -116,4 +117,51 @@ TEST_CASE("TrayNotifier titles an application's notification as one", "[contour]
     REQUIRE(shown.size() == 1);
     CHECK(shown[0].first == QStringLiteral("Application Message: make finished"));
     CHECK(shown[0].second == QStringLiteral("took 3s"));
+}
+
+TEST_CASE("selectSessionNotifier: only a macOS host with a centre goes through it",
+          "[contour][notification][notifier]")
+{
+    using contour::config::HostPlatform;
+    using contour::platform::selectSessionNotifier;
+    using contour::platform::SessionNotifierKind;
+    using contour::platform::UserNotificationAvailability;
+
+    struct Row
+    {
+        HostPlatform host;
+        UserNotificationAvailability centre;
+        SessionNotifierKind expected;
+    };
+    // One row per host and availability: a new HostPlatform fails the size check below until it has rows.
+    constexpr auto Table = std::array {
+        Row { HostPlatform::Other,
+              UserNotificationAvailability::Unavailable,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::Other,
+              UserNotificationAvailability::Available,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::Windows,
+              UserNotificationAvailability::Unavailable,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::Windows,
+              UserNotificationAvailability::Available,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::MacOS,
+              UserNotificationAvailability::Unavailable,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::MacOS,
+              UserNotificationAvailability::Available,
+              SessionNotifierKind::UserNotifications },
+        Row { HostPlatform::KdePlasma,
+              UserNotificationAvailability::Unavailable,
+              SessionNotifierKind::PlatformDefault },
+        Row { HostPlatform::KdePlasma,
+              UserNotificationAvailability::Available,
+              SessionNotifierKind::PlatformDefault },
+    };
+    static_assert(Table.size() == contour::config::HostPlatformCount * 2);
+
+    for (auto const& row: Table)
+        CHECK(selectSessionNotifier(row.host, row.centre) == row.expected);
 }

@@ -127,6 +127,9 @@ QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification cons
 
     auto hints = QVariantMap {};
     hints["urgency"] = QVariant::fromValue(toFreedesktopUrgency(notification.urgency));
+    // Only a notice that asked to be silent says so; DesktopDefault leaves the server's own policy.
+    if (notification.sound == vtbackend::NotificationSound::Silent)
+        hints["suppress-sound"] = true;
 
     // The default action is what a click on the popup triggers.
     auto const actions = QStringList { QStringLiteral("default"), QStringLiteral("Activate") };

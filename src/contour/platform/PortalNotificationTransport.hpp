@@ -71,6 +71,10 @@ constexpr auto NotificationPortalInterface = QLatin1StringView("org.freedesktop.
 /// expire_timeout: it derives the application from the sandbox's own app id, and it never expires
 /// a notification on the caller's instruction.
 ///
+/// NotificationSound::Silent is NOT expressed here: the portal's `sound` key is an interface version 2
+/// key, a version 1 portal rejects an option it does not know, and nothing here probes the version. A
+/// silent finish notice therefore chimes under Flatpak, as a portal notification always does.
+///
 /// @param notification The notification to send.
 /// @return The AddNotification options dictionary.
 [[nodiscard]] QVariantMap buildPortalNotificationOptions(vtbackend::DesktopNotification const& notification);

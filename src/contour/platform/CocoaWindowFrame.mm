@@ -8,6 +8,12 @@
 
     #import <AppKit/AppKit.h>
 
+    // Qt::ExpandedClientAreaHint owns the full-size content view this adapter leaves alone; configure
+    // rejects an older Qt on macOS (src/contour/CMakeLists.txt), and this says why if that is bypassed.
+    #if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
+        #error "macOS builds need Qt 6.9 or later (Qt::ExpandedClientAreaHint, QWindow::safeAreaMargins)."
+    #endif
+
 namespace contour::platform
 {
 
@@ -42,21 +48,20 @@ class CocoaWindowFrame final: public NativeWindowFrame
             return;
 
         auto const policy = framePolicyFor(FramePlatform::MacOS, decoration);
+        // The full-size content view is not ours to set or clear: Qt::ExpandedClientAreaHint owns it
+        // (ClientAreaExpansion::QtHint, through Main.qml's `flags`), and Qt rewrites the style mask on
+        // its own -- entering and leaving full screen among others -- so a second owner here would lose.
         if (policy.shadow != FrameShadowStrategy::FullSizeContent)
         {
-            // The native title bar: put the window back to an ordinary decorated one.
-            nsWindow.styleMask &= ~NSWindowStyleMaskFullSizeContentView;
-            nsWindow.titlebarAppearsTransparent = NO;
+            // The native title bar: an ordinary decorated window, once the hint is dropped.
             nsWindow.titleVisibility = NSWindowTitleVisible;
             return;
         }
 
-        // The content view covers the whole window, including where the title bar would be, but the
-        // window stays DECORATED -- which is what keeps the shadow, the rounded corners and the
+        // The hint lets the content view cover the whole window, including where the title bar would be,
+        // but the window stays DECORATED -- which is what keeps the shadow, the rounded corners and the
         // traffic lights. Our own tab strip then draws into that area, and reserves the corner the
-        // traffic lights occupy (TitleBar.nativeControlsInset).
-        nsWindow.styleMask |= NSWindowStyleMaskFullSizeContentView;
-        nsWindow.titlebarAppearsTransparent = YES;
+        // traffic lights occupy (TitleBar.nativeControlsInset). AppKit would still draw the title there.
         nsWindow.titleVisibility = NSWindowTitleHidden;
 
         // Belt and braces: a window whose content is fully transparent can end up with hasShadow

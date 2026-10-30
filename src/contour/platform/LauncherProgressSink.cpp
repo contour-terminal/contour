@@ -29,8 +29,8 @@ namespace
         // at teardown, which would start Qt's D-Bus thread in every headless `contour <verb>` exit.
         ~LauncherProgressSink() override
         {
-            if (_published != TaskbarProgress {})
-                setApplicationProgress({});
+            if (_published != LauncherEntry {})
+                publish({});
         }
 
         [[nodiscard]] bool isSupported() const noexcept override
@@ -46,9 +46,32 @@ namespace
         void bindWindow(uint64_t, QWindow&) override {}
         void setProgress(uint64_t, TaskbarProgress) override {}
         void removeWindow(uint64_t) override {}
+        void setApplicationAttention(TaskbarAttention attention) override
+        {
+            publish({ .progress = _desired.progress, .attention = attention });
+        }
+        void setAttention(uint64_t, TaskbarAttention) override {}
 
         void setApplicationProgress(TaskbarProgress progress) override
         {
+            publish({ .progress = progress, .attention = _desired.attention });
+        }
+
+      private:
+        /// What one LauncherEntry Update carries: the entry has a single property set, so progress and count
+        /// travel together and each change re-sends the other as the sink last knew it.
+        struct LauncherEntry
+        {
+            TaskbarProgress progress;
+            TaskbarAttention attention;
+            bool operator==(LauncherEntry const&) const = default;
+        };
+
+        void publish(LauncherEntry entry)
+        {
+            _desired = entry;
+            if (entry == _published)
+                return; // The launcher already shows this: no broadcast for an unchanged count or progress.
             auto const uri = launcherProgressUri(QGuiApplication::desktopFileName());
             if (!isSupported() || uri.isEmpty())
                 return;
@@ -56,17 +79,17 @@ namespace
                 QDBusMessage::createSignal(QStringLiteral("/org/contourterminal/Contour/LauncherEntry"),
                                            QStringLiteral("com.canonical.Unity.LauncherEntry"),
                                            QStringLiteral("Update"));
-            message.setArguments({ uri, launcherProgressProperties(progress) });
+            message.setArguments({ uri, launcherEntryProperties(entry.progress, entry.attention) });
             // This protocol is a broadcast, not a request: a desktop without a listener simply ignores it.
             if (!_busProvider().send(message))
-                taskbarLog()("Cannot send desktop launcher progress update");
+                taskbarLog()("Cannot send desktop launcher update");
             else
-                _published = progress;
+                _published = entry;
         }
 
-      private:
         BusProvider _busProvider;
-        TaskbarProgress _published; ///< The progress the launcher last received.
+        LauncherEntry _desired;   ///< The latest progress and count handed to the sink.
+        LauncherEntry _published; ///< What the launcher last received.
     };
 } // namespace
 

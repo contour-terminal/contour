@@ -75,7 +75,11 @@ namespace
                 draw();
             });
         }
-        ~CocoaTaskbarProgressSink() override { clear(); }
+        ~CocoaTaskbarProgressSink() override
+        {
+            clear();
+            restoreBadge();
+        }
 
         [[nodiscard]] bool isSupported() const noexcept override
         {
@@ -87,7 +91,28 @@ namespace
         }
         void bindWindow(uint64_t, QWindow&) override {}
         void setProgress(uint64_t, TaskbarProgress) override {}
+        void setAttention(uint64_t, TaskbarAttention) override {}
         void removeWindow(uint64_t) override {}
+
+        void setApplicationAttention(TaskbarAttention attention) override
+        {
+            if (!isSupported() || _attention == attention)
+                return;
+            _attention = attention;
+            if (attention.waiting == 0)
+            {
+                restoreBadge();
+                return;
+            }
+            auto* const tile = NSApp.dockTile;
+            if (_badge == BadgeOwnership::Foreign)
+            {
+                _badge = BadgeOwnership::Ours;
+                _previousBadge = tile.badgeLabel;
+            }
+            tile.badgeLabel = [NSString stringWithUTF8String:dockBadgeText(attention).c_str()];
+            [tile display];
+        }
 
         void setApplicationProgress(TaskbarProgress progress) override
         {
@@ -122,6 +147,17 @@ namespace
             [NSApp.dockTile display];
         }
 
+        /// Gives the tile the label it had before the first count was shown. A no-op while none is shown.
+        void restoreBadge()
+        {
+            if (_badge == BadgeOwnership::Foreign)
+                return;
+            _badge = BadgeOwnership::Foreign;
+            NSApp.dockTile.badgeLabel = _previousBadge;
+            [NSApp.dockTile display];
+            _previousBadge = nil;
+        }
+
         void clear()
         {
             _animation.stop();
@@ -135,9 +171,19 @@ namespace
         }
 
         // ARC retains both views until restoration; no raw owning Objective-C pointers.
+        /// Who set the tile's current badge label.
+        enum class BadgeOwnership : uint8_t
+        {
+            Foreign, ///< Nobody, or another owner: ours is not shown.
+            Ours,    ///< A waiting-tab count, over the label in @c _previousBadge.
+        };
+
         ContourTaskbarProgressView* __strong _view = nil;
         NSView* __strong _previousContent = nil;
         TaskbarProgress _progress;
+        TaskbarAttention _attention;
+        BadgeOwnership _badge = BadgeOwnership::Foreign;
+        NSString* __strong _previousBadge = nil; ///< The label found before the first count.
         QTimer _animation;
         double _phase = 0.0;
     };

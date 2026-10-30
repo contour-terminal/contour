@@ -24,6 +24,8 @@ struct DwmApi
     // dwmapi.dll
     HRESULT(WINAPI* setWindowAttribute)(HWND, DWORD, LPCVOID, DWORD) = nullptr;
     HRESULT(WINAPI* extendFrameIntoClientArea)(HWND, MARGINS const*) = nullptr;
+    /// Reads a window attribute back. Only the Windows tests ask it, to see what DWM holds.
+    HRESULT(WINAPI* getWindowAttribute)(HWND, DWORD, PVOID, DWORD) = nullptr;
 
     // user32.dll, Windows 10 1607 and later. Without these the frame thickness can only be asked
     // for the PRIMARY monitor, which is the wrong answer on a mixed-DPI desktop.
@@ -57,6 +59,8 @@ struct DwmApi
             resolved.extendFrameIntoClientArea =
                 reinterpret_cast<decltype(resolved.extendFrameIntoClientArea)>(
                     GetProcAddress(dwm, "DwmExtendFrameIntoClientArea"));
+            resolved.getWindowAttribute = reinterpret_cast<decltype(resolved.getWindowAttribute)>(
+                GetProcAddress(dwm, "DwmGetWindowAttribute"));
         }
 
         if (auto* user32 = LoadLibraryW(L"user32.dll"))

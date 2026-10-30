@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -24,6 +25,21 @@ struct TaskbarProgress
     uint8_t percentage = 0;
     bool operator==(TaskbarProgress const&) const = default;
 };
+
+/// How many tabs wait for the user, as a taskbar backend is told it.
+struct TaskbarAttention
+{
+    unsigned waiting = 0; ///< Tabs whose program is blocked on the user (OSC 7501); none shows no badge.
+    bool operator==(TaskbarAttention const&) const = default;
+};
+
+/// The label the Dock tile's badge carries for @p attention.
+/// @param attention How many tabs wait for the user.
+/// @return The number, or nothing for none, which leaves the tile without a badge of ours.
+[[nodiscard]] inline std::string dockBadgeText(TaskbarAttention attention)
+{
+    return attention.waiting == 0 ? std::string {} : std::to_string(attention.waiting);
+}
 
 /// The dependency-free aggregation and staleness policy behind the OS taskbar progress indicator.
 ///

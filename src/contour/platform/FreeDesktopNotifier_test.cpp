@@ -192,6 +192,33 @@ TEST_CASE("buildFreedesktopNotifyArguments builds the Notify tuple", "[contour][
     }
 }
 
+TEST_CASE("buildFreedesktopNotifyArguments asks for silence only for a silent notification",
+          "[contour][notification]")
+{
+    auto notification = aNotification("osc-1");
+    auto const hintsOf = [&] {
+        return contour::platform::buildFreedesktopNotifyArguments(
+                   notification, 0, NotificationBodyFormat::Markup)[6]
+            .toMap();
+    };
+
+    SECTION("silent: suppress-sound is set")
+    {
+        notification.sound = vtbackend::NotificationSound::Silent;
+        auto const hints = hintsOf();
+        REQUIRE(hints.contains("suppress-sound"));
+        CHECK(hints["suppress-sound"].toBool());
+    }
+
+    SECTION("the desktop's default and a chime leave the server's policy alone")
+    {
+        notification.sound = vtbackend::NotificationSound::DesktopDefault;
+        CHECK_FALSE(hintsOf().contains("suppress-sound"));
+        notification.sound = vtbackend::NotificationSound::Chime;
+        CHECK_FALSE(hintsOf().contains("suppress-sound"));
+    }
+}
+
 TEST_CASE("buildFreedesktopNotifyArguments escapes the body a server reads as markup",
           "[contour][notification]")
 {

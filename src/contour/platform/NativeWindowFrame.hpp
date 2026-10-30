@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace contour::platform
 {
@@ -48,6 +49,22 @@ enum class FrameShadowStrategy : uint8_t
     FullSizeContent,
 };
 
+/// Whether a frame keeps an OS title bar the title band can be dressed in -- a material behind it, the
+/// native title bar measured under it. The kept Windows frame does (DWM's backdrop, R-h), as macOS's
+/// full-size content view does; a frame that relies on the compositor has none.
+/// @param strategy The frame's shadow strategy.
+/// @return Whether the controller applies the title-band material under it.
+[[nodiscard]] constexpr bool hostsTitleBandMaterial(FrameShadowStrategy strategy) noexcept
+{
+    switch (strategy)
+    {
+        case FrameShadowStrategy::None: return false;
+        case FrameShadowStrategy::NativeFrameKept:
+        case FrameShadowStrategy::FullSizeContent: return true;
+    }
+    return false;
+}
+
 /// Who supplies the window's frame affordances -- the resize handles and the window controls.
 ///
 /// One field rather than two, because they are one decision: the frame that resizes the window is
@@ -76,6 +93,17 @@ enum class FramelessHint : uint8_t
     Apply,
 };
 
+/// Who extends the client area under the title bar, where a decorated window lets the content fill it.
+///
+/// One owner, so two cannot disagree: on macOS it is Qt's Qt::ExpandedClientAreaHint (Qt >= 6.9), which
+/// also publishes the title bar as the window's safe area, and the Cocoa frame adapter no longer touches
+/// the style mask (Step 1d spike, D1 = Hint).
+enum class ClientAreaExpansion : uint8_t
+{
+    None = 0, //!< The client area stops at the frame, or there is no frame to extend under.
+    QtHint,   //!< Qt::ExpandedClientAreaHint, set through Main.qml's `flags`.
+};
+
 /// Everything that follows from a platform and a decoration choice.
 struct FramePolicy
 {
@@ -83,6 +111,7 @@ struct FramePolicy
     FrameAffordances affordances;
     ControlPlacement controlPlacement;
     FramelessHint framelessHint;
+    ClientAreaExpansion expansion;
 
     [[nodiscard]] constexpr bool operator==(FramePolicy const&) const noexcept = default;
 };
@@ -93,13 +122,15 @@ namespace detail
     inline constexpr auto ServerFramePolicy = FramePolicy { .shadow = FrameShadowStrategy::None,
                                                             .affordances = FrameAffordances::Native,
                                                             .controlPlacement = ControlPlacement::OwnBar,
-                                                            .framelessHint = FramelessHint::Withhold };
+                                                            .framelessHint = FramelessHint::Withhold,
+                                                            .expansion = ClientAreaExpansion::None };
 
     /// A genuinely frameless window: we draw everything, and the shadow is the compositor's to grant.
     inline constexpr auto ClientFramePolicy = FramePolicy { .shadow = FrameShadowStrategy::None,
                                                             .affordances = FrameAffordances::Client,
                                                             .controlPlacement = ControlPlacement::OwnBar,
-                                                            .framelessHint = FramelessHint::Apply };
+                                                            .framelessHint = FramelessHint::Apply,
+                                                            .expansion = ClientAreaExpansion::None };
 } // namespace detail
 
 /// How @p platform should frame a window whose title bar is @p decoration.
@@ -128,17 +159,19 @@ namespace detail
             return FramePolicy { .shadow = FrameShadowStrategy::NativeFrameKept,
                                  .affordances = FrameAffordances::Client,
                                  .controlPlacement = ControlPlacement::OwnBar,
-                                 .framelessHint = FramelessHint::Withhold };
+                                 .framelessHint = FramelessHint::Withhold,
+                                 .expansion = ClientAreaExpansion::None };
 
         case FramePlatform::MacOS:
-            // The window stays a decorated NSWindow with a transparent, hidden title bar, so AppKit
-            // keeps drawing the shadow, the rounded corners AND the traffic lights -- over our own
-            // chrome, since the content view extends under them. Ours must switch off and the tab
-            // strip must leave their corner clear.
+            // The window stays a decorated NSWindow with a hidden title, so AppKit keeps drawing the
+            // shadow, the rounded corners AND the traffic lights -- over our own chrome, since Qt's hint
+            // extends the content view under them. Ours must switch off and the tab strip must leave
+            // their corner clear.
             return FramePolicy { .shadow = FrameShadowStrategy::FullSizeContent,
                                  .affordances = FrameAffordances::Native,
                                  .controlPlacement = ControlPlacement::OverChrome,
-                                 .framelessHint = FramelessHint::Withhold };
+                                 .framelessHint = FramelessHint::Withhold,
+                                 .expansion = ClientAreaExpansion::QtHint };
 
         case FramePlatform::Other: return detail::ClientFramePolicy;
     }
@@ -227,15 +260,30 @@ class NativeWindowFrame
 /// native handle outlives the window it describes, and both platforms recycle handles -- so a later
 /// window inheriting a stale entry with a matching decoration would be skipped and never decorated.
 /// This dies with the window, and one helper serves both adapters instead of two copies.
+/// The window property @ref needsFrameApplied records the applied decoration under, as the decoration + 1
+/// so "never applied" (an absent property, which converts to 0) is distinct from Client's 0.
+inline constexpr auto AppliedDecorationKey = "contour_applied_frame_decoration";
+
 [[nodiscard]] inline bool needsFrameApplied(QWindow& window, WindowDecoration decoration)
 {
-    static constexpr auto Key = "contour_applied_frame_decoration";
-    // +1 so "never applied" (an absent property, which converts to 0) is distinct from Client's 0.
     auto const wanted = static_cast<int>(decoration) + 1;
-    if (window.property(Key).toInt() == wanted)
+    if (window.property(AppliedDecorationKey).toInt() == wanted)
         return false;
-    window.setProperty(Key, wanted);
+    window.setProperty(AppliedDecorationKey, wanted);
     return true;
+}
+
+/// The decoration @p window's frame was last given, as @ref needsFrameApplied recorded it.
+/// @param window The window to ask.
+/// @return The decoration, or nothing when no frame was ever applied.
+[[nodiscard]] inline std::optional<WindowDecoration> appliedDecoration(QWindow const& window)
+{
+    switch (window.property(AppliedDecorationKey).toInt())
+    {
+        case static_cast<int>(WindowDecoration::Client) + 1: return WindowDecoration::Client;
+        case static_cast<int>(WindowDecoration::Server) + 1: return WindowDecoration::Server;
+        default: return std::nullopt;
+    }
 }
 
 /// The frame that does nothing, for platforms with no OS frame service to ask.

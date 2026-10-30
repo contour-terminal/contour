@@ -8,6 +8,8 @@
 namespace contour::platform
 {
 
+struct DwmApi;
+
 /// The Win32 frame adapter.
 ///
 /// Keeps `WS_THICKFRAME | WS_CAPTION` on the window and reports a zero-thickness frame from
@@ -19,6 +21,13 @@ namespace contour::platform
 ///                    rounded corners.
 [[nodiscard]] std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(
     std::function<Qt::ColorScheme()> const& colorScheme);
+
+/// The Win32 frame adapter over the DWM entry points @p api; injected, so a test passes a stub.
+/// @param colorScheme As above.
+/// @param api         The DWM and DPI entry points the frame speaks through.
+/// @return The frame, or nullptr off the Windows platform plugin or where @p api cannot keep the frame.
+[[nodiscard]] std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(
+    std::function<Qt::ColorScheme()> const& colorScheme, DwmApi const& api);
 
 } // namespace contour::platform
 

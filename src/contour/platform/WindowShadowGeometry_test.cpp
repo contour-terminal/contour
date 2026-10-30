@@ -223,3 +223,33 @@ TEST_CASE("shadowVisibilityFor covers every window state", "[contour][shadow]")
                   == ShadowVisibility::Hidden);
     }
 }
+
+TEST_CASE("windowCorner.table", "[contour][shadow][windowshadow]")
+{
+    constexpr auto RowRadius = 12;
+    struct CornerCase
+    {
+        WindowPresentation presentation;
+        WindowDecoration decoration;
+        int expected;
+    };
+    // Every presentation x decoration, written out: only a windowed CSD window rounds its top corners.
+    constexpr auto Cases = std::array {
+        CornerCase { WindowPresentation::Windowed, WindowDecoration::Client, RowRadius },
+        CornerCase { WindowPresentation::Maximized, WindowDecoration::Client, 0 },
+        CornerCase { WindowPresentation::FullScreen, WindowDecoration::Client, 0 },
+        CornerCase { WindowPresentation::Tiled, WindowDecoration::Client, 0 },    // Review Focus 5
+        CornerCase { WindowPresentation::Windowed, WindowDecoration::Server, 0 }, // Review Focus 4
+        CornerCase { WindowPresentation::Maximized, WindowDecoration::Server, 0 },
+        CornerCase { WindowPresentation::FullScreen, WindowDecoration::Server, 0 },
+        CornerCase { WindowPresentation::Tiled, WindowDecoration::Server, 0 },
+    };
+    for (auto const& [presentation, decoration, expected]: Cases)
+    {
+        INFO("presentation " << static_cast<int>(presentation) << ", decoration "
+                             << static_cast<int>(decoration));
+        CHECK(windowCornerRadius(RowRadius, presentation, decoration) == expected);
+        // A row without a window radius (macOS, Terminal) never rounds.
+        CHECK(windowCornerRadius(0, presentation, decoration) == 0);
+    }
+}

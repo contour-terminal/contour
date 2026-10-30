@@ -14,6 +14,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
+#include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <core/Flags.hpp>
 #include <core/Utils.hpp>
@@ -156,7 +157,7 @@ inline constexpr std::string_view FallbackCommandName = "command";
 /// @see vtbackend::formatCommandDuration
 /// @param summary       The finished block.
 /// @param tabName       The tab strip's label for the session's tab; untrusted (it may be a window title).
-/// @param homeDirectory The local home, for `~`; a directory on another machine is never shortened.
+/// @param homeDirectory The local home, for `~`; only a directory known to be on this machine is shortened.
 /// @return The body, its segments joined by ` · `, each sanitised for display and cut to MaxBodySegmentBytes.
 [[nodiscard]] inline std::string finishNotificationBody(vtbackend::CommandBlockSummary const& summary,
                                                         std::string_view tabName,
@@ -175,10 +176,8 @@ inline constexpr std::string_view FallbackCommandName = "command";
 
     if (auto const& directory = summary.workingDirectory; !directory.path.empty())
     {
-        auto const shown = directory.locality == vtbackend::ContextLocality::Foreign
-                               ? directory.path
-                               : vtbackend::abbreviateHomePath(directory.path, homeDirectory);
-        segments.push_back(segmentOf(shown));
+        segments.push_back(
+            segmentOf(vtbackend::homeAbbreviatedPath(directory.path, directory.locality, homeDirectory)));
     }
 
     if (!tabName.empty())
@@ -290,6 +289,42 @@ using FinishEffects = core::Flags<FinishEffect>;
             return FinishEffects { FinishEffect::Notification, FinishEffect::Bell };
     }
     return FinishEffects { FinishEffect::Notification };
+}
+
+/// Whether the profile's bell makes a sound.
+enum class BellAudibility : uint8_t
+{
+    Muted = 0, ///< The bell sound is `off`, or its volume is not above zero.
+    Audible,   ///< The bell would be heard.
+};
+
+/// The sound a finish notification makes. A finish notice chimes only when the notification is the
+/// whole of the delivery and the bell is audible; under `notify_bell` the bell is the sound, so the
+/// notification stays silent rather than chiming twice.
+/// @param action The profile's `notify_on_command_finish.action`.
+/// @param bell Whether the profile's bell is audible.
+/// @return Chime or Silent; a finish notice never leaves the choice to the desktop.
+[[nodiscard]] constexpr vtbackend::NotificationSound finishNoticeSound(config::NotifyAction action,
+                                                                       BellAudibility bell) noexcept
+{
+    switch (action)
+    {
+        case config::NotifyAction::Notify:
+            return bell == BellAudibility::Audible ? vtbackend::NotificationSound::Chime
+                                                   : vtbackend::NotificationSound::Silent;
+        case config::NotifyAction::Bell:
+        case config::NotifyAction::NotifyBell: return vtbackend::NotificationSound::Silent;
+    }
+    return vtbackend::NotificationSound::Silent;
+}
+
+/// Whether a bell with the given configuration is heard.
+/// @param sound The profile's `bell.sound`; `off` mutes it.
+/// @param volume The profile's `bell.volume`; zero or below mutes it.
+/// @return Muted for `off` or a volume of zero or below, else Audible.
+[[nodiscard]] inline BellAudibility bellAudibilityOf(std::string_view sound, float volume) noexcept
+{
+    return sound == "off" || volume <= 0.0f ? BellAudibility::Muted : BellAudibility::Audible;
 }
 
 /// The prefix of every finish notification's identifier. An application's OSC 99 notifications share the
