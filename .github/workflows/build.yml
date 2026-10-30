@@ -36,7 +36,7 @@ env:
   # cannot obtain actionlint, so that a fresh offline clone still gets a green `ctest`; in CI that
   # would mean a gate quietly passing because its download failed, which is worse than no gate.
   # Set at workflow level so it covers every job here that runs `ctest` -- the Linux matrix and
-  # packaging jobs via `--target test`, and the Windows job directly.
+  # packaging jobs and the Windows and macOS jobs, all through `ctest -j`.
   CHECK_WORKFLOWS_REQUIRE_TOOL: 1
   # Single source of truth for the LLVM/Clang toolchain version used across this workflow
   # (clang-format, clang-tidy and the Clang build matrix). Bump this one value to upgrade.
@@ -1005,7 +1005,7 @@ jobs:
         timeout-minutes: 30
         env:
           CONTOUR_TEST_TRACE: "1"
-        run: ctest --preset macos-package
+        run: ctest --preset macos-package -j "$(sysctl -n hw.ncpu)"
       - name: "verify the tmux oracles actually ran"
         # @see the identical assertion on the Linux matrix for why a green suite is not enough:
         # a Catch2 SKIP exits 0, so "no tmux, nothing ran" is indistinguishable from success.
@@ -1284,7 +1284,7 @@ jobs:
       - name: "Test"
         shell: pwsh
         run: |
-          ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo
+          ctest --preset ${{ env.CMAKE_PRESET }} --build-config RelWithDebInfo -j $env:NUMBER_OF_PROCESSORS
       - name: "verify the AF_UNIX tests actually ran"
         # Windows is the ONLY validation the daemon's Windows transport gets -- nobody develops it
         # on a Windows box. The AF_UNIX cases self-skip where the platform has no AF_UNIX, and a
@@ -1679,7 +1679,9 @@ jobs:
         # Raised to 30 on 2026-10-30: the four GUI variants take ~1080 s on the arm runner, and the whole
         # passing suite reached 1210 s, past the 20-minute ceiling (run 40985430645).
         timeout-minutes: 30
-        run: cmake --build --preset gcc-debug --target test
+        # ctest directly, in parallel, rather than `--target test` (serial). Tests that cannot share a
+        # machine say so in their own properties (RUN_SERIAL / RESOURCE_LOCK in CMakeLists.txt).
+        run: ctest --test-dir out/gcc-debug -j"$(nproc)" --output-on-failure --no-tests=error
       - name: "portal settings adapter (private session bus)"
         # Gating, unlike the weston steps: it needs a bus, not a compositor. The [portal-settings] and
         # [globalhotkey][portal] cases SKIP off a private bus (the offscreen suite above), so a SKIP here is a
@@ -1924,7 +1926,7 @@ jobs:
         # too, contour_gui_test alone took 253 s and ContourLinux 155 s, and the step hit 10 minutes at test
         # 41 of 54 (run 41044717252).
         timeout-minutes: 30
-        run: cmake --build --preset gcc-release --target test
+        run: ctest --test-dir out/gcc-release -j"$(nproc)" --output-on-failure --no-tests=error
       - name: "CPack: Creating DEB package"
         run: |
           set -ex
