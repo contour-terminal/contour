@@ -1,23 +1,61 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
+#include <contour/window/FindBarPlacement.hpp>
+#include <contour/window/HeaderBarLayout.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/LinkPillPlacement.hpp>
+#include <contour/window/PalettePlacement.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/SecureLockPlacement.hpp>
+#include <contour/window/SplitChrome.hpp>
+#include <contour/window/TabBadge.hpp>
+#include <contour/window/TabWellLayout.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/vt/ProgressState.hpp>
 
+#include <text_shaper/Font.hpp>
+
 #include <core/log/LogStore.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
+#include <QtCore/QStringList>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace contour::window
 {
 
 namespace
 {
+    /// The family a cell-counting chrome asks Qt for, given the configured @p family: the one the grid's
+    /// font locator draws in. Qt knows the generic `monospace` only where fontconfig does, and elsewhere
+    /// substitutes its own pick (Courier New on Windows) -- a cell that lines up with nothing below it.
+    [[nodiscard]] QString chromeFamilyOf(std::string_view family)
+    {
+        return QString::fromUtf8(text::platformFontFamily(family));
+    }
+
     /// The width of one character cell of @p metrics, in logical pixels.
     ///
     /// The advance of a single glyph rather than QFontMetricsF::averageCharWidth(): for the monospace
@@ -104,6 +142,17 @@ namespace
             badge.setPixelSize(tokens.badgePixelSize);
         badge.setBold(true);
 
+        // Scaled by a percentage of the chrome font rather than pinned to a size, so the caption and
+        // the headline follow the user's font size. A pixel-sized font scales its pixel size instead.
+        auto const scaled = [&font](int percent) {
+            auto result = font;
+            if (font.pointSizeF() > 0.0)
+                result.setPointSizeF(font.pointSizeF() * percent / 100.0);
+            else if (font.pixelSize() > 0)
+                result.setPixelSize(std::max(1, font.pixelSize() * percent / 100));
+            return result;
+        };
+
         return ChromeFonts {
             .base = font,
             .close = sized(tokens.closePointSize),
@@ -111,19 +160,29 @@ namespace
             .menu = sized(tokens.menuPointSize),
             .windowControl = sized(tokens.windowControlPointSize),
             .badge = badge,
+            .caption = scaled(config::ChromeTokens::CaptionFontPercent),
+            .headline = scaled(config::ChromeTokens::HeadlineFontPercent),
         };
     }
 
-    /// @p base at @p percent opacity.
-    ///
-    /// Every translucent overlay the chrome paints -- the hover wash, the two popup scrims -- is a
-    /// palette color taken down to an alpha the token row states, so the one arithmetic step lives
-    /// here rather than once per caller.
-    [[nodiscard]] QColor atOpacity(QColor const& base, int percent)
+    /// @return @p glyphs as the string list QML reads.
+    template <size_t N>
+    [[nodiscard]] QStringList stringsOf(std::array<std::string_view, N> const& glyphs)
     {
-        auto faded = base;
-        faded.setAlphaF(static_cast<float>(percent) / 100.0F);
-        return faded;
+        auto list = QStringList {};
+        list.reserve(static_cast<qsizetype>(N));
+        for (auto const glyph: glyphs)
+            list.append(QString::fromUtf8(glyph));
+        return list;
+    }
+
+    /// Whether the application palette paints a dark chrome: its Window colour's tone, as statusColor() and
+    /// the colour roles read it.
+    [[nodiscard]] bool paletteIsDark()
+    {
+        return platform::colorSchemeOfBackground(
+                   platform::toRGBColor(QGuiApplication::palette().color(QPalette::Window)))
+               == Qt::ColorScheme::Dark;
     }
 
     /// Converts @p tokens' glyphs to the strings QML draws.
@@ -139,66 +198,758 @@ namespace
             .newTab = QString::fromUtf8(tokens.newTabGlyph),
             .menu = QString::fromUtf8(tokens.menuGlyph),
             .submenu = QString::fromUtf8(tokens.submenuGlyph),
+            .tabColor = QString::fromUtf8(tokens.tabColorGlyph),
+            .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
+            .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
+            .hostDot = QString::fromUtf8(tokens.hostDotGlyph),
+            .paneActions = stringsOf(tokens.paneActionGlyphs),
+            .splitLines = stringsOf(tokens.splitLineGlyphs),
+            .restart = QString::fromUtf8(tokens.restartGlyph),
+            .scrollThumb = QString::fromUtf8(tokens.scrollThumbGlyph),
+            .drillIn = QString::fromUtf8(tokens.drillInGlyph),
+            .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
+            .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
+            .findNext = QString::fromUtf8(tokens.findNextGlyph),
+            .secureInput = QString::fromUtf8(tokens.secureInputText),
+            .switchOn = QString::fromUtf8(tokens.switchOnGlyph),
+            .switchOff = QString::fromUtf8(tokens.switchOffGlyph),
+            .segmentOn = QString::fromUtf8(tokens.segmentOnGlyph),
+            .segmentOff = QString::fromUtf8(tokens.segmentOffGlyph),
+            .sliderFill = QString::fromUtf8(tokens.sliderFillGlyph),
+            .sliderKnob = QString::fromUtf8(tokens.sliderKnobGlyph),
+            .sliderTrack = QString::fromUtf8(tokens.sliderTrackGlyph),
+            .stepper = QString::fromUtf8(tokens.stepperGlyph),
+            .colorWell = QString::fromUtf8(tokens.colorWellGlyph),
         };
     }
+
+    /// Whether @p value, as QML passes it, indexes a table of @p count rows (an enum of @p count
+    /// enumerators counted from 0).
+    [[nodiscard]] constexpr bool inRange(int value, size_t count) noexcept
+    {
+        return value >= 0 && std::cmp_less(value, count);
+    }
+
+    /// @return @p name as the QString QML reads it.
+    [[nodiscard]] QString nameOf(std::string_view name)
+    {
+        return QString::fromUtf8(name);
+    }
+
 } // namespace
 
-UiStyleProvider::UiStyleProvider(config::UiStyle style, QFont const& chromeFont, QObject* parent):
-    QObject { parent },
-    _tokens { config::uiStyleTokens(style) },
-    _fonts { chromeFontsFor(_tokens, chromeFont) },
-    _metrics { chromeMetricsFor(_tokens, chromeFont) },
-    _glyphs { chromeGlyphsFor(_tokens) }
+platform::PlatformAppearance chromeAppearanceOf(platform::PlatformAppearance appearance)
 {
+    appearance.scrollBars = std::nullopt;
+    appearance.colorScheme = std::nullopt;
+    appearance.buttonLayout = std::nullopt;
+    return appearance;
+}
+
+ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
+{
+    return ChromeInputs { .row = row,
+                          .font = font,
+                          .accessibility = {},
+                          .appearance = {},
+                          .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}),
+                          .density = config::ChromeDensity::Comfortable,
+                          .secureInput = platform::SecureInputSupport::None };
+}
+
+UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
+    QObject { parent },
+    _inputs { std::move(inputs) },
+    _tokens { config::uiStyleTokens(_inputs.row) },
+    _fonts { chromeFontsFor(_tokens, _inputs.font) },
+    _metrics { chromeMetricsFor(_tokens, _inputs.font) },
+    _glyphs { chromeGlyphsFor(_tokens) },
+    _groups { config::resolveChromeTokens(
+        _inputs.row, _inputs.accessibility, _inputs.density, _inputs.appearance.materials) },
+    // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
+    // legacy one land on the same grid.
+    _units { .horizontal = _metrics.widthQuantum,
+             .vertical = _tokens.unit == config::LengthUnit::Cell ? _metrics.cellHeight : 1.0 },
+    _size { _groups.size, _units, this },
+    _space { _groups.space, _units, this },
+    _radii { _groups.radii, _units, this },
+    _type { _groups.type, _inputs.font, this },
+    _motion { _groups.motion, _units, this },
+    _elevation { _groups.elevation, _units, this },
+    _material { _groups.material, this },
+    _contrast { _groups.contrast, this },
+    _tui { _groups.tui, this },
+    _layout { _groups.layout, this },
+    _tint { _groups.tint, this },
+    _settings { _groups.settings, _units, this },
+    _settingsTraits { _groups.layout.settings, this },
+    _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
+    _paneRoles { this },
+    _badgeKinds { this },
+    _paneEnds { this },
+    _paneStates { this },
+    _headerOccupants { this },
+    _secureInputs { this },
+    _blocks { this },
+    _dropZones { this },
+    _dropPayloads { this }
+{
+    if (auto* application = QCoreApplication::instance())
+        application->installEventFilter(this);
+}
+
+UiStyleProvider::UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent):
+    UiStyleProvider { chromeInputsFor(row, chromeFont), parent }
+{
+}
+
+bool UiStyleProvider::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == QCoreApplication::instance() && event->type() == QEvent::ApplicationPaletteChange)
+    {
+        ++_paletteRevision;
+        emit paletteRevisionChanged();
+    }
+    return QObject::eventFilter(watched, event);
+}
+
+QString UiStyleProvider::chromeStyleName() const
+{
+    return QString::fromLatin1(config::chromeStyleName(_inputs.row));
 }
 
 QColor UiStyleProvider::wash(QColor const& base) const
 {
-    return atOpacity(base, _tokens.hoverWashPercent);
+    return platform::atOpacity(base, _tokens.hoverWashPercent);
+}
+
+QColor UiStyleProvider::contrastWash(QColor const& ink) const
+{
+    return wash(onColor(ink));
 }
 
 QColor UiStyleProvider::modalScrim(QColor const& base) const
 {
-    return atOpacity(base, _tokens.modalScrimPercent);
+    return platform::atOpacity(base, _tokens.modalScrimPercent);
 }
 
 QColor UiStyleProvider::modelessScrim(QColor const& base) const
 {
-    return atOpacity(base, _tokens.modelessScrimPercent);
+    return platform::atOpacity(base, _tokens.modelessScrimPercent);
 }
 
 QColor UiStyleProvider::shadowTint(QColor const& base) const
 {
-    return atOpacity(base, _tokens.shadowOpacityPercent);
+    return platform::atOpacity(base, _tokens.shadowOpacityPercent);
 }
 
 QColor UiStyleProvider::progressColor(int state) const
 {
-    // One accessor taking the state rather than three named ones: the mapping is an index into the
-    // style's own row, so QML says `progressColor(tabProgressState)` and neither side repeats the
-    // state->appearance table. Out-of-range is answered rather than asserted -- the value crosses
-    // from QML, and an unknown state paints nothing rather than aborting the GUI.
-    auto const& colors = _tokens.progressColors;
-    if (state < 0 || std::cmp_greater_equal(state, colors.size()))
+    // One accessor taking the state rather than three named ones: the state's role is one row of
+    // config::ProgressStatusRoles, so QML says `progressColor(tabProgressState)` and neither side
+    // repeats the table. Out-of-range is answered rather than asserted -- the value crosses from QML,
+    // and an unknown state paints nothing rather than aborting the GUI.
+    if (state <= static_cast<int>(vtbackend::ProgressState::Inactive)
+        || !inRange(state, config::ProgressStatusRoles.size()))
         return { Qt::transparent };
-    return QColor::fromRgb(colors[static_cast<size_t>(state)]);
+    return statusInk(static_cast<int>(config::ProgressStatusRoles[static_cast<size_t>(state)]));
+}
+
+QColor UiStyleProvider::statusInk(int role) const
+{
+    if (!inRange(role, config::StatusColorRoleCount))
+        return { Qt::transparent };
+    return _colors.resolve(_groups.statusInk[static_cast<size_t>(role)]);
+}
+
+QVariantMap UiStyleProvider::badgeLook(int kind) const
+{
+    if (!inRange(kind, TabBadgeKindCount))
+        return {};
+    auto const& look = tabBadgeLook(static_cast<TabBadgeKind>(kind));
+    return { { QStringLiteral("glyph"), nameOf(look.glyph) },
+             { QStringLiteral("mark"), nameOf(badgeMarkName(look.mark)) },
+             { QStringLiteral("ink"), statusInk(static_cast<int>(look.ink)) },
+             { QStringLiteral("name"), nameOf(look.accessibleName) } };
+}
+
+QVariantMap UiStyleProvider::hostChipLook(int state) const
+{
+    if (!inRange(state, HostChipStateCount))
+        return {};
+    auto const& look = window::hostChipLook(static_cast<HostChipState>(state));
+    return { { QStringLiteral("dot"), statusInk(static_cast<int>(look.dot)) },
+             { QStringLiteral("status"), nameOf(look.status) },
+             { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
+}
+
+bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
+{
+    return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
+}
+
+QVariantMap UiStyleProvider::titleBand(
+    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
+{
+    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
+        || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
+        || !inRange(hostChipState, HostChipStateCount))
+        return {};
+    auto const band =
+        titleBandOf(TitleBandInputs { .frame = static_cast<WindowFrame>(frame),
+                                      .mode = static_cast<WindowMode>(mode),
+                                      .strip = static_cast<TabStripGate>(strip),
+                                      .position = static_cast<config::TabBarPosition>(position),
+                                      .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
+                                                             static_cast<HostChipState>(hostChipState)) });
+    return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
+             { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
+             { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },
+             { QStringLiteral("tabBar"), nameOf(barPresenceName(band.tabBar)) } };
+}
+
+QVariantMap headerBarVariant(HeaderBar const& bar)
+{
+    auto itemSlots = QVariantList {};
+    for (auto const& row: HeaderBarItems)
+        itemSlots.append(nameOf(headerBarSlotName(headerBarSlotOf(bar, row.item))));
+    return { { QStringLiteral("slots"), itemSlots },
+             { QStringLiteral("newTab"), nameOf(headerBarSlotName(bar.newTab)) },
+             { QStringLiteral("search"), nameOf(headerBarSlotName(bar.search)) },
+             { QStringLiteral("mainMenu"), nameOf(headerBarSlotName(bar.mainMenu)) },
+             { QStringLiteral("leadingSeparator"), bar.leadingSeparator == ControlsSeparator::Shown },
+             { QStringLiteral("trailingSeparator"), bar.trailingSeparator == ControlsSeparator::Shown } };
+}
+
+QVariantMap UiStyleProvider::headerBar(bool nativeFrame, int leadingControls, int trailingControls) const
+{
+    auto const presence = [](int count) {
+        return count > 0 ? ControlsPresence::Present : ControlsPresence::None;
+    };
+    return headerBarVariant(headerBarOf(
+        HeaderBarInputs { .frame = nativeFrame ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
+                          .leading = presence(leadingControls),
+                          .trailing = presence(trailingControls) }));
+}
+
+QVariantList UiStyleProvider::headerBarItems() const
+{
+    auto items = QVariantList {};
+    for (auto const& row: HeaderBarItems)
+        items.append(QVariantMap { { QStringLiteral("item"), static_cast<int>(row.item) },
+                                   { QStringLiteral("objectName"), nameOf(row.objectName) },
+                                   { QStringLiteral("accessibleName"), nameOf(row.accessibleName) },
+                                   { QStringLiteral("iconName"), nameOf(row.iconName) },
+                                   { QStringLiteral("bundledIcon"), nameOf(row.bundledIcon) },
+                                   { QStringLiteral("menu"), nameOf(headerBarMenuName(row.menu)) } });
+    return items;
+}
+
+QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
+{
+    auto const layout = layoutTabWell(available,
+                                      tabCount,
+                                      TabWellMetrics { .minTab = _metrics.minTabWidth,
+                                                       .maxTab = _metrics.maxTabWidth,
+                                                       .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
+                                                       .gap = wellGap(),
+                                                       .padding = wellPadding() });
+    return { { QStringLiteral("tabWidth"), layout.tabWidth },
+             { QStringLiteral("wellWidth"), layout.wellWidth },
+             { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
+             { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+}
+
+QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const
+{
+    // The margin is s7 in both directions, each in its own unit; one vertical unit is a cell's height on
+    // the Terminal row and a pixel elsewhere, so it is also what the top edge snaps to.
+    auto const placement = placePalette(PaletteInputs { .windowWidth = windowWidth,
+                                                        .windowHeight = windowHeight,
+                                                        .width = _size.paletteWidth(),
+                                                        .maxHeight = _size.paletteMaxHeight(),
+                                                        .marginX = _space.s7(),
+                                                        .marginY = _space.s7Rows(),
+                                                        .topPercent = _groups.layout.paletteTopPercent,
+                                                        .rowQuantum = _units.vertical });
+    return { { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width },
+             { QStringLiteral("maxHeight"), placement.maxHeight } };
+}
+
+QFont UiStyleProvider::activeTabFont(QFont const& base) const
+{
+    auto font = base;
+    switch (_groups.layout.activeTabWeight)
+    {
+        case config::ActiveTabWeight::Regular: break;
+        case config::ActiveTabWeight::Bold: font.setBold(true); break;
+    }
+    return font;
+}
+
+qreal UiStyleProvider::snapToCells(qreal length) const
+{
+    auto const quantum = _metrics.widthQuantum;
+    return quantum * std::ceil(length / quantum);
+}
+
+qreal UiStyleProvider::wellGap() const noexcept
+{
+    return hasTabWell() ? _space.s1() : _space.s2();
+}
+
+qreal UiStyleProvider::wellPadding() const noexcept
+{
+    return hasTabWell() ? _space.s1() : 0;
+}
+
+qreal UiStyleProvider::bandHeight() const noexcept
+{
+    switch (_groups.layout.tabShape)
+    {
+        case config::TabShape::Pill: return _size.titleBar();
+        case config::TabShape::Flat:
+        case config::TabShape::Joined: break;
+    }
+    return _metrics.chromeHeight;
+}
+
+QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) const
+{
+    return bandFillColor(bandSurfaceFill(frame, mode, centre));
+}
+
+int UiStyleProvider::bandSurfaceFill(int frame, int mode, QString const& centre) const
+{
+    auto const bandCentre = barCentreNamed(centre.toStdString());
+    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount) || !bandCentre)
+        return static_cast<int>(config::BandFill::Palette);
+
+    return static_cast<int>(resolveTitleBandSurface(TitleBandSurfaceInputs {
+                                                        .style = _inputs.row,
+                                                        .material = _groups.material.titleBand,
+                                                        .frame = static_cast<WindowFrame>(frame),
+                                                        .mode = static_cast<WindowMode>(mode),
+                                                        .centre = *bandCentre,
+                                                        .density = _inputs.density,
+                                                    })
+                                .fill);
+}
+
+QColor UiStyleProvider::bandFillColor(int fill) const
+{
+    auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
+    if (!inRange(fill, config::BandFillCount))
+        return paletteWindow;
+
+    auto const background = _inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)];
+    auto const tone = paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light;
+    auto const orPaletteWindow = [&](std::optional<vtbackend::RGBColor> const& fill) {
+        return fill ? platform::toQColor(*fill) : paletteWindow;
+    };
+    switch (static_cast<config::BandFill>(fill))
+    {
+        case config::BandFill::Palette: break;
+        case config::BandFill::Clear: return { Qt::transparent };
+        case config::BandFill::Tint: return orPaletteWindow(legibleBandTint(background, tone));
+        case config::BandFill::Background: return orPaletteWindow(legibleBandBackground(background, tone));
+    }
+    return paletteWindow;
+}
+
+QColor UiStyleProvider::statusColor(int role) const
+{
+    if (!inRange(role, config::StatusColors.size()))
+        return { Qt::transparent };
+    return statusColor(static_cast<config::StatusColorRole>(role), config::StatusInkUse::Text);
+}
+
+QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::StatusInkUse use) const
+{
+    if (!inRange(static_cast<int>(role), config::StatusColors.size()))
+        return { Qt::transparent };
+
+    return statusInk(role, use, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
+}
+
+QColor UiStyleProvider::statusInk(config::StatusColorRole role,
+                                  config::StatusInkUse use,
+                                  ChromeTone tone) const
+{
+    auto const& row = config::StatusColors[static_cast<size_t>(role)];
+    switch (row.source)
+    {
+        case config::StatusColorSource::PaletteAccent: return accentColor();
+        case config::StatusColorSource::Fixed: break;
+    }
+    auto const& hues = row.hues(use);
+    return QColor::fromRgb(tone == ChromeTone::Dark ? hues.dark : hues.light);
+}
+
+QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::StatusColors.size()))
+        return { Qt::transparent };
+
+    auto const ground = platform::toRGBColor(background);
+    auto const mark =
+        statusInk(static_cast<config::StatusColorRole>(role),
+                  config::StatusInkUse::Mark,
+                  platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
+                                                                                     : ChromeTone::Light);
+    if (vtbackend::contrastRatio(platform::toRGBColor(mark), ground) >= config::MinimumMarkContrast)
+        return mark;
+    return onColor(background);
+}
+
+QColor UiStyleProvider::statusTextOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::StatusColors.size()))
+        return { Qt::transparent };
+
+    auto const ground = platform::toRGBColor(background);
+    auto const text =
+        statusInk(static_cast<config::StatusColorRole>(role),
+                  config::StatusInkUse::Text,
+                  platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
+                                                                                     : ChromeTone::Light);
+    if (vtbackend::contrastRatio(platform::toRGBColor(text), ground) >= config::MinimumTextContrast)
+        return text;
+    return onColor(background);
+}
+
+QColor UiStyleProvider::accentColor() const
+{
+    if (auto const& accent = _inputs.appearance.accent)
+        return platform::toQColor(*accent);
+    return QGuiApplication::palette().color(QPalette::Highlight);
+}
+
+QColor UiStyleProvider::onColor(QColor const& background) const
+{
+    auto const rgb = platform::toRGBColor(background);
+    auto const black = vtbackend::RGBColor(0, 0, 0);
+    auto const white = vtbackend::RGBColor(255, 255, 255);
+    return vtbackend::contrastRatio(rgb, black) >= vtbackend::contrastRatio(rgb, white) ? QColor(Qt::black)
+                                                                                        : QColor(Qt::white);
+}
+
+QColor UiStyleProvider::onStatusColor(int role) const
+{
+    return onColor(statusColor(role));
+}
+
+QColor UiStyleProvider::paneDimColor() const
+{
+    auto const& dim = _groups.dim;
+    return platform::atOpacity(
+        QColor(Qt::black),
+        _groups.contrast.paneDimPercent.value_or(paletteIsDark() ? dim.darkPercent : dim.lightPercent));
+}
+
+QString UiStyleProvider::densityName() const
+{
+    return nameOf(config::chromeDensityName(_inputs.density));
+}
+
+qreal UiStyleProvider::overlayPaneHeader() const noexcept
+{
+    return config::ChromeTokenRows[static_cast<size_t>(_inputs.row)].size.paneHeader * _units.vertical;
+}
+
+QStringList UiStyleProvider::paneHeaderActionNames() const
+{
+    auto names = QStringList {};
+    names.reserve(static_cast<qsizetype>(PaneHeaderActions.size()));
+    for (auto const& row: PaneHeaderActions)
+        names.append(nameOf(row.accessibleName));
+    return names;
+}
+
+QVariantMap UiStyleProvider::paneHeader(
+    int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const
+{
+    if (!inRange(reveal, HeaderRevealCount) || !inRange(pointer, PointerPresenceCount)
+        || !inRange(focus, PaneFocusCount))
+        return {};
+    auto const header = resolvePaneHeader(PaneHeaderInputs { .density = _inputs.density,
+                                                             .reveal = static_cast<HeaderReveal>(reveal),
+                                                             .pointer = static_cast<PointerPresence>(pointer),
+                                                             .focus = static_cast<PaneFocus>(focus),
+                                                             .actionsReveal = _groups.layout.paneActions,
+                                                             .visiblePanes = visiblePanes,
+                                                             .width = width,
+                                                             .height = height,
+                                                             .headerHeight = _size.paneHeader(),
+                                                             .minimumContentHeight = _metrics.cellHeight });
+    return { { QStringLiteral("content"), nameOf(paneHeaderContentName(header.content)) },
+             { QStringLiteral("actions"), nameOf(headerActionsName(header.actions)) },
+             { QStringLiteral("placement"), nameOf(headerPlacementName(header.placement)) },
+             { QStringLiteral("emphasis"), nameOf(headerEmphasisName(header.emphasis)) } };
+}
+
+int UiStyleProvider::stickyHeaderHost(int headerContent, int visiblePanes, int band) const
+{
+    if (!inRange(headerContent, PaneHeaderContentCount) || !inRange(band, TitleBandPresenceCount))
+        return static_cast<int>(StickyHeaderHost::Grid);
+    return static_cast<int>(
+        stickyHeaderHostFor(StickyHeaderHostInputs { .header = static_cast<PaneHeaderContent>(headerContent),
+                                                     .visiblePanes = visiblePanes,
+                                                     .band = static_cast<TitleBandPresence>(band) }));
+}
+
+namespace
+{
+    /// The ints of @p list, as QML hands a JavaScript array over.
+    [[nodiscard]] std::vector<int> intsOf(QVariant const& list)
+    {
+        auto const values = list.toList();
+        auto ints = std::vector<int> {};
+        ints.reserve(static_cast<size_t>(values.size()));
+        for (auto const& value: values)
+            ints.push_back(value.toInt());
+        return ints;
+    }
+
+    /// The grid a pill may cover, from the session's overlay clearance map. The map's lists are copied into
+    /// @p trailingBlank and @p avoidRows, which the returned grid views, so they must outlive it.
+    [[nodiscard]] window::LinkPillGrid pillGridOf(QVariantMap const& clearance,
+                                                  std::vector<int>& trailingBlank,
+                                                  std::vector<int>& avoidRows)
+    {
+        trailingBlank = intsOf(clearance.value(QStringLiteral("trailingBlank")));
+        avoidRows = intsOf(clearance.value(QStringLiteral("avoidRows")));
+        return window::LinkPillGrid { .marginLeft = clearance.value(QStringLiteral("marginLeft")).toReal(),
+                                      .marginTop = clearance.value(QStringLiteral("marginTop")).toReal(),
+                                      .cellWidth = clearance.value(QStringLiteral("cellWidth")).toReal(),
+                                      .cellHeight = clearance.value(QStringLiteral("cellHeight")).toReal(),
+                                      .columns = clearance.value(QStringLiteral("columns")).toInt(),
+                                      .trailingBlankColumns = trailingBlank,
+                                      .avoidRows = avoidRows };
+    }
+} // namespace
+
+QVariantMap UiStyleProvider::linkPillPlacement(int host,
+                                               int findBar,
+                                               qreal headerWidth,
+                                               qreal paneWidth,
+                                               qreal paneHeight,
+                                               qreal pillWidth,
+                                               qreal pillMinimumWidth,
+                                               qreal pillHeight,
+                                               QVariantMap const& clearance) const
+{
+    if (!inRange(host, LinkPillHostCount) || !inRange(findBar, FindBarPresenceCount))
+        return {};
+    auto trailingBlank = std::vector<int> {};
+    auto avoidRows = std::vector<int> {};
+    auto const placement =
+        placeLinkPill(LinkPillInputs { .host = static_cast<LinkPillHost>(host),
+                                       .findBar = static_cast<FindBarPresence>(findBar),
+                                       .paneWidth = paneWidth,
+                                       .paneHeight = paneHeight,
+                                       .pillWidth = pillWidth,
+                                       .pillMinimumWidth = pillMinimumWidth,
+                                       .pillHeight = pillHeight,
+                                       .headerSlotWidth = headerWidth,
+                                       .insetTop = _space.s4(),
+                                       .insetRight = _space.s5(),
+                                       .grid = pillGridOf(clearance, trailingBlank, avoidRows) });
+    return { { QStringLiteral("anchor"), nameOf(linkPillAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width } };
+}
+
+QVariantMap UiStyleProvider::secureLockPlacement(int findBar,
+                                                 QString const& linkPillAnchor,
+                                                 qreal paneWidth,
+                                                 qreal paneHeight,
+                                                 qreal lockWidth,
+                                                 qreal lockHeight,
+                                                 QVariantMap const& clearance) const
+{
+    auto const anchors =
+        std::views::iota(size_t { 0 }, LinkPillAnchorCount)
+        | std::views::transform([](size_t index) { return static_cast<LinkPillAnchor>(index); });
+    auto const linkPill = std::ranges::find_if(anchors, [&](LinkPillAnchor candidate) {
+        return linkPillAnchor == nameOf(linkPillAnchorName(candidate));
+    });
+    if (!inRange(findBar, FindBarPresenceCount) || linkPill == anchors.end())
+        return {};
+    auto trailingBlank = std::vector<int> {};
+    auto avoidRows = std::vector<int> {};
+    auto const placement =
+        placeSecureLock(SecureLockInputs { .findBar = static_cast<FindBarPresence>(findBar),
+                                           .linkPill = *linkPill,
+                                           .paneWidth = paneWidth,
+                                           .paneHeight = paneHeight,
+                                           .lockWidth = lockWidth,
+                                           .lockHeight = lockHeight,
+                                           .insetTop = _space.s4(),
+                                           .insetRight = _space.s5(),
+                                           .grid = pillGridOf(clearance, trailingBlank, avoidRows) });
+    return { { QStringLiteral("anchor"), nameOf(secureLockAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y } };
+}
+
+int UiStyleProvider::findBarPresence(QString const& anchor) const
+{
+    if (anchor.isEmpty())
+        return static_cast<int>(FindBarPresence::Closed);
+    auto const anchors =
+        std::views::iota(size_t { 0 }, FindBarAnchorCount)
+        | std::views::transform([](size_t index) { return static_cast<FindBarAnchor>(index); });
+    auto const named = std::ranges::find_if(
+        anchors, [&](FindBarAnchor candidate) { return anchor == nameOf(findBarAnchorName(candidate)); });
+    return named != anchors.end() ? static_cast<int>(findBarPresenceAt(*named)) : -1;
+}
+
+QString UiStyleProvider::secureInputText(int indicator) const
+{
+    return nameOf(secureInputStateText(_inputs.secureInput,
+                                       inRange(indicator, SecureIndicatorCount)
+                                           ? static_cast<SecureIndicator>(indicator)
+                                           : SecureIndicator::None));
+}
+
+QVariantMap UiStyleProvider::secureIndicatorSpots(int header, int tabWell, int band) const
+{
+    if (!inRange(header, SpotShownCount) || !inRange(tabWell, SpotShownCount)
+        || !inRange(band, SpotShownCount))
+        return {};
+    auto const& rule = window::secureIndicatorSpots(
+        static_cast<SpotShown>(header), static_cast<SpotShown>(tabWell), static_cast<SpotShown>(band));
+    return { { QStringLiteral("header"), rule.lockInHeader == SpotShown::Yes },
+             { QStringLiteral("tab"), rule.lockOnTab == SpotShown::Yes },
+             { QStringLiteral("band"), rule.bandChip == SpotShown::Yes },
+             { QStringLiteral("pane"), rule.lockInPane == SpotShown::Yes } };
+}
+
+QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const
+{
+    return QString::fromStdString(window::paneHeaderName(processName.toStdString(), title.toStdString()));
+}
+
+QVariantMap UiStyleProvider::findBarPlacement(
+    int header, qreal paneWidth, qreal paneHeight, qreal matchTop, qreal matchBottom) const
+{
+    if (!inRange(header, PaneHeaderPresenceCount))
+        return {};
+    auto const currentMatch = matchBottom > matchTop
+                                  ? std::optional { RowBand { .top = matchTop, .bottom = matchBottom } }
+                                  : std::nullopt;
+    auto const placement = placeFindBar(FindBarInputs { .host = _groups.layout.findBar,
+                                                        .header = static_cast<PaneHeaderPresence>(header),
+                                                        .paneWidth = paneWidth,
+                                                        .paneHeight = paneHeight,
+                                                        .barWidth = _size.findBarWidth(),
+                                                        .barHeight = _size.findBar(),
+                                                        .insetX = _space.findBarInset(),
+                                                        .insetY = _space.findBarInsetRows(),
+                                                        .currentMatch = currentMatch });
+    return { { QStringLiteral("anchor"), nameOf(findBarAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width } };
+}
+
+// colorOn() picks a pane's tone by toneOf(); the chrome's own scheme follows the terminal background by
+// platform::colorSchemeOfBackground(). One threshold, so a pane and the chrome agree on what is dark.
+static_assert(TitleBandDarkLuminance == platform::DarkBackgroundLuminance);
+
+QColor UiStyleProvider::colorOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::ChromeColorRoleCount))
+        return { Qt::transparent };
+    auto const ground = platform::toRGBColor(background);
+    auto const& source = _groups.colors[static_cast<size_t>(role)];
+    // A scheme mark (the Terminal row's scrollbar thumb) is chosen against this pane's background, not the
+    // default profile's.
+    if (source.kind == config::ColorSourceKind::Scheme)
+        return platform::atOpacity(platform::toQColor(config::markOn(_inputs.scheme, source.slot, ground)),
+                                   source.alphaPercent);
+    return _colors.resolve(
+        source, toneOf(ground) == ChromeTone::Dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+}
+
+qreal UiStyleProvider::paneCardContentInset(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? cardContentInset(_radii.paneCard(), devicePixelRatio) : 0.0;
+}
+
+qreal UiStyleProvider::paneHeaderHeight(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? snappedChromePixels(_size.paneHeader(), devicePixelRatio)
+                                : _size.paneHeader();
+}
+
+qreal UiStyleProvider::hairline(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;
+}
+
+qreal UiStyleProvider::unfocusedDim(qreal profileDim) const
+{
+    auto dim = profileDim;
+    switch (_inputs.density)
+    {
+        case config::ChromeDensity::Minimal: {
+            auto const& floor = _groups.dim;
+            dim = std::max(dim, (paletteIsDark() ? floor.darkPercent : floor.lightPercent) / 100.0);
+            break;
+        }
+        case config::ChromeDensity::Comfortable: break;
+    }
+    if (auto const cap = _groups.contrast.paneDimPercent)
+        dim = std::min(dim, *cap / 100.0);
+    return dim;
+}
+
+QColor UiStyleProvider::dotGlyphColor() const
+{
+    return platform::atOpacity(QColor(Qt::black), config::ChromeTokens::DotGlyphPercent);
 }
 
 QColor UiStyleProvider::errorColor() const
 {
-    return progressColor(static_cast<int>(vtbackend::ProgressState::Error));
+    return statusColor(static_cast<int>(config::StatusColorRole::Danger));
 }
 
-QFont resolveChromeFont(config::Config const& config, std::string const& profileName)
+FontFamilyAvailability fontDatabaseAvailability()
 {
-    auto const& tokens = config::uiStyleTokens(config.uiStyle.value());
+    return [](std::string_view family) {
+        return QFontDatabase::hasFamily(
+            QString::fromUtf8(family.data(), static_cast<qsizetype>(family.size())));
+    };
+}
+
+QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)
+{
+    return resolveChromeFont(config, row, profileName, fontDatabaseAvailability());
+}
+
+QFont resolveChromeFont(config::Config const& config,
+                        config::ChromeStyle row,
+                        std::string const& profileName,
+                        FontFamilyAvailability const& isInstalled)
+{
+    auto const& tokens = config::uiStyleTokens(row);
     auto font = QGuiApplication::font();
 
     // A style that wants the platform's own font is done here -- and the ui_font_* keys, which exist
     // to make a cell-counting chrome match the grid, are deliberately not applied to it rather than
-    // quietly restyling a chrome nobody asked to restyle.
+    // quietly restyling a chrome nobody asked to restyle. A row naming its own families (Fluent's
+    // Segoe UI Variable) takes the first one installed, and the platform font where none is.
     if (tokens.fontSource == config::ChromeFontSource::PlatformUi)
+    {
+        if (auto const family = config::firstAvailableFamily(tokens.fontFamilies, isInstalled))
+            font.setFamily(QString::fromUtf8(family->data(), static_cast<qsizetype>(family->size())));
         return font;
+    }
 
     // Fall back to the RUNNING profile's regular font, so `ui_style: terminal` alone already matches
     // the terminal grid. The running one rather than `default_profile`: `contour profile=big` puts a
@@ -207,7 +958,7 @@ QFont resolveChromeFont(config::Config const& config, std::string const& profile
     if (auto const* profile = config.findProfile(profileName))
     {
         auto const& fonts = profile->fonts.value();
-        font.setFamily(QString::fromStdString(fonts.regular.familyName));
+        font.setFamily(chromeFamilyOf(fonts.regular.familyName));
         font.setPointSizeF(static_cast<qreal>(fonts.size.pt));
     }
     else
@@ -221,7 +972,7 @@ QFont resolveChromeFont(config::Config const& config, std::string const& profile
     }
 
     if (auto const& family = config.uiFontFamily.value(); !family.empty())
-        font.setFamily(QString::fromStdString(family));
+        font.setFamily(chromeFamilyOf(family));
 
     if (auto const size = config.uiFontSize.value(); size > 0.0)
         font.setPointSizeF(size);

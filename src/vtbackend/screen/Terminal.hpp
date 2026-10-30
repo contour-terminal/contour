@@ -2,9 +2,13 @@
 #pragma once
 
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/core/BlockPill.hpp>
+#include <vtbackend/core/CaptureLineMode.hpp>
+#include <vtbackend/core/ClipboardWriter.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/PasteStrip.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
@@ -21,10 +25,14 @@
 #include <vtbackend/links/ScanText.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Cursor.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
+#include <vtbackend/screen/OverlayClearance.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
+#include <vtbackend/screen/SearchQuery.hpp>
+#include <vtbackend/screen/SearchTallyWalk.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -95,6 +103,13 @@ namespace vtbackend
 class Screen;
 
 /// Result of applying a smooth-scroll pixel delta.
+/// Whether a frame shows a running block's time, which goes stale unless the frame is drawn again.
+enum class RunningStatus : uint8_t
+{
+    Hidden = 0, ///< No running time on display.
+    Shown,      ///< A status chip or the sticky header shows one.
+};
+
 enum class SmoothScrollResult : uint8_t
 {
     Applied,         ///< Pixel delta was applied to the viewport.
@@ -113,6 +128,13 @@ enum class CommandBlockJumpError : uint8_t
     /// The viewport cannot bring the primary page's history into view: another page is on display, or the
     /// cursor is on one while the primary page is shown (DECPCCM reset).
     NotScrollable,
+};
+
+/// Which way Terminal::focusCommandBlock() moves the block focus.
+enum class BlockStep : uint8_t
+{
+    Previous = 0, ///< To the block before: older, further up.
+    Next,         ///< To the block after: newer, further down.
 };
 
 /// Why Terminal::revealStableLineAtTop() could not bring a line to the top.
@@ -301,18 +323,41 @@ class Modes
 /// stepping afterwards. Terminal::clearSearch() is what ends it.
 struct Search
 {
-    std::u32string pattern;
-    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart;
-    SearchOrigin origin = SearchOrigin::Typed;
+    std::u32string pattern;                    ///< As the user gave it; kept when it does not compile.
+    SearchOptions options {};                  ///< The find bar's toggles, as the user set them.
+    SearchOrigin origin = SearchOrigin::Typed; ///< Where the pattern came from.
 
-    /// The cached result of caseComparisonFor(pattern, caseSensitivity).
+    /// The pattern compiled under the options its origin reads it with; null for an empty pattern, one that
+    /// does not compile, or one that proved too complex to match.
     ///
-    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. It is
-    /// cached because RenderBufferBuilder asks it once per RENDERED CELL, and under the default Smart
-    /// policy the honest answer is a UCD lookup per codepoint of the needle: ~109ns against ~8ns for
-    /// the (incorrect) <cctype> test it replaced, which at 240x70 is over a millisecond per frame
-    /// spent re-deriving a constant.
-    CaseComparison comparison = CaseComparison::Folded;
+    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. Shared, so that a
+    /// reader working through the grid in steps keeps the query it began with.
+    std::shared_ptr<SearchQuery const> query {};
+
+    /// Why the pattern is not searched for, while it is not; nothing otherwise.
+    std::optional<SearchPatternError> problem {};
+};
+
+/// What the per-keystroke probe learnt. @see Terminal::probeSearchReverse
+enum class SearchProbeOutcome : uint8_t
+{
+    Undecided = 0, //!< Nothing within the budget, and grid beyond it: not known until a walk reads it.
+    Found,         //!< A match; SearchProbe::match names it.
+    Absent,        //!< The probe read the whole grid: there is no match anywhere.
+};
+
+/// The per-keystroke probe's answer.
+struct SearchProbe
+{
+    SearchProbeOutcome outcome = SearchProbeOutcome::Undecided; //!< What it learnt.
+    std::optional<CellLocation> match {};                       //!< The match, under Found.
+};
+
+/// A search tally walked in steps over one page, and the page it walks: a page switch restarts it.
+struct TerminalSearchTally
+{
+    SearchTallyWalk walk; ///< The walk.
+    PageIndex page;       ///< The page on display when the walk began.
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
@@ -513,7 +558,7 @@ class Terminal: public IStatusLinePublishTarget
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
+        virtual void requestCaptureBuffer(LineCount /*lines*/, CaptureLineMode /*mode*/) {}
         virtual void bell() {}
         /// Another page came on display -- not the cursor's page, which with DECPCCM reset may be another.
         /// @param type The screen type of the page now on display.
@@ -526,11 +571,33 @@ class Terminal: public IStatusLinePublishTarget
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
 
+        /// Whether the frame shows a running block's time changed (@see Terminal::hasVisibleRunningStatus):
+        /// a time on display goes stale unless a frame is drawn again. Raised by the frame build -- on the
+        /// render or the parser thread, with the terminal's lock held -- under renderBufferUpdated()'s rules:
+        /// hand the work to the thread that owns it.
+        virtual void runningStatusChanged() {}
+        /// What a sticky header in the chrome (StickyHeaderPresentation::Chrome) shows changed: another
+        /// block, another outcome, another chip -- a running time's next second -- or none any more. What the
+        /// pane header or the title band re-binds on (Terminal::stickyHeaderSnapshot). Raised by the frame
+        /// build, on the render or the parser thread with the terminal's lock held, under
+        /// runningStatusChanged()'s rules; never while the header is drawn in the grid.
+        virtual void chromeStickyHeaderChanged() {}
+        /// As screenUpdated(), for a frame that repainted what the screen showed already rather than
+        /// output: a mirror's full replay (vthost::client::ScreenMirror::fullReplay) -- the attach, a resync.
+        /// A listener that does not tell the two apart need not override it.
+        virtual void screenReplayed() { screenUpdated(); }
+
         /// A status-line extension published a frame. Called on the extension's worker, holding no lock,
         /// under renderBufferUpdated()'s rules. For a host that renders nothing itself (the daemon), which
         /// repaints the indicator status line on its own thread then (@see
         /// Terminal::refreshIndicatorStatusLine).
         virtual void extensionFramePublished() {}
+
+        /// What an indicator status-line item shows changed off the parser: a `{Git}` lookup found another
+        /// branch. Called on the lookup's executor, holding no terminal lock, under renderBufferUpdated()'s
+        /// rules, after the terminal asked for a frame. For a host that renders nothing itself (the daemon),
+        /// which repaints the indicator status line on its own thread then, as for extensionFramePublished().
+        virtual void indicatorStatusLineItemChanged() {}
 
         /// The page was resized, so any row may have moved: a change of width reflowed every row under
         /// new stable ids, and a change of height moved rows between the page and the history. What is
@@ -545,7 +612,8 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
-        virtual void copyToClipboard(std::string_view /*data*/) {}
+        /// @p data is to go on the clipboard; @p writer says who put it there.
+        virtual void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) {}
 
         /// The application asked for a different mouse pointer shape, by CSS name (`OSC 22`).
         /// @see vtbackend::pointer_shape::SupportedNames.
@@ -641,6 +709,15 @@ class Terminal: public IStatusLinePublishTarget
         /// @param change The block whose record changed, and the newest block that ran a command.
         virtual void commandBlockChanged(CommandBlockChange const& /*change*/) {}
 
+        /// The keyboard's block focus moved, or went (Terminal::focusedCommandBlock): a step, a key or click
+        /// that cleared it, or its record leaving the store.
+        ///
+        /// Raised with Terminal::_stateMutex ALREADY HELD -- on the GUI thread for a step or a clear, on the
+        /// parser thread when the store forgot the focused record -- under progressChanged()'s rule: do not
+        /// read terminal state here; what changed travels in @p focused. Defer to the GUI thread.
+        /// @param focused The block focused now; nullopt for none.
+        virtual void commandBlockFocusChanged(std::optional<CommandBlockId> /*focused*/) {}
+
         /// The user placed or took off a user mark (vi `mm`) on a replica, whose marks are its host's
         /// (Terminal::toggleUserMark): the terminal leaves its line alone, and the listener asks the host,
         /// whose row brings the mark back.
@@ -672,7 +749,7 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
-        virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
+        virtual void pasteFromClipboard(unsigned /*count*/, PasteStrip /*strip*/) {}
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
@@ -712,6 +789,13 @@ class Terminal: public IStatusLinePublishTarget
         /// hard reset). The frontend falls back to a user-chosen color, if any, else its own default.
         /// It never clears a color the user picked.
         virtual void resetWindowFrameColor() {}
+        /// The palette's default background changed: by OSC 11 or 111, DECAC item 1, a reset (DECSTR, RIS),
+        /// XTPOPCOLORS, or the frontend re-seeding the palette. Reported only on an actual change.
+        ///
+        /// Invoked by whichever thread holds the terminal lock -- the parser thread, or the GUI thread for a
+        /// re-seed -- so an implementation must not touch GUI state here: defer to the GUI thread instead.
+        /// @param color The new default background.
+        virtual void defaultBackgroundColorChanged(RGBColor /*color*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
@@ -723,6 +807,12 @@ class Terminal: public IStatusLinePublishTarget
         /// anything displaying the pattern is now displaying one the terminal no longer has. A hook of
         /// its own rather than screenUpdated(), which reports that what is on screen changed.
         virtual void searchCleared() {}
+
+        /// The active search's query was ended because matching it proved too complex (R-f): Search::problem
+        /// says so, and nothing highlights or steps any more. Raised wherever matching met it -- a step, a
+        /// count, or a frame being drawn, which may be on another thread and with the state mutex held -- so
+        /// a frontend showing the search hears about it on every path, not only on the ones it drives itself.
+        virtual void searchQueryEnded() {}
 
         /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
         ///
@@ -747,7 +837,7 @@ class Terminal: public IStatusLinePublishTarget
     class NullEvents: public Events
     {
       public:
-        void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) override {}
+        void requestCaptureBuffer(LineCount /*lines*/, CaptureLineMode /*mode*/) override {}
         void bell() override {}
         void bufferChanged(ScreenType) override {}
         void renderBufferUpdated() override {}
@@ -755,7 +845,7 @@ class Terminal: public IStatusLinePublishTarget
         void pageResized() override {}
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
-        void copyToClipboard(std::string_view /*data*/) override {}
+        void copyToClipboard(std::string_view /*data*/, ClipboardWriter /*writer*/) override {}
         void setPointerShape(std::string_view /*cssName*/) override {}
         void openDocument(std::string_view /*fileOrUrl*/) override {}
         void inspect() override {}
@@ -775,7 +865,7 @@ class Terminal: public IStatusLinePublishTarget
         }
         void focusTerminalWindow() override {}
         void onClosed() override {}
-        void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
+        void pasteFromClipboard(unsigned /*count*/, PasteStrip /*strip*/) override {}
         void onSelectionCompleted() override {}
         void requestWindowResize(LineCount, ColumnCount) override {}
         void requestWindowResize(Width, Height) override {}
@@ -784,6 +874,7 @@ class Terminal: public IStatusLinePublishTarget
         void setTabName(std::string_view /*title*/) override {}
         void setWindowFrameColor(RGBColor /*color*/) override {}
         void resetWindowFrameColor() override {}
+        void defaultBackgroundColorChanged(RGBColor /*color*/) override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
         void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
@@ -821,6 +912,11 @@ class Terminal: public IStatusLinePublishTarget
     /// @param extensionServices The status-line extensions to show and to tell about state changes; absent,
     ///                        `{Extension}` items render empty and every event hook is one untaken branch.
     ///                        The lifetime rules are StatusLineExtensionServices'.
+    /// @param gitServices     Where `{Git}` looks up the branch, off the state lock; absent, `{Git}` shows
+    ///                        nothing and nothing is read. The lifetime rules are GitHeadServices'. A
+    ///                        ThreadPoolExecutor that was stopped runs what is submitted to it inline, so a
+    ///                        lookup asked for at shutdown may run on the render thread, under the terminal
+    ///                        lock, as a link probe may.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -830,7 +926,8 @@ class Terminal: public IStatusLinePublishTarget
              TerminalClocks clocks,
              SemanticBlockTokenSource sessionTokens,
              std::optional<LinkDetectionServices> linkServices = std::nullopt,
-             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
+             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt,
+             std::optional<GitHeadServices> gitServices = std::nullopt);
 
     /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
     /// terminal whose members are being destroyed.
@@ -1565,6 +1662,15 @@ class Terminal: public IStatusLinePublishTarget
     /// Whether the follow gesture's modifiers are held (Settings::linkFollowModifiers).
     [[nodiscard]] FollowModifiers followModifiers() const noexcept;
 
+    /// Whether a plain click goes to the application: it tracks the mouse, input is allowed and vi mode is
+    /// Insert. Only then does a click need the bypass modifiers to reach the terminal (a link, a selection).
+    /// The caller holds the state lock.
+    [[nodiscard]] bool applicationTakesClicks() const noexcept
+    {
+        return _inputGenerator.mouseProtocol().has_value() && allowInput()
+               && _inputHandler.mode() == ViMode::Insert;
+    }
+
     /// Where the pointer counts as being when it is over a link: Elsewhere while an application takes clicks
     /// (mouse tracking on, the bypass modifier not held), so that the link stays at rest.
     [[nodiscard]] LinkPointer hoverPointer() const noexcept;
@@ -1656,8 +1762,8 @@ class Terminal: public IStatusLinePublishTarget
     /// the frontend reads its clipboard, a round trip to whichever process owns it, and the parser thread
     /// must not wait for that.
     /// @param count How many times to paste it.
-    /// @param strip Whether to strip the text: a pre-existing bool, as the frontend's hook has it.
-    void sendPasteFromClipboard(unsigned count, bool strip);
+    /// @param strip Whether to strip the text first.
+    void sendPasteFromClipboard(unsigned count, PasteStrip strip);
     void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode);
@@ -1672,6 +1778,12 @@ class Terminal: public IStatusLinePublishTarget
     void setWindowFrameColor(RGBColor color) { _eventListener.setWindowFrameColor(color); }
     /// Notifies the frontend that the window-frame (tab) color was reset to the host default.
     void resetWindowFrameColor() { _eventListener.resetWindowFrameColor(); }
+    /// Notifies the frontend of the palette's current default background.
+    /// The caller holds the terminal lock and calls this only when the default background changed.
+    void notifyDefaultBackgroundColorChanged()
+    {
+        _eventListener.defaultBackgroundColorChanged(_colorPalette.defaultBackground);
+    }
 
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
@@ -1873,11 +1985,14 @@ class Terminal: public IStatusLinePublishTarget
     /// @return What the press does; Swallow beside any page but the primary screen's.
     [[nodiscard]] BlockColumnPress blockColumnPressAt(LineOffset gridLine) const;
 
-    /// The head of the collapsed fold whose `⋯ N lines` label is drawn over @p position: what a click on the
-    /// label expands. The label is laid out where fillFoldLabels() draws it, by the same placement.
+    /// The head of the collapsed fold whose "N lines hidden ⌄" chip is over @p position: what a click on it
+    /// expands. The chip is laid out where fillFoldLabels() draws it, by the same placement, and its hit
+    /// widened to @p minimumHitColumns over the blanks beside it (foldLabelExtent()).
     /// @param position A cell of the main page, as the pointer names it (main-page rows).
-    /// @return The fold head's grid line, or nullopt where no label is drawn.
-    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position) const;
+    /// @param minimumHitColumns The fewest columns the hit spans: the chrome's @c size.foldChipHit in cells.
+    /// @return The fold head's grid line, or nullopt where no chip is.
+    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position,
+                                                                 ColumnCount minimumHitColumns) const;
 
     /// Whether the primary screen's shell shows a prompt that a command typed now would run at: the newest
     /// command block is at its prompt, and the primary screen is the one on display.
@@ -1977,6 +2092,67 @@ class Terminal: public IStatusLinePublishTarget
     /// @param gridLine The grid line the pointer is over in the gutter, or nullopt when it left.
     void setGutterHoverLine(std::optional<LineOffset> gridLine);
 
+    /// Whether the frame last drawn shows a running block's time -- a status chip, or the sticky header --
+    /// which only a new frame moves on: what a frontend redraws once a second for. Lock-free, any thread.
+    /// @return True while such a time is on display.
+    [[nodiscard]] bool hasVisibleRunningStatus() const noexcept
+    {
+        return _runningStatus.load(std::memory_order_relaxed) == RunningStatus::Shown;
+    }
+
+    /// Takes the UI font's label advances the renderer measured (@see PillLabelMetrics), which a native row's
+    /// chips are placed by: how many columns each pill covers. Called by the renderer on the render thread
+    /// when its fonts or chip metrics change -- the externally driven geometry the constructor cannot know --
+    /// under the terminal's lock, as every mutator is. Refreshes the frame only when the metrics changed.
+    /// @param metrics The measured faces; unmeasured until a renderer has measured them.
+    void setPillLabelMetrics(PillLabelMetrics const& metrics);
+
+    /// The UI font's label advances last taken (@see setPillLabelMetrics); unmeasured until then.
+    [[nodiscard]] PillLabelMetrics const& pillLabelMetrics() const noexcept { return _pillLabelMetrics; }
+
+    /// Lights the rail of @p block as hovered, or clears it with nullopt: the pointer is over its rows.
+    ///
+    /// The pointer over the rail's strip beside a block hovers it too, through setGutterHoverLine().
+    /// Refreshes the frame only when the hovered block changes. Called under the terminal's lock, as every
+    /// mutator is.
+    /// @param block The hovered block, or nullopt when the pointer left every block.
+    void setHoveredCommandBlock(std::optional<CommandBlockId> block);
+
+    /// The block the pointer hovers: over its rows (setHoveredCommandBlock()), else over the rail's strip
+    /// beside them (setGutterHoverLine()).
+    /// @return Its id, or nullopt while no block is hovered.
+    [[nodiscard]] std::optional<CommandBlockId> hoveredBlock() const;
+
+    /// Moves the keyboard's block focus one block in @p step's direction and scrolls the block's head into
+    /// view.
+    ///
+    /// From the focused block when there is one, else from the viewport: the last block whose head is at or
+    /// above its bottom row for Previous, the first whose head is at or below its top row for Next. A block
+    /// still at its prompt has no command and is skipped, as is one whose head left the grid. The focused
+    /// block's rail is lit (BlockAttention::Focused) and the binding modes carry MatchModes::BlockFocus.
+    /// Called under the terminal's lock, as every mutator is.
+    /// @param step Which way to move.
+    /// @return The block now focused; nullopt, with the focus unchanged, where there is none that way.
+    [[nodiscard]] std::optional<CommandBlockId> focusCommandBlock(BlockStep step);
+
+    /// The block the keyboard focuses, if any. Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @return Its id; nullopt while none is focused.
+    [[nodiscard]] std::optional<CommandBlockId> focusedCommandBlock() const noexcept
+    {
+        return _focusedCommandBlock;
+    }
+
+    /// Takes the keyboard's block focus away. Redraws the frame and updates the binding modes only when a
+    /// block was focused. Called under the terminal's lock, as every mutator is.
+    void clearCommandBlockFocus();
+
+    /// The session ended -- its shell exited or was killed, its connection lost -- while a command may still
+    /// have been running: that block stops running (CommandBlockStore::abandonRunning), so no rail, chip,
+    /// tick or sticky header goes on showing it as running, and no frame asks for a once-a-second redraw.
+    /// Nothing is announced. Redraws when a block was running. Called under the terminal's lock, as every
+    /// mutator is.
+    void abandonRunningCommand();
+
     // }}}
 
     // {{{ Sticky command header (OSC 133 blocks)
@@ -1992,6 +2168,7 @@ class Terminal: public IStatusLinePublishTarget
     /// @return The block, or nullopt when the frame in front drew no header.
     [[nodiscard]] std::optional<CommandBlockId> stickyHeaderBlock() const noexcept
     {
+        // A header in the chrome covers no row: the frame publishes none for it (RenderBuffer::swapBuffers).
         auto const block = _renderBuffer.frontStickyHeaderBlock.load();
         if (!foldingAppliesToDisplayedPage() || block == CommandBlockId {})
             return std::nullopt;
@@ -2010,6 +2187,18 @@ class Terminal: public IStatusLinePublishTarget
     /// @return Nothing once the viewport moved (or already showed the head as high as it can); why not
     ///         otherwise, in which case nothing changed.
     [[nodiscard]] std::expected<void, CommandBlockJumpError> scrollToCommandBlockHead(CommandBlockId id);
+
+    /// The sticky header the next frame would carry, laid out as fillStickyHeader() lays it out, on screen
+    /// row 0: what the pane header or the title band binds while the header lives in the chrome.
+    ///
+    /// Called under the terminal's lock. Costs what a frame's header costs: no walk of the block's output.
+    /// @return The header, or nullopt when stickyHeaderFor() decides on none.
+    [[nodiscard]] std::optional<RenderStickyHeader> stickyHeaderSnapshot() const;
+
+    /// Moves the sticky header between the top row and the chrome (StickyHeaderSettings::presentation), and
+    /// redraws when it moved. Called under the terminal's lock, as every mutator is.
+    /// @param presentation Where the header is drawn from now on.
+    void setStickyHeaderPresentation(StickyHeaderPresentation presentation);
 
     // }}}
 
@@ -2252,6 +2441,10 @@ class Terminal: public IStatusLinePublishTarget
     /// Updates the IME preedit-string to be rendered when IME is composing a new input.
     /// Passing an empty string effectively disables IME rendering.
     void updateInputMethodPreeditString(std::string preeditString);
+
+    /// What the input method is composing, as the frontend last handed it over; empty when nothing is.
+    /// Takes the composition's own mutex, not the state lock, so a caller may hold that lock or not.
+    [[nodiscard]] std::string inputMethodPreeditString() const;
     // }}}
 
     /// Takes the state lock as a frontend does, to change what the parser thread changes. Until unlock(), the
@@ -2294,13 +2487,30 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _defaultColorPalette; }
 
+    /// @return The scheme's palette: what resetColorPalette() restores, and what no OSC 4 changes. The
+    ///         host's own chrome (the indicator status line's roles) is coloured from it.
+    [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept { return _defaultColorPalette; }
+
+    /// The indicator status line's colors for the focus and the input mode as they are now: the inactive
+    /// pair while unfocused; the idle (Insert) pair in every mode when the template draws its mode as a chip
+    /// (showsModeChip()), which then carries the mode's colours alone; and the mode's pair otherwise.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+
+    /// The indicator status line's pair for @p mode, as the scheme names it.
+    /// @param mode The vi input mode.
+    /// @return The Insert pair for Insert, the Normal pair for Normal and Hint, and the Visual pair for
+    ///         the visual modes.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColorsFor(ViMode mode) const noexcept;
+
     [[nodiscard]] std::vector<ColorPalette> const& savedColorPalettes() const noexcept
     {
         return _savedColorPalettes;
     }
 
-    void setColorPalette(ColorPalette const& palette) noexcept;
-    void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+    /// Replaces the palette in effect, announcing the default background when it changes. Not
+    /// @c noexcept: the announcement reaches the frontend, which may allocate to post it on.
+    void setColorPalette(ColorPalette const& palette);
+    void resetColorPalette() { setColorPalette(defaultColorPalette()); }
 
     /// Re-seeds the palette, and the defaults a reset returns to, from @p colors.
     ///
@@ -2739,6 +2949,9 @@ class Terminal: public IStatusLinePublishTarget
     /// so that Block cursor cell inversion is suppressed during animation.
     [[nodiscard]] float cursorAnimationProgress(CellLocation cursorGridPosition) const noexcept
     {
+        // The first frame to draw the cursor puts it in place (@see updateCursorMotionAnimation).
+        if (_cursorMotion.tracking == CursorTracking::Unseen)
+            return 1.0f;
         auto const now = currentTime();
         if (_cursorMotion.active && !_cursorMotion.isComplete(now))
             return _cursorMotion.progress(now);
@@ -2863,6 +3076,18 @@ class Terminal: public IStatusLinePublishTarget
     ///
     /// @return The span, or why there is no live prompt.
     [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
+
+    /// Where an overlay over the page on display may go: each drawn row's blank run at its right end, and the
+    /// rows of the live prompt, the cursor and a sticky command header drawn over the page's top row, which
+    /// it must not cover (@see OverlayClearance).
+    ///
+    /// The rows are the drawn ones, status line included, counted from the first; a status line's row is
+    /// never blank. A row a collapsed fold stands in for is read as the row standing in its place, as the
+    /// render pass draws it.
+    ///
+    /// Does NOT take the lock -- the caller holds it. Not noexcept: the fold projection is built lazily.
+    /// @return The clearance of the page on display.
+    [[nodiscard]] OverlayClearance overlayClearance() const;
 
     /// When the cursor first reached @p line, by the wall clock this terminal was given.
     ///
@@ -3142,7 +3367,7 @@ class Terminal: public IStatusLinePublishTarget
 
     // Screen's EventListener implementation
     //
-    void requestCaptureBuffer(LineCount lines, bool logical);
+    void requestCaptureBuffer(LineCount lines, CaptureLineMode mode);
     void requestShowHostWritableStatusLine();
     void bell();
     /// Tells the frontend that another page came on display. Drops the selection, which was on the page shown
@@ -3160,6 +3385,8 @@ class Terminal: public IStatusLinePublishTarget
     ///                  rows went.
     void rowsDropped(LineCount pageShift);
     void screenUpdated();
+    /// As screenUpdated(), for a mirror's full replay: the listener hears Events::screenReplayed().
+    void screenReplayed();
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
@@ -3181,7 +3408,12 @@ class Terminal: public IStatusLinePublishTarget
     void renderBufferUpdated();
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
-    void copyToClipboard(std::string_view data);
+    /// Puts @p data on the frontend's clipboard. A user's copy is handed over once the state lock is released
+    /// (runOutsideStateLock()), as the frontend tells its window of it, which reads terminal state; a
+    /// program's goes out at once.
+    /// @param data What to copy.
+    /// @param writer Who copies it.
+    void copyToClipboard(std::string_view data, ClipboardWriter writer);
 
     // {{{ Mouse pointer shape (OSC 22)
     /// @return the CSS name of the shape currently in effect.
@@ -3376,10 +3608,14 @@ class Terminal: public IStatusLinePublishTarget
     /// on the underlying std::string (torn read / use-after-free on reallocation).
     [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
-    /// Read-only by design: @c Search::comparison is a cache of the other two fields, and the setters
+    /// Read-only by design: @c Search::query is derived from the other fields, and the setters
     /// are what keep it in step. A mutable handle here is how the matcher and the highlighter came to
     /// disagree in the first place, so there is no longer one.
     [[nodiscard]] Search const& search() const noexcept { return _search; }
+
+    /// The render pass's remembered regex matches, kept across frames (@see SearchMatchMemo). Mutable from
+    /// a const terminal, as the render pass holds one; guarded by the terminal's lock like the grid.
+    [[nodiscard]] SearchMatchMemo& searchMatchMemo() const noexcept { return _searchMatchMemo; }
 
     // {{{ hint mode
     /// Activates hint mode, scanning the region @p request asks for.
@@ -3491,6 +3727,32 @@ class Terminal: public IStatusLinePublishTarget
     /// Called from onViewportChanged() so that wheel-scrolling while the left mouse button
     /// is held automatically extends the selection without requiring mouse movement.
     void extendSelectionAfterScroll();
+
+    /// How this terminal's screens measure a grapheme cluster, per DEC mode 2027; also what the status line
+    /// measures and cuts its items by, so a fit it judges is the fit the screen lays out.
+    ///
+    /// DEC mode 2027 is how an application says it expects whole clusters to be measured. Contour keeps the
+    /// mode set by default and always clusters; what the mode gates is narrower -- whether a codepoint
+    /// arriving AFTER the first may change how many columns the cluster occupies. Resetting it does not
+    /// restore the full pre-clustering behaviour, only this part of it: a terminal that also stopped
+    /// segmenting would place every combining mark in its own cell, which is a larger change and is not
+    /// what applications resetting the mode are usually after.
+    /// @return Whether a late codepoint may revise its cluster's width.
+    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept
+    {
+        return isModeEnabled(DECMode::Unicode) ? ClusterWidthPolicy::ClusterAware
+                                               : ClusterWidthPolicy::FirstCodepoint;
+    }
+
+    /// @return The user's home directory, for abbreviating a path to `~`; empty when the environment names
+    ///         none.
+    [[nodiscard]] std::string_view homeDirectory() const noexcept { return _homeDirectory; }
+
+    /// @return The branch `{Git}` shows for the shell's directory, as last looked up; empty for none. A copy,
+    ///         for the lookup publishes the next one from another thread. Reads no file: the indicator status
+    ///         line's repaint asks for a lookup, on the Git services' executor, and only after a command
+    ///         ended or the shell reported a directory.
+    [[nodiscard]] std::string gitBranch() const;
 
     /// @returns either an empty string or a file:// URL of the last set working directory, as reported.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
@@ -3628,10 +3890,12 @@ class Terminal: public IStatusLinePublishTarget
         return _userInputLock.load(std::memory_order_relaxed);
     }
 
-    // Sets the current search term to the given text and
-    // moves the viewport accordingly to make sure the given text is visible,
-    // or it will not move at all if the input text was not found.
-    // Every search reads the page on display, the one the viewport shows.
+    /// Searches backwards for the word vi's `*` and `#` took from under the cursor: installs @p text as the
+    /// pattern (SearchOrigin::WordUnderCursor, so always literal) and moves the viewport to make the match
+    /// visible. Every search reads the page on display, the one the viewport shows.
+    /// @param text           The word.
+    /// @param searchPosition Where to search backwards from.
+    /// @return The match; @p searchPosition itself where the word was already the pattern.
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
@@ -3641,16 +3905,27 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
     [[nodiscard]] std::optional<CellLocation> searchPrevMatch(CellLocation cursorPosition);
 
-    /// Installs @p text as the active search pattern.
-    /// @param text   The needle. Replaces whatever was being searched for.
+    /// Installs @p text as the active search pattern, compiled under the search's options.
+    ///
+    /// A double-clicked word and the word vi's `*` and `#` search for are always literal, whatever the
+    /// options say; the options themselves are left as they are.
+    /// @param text   The needle. Replaces whatever was being searched for; empty ends the search's query.
     /// @param origin Where it came from; selects which highlight colors its matches take.
-    /// @return false if @p text was already the pattern, so callers can skip a redundant search.
-    bool setNewSearchTerm(std::u32string text, SearchOrigin origin);
+    /// @return Whether the pattern or how it is read changed, so callers can skip a redundant search; or why
+    ///         the pattern cannot be searched for, which Search::problem then holds too.
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> setNewSearchTerm(std::u32string text,
+                                                                                   SearchOrigin origin);
 
-    /// Re-points the active search at @p mode. Does not itself move the viewport or the cursor --
-    /// the caller re-runs the search, because only it knows where from.
-    /// @return false if @p mode was already in effect.
-    bool setSearchCaseSensitivity(SearchCaseSensitivity mode);
+    /// Re-points the active search at @p options, recompiling its pattern where they read it differently.
+    /// Does not itself move the viewport or the cursor -- the caller re-runs the search, because only it
+    /// knows where from.
+    /// @param options The find bar's toggles.
+    /// @return Whether they changed; or why the pattern cannot be searched for under them.
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> setSearchOptions(SearchOptions options);
+
+    /// The match of the active search that begins at the normal-mode cursor, on the page on display.
+    /// @return Its first cell and last column, or nothing where no match begins there.
+    [[nodiscard]] std::optional<CellLocationRange> focusedSearchMatch() const;
 
     /// Counts the active pattern's matches across the whole page on display, scrollback included, and
     /// locates @p position among them.
@@ -3662,10 +3937,39 @@ class Terminal: public IStatusLinePublishTarget
     /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
     /// @return The tally. All-zero and @c Exact when the pattern is empty.
     ///
-    /// @note Not const, only because Grid's logical-line iteration is not: search() walks it, and
-    ///       const-correcting that family is a refactor of its own rather than part of this one.
+    /// @note Not const: a pattern too complex to match ends the query (R-f).
     [[nodiscard]] SearchMatchTally tallySearchMatches(CellLocation position,
                                                       size_t limit = DefaultSearchMatchLimit);
+
+    /// Begins counting the active query's matches over the page on display, in steps. @see
+    /// continueSearchTally
+    /// @param position Where the caller is standing; reported back as @c SearchMatchTally::ordinal.
+    /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
+    /// @return The walk, and the page it walks; nothing without a query.
+    [[nodiscard]] std::optional<TerminalSearchTally> beginSearchTally(
+        CellLocation position, size_t limit = DefaultSearchMatchLimit) const;
+
+    /// Reads one step of @p tally: at least @p budget rows of whole segments. Meant to be called under the
+    /// terminal's lock, released between calls. A page switch since the last step restarts the walk on the
+    /// page now on display.
+    /// @param tally  The walk beginSearchTally() began.
+    /// @param budget The rows to read at least.
+    /// @return Whether rows remain; SearchPatternError::TooComplex, which also ends the active query
+    ///         where the walk counts it (R-f).
+    [[nodiscard]] std::expected<WalkProgress, SearchPatternError> continueSearchTally(
+        TerminalSearchTally& tally, LineCount budget = SearchWalkStepLines);
+
+    /// searchReverse(), in whole segments while a SearchReadBudget of @p budget rows admits them -- for a
+    /// regex, also bounded by what it costs the engine: the per-keystroke probe (R-e). A match it finds is
+    /// revealed as searchReverse() reveals one.
+    ///
+    /// Where the whole grid on display fits in the budget, the probe also answers for the rows below
+    /// @p from: it finds the last match there, as a finished tally walk would jump to, or proves there is
+    /// none anywhere.
+    /// @param from   Where to search backwards from.
+    /// @param budget The rows after which it gives up.
+    /// @return The match found, and whether its absence is proved or merely not yet known.
+    [[nodiscard]] SearchProbe probeSearchReverse(CellLocation from, LineCount budget = SearchWalkStepLines);
 
     void clearSearch();
 
@@ -3829,6 +4133,18 @@ class Terminal: public IStatusLinePublishTarget
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
   private:
+    /// Whether a changed screen is announced to the listener now.
+    enum class ScreenNotification : uint8_t
+    {
+        Skipped = 0, ///< Rendering is suppressed, or a frame waits for a swap that failed again.
+        Due,         ///< The listener is told.
+    };
+
+    /// What screenUpdated() and screenReplayed() share: marks the screen dirty and retries the swap of a
+    /// pending render buffer.
+    /// @return Due when the listener is to be told.
+    [[nodiscard]] ScreenNotification markScreenChanged();
+
     /// The frames one repaint of the indicator status line reads, at most one per extension name: what
     /// statusLineExtensionText() reads while updateIndicatorStatusLine() runs.
     struct StatusLineExtensionFrame
@@ -4085,8 +4401,11 @@ class Terminal: public IStatusLinePublishTarget
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
 
-    /// The indicator status line's colors for the focus and the input mode as they are now.
-    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+    /// Asks for gitBranch() for the shell's local directory, when the template shows `{Git}`. Called by
+    /// updateIndicatorStatusLine() under the state lock; reads no file -- a lookup runs on the Git services'
+    /// executor, and only after endCommand(), adoptCommandBlock() or setCurrentWorkingDirectory() invalidated
+    /// the branch, or the directory changed.
+    void refreshGitHead();
 
     void updateCursorVisibilityState() const noexcept;
 
@@ -4135,6 +4454,34 @@ class Terminal: public IStatusLinePublishTarget
     /// selection and the search -- once it has changed it, under that lock.
     void publishBindingModes() noexcept;
 
+    /// Installs @p pattern, @p options and @p origin as the search, recompiling the query where the pattern
+    /// or the options its origin reads it with changed. @see setNewSearchTerm, setSearchOptions
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> installSearch(std::u32string pattern,
+                                                                                SearchOptions options,
+                                                                                SearchOrigin origin);
+
+    /// Compiles Search::pattern under the options its origin reads it with and the current word delimiters,
+    /// into Search::query or, where it does not compile, Search::problem. An empty pattern leaves both empty.
+    void compileSearch();
+
+    /// The last match of the active query at or before @p from, in whole segments while @p read admits them;
+    /// nothing without a query. Reveals nothing. @see probeSearchReverse
+    [[nodiscard]] std::optional<CellLocation> searchReverseWithin(CellLocation from, SearchReadBudget& read);
+
+    /// Brings @p match into view where there is one, and reports the screen updated, as every step does.
+    /// @return @p match.
+    std::optional<CellLocation> revealSearchMatch(std::optional<CellLocation> match);
+
+    /// Ends the active query because matching it failed with @p error (R-f), and tells the listener.
+    void endSearchQuery(SearchPatternError error);
+
+    /// A search's answer, with a failure to match (R-f) ending the query: Search::problem holds why, and
+    /// nothing highlights or steps until the pattern or the options change.
+    /// @param result What the page on display answered.
+    /// @return The match, or nothing where there is none or the query failed.
+    [[nodiscard]] std::optional<CellLocation> settleSearch(
+        std::expected<std::optional<CellLocation>, SearchPatternError> result);
+
     struct TheSelectionHelper: public vtbackend::SelectionHelper
     {
         Terminal* terminal;
@@ -4143,6 +4490,7 @@ class Terminal: public IStatusLinePublishTarget
         [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
         [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
         [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
+        [[nodiscard]] bool cellHoldsText(CellLocation pos) const noexcept override;
     };
     void triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper);
     bool handleMouseSelection(Modifiers modifiers, uint8_t clickCount);
@@ -4273,8 +4621,7 @@ class Terminal: public IStatusLinePublishTarget
 
     bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
-        return _inputGenerator.mouseProtocol().has_value()
-               && mouseInputAllowedInInsertMode(currentlyPressedModifier);
+        return applicationTakesClicks() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
     }
 
     /// No-protocol counterpart to @ref allowPassMouseEventToApp: fires when a wheel notch should
@@ -4653,8 +5000,19 @@ class Terminal: public IStatusLinePublishTarget
 
     // {{{ Cursor motion animation state
     /// Holds state for an ongoing cursor motion animation between grid cells.
+    /// Whether the render-buffer fill has drawn the cursor yet.
+    enum class CursorTracking : uint8_t
+    {
+        Unseen,    ///< No frame has drawn the cursor: there is nowhere it could have moved from.
+        Following, ///< A frame has drawn it, so a move from there is a motion.
+    };
+
     struct CursorMotionState: crispy::AnimationState<crispy::EaseOutCubic>
     {
+        /// The first frame drawing the cursor puts it where it is, rather than sliding it in from the home
+        /// position the state starts at: a session restored with its cursor deep in the page would otherwise
+        /// show a cursor sweeping down from the page's top-left corner.
+        CursorTracking tracking = CursorTracking::Unseen;
         FractionalCellLocation fromPosition {}; ///< Between cells where the motion took over from another.
         CellLocation toPosition {};
         RGBColor fromColor {}; ///< Cursor color at the animation source position.
@@ -5065,6 +5423,8 @@ class Terminal: public IStatusLinePublishTarget
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;
+    /// @see searchMatchMemo
+    mutable SearchMatchMemo _searchMatchMemo;
 
     /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
     ChecksumFlags _checksumExtension = _settings.checksumExtension;
@@ -5201,12 +5561,36 @@ class Terminal: public IStatusLinePublishTarget
         uint64_t blockRevision = 0;      ///< CommandBlockStore::revision()
         uint64_t userMarkRevision = 0;   ///< UserMarkIndex::revision()
         uint64_t foldRevision = 0;       ///< FoldState::revision()
+        uint64_t searchRevision = 0;     ///< _searchMatchRowsRevision
         uint64_t stableIdGeneration = 0; ///< What the heads' and marks' ids mean
         int64_t stableFloor = 0;         ///< Eviction moves every row up
         PageIndex displayedPage {};      ///< canRevealScrollback(): the page on display
 
         bool operator==(ScrollbarMarksInputs const&) const = default;
     };
+
+    /// The rows the active query's tally has matched so far, as continueSearchTally() last published them:
+    /// what scrollbarMarkInputs() draws SearchMatch ticks from.
+    struct SearchMatchRows
+    {
+        std::vector<int64_t> rows {}; ///< Stable ids, ascending, one per row.
+        uint64_t idGeneration = 0;    ///< The Grid::stableIdGeneration() they belong to.
+        PageIndex page {};            ///< The page whose grid was walked.
+    };
+
+    /// Replaces the published match rows with @p walk's. @see _searchMatchRows
+    /// @param walk The tally walk just stepped, over the grid of @p page.
+    /// @param page The page it walks.
+    void publishSearchMatchRows(SearchTallyWalk const& walk, PageIndex page);
+
+    /// Drops the published match rows, as the query they belong to is gone.
+    void dropSearchMatchRows() noexcept;
+
+    /// @see SearchMatchRows
+    SearchMatchRows _searchMatchRows {};
+
+    /// Moves whenever _searchMatchRows changes; scrollbarMarksRevision() folds it in.
+    uint64_t _searchMatchRowsRevision = 0;
 
     /// @see scrollbarMarksRevision
     mutable ScrollbarMarksInputs _scrollbarMarksInputs {};
@@ -5383,8 +5767,11 @@ class Terminal: public IStatusLinePublishTarget
     {
         FoldRange range;         ///< The collapsed fold.
         LineOffset gridLine;     ///< The row the label is drawn on: the head's logical line's last drawn row.
-        ColumnCount textColumns; ///< How many columns of that row hold text.
+        ColumnCount textColumns; ///< The columns before the chip's lead gap: the command's, not an RPROMPT's.
         std::u32string label;    ///< The label, as collapsedFoldLabel() spells it.
+        ColumnCount labelColumns; ///< The columns the chip covers: its cells, or its measured pill.
+        LineWidth width =
+            LineWidth::Single; ///< How wide the row's cells are drawn: a doubled row shows half.
     };
 
     /// The labels of the collapsed folds on display, each where it is drawn.
@@ -5414,11 +5801,25 @@ class Terminal: public IStatusLinePublishTarget
     ///                 the same shift RenderBufferBuilder applies to every cell it emits.
     void fillGutter(RenderBuffer& output, LineOffset baseLine) const;
 
-    /// Fills @p output's annotations with the `⋯ N lines` label of every collapsed fold on display, after
-    /// the text of the fold's prompt line -- on the last row of that line where a long command wrapped it.
+    /// Fills @p output's annotations and chip bands with the `N lines hidden ⌄` chip of every collapsed fold
+    /// on display, after the text of the fold's prompt line -- on the last row of that line where a long
+    /// command wrapped it.
     /// @param output The buffer being built.
     /// @param baseLine As for fillGutter().
-    void fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const;
+    /// @param placements The frame's collapsed folds, foldLabelPlacements()'s: looked up once per frame.
+    void fillFoldLabels(RenderBuffer& output,
+                        LineOffset baseLine,
+                        std::span<FoldLabelPlacement const> placements) const;
+
+    /// Fills @p output's annotations and chip bands with the status chip of every block whose command row is
+    /// drawn: over blank cells right of the command only, or not at all (placeBlockChip()).
+    /// @param output The buffer being built.
+    /// @param baseLine As for fillGutter().
+    /// @return Whether a chip of a running block was drawn: one whose time moves on.
+    /// @param foldLabels The frame's collapsed folds, whose chips take their columns.
+    [[nodiscard]] RunningStatus fillBlockChips(RenderBuffer& output,
+                                               LineOffset baseLine,
+                                               std::span<FoldLabelPlacement const> foldLabels) const;
 
     /// How many screen rows down the main page rows are drawn: the whole page, or fewer where collapsed
     /// folds hide more rows than the history can backfill and the rest of the page is blank.
@@ -5441,6 +5842,75 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
     std::optional<LineOffset> _gutterHoverLine;
+
+    /// Whether the last frame showed a running block's time -- a chip, or the sticky header's --, which goes
+    /// stale unless a frame is drawn again. Written by the frame build, under the lock; read lock-free by a
+    /// frontend's timer (@see hasVisibleRunningStatus).
+    std::atomic<RunningStatus> _runningStatus { RunningStatus::Hidden };
+
+    /// What the last frame's sticky header in the chrome showed, hashed (@see chromeStickyHeaderKey); zero
+    /// for none. Written by the frame build, under the lock, to raise chromeStickyHeaderChanged() once per
+    /// change rather than once per frame.
+    uint64_t _chromeStickyHeaderKey = 0;
+
+    /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
+    std::optional<CommandBlockId> _hoveredCommandBlock;
+
+    /// The block the keyboard focuses, if any (@see focusCommandBlock). Domain state; cleared when its record
+    /// goes (@see reconcileCommandBlockFocus).
+    std::optional<CommandBlockId> _focusedCommandBlock;
+
+    /// Drops the block focus when the focused block's record has left the store (evicted, discarded, retired
+    /// or cleared). Called under the lock after every parsed batch.
+    void reconcileCommandBlockFocus();
+
+    /// Focuses @p block (nullopt: none), publishing the binding modes and telling the listener when it
+    /// changed. Under the terminal's lock.
+    /// @return Whether the focus changed.
+    bool setCommandBlockFocus(std::optional<CommandBlockId> block);
+
+    /// The UI font's label advances, by which a native row's pills are placed (@see setPillLabelMetrics).
+    PillLabelMetrics _pillLabelMetrics {};
+
+    /// The columns a chip of @p style saying @p text covers: the measured pill on a native row (the block
+    /// column drawn as the rail), one per codepoint on the Terminal row or before the renderer measured.
+    /// @param style The chip's style.
+    /// @param text Its label.
+    /// @return The columns.
+    [[nodiscard]] ColumnCount chipColumns(PillStyle style, std::u32string_view text) const noexcept;
+
+    /// What a native row's hovered block lays between the page and a pill on its rows: its tint.
+    /// @param block The pill's block.
+    /// @return The tint while @p block is hovered on a native row; nullopt otherwise.
+    [[nodiscard]] std::optional<RGBAColor> hoverUnderlayOf(CommandBlockId block) const;
+
+    /// Fills @p output's block highlight: the hovered block's drawn rows, head to tail, under a tint and a
+    /// ring, on a native row only (the Terminal row draws cells, not tints).
+    /// @param output The buffer being built.
+    /// @param baseLine As for fillGutter().
+    void fillBlockHighlight(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// Whether this terminal's chips are pills the renderer draws (BlockColumnForm::Rail), or cells.
+    [[nodiscard]] bool drawsPills() const noexcept
+    {
+        return _settings.gutter.blockColumnForm == BlockColumnForm::Rail;
+    }
+
+    /// The frame's block of each drawn row and of the rows beyond the page's two edges
+    /// (fillDrawnRowBlocks()), which the rail, the chips and the hover read. A member so a frame reuses its
+    /// storage; written only while a frame is built, under the lock.
+    mutable std::vector<CommandBlockRecord const*> _railBlocks;
+
+    /// Looks up the block of each drawn row, and of the rows just beyond the page's edges, into _railBlocks:
+    /// once per frame, before the gutter, the chips and the hover read them. Empty on a page without blocks.
+    void fillDrawnRowBlocks() const;
+
+    /// The block of drawn row @p y in @p blocks (fillDrawnRowBlocks()'s layout, -1 the row above the page).
+    /// @param blocks The frame's blocks.
+    /// @param y A drawn row, or -1 or the drawn row count for the rows beyond the page's edges.
+    /// @return Its block; nullptr for none, or where @p blocks holds no rows.
+    [[nodiscard]] static CommandBlockRecord const* drawnRowBlockOf(
+        std::span<CommandBlockRecord const* const> blocks, int y) noexcept;
     // }}}
 
     // {{{ Sticky command header
@@ -5454,6 +5924,20 @@ class Terminal: public IStatusLinePublishTarget
     /// @param output The buffer being built.
     /// @param baseLine The screen row the main page starts at, as for fillGutter().
     void fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// What one frame's sticky header is decided from (@see stickyHeaderInput).
+    struct GatheredStickyHeader;
+
+    /// Lays out the header @p decision names into @p header, from what @p gathered kept: the band's
+    /// colours, the chip, the text, and what the chrome binds (presentation, outcome, command line).
+    /// @param header Where it goes; its cell vectors are appended to, so they come in cleared.
+    /// @param gathered The frame's gathering, whose record the decision names.
+    /// @param decision What stickyHeaderFor() decided on it.
+    /// @param baseLine The screen row the main page starts at, as for fillGutter().
+    void layoutStickyHeader(RenderStickyHeader& header,
+                            GatheredStickyHeader const& gathered,
+                            StickyHeaderDecision const& decision,
+                            LineOffset baseLine) const;
 
     /// Fills @p output's line flash while one fades on a drawn row of the primary page, and ends the flash
     /// once it has faded out.
@@ -5555,6 +6039,10 @@ class Terminal: public IStatusLinePublishTarget
     /// _renderBuffer, and being destroyed before them guarantees no callback fires once the members declared
     /// before it are gone (runs still in flight keep their own state alive and merely find nobody to notify).
     std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
+
+    /// Looks up the `{Git}` branch off thread; null without Git services, which then shows none. Declared
+    /// after what its redraw request touches, as _statusLineCommands is, for the same reason.
+    std::unique_ptr<GitHeadCache> _gitHead;
 
     /// Finds links in output once it goes quiet; null without detection services, with no clickable pattern,
     /// or with detection off on every screen. Replaced, never changed, by setLinkPatterns() and

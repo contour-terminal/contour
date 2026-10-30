@@ -2,6 +2,7 @@
 #include <vtbackend/screen/Gutter.hpp>
 
 #include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/shell/BlockChipPlacement.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -179,12 +180,19 @@ namespace
         return std::clamp(inputs.settings.lineNumberWidth, MinLineNumberWidth, MaxLineNumberWidth);
     }
 
+    /// @return Whether any of the block column's three jobs is on.
+    [[nodiscard]] bool blockColumnWanted(GutterSettings const& settings) noexcept
+    {
+        return settings.foldMarkers || settings.exitStatus || settings.userMarks;
+    }
+
     [[nodiscard]] int blockColumnColumns(SegmentInputs const& inputs)
     {
         // Its configured width whenever any of its three jobs is on. Fold markers alone already reserved
-        // it, so turning exit status or user marks on beside them costs no width.
+        // it, so turning exit status or user marks on beside them costs no width. Under the rail it takes no
+        // cells: it is the strip after them.
         auto const& settings = inputs.settings;
-        if (!settings.foldMarkers && !settings.exitStatus && !settings.userMarks)
+        if (!blockColumnWanted(settings) || settings.blockColumnForm == BlockColumnForm::Rail)
             return 0;
         return std::clamp(settings.blockColumnWidth, MinBlockColumnWidth, MaxBlockColumnWidth);
     }
@@ -274,7 +282,15 @@ GutterLayout gutterLayoutFor(GutterSettings const& settings)
             layout.append(rule.kind, columns);
     if (inputs.timestamp)
         layout.timestampFormat = std::string { inputs.timestamp->format };
+    layout.rail = railPresenceFor(settings);
     return layout;
+}
+
+BlockRailPresence railPresenceFor(GutterSettings const& settings) noexcept
+{
+    return settings.blockColumnForm == BlockColumnForm::Rail && blockColumnWanted(settings)
+               ? BlockRailPresence::Present
+               : BlockRailPresence::Absent;
 }
 
 std::optional<GutterSegmentKind> gutterSegmentAt(GutterLayout const& layout, int column) noexcept
@@ -407,14 +423,11 @@ namespace
         &finishedHeadRule,
     });
 
-    /// The blank column between a row's text and its fold label.
-    constexpr auto FoldLabelGap = 1;
-
     /// The column a fold label starts at, for the drawing and the click alike.
     /// @param textColumns How many columns of the row hold text.
     [[nodiscard]] constexpr ColumnOffset foldLabelStart(ColumnCount textColumns) noexcept
     {
-        return ColumnOffset(unbox<int>(textColumns) + FoldLabelGap);
+        return ColumnOffset(unbox<int>(textColumns + FoldChipLeadGap));
     }
 
     /// Digits per thousands group in a fold label's count.
@@ -570,6 +583,25 @@ void appendGutterCells(GutterLayout const& layout,
                unicode::convert_to<char32_t>(std::string_view { row.timestamp }));
     appendText(GutterSegmentKind::LineNumber, row.lineNumber.view());
 
+    if (layout.rail == BlockRailPresence::Present)
+    {
+        if (row.rail == RailSegment::None && row.railMark == RailMark::None)
+            return;
+        // The mark is drawn two cells wide, sized to the row (LineFlag::DoubleWidth), centred on the bar.
+        auto attributes = gutterCellAttributes(
+            RGBColorPair { .foreground = row.railMarkColor, .background = textColors.background });
+        attributes.lineFlags = LineFlag::DoubleWidth;
+        output.push_back(RenderGutterCell { .lineOffset = row.screenLine,
+                                            .codepoint = 0,
+                                            .attributes = attributes,
+                                            .column = ColumnOffset(0),
+                                            .rail = row.rail,
+                                            .mark = row.railMark,
+                                            .outcome = row.outcome,
+                                            .railColor = row.railColor });
+        return;
+    }
+
     auto const block = layout.segment(GutterSegmentKind::BlockColumn);
     if (!block)
         return;
@@ -592,17 +624,53 @@ RenderAttributes blockColumnCellAttributes(GutterSegment const& block, RGBColorP
     return attributes;
 }
 
+LineWidth lineWidthOf(Line const& line) noexcept
+{
+    return line.isFlagEnabled(LineFlag::DoubleWidth) ? LineWidth::Double : LineWidth::Single;
+}
+
+std::vector<ColumnRange> blankRunsOf(Line const& line, LineOffset screenLine, ColumnCount pageColumns)
+{
+    pageColumns = shownColumnsOf(lineWidthOf(line), pageColumns);
+    auto const defaultBackground = GraphicsAttributes {}.backgroundColor;
+    auto const& storage = line.storage();
+    // A cell that shows nothing: no codepoint, or a space, on the default background -- and neither the right
+    // half of a wide character or of a text-sizing block, which hold no codepoint of their own, nor a
+    // reverse-video space, which shows the foreground as a block (m2).
+    auto const shownFlags = NoTextCellFlags | CellFlag::Inverse;
+    auto const isBlank = [&](ColumnOffset column) {
+        if (column >= boxed_cast<ColumnOffset>(line.size()))
+            return true;
+        if (!line.cellEmptyAt(column))
+            return false;
+        auto const& attributes = line.isBlank() ? storage.fillAttrs : storage.sgr[unbox<std::size_t>(column)];
+        return attributes.backgroundColor == defaultBackground && !attributes.flags.any(shownFlags);
+    };
+
+    auto runs = std::vector<ColumnRange> {};
+    for (auto const column: std::views::iota(0, unbox<int>(pageColumns))
+                                | std::views::transform([](int c) { return ColumnOffset(c); }))
+    {
+        if (!isBlank(column))
+            continue;
+        if (!runs.empty() && runs.back().toColumn + ColumnOffset(1) == column)
+            runs.back().toColumn = column;
+        else
+            runs.push_back(ColumnRange { .line = screenLine, .fromColumn = column, .toColumn = column });
+    }
+    return runs;
+}
+
 std::u32string collapsedFoldLabel(uint64_t hiddenLines)
 {
-    constexpr auto Lead = std::u32string_view { U"⋯ " };
-    auto const unit = hiddenLines == 1 ? std::u32string_view { U" line" } : std::u32string_view { U" lines" };
+    auto const unit = hiddenLines == 1 ? std::u32string_view { U" line hidden ⌄" }
+                                       : std::u32string_view { U" lines hidden ⌄" };
     auto const digits = std::format("{}", hiddenLines);
     auto const separators = (digits.size() - 1) / DigitsPerGroup;
 
     // Sized up front: the label is built for every collapsed fold on screen, every frame.
     auto label = std::u32string {};
-    label.reserve(Lead.size() + digits.size() + separators + unit.size());
-    label += Lead;
+    label.reserve(digits.size() + separators + unit.size());
     for (auto const index: std::views::iota(std::size_t { 0 }, digits.size()))
     {
         if (index != 0 && (digits.size() - index) % DigitsPerGroup == 0)
@@ -616,14 +684,20 @@ std::u32string collapsedFoldLabel(uint64_t hiddenLines)
 std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
                                            ColumnCount textColumns,
                                            ColumnCount pageColumns,
-                                           std::size_t labelColumns) noexcept
+                                           std::size_t labelColumns,
+                                           ColumnCount minimumHitColumns) noexcept
 {
     auto const begin = foldLabelStart(textColumns);
-    auto const end =
-        std::min(begin + ColumnOffset::cast_from(labelColumns), boxed_cast<ColumnOffset>(pageColumns));
+    auto const pageEnd = boxed_cast<ColumnOffset>(pageColumns);
+    auto const end = std::min(begin + ColumnOffset::cast_from(labelColumns), pageEnd);
     if (begin >= end)
         return std::nullopt;
-    return ColumnRange { .line = screenLine, .fromColumn = begin, .toColumn = end - ColumnOffset(1) };
+
+    // Widened evenly to the minimum, then kept off the row's text and on the page.
+    auto const missing = std::max(0, unbox<int>(minimumHitColumns) - unbox<int>(end - begin));
+    auto const from = std::max(begin - ColumnOffset(missing / 2), boxed_cast<ColumnOffset>(textColumns));
+    auto const to = std::min(end + ColumnOffset(missing - (missing / 2)), pageEnd);
+    return ColumnRange { .line = screenLine, .fromColumn = from, .toColumn = to - ColumnOffset(1) };
 }
 
 void layoutFoldLabel(std::vector<RenderCell>& output,

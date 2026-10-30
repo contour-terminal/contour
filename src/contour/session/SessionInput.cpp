@@ -156,14 +156,20 @@ namespace
         auto const dpr = display.devicePixelRatio();
         auto const cellSize = display.gridMetrics().cellSize;
         auto const pageMargin = display.gridMetrics().pageMargin;
-        auto const layout = configuredGutterLayout(session.config());
+        auto const& chrome = session.gutterChrome();
+        auto const layout = configuredGutterLayout(session.config(), chrome);
 
         auto const sx = static_cast<int>(positionPx.x() * dpr);
         // The layout built once, for the extent and the segment both: with timestamps on, building one
         // formats a sample time, and this runs on every pointer motion.
-        auto const column = geometry::gutterColumnAt(
-            sx, pageMargin.left, gutterExtentFor(layout, cellSize, dpr), unbox<int>(cellSize.width));
-        auto const segment = column ? vtbackend::gutterSegmentAt(layout, *column) : std::nullopt;
+        auto const point = geometry::gutterPointAt(
+            sx, pageMargin.left, gutterExtentFor(layout, cellSize, dpr, chrome), unbox<int>(cellSize.width));
+        if (!point)
+            return std::nullopt;
+        // The rail's strip is the block column's, drawn as pixels rather than cells: it names no new segment.
+        auto const segment = point->part == geometry::GutterPart::Rail
+                                 ? std::optional { vtbackend::GutterSegmentKind::BlockColumn }
+                                 : vtbackend::gutterSegmentAt(layout, point->column);
         if (!segment)
             return std::nullopt;
 
@@ -385,88 +391,6 @@ bool sendKeyEvent(QKeyEvent* event,
 
     auto const now = steady_clock::now();
 
-    static auto constexpr KeyMappings = array {
-        // {{{
-        pair { Qt::Key_Escape, Key::Escape },
-        pair { Qt::Key_Enter, Key::Enter },
-        pair { Qt::Key_Return, Key::Enter },
-        pair { Qt::Key_Tab, Key::Tab },
-        pair { Qt::Key_Backspace, Key::Backspace },
-
-        pair { Qt::Key_Insert, Key::Insert },
-        pair { Qt::Key_Delete, Key::Delete },
-        pair { Qt::Key_Right, Key::RightArrow },
-        pair { Qt::Key_Left, Key::LeftArrow },
-        pair { Qt::Key_Down, Key::DownArrow },
-        pair { Qt::Key_Up, Key::UpArrow },
-        pair { Qt::Key_PageDown, Key::PageDown },
-        pair { Qt::Key_PageUp, Key::PageUp },
-        pair { Qt::Key_Home, Key::Home },
-        pair { Qt::Key_End, Key::End },
-        pair { Qt::Key_F1, Key::F1 },
-        pair { Qt::Key_F2, Key::F2 },
-        pair { Qt::Key_F3, Key::F3 },
-        pair { Qt::Key_F4, Key::F4 },
-        pair { Qt::Key_F5, Key::F5 },
-        pair { Qt::Key_F6, Key::F6 },
-        pair { Qt::Key_F7, Key::F7 },
-        pair { Qt::Key_F8, Key::F8 },
-        pair { Qt::Key_F9, Key::F9 },
-        pair { Qt::Key_F10, Key::F10 },
-        pair { Qt::Key_F11, Key::F11 },
-        pair { Qt::Key_F12, Key::F12 },
-        pair { Qt::Key_F13, Key::F13 },
-        pair { Qt::Key_F14, Key::F14 },
-        pair { Qt::Key_F15, Key::F15 },
-        pair { Qt::Key_F16, Key::F16 },
-        pair { Qt::Key_F17, Key::F17 },
-        pair { Qt::Key_F18, Key::F18 },
-        pair { Qt::Key_F19, Key::F19 },
-        pair { Qt::Key_F20, Key::F20 },
-        pair { Qt::Key_F21, Key::F21 },
-        pair { Qt::Key_F22, Key::F22 },
-        pair { Qt::Key_F23, Key::F23 },
-        pair { Qt::Key_F24, Key::F24 },
-        pair { Qt::Key_F25, Key::F25 },
-        pair { Qt::Key_F26, Key::F26 },
-        pair { Qt::Key_F27, Key::F27 },
-        pair { Qt::Key_F28, Key::F28 },
-        pair { Qt::Key_F29, Key::F29 },
-        pair { Qt::Key_F30, Key::F30 },
-        pair { Qt::Key_F31, Key::F31 },
-        pair { Qt::Key_F32, Key::F32 },
-        pair { Qt::Key_F33, Key::F33 },
-        pair { Qt::Key_F34, Key::F34 },
-        pair { Qt::Key_F35, Key::F35 },
-
-        pair { Qt::Key_MediaPlay, Key::MediaPlay },
-        pair { Qt::Key_MediaStop, Key::MediaStop },
-        pair { Qt::Key_MediaPrevious, Key::MediaPrevious },
-        pair { Qt::Key_MediaNext, Key::MediaNext },
-        pair { Qt::Key_MediaPause, Key::MediaPause },
-        pair { Qt::Key_MediaTogglePlayPause, Key::MediaTogglePlayPause },
-
-        pair { Qt::Key_VolumeUp, Key::VolumeUp },
-        pair { Qt::Key_VolumeDown, Key::VolumeDown },
-        pair { Qt::Key_VolumeMute, Key::VolumeMute },
-
-        pair { Qt::Key_Shift, Key::LeftShift },     // NB: Qt cannot distinguish between left and right
-        pair { Qt::Key_Control, Key::LeftControl }, // NB: Qt cannot distinguish between left and right
-        pair { Qt::Key_Alt, Key::LeftAlt },         // NB: Qt cannot distinguish between left and right
-        pair { Qt::Key_Meta, Key::LeftMeta },       // NB: Qt cannot distinguish between left and right
-        pair { Qt::Key_Super_L, Key::LeftSuper },
-        pair { Qt::Key_Super_R, Key::RightSuper },
-        pair { Qt::Key_Hyper_L, Key::LeftHyper },
-        pair { Qt::Key_Hyper_R, Key::RightHyper },
-
-        pair { Qt::Key_CapsLock, Key::CapsLock },
-        pair { Qt::Key_ScrollLock, Key::ScrollLock },
-        pair { Qt::Key_NumLock, Key::NumLock },
-        pair { Qt::Key_Print, Key::PrintScreen },
-        pair { Qt::Key_Pause, Key::Pause },
-        pair { Qt::Key_Menu, Key::Menu },
-    }; // }}}
-
     static auto constexpr CharMappings = array {
         // {{{
         // clang-format off
@@ -589,12 +513,9 @@ bool sendKeyEvent(QKeyEvent* event,
         }
     }
 
-    // NOLINTNEXTLINE(readability-qualified-auto)
-    if (auto const i =
-            std::ranges::find_if(KeyMappings, [event](auto const& x) { return x.first == event->key(); });
-        i != end(KeyMappings))
+    if (auto const named = input::namedKeyOf(event->key()))
     {
-        session.sendKeyEvent(i->second, modifiers, eventType, now);
+        session.sendKeyEvent(*named, modifiers, eventType, now);
         event->accept();
         return true;
     }
@@ -631,7 +552,10 @@ bool sendKeyEvent(QKeyEvent* event,
 
 #ifdef __APPLE__
     if (0x20 <= key && key < 0x80
-        && (modifiers.chord.test(Modifier::Alt) && session.profile().optionKeyAsAlt.value()))
+        && (modifiers.chord.test(Modifier::Alt)
+            && config::optionKeyRoleForHeldChord(session.profile().optionAsAlt.value(),
+                                                 input::optionKeySideOf(event->nativeModifiers()))
+                   == config::OptionKeyRole::Alt))
     {
         // CapsLock inverts the effect of Shift on letter case, which is the one thing a lock key
         // legitimately decides here.

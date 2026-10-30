@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/ConfigProfileCatalog.hpp>
 
+#include <optional>
 #include <utility>
 
 namespace contour::cli
@@ -22,12 +23,8 @@ vthost::ResolvedProfile ConfigProfileCatalog::resolve(std::string_view name) con
     auto const* named = asked.empty() ? nullptr : _config.findProfile(asked);
     auto const match = named != nullptr ? vthost::ProfileMatch::Named : vthost::ProfileMatch::Default;
     auto const& resolvedName = named != nullptr ? asked : _defaultProfile;
-    // The daemon refuses to start under a default profile its configuration lacks, and a reload that lost
-    // it still runs the built-in defaults rather than refusing a session.
-    static auto const builtIn = config::TerminalProfile {};
-    auto const* profile = named != nullptr ? named : _config.findProfile(_defaultProfile);
-    if (profile == nullptr)
-        profile = &builtIn;
+    auto builtIn = std::optional<config::TerminalProfile> {};
+    auto const* profile = profileOf(named, builtIn);
 
     auto session = config::resolvedSessionConfig(_config, *profile, resolvedName, _preference);
     // The host's scrollback, when it states one, wins over the profile's: the daemon keeps the lines.
@@ -39,6 +36,31 @@ vthost::ResolvedProfile ConfigProfileCatalog::resolve(std::string_view name) con
                                      .match = match,
                                      .sandbox = session.escapeSandbox ? vthost::SandboxEscape::Escapes
                                                                       : vthost::SandboxEscape::Contained };
+}
+
+vtbackend::ColorPalette ConfigProfileCatalog::colorPalette(std::string_view name,
+                                                           vtbackend::ColorPreference preference) const
+{
+    auto const asked = std::string { name };
+    auto const* named = asked.empty() ? nullptr : _config.findProfile(asked);
+    auto builtIn = std::optional<config::TerminalProfile> {};
+    auto const* profile = profileOf(named, builtIn);
+    if (auto const* palette = config::preferredColorPalette(profile->colors.value(), preference))
+        return *palette;
+    return resolve(name).settings.colorPalette;
+}
+
+config::TerminalProfile const* ConfigProfileCatalog::profileOf(
+    config::TerminalProfile const* named, std::optional<config::TerminalProfile>& builtIn) const
+{
+    // The daemon refuses to start under a default profile its configuration lacks, and a reload that lost
+    // it still runs the built-in defaults rather than refusing a session -- those of the configuration's own
+    // edition, so a Classic configuration does not fall back to the Native2026 look.
+    // Built only when needed: a profile costs a login-shell lookup and its palettes.
+    auto const* profile = named != nullptr ? named : _config.findProfile(_defaultProfile);
+    if (profile == nullptr)
+        profile = &builtIn.emplace(config::TerminalProfile { .defaultsEdition = _config.defaultsEdition });
+    return profile;
 }
 
 } // namespace contour::cli

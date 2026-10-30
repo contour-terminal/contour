@@ -6,7 +6,7 @@ X-ExecArgs=execute
 Icon=org.contourterminal.Contour
 Terminal=false
 Categories=Qt;System;TerminalEmulator;
-Actions=NewWindow;
+Actions=NewWindow;Connect;
 X-KDE-AuthorizeAction=shell_access
 StartupWMClass=contour
 MimeType=application/x-executable;
@@ -192,3 +192,7 @@ Name[uk]=Відкрити нове вікно
 Name[x-test]=xxOpen a New Windowxx
 Name[zh_CN]=打开新窗口
 Name[zh_TW]=開啟新視窗
+
+[Desktop Action Connect]
+Exec=contour connect
+Name=Connect…

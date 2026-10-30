@@ -932,27 +932,6 @@ class Grid
 
     [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
 
-    /// Whether @p text is what the grid reads from @p start on, the way text is taken from it: a cell holds
-    /// its whole grapheme cluster, a cell with no text of its own (NoTextCellFlags) is stepped over, and the
-    /// text runs on into the next row where that row continues this one after a soft wrap.
-    /// @param text       The needle; non-empty.
-    /// @param start      The cell the match begins at. One with no text of its own begins none.
-    /// @param comparison Whether letters must match case.
-    /// @return Whether the whole of @p text matches there.
-    [[nodiscard]] bool textMatchesAt(std::u32string_view text,
-                                     CellLocation start,
-                                     CaseComparison comparison) const noexcept;
-
-    /// Where the match textMatchesAt() finds at @p start ends, so that its cells can be named.
-    /// @param text       The needle; non-empty.
-    /// @param start      The cell the match begins at.
-    /// @param comparison Whether letters must match case.
-    /// @return The last column the match covers -- a wide character's second half where it ends on one --
-    ///         or nothing where @p text does not match there.
-    [[nodiscard]] std::optional<CellLocation> matchedTextEnd(std::u32string_view text,
-                                                             CellLocation start,
-                                                             CaseComparison comparison) const noexcept;
-
     [[nodiscard]] CellLocation rightMostNonEmptyAt(LineOffset lineOffset) const noexcept
     {
         auto const& line = lineAt(lineOffset);

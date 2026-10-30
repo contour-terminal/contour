@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+TryExec=contour
+Exec=contour connect
+Icon=org.contourterminal.Contour
+Terminal=false
+Categories=Qt;System;
+X-KDE-AuthorizeAction=shell_access
+StartupWMClass=contour
+
+# For menus that show no desktop actions: asks where the new window's sessions should live (this computer's
+# daemon, this window only, a saved host) before the window opens. contour.desktop's "Connect…" action runs
+# the same command.
+Name=Contour — Connect…
+GenericName=Terminal
+Comment=Choose where a new terminal window's sessions live

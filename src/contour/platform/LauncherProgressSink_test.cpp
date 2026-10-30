@@ -83,9 +83,27 @@ TEST_CASE("Launcher adapter broadcasts progress and clears only what it publishe
     CHECK(receiver.properties.value(QStringLiteral("progress")).metaType() == QMetaType::fromType<double>());
     CHECK(receiver.properties.value(QStringLiteral("progress")).toDouble() == 0.6);
     CHECK(receiver.properties.value(QStringLiteral("progress-visible")).toBool());
-    sink.reset();
+    // The count rides the same entry and re-sends the progress it sits beside.
+    sink->setApplicationAttention({ .waiting = 3 });
     REQUIRE(QTest::qWaitFor([&] { return receiver.updates == 2; }, 1000));
+    CHECK(receiver.properties.value(QStringLiteral("count")).toLongLong() == 3);
+    CHECK(receiver.properties.value(QStringLiteral("count-visible")).toBool());
+    CHECK(receiver.properties.value(QStringLiteral("progress")).toDouble() == 0.6);
+    sink->setApplicationAttention({});
+    REQUIRE(QTest::qWaitFor([&] { return receiver.updates == 3; }, 1000));
+    CHECK_FALSE(receiver.properties.value(QStringLiteral("count-visible")).toBool());
+    CHECK(receiver.properties.value(QStringLiteral("progress-visible")).toBool());
+    sink->setApplicationAttention({ .waiting = 1 });
+    REQUIRE(QTest::qWaitFor([&] { return receiver.updates == 4; }, 1000));
+    // An unchanged count or progress is not broadcast again.
+    sink->setApplicationAttention({ .waiting = 1 });
+    sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
+    QTest::qWait(200);
+    CHECK(receiver.updates == 4);
+    sink.reset();
+    REQUIRE(QTest::qWaitFor([&] { return receiver.updates == 5; }, 1000));
     CHECK_FALSE(receiver.properties.value(QStringLiteral("progress-visible")).toBool());
+    CHECK_FALSE(receiver.properties.value(QStringLiteral("count-visible")).toBool());
 }
 
     #include "LauncherProgressSink_test.moc"

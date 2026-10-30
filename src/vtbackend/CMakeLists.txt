@@ -17,15 +17,24 @@ set(vtbackend_HEADERS
     testing/CatchStringMakers.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
+    testing/InMemoryGitFileSystem.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp
     vt/Charset.hpp
     core/Color.hpp
     core/ContextId.hpp
+    core/CaptureLineMode.hpp
+    core/ClipboardWriter.hpp
     core/CommandBlockId.hpp
+    core/BlockPill.hpp
+    core/BlockRailKinds.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp
+    shell/BlockChipPlacement.hpp
+    shell/BlockPill.hpp
+    shell/BlockRail.hpp
+    shell/BlockStatusText.hpp
     shell/CommandBlock.hpp
     shell/CommandBlockAddress.hpp
     shell/CommandBlockRows.hpp
@@ -39,8 +48,10 @@ set(vtbackend_HEADERS
     shell/Folding.hpp
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
+    grid/GraphemeClusters.hpp
     grid/Grid.hpp
     screen/Gutter.hpp
+    screen/PreeditPlacement.hpp
     screen/GutterSettings.hpp
     vt/HierarchicalContext.hpp
     vt/ProgramStatus.hpp
@@ -62,6 +73,7 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     core/LinkDecoration.hpp
+    core/PasteStrip.hpp
     screen/LinkDetector.hpp
     links/LinkDetectionPolicy.hpp
     links/LinkIndex.hpp
@@ -85,9 +97,12 @@ set(vtbackend_HEADERS
     vt/PointerShape.hpp
     core/Primitives.hpp
     core/Search.hpp
+    screen/SearchQuery.hpp
+    screen/SearchTallyWalk.hpp
     vt/ProgressState.hpp
     shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
+    core/RegexEngine.hpp
     render/RenderBuffer.hpp
     screen/RenderBufferBuilder.hpp
     core/RowMove.hpp
@@ -106,11 +121,15 @@ set(vtbackend_HEADERS
     grid/SoAClusterWriter.hpp
     shell/StableIdSet.hpp
     screen/StatusLineBuilder.hpp
+    screen/StatusLineLayout.hpp
+    screen/GitHead.hpp
     core/SteadyClockRef.hpp
     shell/StickyHeader.hpp
     core/StickyHeaderKind.hpp
+    core/UserMarkPresence.hpp
     screen/StatusLineCommandCache.hpp
     screen/StatusLineExtensions.hpp
+    screen/OverlayClearance.hpp
     screen/Terminal.hpp
     screen/TerminalClocks.hpp
     screen/TerminalTestFixtures.hpp
@@ -151,6 +170,9 @@ set(vtbackend_SOURCES
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
+    shell/BlockPill.cpp
+    shell/BlockRail.cpp
+    shell/BlockStatusText.cpp
     shell/CommandBlock.cpp
     shell/CommandBlockRows.cpp
     shell/CommandBlockPaths.cpp
@@ -160,6 +182,7 @@ set(vtbackend_SOURCES
     shell/ScrollbarMarks.cpp
     shell/StickyHeader.cpp
     vt/Functions.cpp
+    grid/GraphemeClusters.cpp
     grid/Grid.cpp
     screen/Gutter.cpp
     core/FileUrl.cpp
@@ -175,6 +198,7 @@ set(vtbackend_SOURCES
     graphics/MessageParser.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
+    screen/PreeditPlacement.cpp
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
     graphics/KittyGraphics.cpp
@@ -189,6 +213,8 @@ set(vtbackend_SOURCES
     links/ScanText.cpp
     screen/PrintedLinks.cpp
     screen/Screen.cpp
+    screen/SearchQuery.cpp
+    screen/SearchTallyWalk.cpp
     shell/SemanticBlockTracker.cpp
     vt/SemanticPrompt.cpp
     input/vi/Selector.cpp
@@ -202,6 +228,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISTextRasterizer.cpp
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
+    screen/GitHead.cpp
     screen/StatusLineCommandCache.cpp
     screen/StatusLineExtensions.cpp
     screen/Terminal.cpp
@@ -297,6 +324,10 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
+        shell/BlockChipPlacement_test.cpp
+        shell/BlockPill_test.cpp
+        shell/BlockRail_test.cpp
+        shell/BlockStatusText_test.cpp
         shell/CommandBlock_test.cpp
         shell/CommandBlockRows_test.cpp
         shell/CommandBlockPaths_test.cpp
@@ -304,6 +335,7 @@ if(LIBTERMINAL_TESTING)
         shell/CommandLineText_test.cpp
         shell/Folding_test.cpp
         screen/Gutter_test.cpp
+        screen/PreeditPlacement_test.cpp
         shell/PromptRegion_test.cpp
         screen/LinkDetector_test.cpp
         links/LinkDetectionPolicy_test.cpp
@@ -357,9 +389,13 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
         core/Search_test.cpp
+        screen/SearchQuery_test.cpp
+        screen/SearchTallyWalk_test.cpp
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/StatusLineLayout_test.cpp
+        screen/GitHead_test.cpp
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp
@@ -370,11 +406,13 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_input_test.cpp
         screen/Terminal_scrollbar_marks_test.cpp
         screen/Terminal_gutter_test.cpp
+        screen/Terminal_blockfocus_test.cpp
         screen/Terminal_mirrorSeams_test.cpp
         screen/Terminal_blocks_test.cpp
         screen/Terminal_links_test.cpp
         screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
+        grid/GraphemeClusters_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
         graphics/SixelParser_test.cpp
@@ -389,7 +427,7 @@ if(LIBTERMINAL_TESTING)
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 

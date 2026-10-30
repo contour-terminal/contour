@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeDensity.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/SecureInput.hpp>
+#include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/HeaderBarLayout.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
+#include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 
+#include <functional>
 #include <string>
+#include <string_view>
 
 namespace contour::config
 {
@@ -61,6 +76,8 @@ struct ChromeFonts
     QFont menu;          ///< The profile-dropdown button.
     QFont windowControl; ///< The minimize/maximize/close window buttons.
     QFont badge;         ///< The zoom badge. Always bold -- it is a marker, not text.
+    QFont caption;       ///< Secondary text, smaller than the chrome font.
+    QFont headline;      ///< Text an overlay announces a state with, larger than the chrome font.
 };
 
 /// The decorative glyphs one style draws its chrome with.
@@ -73,16 +90,83 @@ struct ChromeGlyphs
     QString newTab;
     QString menu;
     QString submenu;
+    QString tabColor;  ///< A coloured tab's leading cell; empty where the colour tints the tab.
+    QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
+    QString chipClose; ///< Closes a chip; empty where the chip is a shape.
+    QString hostDot;   ///< The host chip's state dot; empty where it is a vector circle.
+
+    QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
+    QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
+    QString restart;         ///< Marks the exited footer's Restart button.
+    QString scrollThumb;     ///< The overlay scrollbar's thumb glyph; empty where it is a shape.
+    QString drillIn;         ///< Marks a command palette row that opens a list.
+    QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
+    QString findPrevious;    ///< The find bar's previous-match button.
+    QString findNext;        ///< The find bar's next-match button.
+    QString secureInput;     ///< A locked pane's lock as cell text; empty where the lock is the icon.
+    QString switchOn;        ///< A switch that is on. Empty where it is a shape.
+    QString switchOff;       ///< A switch that is off. Empty where it is a shape.
+    QString segmentOn;       ///< The chosen segment of a segmented control. Empty where it is a shape.
+    QString segmentOff;      ///< An unchosen segment. Empty where it is a shape.
+    QString sliderFill;      ///< A slider's track up to its knob. Empty where it is a shape.
+    QString sliderKnob;      ///< A slider's knob. Empty where it is a shape.
+    QString sliderTrack;     ///< A slider's track beyond its knob. Empty where it is a shape.
+    QString stepper;         ///< A stepper's pair of arrows. Empty where it is a shape.
+    QString colorWell;       ///< A colour well. Empty where it is a shape.
 };
+
+/// Everything a UiStyleProvider is built from.
+///
+/// A value type: two providers built from equal inputs are the same chrome, which is how
+/// ChromeStyleHost tells a rebuild that changes nothing from one that does.
+struct ChromeInputs
+{
+    config::ChromeStyle row = config::ChromeStyle::Terminal; ///< The chrome token row.
+    QFont font {}; ///< The chrome font, already resolved (see resolveChromeFont).
+    config::AccessibilityPreferences accessibility {}; ///< The OS accessibility choices to apply.
+    platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
+    config::ChromeSchemeColors scheme {};              ///< The terminal scheme the Terminal row paints with.
+    config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
+    /// Whether the OS turns secure keyboard entry on here; it decides the words beside the lock.
+    platform::SecureInputSupport secureInput = platform::SecureInputSupport::None;
+
+    [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
+};
+
+/// What of the OS's published look the chrome reads: @p appearance without the scroller style, which is a
+/// session's (the overlay scrollbar's mode), not the chrome tokens'. So a scroller-style flip -- a mouse
+/// plugged in -- rebuilds no UiStyleProvider (ChromeStyleHost::update compares the inputs). Likewise the
+/// light/dark preference, which is the terminal's: the chrome reads it only as the @c scheme it selects; and
+/// the button layout, which the window controls read, not the chrome tokens.
+/// @param appearance What the OS publishes.
+/// @return @p appearance with @c scrollBars, @c colorScheme and @c buttonLayout cleared.
+[[nodiscard]] platform::PlatformAppearance chromeAppearanceOf(platform::PlatformAppearance appearance);
+
+/// The header bar as QML reads it.
+/// @param bar The header bar (window::resolveHeaderBar).
+/// @return `{ slots, newTab, search, mainMenu, leadingSeparator, trailingSeparator }`: each item's slot by
+///         name (window::headerBarSlotName), also as `slots` indexed by window::HeaderBarItem, and whether
+///         each side's separator is shown (QML-facing booleans, the documented carve-out).
+[[nodiscard]] QVariantMap headerBarVariant(HeaderBar const& bar);
+
+/// The inputs for @p row and @p font with nothing else set: default accessibility, no platform
+/// appearance, and the default terminal palette's scheme.
+/// @param row  The chrome token row.
+/// @param font The chrome font.
+/// @return The inputs.
+[[nodiscard]] ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font);
 
 /// The GUI chrome's design tokens, published to QML as the @c chromeStyle context property.
 ///
 /// Every number the chrome QML used to carry as a literal comes from here, already resolved (see
 /// ChromeMetrics), so a QML file never learns which style is active.
 ///
-/// Everything is CONSTANT because the style cannot change within a process: the Qt Quick Controls
-/// half of it is chosen once, before the first control exists (see ContourGuiApp), so a live-updating
-/// geometry half would only produce a half-switched window. @see UiStyle.
+/// Everything but @ref paletteRevision (and what derives from the palette) is CONSTANT: the row cannot
+/// change within a process -- the Qt Quick Controls half of it is chosen once, before the first control
+/// exists (see ContourGuiApp), so a live-updating geometry half would only produce a half-switched
+/// window. What can change -- the font on reload, the OS accessibility and appearance, the terminal
+/// scheme -- is answered by building a NEW provider from new ChromeInputs and republishing it
+/// (ChromeStyleHost), so every binding re-reads at once. @see UiStyle.
 ///
 /// Deliberately a context property rather than a registered QML singleton. Two separate QML modules
 /// read these tokens -- @c Contour.Ui and the @c ContourTui Quick Controls style -- and a singleton
@@ -94,12 +178,24 @@ class UiStyleProvider: public QObject
 {
     Q_OBJECT
 
+    /// Which token row is active: "macos", "fluent", "linux" or "terminal".
+    Q_PROPERTY(QString chromeStyle READ chromeStyleName CONSTANT)
     Q_PROPERTY(QFont font READ font CONSTANT)
     Q_PROPERTY(QFont newTabFont READ newTabFont CONSTANT)
     Q_PROPERTY(QFont menuFont READ menuFont CONSTANT)
     Q_PROPERTY(QFont windowControlFont READ windowControlFont CONSTANT)
     Q_PROPERTY(QFont badgeFont READ badgeFont CONSTANT)
     Q_PROPERTY(QFont closeFont READ closeFont CONSTANT)
+    Q_PROPERTY(QFont captionFont READ captionFont CONSTANT)
+    Q_PROPERTY(QFont headlineFont READ headlineFont CONSTANT)
+
+    Q_PROPERTY(int statusDanger READ statusDanger CONSTANT)
+    Q_PROPERTY(int statusWarning READ statusWarning CONSTANT)
+    Q_PROPERTY(int statusSuccess READ statusSuccess CONSTANT)
+    Q_PROPERTY(int statusRunning READ statusRunning CONSTANT)
+    /// The pane dim follows the chrome's tone, so it notifies with the palette.
+    Q_PROPERTY(QColor paneDimColor READ paneDimColor NOTIFY paletteRevisionChanged)
+    Q_PROPERTY(QColor dotGlyphColor READ dotGlyphColor CONSTANT)
 
     Q_PROPERTY(qreal cellWidth READ cellWidth CONSTANT)
     Q_PROPERTY(qreal cellHeight READ cellHeight CONSTANT)
@@ -134,7 +230,44 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(qreal shadowMargin READ shadowMargin CONSTANT)
     Q_PROPERTY(bool hasPopupShadow READ hasPopupShadow CONSTANT)
 
-    Q_PROPERTY(QColor errorColor READ errorColor CONSTANT)
+    /// "This failed", the @c Danger status colour; it follows the application palette.
+    Q_PROPERTY(QColor errorColor READ errorColor NOTIFY paletteRevisionChanged)
+
+    /// The title band's height: @c size.titleBar under the @c Pill shape, else today's strip height
+    /// (@c chromeHeight), so the Flat rows keep their geometry while @c size.titleBar records the kit's.
+    Q_PROPERTY(qreal bandHeight READ bandHeight CONSTANT)
+    /// Whether the pills sit in a well (a QML-facing bool, the documented carve-out). @see hasTabWell().
+    Q_PROPERTY(bool hasTabWell READ hasTabWell CONSTANT)
+    /// The gap between two pills, and the padding at either end of them. @see wellGap(), wellPadding().
+    Q_PROPERTY(qreal wellGap READ wellGap CONSTANT)
+    Q_PROPERTY(qreal wellPadding READ wellPadding CONSTANT)
+
+    /// The 1a token groups, each a sub-object whose extents are already in logical pixels.
+    Q_PROPERTY(QObject* size READ size CONSTANT)
+    Q_PROPERTY(QObject* space READ space CONSTANT)
+    Q_PROPERTY(QObject* radii READ radii CONSTANT)
+    Q_PROPERTY(QObject* type READ type CONSTANT)
+    Q_PROPERTY(QObject* motion READ motion CONSTANT)
+    Q_PROPERTY(QObject* elevation READ elevation CONSTANT)
+    Q_PROPERTY(QObject* material READ material CONSTANT)
+    Q_PROPERTY(QObject* contrast READ contrast CONSTANT)
+    Q_PROPERTY(QObject* tui READ tui CONSTANT)
+    Q_PROPERTY(QObject* layout READ layout CONSTANT)
+    Q_PROPERTY(QObject* tint READ tint CONSTANT)
+    /// The Settings window's extents and type, and the traits of its layout.
+    Q_PROPERTY(QObject* settings READ settings CONSTANT)
+    Q_PROPERTY(QObject* settingsTraits READ settingsTraits CONSTANT)
+    /// The chrome colour roles. The object is CONSTANT; its own properties notify.
+    Q_PROPERTY(QObject* colors READ colors CONSTANT)
+
+    /// The accent the chrome highlights with: the platform's when it publishes one, else the palette's.
+    Q_PROPERTY(QColor accentColor READ accentColor NOTIFY paletteRevisionChanged)
+
+    /// Bumped whenever the application palette changes. statusColor() and onStatusColor() read that
+    /// palette, and a binding cannot see through an invokable, so each QML call site reads this first,
+    /// using it rather than merely mentioning it (a bare read is dropped by the JS engine):
+    /// `chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(role)`.
+    Q_PROPERTY(int paletteRevision READ paletteRevision NOTIFY paletteRevisionChanged)
 
     Q_PROPERTY(QString tabSeparator READ tabSeparator CONSTANT)
     Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
@@ -143,14 +276,88 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString newTabGlyph READ newTabGlyph CONSTANT)
     Q_PROPERTY(QString menuGlyph READ menuGlyph CONSTANT)
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
+    Q_PROPERTY(QString tabColorGlyph READ tabColorGlyph CONSTANT)
+    Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
+    Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
+    Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
+    Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
+    Q_PROPERTY(QString palettePromptGlyph READ palettePromptGlyph CONSTANT)
+    /// The header bar's items, one map per window::HeaderBarItems row, in enumerator order.
+    Q_PROPERTY(QVariantList headerBarItems READ headerBarItems CONSTANT)
+
+    // {{{ Panes (Step 2)
+    /// The configured chrome density: "comfortable" or "minimal".
+    Q_PROPERTY(QString density READ densityName CONSTANT)
+    Q_PROPERTY(QStringList paneActionGlyphs READ paneActionGlyphs CONSTANT)
+    Q_PROPERTY(QStringList splitLineGlyphs READ splitLineGlyphs CONSTANT)
+    Q_PROPERTY(QString restartGlyph READ restartGlyph CONSTANT)
+    Q_PROPERTY(QString findPreviousGlyph READ findPreviousGlyph CONSTANT)
+    Q_PROPERTY(QString findNextGlyph READ findNextGlyph CONSTANT)
+    Q_PROPERTY(QString scrollThumbGlyph READ scrollThumbGlyph CONSTANT)
+    Q_PROPERTY(QString switchOnGlyph READ switchOnGlyph CONSTANT)
+    Q_PROPERTY(QString switchOffGlyph READ switchOffGlyph CONSTANT)
+    Q_PROPERTY(QString segmentOnGlyph READ segmentOnGlyph CONSTANT)
+    Q_PROPERTY(QString segmentOffGlyph READ segmentOffGlyph CONSTANT)
+    Q_PROPERTY(QString sliderFillGlyph READ sliderFillGlyph CONSTANT)
+    Q_PROPERTY(QString sliderKnobGlyph READ sliderKnobGlyph CONSTANT)
+    Q_PROPERTY(QString sliderTrackGlyph READ sliderTrackGlyph CONSTANT)
+    Q_PROPERTY(QString stepperGlyph READ stepperGlyph CONSTANT)
+    Q_PROPERTY(QString colorWellGlyph READ colorWellGlyph CONSTANT)
+    /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
+    Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
+    /// The QML names of the pane colour roles, for colorOn().
+    Q_PROPERTY(QObject* roles READ roles CONSTANT)
+    /// The QML names of the tab badge kinds, for badgeLook().
+    Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
+    /// The QML names of an ended pane's ends and restart offers.
+    Q_PROPERTY(QObject* paneEnds READ paneEnds CONSTANT)
+    /// The QML names of a pane's states (window::PaneState), for a session's paneState.
+    Q_PROPERTY(QObject* paneStates READ paneStates CONSTANT)
+    /// The QML names of what holds a pane header's trailing area (window::HeaderTrailingOccupant).
+    Q_PROPERTY(QObject* headerOccupants READ headerOccupants CONSTANT)
+    /// The QML names of secure input's values (window::SecureIndicator, window::SpotShown).
+    Q_PROPERTY(QObject* secureInputs READ secureInputs CONSTANT)
+    /// The QML names of the command blocks' values (sticky header hosts and tick styles).
+    Q_PROPERTY(QObject* blocks READ blocks CONSTANT)
+    /// A locked pane's lock as cell text, set between chipOpenGlyph and chipCloseGlyph (`secure` on the
+    /// Terminal row); empty on the native rows, which draw the bundled lock icon.
+    Q_PROPERTY(QString secureInputCellText READ secureInputCellText CONSTANT)
+    /// The QML names of what a drop over a pane would do (window::DropZone).
+    Q_PROPERTY(QObject* dropZones READ dropZones CONSTANT)
+    /// The QML names of what is dragged over a pane (window::DropPayload).
+    Q_PROPERTY(QObject* dropPayloads READ dropPayloads CONSTANT)
+    /// The height of a pane header the held modifier reveals over its pane (Minimal).
+    Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
+    // }}}
 
   public:
-    /// @param style      The configured chrome style.
-    /// @param chromeFont The font the chrome is drawn with, already resolved against its fallbacks
-    ///                   (see resolveChromeFont). Its metrics define the cell every terminal-style
-    ///                   extent is counted in.
+    /// @param inputs What the chrome is built from. @c inputs.font is the font the chrome is drawn
+    ///               with, already resolved against its fallbacks (see resolveChromeFont); its metrics
+    ///               define the cell every terminal-style extent is counted in.
+    /// @param parent Qt ownership.
+    explicit UiStyleProvider(ChromeInputs inputs, QObject* parent = nullptr);
+
+    /// @param row        The chrome token row, see config::resolveChromeStyle.
+    /// @param chromeFont The font the chrome is drawn with. @see chromeInputsFor for the rest.
     /// @param parent     Qt ownership.
-    UiStyleProvider(config::UiStyle style, QFont const& chromeFont, QObject* parent = nullptr);
+    UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent = nullptr);
+
+    /// @return What this provider was built from.
+    [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _inputs; }
+
+    /// The token row this provider publishes: its style's row with the density and the accessibility
+    /// preferences applied. For C++ consumers that need the same numbers the QML reads.
+    [[nodiscard]] config::ChromeTokenRow const& resolvedRow() const noexcept { return _groups; }
+
+    /// What one token unit is, in logical pixels: a chrome cell on the Terminal row, one pixel elsewhere.
+    [[nodiscard]] ChromeUnits const& units() const noexcept { return _units; }
+
+    /// How many times the application palette has changed since this provider was built.
+    /// @see paletteRevisionChanged
+    [[nodiscard]] int paletteRevision() const noexcept { return _paletteRevision; }
+
+    /// The active row's name for QML: "macos", "fluent", "linux" or "terminal".
+    [[nodiscard]] QString chromeStyleName() const;
 
     [[nodiscard]] QFont const& font() const noexcept { return _fonts.base; }
     [[nodiscard]] QFont const& newTabFont() const noexcept { return _fonts.newTab; }
@@ -158,6 +365,243 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QFont const& windowControlFont() const noexcept { return _fonts.windowControl; }
     [[nodiscard]] QFont const& badgeFont() const noexcept { return _fonts.badge; }
     [[nodiscard]] QFont const& closeFont() const noexcept { return _fonts.close; }
+    [[nodiscard]] QFont const& captionFont() const noexcept { return _fonts.caption; }
+    [[nodiscard]] QFont const& headlineFont() const noexcept { return _fonts.headline; }
+
+    // {{{ Panes (Step 2)
+
+    /// The scrim laid over a pane to dim it (an unfocused or reconnecting one): black at the kit's
+    /// @c pane.dim for the chrome's tone (decided as statusColor() decides it), or at
+    /// @c contrast.paneDimPercent under Increased Contrast. Reads the palette.
+    [[nodiscard]] QColor paneDimColor() const;
+
+    /// @return The configured chrome density's name: "comfortable" or "minimal".
+    [[nodiscard]] QString densityName() const;
+    [[nodiscard]] QStringList const& paneActionGlyphs() const noexcept { return _glyphs.paneActions; }
+    [[nodiscard]] QStringList const& splitLineGlyphs() const noexcept { return _glyphs.splitLines; }
+    [[nodiscard]] QString const& restartGlyph() const noexcept { return _glyphs.restart; }
+    [[nodiscard]] QString const& findPreviousGlyph() const noexcept { return _glyphs.findPrevious; }
+    [[nodiscard]] QString const& findNextGlyph() const noexcept { return _glyphs.findNext; }
+    /// @return The overlay scrollbar's thumb glyph: "┃" on the Terminal row, empty on the native ones.
+    [[nodiscard]] QString const& scrollThumbGlyph() const noexcept { return _glyphs.scrollThumb; }
+
+    // The Settings controls' glyphs: the Terminal row's cells, empty on the native rows, which draw shapes.
+    /// @return A switch that is on. Empty where it is a shape.
+    [[nodiscard]] QString const& switchOnGlyph() const noexcept { return _glyphs.switchOn; }
+    /// @return A switch that is off. Empty where it is a shape.
+    [[nodiscard]] QString const& switchOffGlyph() const noexcept { return _glyphs.switchOff; }
+    /// @return The chosen segment of a segmented control. Empty where it is a shape.
+    [[nodiscard]] QString const& segmentOnGlyph() const noexcept { return _glyphs.segmentOn; }
+    /// @return An unchosen segment. Empty where it is a shape.
+    [[nodiscard]] QString const& segmentOffGlyph() const noexcept { return _glyphs.segmentOff; }
+    /// @return A slider's track up to its knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderFillGlyph() const noexcept { return _glyphs.sliderFill; }
+    /// @return A slider's knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderKnobGlyph() const noexcept { return _glyphs.sliderKnob; }
+    /// @return A slider's track beyond its knob. Empty where it is a shape.
+    [[nodiscard]] QString const& sliderTrackGlyph() const noexcept { return _glyphs.sliderTrack; }
+    /// @return A stepper's pair of arrows. Empty where it is a shape.
+    [[nodiscard]] QString const& stepperGlyph() const noexcept { return _glyphs.stepper; }
+    /// @return A colour well. Empty where it is a shape.
+    [[nodiscard]] QString const& colorWellGlyph() const noexcept { return _glyphs.colorWell; }
+    /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
+    [[nodiscard]] QStringList paneHeaderActionNames() const;
+    [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
+    [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
+    [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
+    [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
+    [[nodiscard]] QObject* headerOccupants() noexcept { return &_headerOccupants; }
+    [[nodiscard]] QObject* secureInputs() noexcept { return &_secureInputs; }
+    [[nodiscard]] QObject* blocks() noexcept { return &_blocks; }
+    [[nodiscard]] QString const& secureInputCellText() const noexcept { return _glyphs.secureInput; }
+    [[nodiscard]] QObject* dropZones() noexcept { return &_dropZones; }
+    [[nodiscard]] QObject* dropPayloads() noexcept { return &_dropPayloads; }
+    /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
+    /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
+    /// @return The row's pane header height before the density applies, in logical pixels.
+    [[nodiscard]] qreal overlayPaneHeader() const noexcept;
+
+    /// Decides a pane's header (window::resolvePaneHeader) with this provider's density, its
+    /// @c size.paneHeader, one chrome cell as the least content height, and its @c layout.paneActions.
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
+    /// @param reveal       A window::HeaderReveal.
+    /// @param pointer      A window::PointerPresence.
+    /// @param focus        A window::PaneFocus.
+    /// @param visiblePanes The panes visible in the tab.
+    /// @param width        The pane's width in logical pixels.
+    /// @param height       The pane's height in logical pixels.
+    /// @return `{ content, actions, placement, emphasis }` as their names.
+    [[nodiscard]] Q_INVOKABLE QVariantMap
+    paneHeader(int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const;
+
+    /// Where a pane's sticky command header lives (window::stickyHeaderHostFor).
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers the grid host.
+    /// @param headerContent A window::PaneHeaderContent: what the pane's header shows, if anything.
+    /// @param visiblePanes  The panes visible in the pane's tab.
+    /// @param band          A window::TitleBandPresence: whether the window's band shows the title.
+    /// @return A window::StickyHeaderHost as its underlying value.
+    [[nodiscard]] Q_INVOKABLE int stickyHeaderHost(int headerContent, int visiblePanes, int band) const;
+
+    /// Where the link pill goes (window::placeLinkPill), inset by this row's @c s4 from the top and @c s5
+    /// from the right.
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
+    /// @param host       A window::LinkPillHost.
+    /// @param findBar    A window::FindBarPresence (findBarPresence()).
+    /// @param headerWidth The width of the pane header's trailing slot; ignored without a header host.
+    /// @param paneWidth  The pane's width in logical pixels.
+    /// @param paneHeight The pane's height in logical pixels.
+    /// @param pillWidth  The pill's natural width.
+    /// @param pillMinimumWidth The narrowest the pill may be cut to.
+    /// @param pillHeight The pill's height.
+    /// @param clearance  The session's overlay clearance: `marginLeft`, `marginTop`, `cellWidth`,
+    /// `cellHeight`,
+    ///                   `columns`, `trailingBlank` (a list per drawn row) and `avoidRows`.
+    /// @return `{ anchor, x, y, width }`, the anchor as its name (window::linkPillAnchorName).
+    [[nodiscard]] Q_INVOKABLE QVariantMap linkPillPlacement(int host,
+                                                            int findBar,
+                                                            qreal headerWidth,
+                                                            qreal paneWidth,
+                                                            qreal paneHeight,
+                                                            qreal pillWidth,
+                                                            qreal pillMinimumWidth,
+                                                            qreal pillHeight,
+                                                            QVariantMap const& clearance) const;
+
+    /// Which of the link pill's places the pane's find bar holds (window::findBarPresenceAt).
+    ///
+    /// Read from the bar QML already has rather than re-decided: its placement's anchor name.
+    /// @param anchor The shown find bar's `placement.anchor` (window::findBarAnchorName), or empty while the
+    /// bar
+    ///               is closed.
+    /// @return A window::FindBarPresence as its underlying value; -1 for a name no anchor has, which
+    ///         linkPillPlacement() answers with an empty map.
+    [[nodiscard]] Q_INVOKABLE int findBarPresence(QString const& anchor) const;
+
+    /// The name a pane header shows (window::paneHeaderName).
+    /// @param processName The foreground process name.
+    /// @param title       The pane's title.
+    /// @return @p processName unless empty, else @p title.
+    [[nodiscard]] Q_INVOKABLE QString paneHeaderName(QString const& processName, QString const& title) const;
+
+    /// The words beside a lock, and its accessible name (window::secureInputStateText): a claim about the one
+    /// pane or tab, so it says "on" only where the OS has secure keyboard entry on for it.
+    ///
+    /// An int, the QML-facing carve-out, as the other decisions take their enums. A value out of range reads
+    /// as None.
+    /// @param indicator What the pane shows (a window::SecureIndicator's value).
+    /// @return "Secure input on" for a LockedSecured pane where the OS has secure keyboard entry; else
+    ///         "Input hidden".
+    [[nodiscard]] Q_INVOKABLE QString secureInputText(int indicator) const;
+
+    /// Where a locked pane's lock is drawn (window::secureIndicatorSpots).
+    ///
+    /// Ints rather than enums or adjacent bools: the QML-facing carve-out, as paneHeader() takes it.
+    /// A value out of range answers an empty map.
+    /// @param header  Whether the pane's header is shown (a window::SpotShown's value).
+    /// @param tabWell Whether the tab well is shown (a window::SpotShown's value).
+    /// @param band    Whether a title band is always on screen (a window::SpotShown's value).
+    /// @return `{ header, tab, band, pane }`, each whether the lock goes there.
+    [[nodiscard]] Q_INVOKABLE QVariantMap secureIndicatorSpots(int header, int tabWell, int band) const;
+
+    /// Where the in-pane lock pill goes (window::placeSecureLock), with this row's insets.
+    /// @param findBar        A window::FindBarPresence (findBarPresence()).
+    /// @param linkPillAnchor Where the link pill is now, as window::linkPillAnchorName names it; `hidden`
+    /// while
+    ///                       it is not shown.
+    /// @param paneWidth      The pane's width in logical pixels.
+    /// @param paneHeight     The pane's height in logical pixels.
+    /// @param lockWidth      The pill's width.
+    /// @param lockHeight     The pill's height.
+    /// @param clearance      The session's overlay clearance, as linkPillPlacement() takes it.
+    /// @return `{ anchor, x, y }`, the anchor as window::secureLockAnchorName names it; empty for an input
+    /// out
+    ///         of range.
+    [[nodiscard]] Q_INVOKABLE QVariantMap secureLockPlacement(int findBar,
+                                                              QString const& linkPillAnchor,
+                                                              qreal paneWidth,
+                                                              qreal paneHeight,
+                                                              qreal lockWidth,
+                                                              qreal lockHeight,
+                                                              QVariantMap const& clearance) const;
+
+    /// Where the find bar goes in a pane (window::placeFindBar), with this row's tokens.
+    /// @param header      Whether the pane shows an inline header (a window::PaneHeaderPresence's value).
+    /// @param paneWidth   The pane's width in logical pixels.
+    /// @param paneHeight  The pane's height in logical pixels.
+    /// @param matchTop    The top of the current match's rows, in the pane's coordinates.
+    /// @param matchBottom Their bottom; not below @p matchTop means there is no current match.
+    /// @return `{ anchor, x, y, width }`, the anchor as window::findBarAnchorName names it; empty for an
+    ///         out-of-range @p header.
+    [[nodiscard]] Q_INVOKABLE QVariantMap
+    findBarPlacement(int header, qreal paneWidth, qreal paneHeight, qreal matchTop, qreal matchBottom) const;
+
+    /// The colour of @p role on a pane whose own background is @p background.
+    ///
+    /// The kit's @c Fill, @c Label, @c Surface and @c Separator sources take their light or dark half by
+    /// @p background's tone (window::toneOf) rather than the palette window's, so a light-profile pane
+    /// under a dark chrome keeps a legible header. A @c Scheme source's mark slot (the Terminal row's
+    /// scrollbar thumb) is chosen against @p background too (config::markOn). Every other kind resolves as @c
+    /// colors does, which reads the palette, so a binding over it also reads @ref paletteRevision.
+    /// @param role       A config::ChromeColorRole as its underlying value (see @c roles).
+    /// @param background The pane's own background.
+    /// @return The colour; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor colorOn(int role, QColor const& background) const;
+
+    /// How far a pane card keeps its terminal in from every edge (window::cardContentInset) at its radius.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The inset in logical pixels, on the device grid; 0 for a square card.
+    [[nodiscard]] Q_INVOKABLE qreal paneCardContentInset(qreal devicePixelRatio) const;
+
+    /// How high a pane card draws its inline header (`size.paneHeader`), floored to whole device pixels
+    /// (window::snappedChromePixels) so the grid below it starts on the device grid (#2040), as the
+    /// window-size solver counts it (window::splitChromeOf).
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The header's height in logical pixels; the bare token for a ratio of 0 or less.
+    [[nodiscard]] Q_INVOKABLE qreal paneHeaderHeight(qreal devicePixelRatio) const;
+
+    /// One device pixel, in logical pixels: the pane card's border width.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return @c 1 / @p devicePixelRatio, or 1 for a ratio of 0 or less.
+    [[nodiscard]] Q_INVOKABLE qreal hairline(qreal devicePixelRatio) const;
+
+    /// How strongly an unfocused pane dims (R-g).
+    ///
+    /// Under Minimal, where dimming is the only focus cue (D5), at least the kit's @c pane.dim for the
+    /// chrome's tone; under Comfortable @p profileDim. Either is capped at @c contrast.paneDimPercent
+    /// where Increased Contrast sets it. Reads the palette, so a binding over it also reads
+    /// @ref paletteRevision.
+    /// @param profileDim The profile's @c dim_unfocused, 0 to 1.
+    /// @return The dim, 0 to 1.
+    [[nodiscard]] Q_INVOKABLE qreal unfocusedDim(qreal profileDim) const;
+
+    // }}}
+
+    /// The QML names of the status roles, for statusColor() and onStatusColor(). Properties rather than
+    /// an exported enum: a Q_ENUM is not reachable through a context-property instance, so
+    /// `chromeStyle.Danger` was silently undefined.
+    [[nodiscard]] static constexpr int statusDanger() noexcept
+    {
+        return static_cast<int>(config::StatusColorRole::Danger);
+    }
+    [[nodiscard]] static constexpr int statusWarning() noexcept
+    {
+        return static_cast<int>(config::StatusColorRole::Warning);
+    }
+    [[nodiscard]] static constexpr int statusSuccess() noexcept
+    {
+        return static_cast<int>(config::StatusColorRole::Success);
+    }
+    [[nodiscard]] static constexpr int statusRunning() noexcept
+    {
+        return static_cast<int>(config::StatusColorRole::Running);
+    }
+
+    /// The colour of the glyph drawn on a traffic-light dot. Dark and translucent: the dots are
+    /// saturated in every theme, so the glyph contrasts with the dot, not with the window.
+    [[nodiscard]] QColor dotGlyphColor() const;
 
     [[nodiscard]] qreal cellWidth() const noexcept { return _metrics.cellWidth; }
     [[nodiscard]] qreal cellHeight() const noexcept { return _metrics.cellHeight; }
@@ -204,18 +648,259 @@ class UiStyleProvider: public QObject
         return _tokens.shadowBlurPixels > 0 || _tokens.shadowOffsetUnits > 0;
     }
 
-    /// The color a tab's OSC 9;4 progress bar is painted in for @p state.
+    /// The color a tab's OSC 9;4 progress bar is painted in for @p state: the row's status ink for
+    /// that state's role (config::ProgressStatusRoles), so running is the accent.
     ///
     /// @param state A vtbackend::ProgressState as its underlying value, as the tab model reports it.
-    /// @return The style's color for that state; transparent for a state that paints nothing.
+    /// @return The ink; transparent for a state that paints nothing.
     [[nodiscard]] Q_INVOKABLE QColor progressColor(int state) const;
 
-    /// The colour this style says "this failed" in.
+    /// What @p role is inked in on this row's chrome: the status hue itself on the native rows, and
+    /// on the Terminal row the scheme's hue where it reads on the bar, else the bar's text.
     ///
-    /// Taken from the same token row the progress bar's failure state uses, rather than invented
-    /// afresh or derived from the OS palette: which hue reads as an error is a statement about
-    /// meaning, and a theme-picked one could render a failure green. @see UiStyleTokens.
+    /// Reads the application palette, so a binding over it also reads @ref paletteRevision.
+    /// @param role A config::StatusColorRole as its underlying value.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusInk(int role) const;
+
+    /// How a tab badge kind looks.
+    /// @param kind A window::TabBadgeKind as its underlying value.
+    /// @return `{ glyph, mark, ink, name }`: the Flat glyph, the Pill mark's name (badgeMarkName), the
+    ///         status ink and the accessible name; empty for a kind outside the table.
+    [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
+
+    /// How the host chip looks in @p state.
+    /// @param state A window::HostChipState as its underlying value.
+    /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state
+    ///         outside the table.
+    [[nodiscard]] Q_INVOKABLE QVariantMap hostChipLook(int state) const;
+
+    /// Whether a window attached to @p hostLabel shows the host chip (window::hostChipPresence).
+    /// @param hostLabel The window's host label; empty for a local window.
+    /// @return Whether the chip shows: a QML-facing bool, the documented carve-out.
+    [[nodiscard]] Q_INVOKABLE bool isHostChipShown(QString const& hostLabel) const;
+
+    /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
+    ///
+    /// Ints rather than enums: this is the QML-facing carve-out, whose one caller (Main.qml) passes the
+    /// enumerators' underlying values; a value out of range answers an empty map.
+    /// @param frame         A window::WindowFrame.
+    /// @param mode          A window::WindowMode.
+    /// @param strip         A window::TabStripGate.
+    /// @param position      A config::TabBarPosition.
+    /// @param hostLabel     The window's host label; empty for a local window.
+    /// @param hostChipState A window::HostChipState: what the host chip shows, which a remote window's
+    ///                      band carries whatever the gate says while it is not Connected
+    ///                      (window::hostNoticeOf).
+    /// @return `{ band, bandEdge, centre, tabBar }` as their names.
+    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(
+        int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const;
+
+    /// The chrome row's side of the band decision: this provider's tab shape and density.
+    /// @return The row window::resolveTitleBand(TitleBandRow const&, TitleBandInputs) takes.
+    [[nodiscard]] TitleBandRow titleBandRow() const noexcept
+    {
+        return titleBandRowOf(_groups.layout, _inputs.density);
+    }
+
+    /// Where the title band and the tabs go (window::resolveTitleBand) for this provider's row.
+    /// @param inputs The window's side of the decision: frame, mode, gate, edge and the host's notice; its
+    ///               row fields are overridden by titleBandRow().
+    /// @return The band.
+    [[nodiscard]] TitleBand titleBandOf(TitleBandInputs const& inputs) const noexcept
+    {
+        return resolveTitleBand(titleBandRow(), inputs);
+    }
+
+    /// The header bar for this provider's row (window::resolveHeaderBar).
+    ///
+    /// A bool and counts rather than enums: this is the QML-facing carve-out, whose one caller (TitleBar.qml)
+    /// passes what it already holds -- whether the window manager draws the frame, and the lengths of the
+    /// window-control provider's per-side button lists.
+    /// @param nativeFrame      Whether the window manager draws the frame (window::WindowFrame::NativeFrame).
+    /// @param leadingControls  The number of window buttons at the leading edge.
+    /// @param trailingControls The number of window buttons at the trailing edge.
+    /// @return headerBarVariant() of the header bar.
+    [[nodiscard]] Q_INVOKABLE QVariantMap headerBar(bool nativeFrame,
+                                                    int leadingControls,
+                                                    int trailingControls) const;
+
+    /// The header bar (window::resolveHeaderBar) for this provider's row.
+    /// @param inputs The window's side of the decision; its row fields are overridden by this row's.
+    /// @return The header bar.
+    [[nodiscard]] HeaderBar headerBarOf(HeaderBarInputs inputs) const noexcept
+    {
+        inputs.arrangement = _groups.layout.headerBar;
+        inputs.shape = _groups.layout.tabShape;
+        return resolveHeaderBar(inputs);
+    }
+
+    /// Whether the row's pills sit in a well (size.tabWell above 0) rather than on the bar.
+    /// @return True when the row draws a well.
+    [[nodiscard]] bool hasTabWell() const noexcept { return _size.tabWell() > 0; }
+
+    /// @return The gap between two pills: s1 inside a well, s2 on the bar (ContourLinux's header bar).
+    [[nodiscard]] qreal wellGap() const noexcept;
+    /// @return The padding at either end of the pills: s1 inside a well, none on the bar.
+    [[nodiscard]] qreal wellPadding() const noexcept;
+
+    /// @return One map per window::HeaderBarItems row: `{ item, objectName, accessibleName, iconName,
+    ///         bundledIcon }`, @c item as the enumerator's underlying value.
+    [[nodiscard]] QVariantList headerBarItems() const;
+
+    /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
+    /// @param available The width the band leaves the well.
+    /// @param tabCount  The number of tabs.
+    /// @return `{ tabWidth, wellWidth, label, scrolls }`: the widths, the label mode's name, and whether
+    ///         the well scrolls (a QML-facing bool, the documented carve-out).
+    [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
+
+    /// Where the command palette goes in a window of the given size (window::placePalette), from the
+    /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
+    /// the Terminal row.
+    /// @param windowWidth  The window's width in logical pixels.
+    /// @param windowHeight The window's height in logical pixels.
+    /// @return `{ x, y, width, maxHeight }`.
+    [[nodiscard]] Q_INVOKABLE QVariantMap palettePlacement(qreal windowWidth, qreal windowHeight) const;
+
+    /// The font the active tab's label is set in: @p base, in bold where the row sets the active tab
+    /// apart by weight (config::ActiveTabWeight), because its fill can be the bar's own colour there.
+    /// @param base The font every other tab's label is set in.
+    /// @return The active label's font.
+    [[nodiscard]] Q_INVOKABLE QFont activeTabFont(QFont const& base) const;
+
+    /// @p length rounded up to whole chrome cells (R-q): a cell on the Terminal row, a pixel elsewhere.
+    /// @param length A horizontal extent in logical pixels.
+    /// @return The extent, snapped up to the width quantum.
+    [[nodiscard]] Q_INVOKABLE qreal snapToCells(qreal length) const;
+
+    /// @return The title band's height in logical pixels. @see bandHeight
+    [[nodiscard]] qreal bandHeight() const noexcept;
+
+    /// The title band's tokens as this provider resolves them: its row, the row's resolved title-band
+    /// material, the band's height -- @c size.bareBand for a band whose middle is empty, else bandHeight() --
+    /// on the Terminal row one cell's height (0 elsewhere), and the density.
+    /// @param centre What the band's middle holds (titleBandOf()).
+    /// @return The tokens window::resolveTitleBandGeometry() takes.
+    [[nodiscard]] TitleBandTokens titleBandTokens(BarCentre centre) const noexcept
+    {
+        return TitleBandTokens {
+            .style = _inputs.row,
+            .material = _groups.material.titleBand,
+            .height = centre == BarCentre::Empty ? _size.bareBand() : bandHeight(),
+            .cellHeight = _inputs.row == config::ChromeStyle::Terminal ? cellHeight() : 0.0,
+            .density = _inputs.density,
+        };
+    }
+
+    /// What the title band paints: its surface (window::resolveTitleBandSurface) for this row's resolved
+    /// @c material.titleBand, @p frame and @p mode, as a colour.
+    ///
+    /// - @c Palette: the application palette's window colour (the band before Step 1d);
+    /// - @c Clear: transparent, so a material behind the band shows;
+    /// - @c Tint: window::legibleBandTint of the chrome scheme's background for the chrome's tone (decided
+    ///   as statusColor() decides it), else the palette's window colour.
+    /// - @c Background: window::legibleBandBackground, the chrome scheme's background itself (Minimal's bare
+    ///   band) where it has the chrome's tone, else the palette's window colour.
+    ///
+    /// Reads the palette, so a binding over it also reads @ref paletteRevision. Ints and a name rather than
+    /// enums: the QML-facing carve-out, whose one caller (Main.qml) passes the values it passes titleBand()
+    /// and the centre titleBand() answered.
+    /// @param frame  A window::WindowFrame.
+    /// @param mode   A window::WindowMode.
+    /// @param centre What the band's middle holds, as titleBand() names it ("empty", "tabs" or "title"):
+    ///               under Minimal an empty band is the bare band, in the terminal background.
+    /// @return The fill; the palette's window colour for a value out of range or an unknown centre.
+    [[nodiscard]] Q_INVOKABLE QColor bandFill(int frame, int mode, QString const& centre) const;
+
+    /// What the title band paints as a surface: bandFill()'s decision before its colour.
+    /// @param frame  A window::WindowFrame.
+    /// @param mode   A window::WindowMode.
+    /// @param centre What the band's middle holds, as titleBand() names it.
+    /// @return A config::BandFill as its underlying value; @c Palette for a value out of range or an unknown
+    ///         centre.
+    [[nodiscard]] Q_INVOKABLE int bandSurfaceFill(int frame, int mode, QString const& centre) const;
+
+    /// The colour of a band fill, as bandFill() paints it. Main.qml asks it for the window's own fill
+    /// (WindowController::titleBandFill), which differs from the row's where the window's material failed.
+    /// Reads the palette, so a binding over it also reads @ref paletteRevision.
+    /// @param fill A config::BandFill as its underlying value.
+    /// @return The colour; the palette's window colour for a value out of range.
+    [[nodiscard]] Q_INVOKABLE QColor bandFillColor(int fill) const;
+
+    /// The colour that says @p role, for the chrome the application palette currently paints.
+    ///
+    /// Picks the light or dark variant by the luminance of the palette's @c Window colour, so a status
+    /// hue keeps its contrast on either chrome. @c Running is the palette's highlight instead of a
+    /// fixed hue.
+    ///
+    /// This is the text ink (config::StatusInkUse::Text): what QML colours words and filled buttons with.
+    ///
+    /// @param role A config::StatusColorRole as its underlying value, as QML passes it.
+    /// @return The colour; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusColor(int role) const;
+
+    /// The colour that says @p role when drawn as @p use, for the chrome the application palette paints.
+    /// @param role The status role.
+    /// @param use  Whether it colours text or a mark (config::StatusInkUse).
+    /// @return The colour; transparent for a role outside the table. @see statusColor
+    [[nodiscard]] QColor statusColor(config::StatusColorRole role, config::StatusInkUse use) const;
+
+    /// Black or white, whichever has the higher contrast ratio against @p background.
+    /// @param background The fill the text is drawn on.
+    /// @return The legible text colour for that fill.
+    [[nodiscard]] Q_INVOKABLE QColor onColor(QColor const& background) const;
+
+    /// The mark ink of @p role for a mark drawn on @p background, rather than on the chrome the palette
+    /// paints: the role's mark hue for the background's tone, or black or white (onColor()) where that hue
+    /// falls short of config::MinimumMarkContrast there. For a mark on a surface of its own, such as a
+    /// pane's pill on the toast fill. Running is the accent, as in statusColor().
+    /// @param role       A config::StatusColorRole as its underlying value.
+    /// @param background The opaque fill the mark is drawn on.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusMarkOn(int role, QColor const& background) const;
+
+    /// statusMarkOn()'s counterpart for words: the text ink of @p role (config::StatusInkUse::Text) for text
+    /// drawn on @p background, or black or white (onColor()) where that hue falls short of
+    /// config::MinimumTextContrast there. For a label on a surface of its own, such as the sticky header's
+    /// jump link on a pane's header. Running is the accent, as in statusColor().
+    /// @param role       A config::StatusColorRole as its underlying value.
+    /// @param background The opaque fill the text is drawn on.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusTextOn(int role, QColor const& background) const;
+
+    /// The text colour to draw on statusColor(@p role).
+    /// @param role A config::StatusColorRole as its underlying value.
+    /// @return Black or white, see onColor().
+    [[nodiscard]] Q_INVOKABLE QColor onStatusColor(int role) const;
+
+    /// The colour this style says "this failed" in: @c statusColor(Danger).
+    ///
+    /// The status token rather than the bar's ink (@ref statusInk): error text sits on pages, fields
+    /// and the find bar, not on the Terminal row's bar, so it keeps the hue the status table pins.
     [[nodiscard]] QColor errorColor() const;
+
+    /// The accent the chrome highlights with, and the colour of @c Running.
+    /// @return The platform accent when the OS publishes one, else the palette's Highlight.
+    [[nodiscard]] QColor accentColor() const;
+
+    /// The token groups for QML. Non-const because QML receives them as mutable QObject pointers; the
+    /// objects themselves expose only CONSTANT (or palette-notifying) properties.
+    /// @return This provider's group object, owned by it.
+    [[nodiscard]] QObject* size() noexcept { return &_size; }
+    [[nodiscard]] QObject* space() noexcept { return &_space; }
+    [[nodiscard]] QObject* radii() noexcept { return &_radii; }
+    [[nodiscard]] QObject* type() noexcept { return &_type; }
+    [[nodiscard]] QObject* motion() noexcept { return &_motion; }
+    [[nodiscard]] QObject* elevation() noexcept { return &_elevation; }
+    [[nodiscard]] QObject* material() noexcept { return &_material; }
+    [[nodiscard]] QObject* contrast() noexcept { return &_contrast; }
+    [[nodiscard]] QObject* tui() noexcept { return &_tui; }
+    [[nodiscard]] QObject* layout() noexcept { return &_layout; }
+    [[nodiscard]] QObject* tint() noexcept { return &_tint; }
+    [[nodiscard]] QObject* settings() noexcept { return &_settings; }
+    [[nodiscard]] QObject* settingsTraits() noexcept { return &_settingsTraits; }
+    [[nodiscard]] QObject* colors() noexcept { return &_colors; }
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
     [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }
@@ -224,6 +909,12 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& newTabGlyph() const noexcept { return _glyphs.newTab; }
     [[nodiscard]] QString const& menuGlyph() const noexcept { return _glyphs.menu; }
     [[nodiscard]] QString const& submenuGlyph() const noexcept { return _glyphs.submenu; }
+    [[nodiscard]] QString const& tabColorGlyph() const noexcept { return _glyphs.tabColor; }
+    [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
+    [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
+    [[nodiscard]] QString const& hostDotGlyph() const noexcept { return _glyphs.hostDot; }
+    [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }
+    [[nodiscard]] QString const& palettePromptGlyph() const noexcept { return _glyphs.palettePrompt; }
 
     /// @p base laid over the chrome at hover strength.
     ///
@@ -234,6 +925,17 @@ class UiStyleProvider: public QObject
     /// @param base The color to wash, usually the palette's highlight.
     /// @return @p base at the style's hover alpha.
     [[nodiscard]] Q_INVOKABLE QColor wash(QColor const& base) const;
+
+    /// The hover and pressed wash for a control whose label is drawn in @p ink on a fill of its own.
+    ///
+    /// wash() of the ink would move the fill toward the label and cost it contrast: on a mid-tone accent
+    /// the label would fall below 3:1. This is wash() of the colour opposite to @p ink (onColor(): black
+    /// for light ink, white for dark ink), so the fill moves away from the label and the label's contrast
+    /// can only grow.
+    ///
+    /// @param ink The label's colour.
+    /// @return The wash to lay between the fill and the label.
+    [[nodiscard]] Q_INVOKABLE QColor contrastWash(QColor const& ink) const;
 
     /// The scrim a modal popup dims its window with.
     ///
@@ -256,13 +958,60 @@ class UiStyleProvider: public QObject
     /// the token table rather than a literal repeated in every popup surface.
     [[nodiscard]] Q_INVOKABLE QColor shadowTint(QColor const& base) const;
 
+    /// Watches the application object for QEvent::ApplicationPaletteChange and bumps paletteRevision.
+    /// An event filter rather than QGuiApplication::paletteChanged, which Qt 6 deprecates for the event.
+    /// Public as QObject declares it: an override does not narrow the visibility of what it overrides.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
+  signals:
+    /// The application palette changed, so every palette-derived colour (statusColor()) may have too.
+    void paletteRevisionChanged();
+
   private:
+    /// The colour that says @p role when drawn as @p use on a ground of @p tone: statusColor()'s and
+    /// statusMarkOn()'s one pick of the row's source and hue.
+    /// @param role A status role inside config::StatusColors.
+    /// @param use  Whether it colours text or a mark.
+    /// @param tone The tone of what it is drawn on.
+    /// @return The colour.
+    [[nodiscard]] QColor statusInk(config::StatusColorRole role,
+                                   config::StatusInkUse use,
+                                   ChromeTone tone) const;
+
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
+    ChromeInputs _inputs; ///< What this provider was built from.
     config::UiStyleTokens _tokens;
     ChromeFonts _fonts;
     ChromeMetrics _metrics;
     ChromeGlyphs _glyphs;
+    config::ChromeTokenRow _groups {}; ///< The 1a row, resolved against accessibility.
+    ChromeUnits _units {};             ///< What one token unit is, in pixels.
+    // The group objects, children of this provider by value: they die with it, before ~QObject runs.
+    ChromeSizeTokens _size;
+    ChromeSpaceTokens _space;
+    ChromeRadiusTokens _radii;
+    ChromeTypeTokens _type;
+    ChromeMotionTokens _motion;
+    ChromeElevationTokens _elevation;
+    ChromeMaterialTokens _material;
+    ChromeContrastTokens _contrast;
+    ChromeTuiTokens _tui;
+    ChromeLayoutTokens _layout;
+    ChromeTintTokens _tint;
+    ChromeSettingsTokens _settings;
+    ChromeSettingsTraits _settingsTraits;
+    ChromeColorTokens _colors;
+    ChromePaneRoleNames _paneRoles;
+    ChromeBadgeKindNames _badgeKinds;
+    ChromePaneEndNames _paneEnds;
+    ChromePaneStateNames _paneStates;
+    ChromeHeaderOccupantNames _headerOccupants;
+    ChromeSecureInputNames _secureInputs;
+    ChromeBlockNames _blocks;
+    ChromeDropZoneNames _dropZones;
+    ChromeDropPayloadNames _dropPayloads;
+    int _paletteRevision = 0;
 };
 
 /// The font @p config says the chrome should be drawn with.
@@ -273,11 +1022,33 @@ class UiStyleProvider: public QObject
 /// the chrome match the terminal grid below it without the user configuring anything twice.
 ///
 /// @param config      The loaded configuration.
+/// @param row         The resolved chrome row, see config::resolveChromeStyle.
 /// @param profileName The profile this window is opening with, i.e. ContourGuiApp::profileName().
 ///                    The *running* profile rather than @c default_profile, because `-p/--profile`
 ///                    overrides the latter and the chrome has to match the grid actually on screen.
 ///                    A name that resolves to no profile leaves the platform font in place.
 /// @return A font ready to hand to UiStyleProvider.
-[[nodiscard]] QFont resolveChromeFont(config::Config const& config, std::string const& profileName);
+[[nodiscard]] QFont resolveChromeFont(config::Config const& config,
+                                      config::ChromeStyle row,
+                                      std::string const& profileName);
+
+/// Whether a font family is installed. A @c bool by the @c std::predicate shape firstAvailableFamily takes.
+using FontFamilyAvailability = std::function<bool(std::string_view family)>;
+
+/// @return Whether a family is installed, as the font database answers it: production's availability.
+[[nodiscard]] FontFamilyAvailability fontDatabaseAvailability();
+
+/// resolveChromeFont() with the installed font families injected: the overload above asks the font
+/// database, a test passes a fake so its outcome does not depend on the fonts of the machine it runs on.
+///
+/// @param config      The loaded configuration.
+/// @param row         The resolved chrome row, see config::resolveChromeStyle.
+/// @param profileName The profile this window is opening with (see the overload above).
+/// @param isInstalled Whether a family is installed; asked for the row's @c fontFamilies only.
+/// @return A font ready to hand to UiStyleProvider.
+[[nodiscard]] QFont resolveChromeFont(config::Config const& config,
+                                      config::ChromeStyle row,
+                                      std::string const& profileName,
+                                      FontFamilyAvailability const& isInstalled);
 
 } // namespace contour::window

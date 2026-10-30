@@ -22,8 +22,17 @@ struct TestSelectionHelper: public vtbackend::SelectionHelper
     {
         return screen->isLineWrapped(line);
     }
-    [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override { return screen->at(pos).empty(); }
+    /// Blank as the terminal's own helper has it: nothing written, or a space -- what a copy trims off a
+    /// row's end.
+    [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override
+    {
+        return screen->isCellEmpty(pos);
+    }
     [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override { return screen->at(pos).width(); }
+    [[nodiscard]] bool cellHoldsText(CellLocation pos) const noexcept override
+    {
+        return !screen->at(pos).flags().any(NoTextCellFlags);
+    }
 };
 
 } // namespace
@@ -247,3 +256,105 @@ TEST_CASE("Selector.Rectangular", "[selector]")
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
+
+namespace
+{
+/// The cell at @p line, @p column.
+[[nodiscard]] constexpr CellLocation cellAt(int line, int column)
+{
+    return CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+}
+
+/// The extent of a selection of type @p S from @p from to @p to, extended as a mouse drag would.
+template <typename S>
+[[nodiscard]] SelectionExtent extentOf(SelectionHelper const& helper, CellLocation from, CellLocation to)
+{
+    auto selection = S(helper, from, []() {});
+    (void) selection.extend(to);
+    return selection.extent();
+}
+} // namespace
+
+TEST_CASE("Selector.extentCountsLinesAndCharacters", "[selector]")
+{
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
+    auto& screen = term.terminal.primaryScreen();
+    auto const helper = TestSelectionHelper(screen);
+    // Row 1 holds three characters and eight cells nothing was written to.
+    term.writeToScreen("12345,67890abc\r\n12345,67890");
+    REQUIRE(screen.grid().lineText(LineOffset(1)).starts_with("abc"));
+
+    // Row 0 from column 3 (8 cells), row 1 whole (3 written), row 2 to column 4 (5 cells).
+    auto const linear = SelectionExtent { .lines = LineCount(3), .characters = 16 };
+    CHECK(extentOf<LinearSelection>(helper, cellAt(0, 3), cellAt(2, 4)) == linear);
+    CHECK(extentOf<LinearSelection>(helper, cellAt(2, 4), cellAt(0, 3)) == linear);
+
+    // Columns 1 to 3 of each row: "234", "bc" and an empty cell, "234" -- dragged either way.
+    auto const rectangle = SelectionExtent { .lines = LineCount(3), .characters = 8 };
+    CHECK(extentOf<RectangularSelection>(helper, cellAt(0, 1), cellAt(2, 3)) == rectangle);
+    CHECK(extentOf<RectangularSelection>(helper, cellAt(2, 3), cellAt(0, 1)) == rectangle);
+}
+
+TEST_CASE("Selector.extentCountsWhatACopyYields", "[selector]")
+{
+    auto const extentOfRow = [](std::string_view text) {
+        auto term = MockTerm(PageSize { LineCount(3), ColumnCount(16) }, LineCount(5));
+        term.writeToScreen(text);
+        auto const helper = TestSelectionHelper(term.terminal.primaryScreen());
+        return extentOf<LinearSelection>(helper, cellAt(0, 0), cellAt(0, 15)).characters;
+    };
+
+    // The space between the words is copied; the three after them and the padding beyond are not.
+    CHECK(extentOfRow("hello world   ") == 11);
+    // A wide character is one character over its two cells.
+    CHECK(extentOfRow("a\u4E2Db") == 3);
+    // A combining mark is part of the character it combines with.
+    CHECK(extentOfRow("e\u0301x") == 2);
+}
+
+TEST_CASE("Selector.extentSkipsTheHalfOfAWideCharacterARectangleCuts", "[selector]")
+{
+    // A rectangle whose left edge falls on a wide character's second cell holds that cell alone, which a
+    // copy leaves out: columns 2 to 3 of "a中b" are the second half of 中 and "b" -- one character a row.
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(16) }, LineCount(5));
+    term.writeToScreen("a\u4E2Db\r\na\u4E2Db");
+    auto const helper = TestSelectionHelper(term.terminal.primaryScreen());
+    CHECK(extentOf<RectangularSelection>(helper, cellAt(0, 2), cellAt(1, 3))
+          == SelectionExtent { .lines = LineCount(2), .characters = 2 });
+}
+
+TEST_CASE("Selector.extentReachesIntoTheScrollback", "[selector]")
+{
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
+    term.writeToScreen("aaa\r\nbbb\r\nccc\r\nddd\r\neee");
+    auto& screen = term.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineText(LineOffset(-2)).starts_with("aaa"));
+    auto const helper = TestSelectionHelper(screen);
+
+    // From "aaa", two rows into the history, to the end of "ccc", the page's top row.
+    CHECK(extentOf<LinearSelection>(helper, cellAt(-2, 0), cellAt(0, 10))
+          == SelectionExtent { .lines = LineCount(3), .characters = 9 });
+}
+
+TEST_CASE("Selector.extentCountsCharactersOnlyBelowTheLimit", "[selector]")
+{
+    // 99 rows of 101 columns is one cell below the limit; 100 of 100 is the limit itself.
+    auto below = MockTerm(PageSize { LineCount(99), ColumnCount(101) }, LineCount(0));
+    below.writeToScreen("ab");
+    auto const belowHelper = TestSelectionHelper(below.terminal.primaryScreen());
+    REQUIRE(std::size_t { 99 } * 101 == SelectionCharacterCountLimit - 1);
+    CHECK(extentOf<LinearSelection>(belowHelper, cellAt(0, 0), cellAt(98, 100))
+          == SelectionExtent { .lines = LineCount(99), .characters = 2 });
+
+    auto atLimit = MockTerm(PageSize { LineCount(100), ColumnCount(100) }, LineCount(0));
+    atLimit.writeToScreen("ab");
+    auto const atLimitHelper = TestSelectionHelper(atLimit.terminal.primaryScreen());
+    REQUIRE(std::size_t { 100 } * 100 == SelectionCharacterCountLimit);
+    CHECK(extentOf<LinearSelection>(atLimitHelper, cellAt(0, 0), cellAt(99, 99))
+          == SelectionExtent { .lines = LineCount(100), .characters = std::nullopt });
+
+    // A rectangle is bounded by its own width: 100 rows of two columns are counted on a page whose
+    // full rows would be at the limit.
+    CHECK(extentOf<RectangularSelection>(atLimitHelper, cellAt(0, 0), cellAt(99, 1))
+          == SelectionExtent { .lines = LineCount(100), .characters = 2 });
+}

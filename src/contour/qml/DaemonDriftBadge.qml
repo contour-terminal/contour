@@ -1,61 +1,123 @@
 // vim:syntax=qml
-// A quiet chip, bottom-right of the window content, shown while the daemon this client talks to runs
-// another release than the client. Clicking it offers to restart the daemon on the new version, after a
-// confirmation that says what the restart costs.
+// A toolbar chip in the title band, shown while the daemon this client talks to runs another release than
+// the client. Clicking it offers to restart the daemon on the new version, after a confirmation that says
+// what the restart costs.
 //
-// Placed by its user (Main.qml anchors it bottom-right of the window content).
+// Placed by its user: Main.qml puts it in the band's trailing area, and at the content's corner while no
+// band is shown, so a drift never goes unsaid.
 //
 // It reads the `daemonDrift` context property (window::DaemonDriftModel) and neither decides what drifts
-// nor performs the restart: it shows the model's line and forwards the user's confirmation.
+// nor performs the restart: it shows the model's line and forwards the user's confirmation. On the
+// Terminal row the chip is a run of cells bracketed by the chip glyph tokens.
 import QtQuick
 import QtQuick.Controls
 
-Rectangle {
+Item {
     id: root
     objectName: "daemonDriftBadge"
 
     // Guarded with typeof: a window hosted without a daemon (and the lightweight test harnesses) sets no
     // such context property, and an unresolved name in a binding is a ReferenceError.
     readonly property var model: typeof daemonDrift !== "undefined" ? daemonDrift : null
+    // Whether a click may ask for the restart: not while one already runs.
+    readonly property bool canRestart: root.model !== null && !root.model.isRestarting
+    // Whether the chip is a run of bracketed cells (the Terminal row) rather than a rounded shape.
+    readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
+    /// This window's WindowController, which a key the chip does not use is offered to; null for none.
+    property var controller: null
+    /// Whether keyboard focus is on the chip and the chrome says so: the host's to set.
+    property bool focusRingShown: false
+
+    Accessible.role: Accessible.Button
+    Accessible.focusable: root.focusRingShown
+    Accessible.focused: root.focusRingShown
+    Accessible.name: label.text
+    Accessible.onPressAction: root.offerRestart()
 
     visible: root.model !== null && root.model.isVisible
 
-    implicitWidth: label.implicitWidth + 16
-    implicitHeight: label.implicitHeight + 8
-    radius: 4
-    color: Qt.rgba(sys.window.r, sys.window.g, sys.window.b, 0.85)
-    border.color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.25)
-    border.width: 1
+    implicitWidth: row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.toolbarChipPadding + chromeStyle.space.toolbarChipPadding)
+    implicitHeight: chromeStyle.size.toolbarChip
+    width: root.implicitWidth
+    height: root.implicitHeight
 
-    SystemPalette {
-        id: sys
-        colorGroup: SystemPalette.Active
+    // Return and Space ask for the restart, as a click does; any other key is the chrome's (arrows, Escape, the
+    // focus chords), whether the chip sits in the band or, with no band, at the content's corner.
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.offerRestart()
+            event.accepted = true
+        } else if (root.controller && root.controller.chromeKey) {
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+        }
     }
 
-    Label {
-        id: label
-        objectName: "daemonDriftLabel"
-        anchors.centerIn: parent
-        text: root.model !== null ? root.model.text : ""
-        font.pointSize: 9
-        color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.7)
+    /// Opens the confirmation, unless a restart already runs.
+    function offerRestart() {
+        if (root.canRestart)
+            confirmDialog.open()
     }
 
-    MouseArea {
-        id: area
-        objectName: "daemonDriftArea"
+    Rectangle {
+        objectName: "daemonDriftBackground"
         anchors.fill: parent
-        enabled: root.model !== null && !root.model.isRestarting
-        cursorShape: Qt.PointingHandCursor
-        onClicked: confirmDialog.open()
+        radius: chromeStyle.radii.toolbarChip
+        color: chromeStyle.colors.chipFill
     }
 
-    ConfirmDialog {
+    FocusRing {
+        shown: root.focusRingShown
+        hostRadius: chromeStyle.radii.toolbarChip
+    }
+
+    Row {
+        id: row
+        anchors.centerIn: parent
+
+        Text {
+            visible: root.bracketed
+            text: chromeStyle.chipOpenGlyph
+            font: chromeStyle.type.footnote
+            color: chromeStyle.colors.chipText
+        }
+
+        Label {
+            id: label
+            objectName: "daemonDriftLabel"
+            text: root.model !== null ? root.model.text : ""
+            font: chromeStyle.type.footnote
+            color: chromeStyle.colors.chipText
+        }
+
+        Text {
+            visible: root.bracketed
+            text: chromeStyle.chipCloseGlyph
+            font: chromeStyle.type.footnote
+            color: chromeStyle.colors.chipText
+        }
+    }
+
+    TapHandler {
+        objectName: "daemonDriftArea"
+        enabled: root.canRestart
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: root.offerRestart()
+    }
+
+    HoverHandler {
+        enabled: root.canRestart
+        cursorShape: Qt.PointingHandCursor
+    }
+
+    // Over the whole window, not centred on this chip: a dialog centres on its parent.
+    KitDialog {
         id: confirmDialog
         objectName: "daemonDriftConfirm"
+        parent: Overlay.overlay
         heading: root.model !== null ? root.model.actionLabel : ""
         message: root.model !== null ? root.model.confirmation : ""
-        confirmText: qsTr("Restart daemon")
-        onConfirmed: root.model.requestRestart()
+        acceptText: qsTr("Restart daemon")
+        rejectText: qsTr("Cancel")
+        onAccepted: root.model.requestRestart()
     }
 }

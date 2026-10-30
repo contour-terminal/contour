@@ -300,6 +300,19 @@ struct ColorPalette
     CellRGBColorAndAlphaPair hintMatch = { .foreground=CellForegroundColor {}, .foregroundAlpha=1.0f, .background=0x4488CC_rgb, .backgroundAlpha=0.35f };
     // clang-format on
 
+    /// The hint labels once a prefix is typed (`hint_label_typed`): every label on screen then starts with
+    /// it, and is drawn whole in this pair. Empty: the typed characters are drawn in @ref hintLabel mixed
+    /// halfway to the background, the rest in @ref hintLabel.
+    std::optional<CellRGBColorAndAlphaPair> hintLabelTyped {};
+
+    /// How much of its colour a cell outside every hint match keeps while hint mode is on: the rest is
+    /// blended toward the background, so the labels stand out.
+    ///
+    /// Deliberately allowed below 4.5:1: while hint mode is up the rest of the page is inactive content,
+    /// de-emphasised so the labels -- which do reach 4.5:1 -- are what the eye finds (WCAG 1.4.3 exempts
+    /// inactive text). Leaving hint mode restores it.
+    float hintUnmatchedOpacity = 0.5f;
+
     RGBColorPair indicatorStatusLineInactive = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineInsertMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineNormalMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
@@ -389,7 +402,8 @@ struct ColorPalette
     ///
     /// Success derives from the fold column's resting colour -- neutral, so a column of successful
     /// commands looks exactly as the fold column always did -- while failure and running derive from the
-    /// palette's own red and yellow, which every scheme already tunes to read on its background.
+    /// palette's own red and blue (yellow means search), which every scheme already tunes to read on its
+    /// background.
     ///
     /// @param outcome How the block's command ended, or that it is still running.
     /// @return The scheme's colour for @p outcome, or the derived one when the scheme sets none.
@@ -401,7 +415,7 @@ struct ColorPalette
         {
             case CommandBlockOutcome::Success: return foldMarkerColors().foreground;
             case CommandBlockOutcome::Failure: return normalColor(1);
-            case CommandBlockOutcome::Running: return normalColor(3);
+            case CommandBlockOutcome::Running: return normalColor(4);
         }
         return foldMarkerColors().foreground;
     }
@@ -550,6 +564,54 @@ bool defaultColorPalettes(std::string_view colorPaletteName, ColorPalette& palet
 ///
 /// @return The names, in table order.
 [[nodiscard]] std::span<std::string_view const> defaultColorPaletteNames() noexcept;
+
+/// The WCAG AA ratio text must reach against the ground it is drawn on.
+inline constexpr double MinimumTextContrast = 4.5;
+
+/// The WCAG AA ratio large or secondary text must reach against its ground: the large-text tier.
+inline constexpr double MinimumLargeTextContrast = 3.0;
+
+/// The WCAG 1.4.11 ratio a mark (a dot, a status glyph, the current search match's fill) must reach against
+/// what it sits on.
+inline constexpr double MinimumMarkContrast = 3.0;
+
+/// Where the ink for text on a ground comes from, in the order legibleInkOn() tries it.
+enum class InkSource : uint8_t
+{
+    SchemeEnd = 0, ///< Whichever of the default foreground and background reads better on the ground.
+    BrightWhite,   ///< ANSI 15 (bright white), for a scheme whose own ends are dim.
+    Mono,          ///< Black or white, whichever reads better: always at least 4.58:1.
+};
+
+/// The candidates for ink on a ground, first legible one wins. one-dark's grey foreground on its black ANSI 0
+/// and solarized-light's on its cream fail 4.5:1; the last candidate always reads, so text does on every
+/// ground.
+inline constexpr std::array InkFallbacks {
+    InkSource::SchemeEnd,
+    InkSource::BrightWhite,
+    InkSource::Mono,
+};
+
+/// The ink text on @p ground is drawn in: the first of @ref InkFallbacks that reads at
+/// @ref MinimumTextContrast. The chrome's bar ink and a status-line role that would not read on its bar
+/// both take it, so the two cannot disagree about what is legible.
+/// @param palette The scheme whose ends and ANSI 15 are tried.
+/// @param ground  What the text is drawn on.
+/// @return The ink; at least 4.5:1 against @p ground.
+[[nodiscard]] RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept;
+
+/// How far legibleTintOn() moves an ink toward legibleInkOn() per step: tenths, so a hue keeps as much of
+/// itself as legibility allows.
+inline constexpr auto LegibleTintSteps = 10;
+
+/// @p ink where it reads on @p ground at @ref MinimumTextContrast; else the first tenth-step mix of it
+/// toward legibleInkOn() that does, keeping what it can of its hue -- a status colour stays a tint of
+/// itself rather than turning plain. The sticky header's chip and placeholder on their band take it.
+/// @param palette The scheme legibleInkOn() reads.
+/// @param ink     The colour the text would be drawn in.
+/// @param ground  What it is drawn on.
+/// @return The ink; at least 4.5:1 against @p ground.
+[[nodiscard]] RGBColor legibleTintOn(ColorPalette const& palette, RGBColor ink, RGBColor ground) noexcept;
 
 enum class ColorTarget : uint8_t
 {

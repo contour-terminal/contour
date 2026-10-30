@@ -77,6 +77,61 @@ class MockTerm: public Terminal::NullEvents
                       std::optional<LinkDetectionServices> linkServices = std::nullopt,
                       std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
 
+    /// A terminal that reads printed paths from @p fileSystem, and shows no `{Git}`; everything else as
+    /// `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
+    MockTerm(PageSize size, core::platform::FileSystem const& fileSystem):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
+                   fileSystem,
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt }
+    {
+    }
+
+    /// A terminal that reads printed paths from @p fileSystem and looks up `{Git}` through @p gitServices;
+    /// everything else as `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
+    /// @param gitServices Where `{Git}` looks up the branch: a test's executor, drained by hand.
+    MockTerm(PageSize size, core::platform::FileSystem const& fileSystem, GitHeadServices gitServices):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
+                   fileSystem,
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt,
+                   gitServices }
+    {
+    }
+
+    /// A terminal reading its environment (`HOME` and the like) from @p environment rather than the
+    /// process's, so that a test does not depend on the machine it runs on.
+    /// @param size The page size.
+    /// @param environment The terminal's environment. Read while the terminal is built.
+    MockTerm(PageSize size, core::Environment const& environment):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024), environment }
+    {
+    }
+
+    /// Builds the terminal from @p settings, reading its environment from @p environment.
+    /// @param settings The terminal's settings, exactly as given.
+    /// @param environment The terminal's environment. Read while the terminal is built.
+    MockTerm(vtbackend::Settings settings, core::Environment const& environment):
+        MockTerm { std::move(settings),
+                   environment,
+                   core::platform::NativeFileSystem::instance(),
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt }
+    {
+    }
+
     /// A terminal showing the status-line extensions @p extensionServices names.
     MockTerm(PageSize size, StatusLineExtensionServices extensionServices):
         MockTerm { createSettings(size, HistoryLimits {}, 1024),
@@ -211,6 +266,11 @@ class MockTerm: public Terminal::NullEvents
     /// How often the terminal reported a selection completed: what a frontend copies to PRIMARY on.
     int selectionCompletions = 0;
 
+    void searchQueryEnded() override { ++searchQueriesEnded; }
+
+    /// How often the terminal reported ending the search's query as too complex to match.
+    int searchQueriesEnded = 0;
+
     /// When set, the request is recorded but NOT applied — modelling a frontend that cannot honour it
     /// (window maximized/fullscreen, a tiling WM, or the resize still in-flight on the GUI thread). Lets
     /// a test prove a sequence resizes the grid on its own authority rather than via the frontend.
@@ -291,6 +351,12 @@ class MockTerm: public Terminal::NullEvents
     /// Number of setWindowFrameColor()/resetWindowFrameColor() notifications received.
     int windowFrameColorChangeCount = 0;
 
+    /// The most recent default background announced, or std::nullopt if none was. @see
+    /// defaultBackgroundColorChanged.
+    std::optional<RGBColor> defaultBackground;
+    /// Number of defaultBackgroundColorChanged() notifications received.
+    int defaultBackgroundChangeCount = 0;
+
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
@@ -305,7 +371,7 @@ class MockTerm: public Terminal::NullEvents
         pointerShapeNotifications.emplace_back(cssName);
     }
 
-    void copyToClipboard(std::string_view data) override { clipboardData = data; }
+    void copyToClipboard(std::string_view data, ClipboardWriter /*writer*/) override { clipboardData = data; }
 
     std::string getClipboard() override { return clipboardData; }
 
@@ -329,6 +395,12 @@ class MockTerm: public Terminal::NullEvents
     {
         windowFrameColor = std::nullopt;
         ++windowFrameColorChangeCount;
+    }
+
+    void defaultBackgroundColorChanged(RGBColor color) override
+    {
+        defaultBackground = color;
+        ++defaultBackgroundChangeCount;
     }
 
     /// Every desktop notification raised, as (title, body), in order. Recorded so a test can assert
@@ -445,10 +517,23 @@ class MockTerm: public Terminal::NullEvents
         mockPty().stdinBuffer().clear();
     }
 
-    void requestCaptureBuffer(LineCount lines, bool logical) override
+    void requestCaptureBuffer(LineCount lines, CaptureLineMode mode) override
     {
-        terminal.primaryScreen().captureBuffer(lines, logical);
+        terminal.primaryScreen().captureBuffer(lines, mode);
     }
+
+  private:
+    /// What every public constructor comes down to: the Settings one's parameters, plus the terminal's
+    /// environment and its filesystem, which must be @p linkServices' own when it is given (as Terminal()
+    /// asks).
+    MockTerm(vtbackend::Settings settings,
+             core::Environment const& environment,
+             core::platform::FileSystem const& fileSystem,
+             std::optional<StatusLineCommandServices> commandServices,
+             LocalTimeConverter localTime,
+             std::optional<LinkDetectionServices> linkServices,
+             std::optional<StatusLineExtensionServices> extensionServices,
+             std::optional<GitHeadServices> gitServices = std::nullopt);
 };
 
 template <typename PtyDevice>
@@ -471,9 +556,28 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices):
-    terminal { *this,
+    MockTerm { std::move(settings),
                core::defaultEnvironment(),
                linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
+               std::move(commandServices),
+               localTime,
+               std::move(linkServices),
+               std::move(extensionServices) }
+{
+}
+
+template <typename PtyDevice>
+inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
+                                     core::Environment const& environment,
+                                     core::platform::FileSystem const& fileSystem,
+                                     std::optional<StatusLineCommandServices> commandServices,
+                                     LocalTimeConverter localTime,
+                                     std::optional<LinkDetectionServices> linkServices,
+                                     std::optional<StatusLineExtensionServices> extensionServices,
+                                     std::optional<GitHeadServices> gitServices):
+    terminal { *this,
+               environment,
+               fileSystem,
                std::make_unique<PtyDevice>(settings.pageSize),
                std::move(settings),
                std::move(commandServices),
@@ -484,7 +588,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                    return token;
                },
                std::move(linkServices),
-               extensionServices }
+               extensionServices,
+               gitServices }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

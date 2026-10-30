@@ -18,6 +18,7 @@
 
 #include <vtrasterizer/shared_defines.h>
 
+#include <QtCore/QPointF>
 #include <QtGui/QColor>
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOffscreenSurface>
@@ -37,9 +38,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <ranges>
 #include <span>
+#include <string>
 #include <vector>
 
 using namespace contour::display;
@@ -323,7 +326,7 @@ std::vector<uint8_t> renderTileScaled(QRhi* rhi,
                                       TextureTarget const& target,
                                       int targetWidth,
                                       int targetHeight,
-                                      float paneOriginLogical,
+                                      QPointF paneOriginLogical,
                                       float projectionDpr,
                                       float composeDpr)
 {
@@ -344,7 +347,8 @@ std::vector<uint8_t> renderTileScaled(QRhi* rhi,
     // by whatever the display reports; passing the two separately lets a case pin what a disagreement
     // between them does to the glyph texels.
     auto nodeMatrix = QMatrix4x4 {};
-    nodeMatrix.translate(paneOriginLogical, 0.0f);
+    nodeMatrix.translate(static_cast<float>(paneOriginLogical.x()),
+                         static_cast<float>(paneOriginLogical.y()));
     renderer.setProjectionMatrix(contour::display::composeItemToClip(
         sceneOrtho(targetWidth, targetHeight, projectionDpr), nodeMatrix, composeDpr));
 
@@ -356,6 +360,7 @@ std::vector<uint8_t> renderTileScaled(QRhi* rhi,
         {
             auto* px = bitmap.data() + (((static_cast<size_t>(row) * TileExtent) + column) * 4);
             px[0] = static_cast<uint8_t>(TileColumnStride * (column + 1));
+            px[1] = static_cast<uint8_t>(TileColumnStride * (row + 1));
             px[3] = 0xFF;
         }
 
@@ -425,6 +430,16 @@ std::vector<int> survivingColumns(std::span<uint8_t const> image, int width, int
     return out;
 }
 
+/// @return the green channel of every non-transparent pixel down column @p x, top to bottom.
+std::vector<int> survivingRows(std::span<uint8_t const> image, int width, int height, int x)
+{
+    auto out = std::vector<int> {};
+    for (auto const y: std::views::iota(0, height))
+        if (auto const px = pixelAt(image, width, x, y); px.alpha() != 0)
+            out.push_back(px.green());
+    return out;
+}
+
 } // namespace
 
 TEST_CASE("#2040: a pane at a fractional device origin renders every glyph column exactly once",
@@ -467,7 +482,7 @@ TEST_CASE("#2040: a pane at a fractional device origin renders every glyph colum
 
     SECTION("an integral pane origin renders the tile faithfully (the left pane / pre-split case)")
     {
-        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.0f, Dpr, Dpr);
+        auto const image = renderTileScaled(rhi, target, W, H, QPointF(4.0f, 0.0), Dpr, Dpr);
         if (image.empty())
             SKIP("the RHI could not render this frame");
         CHECK(survivingColumns(image, W, SampleRow) == expected);
@@ -475,11 +490,11 @@ TEST_CASE("#2040: a pane at a fractional device origin renders every glyph colum
 
     SECTION("a fractional pane origin renders it just as faithfully (the right pane)")
     {
-        // A pane at x.5 is the ordinary case for a SplitView's second child. A pure TRANSLATION is
-        // harmless under Nearest sampling however fractional it is: every sample point shifts by the same
-        // amount, so each still lands in a distinct texel and the tile is at worst displaced by one pixel.
-        // This case exists to keep that on the record — pane placement is not what #2040 was about.
-        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.5f, Dpr, Dpr);
+        // A pane at x.5 is the ordinary case for a SplitView's second child. Horizontally a left edge on a
+        // pixel centre is kept by the fill rule, so this held even before composeItemToClip rounded the
+        // origin; vertically it did not (see the half-pixel case below). Pane placement is not what #2040
+        // was about.
+        auto const image = renderTileScaled(rhi, target, W, H, QPointF(4.5f, 0.0), Dpr, Dpr);
         if (image.empty())
             SKIP("the RHI could not render this frame");
         CHECK(survivingColumns(image, W, SampleRow) == expected);
@@ -496,7 +511,7 @@ TEST_CASE("#2040: a pane at a fractional device origin renders every glyph colum
         // 1.0 vs 0.94 is a ~6% scale, enough to duplicate exactly one column of an 8px tile. The
         // production path must never produce a ratio other than 1, which is what deviceToLogicalScale()
         // (RhiTransform.h) guarantees by deriving the divisor from the frame's own render target.
-        auto const image = renderTileScaled(rhi, target, W, H, /*paneOriginLogical*/ 4.0f, 1.0f, 0.94f);
+        auto const image = renderTileScaled(rhi, target, W, H, QPointF(4.0f, 0.0), 1.0f, 0.94f);
         if (image.empty())
             SKIP("the RHI could not render this frame");
 
@@ -505,5 +520,51 @@ TEST_CASE("#2040: a pane at a fractional device origin renders every glyph colum
         CHECK_FALSE(columns == expected);             // ... and so the tile is not faithful
         CHECK(std::ranges::is_sorted(columns));       // duplicated, not shuffled
     }
+}
+
+TEST_CASE("a terminal at a half-pixel device origin renders every glyph row exactly once",
+          "[screenshot][rhi][glyphclip]")
+{
+    // Regression pin for the glyphs whose top row was cut off on every line. The chrome places the
+    // terminal item in logical pixels, so its device-pixel origin is x.5 whenever the layout above it is
+    // an odd number of pixels at 150%, 2 mod 4 at 125% or 175%, or a quarter pixel at 200%. On OpenGL,
+    // Qt's default on Linux, a quad whose top edge lies on a pixel centre loses its first row to the fill
+    // rule, and the sub-pixel snap widens that to anything within ±1/256 of the half. Before the item's
+    // origin was rounded (composeItemToClip), every origin below in that window read rows 2..8 and a
+    // stray row past the tile's end: the top of every glyph, gone.
+    auto env = makeOffscreenRhi();
+    if (!env.valid())
+        SKIP("no usable OpenGL context in this environment");
+
+    auto* rhi = env.rhi.get();
+    constexpr int W = 32;
+    constexpr int H = 32;
+
+    auto const target = makeTextureTarget(rhi, QSize(W, H));
+    if (!target.valid())
+        SKIP("could not create a texture render target");
+
+    // The eight row values the tile carries, top to bottom.
+    auto const expected = [] {
+        auto v = std::vector<int> {};
+        for (auto const row: std::views::iota(0, TileExtent))
+            v.push_back(TileColumnStride * (row + 1));
+        return v;
+    }();
+
+    // The item's origin in DEVICE pixels; the tile is drawn at its item-local (0, 0).
+    constexpr auto OriginX = 4.0;
+    constexpr int SampleColumn = static_cast<int>(OriginX) + (TileExtent / 2);
+
+    for (auto const dpr: { 1.0f, 1.25f, 1.5f, 2.0f })
+        for (auto const originY: { 4.0, 4.25, 4.499, 4.5, 4.501, 4.75 })
+        {
+            INFO(std::format("dpr {}, device origin y {}", dpr, originY));
+            auto const image =
+                renderTileScaled(rhi, target, W, H, QPointF(OriginX / dpr, originY / dpr), dpr, dpr);
+            if (image.empty())
+                SKIP("the RHI could not render this frame");
+            CHECK(survivingRows(image, W, H, SampleColumn) == expected);
+        }
 }
 // }}}

@@ -34,6 +34,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
+#include <cmath>
 #include <fstream>
 #include <memory>
 #include <string_view>
@@ -46,6 +47,15 @@ namespace
 
 using contour::test::ScopedController;
 using contour::test::TestApp;
+
+/// Skips the running test on a Wayland session: a Wayland client cannot place or read back its own
+/// window position, so a test that restores or saves one has nothing to observe there.
+#define SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED()                                       \
+    do                                                                             \
+    {                                                                              \
+        if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland"))) \
+            SKIP("Wayland clients cannot place windows.");                         \
+    } while (false)
 
 } // namespace
 
@@ -91,6 +101,7 @@ TEST_CASE("bindWindow(nullptr) and displayless showInitial are safe no-ops", "[c
 
 TEST_CASE("first window restores its location and saves normal moves", "[contour][sizing][window-position]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     TestApp app;
     app.app().config().rememberWindowPosition = true;
     app.app().config().configFile = "test-config/contour.yml";
@@ -135,6 +146,7 @@ TEST_CASE("first window restores its location and saves normal moves", "[contour
 
 TEST_CASE("unavailable saved monitor falls back to an available monitor", "[contour][window-position]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     TestApp app;
     app.app().config().configFile = "test-config/contour.yml";
     app.app().config().rememberWindowPosition = true;
@@ -177,6 +189,7 @@ TEST_CASE("disabled window position persistence neither loads nor saves", "[cont
 TEST_CASE("first startup in every presentation mode saves a normal placement without prior state",
           "[contour][sizing][window-position][native]")
 {
+    SKIP_WHEN_WINDOWS_CANNOT_BE_PLACED();
     auto const initialState = GENERATE(Qt::WindowNoState, Qt::WindowMaximized, Qt::WindowFullScreen);
     CAPTURE(initialState);
 
@@ -391,10 +404,15 @@ TEST_CASE("the size hints reserve the gutter the configuration lays out", "[cont
     controller->updateSizeHintsFor(requester,
                                    contour::window::WindowController::HintApplyMode::RespectWindowState);
 
-    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor). Eight cells -- six
-    // of line numbers, two of block column -- behind the blank lead-in every reserved gutter begins with.
-    auto const gutterDevicePx = contour::geometry::gutterLeadIn(requester.devicePixelRatioValue)
-                                + (8 * unbox<int>(requester.cellSizeValue.width));
+    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor). Six cells of line
+    // numbers, then the block column -- on the TestApp's native chrome row the rail's strip of
+    // space.blockGutter points after them (R-b) -- behind the blank lead-in every reserved gutter begins
+    // with.
+    REQUIRE(session->gutterChrome().form == vtbackend::BlockColumnForm::Rail);
+    auto const dpr = requester.devicePixelRatioValue;
+    auto const gutterDevicePx =
+        contour::geometry::gutterLeadIn(dpr) + (6 * unbox<int>(requester.cellSizeValue.width))
+        + contour::session::chromeDevicePixels(session->gutterChrome().stripPoints, dpr);
     auto const expected = contour::geometry::sizeHintsFor(
         requester.cellSizeValue,
         contour::session::toGeometryMargins(session->profile().margins.value()),
@@ -622,8 +640,10 @@ TEST_CASE("DPI settlement waits for the native move loop to end", "[contour][siz
         {},
         surface.devicePixelRatioValue,
         contour::geometry::Chrome { .width = 0, .height = 34 },
-        contour::session::configuredGutterWidth(
-            session->config(), surface.cellSizeValue, surface.devicePixelRatioValue));
+        contour::session::configuredGutterWidth(session->config(),
+                                                surface.cellSizeValue,
+                                                surface.devicePixelRatioValue,
+                                                session->gutterChrome()));
     SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
     QCoreApplication::processEvents();
     CHECK(window.size() == QSize(expected.width, expected.height));

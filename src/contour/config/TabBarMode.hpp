@@ -4,6 +4,7 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -18,6 +19,9 @@ enum class TabBarPosition : uint8_t
     Top,    //!< The tab strip sits above the terminal content (default, historical behavior).
     Bottom, //!< The tab strip sits below the terminal content.
 };
+
+/// Number of @c TabBarPosition enumerators, derived from the last one.
+inline constexpr size_t TabBarPositionCount = static_cast<size_t>(TabBarPosition::Bottom) + 1;
 
 /// When the GUI tab strip (tab bar) is shown.
 enum class TabBarVisibility : uint8_t
@@ -45,6 +49,21 @@ namespace detail
         ConfigEnumInfo<TabBarVisibility> { TabBarVisibility::Multiple, "Multiple", "Auto-Hide" },
     };
 } // namespace detail
+
+/// Whether the tab strip is shown under @p visibility.
+/// @param visibility The configured mode.
+/// @param tabCount How many tabs the window holds.
+/// @return True when the strip is shown.
+[[nodiscard]] constexpr bool isTabBarShown(TabBarVisibility visibility, int tabCount) noexcept
+{
+    switch (visibility)
+    {
+        case TabBarVisibility::Always: return true;
+        case TabBarVisibility::Never: return false;
+        case TabBarVisibility::Multiple: return tabCount > 1;
+    }
+    return true;
+}
 
 template <>
 constexpr std::span<ConfigEnumInfo<TabBarPosition> const> configEnumValues() noexcept

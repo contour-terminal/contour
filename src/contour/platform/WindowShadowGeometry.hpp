@@ -306,4 +306,30 @@ enum class WindowPresentation : uint8_t
     return ShadowVisibility::Hidden;
 }
 
+/// The radius of the window's two top corners, which the header bar rounds (R-g).
+///
+/// Only a windowed, client-decorated window rounds them: a maximised, full-screen or tiled window meets
+/// its screen or its neighbours edge to edge, and a server-decorated one wears the window manager's frame.
+/// The bottom corners stay square, since rounding them would mask the terminal's surface every frame.
+/// @param rowRadius    The chrome row's @c radii.window, in logical pixels.
+/// @param presentation How the window is presented.
+/// @param decoration   Who draws the window's frame.
+/// @return @p rowRadius for a windowed client-decorated window, otherwise 0.
+[[nodiscard]] constexpr int windowCornerRadius(int rowRadius,
+                                               WindowPresentation presentation,
+                                               WindowDecoration decoration) noexcept
+{
+    if (decoration == WindowDecoration::Server)
+        return 0;
+
+    switch (presentation)
+    {
+        case WindowPresentation::Windowed: return rowRadius;
+        case WindowPresentation::Maximized:
+        case WindowPresentation::FullScreen:
+        case WindowPresentation::Tiled: return 0;
+    }
+    return 0;
+}
+
 } // namespace contour::platform

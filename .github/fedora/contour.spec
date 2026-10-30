@@ -36,6 +36,7 @@ Requires:       harfbuzz
 Requires:       qt6-qtbase
 Requires:       qt6-qtbase-gui
 Requires:       qt6-qtmultimedia-devel
+Requires:       qt6-qtsvg
 Requires:       yaml-cpp
 
 %description

@@ -51,6 +51,17 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().hosting();
     }
 
+    /// The default factory: what spawns here, attached or not.
+    [[nodiscard]] contour::session::SessionFactory& localSessions() noexcept override
+    {
+        return _default->localSessions();
+    }
+
+    [[nodiscard]] contour::session::TabMergeSupport tabMergeSupport() const noexcept override
+    {
+        return active().tabMergeSupport();
+    }
+
     [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
     {
         return active().createNotifier();
@@ -67,6 +78,14 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
                                           contour::session::RemoteSpawn const& spawn) override
     {
         return active().requestRemoteSplit(actingPty, vertical, spawn);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteTabMerge(
+        std::span<vtpty::Pty const* const> tabPtys,
+        vtpty::Pty const* targetPty,
+        vtworkspace::SplitSide side) override
+    {
+        return active().requestRemoteTabMerge(tabPtys, targetPty, side);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override
@@ -92,9 +111,28 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().requestHostedOperation(pty, request);
     }
 
-    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
     {
-        active().bindTerminal(pty, terminal);
+        return active().reconnectSupport();
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        return active().reconnect();
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        return active().bindForReconnect(endedPty);
+    }
+
+    void cancelReconnectBinding() override { active().cancelReconnectBinding(); }
+
+    void bindTerminal(vtpty::Pty const* pty,
+                      vtbackend::Terminal& terminal,
+                      contour::session::InterruptionSink const& interruptions) override
+    {
+        active().bindTerminal(pty, terminal, interruptions);
     }
 
   private:

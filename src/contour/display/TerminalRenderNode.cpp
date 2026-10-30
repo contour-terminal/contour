@@ -137,13 +137,11 @@ void TerminalRenderNode::prepare()
     }
     // }}}
 
-    // This item's top-left corner inside the render target, in device pixels. matrix() maps item-local
-    // (0,0) to scene space in logical pixels (translation for Quick item placement); the scene graph
-    // rasterizes scene coordinates at the DPR. The renderer needs this to translate the rasterizer's
+    // This item's top-left corner inside the render target, in device pixels: the same whole pixel
+    // composeItemToClip() moved the vertices onto. The renderer needs this to translate the rasterizer's
     // item-relative inner scissor into render-target coordinates — a split pane sits at an offset, and
     // scissoring with untranslated coordinates would clip the WRONG pane's region.
-    auto const originScene = matrix()->map(QPointF(0, 0));
-    auto const itemOriginDevice = QPoint(qRound(originScene.x() * dpr), qRound(originScene.y() * dpr));
+    auto const itemOriginDevice = snappedItemOrigin(*matrix(), dpr);
 
     // Stage the frame BEFORE the render pass begins: build pipelines and queue all resource uploads onto the
     // command buffer. Qt's RHI render-node contract requires resource uploads to happen in prepare() (before

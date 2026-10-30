@@ -5,13 +5,42 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
+#include <optional>
+#include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace contour::command::detail
 {
+
+/// A resolved, enabled command row: what a menu's dynamic rows (one per profile, host, tab, …) are made of.
+/// @param title  The row's display text.
+/// @param action What the row runs.
+/// @param check  The row's check column, if any.
+/// @param swatch The color the row is drawn as, if it is a swatch.
+/// @return The row.
+[[nodiscard]] inline ContextMenuEntry commandEntry(std::string title,
+                                                   actions::Action action,
+                                                   RowCheck check = RowCheck::None,
+                                                   std::optional<vtbackend::RGBColor> swatch = std::nullopt)
+{
+    return ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
+                              .title = std::move(title),
+                              .action = std::move(action),
+                              .availability = RowAvailability::Enabled,
+                              .check = check,
+                              .role = MenuItemRole::None,
+                              .swatch = swatch,
+                              .children = {} };
+}
 
 /// The machinery a context menu is described with, parameterized on the state that menu reads.
 ///
@@ -47,6 +76,13 @@ struct MenuTable
     /// different cell. Same reasoning as ContextMenuEntry holding an action rather than a name.
     using ActionBinder = actions::Action (*)(State const&);
 
+    /// Where a Submenu row's built children go: into a submenu of their own, or into the menu itself.
+    enum class ChildPlacement : std::uint8_t
+    {
+        Nested = 0, ///< Under the row's title, as a submenu.
+        Spliced,    ///< In place of the row: the menu's own rows, as a list that grows with the state.
+    };
+
     /// The precondition of a row that has none.
     [[nodiscard]] static bool always(State const& /*state*/) noexcept { return true; }
 
@@ -60,12 +96,15 @@ struct MenuTable
     {
         ContextMenuEntryKind kind = ContextMenuEntryKind::Command;
         actions::Action action {};
-        std::string_view title {};         ///< Empty on a Command row => commandTitle(action).
-        Predicate visible = always;        ///< When false, the row is not in the menu at all.
-        Predicate enabled = always;        ///< When false, the row is in the menu but grayed out.
-        Predicate checked = nullptr;       ///< When set, the row is checkable; checked when it holds.
-        ChildBuilder children = nullptr;   ///< Submenu rows: what is inside.
-        ActionBinder bindAction = nullptr; ///< When set, supplies the action in place of @ref action.
+        std::string_view title {};              ///< Empty on a Command row => commandTitle(action).
+        Predicate visible = always;             ///< When false, the row is not in the menu at all.
+        Predicate enabled = always;             ///< When false, the row is in the menu but grayed out.
+        Predicate checked = nullptr;            ///< When set, the row is checkable; checked when it holds.
+        MenuItemRole role = MenuItemRole::None; ///< The role a native menu gives this row.
+        ChildBuilder children = nullptr;        ///< Submenu rows: what is inside.
+        ActionBinder bindAction = nullptr;      ///< When set, supplies the action in place of @ref action.
+        ChildPlacement placement = ChildPlacement::Nested; ///< Submenu rows: nested, or spliced in place.
+        ActionScope scope = ActionScope::Window;           ///< Command rows: what the row acts on.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -91,12 +130,43 @@ struct MenuTable
             return row;
         }
 
+        /// This row, carrying @p newRole for a native menu to place.
+        [[nodiscard]] Row withRole(MenuItemRole newRole) const
+        {
+            auto row = *this;
+            row.role = newRole;
+            return row;
+        }
+
         /// This row, running the action @p binder builds from the state rather than a fixed one.
         [[nodiscard]] Row actionFrom(ActionBinder binder) const
         {
             auto row = *this;
             row.bindAction = binder;
             return row;
+        }
+
+        /// This row, acting on @p newScope.
+        [[nodiscard]] Row inScope(ActionScope newScope) const
+        {
+            auto row = *this;
+            row.scope = newScope;
+            return row;
+        }
+
+        /// Whether this row can be picked, against @p state.
+        [[nodiscard]] RowAvailability availabilityFor(State const& state) const
+        {
+            return enabled(state) ? RowAvailability::Enabled : RowAvailability::Disabled;
+        }
+
+        /// Whether this row shows a check mark, against @p state.
+        /// @return None for a row that is not checkable, otherwise Checked or Unchecked.
+        [[nodiscard]] RowCheck checkFor(State const& state) const
+        {
+            if (checked == nullptr)
+                return RowCheck::None;
+            return checked(state) ? RowCheck::Checked : RowCheck::Unchecked;
         }
 
         /// What this row runs, against @p state.
@@ -114,7 +184,12 @@ struct MenuTable
                      .title = title,
                      .visible = always,
                      .enabled = always,
-                     .children = nullptr };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = nullptr,
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
     }
 
     /// A divider between groups of rows.
@@ -125,7 +200,12 @@ struct MenuTable
                      .title = {},
                      .visible = always,
                      .enabled = always,
-                     .children = nullptr };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = nullptr,
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
     }
 
     /// A row named @p title that opens onto whatever @p children builds.
@@ -136,7 +216,31 @@ struct MenuTable
                      .title = title,
                      .visible = always,
                      .enabled = always,
-                     .children = children };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = children,
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
+    }
+
+    /// A run of rows that @p children builds, spliced into the menu in place of this row.
+    ///
+    /// For a list that grows with the state (the Window menu's tabs), where a submenu would hide what
+    /// the menu exists to show. Honours `shownWhen`; `enabledWhen` has no row to gray and is ignored.
+    [[nodiscard]] static Row rows(ChildBuilder children)
+    {
+        return Row { .kind = ContextMenuEntryKind::Submenu,
+                     .action = {},
+                     .title = {},
+                     .visible = always,
+                     .enabled = always,
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = children,
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Spliced,
+                     .scope = ActionScope::Window };
     }
 
     /// One AttachToHost row per saved host, in `State::hostNames` order.
@@ -147,24 +251,49 @@ struct MenuTable
     /// @return The rows, none without saved hosts.
     [[nodiscard]] static std::vector<ContextMenuEntry> hostRows(State const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.hostNames.size());
-
-        for (auto const& name: state.hostNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::AttachToHost { .name = name },
-                                                    .enabled = true,
-                                                    .checkable = false,
-                                                    .checked = false,
-                                                    .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(state.hostNames | std::views::transform([](auto const& name) {
+                                                return commandEntry(name,
+                                                                    actions::AttachToHost { .name = name });
+                                            }));
     }
 
     /// The "Attach to Host" submenu, listing hostRows(); absent without saved hosts, as an empty submenu
     /// is dropped.
     [[nodiscard]] static Row attachToHostSubmenu() { return submenu("Attach to Host", hostRows); }
+
+    /// One ChangeProfile row per configured profile, with the active one check-marked.
+    ///
+    /// Shared by the pane menu and the menu bar's Shell menu, so the two cannot drift apart.
+    /// @param state The world the menu was opened over; reads `profileNames` and `activeProfile`.
+    /// @return The rows, none without profiles.
+    [[nodiscard]] static std::vector<ContextMenuEntry> changeProfileRows(State const& state)
+    {
+        return std::ranges::to<std::vector>(
+            state.profileNames | std::views::transform([&](auto const& name) {
+                return commandEntry(name,
+                                    actions::ChangeProfile { .name = name },
+                                    name == state.activeProfile ? RowCheck::Checked : RowCheck::Unchecked);
+            }));
+    }
+
+    /// The "Change Profile" submenu, listing changeProfileRows(); absent without profiles.
+    [[nodiscard]] static Row changeProfileSubmenu() { return submenu("Change Profile", changeProfileRows); }
+
+    /// One CreateNewTab row per configured profile, titled with the profile's name.
+    ///
+    /// Shared by the title bar's and the menu bar's "New Tab with Profile". Deliberately NOT
+    /// changeProfileRows(): that one switches the CURRENT pane's profile and check-marks the active one.
+    /// Here each row opens a NEW tab under its profile, so nothing is "current" and nothing is checked -- a
+    /// tick would claim a state this menu does not describe.
+    /// @param state The world the menu was opened over; reads its `profileNames`.
+    /// @return The rows, none without profiles.
+    [[nodiscard]] static std::vector<ContextMenuEntry> newTabProfileRows(State const& state)
+    {
+        return std::ranges::to<std::vector>(state.profileNames | std::views::transform([](auto const& name) {
+                                                return commandEntry(
+                                                    name, actions::CreateNewTab { .profileName = name });
+                                            }));
+    }
 
     /// Resolves @p rows against @p state: drops the rows whose precondition fails, grays out the ones
     /// merely unsatisfied, and expands the submenus.
@@ -189,9 +318,10 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
                                                             .title = {},
                                                             .action = {},
-                                                            .enabled = true,
-                                                            .checkable = false,
-                                                            .checked = false,
+                                                            .availability = row.availabilityFor(state),
+                                                            .check = RowCheck::None,
+                                                            .role = MenuItemRole::None,
+                                                            .swatch = std::nullopt,
                                                             .children = {} });
                     break;
 
@@ -200,15 +330,25 @@ struct MenuTable
                     // An empty submenu is noise: it opens onto nothing.
                     if (children.empty())
                         break;
+                    if (row.placement == ChildPlacement::Spliced)
+                    {
+                        std::ranges::move(children, std::back_inserter(entries));
+                        break;
+                    }
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
                                                             .title = std::string(row.title),
                                                             .action = {},
-                                                            .enabled = true,
-                                                            .checkable = false,
-                                                            .checked = false,
+                                                            .availability = row.availabilityFor(state),
+                                                            .check = RowCheck::None,
+                                                            .role = MenuItemRole::None,
+                                                            .swatch = std::nullopt,
                                                             .children = std::move(children) });
                     break;
                 }
+
+                case ContextMenuEntryKind::Header:
+                    // Headers are made from a state's lines, never described by a table row.
+                    break;
 
                 case ContextMenuEntryKind::Command: {
                     auto action = row.actionFor(state);
@@ -216,10 +356,12 @@ struct MenuTable
                         .kind = ContextMenuEntryKind::Command,
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
-                        .enabled = row.enabled(state),
-                        .checkable = row.checked != nullptr,
-                        .checked = row.checked != nullptr && row.checked(state),
-                        .children = {} });
+                        .availability = row.availabilityFor(state),
+                        .check = row.checkFor(state),
+                        .role = row.role,
+                        .swatch = std::nullopt,
+                        .children = {},
+                        .scope = row.scope });
                     break;
                 }
             }

@@ -226,6 +226,22 @@ Task<bool> peerHandshakesAndSays(StrictTlsPeer* peer, ISocket* wire, std::string
     co_return co_await peer->write(wire, std::move(text));
 }
 
+/// Owns a TLS socket and its write queue, as a client connection's flow does, on a loop whose stop was
+/// requested while the flow was busy: it queues its hello -- spawning the drain that will drive the
+/// handshake -- and its next wait throws at once, so the flow unwinds and drops the queue and the socket
+/// within the same turn, ahead of that drain.
+/// @param connection The socket, taken into a local: a parameter would live on in the frame after the unwind.
+Task<void> queueOnAStoppingLoop(EventLoop* loop, std::unique_ptr<ISocket>* connection, bool* queued)
+{
+    auto const socket = std::move(*connection);
+    co_await core::net::testing::sleepFor(loop, 1ms); // resumed by a turn, as a connect's completion is
+    loop->requestStop();
+    auto queue = core::net::WriteQueue { *loop, socket.get(), std::size_t { 1 } << 20U };
+    *queued = queue.enqueue("hello");
+    auto buffer = std::array<std::byte, 64> {};
+    std::ignore = co_await socket->read(buffer);
+}
+
 /// Closes the socket and destroys it in one turn, as `conn->close(); connections.erase(id);` does.
 Task<void> closeAndDestroy(std::unique_ptr<ISocket>* socket)
 {
@@ -307,6 +323,20 @@ TEST_CASE("Destroying a TLS socket mid-handshake resolves every operation parked
 
     REQUIRE(c.pumpUntil([&] { return read.settled && !queue->draining(); }));
     CHECK(read.threw); // a destroyed socket ABANDONS: the flow unwinds rather than reading a value
+}
+
+TEST_CASE("A WriteQueue drain spawned on a stopping loop leaves the socket its owner dropped alone",
+          "[net][tls][tlsgate][writequeue]")
+{
+    // A client stopped while it connects: the stop is requested while its flow runs, the flow queues its
+    // hello, and its next wait unwinds it -- dropping the socket -- in the turn that also holds the drain the
+    // hello spawned. That drain then ran, and drove the TLS handshake on the freed socket
+    // (contour-terminal/core-cpp#83).
+    auto c = Conversation {};
+    auto queued = false;
+    CHECK_THROWS_AS(c.loop.blockOn(queueOnAStoppingLoop(&c.loop, &c.tls, &queued)),
+                    core::async::OperationCancelled);
+    CHECK(queued);
 }
 
 TEST_CASE("A flow released from the handshake gate may destroy the socket before the others run",

@@ -51,6 +51,31 @@ Pane* Tab::splitActivePane(
     return secondChild;
 }
 
+Pane* Tab::graftTab(Pane& leaf, Tab& source, SplitSide side, PaneId splitNodeId, double ratio)
+{
+    assert(leaf.isLeaf() && "graftTab() must be given a leaf");
+    assert(&source != this && "a tab cannot be grafted into itself");
+    assert(source._root != nullptr && source._activeLeaf != nullptr
+           && "the source tab must still hold its tree");
+
+    _zoomed = false; // the grafted panes must be visible (see Tab.h's zoom block)
+
+    auto* const sourceActive = source._activeLeaf;
+    // Both tabs' leaf ids are unique model-wide, so the MRUs concatenate without duplicates; the source's
+    // own order is kept behind this tab's.
+    _mru.insert(_mru.end(), source._mru.begin(), source._mru.end());
+    source._mru.clear();
+    source._activeLeaf = nullptr;
+
+    auto* const grafted =
+        leaf.graft(std::move(source._root), splitNodeId, splitStateOf(side), graftOrderOf(side), ratio);
+
+    // `leaf` is a split node now, so _activeLeaf may no longer name a leaf: the grafted tab's active pane
+    // takes over.
+    setActivePane(sourceActive);
+    return grafted;
+}
+
 SessionId Tab::closePane(Pane* leaf)
 {
     assert(leaf != nullptr && leaf->isLeaf());

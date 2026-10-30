@@ -4,20 +4,29 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
+#include <contour/session/Permission.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/TestEnvironment.hpp>
 
+#include <core/Environment.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
 #include <QtCore/QEvent>
+#include <QtCore/QFileInfo>
+#include <QtCore/QLibraryInfo>
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
+#include <QtWidgets/QApplication>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <system_error>
 
@@ -25,6 +34,7 @@
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
+#include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
@@ -73,9 +83,59 @@ class DeferredDeletionDrain final: public Catch::EventListenerBase
     return false;
 }
 
+/// The first test case after which this process ran QtDBus's connection thread; empty while none has.
+///
+/// The thread outlives whatever started it, so the first case to end with it running is the one that
+/// reached a bus -- the run-wide gate in main() names it instead of leaving a bisection by tag to whoever
+/// reads the failure. Written only by SessionBusWitness, on the thread Catch2 runs the cases on.
+/// @return The test case's name.
+[[nodiscard]] std::string& firstCaseOnSessionBus()
+{
+    static auto name = std::string {};
+    return name;
+}
+
+/// Records, in firstCaseOnSessionBus, the first test case that ends with a session bus reached.
+class SessionBusWitness final: public Catch::EventListenerBase
+{
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+
+    /// Checks the bus after each test case, until one has been found to reach it.
+    void testCaseEnded(Catch::TestCaseStats const& stats) override
+    {
+        if (firstCaseOnSessionBus().empty() && reachedSessionBus())
+            firstCaseOnSessionBus() = stats.testInfo->name;
+    }
+};
+
+/// Whether this machine's Qt has controls style @p style: its qmldir lies beneath one of the import paths a
+/// QQmlEngine searches by default, as QQuickStyle resolves the name. Files are looked for, not imported: a
+/// style imported before QQuickStyle::setStyle() would be loaded ahead of the one the run asks for.
+/// @param style The style's name.
+/// @return Whether a qmldir of it exists.
+[[nodiscard]] bool controlsStyleInstalled(QString const& style)
+{
+    // The engine's defaults: the modules compiled into this binary (ContourTui, ContourLinux), Qt's own
+    // (Fusion, FluentWinUI3), and what the environment adds.
+    auto importPaths =
+        QStringList { QStringLiteral(":/qt/qml"), QLibraryInfo::path(QLibraryInfo::QmlImportsPath) };
+    for (auto const* const variable: { "QML_IMPORT_PATH", "QML2_IMPORT_PATH" })
+        if (auto const added = core::LiveEnvironment {}.get(variable))
+            importPaths << QString::fromStdString(*added).split(QDir::listSeparator(), Qt::SkipEmptyParts);
+
+    auto const qmldirs = contour::test::controlsStyleQmldirs(style.toStdString());
+    return std::ranges::any_of(importPaths, [&](QString const& importPath) {
+        return std::ranges::any_of(qmldirs, [&](std::string const& qmldir) {
+            return QFileInfo::exists(importPath + u'/' + QString::fromStdString(qmldir));
+        });
+    });
+}
+
 } // namespace
 
 CATCH_REGISTER_LISTENER(DeferredDeletionDrain)
+CATCH_REGISTER_LISTENER(SessionBusWitness)
 
 int main(int argc, char* argv[])
 {
@@ -92,10 +152,12 @@ int main(int argc, char* argv[])
     ///     may withhold frame callbacks from unexposed/occluded test windows, stalling
     ///     QQuickWindow::grabWindow() indefinitely, while X11/XWayland keeps delivering frames.
     ///   - Otherwise leave the platform untouched and let Qt pick.
-    if (qgetenv("CONTOUR_TEST_DISPLAY") != "1")
+    if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))
     {
 #ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
+        if (auto const fonts = contour::test::offscreenFontDirectory(core::LiveEnvironment {}))
+            _putenv_s(std::string(contour::test::QtFontDirectoryVariable).c_str(), fonts->c_str());
 #else
         qputenv("QT_QPA_PLATFORM", "offscreen");
 #endif
@@ -105,14 +167,39 @@ int main(int argc, char* argv[])
         qputenv("QT_QPA_PLATFORM", "xcb");
 #endif
 
-    QGuiApplication const app(argc, argv);
+    // A display run stands up Qt Widgets as well, for the native menu bar (window/AppMenuBar_test.cpp);
+    // offscreen, a QGuiApplication keeps the suite free of the widget stack.
+    auto const app = contour::test::displayTestsEnabled(core::LiveEnvironment {})
+                         ? std::unique_ptr<QGuiApplication> { std::make_unique<QApplication>(argc, argv) }
+                         : std::make_unique<QGuiApplication>(argc, argv);
 
-    // Pin the same Qt Quick Controls style the app itself pins (ContourGuiApp: QQuickStyle::setStyle).
-    // The tests instantiate real Controls (SessionChrome's customized ScrollBar, the tab flyout, ...),
-    // and the platform-native style (notably on Windows) refuses contentItem/background customization,
-    // emitting a QML diagnostic that the gate below then fails on. Fusion supports customization on
-    // every platform, so pinning it here makes the test environment match production.
-    QQuickStyle::setStyle(QStringLiteral("Fusion"));
+    // The QML types the application registers that the tested QML imports from Contour.Terminal: the
+    // permission enums (SessionChrome answers its question in them).
+    contour::session::registerPermissionQmlTypes();
+
+    // Pin a Qt Quick Controls style the way the app itself does (ContourGuiApp: a Fusion fallback, then
+    // the row's style). The tests instantiate real Controls (SessionChrome's customized ScrollBar, the
+    // tab flyout, ...), and the platform-native style (notably on Windows) refuses contentItem/background
+    // customization, emitting a QML diagnostic that the gate below then fails on. Fusion supports
+    // customization on every platform, so it is the default here as it is in production.
+    //
+    // CONTOUR_TEST_CONTROLS_STYLE names another style for the whole run. A style is resolved once per
+    // process, before the first control exists, so the rows a style draws -- the Terminal row's
+    // ContourTui, notably -- can only be rendered by a second run under it; the chrome snapshot case
+    // (ChromeSnapshot_test.cpp, tag [snapshot]) draws the rows of whichever style this run has.
+    //
+    // A style this machine's Qt does not have ends the run before a test starts, saying so, rather than
+    // failing every QML case on a module that is not installed.
+    auto const controlsStyle =
+        QString::fromStdString(contour::test::controlsStyleFor(core::LiveEnvironment {}));
+    if (!controlsStyleInstalled(controlsStyle))
+    {
+        std::cerr << "SKIPPED: the Qt Quick Controls style " << controlsStyle.toStdString()
+                  << " is not installed here; nothing ran under it.\n";
+        return contour::test::ControlsStyleMissingExitCode;
+    }
+    QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
+    QQuickStyle::setStyle(controlsStyle);
 
     // Run-wide gate: capture every warning/critical for the whole session. Per-test QmlMessageCapture guards
     // chain to this one (see QmlMessageCapture.h), so a per-test guard never blinds the gate.
@@ -149,7 +236,11 @@ int main(int argc, char* argv[])
         std::cerr << "\n=================================================================\n"
                   << "FAILURE: a test reached the session bus (a QDBusConnection thread is running). Give a\n"
                      "session contour::test::makeTestNotifier(), or run a real-transport case only under\n"
-                     "contour::test::onPrivateSessionBus(). Run the suite by tag to find which test it was.\n"
+                     "contour::test::onPrivateSessionBus().\n"
+                  << "The first test case to end with it running: \""
+                  << (firstCaseOnSessionBus().empty() ? std::string { "(none; it started after the last)" }
+                                                      : firstCaseOnSessionBus())
+                  << "\"\n"
                   << "=================================================================\n";
         return testResult != 0 ? testResult : 1;
     }

@@ -27,7 +27,10 @@
 ///    viewport, the Vi cursor and any live selection),
 ///  - command-block heads through `Screen::noteBlockRowChange` and `Terminal::placeCommandBlockHeads`
 ///    (the parser's erases and prompts keep them on the host, by a rule the mirror applies to its own rows),
-///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated`.
+///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated` -- or
+///    `Terminal::screenReplayed` for a full replay the host's plumbing caused, which repaints rather than
+///    reports output. A primed mirror's screen switch, clear or reset is the program's doing and reports
+///    output (@see frameOf).
 ///
 /// The mirror OWNS its terminal's screen, and its scrollback is real scrollback built by scrolling
 /// rows through the page — so a resync must not erase it unless the server actually discarded its
@@ -41,6 +44,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -86,6 +90,66 @@ enum class LocalHistory : uint8_t
     Discard,
 };
 
+/// Why a primed mirror, or an attaching one, rewrote its whole page rather than applying an update row by
+/// row: the branch of ScreenMirror::apply() that took the update, or the explicit ScreenMirror::fullReplay().
+/// Its frame is announced by frameOf().
+enum class ReplayCause : uint8_t
+{
+    /// The first update into a fresh or restarted mirror (nothing recorded to compare with), or an explicit
+    /// fullReplay(): what the host showed already, whatever state the session is found in.
+    Attach,
+    /// A snapshot delta to a primed mirror: the server resynchronized -- a ResyncRequired, or output that
+    /// overran its scrollback floor between two pushes, which an increment can no longer name.
+    Resync,
+    /// The announced size moved: the window manager's doing, not the program's.
+    Resize,
+    /// The window into a larger host grid panned, or the host's page base moved back.
+    WindowMoved,
+    /// The program entered or left the alternate screen (or another DEC page).
+    ScreenSwitch,
+    /// The server's floor outran its viewport advance: the program cleared the history (`clear`, CSI 3 J).
+    /// A history limit lowered on the host can read as this rather than as a Reset; the frame is the same.
+    HistoryCleared,
+    /// Row identity lost at an unchanged size: the program reset the terminal (RIS).
+    ///
+    /// A false positive the wire cannot rule out: sizes that changed and changed back while the host's
+    /// snapshot was queued (80 -> 81 -> 80 columns) bump the generation at the size the mirror already has,
+    /// so the server's reflow reads as a Reset and dots a background tab. Telling them apart needs a cause
+    /// or size epoch in the snapshot, which is a protocol change.
+    Reset,
+};
+
+/// How a frame of the mirror terminal is announced to its listener.
+enum class MirrorFrame : uint8_t
+{
+    Replay, ///< Terminal::screenReplayed(): a repaint of what the host showed already, not news.
+    Output, ///< Terminal::screenUpdated(): what the program did, news to whatever tracks unseen output.
+};
+
+/// The one place that decides whether a full replay is news (the GUI's tab dot): it is when the program
+/// caused it, and only a primed mirror can tell that (an unprimed one's replay is the Attach).
+///
+/// A missed dot, never a false one: output that overran the server's scrollback floor between two pushes
+/// arrives as a snapshot and reads as a Resync. Rarer still, a history-limit change on the host bumps the
+/// generation as a reset does, and is a Reset (or a HistoryCleared, if it lowered the floor first). The one
+/// false dot is a server-coalesced resize that ended at the mirror's size (@see ReplayCause::Reset).
+/// @param cause Why the page was replayed.
+/// @return How its frame is announced.
+[[nodiscard]] constexpr MirrorFrame frameOf(ReplayCause cause) noexcept
+{
+    switch (cause)
+    {
+        case ReplayCause::Attach:
+        case ReplayCause::Resync:
+        case ReplayCause::Resize:
+        case ReplayCause::WindowMoved: return MirrorFrame::Replay;
+        case ReplayCause::ScreenSwitch:
+        case ReplayCause::HistoryCleared:
+        case ReplayCause::Reset: return MirrorFrame::Output;
+    }
+    return MirrorFrame::Replay;
+}
+
 /// Stateful per-session populator. Feed every Delta (after the owning `RemoteScreen` applied it);
 /// the mirror terminal is up to date when the call returns.
 class ScreenMirror
@@ -99,6 +163,11 @@ class ScreenMirror
     ///        this machine's identity as the daemon names machines (vthost::appSpecificIdentity).
     ///        Fixed for the mirror's life, as for the connection's: every attach builds a new mirror.
     ScreenMirror(vtbackend::Terminal& terminal, DaemonMachine daemon);
+
+    /// @return The command line a restart stopped in this session, as of the last apply() or replay();
+    ///         empty for none, or once the session started a command of its own. Untrusted text, bounded
+    ///         to vtbackend::MaxRecordedCommandLineBytes. Read on the reactor thread, like the mirror.
+    [[nodiscard]] std::string const& interruptedCommand() const noexcept { return _interruptedCommand; }
 
     /// Brings the mirror terminal up to date with @p screen after @p delta was applied to it.
     /// Falls back to a full replay on the first call, on snapshot deltas, and on generation,
@@ -116,6 +185,9 @@ class ScreenMirror
     ///
     /// Not defaulted: erasing the user's scrollback is the kind of decision a caller should have to
     /// write down.
+    ///
+    /// Its frame is announced as Terminal::screenReplayed(), not screenUpdated(): it is the Attach
+    /// (@see frameOf), so nothing that tracks unseen output (the GUI's tab badge) takes it for news.
     /// @param screen The mirrored screen to replay.
     /// @param history Whether to keep or erase the mirror's local scrollback.
     void fullReplay(RemoteScreen const& screen, LocalHistory history);
@@ -151,6 +223,13 @@ class ScreenMirror
     void applyEvent(proto::SessionEventPdu const& event);
 
   private:
+    /// The full replay itself, announced as frameOf(@p cause) says: what fullReplay() and every replaying
+    /// branch of apply() run.
+    /// @param screen The mirrored screen to replay.
+    /// @param history Whether to keep or erase the mirror's local scrollback.
+    /// @param cause Why the page is replayed.
+    void replay(RemoteScreen const& screen, LocalHistory history, ReplayCause cause);
+
     /// Replaces the mirror terminal's program-status records with the host's
     /// (Terminal::replaceProgramStatus), dropping each record whose state this build does not know. The
     /// caller holds the terminal lock.
@@ -165,6 +244,12 @@ class ScreenMirror
     /// Asserts the non-grid state a snapshot carries: title, cursor style, colors, working
     /// directory, status display and the two input-encoding protocols.
     void applySessionState(RemoteScreen const& screen);
+
+    /// Takes the host's default colors, and tells the terminal's frontend when the background moved, as an
+    /// OSC 11 would: the palette alone repaints nothing that binds the background.
+    /// @param foreground The default foreground, 0xRRGGBB.
+    /// @param background The default background, 0xRRGGBB.
+    void applyDefaultColors(uint32_t foreground, uint32_t background);
 
     /// Applies a DECSCUSR `Ps` (@see vthost::CursorStylePsTable).
     /// @param ps The style off the wire; 0 restores this terminal's configured default.
@@ -358,6 +443,8 @@ class ScreenMirror
     uint64_t _syncedCommandBlocks = 0;
     /// The epoch the block ids on this mirror's rows count in (proto::SessionState::commandBlockIdEpoch).
     uint64_t _commandBlockIdEpoch = 0;
+    /// @see interruptedCommand
+    std::string _interruptedCommand;
 
     /// Where the primary page stood, in this mirror's own row ids, when an update last wrote it: its first
     /// line held the host row at `_viewportBase`. Kept in ids rather than offsets because this terminal's

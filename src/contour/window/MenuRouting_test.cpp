@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/command/Command.hpp>
+#include <contour/config/ChromeTokenRows.hpp>
+#include <contour/test/MenuFixtures.hpp>
+#include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/MenuRouting.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <cstddef>
+#include <optional>
+#include <ranges>
+#include <vector>
+
+using contour::config::MenuPresentation;
+using contour::platform::MenuAnchor;
+using contour::platform::MenuPresentError;
+using contour::window::MenuRoute;
+using contour::window::presentMenu;
+
+namespace
+{
+contour::command::MenuTree sampleTree()
+{
+    using contour::command::MenuNode;
+    return contour::command::MenuTree {
+        .nodes = { MenuNode { .kind = contour::command::ContextMenuEntryKind::Command,
+                              .title = "New Tab",
+                              .availability = contour::command::RowAvailability::Enabled,
+                              .check = contour::command::RowCheck::None,
+                              .role = contour::command::MenuItemRole::None,
+                              .swatch = std::nullopt,
+                              .chord = std::nullopt,
+                              .shortcut = {},
+                              .actionIndex = 0,
+                              .children = {} },
+                   MenuNode { .kind = contour::command::ContextMenuEntryKind::Command,
+                              .title = "Copy",
+                              .availability = contour::command::RowAvailability::Enabled,
+                              .check = contour::command::RowCheck::None,
+                              .role = contour::command::MenuItemRole::None,
+                              .swatch = std::nullopt,
+                              .chord = std::nullopt,
+                              .shortcut = {},
+                              .actionIndex = 1,
+                              .children = {} } },
+        .actions = { contour::actions::NewTerminal {}, contour::actions::CopySelection {} },
+    };
+}
+} // namespace
+
+TEST_CASE("presentMenu keeps an in-scene menu in the scene", "[menurouting]")
+{
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto const route =
+        presentMenu(MenuPresentation::InScene, presenter, sampleTree(), MenuAnchor {}, [](std::size_t) {});
+    CHECK(route == MenuRoute::InScene);
+    CHECK(presenter.trees.empty());
+}
+
+TEST_CASE("presentMenu hands a native menu to the presenter", "[menurouting]")
+{
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto const tree = sampleTree();
+    auto const anchor = MenuAnchor { .window = nullptr, .position = QPointF { 12.0, 34.0 } };
+    auto const route = presentMenu(MenuPresentation::Native, presenter, tree, anchor, [](std::size_t) {});
+    CHECK(route == MenuRoute::Native);
+    REQUIRE(presenter.trees.size() == 1);
+    CHECK(presenter.trees.front().nodes == tree.nodes);
+    auto const& actions = presenter.trees.front().actions;
+    REQUIRE(actions.size() == tree.actions.size());
+    for (auto const i: std::views::iota(std::size_t { 0 }, actions.size()))
+        CHECK(contour::command::commandId(actions[i]) == contour::command::commandId(tree.actions[i]));
+    REQUIRE(presenter.anchors.size() == 1);
+    CHECK(presenter.anchors.front().window == anchor.window);
+    CHECK(presenter.anchors.front().position == anchor.position);
+}
+
+TEST_CASE("presentMenu falls back to the scene when the presenter cannot show it", "[menurouting]")
+{
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    presenter.result = std::unexpected(MenuPresentError::Unsupported);
+    auto const route =
+        presentMenu(MenuPresentation::Native, presenter, sampleTree(), MenuAnchor {}, [](std::size_t) {});
+    CHECK(route == MenuRoute::InScene);
+    CHECK(presenter.trees.size() == 1);
+}
+
+TEST_CASE("presentMenu passes the pick callback through", "[menurouting]")
+{
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto picked = std::optional<std::size_t> {};
+    auto const route =
+        presentMenu(MenuPresentation::Native, presenter, sampleTree(), MenuAnchor {}, [&](std::size_t index) {
+            picked = index;
+        });
+    CHECK(route == MenuRoute::Native);
+    presenter.pick(2);
+    CHECK(picked == std::size_t { 2 });
+}
+
+TEST_CASE("a native pick runs the action of the menu that was shown, not of a newer one", "[menurouting]")
+{
+    using contour::command::commandId;
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto published = contour::window::PublishedContextMenu {};
+
+    // Menu A is published and shown natively.
+    auto const menuA = sampleTree();
+    published.publish(menuA);
+    auto ran = std::vector<contour::actions::Action> {};
+    auto const route = presentMenu(
+        MenuPresentation::Native,
+        presenter,
+        menuA,
+        MenuAnchor {},
+        contour::window::pickFromShown(
+            menuA.actions, [&](contour::actions::Action const& action) { ran.push_back(action); }));
+    REQUIRE(route == MenuRoute::Native);
+
+    // While A tracks, the same surface is reopened: B replaces it, with other actions at the same indices.
+    auto menuB = sampleTree();
+    // A vector moved in, not a list assigned element-wise: the Action variant's copy assignment would cost
+    // GCC at -O2 -g some 7 GB more memory and seven times the time.
+    menuB.actions = std::vector<contour::actions::Action> { contour::actions::Quit {},
+                                                            contour::actions::PasteClipboard {} };
+    published.publish(menuB);
+
+    presenter.pick(1);
+
+    REQUIRE(ran.size() == 1);
+    CHECK(commandId(ran.front()) == commandId(menuA.actions[1]));
+    CHECK(commandId(ran.front()) != commandId(published.actionAt(1).value()));
+
+    // An index the shown menu does not hold runs nothing.
+    presenter.pick(menuA.actions.size());
+    CHECK(ran.size() == 1);
+}
+
+TEST_CASE("the Fluent row routes in-scene even with a willing presenter", "[menurouting]")
+{
+    // A presenter that would show the menu, were it asked: the Fluent row's token never asks (R-a).
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto const presentation =
+        contour::config::ChromeTokenRows[static_cast<std::size_t>(contour::config::ChromeStyle::Fluent)]
+            .layout.menu;
+    auto const route = presentMenu(presentation, presenter, sampleTree(), MenuAnchor {}, [](std::size_t) {});
+    CHECK(route == MenuRoute::InScene);
+    CHECK(presenter.trees.empty());
+}

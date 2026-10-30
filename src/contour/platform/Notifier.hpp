@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/UserNotificationCenter.hpp>
+
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <vtpty/SandboxInfo.hpp>
@@ -172,6 +175,54 @@ enum class NotificationBackend : uint8_t
 /// @return The notifier; never null.
 [[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay,
                                                             TrayNotifier::ShowMessage const& showTrayMessage);
+
+/// Which notifier a session or the application raises through.
+enum class SessionNotifierKind : uint8_t
+{
+    PlatformDefault = 0, ///< The platform's own: FreeDesktop or the portal on Linux, the tray elsewhere.
+    UserNotifications,   ///< The operating system's user-notification centre (macOS Notification Center).
+};
+
+/// The notifier kind for a host and the centre it can reach.
+///
+/// The host is the one the app was given (config::HostPlatform), not a compile-time choice, so a test
+/// reaches the macOS path on any OS. Only macOS has a centre that replaces the platform default; Linux
+/// keeps FreeDesktop or the portal and Windows keeps the tray.
+/// @param host The host the app runs on.
+/// @param centre Whether the app's notification centre raises anything.
+/// @return UserNotifications on macOS with an Available centre, else PlatformDefault.
+[[nodiscard]] constexpr SessionNotifierKind selectSessionNotifier(
+    config::HostPlatform host, UserNotificationAvailability centre) noexcept
+{
+    switch (host)
+    {
+        case config::HostPlatform::MacOS:
+            return centre == UserNotificationAvailability::Available ? SessionNotifierKind::UserNotifications
+                                                                     : SessionNotifierKind::PlatformDefault;
+        case config::HostPlatform::Windows:
+        case config::HostPlatform::KdePlasma:
+        case config::HostPlatform::Other: break;
+    }
+    return SessionNotifierKind::PlatformDefault;
+}
+
+/// The notifier of one owner (a session, or the application) on a host that may have a notification centre.
+///
+/// A UserNotificationNotifier over @p centre when selectSessionNotifier() says so, whose fallback is the
+/// tray, for when the centre turns out unusable; otherwise the platform's own, as the
+/// overload without a centre builds it.
+///
+/// @param closeDelay      Passed to the notifier chosen.
+/// @param showTrayMessage How a message reaches the tray, where the platform has no desktop to raise it on.
+/// @param centre          The application's notification centre; it must outlive the notifier.
+/// @param requestPrefix   What the owner's request ids start with in the centre.
+/// @param host            The host the app runs on.
+/// @return The notifier; never null.
+[[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay,
+                                                            TrayNotifier::ShowMessage const& showTrayMessage,
+                                                            IUserNotificationCenter& centre,
+                                                            std::string requestPrefix,
+                                                            config::HostPlatform host);
 
 } // namespace contour::platform
 

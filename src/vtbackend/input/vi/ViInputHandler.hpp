@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/PasteStrip.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputHandler.hpp>
 
@@ -180,7 +181,7 @@ class ViInputHandler: public InputHandler
         virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(ViMotion motion) = 0;
         virtual void open(TextObjectScope scope, TextObject textObject) = 0;
-        virtual void paste(unsigned count, bool stripped) = 0;
+        virtual void paste(unsigned count, PasteStrip strip) = 0;
 
         virtual void modeChanged(ViMode mode) = 0;
 

@@ -5,8 +5,12 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace vtpty
 {
@@ -46,6 +50,30 @@ class MockPty: public Pty
     /// transition under test.
     void setWriteBehavior(PtyWriteBehavior behavior) noexcept { _writeBehavior = behavior; }
 
+    /// Names the program in front, as a shell starting one changes it. Runtime state, as for a real pty.
+    /// @param name The name foregroundProcessName() reports; none for no process.
+    void setForegroundProcessName(std::optional<std::string> name)
+    {
+        _foregroundProcessName = std::move(name);
+    }
+
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override
+    {
+        return _foregroundProcessName;
+    }
+
+    /// Sets what the terminal does with typed text, as the program in a real one changes it. Runtime state
+    /// rather than construction-time configuration: a test flips it mid-run, as sudo turning echo off does.
+    /// @param echo The state inputEcho() reports.
+    void setInputEcho(InputEcho echo) noexcept { _inputEcho = echo; }
+
+    [[nodiscard]] InputEcho inputEcho() const noexcept override { return _inputEcho; }
+
+    /// Runs @p observer at the start of every write(), before the bytes are stored, so a test can read what
+    /// the writer had done by the time its bytes left. Runtime state, as for the other test hooks.
+    /// @param observer What to run; empty for nothing.
+    void setWriteObserver(std::function<void()> observer) { _writeObserver = std::move(observer); }
+
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
     [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
 
@@ -73,9 +101,14 @@ class MockPty: public Pty
     std::string _inputBuffer;
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;
-    bool _closed = false;
+    /// Atomic because the terminal loop closes the device as a read ends it, while the owner's thread
+    /// asks isClosed() on teardown (TerminalSession's destructor) -- the settings preview's real case.
+    std::atomic<bool> _isClosed = false;
     PtyWriteBehavior _writeBehavior = PtyWriteBehavior::Accept;
     PtySlaveDummy _slave;
+    std::optional<std::string> _foregroundProcessName; ///< @see setForegroundProcessName
+    InputEcho _inputEcho = InputEcho::Unknown;         ///< @see setInputEcho
+    std::function<void()> _writeObserver;              ///< @see setWriteObserver
 };
 
 } // namespace vtpty

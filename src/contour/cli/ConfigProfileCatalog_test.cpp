@@ -71,3 +71,50 @@ TEST_CASE("daemon.history_limit overrides the profile's history on the host", "[
     CHECK(work.settings.historyLimits.capacity
           == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(50000) });
 }
+
+TEST_CASE("ConfigProfileCatalog hands out the palette of the preference asked for", "[cli][profiles][colors]")
+{
+    auto const builtin = [](std::string_view name) {
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        return palette;
+    };
+    auto const dark = builtin("contour-dark");
+    auto const light = builtin("contour-light");
+    REQUIRE(dark.defaultBackground != light.defaultBackground);
+
+    SECTION("a dual color configuration pairs one scheme with each preference")
+    {
+        auto const catalog = ConfigProfileCatalog { loadConfigFromYaml("default_profile: main\n"
+                                                                       "profiles:\n"
+                                                                       "  main:\n"
+                                                                       "    shell: /bin/zsh\n"
+                                                                       "    colors:\n"
+                                                                       "      dark: contour-dark\n"
+                                                                       "      light: contour-light\n"),
+                                                    {},
+                                                    vtbackend::ColorPreference::Light };
+        CHECK(catalog.colorPalette("main", vtbackend::ColorPreference::Dark).defaultBackground
+              == dark.defaultBackground);
+        CHECK(catalog.colorPalette("main", vtbackend::ColorPreference::Light).defaultBackground
+              == light.defaultBackground);
+        // An unknown name asks the default profile, as resolve() does.
+        CHECK(catalog.colorPalette("nope", vtbackend::ColorPreference::Dark).defaultBackground
+              == dark.defaultBackground);
+    }
+
+    SECTION("a single scheme is the same for both")
+    {
+        auto const catalog = ConfigProfileCatalog { loadConfigFromYaml("default_profile: main\n"
+                                                                       "profiles:\n"
+                                                                       "  main:\n"
+                                                                       "    shell: /bin/zsh\n"
+                                                                       "    colors: contour-light\n"),
+                                                    {},
+                                                    vtbackend::ColorPreference::Light };
+        CHECK(catalog.colorPalette("main", vtbackend::ColorPreference::Dark).defaultBackground
+              == light.defaultBackground);
+        CHECK(catalog.colorPalette("main", vtbackend::ColorPreference::Light).defaultBackground
+              == light.defaultBackground);
+    }
+}

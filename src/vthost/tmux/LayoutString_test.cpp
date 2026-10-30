@@ -141,6 +141,79 @@ TEST_CASE("pane-id backtracking distinguishes ids from sibling geometry", "[vtho
     CHECK_FALSE(parsed->children[1].paneId.has_value());
 }
 
+TEST_CASE("tmux 3.8's JSON layout parses to the tree the old string describes", "[vthost][layout]")
+{
+    // What tmux 3.8 prints for `new-session -x 160 -y 50; split-window -h; split-window -v`.
+    auto const json =
+        std::string_view { R"({"V":2,"L":{"t":"h","w":160,"h":50,"x":0,"y":0,"c":[)"
+                           R"({"t":"p","w":80,"h":50,"x":0,"y":0,"l":1,"i":0,"I":"%0"},)"
+                           R"({"t":"v","w":79,"h":50,"x":81,"y":0,"c":[)"
+                           R"({"t":"p","w":79,"h":25,"x":81,"y":0,"l":0,"i":1,"I":"%1"},)"
+                           R"({"t":"p","w":79,"h":24,"x":81,"y":26,"a":true,"i":2,"I":"%2"}]}]}})" };
+    auto const old = std::string_view { "160x50,0,0{80x50,0,0,0,79x50,81,0[79x25,81,0,1,79x24,81,26,2]}" };
+    auto const oldWithChecksum = std::format("{:04x},{}", layoutChecksum(old), old);
+
+    auto const parsed = parseLayout(json);
+    REQUIRE(parsed.has_value());
+    auto const expected = parseLayout(oldWithChecksum);
+    REQUIRE(expected.has_value());
+    CHECK(*parsed == *expected);
+    CHECK(collapseToBinary(*parsed).leafCount() == 3);
+}
+
+TEST_CASE("a JSON layout leaves its floating panes out of the partition", "[vthost][layout]")
+{
+    auto const json =
+        std::string_view { R"({"V":2,"L":{"t":"h","w":160,"h":50,"x":0,"y":0,"c":[)"
+                           R"({"t":"p","w":80,"h":50,"x":0,"y":0,"l":1,"i":0,"I":"%0"},)"
+                           R"({"t":"p","w":79,"h":50,"x":81,"y":0,"l":0,"i":1,"I":"%1"},)"
+                           R"({"t":"p","w":80,"h":12,"x":4,"y":2,"a":true,"i":2,"z":0,"I":"%2"}]}})" };
+    auto const parsed = parseLayout(json);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->children.size() == 2);
+    CHECK(collapseToBinary(*parsed).leafCount() == 2);
+}
+
+TEST_CASE("a malformed JSON layout is rejected", "[vthost][layout]")
+{
+    auto const bad = std::array {
+        R"({"V":2})",                                         // no layout
+        R"({"V":2,"L":{"t":"p","w":80,"h":50,"x":0}})",       // no y
+        R"({"V":2,"L":{"t":"q","w":80,"h":50,"x":0,"y":0}})", // unknown type
+        R"({"V":2,"L":{"t":"h","w":10,"h":5,"x":0,"y":0,"c":[)"
+        R"({"t":"p","w":3,"h":5,"x":0,"y":0},{"t":"p","w":3,"h":5,"x":4,"y":0}]}})", // not a partition
+        R"({"V":2,"L":{"t":"p","w":80,"h":50,"x":0,"y":0}} trailing)",
+        R"({"V":2,"L":{"t":"p","w":80,"h":50,"x":0,"y":0})", // unterminated
+    };
+    for (auto const* text: bad)
+        CHECK_FALSE(parseLayout(text).has_value());
+}
+
+TEST_CASE("a pathologically nested JSON layout is refused, not crashed", "[vthost][layout]")
+{
+    // Well-formed, so only the nesting bound can refuse it.
+    constexpr auto Depth = std::size_t { 5000 };
+    auto text = std::string { R"({"V":2,"L":)" };
+    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, Depth))
+        text += R"({"t":"v","w":9,"h":9,"x":0,"y":0,"c":[{"t":"p","w":9,"h":4,"x":0,"y":0},)";
+    text += R"({"t":"p","w":9,"h":4,"x":0,"y":0})";
+    for ([[maybe_unused]] auto const _: std::views::iota(std::size_t { 0 }, Depth))
+        text += "]}";
+    text += "}";
+    CHECK_FALSE(parseLayout(text).has_value());
+}
+
+TEST_CASE("a JSON layout with too many nodes is refused", "[vthost][layout]")
+{
+    // A valid partition -- N one-cell panes and their N - 1 dividers -- so only the node bound refuses it.
+    constexpr auto Panes = std::size_t { 2000 };
+    auto text = std::format(R"({{"V":2,"L":{{"t":"h","w":{},"h":1,"x":0,"y":0,"c":[)", (2 * Panes) - 1);
+    for (auto const i: std::views::iota(std::size_t { 0 }, Panes))
+        text += std::format(R"({}{{"t":"p","w":1,"h":1,"x":{},"y":0}})", i == 0 ? "" : ",", i * 2);
+    text += "]}}";
+    CHECK_FALSE(parseLayout(text).has_value());
+}
+
 TEST_CASE("an n-ary container collapses into a right-leaning binary chain", "[vthost][layout]")
 {
     // Even-horizontal over three panes: 53 + 1 + 52 + 1 + 53 == 160 columns.

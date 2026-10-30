@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <ranges>
@@ -82,45 +83,45 @@ TEST_CASE("captureBuffer", "[screen]")
 
     SECTION("lines: 0")
     {
-        screen.captureBuffer(LineCount(0), false);
+        screen.captureBuffer(LineCount(0), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;\033\\"));
     }
     SECTION("lines: 1")
     {
-        screen.captureBuffer(LineCount(1), false);
+        screen.captureBuffer(LineCount(1), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;KLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 2")
     {
-        screen.captureBuffer(LineCount(2), false);
+        screen.captureBuffer(LineCount(2), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;FGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 3")
     {
-        screen.captureBuffer(LineCount(3), false);
+        screen.captureBuffer(LineCount(3), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 4")
     {
-        screen.captureBuffer(LineCount(4), false);
+        screen.captureBuffer(LineCount(4), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5")
     {
-        screen.captureBuffer(LineCount(5), false);
+        screen.captureBuffer(LineCount(5), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5 (+1 overflow)")
     {
-        screen.captureBuffer(LineCount(6), false);
+        screen.captureBuffer(LineCount(6), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
@@ -534,6 +535,53 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
         mock.writeToScreen("\033]11;?\033\\");
         mock.terminal.flushInput();
         CHECK(mock.replyData() == original);
+    }
+}
+
+TEST_CASE("OSC 11, OSC 111, DECAC 1, DECSTR and RIS announce the default background",
+          "[screen][osc][background-event]")
+{
+    // Each row is applied in order; an event fires only on a real change, so RIS follows a fresh OSC 11.
+    struct Row
+    {
+        std::string_view input {};
+        int count = 0;
+        RGBColor colour {};
+    };
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const defaultBackground = mock.terminal.defaultColorPalette().defaultBackground;
+    auto const decacBackground = mock.terminal.colorPalette().indexedColor(4);
+
+    auto const rows = std::array {
+        Row { .input = "\033]11;rgb:1010/1010/1010\033\\", .count = 1, .colour = 0x101010_rgb },
+        Row { .input = "\033]111\033\\", .count = 2, .colour = defaultBackground },
+        Row { .input = "\033[1;7;4,|", .count = 3, .colour = decacBackground },
+        Row { .input = "\033[!p", .count = 4, .colour = defaultBackground },
+        Row { .input = "\033]11;rgb:2020/2020/2020\033\\", .count = 5, .colour = 0x202020_rgb },
+        Row { .input = "\033c", .count = 6, .colour = defaultBackground },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.input));
+        mock.writeToScreen(row.input);
+        CHECK(mock.defaultBackgroundChangeCount == row.count);
+        CHECK(mock.defaultBackground == row.colour);
+    }
+
+    SECTION("a foreground change is not announced")
+    {
+        mock.writeToScreen("\033]10;rgb:3030/3030/3030\033\\");
+        CHECK(mock.defaultBackgroundChangeCount == 6);
+    }
+
+    SECTION("a reset whose background is already the default is not announced")
+    {
+        mock.writeToScreen("\033]111\033\\");
+        mock.writeToScreen("\033[!p");
+        mock.writeToScreen("\033c");
+        CHECK(mock.defaultBackgroundChangeCount == 6);
     }
 }
 

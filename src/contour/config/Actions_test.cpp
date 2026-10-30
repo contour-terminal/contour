@@ -11,12 +11,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <format>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
 using namespace contour;
+using namespace std::string_view_literals;
 
 TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][repeat]")
 {
@@ -39,6 +45,9 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     // A held toggle would flip zoom once per repeat, leaving the final state up to the repeat count
     // rather than the user.
     CHECK(actions::isNonRepeatable(actions::Action { actions::TogglePaneZoom {} }));
+    // Zooming the window is a toggle too, and minimizing it a one-shot gesture.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::ZoomWindow {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::MinimizeWindow {} }));
 
     // LaunchLayout spawns a whole window's worth of tabs/panes per fire, and SaveLayout writes a
     // file per fire; a held key must not amplify either into a burst.
@@ -83,6 +92,19 @@ TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][par
     CHECK(std::holds_alternative<actions::ResizePane>(*actions::fromString("ResizePane")));
     // An unknown name yields nullopt.
     CHECK_FALSE(actions::fromString("NoSuchPaneAction").has_value());
+}
+
+TEST_CASE("actions::fromString names the window's Minimize and Zoom", "[actions][parse]")
+{
+    CHECK(std::holds_alternative<actions::MinimizeWindow>(*actions::fromString("MinimizeWindow")));
+    CHECK(std::holds_alternative<actions::ZoomWindow>(*actions::fromString("ZoomWindow")));
+}
+
+TEST_CASE("actions::fromString names the three chrome focus actions", "[actions][parse]")
+{
+    CHECK(std::holds_alternative<actions::FocusNextArea>(*actions::fromString("FocusNextArea")));
+    CHECK(std::holds_alternative<actions::FocusPreviousArea>(*actions::fromString("FocusPreviousArea")));
+    CHECK(std::holds_alternative<actions::FocusToolbar>(*actions::fromString("FocusToolbar")));
 }
 
 TEST_CASE("actions::filterRepeatableActions drops ClosePane on auto-repeat", "[actions][repeat]")
@@ -308,6 +330,15 @@ TEST_CASE("actions: the block copy actions write their arguments as config token
           == "CopyCommandLine, target: cursor, block: 2");
 }
 
+TEST_CASE("actions: OpenConfiguration writes in_editor for the editor target alone", "[actions]")
+{
+    CHECK(std::format("{}", actions::Action { actions::OpenConfiguration {} }) == "OpenConfiguration");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::OpenConfiguration { .target = actions::ConfigurationTarget::Editor } })
+          == "OpenConfiguration, in_editor: true");
+}
+
 TEST_CASE("actions: CopySelection writes the arguments it carries", "[actions][semanticblocks]")
 {
     CHECK(std::format("{}", actions::Action { actions::CopySelection {} }) == "CopySelection");
@@ -354,4 +385,79 @@ TEST_CASE("actions: OpenCommandOutput writes its arguments and is not repeated",
 
     // Every fire forks a pager pane, as a split does: a held key must not open a burst of them.
     CHECK(actions::isNonRepeatable(actions::Action { actions::OpenCommandOutput {} }));
+}
+
+TEST_CASE("Actions: the tab-menu actions map by name", "[actions][catalog]")
+{
+    CHECK(std::holds_alternative<actions::CloseOtherTabs>(*actions::fromString("CloseOtherTabs")));
+    CHECK(std::holds_alternative<actions::CloseTabsToRight>(*actions::fromString("CloseTabsToRight")));
+    CHECK(std::holds_alternative<actions::MoveTabToNewWindow>(*actions::fromString("MoveTabToNewWindow")));
+    CHECK(std::holds_alternative<actions::ShowAbout>(*actions::fromString("ShowAbout")));
+}
+
+TEST_CASE("Actions: the tab-menu actions are dropped on key repeat", "[actions][repeat]")
+{
+    std::vector<actions::Action> const held {
+        actions::CloseOtherTabs {},
+        actions::CloseTabsToRight {},
+        actions::MoveTabToNewWindow {},
+        actions::ShowAbout {},
+    };
+    CHECK(actions::filterRepeatableActions(held).empty());
+}
+
+TEST_CASE("actions::fromString names Use Selection for Find", "[actions][parse]")
+{
+    auto const action = contour::actions::fromString("SearchSelection");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::SearchSelection>(*action));
+
+    auto const& catalog = contour::actions::actionCatalog();
+    auto const entry = std::ranges::find(
+        catalog, std::string_view { "SearchSelection" }, &contour::actions::ActionCatalogEntry::name);
+    REQUIRE(entry != catalog.end());
+    CHECK_FALSE(entry->documentation.empty());
+}
+
+TEST_CASE("actions::fromString names ToggleCommandFold, a non-repeatable block action", "[actions][parse]")
+{
+    auto const action = contour::actions::fromString("ToggleCommandFold");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::ToggleCommandFold>(*action));
+    CHECK(contour::actions::isNonRepeatable(*action));
+
+    auto const& catalog = contour::actions::actionCatalog();
+    auto const entry = std::ranges::find(
+        catalog, std::string_view { "ToggleCommandFold" }, &contour::actions::ActionCatalogEntry::name);
+    REQUIRE(entry != catalog.end());
+    CHECK_FALSE(entry->documentation.empty());
+}
+
+TEST_CASE("actions: the block focus actions round-trip and are Blocks", "[actions][catalog][blockfocus]")
+{
+    using actions::Action;
+    auto const rows = std::array {
+        std::pair { "FocusPreviousCommand"sv, Action { actions::FocusPreviousCommand {} } },
+        std::pair { "FocusNextCommand"sv, Action { actions::FocusNextCommand {} } },
+        std::pair { "SelectPreviousCommandOutput"sv, Action { actions::SelectPreviousCommandOutput {} } },
+        std::pair { "SelectNextCommandOutput"sv, Action { actions::SelectNextCommandOutput {} } },
+        std::pair { "OpenBlockMenu"sv, Action { actions::OpenBlockMenu {} } },
+        std::pair { "ClearCommandBlockFocus"sv, Action { actions::ClearCommandBlockFocus {} } },
+    };
+    for (auto const& [name, action]: rows)
+    {
+        INFO(name);
+        auto const parsed = actions::fromString(std::string { name });
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->index() == action.index());
+        CHECK(actions::actionCatalog()[action.index()].name == name);
+    }
+
+    // The four steps repeat when the key is held; the menu and the release of the focus do not.
+    for (auto const& [name, action]: rows)
+    {
+        INFO(name);
+        auto const steps = name.starts_with("Focus") || name.starts_with("Select");
+        CHECK(actions::isNonRepeatable(action) == !steps);
+    }
 }

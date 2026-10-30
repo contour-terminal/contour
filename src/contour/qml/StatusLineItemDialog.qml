@@ -21,6 +21,13 @@ Popup {
 
     /// Every cell flag an item may carry, as [{ key, label }], from SettingsController::indicatorFlags.
     property var flagCatalog: []
+    /// The colour roles a colour field accepts beside a hex value, from
+    /// SettingsController::indicatorColorRoles.
+    property var colorRoles: []
+    /// The item edit() was opened with, untouched. apply() starts from a copy of it, so a payload the
+    /// dialog has no control for -- InputMode's Hide= and Chip, a MaxWidth=, Context's Verbosity= -- is
+    /// carried through an edit instead of being deleted by it.
+    property var original: ({})
 
     /// Emitted with the edited item when the user accepts.
     signal applied(int segmentIndex, int itemIndex, var item)
@@ -28,14 +35,6 @@ Popup {
     signal removed(int segmentIndex, int itemIndex)
     /// Emitted when the user moves the item by @p delta places within its segment.
     signal moved(int segmentIndex, int itemIndex, int delta)
-
-    // Live OS palette handle, so the dialog follows dark/light in realtime.
-    SystemPalette {
-        id: sys
-        colorGroup: SystemPalette.Active
-    }
-    readonly property color subtleText: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.6)
-    readonly property color hairline: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.12)
 
     // Which item is being edited.
     property int segmentIndex: -1
@@ -93,6 +92,7 @@ Popup {
         root.segmentIndex = segmentIndex
         root.itemIndex = itemIndex
         root.segmentLength = segmentLength
+        root.original = item
         root.itemType = item.type !== undefined ? item.type : ""
         root.itemLabel = item.label !== undefined ? item.label : root.itemType
         root.itemText = item.text !== undefined ? item.text : ""
@@ -122,9 +122,9 @@ Popup {
         root.open()
     }
 
-    /// Assembles the edited properties back into an item and reports it.
+    /// Assembles the edited properties over a copy of the original item and reports it.
     function apply() {
-        var item = {
+        var item = Object.assign({}, root.original, {
             "type": root.itemType,
             "label": root.itemLabel,
             "displayName": root.itemLabel,
@@ -135,7 +135,7 @@ Popup {
             "bgColor": root.bgColorHex,
             "textLeft": root.textLeft,
             "textRight": root.textRight
-        }
+        })
         // A Text, Command or Extension item is named by its own content, the way parseIndicatorSegment names it.
         if (root.isText) {
             item.text = root.itemText
@@ -165,31 +165,29 @@ Popup {
     // be clipped by the scrolling settings pane it was opened from.
     parent: Overlay.overlay
     anchors.centerIn: Overlay.overlay
-    width: Math.min(480, Overlay.overlay ? Overlay.overlay.width - 48 : 480)
+    width: Math.min(chromeStyle.settings.listMaxWidth, Overlay.overlay ? Overlay.overlay.width - chromeStyle.space.s8 + chromeStyle.space.s8 : chromeStyle.settings.listMaxWidth)
     modal: true
     focus: true
-    padding: 16
+    padding: chromeStyle.space.s6
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 12
+        spacing: chromeStyle.space.s5
 
         RowLayout {
             Layout.fillWidth: true
             Label {
                 text: root.itemLabel
-                font.pointSize: 12
-                font.weight: Font.DemiBold
-                color: sys.windowText
+                font: chromeStyle.type.bodyStrong
+                color: chromeStyle.colors.settingsLabel
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
             Label {
                 text: "{" + root.itemType + "}"
-                color: root.subtleText
-                font.family: "monospace"
-                font.pointSize: 9
+                color: chromeStyle.colors.settingsHelp
+                font: Qt.font({ family: "monospace", pixelSize: chromeStyle.type.footnote.pixelSize })
             }
         }
 
@@ -197,15 +195,16 @@ Popup {
         ColumnLayout {
             visible: root.isText || root.isCommand || root.isExtension
             Layout.fillWidth: true
-            spacing: 2
+            spacing: chromeStyle.space.s1
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: chromeStyle.space.s5
                 Label {
                     text: root.isCommand ? qsTr("Program") : root.isExtension ? qsTr("Extension") : qsTr("Text")
-                    color: sys.windowText
-                    Layout.preferredWidth: 130
+                    font: chromeStyle.type.body
+                    color: chromeStyle.colors.settingsLabel
+                    Layout.preferredWidth: chromeStyle.settings.sidebarWidth
                 }
                 TextField {
                     objectName: "indicatorItemTextField"
@@ -226,14 +225,15 @@ Popup {
                 objectName: "indicatorTextWarning"
                 visible: root.isText && !root.textIsRepresentable
                 Layout.fillWidth: true
-                Layout.leftMargin: 138
+                Layout.leftMargin: chromeStyle.settings.sidebarWidth + chromeStyle.space.s5
                 wrapMode: Text.WordWrap
-                font.pointSize: 8
+                font: chromeStyle.type.footnote
                 // Not merely advisory: with one of these in it, the text can only be stored unstyled,
                 // because a template cannot escape them.
                 text: qsTr("A comma or a brace cannot be stored with styling — remove it, or the styling "
                            + "on this text will be dropped.")
-                color: "#e0a030"
+                // Reads paletteRevision so the binding re-evaluates on a light/dark flip (see UiStyleProvider).
+                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(chromeStyle.statusWarning)
             }
         }
 
@@ -241,13 +241,14 @@ Popup {
         GridLayout {
             Layout.fillWidth: true
             columns: 2
-            columnSpacing: 8
-            rowSpacing: 6
+            columnSpacing: chromeStyle.space.s5
+            rowSpacing: chromeStyle.space.s3
 
             Label {
                 text: qsTr("Before")
-                color: sys.windowText
-                Layout.preferredWidth: 130
+                font: chromeStyle.type.body
+                color: chromeStyle.colors.settingsLabel
+                Layout.preferredWidth: chromeStyle.settings.sidebarWidth
             }
             TextField {
                 Layout.fillWidth: true
@@ -259,8 +260,9 @@ Popup {
 
             Label {
                 text: qsTr("After")
-                color: sys.windowText
-                Layout.preferredWidth: 130
+                font: chromeStyle.type.body
+                color: chromeStyle.colors.settingsLabel
+                Layout.preferredWidth: chromeStyle.settings.sidebarWidth
             }
             TextField {
                 Layout.fillWidth: true
@@ -273,22 +275,22 @@ Popup {
         // Every flag the template grammar accepts, straight from C++.
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 4
+            spacing: chromeStyle.space.s2
             Label {
                 text: qsTr("Style")
-                color: sys.windowText
-                font.weight: Font.DemiBold
+                color: chromeStyle.colors.settingsLabel
+                font: chromeStyle.type.bodyStrong
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: 4
+                spacing: chromeStyle.space.s2
                 Repeater {
                     model: root.flagCatalog
                     delegate: Button {
                         required property var modelData
                         objectName: "indicatorFlagButton"
                         text: modelData.label
-                        font.pointSize: 8
+                        font: chromeStyle.type.footnote
                         flat: true
                         checkable: true
                         checked: root.flags[modelData.key] === true
@@ -299,32 +301,40 @@ Popup {
             }
         }
 
-        // Colours. Each is a hex field plus a swatch; clearing the field unsets the colour.
-        ColorSlotField {
+        // Colours. Each is a hex or role field plus a swatch; clearing the field unsets the colour.
+        StatusLineColorField {
             Layout.fillWidth: true
+            fieldName: "foregroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Foreground")
             isSet: root.hasColor
             value: root.colorHex
             onChanged: (isSet, hex) => { root.hasColor = isSet; root.colorHex = hex }
         }
-        ColorSlotField {
+        StatusLineColorField {
             Layout.fillWidth: true
+            fieldName: "backgroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Background")
             isSet: root.hasBgColor
             value: root.bgColorHex
             onChanged: (isSet, hex) => { root.hasBgColor = isSet; root.bgColorHex = hex }
         }
-        ColorSlotField {
+        StatusLineColorField {
             Layout.fillWidth: true
             visible: root.isTabs
+            fieldName: "activeTabForegroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Active tab foreground")
             isSet: root.hasActiveColor
             value: root.activeColorHex
             onChanged: (isSet, hex) => { root.hasActiveColor = isSet; root.activeColorHex = hex }
         }
-        ColorSlotField {
+        StatusLineColorField {
             Layout.fillWidth: true
             visible: root.isTabs
+            fieldName: "activeTabBackgroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Active tab background")
             isSet: root.hasActiveBackground
             value: root.activeBackgroundHex
@@ -335,26 +345,28 @@ Popup {
         RowLayout {
             visible: root.isTabs
             Layout.fillWidth: true
-            spacing: 8
+            spacing: chromeStyle.space.s5
             Label {
                 text: qsTr("Tab separator")
-                color: sys.windowText
-                Layout.preferredWidth: 130
+                font: chromeStyle.type.body
+                color: chromeStyle.colors.settingsLabel
+                Layout.preferredWidth: chromeStyle.settings.sidebarWidth
             }
             TextField {
                 Layout.fillWidth: true
                 text: root.separator
+                font: chromeStyle.type.body
                 placeholderText: qsTr("default: |")
                 selectByMouse: true
                 onTextChanged: root.separator = text
             }
         }
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.hairline }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: chromeStyle.borderWidth; color: chromeStyle.colors.settingsSeparator }
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: chromeStyle.space.s5
 
             // Reordering lives here rather than on the chip: a chip with arrows on it is three hit targets
             // in twenty pixels, and this is where the user already is.

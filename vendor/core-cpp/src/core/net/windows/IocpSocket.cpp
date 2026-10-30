@@ -678,6 +678,13 @@ void IocpSocket::setReceiveDeadline(std::chrono::milliseconds deadline) noexcept
     _receiveDeadline = std::max(deadline, std::chrono::milliseconds::zero());
 }
 
+std::expected<void, NetError> IocpSocket::armKeepAlive(KeepAliveSettings const& settings)
+{
+    if (_closed || _socket == detail::InvalidSocket)
+        return std::unexpected(closedSocket("armKeepAlive"));
+    return detail::armKeepAlive(reinterpret_cast<platform::NativeHandle>(_socket), settings);
+}
+
 ResultAwaitable<void> IocpSocket::shutdownWrite()
 {
     // The precondition -- no write outstanding -- is the caller's, and is not asserted here, as it

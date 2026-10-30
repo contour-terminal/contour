@@ -292,6 +292,7 @@ install_deps_ubuntu() {
             qt6-multimedia-dev
             qt6-qpa-plugins
             qt6-shadertools-dev
+            qt6-svg-dev
             qt6-wayland-dev
             libwayland-dev
             wayland-protocols
@@ -333,6 +334,13 @@ install_deps_ubuntu() {
                 packages="$packages qt6-wayland-dev-tools"
                 ;;
         esac
+    fi
+
+    # The header bar's bundled icons are SVG, read through Qt SVG's image plugin. Debian moved it out of
+    # libqt6svg6 into qt6-svg-plugins in 6.7.2-5 (trixie, Ubuntu 25.04); older releases ship it in
+    # libqt6svg6, which qt6-svg-dev pulls in, and have no qt6-svg-plugins to install.
+    if apt-cache show qt6-svg-plugins >/dev/null 2>&1; then
+        packages="$packages qt6-svg-plugins"
     fi
 
     fetch_and_unpack_gsl
@@ -395,6 +403,7 @@ install_deps_FreeBSD() {
         qt6-base \
         qt6-declarative \
         qt6-multimedia \
+        qt6-svg \
         qt6-tools \
         xcb \
         yaml-cpp
@@ -456,6 +465,7 @@ install_deps_arch() {
             qt6-declarative \
             qt6-multimedia \
             qt6-shadertools \
+            qt6-svg \
             qt6-wayland \
             wayland \
             wayland-protocols \
@@ -512,6 +522,7 @@ install_deps_suse() {
             qt6-quick-devel
             qt6-quick-devel
             qt6-quickcontrols2-devel
+            qt6-svg-devel
             qt6-wayland-devel
             wayland-devel
             wayland-protocols-devel
@@ -567,6 +578,7 @@ install_deps_fedora() {
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
             qt6-qtmultimedia-devel
+            qt6-qtsvg
             qt6-qtwayland-devel
             qt6-qtquickcontrols2-devel
             wayland-devel

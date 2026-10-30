@@ -64,6 +64,7 @@ class PosixSocket final: public ISocket
     void cancelRead() noexcept override;
     [[nodiscard]] ResultAwaitable<void> shutdownWrite() override;
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override;
+    [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override;
 
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }
 

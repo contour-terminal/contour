@@ -152,7 +152,7 @@ if(CRISPY_TESTING)
     if(NOT WIN32)
         target_sources(crispy_test PRIVATE ReadSelector_test.cpp)
     endif()
-    target_link_libraries(crispy_test Catch2::Catch2 crispy::core core::testing contour::tracy)
+    target_link_libraries(crispy_test Catch2::Catch2 crispy::core core::testing contour::tracy contour_test_trace)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
 
     if(NOT WIN32)

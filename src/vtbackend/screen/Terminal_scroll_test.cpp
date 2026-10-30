@@ -965,6 +965,26 @@ TEST_CASE("Terminal.cursorMotionAnimation.starts_on_position_change", "[terminal
     CHECK(cursor.animationProgress < 1.0f);
 }
 
+TEST_CASE("Terminal.cursorMotionAnimation.firstFrameDoesNotAnimateFromHome", "[terminal]")
+{
+    // A session restored with its cursor deep in the page draws its first frame there: nothing was drawn
+    // before it, so there is no earlier position to slide in from.
+    auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    REQUIRE(terminal.settings().cursorMotionAnimationDuration.count() > 0);
+
+    mc.writeToScreen("\033[3;5H");
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+
+    auto const frame = terminal.renderBuffer();
+    REQUIRE(frame.get().cursor.has_value());
+    CHECK(frame.get().cursor->position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(4) });
+    CHECK_FALSE(frame.get().cursor->animateFrom.has_value());
+    CHECK(frame.get().cursor->animationProgress == 1.0f);
+}
+
 TEST_CASE("Terminal.cursorMotionAnimation.chains_midanimation", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };

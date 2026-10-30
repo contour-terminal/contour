@@ -146,7 +146,10 @@ class TerminalEngine final: public vtbackend::Terminal::NullEvents
 
     // The headless engine models a clipboard in memory so that OSC 52 write/read round-trips (the
     // conformance suites assume a readable clipboard; a real GUI gates this behind user policy).
-    void copyToClipboard(std::string_view data) override { _clipboard = data; }
+    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
+    {
+        _clipboard = data;
+    }
     std::string getClipboard() override { return _clipboard; }
 
   private:

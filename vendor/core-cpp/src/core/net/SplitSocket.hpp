@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <span>
 #include <utility>
@@ -70,6 +71,15 @@ class SplitSocket final: public ISocket
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override
     {
         _readHalf->setReceiveDeadline(deadline);
+    }
+
+    /// Arms ONLY the read half: that is where the peer's silence is observed (as @c setReceiveDeadline
+    /// bounds it), and the write half is left unarmed.
+    /// @param settings The probe intervals.
+    /// @return What the read half answers.
+    [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override
+    {
+        return _readHalf->armKeepAlive(settings);
     }
 
     /// Closes both halves, and touches nothing of this object once a retirement has run.

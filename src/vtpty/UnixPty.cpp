@@ -333,6 +333,19 @@ void UnixPty::close()
     wakeupReader();
 }
 
+InputEcho UnixPty::inputEcho() const noexcept
+{
+    if (_masterState.load(std::memory_order_acquire) == MasterState::Closed)
+        return InputEcho::Unknown;
+    auto const _ = std::scoped_lock { _mutex };
+    if (_masterFd.isClosed())
+        return InputEcho::Unknown;
+    auto tio = termios {};
+    if (::tcgetattr(_masterFd, &tio) != 0)
+        return InputEcho::Unknown;
+    return util::inputEchoOf(tio.c_lflag);
+}
+
 bool UnixPty::isClosed() const noexcept
 {
     // Published by close(), rather than read under its lock: it is asked from the GUI thread, or a daemon's

@@ -13,14 +13,17 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <format>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -89,6 +92,47 @@ HyperlinkId replaceRowWithLinkedText(MockTerm<>& mock, LineOffset row, std::stri
     std::ignore = writeTextToSoA(soa, 0, text, GraphicsAttributes {}, link, /*asciiHint=*/true);
     mock.terminal.primaryScreen().grid().lineAt(row) = Line(LineFlags {}, std::move(soa), columns);
     return link;
+}
+
+/// The background a cell matched by the search is painted in, and the one of the match the cursor is on.
+constexpr auto SearchMatched = RGBColor { 0xAB, 0xCD, 0xEF };
+constexpr auto SearchFocused = RGBColor { 0x12, 0x34, 0x56 };
+
+/// How each column of grid row @p row is painted for @p pattern, read as a regex: 'm' a match, 'f' the match
+/// the vi cursor at @p cursor stands on, '.' neither.
+[[nodiscard]] std::string regexHighlightOf(MockTerm<>& mock,
+                                           std::u32string pattern,
+                                           CellLocation cursor,
+                                           int row)
+{
+    auto const paint = [](RGBColor background) {
+        return CellRGBColorAndAlphaPair { .foreground = RGBColor { 0, 0, 0 },
+                                          .foregroundAlpha = 1.0f,
+                                          .background = background,
+                                          .backgroundAlpha = 1.0f };
+    };
+    mock.terminal.colorPalette().searchHighlight = paint(SearchMatched);
+    mock.terminal.colorPalette().searchHighlightFocused = paint(SearchFocused);
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    auto const installed = mock.terminal.setNewSearchTerm(std::move(pattern), SearchOrigin::Typed);
+    REQUIRE(installed.has_value());
+    mock.terminal.moveNormalModeCursorTo(cursor);
+    mock.terminal.refreshRenderBuffer(true);
+
+    auto painted = std::string(unbox<size_t>(mock.terminal.pageSize().columns), '?');
+    for (auto const& cell: mock.terminal.renderBuffer().get().cells)
+    {
+        if (unbox(cell.position.line) != row)
+            continue;
+        auto const background = cell.attributes.backgroundColor;
+        auto mark = '.';
+        if (background == SearchMatched)
+            mark = 'm';
+        else if (background == SearchFocused)
+            mark = 'f';
+        painted[unbox<size_t>(cell.position.column)] = mark;
+    }
+    return painted;
 }
 } // namespace
 
@@ -570,3 +614,398 @@ TEST_CASE("RenderBufferBuilder.aStatusLineIsNoPartOfThePagesDetectedLinks", "[re
         cells, [](auto const& entry) { return entry.second.linkRole != LinkDecorationRole::None; }));
 }
 #endif
+
+TEST_CASE("search.regexHighlightPaintsTheMatchedCells", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+    mock.writeToScreen("id 42 and 7");
+    CHECK(regexHighlightOf(mock, U"[0-9]+", CellLocation { LineOffset(0), ColumnOffset(10) }, 0)
+          == "...mm.....f.");
+}
+
+TEST_CASE("search.regexHighlightPaintsBothRowsOfAWrappedMatch", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    mock.writeToScreen("abc 12 de 345");
+    auto const elsewhere = CellLocation { LineOffset(1), ColumnOffset(9) };
+    CHECK(regexHighlightOf(mock, U"de 3", elsewhere, 0) == ".......mmm");
+    CHECK(regexHighlightOf(mock, U"de 3", elsewhere, 1) == "m.........");
+}
+
+TEST_CASE("search.regexHighlightCoversBothHalvesOfAWideCharacter", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+    mock.writeToScreen("x\xE6\x97\xA5y"); // x日y
+    CHECK(regexHighlightOf(mock, U"\u65E5", CellLocation { LineOffset(1), ColumnOffset(0) }, 0) == ".mm...");
+}
+
+TEST_CASE("search.aRegexIsMatchedOncePerSegmentAcrossFrames", "[renderbuffer][search]")
+{
+    // C1: a frame that changes nothing on a segment does not run the regex over it again; output that does
+    // runs it over that segment alone.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("abc\r\nabd\r\nabe");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"ab.", SearchOrigin::Typed).has_value());
+    auto const& memo = mock.terminal.searchMatchMemo();
+
+    mock.terminal.refreshRenderBuffer(true);
+    auto const firstFrame = memo.engineRuns();
+    CHECK(firstFrame == 3);
+
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(memo.engineRuns() == firstFrame);
+
+    mock.writeToScreen("x");
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(memo.engineRuns() == firstFrame + 1);
+}
+
+TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][search]")
+{
+    // (a+)+$ over a run of a's that ends in a b is exponential for a backtracking engine. Where the engine
+    // gives up (libc++, MSVC), one frame meets it, ends the query, and no later frame runs the matcher; where
+    // it does not (libstdc++'s breadth-first executor), the pattern simply matches nothing.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+    mock.writeToScreen(std::string(60, 'a') + "b");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"(a+)+$", SearchOrigin::Typed).has_value());
+    auto const query = mock.terminal.search().query;
+    REQUIRE(query != nullptr);
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto const direct = query->matchesIn(grid, searchSegmentAt(grid, LineOffset(0), query->segmentCells()));
+
+    mock.terminal.refreshRenderBuffer(true);
+    if (direct)
+    {
+        CHECK(direct->empty());
+        CHECK(mock.terminal.search().query == query);
+        CHECK(mock.searchQueriesEnded == 0);
+        return;
+    }
+    CHECK(direct.error() == SearchPatternError::TooComplex);
+    CHECK(mock.terminal.search().problem == SearchPatternError::TooComplex);
+    // And the frontend is told, from the render pass, so the find bar can say why.
+    CHECK(mock.searchQueriesEnded == 1);
+    CHECK(mock.terminal.search().query == nullptr);
+    CHECK(mock.terminal.search().pattern == U"(a+)+$");
+    // The next frame finds no query to run, and tells nobody again.
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(mock.terminal.search().query == nullptr);
+    CHECK(mock.searchQueriesEnded == 1);
+}
+
+TEST_CASE("search.aMatchReadsOnEveryCellItPaints", "[renderbuffer][search]")
+{
+    // A match's fill is mixed over the cell's own background, which is not always the page: a reverse-video
+    // status bar, or a selection. Its ink is picked against what the cell actually shows.
+    auto const scheme = GENERATE(std::string_view { "contour-dark" }, std::string_view { "contour-light" });
+    auto const ground = GENERATE(
+        std::string_view { "page" }, std::string_view { "reverse" }, std::string_view { "selected" });
+    INFO(std::format("scheme {}, ground {}", scheme, ground));
+
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    REQUIRE(defaultColorPalettes(scheme, mock.terminal.colorPalette()));
+    mock.writeToScreen(ground == "reverse" ? "\033[7mneedle needle\033[m" : "needle needle");
+    if (ground == "selected")
+        mock.terminal.selectAll();
+    REQUIRE(mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed).has_value());
+    // The cursor on the second match: the first is a plain match, the second the current one.
+    mock.terminal.moveNormalModeCursorTo(CellLocation { LineOffset(0), ColumnOffset(7) });
+    mock.terminal.refreshRenderBuffer(true);
+
+    for (auto const column: { 0, 7 })
+    {
+        INFO(std::format("column {}", column));
+        auto const& cells = mock.terminal.renderBuffer().get().cells;
+        auto const cell = std::ranges::find(
+            cells, CellLocation { LineOffset(0), ColumnOffset(column) }, &RenderCell::position);
+        REQUIRE(cell != cells.end());
+        CHECK(contrastRatio(cell->attributes.foregroundColor, cell->attributes.backgroundColor)
+              >= MinimumTextContrast);
+    }
+}
+
+namespace
+{
+
+/// What a frame drew, copied out of the render buffer so that its lock is not held while a test reads it.
+struct DrawnFrame
+{
+    std::vector<RenderCell> cells;
+    std::optional<RenderCursor> cursor;
+
+    /// The cells of the top row from column @p from on, in column order.
+    /// @param from The first column wanted.
+    [[nodiscard]] std::vector<RenderCell> topRowFrom(ColumnOffset from) const
+    {
+        auto row = std::ranges::to<std::vector>(cells | std::views::filter([&](RenderCell const& cell) {
+                                                    return cell.position.line == LineOffset(0)
+                                                           && cell.position.column >= from;
+                                                }));
+        std::ranges::sort(row, {}, [](RenderCell const& cell) { return cell.position.column; });
+        return row;
+    }
+};
+
+/// Builds a frame of @p mc and copies it out.
+/// @param mc The terminal.
+[[nodiscard]] DrawnFrame drawnFrame(MockTerm<>& mc)
+{
+    mc.terminal.refreshRenderBuffer(true);
+    auto const frame = mc.terminal.renderBuffer();
+    return DrawnFrame { .cells = frame.get().cells, .cursor = frame.get().cursor };
+}
+
+/// A 10 x 3 terminal drawing its preedit in @p style, its cursor moved to @p cursor.
+/// @param style  How the preedit is drawn.
+/// @param cursor Where the cursor stands, and so where the preedit starts.
+/// @param preedit What the input method is composing.
+[[nodiscard]] std::unique_ptr<MockTerm<>> composingTerm(PreeditStyle style,
+                                                        CellLocation cursor,
+                                                        std::string_view preedit)
+{
+    auto settings = MockTerm<>::createSettings(
+        PageSize { .lines = LineCount(3), .columns = ColumnCount(10) }, HistoryLimits {}, 1024);
+    settings.preeditStyle = style;
+    // A cursor that has arrived: a block cursor colours its cell only once its glide has ended.
+    settings.cursorMotionAnimationDuration = std::chrono::milliseconds(0);
+    auto mc = std::make_unique<MockTerm<>>(std::move(settings));
+    mc->writeToScreen(std::format("\033[{};{}H", cursor.line.value + 1, cursor.column.value + 1));
+    mc->terminal.updateInputMethodPreeditString(std::string { preedit });
+    return mc;
+}
+
+} // namespace
+
+TEST_CASE("RenderBufferBuilder.anInlinePreeditTakesTheCellsColoursAndThePreeditFlag", "[renderbuffer][ime]")
+{
+    auto const mc =
+        composingTerm(PreeditStyle::Inline, { .line = LineOffset(0), .column = ColumnOffset(2) }, "ab");
+    auto const& palette = mc->terminal.colorPalette();
+
+    // The second cell: the first is under the cursor, which colours it as a cursor.
+    auto const frame = drawnFrame(*mc);
+    auto const cells = frame.topRowFrom(ColumnOffset(2));
+    REQUIRE(cells.size() >= 2);
+    CHECK(cells[0].codepoints == U"a");
+    CHECK(cells[0].attributes.flags.contains(CellFlag::InputMethodPreedit));
+    auto const& cell = cells[1];
+    CHECK(cell.codepoints == U"b");
+    CHECK(cell.attributes.foregroundColor == palette.defaultForeground);
+    CHECK(cell.attributes.backgroundColor == palette.defaultBackground);
+    CHECK(cell.attributes.decorationColor == palette.defaultForeground);
+    CHECK(cell.attributes.flags.contains(CellFlag::InputMethodPreedit));
+    CHECK_FALSE(cell.attributes.flags.contains(CellFlag::Bold));
+    CHECK_FALSE(cell.attributes.flags.contains(CellFlag::Underline));
+}
+
+TEST_CASE("RenderBufferBuilder.anInlinePreeditFollowsAReversedScreen", "[renderbuffer][ime]")
+{
+    auto const mc =
+        composingTerm(PreeditStyle::Inline, { .line = LineOffset(0), .column = ColumnOffset(2) }, "ab");
+    mc->writeToScreen("\033[?5h"); // DECSCNM
+    auto const& palette = mc->terminal.colorPalette();
+
+    auto const cells = drawnFrame(*mc).topRowFrom(ColumnOffset(3));
+    REQUIRE_FALSE(cells.empty());
+    CHECK(cells.front().codepoints == U"b");
+    CHECK(cells.front().attributes.foregroundColor == palette.defaultBackground);
+    CHECK(cells.front().attributes.backgroundColor == palette.defaultForeground);
+}
+
+TEST_CASE("RenderBufferBuilder.aHighlightedPreeditIsUnchanged", "[renderbuffer][ime]")
+{
+    auto const mc =
+        composingTerm(PreeditStyle::Highlighted, { .line = LineOffset(0), .column = ColumnOffset(2) }, "ab");
+    auto const& palette = mc->terminal.colorPalette();
+
+    auto const cells = drawnFrame(*mc).topRowFrom(ColumnOffset(3));
+    REQUIRE_FALSE(cells.empty());
+    auto const& cell = cells.front(); // the second cell: the first one is the cursor's
+    CHECK(cell.codepoints == U"b");
+    CHECK(cell.attributes.foregroundColor == palette.inputMethodEditor.foreground);
+    CHECK(cell.attributes.backgroundColor == palette.inputMethodEditor.background);
+    CHECK(cell.attributes.flags.contains(CellFlag::Bold));
+    CHECK(cell.attributes.flags.contains(CellFlag::Underline));
+    CHECK_FALSE(cell.attributes.flags.contains(CellFlag::InputMethodPreedit));
+}
+
+TEST_CASE("RenderBufferBuilder.aPreeditIsDrawnOnARowOfMixedRenditions", "[renderbuffer][ime]")
+{
+    // A row whose renditions differ is built cell by cell, through another path than a uniform row: the
+    // preedit has to reach both.
+    auto const mc =
+        composingTerm(PreeditStyle::Inline, { .line = LineOffset(0), .column = ColumnOffset(0) }, "");
+    mc->writeToScreen("x\033[1my\033[m");
+    mc->terminal.updateInputMethodPreeditString("ab");
+
+    auto const cells = drawnFrame(*mc).topRowFrom(ColumnOffset(2));
+    REQUIRE(cells.size() >= 2);
+    CHECK(cells[0].codepoints == U"a");
+    CHECK(cells[1].codepoints == U"b");
+    CHECK(cells[1].attributes.flags.contains(CellFlag::InputMethodPreedit));
+}
+
+namespace
+{
+
+/// Which emitter a row goes through: a row of one rendition is emitted whole (renderTrivialLine), a row of
+/// several cell by cell (renderCell). The preedit has to come out the same through both.
+enum class RowKind : uint8_t
+{
+    Uniform = 0,
+    MixedRenditions,
+};
+
+/// @p mc with its top row turned to one of mixed renditions, its cursor put back at @p cursor.
+void mixRenditionsOfTheTopRow(MockTerm<>& mc, CellLocation cursor)
+{
+    mc.writeToScreen(
+        std::format("\033[1;1H\033[1mX\033[mY\033[{};{}H", cursor.line.value + 1, cursor.column.value + 1));
+    auto const lock = std::lock_guard { mc.terminal };
+    REQUIRE_FALSE(mc.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
+}
+
+/// A composing terminal, as composingTerm() builds it, whose top row is of @p kind.
+[[nodiscard]] std::unique_ptr<MockTerm<>> composingTermOn(RowKind kind,
+                                                          PreeditStyle style,
+                                                          CellLocation cursor,
+                                                          std::string_view preedit)
+{
+    auto mc = composingTerm(style, cursor, "");
+    if (kind == RowKind::MixedRenditions)
+        mixRenditionsOfTheTopRow(*mc, cursor);
+    mc->terminal.updateInputMethodPreeditString(std::string { preedit });
+    return mc;
+}
+
+/// The column of the cell drawing @p text on the top row, or nothing.
+[[nodiscard]] std::optional<ColumnOffset> columnOf(DrawnFrame const& frame, std::u32string_view text)
+{
+    auto const row = frame.topRowFrom(ColumnOffset(0));
+    auto const cell = std::ranges::find(row, std::u32string { text }, &RenderCell::codepoints);
+    if (cell == row.end())
+        return std::nullopt;
+    return cell->position.column;
+}
+
+} // namespace
+
+TEST_CASE("RenderBufferBuilder.aPreeditIsPlacedOnTheLine", "[renderbuffer][ime]")
+{
+    auto const kind = GENERATE(RowKind::Uniform, RowKind::MixedRenditions);
+    auto const style = GENERATE(PreeditStyle::Highlighted, PreeditStyle::Inline);
+    static constexpr auto LastColumn = ColumnOffset(9);
+    INFO("row kind " << static_cast<int>(kind) << ", style " << static_cast<int>(style));
+
+    auto const nothingPastTheEdge = [](DrawnFrame const& frame) {
+        return std::ranges::none_of(frame.cells, [](RenderCell const& cell) {
+            return cell.position.line == LineOffset(0)
+                   && cell.position.column + ColumnOffset(std::max<int>(1, cell.width)) - 1 > LastColumn;
+        });
+    };
+
+    SECTION("a wide first cluster in the last column moves left to meet the edge")
+    {
+        // The cursor on the last cell, as after a full line (where the grid keeps a wrap-pending cursor): に
+        // does not fit there.
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = LastColumn }, "にほ"));
+        CHECK(columnOf(frame, U"に") == ColumnOffset(6));
+        CHECK(columnOf(frame, U"ほ") == ColumnOffset(8));
+        CHECK(nothingPastTheEdge(frame));
+        REQUIRE(frame.cursor.has_value());
+        CHECK(frame.cursor->position.column <= LastColumn);
+    }
+
+    SECTION("a preedit running past the edge moves left whole")
+    {
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = ColumnOffset(6) }, "にほんご"));
+        CHECK(columnOf(frame, U"に") == ColumnOffset(2));
+        CHECK(columnOf(frame, U"ご") == ColumnOffset(8));
+        CHECK(nothingPastTheEdge(frame));
+        REQUIRE(frame.cursor.has_value());
+        CHECK(frame.cursor->position.column <= LastColumn);
+    }
+
+    SECTION("only a preedit wider than the line is cut, before a cluster that would straddle the edge")
+    {
+        auto const frame = drawnFrame(*composingTermOn(
+            kind, style, { .line = LineOffset(0), .column = ColumnOffset(3) }, "abcdefghiにj"));
+        CHECK(columnOf(frame, U"a") == ColumnOffset(0));
+        CHECK(columnOf(frame, U"i") == ColumnOffset(8));
+        CHECK_FALSE(columnOf(frame, U"に").has_value());
+        CHECK_FALSE(columnOf(frame, U"j").has_value());
+        CHECK(nothingPastTheEdge(frame));
+    }
+
+    SECTION("a cluster of no width keeps one cell per column")
+    {
+        auto const frame = drawnFrame(
+            *composingTermOn(kind, style, { .line = LineOffset(0), .column = ColumnOffset(2) }, "\u200Bab"));
+        CHECK(columnOf(frame, U"a") == ColumnOffset(3));
+        CHECK(columnOf(frame, U"b") == ColumnOffset(4));
+        auto const columns = std::ranges::to<std::vector>(
+            frame.topRowFrom(ColumnOffset(0))
+            | std::views::transform([](RenderCell const& cell) { return cell.position.column; }));
+        CHECK(std::ranges::adjacent_find(columns) == columns.end());
+    }
+}
+
+TEST_CASE("RenderBufferBuilder.aPreeditMovedLeftIsNotDrawnOverByAWideGlyph", "[renderbuffer][ime]")
+{
+    // あ covers columns 3 and 4. Moved left to meet the edge, the preedit would begin at column 4, the
+    // glyph's right half, and the glyph drawn at column 3 would cover its first column. It begins at
+    // column 3.
+    auto const kind = GENERATE(RowKind::Uniform, RowKind::MixedRenditions);
+    INFO("row kind " << static_cast<int>(kind));
+    auto const cursor = CellLocation { .line = LineOffset(0), .column = ColumnOffset(9) };
+    auto mc = composingTermOn(kind, PreeditStyle::Inline, cursor, "");
+    mc->writeToScreen(std::format("\033[1;4Hあ\033[1;{}H", cursor.column.value + 1));
+    mc->terminal.updateInputMethodPreeditString("にほん");
+
+    auto const frame = drawnFrame(*mc);
+    CHECK_FALSE(columnOf(frame, U"あ").has_value());
+    CHECK(columnOf(frame, U"に") == ColumnOffset(3));
+    CHECK(columnOf(frame, U"ん") == ColumnOffset(7));
+}
+
+TEST_CASE("RenderBufferBuilder.aPreeditCellNeverTakesTheCursorsColours", "[renderbuffer][ime]")
+{
+    // The cursor drawn after the preedit marks the caret. A block cursor's colours on the preedit cell at the
+    // grid cursor's column -- its first, or one in its middle once moved left -- would draw a second one.
+    struct Composition
+    {
+        int cursorColumn;
+        std::string_view preedit;
+        int start;
+        int columns;
+    };
+    auto const [cursorColumn, preedit, start, columns] =
+        GENERATE(Composition { 2, "ab", 2, 2 },   // at the cursor
+                 Composition { 9, "にa", 7, 3 }); // moved left: a at 9
+    INFO("preedit at " << cursorColumn);
+    auto const cursor = CellLocation { .line = LineOffset(0), .column = ColumnOffset(cursorColumn) };
+    auto mc = composingTerm(PreeditStyle::Inline, cursor, "");
+    auto const& palette = mc->terminal.colorPalette();
+
+    // The fixture's cursor is a block, and it does colour the cell it is on.
+    {
+        auto const plain = drawnFrame(*mc).topRowFrom(cursor.column);
+        REQUIRE_FALSE(plain.empty());
+        REQUIRE(plain.front().attributes.backgroundColor != palette.defaultBackground);
+    }
+
+    mc->terminal.updateInputMethodPreeditString(std::string { preedit });
+    auto const cells = drawnFrame(*mc).topRowFrom(ColumnOffset(start));
+    REQUIRE(std::cmp_greater_equal(cells.size(), columns));
+    for (auto const& cell: cells | std::views::take(columns))
+    {
+        INFO("column " << cell.position.column.value);
+        CHECK(cell.attributes.flags.contains(CellFlag::InputMethodPreedit));
+        CHECK(cell.attributes.foregroundColor == palette.defaultForeground);
+        CHECK(cell.attributes.backgroundColor == palette.defaultBackground);
+    }
+}

@@ -4,6 +4,7 @@
 #include <vtbackend/core/LinkDecoration.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace vtbackend
@@ -16,12 +17,18 @@ enum class LinkPointer : uint8_t
     Over,          ///< Over this link, and a click would follow it.
 };
 
+/// How many LinkPointer values there are, derived from the last one.
+inline constexpr size_t LinkPointerCount = static_cast<size_t>(LinkPointer::Over) + 1;
+
 /// Whether the follow gesture's modifiers (Ctrl, by default) are held.
 enum class FollowModifiers : uint8_t
 {
     Released = 0,
     Held,
 };
+
+/// How many FollowModifiers values there are, derived from the last one.
+inline constexpr size_t FollowModifiersCount = static_cast<size_t>(FollowModifiers::Held) + 1;
 
 /// The pointer shape a link asks for.
 enum class LinkPointerShape : uint8_t

@@ -12,7 +12,10 @@
 #include <contour/display/RhiVertexLayout.hpp>
 #include <contour/display/ScissorRect.hpp>
 
+#include <QtCore/QPoint>
+#include <QtCore/QPointF>
 #include <QtGui/QMatrix4x4>
+#include <QtGui/QVector3D>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -320,15 +323,55 @@ TEST_CASE("rhitransform: a mismatched DPR is detected", "[rhi][geometry]")
 
 TEST_CASE("rhitransform: a fractional pane origin is NOT reported", "[rhi][geometry]")
 {
-    // A translation leaves the quad spanning as many device pixels as the tile has texels, so the
-    // sample points still step one texel per pixel. This was investigated and disproven as a cause
-    // in #2040; the probe must not resurrect it as a false positive.
+    // A translation cannot change the scale, and composeItemToClip rounds it away besides; the scale
+    // probe must not report it as a false positive.
     auto const projection = sceneProjection(1000.0f, 600.0f);
     auto nodeMatrix = QMatrix4x4 {};
     nodeMatrix.translate(4.5f, 7.5f);
 
     auto const itemToClip = composeItemToClip(projection, nodeMatrix, 1.0f);
     CHECK(devicePixelScaleError(itemToClip, 1000) == Catch::Approx(1.0f).epsilon(0.0001f));
+}
+
+TEST_CASE("composeItemToClip: a fractional item origin is moved onto a whole device pixel", "[rhi][dpr]")
+{
+    // At 125% a title band 30 logical pixels tall puts the terminal's top at 37.5 device pixels. Drawn
+    // there, every glyph's first row lies on a pixel centre and OpenGL's fill rule drops it, so the item
+    // must land on a whole pixel: 38, the one the scissor is translated by as well.
+    constexpr int DeviceW = 1000;
+    constexpr int DeviceH = 750;
+    constexpr float Dpr = 1.25f;
+
+    auto nodeMatrix = QMatrix4x4 {};
+    nodeMatrix.translate(6.0f, 30.0f); // 7.5 and 37.5 device pixels
+
+    CHECK(snappedItemOrigin(nodeMatrix, Dpr) == QPoint(8, 38));
+
+    auto const itemToClip = composeItemToClip(logicalOrtho(DeviceW, DeviceH, Dpr), nodeMatrix, Dpr);
+    auto const toDevice = [&](float x, float y) {
+        auto const clip = itemToClip.map(QVector3D(x, y, 0.0f));
+        return QPointF((clip.x() + 1.0f) * DeviceW / 2.0f, (1.0f - clip.y()) * DeviceH / 2.0f);
+    };
+
+    // The item's origin, and a glyph's top-left 17 rows into it, both on whole device pixels.
+    CHECK(toDevice(0.0f, 0.0f).x() == Catch::Approx(8.0).margin(1e-3));
+    CHECK(toDevice(0.0f, 0.0f).y() == Catch::Approx(38.0).margin(1e-3));
+    CHECK(toDevice(9.0f, 17.0f).y() == Catch::Approx(55.0).margin(1e-3));
+
+    // ... and still one device pixel per rasterizer pixel.
+    CHECK(devicePixelScaleError(itemToClip, DeviceW) == Catch::Approx(1.0f).epsilon(0.0001f));
+}
+
+TEST_CASE("composeItemToClip: a whole-pixel item origin is left where it is", "[rhi][dpr]")
+{
+    auto nodeMatrix = QMatrix4x4 {};
+    nodeMatrix.translate(8.0f, 24.0f); // 10 and 30 device pixels at 125%
+    auto const projection = logicalOrtho(1000, 750, 1.25f);
+
+    auto unsnapped = QMatrix4x4 {};
+    unsnapped.scale(1.0f / 1.25f, 1.0f / 1.25f);
+    CHECK(composeItemToClip(projection, nodeMatrix, 1.25f) == projection * nodeMatrix * unsnapped);
+    CHECK(snappedItemOrigin(nodeMatrix, 1.25f) == QPoint(10, 30));
 }
 
 TEST_CASE("rhitransform: a degenerate target width reports no error", "[rhi][geometry]")

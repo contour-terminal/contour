@@ -29,11 +29,14 @@ enum class SearchCaseSensitivity : uint8_t
 ///
 /// It selects between two named highlight vocabularies rather than reporting a yes/no fact: a
 /// pattern the user typed paints @c ColorPalette::searchHighlight, while one the terminal derived
-/// from a double-click paints @c wordHighlight. @see RenderBufferBuilder.
+/// from a double-click paints @c wordHighlight. @see RenderBufferBuilder. It also decides how the
+/// pattern is read: a word taken from the screen is text, never a regex, whatever the find bar's
+/// toggles say.
 enum class SearchOrigin : uint8_t
 {
-    Typed = 0,   //!< Entered into the find bar, or by a vi-mode search.
-    DoubleClick, //!< Derived from the selection, to visualize the selected word.
+    Typed = 0,       //!< Entered into the find bar.
+    DoubleClick,     //!< Derived from the selection, to visualize the selected word.
+    WordUnderCursor, //!< The word under the cursor, as vi's `*` and `#` search for it.
 };
 
 /// Whether the renderer paints search matches at all.
@@ -82,9 +85,8 @@ struct SearchMatchTally
 /// A case policy resolved against an actual needle: how the comparison will be done.
 ///
 /// Distinct from @c SearchCaseSensitivity, which is what the user asked for -- @c Smart is a rule,
-/// not an answer. This is the answer, and it is named rather than left a @c bool because it is
-/// threaded through call sites where a bare @c true says nothing (@c Screen::searchFrom) and stored
-/// on @c Search, where a @c bool member would be a finding by this project's own rule.
+/// not an answer. This is the answer, which SearchQuery::compile() settles once per pattern and folds the
+/// needle and the subject by; named rather than left a @c bool, by this project's own rule.
 enum class CaseComparison : uint8_t
 {
     Folded = 0, //!< Letters compare equal regardless of case.
@@ -103,5 +105,52 @@ enum class CaseComparison : uint8_t
 /// @return How the comparison must treat letter case.
 [[nodiscard]] CaseComparison caseComparisonFor(std::u32string_view searchText,
                                                SearchCaseSensitivity mode) noexcept;
+
+/// How a search pattern is read.
+enum class SearchSyntax : uint8_t
+{
+    Literal = 0, //!< The pattern is the text to find, character for character.
+    Regex,       //!< The pattern is an ECMAScript regular expression.
+};
+
+/// Where a match may begin and end relative to the words around it.
+///
+/// A search segment's cut counts as a word boundary -- a regex's cuts on both sides; a literal's only where a
+/// match begins, since a literal reads on past its segment's end. A long logical line is cut into segments (a
+/// regex's every RegexSegmentCells cells), and a word a cut runs through reads there as a line's end would.
+/// The cuts fall at fixed rows, so this is rare, and the same for every reader.
+enum class SearchWordBoundary : uint8_t
+{
+    Any = 0,   //!< Anywhere, inside a word too.
+    WholeWord, //!< Only where a word delimiter, a line's end or a line break is on either side.
+};
+
+/// How a search reads its pattern: the find bar's three toggles.
+///
+/// All-zero is what the terminal has always done -- smart case, literal text, anywhere -- so a
+/// value-initialized one changes nothing.
+struct SearchOptions
+{
+    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart; //!< Letter case.
+    SearchSyntax syntax = SearchSyntax::Literal;                          //!< Literal or regex.
+    SearchWordBoundary wordBoundary = SearchWordBoundary::Any;            //!< Whole words only, or not.
+
+    constexpr bool operator==(SearchOptions const&) const noexcept = default;
+};
+
+/// Why a search pattern cannot be searched for.
+enum class SearchPatternError : uint8_t
+{
+    InvalidSyntax = 0, //!< The regex does not compile.
+    BackReference,     //!< The regex names a back-reference (`\1`…), which no engine here runs everywhere.
+    TooComplex,        //!< Matching gave up within the engine's own complexity or stack budget.
+};
+
+/// Whether a search setter changed what is searched for, so the caller knows whether to search again.
+enum class SearchChange : uint8_t
+{
+    Unchanged = 0, //!< Everything was already so; the last search's answer stands.
+    Changed,       //!< The pattern or how it is read changed.
+};
 
 } // namespace vtbackend

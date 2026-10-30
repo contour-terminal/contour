@@ -42,6 +42,23 @@ using vtworkspace::TabId;
 using vtworkspace::WindowId;
 
 // ---------------------------------------------------------------------------
+// HostGitLookups
+
+HostGitLookups::HostGitLookups(std::optional<vtbackend::GitHeadServices> given,
+                               core::platform::FileSystem const& fileSystem):
+    _fileSystem { !given && &fileSystem == &core::platform::NativeFileSystem::instance()
+                      ? std::make_unique<vtbackend::NativeGitFileSystem>(fileSystem)
+                      : nullptr },
+    // Started here, on the thread building the host: the daemon blocks its shutdown signals before it does,
+    // and the probe thread inherits that mask, as every pump thread does.
+    _executor { _fileSystem ? std::make_unique<core::async::ThreadPoolExecutor>(1) : nullptr },
+    _services { _fileSystem ? std::optional { vtbackend::GitHeadServices { .executor = *_executor,
+                                                                           .fileSystem = *_fileSystem } }
+                            : given }
+{
+}
+
+// ---------------------------------------------------------------------------
 // HostedSession
 
 HostedSession::HostedSession(SessionId id,
@@ -59,7 +76,8 @@ HostedSession::HostedSession(SessionId id,
                              SessionSignalCallback onSignal,
                              HostedSessionExtensions extensions,
                              std::string profileName,
-                             SettingsOrigin settingsOrigin):
+                             SettingsOrigin settingsOrigin,
+                             std::optional<vtbackend::GitHeadServices> git):
     _id(id),
     _profileName(std::move(profileName)),
     _settingsOrigin(settingsOrigin),
@@ -92,13 +110,19 @@ HostedSession::HostedSession(SessionId id,
               clocks,
               vtbackend::randomSemanticBlockTokens(),
               std::nullopt,
-              _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt),
+              _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
+              git),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
     // The daemon honors it (the GUI does the same), so an app's status line works.
     _events.onShowHostWritableStatusLine = [this] {
         _terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+    };
+    // Refused, not dropped: a client reads until the terminating chunk. No lock here -- the hook runs on the
+    // parser thread with the terminal lock held -- and the pump's flushInput() after the batch writes it.
+    _events.onCaptureBuffer = [this] {
+        _terminal.primaryScreen().replyCaptureBufferEnd();
     };
     // Once the terminal they reach exists; they are built on another thread, and run once handed back.
     if (_extensions)
@@ -293,6 +317,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _inputWatermarks(config.inputWatermarks),
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
+    _git(config.git, config.fileSystem.get()),
     _profiles(std::move(config.profiles)),
     _extensions(std::move(config.extensions)),
     _objects(std::move(config.uuids)),
@@ -318,8 +343,12 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
     // listener, so the layout is in place before a client could possibly attach. A restored workspace
     // replaces the startup layout, unless it brought nothing back.
-    if (config.restore && realizeRestoredWorkspace(*config.restore) > 0)
+    auto const realized = config.restore ? realizeRestoredWorkspace(*config.restore) : RealizedRestore {};
+    if (realized.panes > 0)
+    {
         _restoreOutcome = RestoreOutcome::Realized;
+        _restoreAnnouncement = realized.windows;
+    }
     else
         realizeStartupLayout(_window, config.startupLayout);
 }
@@ -440,6 +469,13 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     // A request's settings are re-normalized rather than taken as given: they can have travelled in
     // from a client, and this is the one funnel every session passes through.
     auto settings = requestedSettings ? hostedSessionSettings(*requestedSettings) : _settings;
+    // Born under the preference the latest client stated, so its very first snapshot shows the palette it
+    // displays; the sessions the host builds light need no record, as it is what an absent one means.
+    if (_profiles && _defaultColorPreference != HostedColorPreference)
+    {
+        settings.colorPalette = _profiles->colorPalette(profileName, _defaultColorPreference);
+        _colorPreferences.insert_or_assign(id.value, _defaultColorPreference);
+    }
 
     // The terminal must open at the same size as its PTY: the client area, not the factory
     // settings' default — and not a size a requesting client named either, since the host projects
@@ -491,11 +527,12 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         },
         makeSessionExtensions(id),
         std::move(profileName),
-        spawn.settingsOrigin);
+        spawn.settingsOrigin,
+        _git.services());
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
-        seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredMarker);
+        seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredDivider);
     if (_pumping == SessionPumping::Threaded)
         session->start();
     if (session->hasExtensions())
@@ -512,6 +549,20 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     _pendingSessionId = id;
     if (!request.initialInput.empty())
         holdInitialInput(id, request.initialInput);
+    if (!request.interruptedCommand.empty())
+    {
+        // The newest record is the seeded history's, every one of them finished: what the shell mints
+        // next has a higher id.
+        auto const after = [&] {
+            auto& backing = _sessions.at(id.value)->terminal();
+            auto const guard = std::lock_guard { backing };
+            return backing.commandBlocks().currentId();
+        }();
+        _interruptions.insert_or_assign(
+            id.value,
+            Interruption { .commandLine = vtbackend::truncatedCommandLine(request.interruptedCommand),
+                           .after = after });
+    }
     sessionLog()("session {} spawned at {}x{} ({} live)",
                  id.value,
                  unbox(_pageSize.columns),
@@ -662,42 +713,45 @@ Uuid SessionHost::restoredUuid(ObjectKind kind, std::optional<ObjectIdentityReco
     return _objects.mint();
 }
 
-std::size_t SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
+SessionHost::RealizedRestore SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
 {
-    auto realized = std::size_t { 0 };
+    auto realized = RealizedRestore {};
     for (auto const& window: restore.snapshot.windows)
     {
         // The first window that brings anything back is the host's own, which never stays empty while a
         // later one fills.
-        auto const id = realized == 0 ? _window : _model.createWindow()->id();
+        auto const id = realized.panes == 0 ? _window : _model.createWindow()->id();
         // The host's own window takes the identity of each one that tries to fill it, the last such one
         // keeping it.
         auto const uuid = restoredUuid(ObjectKind::Window, window.identity);
         _objects.bind(id, uuid);
         _objects.setLabel(ObjectRef { .kind = ObjectKind::Window, .uuid = uuid }, labelOf(window.identity));
-        auto const panes = realizeRestoredWindow(id, window, restore);
+        auto const inWindow = realizeRestoredWindow(id, window, restore);
         // A window none of whose panes came back is not left behind empty.
-        if (panes == 0 && id != _window)
+        if (inWindow.panes == 0 && id != _window)
         {
             _objects.forget(id);
             _model.removeWindow(id);
         }
-        realized += panes;
+        realized.panes += inWindow.panes;
+        if (inWindow.tabs > 0)
+            realized.windows.push_back(RestoredWindow { .window = id.value, .tabs = inWindow.tabs });
     }
     sessionLog()("restore: {} pane(s) of a snapshot of {} window(s) came back",
-                 realized,
+                 realized.panes,
                  restore.snapshot.windows.size());
     return realized;
 }
 
-std::size_t SessionHost::realizeRestoredWindow(WindowId window,
-                                               WindowSnapshot const& snapshot,
-                                               WorkspaceRestore const& restore)
+SessionHost::RealizedWindow SessionHost::realizeRestoredWindow(WindowId window,
+                                                               WindowSnapshot const& snapshot,
+                                                               WorkspaceRestore const& restore)
 {
-    auto realized = std::size_t { 0 };
+    auto realized = RealizedWindow {};
     auto tabs = std::vector<Tab*> {};
     for (auto const& tabSnapshot: snapshot.tabs)
     {
+        auto const panesBefore = realized.panes;
         auto const restored = restoredTabOf(tabSnapshot);
         // As for a startup layout: the tab's UUID is staged with its first pane and bound when the model
         // announces the tab. A restored object keeps the UUID and label it was captured with.
@@ -718,12 +772,16 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
                         "restore: {} no longer exists; the pane starts in the shell's default directory",
                         core::pathToUtf8(*pane.workingDirectory));
             }
-            if (pane.history)
-            {
-                request.restoredHistory = std::make_shared<proto::Delta const>(*pane.history);
-                request.restoredMarker = restore.marker;
-            }
-            request.initialInput = rerunInputFor(pane, restore.rerunPrograms).value_or(std::string {});
+            // Every restored pane gets the divider, one without history on its first row.
+            request.restoredHistory =
+                std::make_shared<proto::Delta const>(pane.history.value_or(proto::Delta {}));
+            request.restoredDivider = restore.divider;
+            // What the restart stopped, unless the daemon types it again itself: then there is nothing to
+            // tell.
+            if (auto rerun = rerunInputFor(pane, restore.rerunPrograms))
+                request.initialInput = std::move(*rerun);
+            else if (pane.runningCommandLine)
+                request.interruptedCommand = *pane.runningCommandLine;
             auto const paneUuid = restoredUuid(ObjectKind::Pane, pane.identity);
             request.presetIds = PresetObjectIds { .pane = paneUuid, .paneLabel = labelOf(pane.identity) };
             if (!tabUuid)
@@ -735,7 +793,7 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
                 seedSession(request,
                             SpawnIds { .window = windowUuid(window), .tab = *tabUuid, .pane = paneUuid })
                     .has_value();
-            realized += seeded ? 1 : 0;
+            realized.panes += seeded ? 1 : 0;
             return seeded;
         };
         auto* const tab = vtworkspace::realizeLayoutTab(_model, window, restored->layout, seeder);
@@ -744,6 +802,7 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
         if (tab == nullptr)
             continue;
         tabs.push_back(tab);
+        realized.tabs += realized.panes > panesBefore ? 1 : 0;
         auto leaf = tabSnapshot.activeLeaf;
         if (auto const* const active = leafAt(*tab->rootPane(), leaf))
             _model.setActivePane(tab->id(), active->id());
@@ -753,6 +812,19 @@ std::size_t SessionHost::realizeRestoredWindow(WindowId window,
     if (snapshot.activeTab < tabs.size())
         _model.activateTab(window, tabs[snapshot.activeTab]->id());
     return realized;
+}
+
+std::optional<RestoredCounts> SessionHost::takeRestoreAnnouncement(
+    std::function<bool(uint64_t)> const& follows)
+{
+    auto const restored = std::exchange(_restoreAnnouncement, {});
+    auto counts = RestoredCounts {};
+    for (auto const& entry: restored | std::views::filter([&](auto const& w) { return follows(w.window); }))
+    {
+        ++counts.windows;
+        counts.tabs += entry.tabs;
+    }
+    return counts.windows > 0 ? std::optional { counts } : std::nullopt;
 }
 
 void SessionHost::holdInitialInput(SessionId session, std::string input)
@@ -774,6 +846,7 @@ void SessionHost::onSessionScreenUpdated(SessionId session)
     if (hosted->second->hasExtensions() && hasScreenMirrors())
         hosted->second->requestStatusLineRepaint();
     typeInitialInputAtPrompt(session);
+    clearInterruptionOnNextCommand(session);
     for (auto* observer: _streamSubscribers)
         observer->sessionScreenUpdated(session);
 }
@@ -792,6 +865,30 @@ void SessionHost::typeInitialInputAtPrompt(SessionId session)
     }();
     if (prompting)
         typeInitialInput(session);
+}
+
+std::string SessionHost::interruptedCommandOf(SessionId session) const
+{
+    auto const it = _interruptions.find(session.value);
+    return it != _interruptions.end() ? it->second.commandLine : std::string {};
+}
+
+void SessionHost::clearInterruptionOnNextCommand(SessionId session)
+{
+    auto const held = _interruptions.find(session.value);
+    if (held == _interruptions.end())
+        return;
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return;
+    auto const started = [&] {
+        auto const guard = std::lock_guard { *backing };
+        return std::ranges::any_of(backing->commandBlocks().records(), [&](auto const& record) {
+            return record.id > held->second.after && record.state != vtbackend::CommandBlockState::Prompting;
+        });
+    }();
+    if (started)
+        _interruptions.erase(held);
 }
 
 void SessionHost::typeInitialInput(SessionId session)
@@ -1101,7 +1198,9 @@ std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionI
 void SessionHost::eraseSession(uint64_t session)
 {
     _initialInputs.erase(session);
+    _interruptions.erase(session);
     _lastInput.erase(session);
+    _colorPreferences.erase(session);
     _sessions.erase(session);
 }
 
@@ -1122,7 +1221,10 @@ namespace
     /// pump's, between two reads, as it parses the application's output (HostedSession::Delivery), handed the
     /// request's text alone: a parse, which can sleep (DECSCLM) and reply.
     /// @see HostedSession::deliverOnPump()
-    using OperationPerform = std::variant<LoopPerform, HostedSession::Delivery>;
+    ///
+    /// Or a light/dark preference to re-seed the session's palette under, which needs the host's profiles.
+    /// @see SessionHost::applyColorPreference()
+    using OperationPerform = std::variant<LoopPerform, HostedSession::Delivery, vtbackend::ColorPreference>;
 
     /// One engine operation a client may ask the host to perform.
     struct OperationRow
@@ -1180,6 +1282,10 @@ namespace
                                                    proto::PerformOperation const& request) {
                            placeUserMark(terminal, request, vtbackend::UserMarkChange::Removed);
                        } } },
+        OperationRow { .operation = proto::EngineOperation::UseDarkColors,
+                       .perform = vtbackend::ColorPreference::Dark },
+        OperationRow { .operation = proto::EngineOperation::UseLightColors,
+                       .perform = vtbackend::ColorPreference::Light },
     };
 } // namespace
 
@@ -1210,9 +1316,41 @@ std::expected<void, OperationError> SessionHost::performOperation(proto::Perform
             },
             // A parse, which raises a screen update of its own as the application's output does.
             [&](HostedSession::Delivery deliver) { hostedSession.deliverOnPump(deliver, request.text); },
+            [&](vtbackend::ColorPreference preference) { applyColorPreference(session, preference); },
         },
         row->perform);
     return {};
+}
+
+void SessionHost::adoptColorPreference(vtbackend::ColorPreference preference)
+{
+    _defaultColorPreference = preference;
+}
+
+void SessionHost::applyColorPreference(SessionId session, vtbackend::ColorPreference preference)
+{
+    // The latest client's statement wins for the sessions spawned from now on.
+    _defaultColorPreference = preference;
+    auto const hosted = _sessions.find(session.value);
+    if (hosted == _sessions.end() || !_profiles)
+        return;
+    auto& hostedSession = *hosted->second;
+    // Only a change re-seeds: a client attaching to a session already in its preference must not wipe the
+    // colors a program set there (OSC 4, 10, 11), as a local session's updateColorPreference() does not.
+    auto const current = _colorPreferences.contains(session.value) ? _colorPreferences.at(session.value)
+                                                                   : HostedColorPreference;
+    if (current == preference)
+        return;
+    _colorPreferences.insert_or_assign(session.value, preference);
+    auto const palette = _profiles->colorPalette(hostedSession.profileName(), preference);
+    {
+        auto& terminal = hostedSession.terminal();
+        auto const guard = std::lock_guard { terminal };
+        terminal.resetColorPalette(palette);
+    }
+    // Outside the lock, as performOperation() announces any operation: every attached client's mirror
+    // follows.
+    fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
 }
 
 void SessionHost::subscribe(vtworkspace::ModelEvents* observer)

@@ -326,6 +326,21 @@ void collapseOnlyFold(MockTerm<T>& mt)
     return buffer;
 }
 
+/// The background @p buffer paints at @p location: its cell's, or the fill of the row it lies on.
+/// @param buffer A rendered frame.
+/// @param location The screen row and column, as RenderCell::position counts them.
+/// @return The background; default-constructed when the frame has neither a cell nor a row there.
+[[nodiscard]] inline RGBColor backgroundAt(RenderBuffer const& buffer, CellLocation location)
+{
+    for (auto const& cell: buffer.cells)
+        if (cell.position == location)
+            return cell.attributes.backgroundColor;
+    for (auto const& row: buffer.lines)
+        if (row.lineOffset == location.line)
+            return row.fillAttributes.backgroundColor;
+    return {};
+}
+
 /// Draws a frame the way the render thread gets one -- filled into the back buffer, then swapped to the
 /// front -- so Terminal::stickyHeaderBlock() answers for it, as it does for a frame on screen. The terminal's
 /// lock is taken here, so a terminal another thread writes to is drawn safely too.

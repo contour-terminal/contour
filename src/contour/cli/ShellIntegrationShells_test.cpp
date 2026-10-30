@@ -281,11 +281,16 @@ void writeFile(std::filesystem::path const& path, std::string_view contents)
 }
 
 /// @return The environment every shell here runs in: its own HOME, and with it its own history and
-///         start-up files; a UTF-8 locale; a TERM every shell knows.
+///         start-up files; a UTF-8 locale; a TERM every shell knows; and a stale HOSTNAME and HOST.
 [[nodiscard]] vtpty::Process::Environment isolatedEnvironment(std::string const& home)
 {
     return vtpty::Process::Environment {
         { "HOME", home },
+        // A HOSTNAME and a HOST naming another machine, as a login carried over from one leaves them: bash
+        // keeps the one and zsh the other over gethostname(2), and an integration that reported either would
+        // make every directory a foreign one. (tcsh sets HOST itself, whatever it inherits.)
+        { "HOSTNAME", "stale-hostname.invalid" },
+        { "HOST", "stale-hostname.invalid" },
         { "ZDOTDIR", home },
         { "XDG_CONFIG_HOME", home + "/.config" },
         { "XDG_DATA_HOME", home + "/.local/share" },

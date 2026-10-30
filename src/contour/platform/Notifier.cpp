@@ -2,6 +2,7 @@
 #include <contour/platform/FinishNotification.hpp>
 #include <contour/platform/NotificationTransport.hpp>
 #include <contour/platform/Notifier.hpp>
+#include <contour/platform/UserNotificationNotifier.hpp>
 
 #include <QtCore/QPointer>
 
@@ -72,6 +73,26 @@ std::unique_ptr<Notifier> makeDesktopNotifier(
 #else
     return std::make_unique<TrayNotifier>(showTrayMessage);
 #endif
+}
+
+std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay,
+                                              TrayNotifier::ShowMessage const& showTrayMessage,
+                                              IUserNotificationCenter& centre,
+                                              std::string requestPrefix,
+                                              config::HostPlatform host)
+{
+    switch (selectSessionNotifier(host, centre.availability()))
+    {
+        // The tray is what macOS has without a centre, so it is what a refused one falls back to.
+        case SessionNotifierKind::UserNotifications:
+            return std::make_unique<UserNotificationNotifier>(
+                centre,
+                std::move(requestPrefix),
+                closeDelay,
+                std::make_unique<TrayNotifier>(showTrayMessage));
+        case SessionNotifierKind::PlatformDefault: break;
+    }
+    return makeDesktopNotifier(closeDelay, showTrayMessage);
 }
 
 } // namespace contour::platform

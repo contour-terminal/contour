@@ -11,10 +11,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -34,6 +37,11 @@ using vtworkspace::SplitState;
 
 namespace
 {
+
+constexpr auto DividerOf =
+    RestoreDivider { .sessionEndedAt = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 }
+                                       + std::chrono::hours { 14 } + std::chrono::minutes { 2 },
+                     .today = std::chrono::local_days { std::chrono::year { 2026 } / 10 / 25 } };
 
 constexpr auto Now = std::chrono::sys_seconds { std::chrono::seconds { 1'761'000'000 } };
 
@@ -213,7 +221,7 @@ TEST_CASE("a directory that is gone opens the pane in the default directory", "[
         "restore: /gone no longer exists; the pane starts in the shell's default directory"));
 }
 
-TEST_CASE("restored history sits above the marker and the new prompt", "[vthost][snapshot][restore]")
+TEST_CASE("restored history sits above the divider and the new prompt", "[vthost][snapshot][restore]")
 {
     auto h = RestoreHarness {};
     auto source = h.makeHost({});
@@ -222,15 +230,25 @@ TEST_CASE("restored history sits above the marker and the new prompt", "[vthost]
     auto const captured = captureWorkspace(*source, {}, Now);
     REQUIRE(captured.windows.at(0).tabs.at(0).root.pane.history.has_value());
 
-    auto const host = h.restore(
-        WorkspaceRestore { .snapshot = captured,
-                           .marker = restoredMarker(std::chrono::local_seconds { Now.time_since_epoch() }) });
+    auto const host = h.restore(WorkspaceRestore { .snapshot = captured, .divider = DividerOf });
 
     auto& terminal = terminalOf(*host, 0);
     auto const& grid = terminal.primaryScreen().grid();
     CHECK(grid.lineText(vtbackend::LineOffset(-3)).starts_with("old 1"));
     CHECK(grid.lineText(vtbackend::LineOffset(-1)).starts_with("old 3"));
-    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("restored · snapshot of"));
+    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("Restored · session ended 14:02"));
+}
+
+TEST_CASE("a pane restored without history still has the divider on its first row",
+          "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot {} }), .divider = DividerOf });
+
+    auto const& grid = terminalOf(*host, 0).primaryScreen().grid();
+    CHECK(grid.lineText(vtbackend::LineOffset(0)).contains("Restored · session ended 14:02"));
+    CHECK(grid.historyLineCount() == vtbackend::LineCount(0));
 }
 
 TEST_CASE("an allow-listed program is typed into its restored shell once it shows a prompt",
@@ -257,6 +275,46 @@ TEST_CASE("an allow-listed program is typed into its restored shell once it show
     std::ignore = h.loop.runUntilIdle();
     CHECK(mockOf(restored).stdinBuffer() == "htop\r");
     CHECK(mockOf(other).stdinBuffer().empty());
+}
+
+TEST_CASE("a pane whose command was not re-run remembers it until its next command",
+          "[vthost][snapshot][restore][interrupted]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore {
+        .snapshot = workspaceOf({ PaneSnapshot { .runningCommandLine = "make test" },
+                                  PaneSnapshot { .foregroundProcess = "htop", .runningCommandLine = "htop" },
+                                  PaneSnapshot {} }),
+        .rerunPrograms = { "htop" } });
+    auto& first = terminalOf(*host, 0);
+    auto& second = terminalOf(*host, 1);
+    auto const sessionOf = [&](int tab) {
+        return host->model().window(host->windowId())->tabAt(tab)->activePane()->session();
+    };
+    std::ignore = h.loop.runUntilIdle();
+
+    SECTION("only the pane whose command no program re-ran carries it")
+    {
+        CHECK(host->interruptedCommandOf(sessionOf(0)) == "make test");
+        CHECK(host->interruptedCommandOf(sessionOf(1)).empty());
+        CHECK(host->interruptedCommandOf(sessionOf(2)).empty());
+
+        pump(second, "\033]133;A\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(mockOf(second).stdinBuffer() == "htop\r");
+    }
+
+    SECTION("the shell's prompt does not clear it; its next command does, and a later attach is told none")
+    {
+        pump(first, "\033]133;A\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(host->interruptedCommandOf(sessionOf(0)) == "make test");
+
+        pump(first, "\033]133;B\033\\\033]133;C\033\\");
+        std::ignore = h.loop.runUntilIdle();
+        CHECK(host->interruptedCommandOf(sessionOf(0)).empty());
+        CHECK(host->interruptedCommandOf(sessionOf(2)).empty());
+    }
 }
 
 TEST_CASE("a shell without prompt marks still gets its re-run after the fallback",
@@ -428,4 +486,66 @@ TEST_CASE("a snapshot that repeats a UUID restores the second object under a fre
     REQUIRE((first.has_value() && second.has_value()));
     CHECK(first->bytes == repeated.uuid);
     CHECK(*second != *first);
+}
+
+namespace
+{
+
+/// @return A snapshot of one window per count given, each holding that many single-pane tabs.
+[[nodiscard]] WorkspaceSnapshot windowsOf(std::vector<int> const& tabCounts)
+{
+    auto snapshot = WorkspaceSnapshot { .takenAt = Now };
+    for (auto const tabs: tabCounts)
+    {
+        auto window = WindowSnapshot {};
+        std::ranges::generate_n(
+            std::back_inserter(window.tabs), tabs, [] { return TabSnapshot { .root = leaf() }; });
+        snapshot.windows.push_back(std::move(window));
+    }
+    return snapshot;
+}
+
+} // namespace
+
+TEST_CASE("a restore announces the windows and tabs it brought back, once", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    auto const everything = [](uint64_t) {
+        return true;
+    };
+
+    CHECK(host->takeRestoreAnnouncement(everything) == RestoredCounts { .windows = 2, .tabs = 7 });
+    CHECK_FALSE(host->takeRestoreAnnouncement(everything).has_value());
+}
+
+TEST_CASE("a window none of whose panes spawned is not announced", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    h.recorded.failFirst = 3; // every pane of the first window
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+
+    CHECK(host->takeRestoreAnnouncement([](uint64_t) { return true; })
+          == RestoredCounts { .windows = 1, .tabs = 4 });
+}
+
+TEST_CASE("a client is told only of the windows it follows", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 3, 4 }), .divider = DividerOf });
+    auto const first = host->model().windowAt(0)->id().value;
+
+    CHECK(host->takeRestoreAnnouncement([first](uint64_t window) { return window == first; })
+          == RestoredCounts { .windows = 1, .tabs = 3 });
+    // The question is asked of the first client only: nothing is left for another.
+    CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+}
+
+TEST_CASE("a host that restored nothing has nothing to announce", "[vthost][snapshot][restore]")
+{
+    auto h = RestoreHarness {};
+    h.recorded.failing = true;
+    auto const host = h.restore(WorkspaceRestore { .snapshot = windowsOf({ 2 }), .divider = DividerOf });
+    CHECK_FALSE(host->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
+    CHECK_FALSE(h.makeHost({})->takeRestoreAnnouncement([](uint64_t) { return true; }).has_value());
 }

@@ -8,6 +8,7 @@
 #include <QtCore/QString>
 #include <QtCore/QUrl>
 #include <QtGui/QFont>
+#include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -21,8 +22,10 @@
 #include <memory>
 
 // The ContourTui Qt Quick Controls style is selected by name, once per process, before the first
-// control exists (ContourGuiApp). That makes it untestable by *selecting* it here -- this binary has
-// already pinned Fusion in test_main.cpp, and Qt offers no way to re-resolve a style afterwards.
+// control exists (ContourGuiApp). This binary does the same in test_main.cpp: it runs under Fusion
+// unless CONTOUR_TEST_CONTROLS_STYLE names another style for the whole run, and Qt offers no way to
+// re-resolve a style afterwards, so these cases cannot select it themselves. A run under
+// CONTOUR_TEST_CONTROLS_STYLE=ContourTui is what renders the Terminal row's chrome snapshots.
 // (Qt 6.11's QQuickStyle exposes only name/setStyle/setFallbackStyle; there is no availableStyles()
 // to ask, either.)
 //
@@ -365,10 +368,10 @@ TEST_CASE("The two chrome styles cast recognisably different shadows", "[contour
     // Not a preference check: the terminal style quotes a text-mode UI, whose drop shadow is a hard
     // offset block rather than a soft halo. A blurred one would be the single thing in that chrome not
     // aligned to the character grid.
-    auto const native =
-        contour::window::UiStyleProvider(contour::config::UiStyle::Native, QGuiApplication::font(), nullptr);
+    auto const native = contour::window::UiStyleProvider(
+        contour::config::ChromeStyle::ContourLinux, QGuiApplication::font(), nullptr);
     auto const terminal = contour::window::UiStyleProvider(
-        contour::config::UiStyle::Terminal, QGuiApplication::font(), nullptr);
+        contour::config::ChromeStyle::Terminal, QGuiApplication::font(), nullptr);
 
     CHECK(native.shadowBlur() > 0);
     CHECK(terminal.shadowBlur() == 0);
@@ -377,4 +380,29 @@ TEST_CASE("The two chrome styles cast recognisably different shadows", "[contour
     // Both must actually ask for one, or the styles differ by having no shadow rather than by shape.
     CHECK(native.hasPopupShadow());
     CHECK(terminal.hasPopupShadow());
+}
+
+TEST_CASE("A ContourTui combo box fits its longest option, not just the one showing", "[contour][gui][style]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/ContourTui/ComboBox.qml")));
+    INFO("ComboBox errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> combo(component.create());
+    REQUIRE(combo != nullptr);
+
+    combo->setProperty("model", QStringList { "No", "Always", "Underlined text with a long tail" });
+    combo->setProperty("currentIndex", 0);
+    auto const font = combo->property("font").value<QFont>();
+    auto const longest =
+        QFontMetricsF(font).horizontalAdvance(QStringLiteral("Underlined text with a long tail"));
+
+    CHECK(combo->property("modelWidth").toReal() >= longest);
+    CHECK(combo->property("implicitWidth").toReal()
+          >= longest + combo->property("leftPadding").toReal() + combo->property("rightPadding").toReal());
+    auto const* popup = combo->property("popup").value<QObject*>();
+    REQUIRE(popup != nullptr);
+    CHECK(popup->property("width").toReal() >= longest);
 }

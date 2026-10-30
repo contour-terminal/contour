@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <coroutine>
 #include <cstddef>
+#include <exception>
 #include <expected>
 #include <format>
 #include <functional>
@@ -37,6 +39,7 @@
 #include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
+#include <vthost/InputEchoWire.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
@@ -44,6 +47,7 @@
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/TabEdits.hpp>
+#include <vthost/TabMerge.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/proto/PduTrace.hpp>
@@ -374,8 +378,7 @@ void NativeSession::scheduleFlush(core::platform::SteadyTimePoint deadline)
     if (_closed || (_flushDeadline && *_flushDeadline <= deadline))
         return;
     _flushDeadline = deadline;
-    ++_flushesInFlight;
-    _loop.spawn(flushAt(deadline));
+    _loop.spawn(flushAt(claimFlush(), deadline));
 }
 
 void NativeSession::sessionClosed(SessionId session)
@@ -388,6 +391,8 @@ void NativeSession::sessionClosed(SessionId session)
     std::erase(_snapshotQueue, session.value);
     _recordsAwaitingRoom.erase(session.value);
     _programStatusPending.erase(session.value);
+    _inputEchoPending.erase(session.value);
+    _inputEchoSent.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
@@ -462,6 +467,55 @@ void NativeSession::pushProgramStatus(SessionId session, ProgramStatusPush when)
     emitSessionEvent(std::move(pdu));
 }
 
+bool NativeSession::mirrorsInputEcho() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::InputEcho);
+}
+
+void NativeSession::pushInputEcho(SessionId session)
+{
+    if (!mirrorsInputEcho())
+        return;
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+    {
+        _inputEchoSent.erase(session.value); // gone: nothing more to tell of it
+        return;
+    }
+    // The device's own lock guards the read (UnixPty::inputEcho); the terminal's is not taken, so a parser
+    // thread holding it never holds up the loop here.
+    auto const echo = inputEchoToWire(terminal->device().inputEcho());
+    auto const [sent, inserted] =
+        _inputEchoSent.try_emplace(session.value, inputEchoToWire(vtpty::InputEcho::Unknown));
+    if (sent->second == echo)
+        return;
+    sent->second = echo;
+    emitSessionEvent(proto::SessionInputEcho { .session = session.value, .echo = echo });
+}
+
+void NativeSession::checkInputEchoWhenDue()
+{
+    if (!mirrorsInputEcho() || _closed)
+        return;
+    auto const now = _loop.clock().now();
+    if (now >= _nextInputEchoCheck)
+    {
+        _nextInputEchoCheck = now + _services.flush.inputEchoCheck;
+        for (auto const& [session, follow]: _followed)
+            pushInputEcho(SessionId { session });
+    }
+    // The next check rides a flush of its own; an earlier flush that output arms runs this again, and
+    // supersedes the one armed here, which then finds its deadline moved. Past the activity window nothing
+    // is armed: an idle connection wakes no timer, and the next output or input opens the window again.
+    if (now < _inputEchoActiveUntil)
+        scheduleFlush(_nextInputEchoCheck);
+}
+
+void NativeSession::noteInputEchoActivity()
+{
+    _inputEchoActiveUntil = _loop.clock().now() + _services.flush.inputEchoWindow;
+}
+
 void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
 {
     // A question is asked in its pane: one in a window this client does not show waits for a client that
@@ -487,9 +541,16 @@ void NativeSession::pushLayout()
     // One LayoutState per followed daemon window (B4) — the client opens a GUI window for
     // each and reconciles its tabs/splits independently.
     auto& model = _host.model();
+    auto const acknowledges =
+        _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::TabEditAcks);
     for (auto const i: std::views::iota(0, model.windowCount()))
         if (auto* window = model.windowAt(i); window != nullptr && follows(window->id()))
-            send(0, proto::DecodedPdu { serializeLayout(*window) });
+        {
+            auto layout = serializeLayout(*window);
+            if (acknowledges)
+                layout.servedEdit = _servedEdit;
+            send(0, proto::DecodedPdu { std::move(layout) });
+        }
 }
 
 void NativeSession::refreshFollowedWindows()
@@ -531,12 +592,14 @@ bool NativeSession::followsSession(SessionId session) const
     return window != nullptr && follows(window->id());
 }
 
-core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint deadline)
+core::async::Task<void> NativeSession::flushAt(SpawnedFlowClaim claim,
+                                               core::platform::SteadyTimePoint deadline)
 {
+    // Given back as the body ends, however it ends: a stopped loop unwinds a flush from its sleep.
+    auto const held = std::move(claim);
     // A busy PTY produces many screenUpdated signals per frame-worth of output; one Delta per coalescing
     // window is what the client can use anyway. A deadline already due resumes without suspending.
     co_await _loop.sleepUntil(deadline);
-    --_flushesInFlight;
     // An earlier deadline superseded this one, and its flusher flushed (or will): nothing is left to do.
     if (_flushDeadline != deadline)
         co_return;
@@ -548,6 +611,15 @@ core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint d
     // the mirror apply and repaint a grid it has only half received. Put it back rather than drop
     // it — rows changed after the snapshot was captured are still news. The reinsert targets the
     // member, which `exchange` just emptied, not the range being walked.
+    // The echo first, so a client's pane holds it by the time the output that follows it lands: sudo turns
+    // echo off before it prints the prompt.
+    if (!_pendingSessions.empty() || !_inputEchoPending.empty())
+        noteInputEchoActivity();
+    for (auto const session: _pendingSessions)
+        pushInputEcho(SessionId { session });
+    for (auto const session: std::exchange(_inputEchoPending, {}))
+        pushInputEcho(SessionId { session });
+    checkInputEchoWhenDue();
     for (auto const session: std::exchange(_pendingSessions, {}))
         if (snapshotPending(SessionId { session }))
             _pendingSessions.insert(session);
@@ -1192,6 +1264,11 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
     follow.lastCursorLine = delta.cursorLine;
     follow.lastCursorColumn = delta.cursorColumn;
     follow.lastStableFloor = delta.stableFloor;
+    // Stated outright, empty included, like the rest of a snapshot: the host forgot it when the session's
+    // next command started, and a client that attaches or resyncs after that is told none. Loop thread, as
+    // the host's table is.
+    if (state)
+        state->interruptedCommand = _host.interruptedCommandOf(session);
     return BuiltPush { .delta = std::move(delta), .state = std::move(state) };
 }
 
@@ -1248,8 +1325,7 @@ void NativeSession::requestSnapshot(SessionId session)
     _snapshotQueue.push_back(session.value);
     if (!idle)
         return;
-    _streamingSession = session.value;
-    _loop.spawn(streamSnapshots());
+    _loop.spawn(streamSnapshots(claimStreamer(session)));
 }
 
 core::async::Task<bool> NativeSession::awaitSendRoom()
@@ -1300,26 +1376,25 @@ void NativeSession::followUpRecords(SessionId session)
     if (_roomWaiter == RoomWaiter::Parked || _closed)
         return;
     // Claimed before the spawn, for the reason requestSnapshot claims the streamer before its own.
-    _roomWaiter = RoomWaiter::Parked;
-    _loop.spawn(requeueOnSendRoom());
+    _loop.spawn(requeueOnSendRoom(claimRoomWaiter()));
 }
 
-core::async::Task<void> NativeSession::requeueOnSendRoom()
+core::async::Task<void> NativeSession::requeueOnSendRoom(SpawnedFlowClaim claim)
 {
-    // A scope guard, for the reason streamSnapshots has one: run()'s teardown waits on it.
-    auto const idle = core::Finally { [this] { _roomWaiter = RoomWaiter::Idle; } };
+    // Given back as the body ends, for the reason streamSnapshots gives its claim back so.
+    auto const held = std::move(claim);
     if (!co_await awaitSendRoom())
         co_return;
     for (auto const session: std::exchange(_recordsAwaitingRoom, {}))
         queueIncrement(SessionId { session });
 }
 
-core::async::Task<void> NativeSession::streamSnapshots()
+core::async::Task<void> NativeSession::streamSnapshots(SpawnedFlowClaim claim)
 {
-    // A scope guard, not an assignment at the end: run()'s teardown polls this for the streamer
-    // having let go of `this`, and a cancellation unwinding past a trailing assignment would
-    // leave it set — deadlocking the very poll that keeps `this` alive.
-    auto const finished = core::Finally { [this] { _streamingSession.reset(); } };
+    // Given back as the body ends, not by an assignment at the end: run()'s teardown waits for the
+    // streamer having let go of `this`, and a cancellation unwinding past a trailing assignment would
+    // leave it held — deadlocking the very wait that keeps `this` alive.
+    auto const held = std::move(claim);
 
     while (!_snapshotQueue.empty() && !_closed)
     {
@@ -1342,6 +1417,8 @@ core::async::Task<void> NativeSession::streamSnapshots()
         // Before the rows, so that the screen holds the set by the time the completing piece replays it.
         if (mirrorsProgramStatus())
             pushProgramStatus(session, ProgramStatusPush::IfAny);
+        // A snapshot states the echo too, for a client that attached while a prompt waits.
+        pushInputEcho(session);
         // A snapshot that stated only the newest records that fit had buildPush queue the older
         // remainder as increments, which the debounce holds back until this run is off the wire.
         co_await sendSnapshotPieces(std::move(built->delta), session);
@@ -1423,6 +1500,30 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
     }
 }
 
+void NativeSession::handleInput(proto::Input const& input)
+{
+    if (_host.terminal(SessionId { input.session }) == nullptr)
+    {
+        errorLog()(
+            "{}: Input for unknown session {} ({} bytes dropped)", _id, input.session, input.data.size());
+        return;
+    }
+    // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
+    // PTY write while the application leaves its input unread.
+    _host.writeInput(
+        SessionId { input.session },
+        std::string_view { reinterpret_cast<char const*>(input.data.data()), input.data.size() });
+    pauseReadingIfBackedUp(SessionId { input.session });
+    // The program may answer the keys by turning echo back on without printing a byte: read it again at the
+    // next flush, which the session's pump has written the keys by.
+    if (mirrorsInputEcho())
+    {
+        noteInputEchoActivity();
+        _inputEchoPending.insert(input.session);
+        scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
+    }
+}
+
 void NativeSession::handlePdu(proto::DecodedFrame const& frame)
 {
     // An unknown PDU from a newer client is answered rather than dropped, and an Unsupported it sent is
@@ -1466,20 +1567,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* input = std::get_if<proto::Input>(&frame.pdu))
     {
-        if (_host.terminal(SessionId { input->session }) == nullptr)
-        {
-            errorLog()("{}: Input for unknown session {} ({} bytes dropped)",
-                       _id,
-                       input->session,
-                       input->data.size());
-            return;
-        }
-        // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
-        // PTY write while the application leaves its input unread.
-        _host.writeInput(
-            SessionId { input->session },
-            std::string_view { reinterpret_cast<char const*>(input->data.data()), input->data.size() });
-        pauseReadingIfBackedUp(SessionId { input->session });
+        handleInput(*input);
         return;
     }
     if (auto const* resize = std::get_if<proto::ResizeRequest>(&frame.pdu))
@@ -1617,19 +1705,8 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         pauseReadingIfBackedUp(SessionId { request->session });
         return;
     }
-    if (auto const* edit = std::get_if<proto::EditTab>(&frame.pdu))
-    {
-        // A client that did not negotiate it may not edit: it is refused as a PDU this daemon does not know.
-        if (!_negotiated->shared.contains(proto::Capability::TabEdits))
-        {
-            refuse(frame);
-            return;
-        }
-        // A change fans out as a model event, and so as a layout push to every client, this one included.
-        if (auto const applied = applyTabEdit(_host.model(), *edit); !applied)
-            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(applied.error()));
+    if (serveTabVerb(frame) == TabVerb::Served)
         return;
-    }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
         _host.closeSession(vtworkspace::SessionId { close->session });
@@ -1648,6 +1725,46 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     // all the same — "the daemon ignored what I sent" is otherwise indistinguishable from "the
     // daemon never received it".
     errorLog()("{}: ignoring unexpected {} (serial {})", _id, proto::describe(frame.pdu), frame.serial);
+}
+
+NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& frame)
+{
+    if (auto const* edit = std::get_if<proto::EditTab>(&frame.pdu))
+    {
+        // A client that did not negotiate it may not edit: it is refused as a PDU this daemon does not know.
+        if (!_negotiated->shared.contains(proto::Capability::TabEdits))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Served before it is applied: the push the change fans out, to this client included, has seen it.
+        _servedEdit = frame.serial;
+        // A change fans out as a model event, and so as a layout push to every client, this one included.
+        if (auto const applied = applyTabEdit(_host.model(), *edit); !applied)
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(applied.error()));
+        return TabVerb::Served;
+    }
+    if (auto const* merge = std::get_if<proto::MergeTabIntoSplit>(&frame.pdu))
+    {
+        // As for EditTab, a client that did not negotiate it is refused.
+        if (!_negotiated->shared.contains(proto::Capability::TabMerge))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, so the layout push that reaches every client, this one included, is the
+        // answer: the dragged tab's sessions move into the target tab and none is spawned or closed.
+        if (auto const merged = applyTabMerge(_host.model(), *merge); !merged)
+        {
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(merged.error()));
+            // Said, so the user whose drop did nothing is told: no layout push follows a refusal.
+            send(frame.serial,
+                 proto::DecodedPdu {
+                     proto::TabMergeRefused { .reason = std::to_underlying(merged.error()) } });
+        }
+        return TabVerb::Served;
+    }
+    return TabVerb::None;
 }
 
 NativeSession::GrantCheck NativeSession::requireGrant(vtcontrol::Permission permission,
@@ -1927,6 +2044,20 @@ void NativeSession::attachClient(uint64_t serial,
                        hello.clientArea->lines);
     }
 
+    // The preference the client shows, applied BEFORE the plan spawns anything, so a session spawned for this
+    // attach is built under it and its first snapshot is no flash of the other scheme.
+    auto const colorPreference = [&]() -> std::optional<vtbackend::ColorPreference> {
+        switch (hello.colorPreference)
+        {
+            case proto::WireColorPreference::Dark: return vtbackend::ColorPreference::Dark;
+            case proto::WireColorPreference::Light: return vtbackend::ColorPreference::Light;
+            case proto::WireColorPreference::Unstated: break;
+        }
+        return std::nullopt;
+    }();
+    if (colorPreference)
+        _host.adoptColorPreference(*colorPreference);
+
     // After the client area, so whatever the plan spawns spawns at the size the client displays (D7). A
     // client that cannot state an intent follows every window, as every client did before intents existed.
     executeAttachPlan(negotiated.shared.contains(proto::Capability::AttachIntent) ? hello.attachIntent
@@ -1940,13 +2071,38 @@ void NativeSession::attachClient(uint64_t serial,
             if (auto* window = _host.model().windowAt(i); window != nullptr && window->tabCount() > 0)
                 reply.followedWindows.push_back(window->id().value);
     reply.daemonInstance = _host.instance();
+    // Told to the first attaching client only, whichever windows it follows: the host forgets it with the
+    // answer.
+    if (auto const restored = _host.takeRestoreAnnouncement(
+            [this](uint64_t window) { return follows(vtworkspace::WindowId { window }); }))
+    {
+        reply.restoredWindows = restored->windows;
+        reply.restoredTabs = restored->tabs;
+    }
     send(serial, proto::DecodedPdu { std::move(reply) });
     _negotiated = std::move(negotiated);
     _phase = ConnectionPhase::Viewing;
+    // The idle check of the echo state starts one interval from now, and runs for the activity window.
+    _nextInputEchoCheck = _loop.clock().now() + _services.flush.inputEchoCheck;
+    noteInputEchoActivity();
+    if (mirrorsInputEcho())
+        scheduleFlush(_nextInputEchoCheck);
 
     // The window/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.
     pushLayout();
+
+    // The sessions that already existed take the stated preference before their snapshot is built; a change
+    // only, so what a program set on one survives.
+    if (colorPreference)
+        _host.model().forEachTab([&](vtworkspace::Window& window, vtworkspace::Tab& tab) {
+            if (!follows(window.id()))
+                return;
+            tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+                if (pane.isLeaf())
+                    _host.applyColorPreference(pane.session(), *colorPreference);
+            });
+        });
 
     // The attach snapshot: every hosted session of every followed window, full state. QUEUED, not pushed:
     // this runs inside the PDU pump's handler, which cannot suspend, so pushing here would put
@@ -2022,52 +2178,115 @@ void NativeSession::reportPumpOutcome(PumpResult const& outcome) const
     }
 }
 
+NativeSession::SpawnedFlowClaim::~SpawnedFlowClaim()
+{
+    if (_session == nullptr)
+        return;
+    _release(*_session);
+    // Queued, not resumed inline: this may run inside the frame of the flow giving the claim back.
+    if (_session->_spawnedFlowsWaiter && _session->spawnedFlowsEnded())
+        _session->_loop.submit(std::exchange(_session->_spawnedFlowsWaiter, {}));
+}
+
+NativeSession::SpawnedFlowClaim NativeSession::claimFlush()
+{
+    ++_flushesInFlight;
+    return SpawnedFlowClaim { *this, [](NativeSession& self) noexcept { --self._flushesInFlight; } };
+}
+
+NativeSession::SpawnedFlowClaim NativeSession::claimStreamer(SessionId session)
+{
+    _streamingSession = session.value;
+    return SpawnedFlowClaim { *this, [](NativeSession& self) noexcept { self._streamingSession.reset(); } };
+}
+
+NativeSession::SpawnedFlowClaim NativeSession::claimRoomWaiter()
+{
+    _roomWaiter = RoomWaiter::Parked;
+    return SpawnedFlowClaim { *this,
+                              [](NativeSession& self) noexcept { self._roomWaiter = RoomWaiter::Idle; } };
+}
+
+/// An awaiter, so its three members carry the names the coroutine machinery calls them by.
+struct NativeSession::SpawnedFlowsEnded
+{
+    NativeSession* session;
+
+    // NOLINTNEXTLINE(readability-identifier-naming) -- bound by spelling: the coroutine machinery calls it.
+    [[nodiscard]] bool await_ready() const noexcept { return session->spawnedFlowsEnded(); }
+    // NOLINTNEXTLINE(readability-identifier-naming) -- bound by spelling: the coroutine machinery calls it.
+    void await_suspend(std::coroutine_handle<> awaiting) const noexcept
+    {
+        session->_spawnedFlowsWaiter = awaiting;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming) -- bound by spelling: the coroutine machinery calls it.
+    void await_resume() const noexcept {}
+};
+
 core::async::Task<void> NativeSession::run()
 {
-    // Nothing is valid before a version-matching ClientHello; afterwards the
-    // pump serves request PDUs until the peer disconnects.
-    auto const outcome = co_await pumpPdus(
-        _connection.get(),
-        [this](proto::DecodedFrame const& frame) {
-            // Traced HERE rather than in handlePdu: the handshake frame never reaches handlePdu, and
-            // a trace that cannot show the ClientHello is useless for exactly the failures — version
-            // and token mismatches — one most wants a trace for.
-            if (protocolTraceLog)
-                protocolTraceLog()(
-                    "{} {}",
-                    _id,
-                    proto::traceLine(proto::Direction::Recv, frame.serial, frame.pdu, frame.consumed));
-            if (_phase == ConnectionPhase::AwaitingHello)
-                return completeHandshake(frame);
-            handlePdu(frame);
-            return true;
-        },
-        {},
-        [this] { return awaitInputRoom(); });
-    reportPumpOutcome(outcome);
+    // Whatever ends the pump ends it here, so that the barrier below runs on every way out. Every exception,
+    // not just a stopped loop's OperationCancelled: any of them leaves this frame, and serveNativeClient
+    // frees `this` the moment it does -- under every flow still holding it, which is the use-after-free the
+    // barrier exists to prevent. Rethrown, unchanged, once that barrier is passed.
+    auto failure = std::exception_ptr {};
+    try
+    {
+        // Nothing is valid before a version-matching ClientHello; afterwards the
+        // pump serves request PDUs until the peer disconnects.
+        auto const outcome = co_await pumpPdus(
+            _connection.get(),
+            [this](proto::DecodedFrame const& frame) {
+                // Traced HERE rather than in handlePdu: the handshake frame never reaches handlePdu, and
+                // a trace that cannot show the ClientHello is useless for exactly the failures — version
+                // and token mismatches — one most wants a trace for.
+                if (protocolTraceLog)
+                    protocolTraceLog()(
+                        "{} {}",
+                        _id,
+                        proto::traceLine(proto::Direction::Recv, frame.serial, frame.pdu, frame.consumed));
+                if (_phase == ConnectionPhase::AwaitingHello)
+                    return completeHandshake(frame);
+                handlePdu(frame);
+                return true;
+            },
+            {},
+            [this] { return awaitInputRoom(); });
+        reportPumpOutcome(outcome);
+    }
+    catch (...)
+    {
+        failure = std::current_exception();
+    }
 
     _closed = true;
     // Before the barrier below: a wait completing later must find no sink of a connection that is going.
     _services.control.get().sinkClosed(_controlEvents);
     // Lifetime constraint: serveNativeClient destroys this session the moment
     // run() returns (the unique_ptr goes out of scope immediately after the
-    // co_await). Flushes spawned before the disconnect may still be parked
-    // until their deadlines with `this` captured in their coroutine frames --
-    // superseded ones included, which is why this counts them rather than
-    // asking whether a deadline is armed. pollUntil drains them -- *this must
-    // still be alive for the entire poll, so this poll MUST remain the last
-    // thing run() does before returning. Any refactoring that moves logic after
-    // this point opens a use-after-free window on _flushesInFlight.
+    // co_await). Flows spawned before the disconnect may still hold `this` --
+    // flushes parked until their deadlines, superseded ones included, or not
+    // started yet; the snapshot streamer; the waiter for send room -- so this
+    // barrier MUST remain the last thing run() does before it lets go of `this`.
+    // Any refactoring that moves logic after this point opens a use-after-free
+    // window on every one of them.
     //
-    // The snapshot streamer joins the same barrier for the same reason, and needs it more: it
-    // parks on the write queue's watermark, which is a far longer park than a flush deadline.
-    // `_closed` was set just above, which is what unparks it — waitUntilBacklogBelow returns on
-    // a closed queue, and the streamer's loops all test _closed — so this poll is bounded. The waiter
-    // for room for command-block records parks on the same watermark, and joins for the same reason.
-    co_await core::net::pollUntil(&_loop, [this] {
-        return _flushesInFlight == 0 && !_streamingSession && _roomWaiter == RoomWaiter::Idle;
-    });
+    // The barrier is no poll, so a stopped loop -- whose every wait throws -- cannot cut it short, and it
+    // never spins: it parks until the last claim is given back (@see SpawnedFlowClaim). It ends because
+    // every claimed flow ends: the flows park only on the loop's own waits, which `_closed` (set above)
+    // ends -- waitUntilBacklogBelow returns on it, and the streamer's loops test it -- or a deadline does,
+    // and a stopped loop unparks and cancels all of them; a frame the loop frees unstarted gives its claim
+    // back from its parameter. Were one never to end, this would wait rather than spin, and LoopDrain's
+    // bounded drain would report the flow still alive.
+    co_await SpawnedFlowsEnded { this };
+    if (failure)
+        std::rethrow_exception(failure);
     co_await closeGracefully(&_loop, &_writer, _connection.get());
+}
+
+bool NativeSession::spawnedFlowsEnded() const noexcept
+{
+    return _flushesInFlight == 0 && !_streamingSession && _roomWaiter == RoomWaiter::Idle;
 }
 
 namespace

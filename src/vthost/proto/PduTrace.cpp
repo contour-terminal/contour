@@ -110,7 +110,7 @@ namespace
                        // a block of the user's configuration, and a trace is not a config dump.
                        return std::format(
                            "versions={} caps={} token={} settings={} role={} area={} intent={} windows={} "
-                           "profile=\"{}\"",
+                           "profile=\"{}\"{}",
                            formatRange(value.versions),
                            formatCapabilities(value.capabilities),
                            value.token.empty() ? "no" : "yes",
@@ -121,7 +121,13 @@ namespace
                                : std::string { "none" },
                            std::ranges::find(IntentNames, value.attachIntent.kind, &IntentName::kind)->name,
                            formatWindows(value.attachIntent.windows),
-                           value.profileName);
+                           value.profileName,
+                           // Only a stated one, so a hello that states none reads as it always did.
+                           value.colorPreference == WireColorPreference::Unstated
+                               ? std::string {}
+                               : std::format(" color={}",
+                                             value.colorPreference == WireColorPreference::Dark ? "dark"
+                                                                                                : "light"));
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",
@@ -136,13 +142,15 @@ namespace
                            case HelloLayout::Negotiating: break;
                        }
                        return std::format("layout=negotiating agreed={} versions={} caps={} release={} "
-                                          "followed={} instance={:016x}",
+                                          "followed={} instance={:016x} restored={}/{}",
                                           value.agreedVersion,
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
                                           value.releaseVersion.empty() ? "unknown" : value.releaseVersion,
                                           formatWindows(value.followedWindows),
-                                          value.daemonInstance);
+                                          value.daemonInstance,
+                                          value.restoredWindows,
+                                          value.restoredTabs);
                    } },
         TraceRow { PduType::Input,
                    "Input",
@@ -194,10 +202,10 @@ namespace
                        // Context records carry user, hostname, cwd and cmdline: a COUNT is the
                        // diagnostic, and the fields themselves must never reach a trace log.
                        // Command-block records carry command lines and directories: counted, never
-                       // shown.
+                       // shown; so is the interrupted command's length.
                        return std::format(
                            "session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{} contexts={} "
-                           "chain={} blocks={}",
+                           "chain={} blocks={} interrupted={}ch",
                            value.session,
                            value.columns,
                            value.lines,
@@ -208,7 +216,8 @@ namespace
                            value.progressPercentage,
                            value.contexts.size(),
                            value.contextChain.size(),
-                           value.commandBlocks.size());
+                           value.commandBlocks.size(),
+                           value.interruptedCommand.size());
                    } },
         TraceRow { PduType::Delta,
                    "Delta",
@@ -423,6 +432,26 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<ProgramStatus>(pdu);
                        return std::format("session={} records={}", value.session, value.records.size());
+                   } },
+        TraceRow { PduType::SessionInputEcho,
+                   "SessionInputEcho",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SessionInputEcho>(pdu);
+                       return std::format("session={} echo={}", value.session, value.echo);
+                   } },
+        TraceRow { PduType::MergeTabIntoSplit,
+                   "MergeTabIntoSplit",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MergeTabIntoSplit>(pdu);
+                       return std::format("tab-sessions={} target={} side={}",
+                                          value.tabSessions.size(),
+                                          value.targetSession,
+                                          value.side);
+                   } },
+        TraceRow { PduType::TabMergeRefused,
+                   "TabMergeRefused",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("reason={}", std::get<TabMergeRefused>(pdu).reason);
                    } },
     };
 

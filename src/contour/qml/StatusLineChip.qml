@@ -13,6 +13,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "indicatorChip"
 
     /// One entry of SettingsController::parseIndicatorSegment.
     required property var item
@@ -22,13 +23,6 @@ Rectangle {
 
     signal editRequested()
     signal removeRequested()
-
-    // Live OS palette handle, so the chip follows dark/light in realtime.
-    SystemPalette {
-        id: sys
-        colorGroup: SystemPalette.Active
-    }
-    readonly property color subtleText: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.6)
 
     /// Which attributes this item carries, without their values: one letter per set flag, plus a mark for
     /// each colour. Enough to tell two otherwise identical chips apart at a glance.
@@ -48,13 +42,14 @@ Rectangle {
     readonly property string displayName: root.item && root.item.displayName !== undefined
                                          ? root.item.displayName : ""
 
-    implicitHeight: chipRow.implicitHeight + 8
-    implicitWidth: chipRow.implicitWidth + 14
-    radius: 5
-    color: Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, chipHover.hovered ? 0.18 : 0.09)
-    border.width: 1
-    border.color: Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, 0.32)
-    opacity: root.editable ? 1.0 : 0.6
+    implicitHeight: chipRow.implicitHeight + chromeStyle.space.s2 + chromeStyle.space.s2
+    implicitWidth: chipRow.implicitWidth + chromeStyle.space.s4 + chromeStyle.space.s4
+    radius: chromeStyle.radii.control
+    color: chromeStyle.colors.controlFill
+    // The hovered chip's edge is the label's ink, a mark that stands off the fill.
+    border.width: chromeStyle.borderWidth
+    border.color: chipHover.hovered ? chromeStyle.colors.settingsLabel : chromeStyle.colors.settingsSeparator
+    opacity: root.editable ? 1.0 : chromeStyle.settings.disabledOpacity
 
     HoverHandler { id: chipHover; enabled: root.editable }
 
@@ -71,22 +66,21 @@ Rectangle {
     RowLayout {
         id: chipRow
         anchors.centerIn: parent
-        spacing: 5
+        spacing: chromeStyle.space.s3
 
         Label {
             text: root.displayName
-            color: sys.windowText
-            font.pointSize: 9
+            color: chromeStyle.colors.controlText
+            font: chromeStyle.type.footnote
             elide: Text.ElideRight
-            Layout.maximumWidth: 190
+            Layout.maximumWidth: chromeStyle.settings.sidebarWidth
         }
 
         Label {
             visible: root.badge.length > 0
             text: root.badge
-            color: root.subtleText
-            font.pointSize: 7
-            font.family: "monospace"
+            color: chromeStyle.colors.controlText
+            font: Qt.font({ family: "monospace", pixelSize: chromeStyle.type.footnote.pixelSize })
         }
 
         // A real button, so it is keyboard reachable and owns its own hit area rather than being a
@@ -96,9 +90,7 @@ Rectangle {
             text: "✕"
             flat: true
             visible: root.editable
-            implicitWidth: 18
-            implicitHeight: 18
-            font.pointSize: 7
+            font: chromeStyle.type.footnote
             Accessible.name: qsTr("Remove %1").arg(root.displayName)
             onClicked: root.removeRequested()
         }

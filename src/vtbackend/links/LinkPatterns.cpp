@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/links/LinkPatterns.hpp>
 
+#include <vtbackend/core/RegexEngine.hpp>
+
 #include <algorithm>
 #include <array>
 #include <format>
@@ -48,19 +50,6 @@ namespace
     /// Short inputs on which a pattern that can match the empty string does so somewhere.
     constexpr auto EmptyMatchProbes = std::array<std::string_view, 7> { "", " ", "a", "a b", "/", "1", "-" };
 
-#ifdef __GLIBCXX__
-    /// libstdc++'s default (depth-first) executor recursed once per matched character until libstdc++ 16, at
-    /// 150-350 bytes of stack each: a long run overflowed even an 8 MiB stack. Its breadth-first executor, an
-    /// extension, keeps the stack to the pattern's size and has no back-references. Chosen on every
-    /// libstdc++, so that the engine tested here is the one every Linux build runs.
-    constexpr auto EngineFlags = std::regex_constants::__polynomial;
-#else
-    /// libc++ matches iteratively, and MSVC gives up with `error_stack`: the default engine is fine there.
-    constexpr auto EngineFlags = std::regex_constants::syntax_option_type {};
-#endif
-    constexpr auto RegexFlags =
-        std::regex_constants::ECMAScript | std::regex_constants::optimize | EngineFlags;
-
     /// A pattern before compilation: a built-in, then whatever the entries changed.
     struct Draft
     {
@@ -105,54 +94,11 @@ namespace
         });
     }
 
-    /// What a character of a pattern's source is to the regex grammar.
-    enum class SourceRole : uint8_t
-    {
-        Plain = 0,      ///< Outside any `[…]` class, not escaped.
-        Escaped,        ///< Right after a backslash, outside a class.
-        InClass,        ///< Inside `[…]`, not escaped.
-        EscapedInClass, ///< Right after a backslash, inside `[…]`.
-    };
-
-    /// Whether some character of @p source, in the role it has there, passes @p test.
-    /// @param test Called as `test(char, SourceRole)`.
-    template <typename Test>
-    [[nodiscard]] bool anySourceCharacter(std::string_view source, Test test)
-    {
-        auto escaped = false;
-        auto inClass = false;
-        for (auto const ch: source)
-        {
-            auto role = inClass ? SourceRole::InClass : SourceRole::Plain;
-            if (escaped)
-                role = inClass ? SourceRole::EscapedInClass : SourceRole::Escaped;
-            if (test(ch, role))
-                return true;
-            if (escaped)
-                escaped = false;
-            else if (ch == '\\')
-                escaped = true;
-            else if (!inClass && ch == '[')
-                inClass = true;
-            else if (inClass && ch == ']')
-                inClass = false;
-        }
-        return false;
-    }
-
     /// Whether a `[…]` class in @p source holds a byte outside ASCII.
     [[nodiscard]] bool hasNonAsciiInBracket(std::string_view source)
     {
-        return anySourceCharacter(source, [](char ch, SourceRole role) {
-            return role == SourceRole::InClass && static_cast<unsigned char>(ch) >= 0x80;
-        });
-    }
-
-    /// Whether @p source holds a back-reference, `\1` to `\9` (and on) outside a class.
-    [[nodiscard]] bool hasBackReference(std::string_view source)
-    {
-        return anySourceCharacter(source, [](char ch, SourceRole role) {
-            return role == SourceRole::Escaped && ch >= '1' && ch <= '9';
+        return anyRegexSourceCharacter(source, [](char ch, RegexSourceRole role) {
+            return role == RegexSourceRole::InClass && static_cast<unsigned char>(ch) >= 0x80;
         });
     }
 } // namespace
@@ -258,7 +204,7 @@ LinkPatterns LinkPatterns::compile(std::span<LinkPatternSpec const> entries)
     for (auto& draft: drafts)
     {
         // Refused before compiling, so that every platform refuses it: only libstdc++'s engine would throw.
-        if (hasBackReference(draft.source))
+        if (hasRegexBackReference(std::string_view(draft.source)))
         {
             table._diagnostics.push_back(
                 { .pattern = draft.name, .problem = LinkPatternProblem::BackReference, .detail = {} });
@@ -267,7 +213,7 @@ LinkPatterns LinkPatterns::compile(std::span<LinkPatternSpec const> entries)
         auto regex = std::regex {};
         try
         {
-            regex = std::regex(draft.source, RegexFlags);
+            regex = std::regex(draft.source, RegexEngineFlags);
         }
         catch (std::regex_error const& error)
         {

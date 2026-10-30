@@ -17,6 +17,7 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/display/LatencyProbeDriver.hpp>
 #include <contour/display/TerminalAccessible.hpp>
@@ -28,6 +29,10 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/PermissionFixtures.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMocks.hpp>
+#include <contour/test/ScopedApplicationAttribute.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -36,7 +41,10 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/Environment.hpp>
+
 #include <QtCore/QBuffer>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QRunnable>
 #include <QtCore/QSemaphore>
@@ -45,6 +53,9 @@
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -77,21 +88,18 @@
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
+using contour::session::PermissionDecision;
+using contour::session::PermissionMemory;
 using contour::test::DisplayHarness;
 using contour::test::HarnessWindow;
 
 namespace
 {
 
-[[nodiscard]] bool displayTestsEnabled()
-{
-    return qgetenv("CONTOUR_TEST_DISPLAY") == "1";
-}
-
 #define REQUIRE_DISPLAY_OR_SKIP()                                                          \
     do                                                                                     \
     {                                                                                      \
-        if (!displayTestsEnabled())                                                        \
+        if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))                 \
         {                                                                                  \
             WARN("Skipping display test: set CONTOUR_TEST_DISPLAY=1 with a real display"); \
             return;                                                                        \
@@ -149,6 +157,19 @@ constexpr auto RequestedFontSize = 13.0;
     return vtbackend::FontDef {
         .size = size, .regular = "", .bold = "", .italic = "", .boldItalic = "", .emoji = ""
     };
+}
+
+/// Sends the OSC 50 request for RequestedFontSize and waits until its question has reached the session.
+///
+/// setFontDef() posts the request through the display's GUI queue; an answer given before the post has run
+/// finds nothing pending and changes no font, which a compositor that is slow to dispatch it (weston) shows.
+void askedForFont(DisplayHarness const& h)
+{
+    auto asks = 0;
+    contour::test::countAsks(
+        *h.session, contour::session::PermissionAsk { contour::session::GuardedRole::ChangeFont }, asks);
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+    REQUIRE(QTest::qWaitFor([&] { return asks != 0; }));
 }
 
 } // namespace
@@ -502,6 +523,79 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     h.pump();
 }
 
+TEST_CASE("display: the terminal claims a chord no menu owns ahead of any shortcut",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    // Ctrl+Alt+K belongs to the program in the terminal on every host: the display accepts the override,
+    // so no QShortcut or menu item may take it, whatever the menu bar lists or enables.
+    QKeyEvent event(QEvent::ShortcutOverride, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier);
+    event.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &event);
+    CHECK(event.isAccepted());
+}
+
+TEST_CASE("display: under a global menu bar the terminal refuses Command+Q and keeps the next key",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+#ifdef __APPLE__
+    // As the app runs: the Control/Meta swap is off, so the Command key arrives as Qt::MetaModifier.
+    auto const unswapped = contour::test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+    DisplayHarness h;
+    REQUIRE(h.testApp.app().menuBarPlacement() == contour::command::MenuBarPlacement::Global);
+    h.display->forceActiveFocus();
+    QCoreApplication::processEvents();
+
+    // Command+Q is the menu's: the display leaves the override ignored, so the Quit item may take it.
+    QKeyEvent quit(QEvent::ShortcutOverride, Qt::Key_Q, Qt::MetaModifier);
+    quit.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &quit);
+    CHECK_FALSE(quit.isAccepted());
+
+    // The refusal leaves nothing behind: the next key is the program's, claimed and written to the PTY.
+    QKeyEvent next(QEvent::ShortcutOverride, Qt::Key_Z, Qt::NoModifier, QStringLiteral("z"));
+    next.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &next);
+    CHECK(next.isAccepted());
+    QTest::keyClick(h.window.get(), Qt::Key_Z);
+    CHECK(h.sentInput().contains('z'));
+#else
+    SKIP("only macOS has a global menu bar, and the app's placement cannot be forced on another host");
+#endif
+}
+
+TEST_CASE("display: a chord bound to a terminal action is claimed by the terminal and runs the action",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    // Super+C is the Command+C a global Edit menu lists for Copy. Bound here to an action whose effect the
+    // PTY shows, so the case can tell the binding ran from the chord being lost to a menu or typed as text.
+    DisplayHarness h(HarnessWindow::Shown, [](contour::config::Config& config) {
+        config.inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Super], key: 'C', action: SendChars, chars: "bound-action" }
+)")
+                                   .inputMappings;
+    });
+    h.display->forceActiveFocus();
+    QCoreApplication::processEvents();
+
+    QKeyEvent copy(QEvent::ShortcutOverride, Qt::Key_C, Qt::MetaModifier);
+    copy.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &copy);
+    CHECK(copy.isAccepted());
+
+    QTest::keyClick(h.window.get(), Qt::Key_C, Qt::MetaModifier);
+    CHECK(h.sentInput().contains("bound-action"));
+}
+
 TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls through to line scrolling",
           "[display][input]")
 {
@@ -559,9 +653,10 @@ TEST_CASE("display: window resize reflows the grid through the real render loop"
 TEST_CASE("display: the page leaves the configured gutter's columns left of the grid",
           "[display][geometry][gutter]")
 {
-    // Line numbers six columns wide beside the two-cell block column: a gutter of eight cells, behind the
-    // blank lead-in that keeps them off the window's edge. Fitted around any other width, the grid would be
-    // drawn across the numbers, or a blank strip away from them.
+    // Line numbers six columns wide beside the block column: two cells under the glyph form, the rail's strip
+    // (its token's width, not a whole number of cells) under the rail form, behind the blank lead-in that
+    // keeps them off the window's edge. Fitted around any other width, the grid would be drawn across the
+    // numbers, or a blank strip away from them.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
                                 config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
@@ -574,12 +669,18 @@ TEST_CASE("display: the page leaves the configured gutter's columns left of the 
         contour::geometry::scaled(contour::session::toGeometryMargins(h.session->profile().margins.value()),
                                   h.display->devicePixelRatio());
     auto const leadIn = contour::geometry::gutterLeadIn(h.display->devicePixelRatio());
-    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + (8 * cellWidth));
+    auto const& chrome = h.session->gutterChrome();
+    auto const blockColumn =
+        chrome.form == vtbackend::BlockColumnForm::Rail
+            ? contour::session::chromeDevicePixels(chrome.stripPoints, h.display->devicePixelRatio())
+            : 2 * cellWidth;
+    auto const gutter = (6 * cellWidth) + blockColumn;
+    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + gutter);
 
-    // And the extent the window is told the page needs counts the same eight cells and the same lead-in.
+    // And the extent the window is told the page needs counts the same gutter and the same lead-in.
     auto const columns = unbox<int>(h.session->terminal().totalPageSize().columns);
     CHECK(unbox<int>(h.display->pixelSize().width)
-          == (2 * margins.horizontal) + leadIn + ((8 + columns) * cellWidth));
+          == (2 * margins.horizontal) + leadIn + gutter + (columns * cellWidth));
 }
 
 TEST_CASE("display: a reload that widens the gutter widens the window's minimum with the page",
@@ -702,19 +803,17 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     DisplayHarness const h;
 
     // ChangeFont rides the display's GUI queue: setFontDef posts requestPermission(ChangeFont). The
-    // default profile says "ask", so the request surfaces as the permission signal; answering with
+    // default profile says "ask", so the request surfaces as the session's question; answering with
     // allow+remember runs the whole apply-font flow, and the REMEMBERED verdict short-circuits the
     // next request without asking again.
     auto fontAsks = 0;
-    QObject::connect(h.session.get(),
-                     &contour::session::TerminalSession::requestPermissionForFontChange,
-                     h.session.get(),
-                     [&fontAsks]() { ++fontAsks; });
+    contour::test::countAsks(
+        *h.session, contour::session::PermissionAsk { contour::session::GuardedRole::ChangeFont }, fontAsks);
 
     h.session->setFontDef(fontRequest(RequestedFontSize));
     REQUIRE(QTest::qWaitFor([&] { return fontAsks != 0; }));
     REQUIRE(fontAsks == 1);
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/true);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Session);
     REQUIRE(QTest::qWaitFor([&] { return h.display->fontSize().pt == RequestedFontSize; }));
     h.pump();
 
@@ -727,35 +826,34 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     // gate, so the dialog has to be waited for and answered through it -- answering the executor before
     // the gate arrives would leave the gate to raise a dialog for a request already served.
     auto captureAsks = 0;
-    QObject::connect(h.session.get(),
-                     &contour::session::TerminalSession::requestPermissionForBufferCapture,
-                     h.session.get(),
-                     [&captureAsks]() { ++captureAsks; });
+    contour::test::countAsks(*h.session,
+                             contour::session::PermissionAsk { contour::session::GuardedRole::CaptureBuffer },
+                             captureAsks);
 
     // The chunk that ends every answer to a capture request (Screen::replyCaptureBufferEnd), and is the
     // whole of a refusal. Only a verdict on the request writes it.
     constexpr auto CaptureAnswerEnd = "\033^314;\033\\"sv;
 
     h.feedAndSettle("capture me\r\n"sv);
-    h.session->requestCaptureBuffer(vtbackend::LineCount(2), /*logical=*/false);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(2), vtbackend::CaptureLineMode::Physical);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 0; }));
     REQUIRE(captureAsks == 1);
-    h.session->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
+    h.session->executePendingBufferCapture(PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(contour::test::occurrencesOf(CaptureAnswerEnd, h.sentInput()) == 1); // allowed: answered
 
     // A remembered deny resolves the next request without asking again -- and still answers it, since a
     // refused capture owes its client the terminating chunk.
-    h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Logical);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 1; }));
     REQUIRE(captureAsks == 2);
-    h.session->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
-    h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    h.session->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Session);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Logical);
     REQUIRE(QTest::qWaitFor(
         [&] { return contour::test::occurrencesOf(CaptureAnswerEnd, h.pty->stdinSnapshot()) == 3; }));
     CHECK(captureAsks == 2); // remembered: resolved without asking again
 
     // ShowHostWritableStatusLine rides the display queue too; a remembered deny resolves silently.
-    h.session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/true);
+    h.session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Session);
     h.pump();
 }
 
@@ -793,10 +891,14 @@ TEST_CASE("display: font-size changes re-render without crashing and publish new
     // async), so comparing it here races the render loop and can equal the old value at some DPIs.
     // Driving frames afterward still exercises the re-render path (the point of this display test).
     REQUIRE(h.display->fontSize().pt != 14.0);
+    auto const revision = h.display->cellGeometryRevision();
     CHECK(h.display->setFontSize(text::FontSize { 14.0 }));
     CHECK(h.display->fontSize().pt == 14.0);
     h.pump();
     h.pump();
+    // The rows moved under an unmoved item: what binds a row band (the find bar) is told, once the new cell
+    // size is live.
+    CHECK(QTest::qWaitFor([&] { return h.display->cellGeometryRevision() > revision; }));
 }
 
 #ifdef CONTOUR_TEST_ECHO_WASM
@@ -853,8 +955,8 @@ TEST_CASE("display: a font change staged without a render target reaches the sta
     // Asked for and approved while there is no render target: staged only. The next sync re-enters
     // createRenderer(), which materializes it.
     REQUIRE(h.display->fontSize().pt < RequestedFontSize);
-    h.session->setFontDef(fontRequest(RequestedFontSize));
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    askedForFont(h);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once);
     REQUIRE(QTest::qWaitFor([&] {
         h.pump();
         return h.display->hasRenderTarget() && h.display->fontSize().pt == RequestedFontSize;
@@ -973,7 +1075,7 @@ TEST_CASE("display: a font-size change on one session does not leak to another o
     // renderer's font from the incoming session on the hasRenderTarget() rebind path). The single
     // display/_renderer is reused across tabs; without the re-seed it keeps whatever font the last-active
     // tab pushed, so switching back to a tab shows the OTHER tab's font. The per-session _profile
-    // isolation is covered headlessly in TerminalSession_test; this proves the RENDERER follows the
+    // isolation is covered headlessly in the TerminalSession tests; this proves the RENDERER follows the
     // active session across a rebind.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness h;
@@ -2148,6 +2250,67 @@ TEST_CASE("display: VT-driven window resize requests route through the bound con
     SUCCEED("VT resize requests routed through the controller without crashing");
 }
 
+namespace
+{
+/// The extent PaneNode.qml gives the FIRST card's terminal of a side-by-side split of two leaves, in a
+/// window of @p windowSize drawn with @p inputs: what the app's chrome makes of the space the window-size
+/// solver counted, measured from the QML itself.
+/// @param sessions The `terminalSessions` the panes' chrome reads, as Main.qml's engine has it.
+[[nodiscard]] QSizeF firstCardTerminalExtent(contour::window::ChromeInputs const& inputs,
+                                             QSize windowSize,
+                                             QObject& sessions)
+{
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("terminalSessions"), &sessions);
+    qmlRegisterType<contour::test::StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    contour::test::installChromeStyle(engine,
+                                      contour::test::ChromeSetup { .row = inputs.row,
+                                                                   .font = inputs.font,
+                                                                   .windowControls = {},
+                                                                   .accessibility = inputs.accessibility,
+                                                                   .appearance = inputs.appearance,
+                                                                   .scheme = inputs.scheme,
+                                                                   .density = inputs.density });
+    contour::test::MockSession left;
+    contour::test::MockSession right;
+    auto split = contour::test::MockPaneProxy { /*leaf*/ false,
+                                                new contour::test::MockPaneProxy(/*leaf*/ true),
+                                                new contour::test::MockPaneProxy(/*leaf*/ true) };
+    split.first()->setSession(&left);
+    split.second()->setSession(&right);
+    split.setOrientation(static_cast<int>(vtworkspace::SplitState::Vertical));
+
+    QQuickWindow window;
+    window.resize(windowSize);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
+    INFO("PaneNode.qml: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const paneNode = std::unique_ptr<QObject>(component.createWithInitialProperties(
+        { { "node", QVariant::fromValue(static_cast<QObject*>(&split)) }, { "visiblePanes", 2 } }));
+    auto* root = qobject_cast<QQuickItem*>(paneNode.get());
+    REQUIRE(root != nullptr);
+    root->setParentItem(window.contentItem());
+    root->setSize(QSizeF(windowSize));
+
+    // The SplitView lays out on polish: wait for the second card to be placed beside the first.
+    auto const terminals = [root] {
+        return root->findChildren<contour::test::StubContourTerminal*>();
+    };
+    REQUIRE(QTest::qWaitFor([&] {
+        auto const found = terminals();
+        return found.size() == 2
+               && std::ranges::any_of(found, [](auto const* t) { return t->mapToScene({}).x() > 0; })
+               && std::ranges::all_of(found, [](auto const* t) { return t->height() > 0; });
+    }));
+    auto const found = terminals();
+    auto const* first = *std::ranges::min_element(
+        found, {}, [](auto const* terminal) { return terminal->mapToScene({}).x(); });
+    return first->size();
+}
+} // namespace
+
 TEST_CASE("display: content-driven resize refuses, then resizes once the session is the active tab",
           "[display][controller][resize]")
 {
@@ -2191,6 +2354,36 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     CHECK(controller.resizeWindowForContentPixels(
         *h.display, vtbackend::ImageSize { vtbackend::Width(640), vtbackend::Height(480) }));
     h.pump();
+
+    // Split side by side at one half, the harness session staying in the FIRST card: the window must now
+    // hold twice the leaf's width with its card's content inset, its header, and the cards' inset on every
+    // edge. The single-pane answer
+    // for the same page is the leaf's own extent (the identity case above), so it is the yardstick.
+    auto const page = vtbackend::PageSize { vtbackend::LineCount(30), vtbackend::ColumnCount(100) };
+    REQUIRE(controller.resizeWindowForPage(*h.display, page));
+    h.pump();
+    auto const leafExtent = h.window->size();
+
+    REQUIRE(model.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5) != nullptr);
+    REQUIRE(tab->rootPane()->first()->session() == h.session->modelSessionId());
+    h.pump();
+
+    auto const chrome = h.testApp.app().splitChrome(h.window->devicePixelRatio());
+    REQUIRE(controller.resizeWindowForPage(*h.display, page));
+    h.pump();
+    CHECK(h.window->width() == (2 * (leafExtent.width() + (2 * chrome.leafInset))) + (2 * chrome.rootInset));
+    CHECK(h.window->height()
+          == leafExtent.height() + (2 * chrome.leafInset) + chrome.leafHeader + (2 * chrome.rootInset));
+
+    // And what the solver counted is what the cards draw: the first card's terminal -- below its header,
+    // inside the inset, beside the gap -- holds exactly the requested page.
+    h.display->setSize(firstCardTerminalExtent(
+        h.testApp.app().chromeInputs(), h.window->size(), h.testApp.app().sessionsManager()));
+    CHECK(QTest::qWaitFor([&] {
+        h.pump();
+        return h.session->terminal().totalPageSize() == page;
+    }));
+    CHECK(h.session->terminal().totalPageSize() == page);
 }
 
 TEST_CASE("display: releaseSession detaches the live session and clears the back-pointer",
@@ -2365,9 +2558,11 @@ TEST_CASE("display: a font change approved with no render target is deferred, no
     REQUIRE(h.display->hasSession());
     REQUIRE_FALSE(h.display->hasRenderTarget()); // never had a window, so never had one
 
-    // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort.
+    // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort. The
+    // request reaches the GUI thread through the display's queue, as every guarded request does.
     h.session->setFontDef(fontRequest(RequestedFontSize));
-    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+    QCoreApplication::processEvents();
+    CHECK_NOTHROW(h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
 
     // Deferred, not dropped: recorded as this session's own font, which every re-seeding path applies
     // once a render target exists again.
@@ -2385,7 +2580,7 @@ TEST_CASE("display: a font change approved after the pane detached is a silent n
     h.display->setSession(nullptr);
     REQUIRE(h.session->display() == nullptr);
 
-    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+    CHECK_NOTHROW(h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
 
     // Re-attach so the fixture tears down along its normal path.
     h.display->setSession(h.session.get());
@@ -2433,7 +2628,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     auto const sizeBefore = h.display->fontSize().pt;
     REQUIRE(sizeBefore < RequestedFontSize);
 
-    h.session->setFontDef(fontRequest(RequestedFontSize));
+    askedForFont(h);
 
     // Destroy it the way a scene-graph invalidation does: on the render thread, where RHI resources
     // must be freed.
@@ -2447,7 +2642,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     REQUIRE_FALSE(h.display->hasRenderTarget());
 
     // The answer arrives with no render target to apply it to: staged only.
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(h.display->fontSize().pt == sizeBefore); // nothing published yet
 
     // The next sync re-enters createRenderer(), which materializes whatever is staged.

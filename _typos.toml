@@ -47,6 +47,9 @@ extend-ignore-re = [
     # Unicode codepoint notation. A terminal emulator cites these constantly, and the hex digits
     # spell words by accident -- U+E0BA and U+25BA both read as "BA".
     'U\+[0-9A-Fa-f]{4,6}',
+    # Abbreviated and full git commit hashes, which the ledgers and plans cite on every line; their hex
+    # digits spell words by accident (56caf3555 reads as "caf", b48ba9ebb as "ba").
+    '\b[0-9a-f]{7,40}\b',
 ]
 
 [default.extend-identifiers]
@@ -109,3 +112,11 @@ caf = "caf" # "caf\xC3\xA9" -- café written as explicit UTF-8 bytes.
 ine = "ine"   # From `l[ine.]` in the vi.motion `b` test.
 nd = "nd"     # From `a[nd]` in the vi.motion `b` test.
 hree = "hree" # From `T[hree]` in the vi.motion `b` test.
+
+# Win32's TrackMouseEvent flags (TME_LEAVE, TME_NONCLIENT) read as the word "TME". The spelling is
+# Microsoft's, not ours to rename. Scoped to the one file that asks for a mouse-leave notification.
+[type.win32-track-mouse]
+extend-glob = ["Win32CaptionButtons.cpp"]
+
+[type.win32-track-mouse.extend-words]
+TME = "TME" # The TRACKMOUSEEVENT flag prefix.

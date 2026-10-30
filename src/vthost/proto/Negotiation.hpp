@@ -57,6 +57,22 @@ enum class Capability : uint8_t
     /// that asks for any only to a client sharing it: one that would prompt without them would have its user
     /// grant what they were never shown.
     ControlPermissions = 11,
+    /// The peer pushes, or mirrors, what a session's terminal does with typed text (PDU SessionInputEcho), so
+    /// a client locks a pane at a password prompt and turns its OS's secure keyboard entry on.
+    InputEcho = 12,
+    /// The peer serves MergeTabIntoSplit: it grafts a whole tab, sessions and all, beside a pane of another
+    /// tab. A daemon without it cannot move a tab's sessions into a split, so a client does not offer
+    /// drop-to-split.
+    TabMerge = 13,
+    /// The peer acknowledges EditTab: a daemon stamps each LayoutState it pushes with the serial of the last
+    /// EditTab of the connection it had served when it composed the push (LayoutState::servedEdit), and a
+    /// client keeps the edits a push predates in force over it (vthost::client::PendingTabEdits). Without it
+    /// a push composed before the daemon read the client's EditTab undoes the edit until the echo arrives.
+    TabEditAcks = 14,
+    /// The peer applies the ClientHello's light/dark preference. Informational only, as InitialClientArea is:
+    /// the field travels before the ServerHello, so a client sends it regardless and a daemon predating it
+    /// ignores it.
+    ColorPreference = 15,
 };
 
 /// One row of the table naming a Capability.
@@ -79,6 +95,10 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ControlApi, .name = "control-api" },
     CapabilityRow { .capability = Capability::ProgramStatus, .name = "program-status" },
     CapabilityRow { .capability = Capability::ControlPermissions, .name = "control-permissions" },
+    CapabilityRow { .capability = Capability::InputEcho, .name = "input-echo" },
+    CapabilityRow { .capability = Capability::TabMerge, .name = "tab-merge" },
+    CapabilityRow { .capability = Capability::TabEditAcks, .name = "tab-edit-acks" },
+    CapabilityRow { .capability = Capability::ColorPreference, .name = "color-preference" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

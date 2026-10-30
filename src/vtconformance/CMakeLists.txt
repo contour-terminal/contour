@@ -57,7 +57,7 @@ if(VTCONFORMANCE_TESTING)
         TerminalHarness_test.cpp
         VtTestLog_test.cpp
     )
-    target_link_libraries(vtconformance_test vtconformance core::testing Catch2::Catch2)
+    target_link_libraries(vtconformance_test vtconformance core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtconformance_test COMMAND $<TARGET_FILE:vtconformance_test>)
 
     if(NOT WIN32)

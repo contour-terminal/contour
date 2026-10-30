@@ -1,13 +1,113 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/command/MenuTree.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/command/TabMenus.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/CaptionHitTest.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/TabColorScheme.hpp>
+#include <contour/window/ToastPlacement.hpp>
+
+#include <vtbackend/core/Color.hpp>
+
+#include <core/platform/Clock.hpp>
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QPointF>
 #include <QtCore/QString>
+#include <QtCore/QVariant>
+#include <QtCore/QVariantList>
+#include <QtGui/QColor>
+
+#include <array>
+#include <cstddef>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace contour::test
 {
+/// The token every mock window controller answers to processToken(): what its tabs stamp into a drag.
+/// @return The token.
+[[nodiscard]] inline QString mockProcessToken()
+{
+    return QStringLiteral("mock-process-token");
+}
+
+/// The colours a mock offers in its tab menu's "Tab Color" sub-menu, in order.
+inline constexpr auto MockTabPalette = std::array {
+    vtbackend::RGBColor { 0xEE6666u }, vtbackend::RGBColor { 0xF0A050u }, vtbackend::RGBColor { 0xE8D05Au },
+    vtbackend::RGBColor { 0x7CC87Cu }, vtbackend::RGBColor { 0x5AB4D8u }, vtbackend::RGBColor { 0x6A8CE8u },
+    vtbackend::RGBColor { 0xB07CE0u }, vtbackend::RGBColor { 0xA0A0A0u },
+};
+
+/// The profiles a mock offers in its new-tab menu, in order.
+inline constexpr auto MockProfileNames =
+    std::array { std::string_view { "dark" }, std::string_view { "light" } };
+
+/// The tab menu a mock publishes, built by the real table: the right-clicked tab wears the palette's
+/// first colour, so its swatch is the checked one.
+/// @param index The right-clicked tab.
+/// @param count The tabs in the window.
+/// @return The menu as QML sees it.
+[[nodiscard]] inline QVariantList mockTabContextMenuModel(int index, int count)
+{
+    auto const state = command::TabContextMenuState {
+        .tabIndex = index,
+        .tabCount = count,
+        .palette = { MockTabPalette.begin(), MockTabPalette.end() },
+        .color = MockTabPalette.front(),
+        .userColor = command::UserColorPresence::Present,
+    };
+    return window::toContextMenuModel(
+        command::buildMenuTree(command::buildTabContextMenu(state), {}, command::ShortcutStyle::Text).nodes);
+}
+
+/// The new-tab menu a mock publishes, built by the real table over @ref MockProfileNames.
+/// @return The menu as QML sees it.
+[[nodiscard]] inline QVariantList mockNewTabMenuModel()
+{
+    return window::toContextMenuModel(
+        command::buildMenuTree(
+            command::buildNewTabMenu(
+                { .profileNames = std::ranges::to<std::vector<std::string>>(MockProfileNames) }),
+            {},
+            command::ShortcutStyle::Text)
+            .nodes);
+}
+
+/// What WindowController::tabBackgroundColor() answers, for a mock to answer the same: the WT-style fill
+/// of a coloured tab on the native Flat strip. The flags mirror the invokable QML calls.
+/// @return The fill, from the same TabColorScheme math as the real one.
+[[nodiscard]] inline QColor mockTabBackgroundColor(
+    QColor const& tabColor, QColor const& rowBackground, bool active, bool hovered, bool windowActive)
+{
+    auto const state = [&] {
+        if (active)
+            return window::TabVisualState::Active;
+        if (hovered)
+            return window::TabVisualState::Hover;
+        return windowActive ? window::TabVisualState::Inactive
+                            : window::TabVisualState::InactiveWindowUnfocused;
+    }();
+    return platform::toQColor(window::tabBackgroundColor(
+        platform::toRGBColor(tabColor), platform::toRGBColor(rowBackground), state));
+}
+
+/// What WindowController::tabTextColor() answers: the label that reads on a coloured fill.
+[[nodiscard]] inline QColor mockTabTextColor(QColor const& tabBackground)
+{
+    return platform::toQColor(window::contrastingTextColor(platform::toRGBColor(tabBackground)));
+}
 
 /// The window-controller surface Main.qml's own Connections bind, shared by every offscreen mock that
 /// loads Main.qml in place of the real WindowController.
@@ -20,12 +120,81 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
+    Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
+    // Mirrors WindowController's version string, which the About dialog shows.
+    Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
+    // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
+    // Connections-targets.
+    Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
+    Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
+    // {{{ Panes
+    // Mirrors WindowController's visible pane count; a test sets it to drive the pane headers.
+    Q_PROPERTY(
+        int visiblePaneCount READ visiblePaneCount WRITE setVisiblePaneCount NOTIFY visiblePaneCountChanged)
+    // Mirrors WindowController's held-modifier reveal (a window::HeaderReveal); a test sets it to show the
+    // headers Minimal hides.
+    Q_PROPERTY(int headerReveal READ headerReveal WRITE setHeaderReveal NOTIFY headerRevealChanged)
+    // }}}
+    // Mirrors WindowController's measured title band: 0 (the band keeps its token height, at the window's
+    // top) unless a test sets them, as the material's measurement would.
+    Q_PROPERTY(qreal titleBandHeight READ titleBandHeight WRITE setTitleBandHeight NOTIFY titleBandChanged)
+    Q_PROPERTY(
+        qreal titleBandRevealTop READ titleBandRevealTop WRITE setTitleBandRevealTop NOTIFY titleBandChanged)
+    // Mirrors WindowController's titleBandFill: undefined in QML (Main.qml takes the row's own fill) unless a
+    // test sets it, as a window whose material failed would.
+    Q_PROPERTY(QVariant titleBandFill READ titleBandFill NOTIFY titleBandChanged)
+    // Mirrors WindowController's notices: a real NoticeModel, on a clock the test moves, saying nothing.
+    Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
+    // Mirrors WindowController's maximise button as the OS drives it; a test sets it with
+    // setNativeMaximizeVisual().
+    Q_PROPERTY(bool nativeMaximizeHovered READ nativeMaximizeHovered NOTIFY nativeMaximizeVisualChanged)
+    Q_PROPERTY(bool nativeMaximizePressed READ nativeMaximizePressed NOTIFY nativeMaximizeVisualChanged)
 
   public:
     using QAbstractListModel::QAbstractListModel;
 
     /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
     [[nodiscard]] QString const& hostLabel() const noexcept { return attachedHost; }
+
+    /// Mirrors WindowController::hostChipState().
+    [[nodiscard]] int hostChipState() const noexcept { return _hostChipState; }
+
+    /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.
+    /// @param state A window::HostChipState as its underlying value.
+    void setHostChipState(int state)
+    {
+        if (_hostChipState == state)
+            return;
+        _hostChipState = state;
+        emit hostChipStateChanged();
+    }
+
+    /// Mirrors WindowController::applicationVersion() with a fixed test value.
+    [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
+
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, Ctrl+Shift+X, and nothing for
+    /// any other command (an ended pane's footer names Close's).
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
+    {
+        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
+    }
+
+    /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
+    Q_INVOKABLE void showAbout() { emit aboutRequested(); }
+    /// Mirrors WindowController::dropZoneAt(): nothing is a drop target here.
+    Q_INVOKABLE [[nodiscard]] int dropZoneAt(QObject*, int, qreal, qreal, qreal, qreal, QString const&) const
+    {
+        return 0;
+    }
+    /// Mirrors WindowController::dropTabOnPane(): counted.
+    Q_INVOKABLE void dropTabOnPane(QObject*, int, QString const&) { ++tabDrops; }
+    /// How often a tab was dropped on a pane's split zone.
+    int tabDrops = 0;
+    /// Mirrors WindowController::dropGhostLabel(): no zone has a ghost here.
+    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int) const { return {}; }
+    /// Mirrors WindowController::dropGhostRect(): no zone has a ghost here.
+    Q_INVOKABLE [[nodiscard]] QRectF dropGhostRect(int, qreal, qreal, qreal) const { return {}; }
 
     /// Mirrors WindowController::windowTitle(), through the same remoteWindowTitle().
     Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const
@@ -47,7 +216,185 @@ class MainWindowControllerMock: public QAbstractListModel
 
     int trayClickCount = 0; ///< How many tray message clicks Main.qml passed on to the window.
 
+    /// @return The tab menu last published by openTabContextMenu().
+    [[nodiscard]] QVariantList const& tabContextMenuModel() const noexcept { return _tabContextMenuModel; }
+    /// @return The new-tab menu last published by openNewTabMenu().
+    [[nodiscard]] QVariantList const& newTabMenuModel() const noexcept { return _newTabMenuModel; }
+
+    /// Mirrors WindowController::openTabContextMenu(): publishes the tab's menu, then asks for it.
+    Q_INVOKABLE void openTabContextMenu(int index, QPointF /*windowPosition*/)
+    {
+        _tabContextMenuModel = mockTabContextMenuModel(index, rowCount());
+        emit tabContextMenuModelChanged();
+        emit tabContextMenuRequested(index);
+    }
+
+    /// Mirrors WindowController::triggerTabContextMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerTabContextMenuAction(int actionId) { tabMenuPicks.push_back(actionId); }
+
+    /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it, counting the calls.
+    Q_INVOKABLE void openNewTabMenu(QPointF /*windowPosition*/)
+    {
+        ++newTabMenuOpenings;
+        _newTabMenuModel = mockNewTabMenuModel();
+        emit newTabMenuModelChanged();
+        emit newTabMenuRequested();
+    }
+
+    /// Mirrors WindowController::triggerNewTabMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerNewTabMenuAction(int actionId) { newTabMenuPicks.push_back(actionId); }
+
+    // {{{ Panes
+    /// Mirrors WindowController::visiblePaneCount().
+    [[nodiscard]] int visiblePaneCount() const noexcept { return _visiblePaneCount; }
+
+    /// Splits or zooms, as WindowController recounts the active tab's panes.
+    /// @param count The panes shown.
+    void setVisiblePaneCount(int count)
+    {
+        if (_visiblePaneCount == count)
+            return;
+        _visiblePaneCount = count;
+        emit visiblePaneCountChanged();
+    }
+
+    /// Mirrors WindowController::headerReveal().
+    [[nodiscard]] int headerReveal() const noexcept { return _headerReveal; }
+
+    /// Holds or lets go of the reveal modifier, as WindowController's event filter decides.
+    /// @param reveal A window::HeaderReveal as its underlying value.
+    void setHeaderReveal(int reveal)
+    {
+        if (_headerReveal == reveal)
+            return;
+        _headerReveal = reveal;
+        emit headerRevealChanged();
+    }
+    // }}}
+
+    /// Mirrors WindowController::titleBandHeight(): the band's measured height, 0 for none.
+    [[nodiscard]] qreal titleBandHeight() const noexcept { return _titleBandHeight; }
+
+    /// Measures the band, as WindowController::refreshTitleBand() would.
+    /// @param height The band's height in logical pixels; 0 leaves the band to its token.
+    void setTitleBandHeight(qreal height)
+    {
+        if (_titleBandHeight == height)
+            return;
+        _titleBandHeight = height;
+        emit titleBandChanged();
+    }
+
+    /// Mirrors WindowController::titleBandFill(): what this window's band paints, a config::BandFill.
+    /// @return The fill a test set, or an invalid variant for none.
+    [[nodiscard]] QVariant titleBandFill() const { return _titleBandFill; }
+
+    /// Decides the band's fill, as WindowController::refreshTitleBand() would.
+    /// @param fill What the band paints.
+    void setTitleBandFill(config::BandFill fill)
+    {
+        _titleBandFill = static_cast<int>(fill);
+        emit titleBandChanged();
+    }
+
+    /// Mirrors WindowController::titleBandRevealTop(): where a revealed full-screen band rests.
+    [[nodiscard]] qreal titleBandRevealTop() const noexcept { return _titleBandRevealTop; }
+
+    /// Measures the full-screen reveal top, as WindowController::refreshTitleBand() would.
+    /// @param top The band's resting top in full screen, in window coordinates.
+    void setTitleBandRevealTop(qreal top)
+    {
+        if (_titleBandRevealTop == top)
+            return;
+        _titleBandRevealTop = top;
+        emit titleBandChanged();
+    }
+
+    // {{{ Notices
+    /// This window's notices, as WindowController::notices() gives them.
+    [[nodiscard]] window::NoticeModel& notices() noexcept { return _notices; }
+    /// @return The notices, as the `notices` property hands them to QML.
+    [[nodiscard]] window::NoticeModel* noticesForQml() noexcept { return &_notices; }
+
+    /// Mirrors WindowController::toastHost(), with the active pane's cursor row a test sets.
+    [[nodiscard]] Q_INVOKABLE QString toastHost(QString const& band,
+                                                QString const& edge,
+                                                int bandHeight,
+                                                int toastHeight) const
+    {
+        return QString::fromUtf8(window::placeToastNamed(band.toStdString(),
+                                                         edge.toStdString(),
+                                                         bandHeight,
+                                                         toastHeight,
+                                                         cursorRow,
+                                                         window::PaneFooter::Hidden));
+    }
+
+    core::platform::ManualClock noticeClock {}; ///< What the notices' toasts are timed by.
+    int cursorRow = window::ToastCoveredRows;   ///< The active pane's cursor row toastHost() reads.
+    // }}}
+
+    // {{{ The caption buttons the OS drives
+    /// Mirrors WindowController::setCaptionButtonRect(): records the rectangle and its owner; out-of-range
+    /// kinds ignored.
+    Q_INVOKABLE void setCaptionButtonRect(
+        QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height)
+    {
+        if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
+            return;
+        captionRects[static_cast<size_t>(kind)] =
+            platform::LogicalRect { .x = x, .y = y, .width = width, .height = height };
+        captionOwners[static_cast<size_t>(kind)] = owner;
+    }
+
+    /// Mirrors WindowController::clearCaptionButtonRect(): records the call, and forgets the rectangle when
+    /// @p owner reported it last.
+    Q_INVOKABLE void clearCaptionButtonRect(QObject* owner, int kind)
+    {
+        clearedCaptionKinds.push_back(kind);
+        if (kind < 0 || std::cmp_greater_equal(kind, captionRects.size()))
+            return;
+        if (captionOwners[static_cast<size_t>(kind)] != owner)
+            return;
+        captionRects[static_cast<size_t>(kind)].reset();
+        captionOwners[static_cast<size_t>(kind)] = nullptr;
+    }
+
+    /// Mirrors WindowController::nativeMaximizeHovered().
+    [[nodiscard]] bool nativeMaximizeHovered() const noexcept
+    {
+        return _nativeMaximizeVisual != platform::CaptionButtonVisual::Rest;
+    }
+
+    /// Mirrors WindowController::nativeMaximizePressed().
+    [[nodiscard]] bool nativeMaximizePressed() const noexcept
+    {
+        return _nativeMaximizeVisual == platform::CaptionButtonVisual::Pressed;
+    }
+
+    /// What the caption adapter reports, as WindowController's binding would hear it.
+    /// @param visual How the maximise button looks now.
+    void setNativeMaximizeVisual(platform::CaptionButtonVisual visual)
+    {
+        if (_nativeMaximizeVisual == visual)
+            return;
+        _nativeMaximizeVisual = visual;
+        emit nativeMaximizeVisualChanged();
+    }
+
+    /// The rectangles WindowControls.qml last reported, by config::WindowControlKind.
+    std::array<std::optional<platform::LogicalRect>, config::WindowControlCount> captionRects {};
+    /// The control that reported each rectangle last, by config::WindowControlKind.
+    std::array<QObject*, config::WindowControlCount> captionOwners {};
+    std::vector<int> clearedCaptionKinds {}; ///< Every clearCaptionButtonRect() kind, in order.
+    // }}}
+
+    std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
+    std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
+    int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
+
   signals:
+    void hostChipStateChanged();
     void commandPaletteRequested();
     void contextMenuRequested();
     void titleBarContextMenuRequested();
@@ -56,6 +403,29 @@ class MainWindowControllerMock: public QAbstractListModel
     void notificationRequested(QString const& title, QString const& body);
     void bellRequested(QString const& source, double volume);
     void alertRequested();
+    void tabContextMenuModelChanged();
+    void tabContextMenuRequested(int index);
+    void newTabMenuModelChanged();
+    void newTabMenuRequested();
+    void aboutRequested();
+    void visiblePaneCountChanged();
+    void headerRevealChanged();
+    void titleBandChanged();
+    void nativeMaximizeVisualChanged();
+
+  private:
+    QVariantList _tabContextMenuModel {};
+    QVariantList _newTabMenuModel {};
+    int _hostChipState = 0;        ///< @see hostChipState; 0 = HostChipState::Connected.
+    int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.
+    int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
+    qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.
+    QVariant _titleBandFill {};    ///< @see titleBandFill; invalid = the row's own.
+    qreal _titleBandRevealTop = 0; ///< @see titleBandRevealTop; 0 = the window's top.
+    /// @see setNativeMaximizeVisual.
+    platform::CaptionButtonVisual _nativeMaximizeVisual = platform::CaptionButtonVisual::Rest;
+    platform::NullAnnouncer _noticeAnnouncer;
+    window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
 };
 
 } // namespace contour::test

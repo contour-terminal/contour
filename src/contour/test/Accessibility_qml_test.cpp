@@ -10,19 +10,46 @@
 // What this canNOT assert is what a bridge would DELIVER; offscreen QPA has no accessibility bridge at
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
+#include <contour/config/DesktopButtonLayout.hpp>
+#include <contour/session/EndReason.hpp>
+#include <contour/session/PermissionPrompt.hpp>
+#include <contour/session/SearchStatus.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ShellIntegrationOffer.hpp>
+#include <contour/window/TabBadge.hpp>
+
+#include <vtbackend/core/Search.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QAccessible>
+#include <QtGui/QColor>
 #include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <memory>
+#include <ranges>
 #include <string_view>
+#include <utility>
+#include <vector>
+
+#include <QtTest/QTest>
+#include <vthost/client/ReleaseDrift.hpp>
 
 namespace
 {
@@ -41,6 +68,30 @@ namespace
         if (child->inherits("QQuickAccessibleAttached"))
             return child;
     return nullptr;
+}
+
+/// Every item beneath @p root, in the visual tree, named @p name.
+///
+/// The visual tree rather than findChildren(): a Repeater's delegates have a parent item but no QObject
+/// parent. Empty when @p root is not an item.
+[[nodiscard]] std::vector<QQuickItem*> partsNamed(QObject& root, QString const& name)
+{
+    auto parts = std::vector<QQuickItem*> {};
+    auto pending = std::vector<QQuickItem*> {};
+    if (auto* item = qobject_cast<QQuickItem*>(&root))
+        pending.push_back(item);
+    while (!pending.empty())
+    {
+        auto* item = pending.back();
+        pending.pop_back();
+        for (auto* child: item->childItems())
+        {
+            if (child->objectName() == name)
+                parts.push_back(child);
+            pending.push_back(child);
+        }
+    }
+    return parts;
 }
 
 /// Loads @p qmlUrl with @p initialProperties and returns its root item.
@@ -83,69 +134,611 @@ TEST_CASE("accessibility: the tab strip declares itself a tab list", "[contour][
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("accessibility: every settings editor carries the row's label", "[contour][gui][qml][a11y]")
+TEST_CASE("accessibility: the Linux header bar names its buttons", "[contour][gui][qml][a11y][headerbar]")
 {
-    // THE high-value case. Each editor's visible label is a SIBLING Label, so without a name of its own
-    // an editor reaches a screen reader as an unlabelled control that can only say what KIND it is —
-    // and that was true of every field on the settings page at once. Asserted for every editor TYPE,
-    // so a new field type added to the Loader cannot quietly reintroduce it.
+    using enum contour::config::WindowControlKind;
+    QQmlEngine engine;
+    contour::test::MockMainController controller { contour::test::MainWindowScene {
+        .tabCount = 2, .affordances = contour::test::ClientFrameAffordances::Drawn } };
+    contour::test::QmlMessageCapture warnings;
+    auto setup = contour::test::defaultChromeSetup(contour::config::UiStyle::Native,
+                                                   contour::config::WindowControlStyle::Linux);
+    setup.row = contour::config::ChromeStyle::ContourLinux;
+    setup.buttonLayout =
+        contour::config::WindowButtonLayout { .leading = {}, .trailing = { Minimize, Maximize, Close } };
+    auto root = contour::test::loadMainWindow(engine, controller, warnings, setup);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+
+    struct NamedButton
+    {
+        char const* objectName;
+        char const* accessibleName;
+    };
+    for (auto const& [objectName, accessibleName]: std::array {
+             NamedButton { "headerNewTab", "New tab" },
+             NamedButton { "headerSearch", "Search" },
+             NamedButton { "headerMainMenu", "Main menu" },
+             NamedButton { "windowControl_minimize", "Minimize" },
+             NamedButton { "windowControl_maximize", "Maximize" },
+             NamedButton { "windowControl_close", "Close window" },
+         })
+    {
+        INFO("button: " << objectName);
+        auto const parts = partsNamed(*window->contentItem(), QString::fromLatin1(objectName));
+        REQUIRE(parts.size() == 1);
+        // A Loader holds a window control; the button is what it loaded.
+        auto* item = parts.front()->property("item").value<QQuickItem*>();
+        auto* attached = accessibleAttachedOf(item != nullptr ? item : parts.front());
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == static_cast<int>(QAccessible::Button));
+        CHECK(attached->property("name").toString() == QString::fromLatin1(accessibleName));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: every kit primitive declares a role and a name", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    // The drift chip names itself by the model's line, so it is given one that drifted.
+    auto drift = contour::window::DaemonDriftModel {};
+    drift.show(vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    engine.rootContext()->setContextProperty(QStringLiteral("daemonDrift"), &drift);
+
+    struct Case
+    {
+        QString url;
+        QVariantMap initialProperties;
+        std::size_t swatches = 0; ///< How many `menuSwatch` parts the primitive shows.
+        QString name {};          ///< The name it must announce; any non-empty one when empty.
+        int role = -1;            ///< The QAccessible::Role it must declare; any when -1.
+    };
+    // The link pill names the session's link target and how to open it.
+    auto linkSession = contour::test::MockSession {};
+    linkSession.setLinkTarget(QStringLiteral("example.com"), QStringLiteral("Ctrl+Click to open"), true);
+
+    auto const cases = std::array {
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/LinkPill.qml"),
+               .initialProperties =
+                   QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&linkSession)) } },
+               .swatches = 0,
+               .name = QStringLiteral("example.com, Ctrl+Click to open"),
+               .role = QAccessible::ToolTip },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("Contour has new defaults") } },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("Copied 3 lines") } },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
+        // A detail is part of the name: the link pill's hint says how to open the target it names.
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("example.com") },
+                                                  { "detail", QStringLiteral("Ctrl+Click to open") } },
+               .swatches = 0,
+               .name = QStringLiteral("example.com, Ctrl+Click to open"),
+               .role = -1 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
+               .initialProperties = QVariantMap { { "heading", QStringLiteral("Close this tab?") } },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/MenuSwatchRow.qml"),
+               .initialProperties =
+                   QVariantMap { { "swatches",
+                                   QVariantList { QVariantMap { { "title", QStringLiteral("#EE6666") },
+                                                                { "color", QColor(0xEE, 0x66, 0x66) },
+                                                                { "actionId", 0 },
+                                                                { "enabled", true },
+                                                                { "checked", false } } } } },
+               .swatches = 1,
+               .name = {},
+               .role = -1 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/TabBadgeSlot.qml"),
+               .initialProperties =
+                   QVariantMap { { "kind", static_cast<int>(contour::window::TabBadgeKind::Blocked) } },
+               .swatches = 0,
+               .name = QStringLiteral("Waiting for you"),
+               .role = QAccessible::StaticText },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/HostChip.qml"),
+               .initialProperties =
+                   QVariantMap {
+                       { "hostLabel", QStringLiteral("build-01") },
+                       { "connection", static_cast<int>(contour::window::HostChipState::Reconnecting) } },
+               .swatches = 0,
+               .name = QStringLiteral("Attached to build-01, reconnecting"),
+               .role = QAccessible::StaticText },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/ToolbarButton.qml"),
+               .initialProperties = QVariantMap { { "glyph", QStringLiteral("+") },
+                                                  { "accessibleName", QStringLiteral("New tab") } },
+               .swatches = 0,
+               .name = QStringLiteral("New tab"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml"),
+               .initialProperties = {},
+               .swatches = 0,
+               .name = QStringLiteral("daemon 0.8.1 is older than this client"),
+               .role = QAccessible::Button },
+    };
+
+    for (auto const& testCase: cases)
+    {
+        INFO("kit primitive: " << testCase.url.toStdString());
+        auto root = loadComponent(engine, testCase.url, testCase.initialProperties);
+        // A Popup is not an Item: its role and name live on its content item.
+        auto* host = qobject_cast<QQuickItem*>(root.get()) != nullptr
+                         ? root.get()
+                         : root->property("contentItem").value<QObject*>();
+        auto* attached = accessibleAttachedOf(host);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").isValid());
+        CHECK_FALSE(attached->property("name").toString().isEmpty());
+        if (!testCase.name.isEmpty())
+            CHECK(attached->property("name").toString() == testCase.name);
+        if (testCase.role >= 0)
+            CHECK(attached->property("role").toInt() == testCase.role);
+
+        // A primitive made of parts names each part as well: a swatch row's every swatch is a button.
+        auto const parts = partsNamed(*root, QStringLiteral("menuSwatch"));
+        CHECK(parts.size() == testCase.swatches);
+        for (auto* part: parts)
+        {
+            auto* partAttached = accessibleAttachedOf(part);
+            REQUIRE(partAttached != nullptr);
+            CHECK(partAttached->property("role").isValid());
+            CHECK(partAttached->property("name").toString() == QStringLiteral("#EE6666"));
+        }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    auto const titled = GENERATE(false, true);
+    if (titled)
+        session.setTitle(QStringLiteral("50%2 done"));
+    else
+        session.setForegroundProcessName(QStringLiteral("vim"));
+    session.setDisplayWorkingDirectory(QStringLiteral("~/repo"));
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+
+    auto const policy = QVariantMap { { "content", QStringLiteral("nameAndCwd") },
+                                      { "actions", QStringLiteral("shown") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) },
+                                    { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                    { "policy", policy } });
+    auto* attached = accessibleAttachedOf(header.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::StaticText);
+    // A title is the application's text: a "%2" in it stays itself.
+    CHECK(attached->property("name").toString()
+          == (titled ? QStringLiteral("50%2 done, ~/repo") : QStringLiteral("vim, ~/repo")));
+
+    auto const names = std::array { QStringLiteral("Split right"),
+                                    QStringLiteral("Split down"),
+                                    QStringLiteral("Zoom pane"),
+                                    QStringLiteral("Close pane") };
+    static_assert(names.size() == contour::config::PaneHeaderActionCount);
+    for (auto const index: std::views::iota(size_t { 0 }, names.size()))
+    {
+        auto const buttons = partsNamed(*header, QStringLiteral("paneHeaderAction%1").arg(index));
+        INFO("button " << index);
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == names[index]);
+        CHECK(button->property("focusable").toBool());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: an ended pane's footer is an alert named by its message, with two buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setEnd(static_cast<int>(contour::session::EndReason::Exited),
+                   QStringLiteral("Process exited with code 1."),
+                   static_cast<int>(contour::session::FooterAction::Restart));
+    auto footer =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ExitedFooter.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(footer.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == QStringLiteral("Process exited with code 1."));
+
+    for (auto const& [part, name]: std::array { std::pair { "exitedFooterRestart", "Restart" },
+                                                std::pair { "exitedFooterClose", "Close" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*footer, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE(
+    "accessibility: a restored shell's footer is an alert named by the stopped command, with two buttons",
+    "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    auto const message = QStringLiteral("\u201cmake test\u201d was stopped when the session ended.");
+    session.setInterrupted(message, QStringLiteral("Run Again"));
+    auto footer =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ExitedFooter.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(footer.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == message);
+
+    for (auto const& [part, name]: std::array { std::pair { "exitedFooterRestart", "Run Again" },
+                                                std::pair { "exitedFooterClose", "Dismiss" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*footer, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the shell integration card is an alert named by its title, with two buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setShellCard(contour::window::CardStage::Offer);
+    auto card =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ShellIntegrationCard.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(card.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == session.shellIntegrationTitle());
+
+    for (auto const& [part, name]: std::array { std::pair { "shellIntegrationPrimary", "Install" },
+                                                std::pair { "shellIntegrationSecondary", "Not Now" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*card, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the find bar names its field, its count, its toggles and its buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::MockSession session;
+    session.setSearchPattern(QStringLiteral("needle"));
+    // Regex on, the others off: a toggle that reported a fixed state would miss one of the two.
+    session.searchOptions.syntax = vtbackend::SearchSyntax::Regex;
+    engine.rootContext()->setContextProperty("mockSession", &session);
+
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "Window {\n"
+                          "  width: 800; height: 400; visible: true\n"
+                          "  property alias bar: barItem\n"
+                          "  Item { id: display; anchors.fill: parent }\n"
+                          "  SearchBar { id: barItem; session: mockSession; displayItem: display }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBarA11yHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const window = std::unique_ptr<QObject>(component.create());
+    REQUIRE(window != nullptr);
+    auto* bar = window->property("bar").value<QObject*>();
+    REQUIRE(bar != nullptr);
+    QMetaObject::invokeMethod(bar, "open");
+    QCoreApplication::processEvents();
+
+    // Through the visual tree: a Repeater's delegates (the toggles) are not QObject children of the popup.
+    auto* content = bar->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    auto const attachedOf = [content](QString const& name) {
+        auto const parts = partsNamed(*content, name);
+        REQUIRE(parts.size() == 1);
+        auto* part = parts.front();
+        auto* attached = accessibleAttachedOf(part);
+        REQUIRE(attached != nullptr);
+        return attached;
+    };
+
+    auto const* field = attachedOf(QStringLiteral("searchBarField"));
+    CHECK(field->property("role").toInt() == QAccessible::EditableText);
+    CHECK(field->property("name").toString() == QStringLiteral("Find"));
+
+    auto const* count = attachedOf(QStringLiteral("searchBarCount"));
+    CHECK(count->property("role").toInt() == QAccessible::StaticText);
+    CHECK(count->property("name").toString() == session.searchSummary());
+
+    auto const toggleNames = std::array { QStringLiteral("Match case"),
+                                          QStringLiteral("Regular expression"),
+                                          QStringLiteral("Whole word") };
+    static_assert(toggleNames.size() == contour::session::SearchToggleRows.size());
+    auto const toggleChecked = std::array { false, true, false };
+    static_assert(toggleChecked.size() == toggleNames.size());
+    for (auto const index: std::views::iota(std::size_t { 0 }, toggleNames.size()))
+    {
+        auto const* toggle =
+            attachedOf(QString::fromUtf8(contour::session::SearchToggleRows[index].objectName));
+        INFO("toggle " << index);
+        CHECK(toggle->property("role").toInt() == QAccessible::Button);
+        CHECK(toggle->property("name").toString() == toggleNames[index]);
+        CHECK(toggle->property("checkable").toBool());
+        CHECK(toggle->property("checked").toBool() == toggleChecked[index]);
+    }
+
+    for (auto const& [name, label]:
+         std::array { std::pair { "searchBarPrevious", QStringLiteral("Previous match") },
+                      std::pair { "searchBarNext", QStringLiteral("Next match") },
+                      std::pair { "searchBarClose", QStringLiteral("Close find") } })
+    {
+        auto const* button = attachedOf(QString::fromUtf8(name));
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == label);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the permission dialog's accessible tree", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    QQuickWindow window;
+    window.resize(1024, 640);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+
+    auto const prompt = contour::session::bufferCapturePrompt("zsh", vtbackend::LineCount(24));
+    auto dialog = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/PermissionDialog.qml"),
+                                QVariantMap { { "prompt", contour::session::permissionPromptMap(prompt, 1) },
+                                              { "parent", QVariant::fromValue(window.contentItem()) } });
+    REQUIRE(QMetaObject::invokeMethod(dialog.get(), "open"));
+    REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+
+    // The content is the Dialog: a Popup carries no Accessible of its own.
+    auto* content = dialog->property("contentItem").value<QQuickItem*>();
+    auto* attached = accessibleAttachedOf(content);
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::Dialog);
+    CHECK(attached->property("name").toString() == QString::fromStdString(prompt.title));
+    CHECK(attached->property("description").toString() == QString::fromStdString(prompt.lines.front().text));
+
+    auto const boxes = partsNamed(*content, QStringLiteral("permissionRemember"));
+    REQUIRE(boxes.size() == 1);
+    auto* box = accessibleAttachedOf(boxes.front());
+    REQUIRE(box != nullptr);
+    CHECK(box->property("role").toInt() == QAccessible::CheckBox);
+    CHECK(box->property("name").toString() == QStringLiteral("Don't ask again in this session"));
+
+    for (auto const& [part, label]:
+         std::array { std::pair { QStringLiteral("kitDialogAccept"), prompt.allowText },
+                      std::pair { QStringLiteral("kitDialogReject"), prompt.denyText } })
+    {
+        auto const buttons = partsNamed(*content, part);
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("name").toString() == QString::fromStdString(label));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a locked pane's header names the lock and says so",
+          "[contour][gui][qml][a11y][secureinput]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine); // no secure keyboard entry: "Input hidden"
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setForegroundProcessName(QStringLiteral("ssh"));
+    session.setSecureIndicator(1); // window::SecureIndicator::Locked
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+    auto const policy = QVariantMap { { "content", QStringLiteral("name") },
+                                      { "actions", QStringLiteral("hidden") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) },
+                                    { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                    { "policy", policy } });
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString()
+          == QStringLiteral("ssh · Input hidden"));
+
+    auto const locks = partsNamed(*header, QStringLiteral("paneHeaderLock"));
+    REQUIRE(locks.size() == 1);
+    auto* lock = accessibleAttachedOf(locks.front());
+    REQUIRE(lock != nullptr);
+    CHECK(lock->property("role").toInt() == QAccessible::Indicator);
+    CHECK(lock->property("name").toString() == QStringLiteral("Input hidden"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the block's ⋯ button and the sticky header's jump link are buttons",
+          "[contour][gui][qml][a11y][blocks]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    auto const object = QVariant::fromValue(static_cast<QObject*>(&session));
+
+    auto button = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/BlockActionsButton.qml"),
+                                QVariantMap { { "session", object } });
+    auto* attached = accessibleAttachedOf(button.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::Button);
+    CHECK(attached->property("name").toString() == QStringLiteral("Block actions"));
+
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+    session.setStickyHeader(QVariantMap { { "glyph", QStringLiteral("✗") },
+                                          { "command", QStringLiteral("make") },
+                                          { "detail", QStringLiteral("12 s") },
+                                          { "statusRole", 0 },
+                                          { "jumpLabel", QStringLiteral("Jump to Command ↑") } });
+    auto const policy = QVariantMap { { "content", QStringLiteral("nameAndCwd") },
+                                      { "actions", QStringLiteral("shown") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                                QVariantMap { { "session", object },
+                                              { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                              { "policy", policy } });
+    // The header reads as the sticky command while it is shown, without the duration: that ticks every
+    // second while the block runs, and a name that changed with it would be announced at every tick.
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make"));
+    session.setStickyHeader(QVariantMap { { "glyph", QStringLiteral("✗") },
+                                          { "command", QStringLiteral("make") },
+                                          { "detail", QStringLiteral("13 s") },
+                                          { "statusRole", 0 },
+                                          { "jumpLabel", QStringLiteral("Jump to Command ↑") } });
+    CHECK(accessibleAttachedOf(header.get())->property("name").toString() == QStringLiteral("✗ make"));
+    auto const links = partsNamed(*header, QStringLiteral("paneHeaderJump"));
+    REQUIRE(links.size() == 1);
+    auto* jump = accessibleAttachedOf(links.front());
+    REQUIRE(jump != nullptr);
+    CHECK(jump->property("role").toInt() == QAccessible::Button);
+    CHECK(jump->property("name").toString() == QStringLiteral("Jump to Command ↑"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: every kit control declares a role and a name", "[contour][gui][qml][a11y]")
+{
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
     struct Case
     {
-        std::string_view type;
-        QVariant value;
+        QString type;
+        QVariantMap properties;
+        QAccessible::Role role;
     };
     auto const cases = std::array {
-        Case { "enum", QVariant(QStringLiteral("Always")) },
-        Case { "bool", QVariant(true) },
-        Case { "double", QVariant(0.5) },
-        Case { "int", QVariant(42) },
-        Case { "string", QVariant(QStringLiteral("hello")) },
+        Case { QStringLiteral("KitSwitch"), {}, QAccessible::CheckBox },
+        Case { QStringLiteral("KitSegmented"),
+               { { "options", QStringList { "a", "b" } } },
+               QAccessible::Grouping },
+        Case { QStringLiteral("KitStepper"), {}, QAccessible::SpinBox },
+        Case { QStringLiteral("KitSlider"), {}, QAccessible::Slider },
+        Case { QStringLiteral("KitPopUp"), {}, QAccessible::ComboBox },
+        Case { QStringLiteral("KitColorWell"),
+               { { "hex", QStringLiteral("#112233") } },
+               QAccessible::EditableText },
+        Case { QStringLiteral("KitFontPicker"), {}, QAccessible::ComboBox },
     };
-
     for (auto const& testCase: cases)
     {
-        INFO("editor type: " << testCase.type);
+        INFO("control: " << testCase.type.toStdString());
+        auto properties = testCase.properties;
+        properties.insert(QStringLiteral("name"), QStringLiteral("Some setting"));
+        properties.insert(QStringLiteral("description"), QStringLiteral("What it does"));
         auto root = loadComponent(
-            engine,
-            QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml"),
-            QVariantMap {
-                { "label", QStringLiteral("Tab bar visibility") },
-                { "help", QStringLiteral("When the tab strip is shown.") },
-                { "fieldKey", QStringLiteral("tab_bar_visibility") },
-                { "type",
-                  QString::fromUtf8(testCase.type.data(), static_cast<qsizetype>(testCase.type.size())) },
-                { "value", testCase.value },
-                { "options", QStringList { "Always", "Never", "Multiple" } },
-                { "editable", true },
-            });
-
-        // The EDITOR specifically, reached through the Loader that builds it.
-        //
-        // Deliberately not "some descendant carries the name": the row's visible Label is a Controls
-        // type, and Qt gives those an attached object of their own carrying their text -- so a
-        // descendant-wide search reports success from the LABEL while the editor stays unnamed, which
-        // is precisely the bug. (Verified: that looser form passed with every Accessible.name deleted.)
-        auto* item = qobject_cast<QQuickItem*>(root.get());
-        REQUIRE(item != nullptr);
-
-        QObject* loader = nullptr;
-        for (auto* descendant: item->findChildren<QObject*>())
-            if (descendant->inherits("QQuickLoader"))
-                loader = descendant;
-        REQUIRE(loader != nullptr);
-
-        auto* editor = loader->property("item").value<QQuickItem*>();
-        REQUIRE(editor != nullptr);
-
-        auto* attached = accessibleAttachedOf(editor);
+            engine, QStringLiteral("qrc:/qt/qml/Contour/Ui/%1.qml").arg(testCase.type), properties);
+        auto* attached = accessibleAttachedOf(root.get());
         REQUIRE(attached != nullptr);
-        CHECK(attached->property("name").toString() == "Tab bar visibility");
-        CHECK(attached->property("description").toString() == "When the tab strip is shown.");
+        CHECK(attached->property("role").toInt() == testCase.role);
+        CHECK(attached->property("name").toString() == QStringLiteral("Some setting"));
+        CHECK(attached->property("description").toString() == QStringLiteral("What it does"));
     }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 
+TEST_CASE("accessibility: a segmented control's segments are radio buttons in a named group",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto root = loadComponent(engine,
+                              QStringLiteral("qrc:/qt/qml/Contour/Ui/KitSegmented.qml"),
+                              { { "options", QStringList { "off", "left" } },
+                                { "labels", QStringList { "Off", "Left" } },
+                                { "value", QStringLiteral("left") },
+                                { "name", QStringLiteral("Use Option as Meta") } });
+    auto segments = partsNamed(*root, QStringLiteral("segment"));
+    // Left to right: the visual tree's order is the Repeater's, but say so rather than rely on it.
+    std::ranges::sort(segments, [](QQuickItem const* a, QQuickItem const* b) { return a->x() < b->x(); });
+    REQUIRE(segments.size() == 2);
+    auto const names = std::array { QStringLiteral("Off"), QStringLiteral("Left") };
+    for (auto const index: std::views::iota(size_t { 0 }, segments.size()))
+    {
+        auto* attached = accessibleAttachedOf(segments[index]);
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").toInt() == QAccessible::RadioButton);
+        CHECK(attached->property("name").toString() == names[index]);
+        CHECK(attached->property("checked").toBool() == (index == 1));
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

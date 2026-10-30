@@ -5,6 +5,20 @@
       <RegistryValue Root="HKLM" Key="Software\Contour\Contour" Name="PathEnv" Type="integer" Value="1" KeyPath="yes"/>
     </Component>
   </CPackWiXFragment>
+  <!-- The Start menu shortcut "Contour (Connect…)": `contour.exe connect`, which asks where the new window's
+       sessions should live (this computer's daemon, this window only, a saved host) before it opens. CPack's
+       own shortcuts take no arguments, hence a component of our own, attached to the main feature. -->
+  <CPackWiXFragment Id="#PRODUCT">
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="CM_C_contour_connect_shortcut" Guid="*">
+        <Shortcut Id="CM_S_contour_connect" Name="Contour (Connect…)" Description="Choose where a new Contour window's sessions live" Target="[INSTALL_ROOT]bin\contour.exe" Arguments="connect" WorkingDirectory="INSTALL_ROOT" />
+        <RegistryValue Root="HKCU" Key="Software\Contour\Contour" Name="ConnectShortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+  </CPackWiXFragment>
+  <CPackWiXFragment Id="#PRODUCTFEATURE">
+    <ComponentRef Id="CM_C_contour_connect_shortcut" />
+  </CPackWiXFragment>
   <CPackWiXFragment Id="#PRODUCT">
     <CustomAction Id="LaunchApplication" Directory="INSTALL_ROOT" ExeCommand="&quot;[INSTALL_ROOT]bin\contour.exe&quot;" Return="asyncNoWait" Impersonate="yes" />
     <UI>

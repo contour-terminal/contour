@@ -553,50 +553,91 @@ template <typename ClampFn>
         detail::mainPageRowOf(yDevicePx, pageMarginTop, cellHeightPx, mainPageTopRow), 0, mainPageLines - 1);
 }
 
-/// The gutter's two parts, in device pixels: the blank lead-in against the pane's left edge, then the columns
-/// ending where the grid begins. Their sum is the GutterWidth a page is fitted with.
+/// The gutter's parts, in device pixels: the blank lead-in against the pane's left edge, the cell columns,
+/// then the block rail's strip ending where the grid begins. Their sum is the GutterWidth a page is fitted
+/// with.
 struct GutterExtent
 {
     GutterWidth leadIn = 0;  ///< The lead-in (@see gutterLeadIn); 0 when there is no gutter.
-    GutterWidth columns = 0; ///< The columns themselves; 0 means there is no gutter.
+    GutterWidth columns = 0; ///< The cell columns themselves; 0 when the gutter has none.
+    GutterWidth rail = 0;    ///< The block rail's strip after the cells; 0 when there is none.
 };
 
 /// Whether the device-pixel x coordinate @p xDevicePx falls inside the gutter, its lead-in included.
 ///
-/// The gutter is the strip [pageMarginLeft - lead-in - columns, pageMarginLeft): fitPageToPixels folds its
-/// width INTO pageMargin.left, so the strip is exactly what that inset gained, and column 0 begins where it
-/// ends. Pure, so the hit-test is testable without a window -- and so the one place that decides where
+/// The gutter is the strip [pageMarginLeft - rail - columns - lead-in, pageMarginLeft): fitPageToPixels folds
+/// its width INTO pageMargin.left, so the strip is exactly what that inset gained, and column 0 begins where
+/// it ends. Pure, so the hit-test is testable without a window -- and so the one place that decides where
 /// the gutter IS is the same header that decided how wide to make it.
 ///
 /// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
 /// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
-/// @param extent          The reserved gutter; no columns means there is no gutter.
+/// @param extent          The reserved gutter; neither columns nor a rail means there is no gutter.
 /// @return Whether the coordinate is over the gutter rather than over a cell or the margin left of it.
 [[nodiscard]] constexpr bool isInGutter(int xDevicePx, int pageMarginLeft, GutterExtent extent) noexcept
 {
-    return extent.columns > 0 && xDevicePx >= pageMarginLeft - extent.columns - extent.leadIn
+    return extent.columns + extent.rail > 0
+           && xDevicePx >= pageMarginLeft - extent.rail - extent.columns - extent.leadIn
            && xDevicePx < pageMarginLeft;
 }
 
-/// The gutter column under @p xDevicePx, counted from the gutter's LEFT edge -- the column
-/// vtbackend::gutterSegmentAt() names a segment for.
+/// Which part of the gutter a point is over.
+enum class GutterPart : uint8_t
+{
+    Cells = 0, ///< The cell columns: timestamps, line numbers, or the glyph block column.
+    Rail,      ///< The block rail's strip.
+};
+
+/// A point over the gutter: the part, and for the cells the column counted from the gutter's left edge.
+struct GutterPoint
+{
+    GutterPart part = GutterPart::Cells; ///< The part under the point.
+    int column = 0;                      ///< The cell column; 0 over the rail.
+
+    bool operator==(GutterPoint const&) const = default;
+};
+
+/// What of the gutter is under @p xDevicePx: the rail's strip, or a cell column counted from the gutter's
+/// LEFT edge -- the column vtbackend::gutterSegmentAt() names a segment for.
 ///
-/// The lead-in counts as the first column's: a target that reaches the pane's edge is the easier one to
-/// hit, and the strip holds nothing else a press there could have meant. Built on isInGutter() so the two
-/// cannot disagree about where the strip is.
+/// The lead-in counts as the first column's -- the rail's, when there are no cells: a target that reaches
+/// the pane's edge is the easier one to hit, and the strip holds nothing else a press there could have meant.
+/// Built on isInGutter() so the two cannot disagree about where the gutter is.
 /// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
 /// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
-/// @param extent          The reserved gutter; no columns means there is no gutter.
+/// @param extent          The reserved gutter.
 /// @param cellWidthPx     The cell width in device pixels.
-/// @return The column, or nullopt when the coordinate is not over the gutter.
+/// @return The point, or nullopt when the coordinate is not over the gutter.
+[[nodiscard]] constexpr std::optional<GutterPoint> gutterPointAt(int xDevicePx,
+                                                                 int pageMarginLeft,
+                                                                 GutterExtent extent,
+                                                                 int cellWidthPx) noexcept
+{
+    if (cellWidthPx <= 0 || !isInGutter(xDevicePx, pageMarginLeft, extent))
+        return std::nullopt;
+    auto const railStart = pageMarginLeft - extent.rail;
+    if (xDevicePx >= railStart || extent.columns == 0)
+        return GutterPoint { .part = GutterPart::Rail, .column = 0 };
+    return GutterPoint { .part = GutterPart::Cells,
+                         .column = std::max(0, xDevicePx - (railStart - extent.columns)) / cellWidthPx };
+}
+
+/// The gutter cell column under @p xDevicePx, counted from the gutter's LEFT edge (@see gutterPointAt).
+/// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
+/// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
+/// @param extent          The reserved gutter.
+/// @param cellWidthPx     The cell width in device pixels.
+/// @return The column, or nullopt when the coordinate is not over the gutter's cells -- over the rail
+///         included.
 [[nodiscard]] constexpr std::optional<int> gutterColumnAt(int xDevicePx,
                                                           int pageMarginLeft,
                                                           GutterExtent extent,
                                                           int cellWidthPx) noexcept
 {
-    if (cellWidthPx <= 0 || !isInGutter(xDevicePx, pageMarginLeft, extent))
+    auto const point = gutterPointAt(xDevicePx, pageMarginLeft, extent, cellWidthPx);
+    if (!point || point->part != GutterPart::Cells)
         return std::nullopt;
-    return std::max(0, xDevicePx - (pageMarginLeft - extent.columns)) / cellWidthPx;
+    return point->column;
 }
 
 /// The page column under @p xDevicePx, or nullopt when it is beside the page: over the gutter, or the margins
@@ -739,14 +780,17 @@ struct GutterExtent
 /// Snaps a split pane's logical extent so its boundary lands on a whole DEVICE pixel.
 ///
 /// A split child is sized `view.width * ratio`, which is a real number -- so the first pane routinely
-/// gets a fractional width and the second a fractional ORIGIN. That origin reaches the renderer by two
-/// paths that round differently: the vertex transform composes it unrounded
-/// (TerminalRenderNode::prepare -> composeItemToClip), while the scissor rounds it to a whole pixel
-/// (`qRound(originScene.x() * dpr)`). Geometry and clip then disagree by up to half a pixel, and since
-/// the glyph atlas is sampled with QRhiSampler::Nearest the sample points land on texel boundaries --
+/// gets a fractional width and the second a fractional ORIGIN. That origin used to reach the renderer by
+/// two paths that rounded differently: the vertex transform composed it unrounded, while the scissor
+/// rounded it to a whole pixel. Geometry and clip then disagreed by up to half a pixel, and since
+/// the glyph atlas is sampled with QRhiSampler::Nearest the sample points landed on texel boundaries --
 /// a stem loses its bright column for a scanline or two while its neighbours in the same row, same
 /// frame, are untouched. That is #2040: measured as a stem's ink dropping 2656 -> 2043 (23%) with the
 /// glyph's mask intact, on two of three identical `l` glyphs.
+///
+/// composeItemToClip() now rounds every item's origin to the pixel the scissor uses (snappedItemOrigin),
+/// whatever placed it, so this snap is no longer what keeps the glyphs whole. It still keeps the pane
+/// boundary itself, and the split handle between two panes, on the device grid.
 ///
 /// Snapping in logical coordinates alone is not enough at a fractional device-pixel ratio: the
 /// quantity both paths agree about is the HARDWARE pixel, so the rounding happens in device space and

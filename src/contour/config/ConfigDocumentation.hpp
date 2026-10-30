@@ -1,6 +1,9 @@
 #pragma once
 
+#include <contour/config/ConfigDocumentationTags.hpp>
+
 #include <algorithm>
+#include <cstddef>
 #include <string_view>
 
 namespace contour::config::documentation
@@ -14,14 +17,14 @@ struct StringLiteral
     char value[N]; // NOLINT
 };
 
-template <auto T>
-struct Wrap
-{
-};
-
-template <StringLiteral Config, StringLiteral Web>
+/// The text of one documentation entry: its two strings, for contour.yml and for the website. Each Text<Tag>
+/// specialization below derives from one, so a ConfigEntry names the tag rather than carrying the strings in
+/// its type.
+template <StringLiteral ConfigDoc, StringLiteral WebDoc>
 struct DocumentationEntry
 {
+    static constexpr std::string_view Config = ConfigDoc.value; ///< The commented contour.yml text.
+    static constexpr std::string_view Web = WebDoc.value;       ///< The website's Markdown text.
 };
 
 constexpr StringLiteral Dummy { "{comment} fmt formatted doc {}\n" };
@@ -114,6 +117,10 @@ constexpr StringLiteral ShowTitleBarConfig {
     "{comment}   true  = the native (server-side) title bar and its window controls;\n"
     "{comment}   false = a frameless window with Contour's own client-side tab strip and controls.\n"
     "{comment} The tab strip is shown either way; only the min/max/close controls move to the OS frame.\n"
+    "{comment} On Linux: false (the default) = Contour's own header bar with the desktop's window buttons;\n"
+    "{comment}   true = the window manager draws the frame (KWin, Mutter, or a tiling WM's border or none);\n"
+    "{comment}   the header bar keeps the tabs, new tab, search and menu; only the window buttons move out "
+    "of it.\n"
     "show_title_bar: {}\n"
     "\n"
 };
@@ -133,8 +140,8 @@ constexpr StringLiteral WindowShadowConfig {
 constexpr StringLiteral DimUnfocusedConfig {
     "{comment} Dims a pane while it is not the focused one — an inactive pane of a split, or any\n"
     "{comment} pane of an unfocused window — by blending it toward its own background color.\n"
-    "{comment} The value is the blend amount between 0.0 (dimming disabled; the default) and 1.0\n"
-    "{comment} (fully blended to the background color).\n"
+    "{comment} The value is the blend amount between 0.0 (dimming disabled; the classic default) and\n"
+    "{comment} 1.0 (fully blended to the background color). The native2026 default is 0.15.\n"
     "dim_unfocused: {}\n"
     "\n"
 };
@@ -193,8 +200,11 @@ constexpr StringLiteral CopyCommandPreserveMultilineWeb {
     "immediately."
 };
 
-using CopyCommandPreserveMultiline =
-    DocumentationEntry<CopyCommandPreserveMultilineConfig, CopyCommandPreserveMultilineWeb>;
+template <>
+struct Text<CopyCommandPreserveMultiline>:
+    DocumentationEntry<CopyCommandPreserveMultilineConfig, CopyCommandPreserveMultilineWeb>
+{
+};
 
 constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
@@ -251,7 +261,8 @@ constexpr StringLiteral AccessibilityCaretReportingConfig {
 };
 
 constexpr StringLiteral HyperlinkHoverTooltipConfig {
-    "{comment} Whether hovering an OSC 8 hyperlink shows a tooltip with its target.\n"
+    "{comment} Whether hovering a link shows its target without holding the follow modifier. While the\n"
+    "{comment} modifier is held the target always shows.\n"
     "hyperlink_hover_tooltip: {}\n"
     "\n"
 };
@@ -284,9 +295,10 @@ constexpr StringLiteral TabBarPositionConfig {
 
 constexpr StringLiteral TabBarVisibilityConfig {
     "{comment} When the GUI tab strip (tab bar) is shown (ignore-case):\n"
-    "{comment}   Always   = always show the tab strip (default).\n"
+    "{comment}   Always   = always show the tab strip (the classic default).\n"
     "{comment}   Never    = never show the tab strip.\n"
-    "{comment}   Multiple = show the tab strip only when the window has more than one tab.\n"
+    "{comment}   Multiple = show the tab strip only when the window has more than one tab (the\n"
+    "{comment}              native2026 default).\n"
     "tab_bar_visibility: {}\n"
     "\n"
 };
@@ -302,15 +314,34 @@ constexpr StringLiteral UiStyleConfig {
     "\n"
 };
 
+constexpr StringLiteral ChromeDensityConfig {
+    "{comment} How much room the window chrome takes (ignore-case).\n"
+    "{comment}   comfortable = once a tab is split, pane cards with headers and a 6 pt gap (default).\n"
+    "{comment}   minimal     = 1 pt split lines and no pane headers; hold Alt (Option) for half a\n"
+    "{comment}                 second to show them. On macOS a single tab gets a bare 28 pt band.\n"
+    "{comment} Applied live.\n"
+    "chrome_density: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral SecureInputConfig {
+    "{comment} Shows a lock while the program in a pane hides what you type (a password prompt) and, on\n"
+    "{comment} macOS, turns on Secure Keyboard Entry while that pane has focus. `auto` or `off`.\n"
+    "secure_input: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleConfig {
     "{comment} How the window's own minimize/maximize/close controls are drawn, and which side of\n"
     "{comment} the tab bar they sit on (ignore-case). Only applies while the native title bar is\n"
     "{comment} hidden (show_title_bar: false); with it shown, the OS draws these itself.\n"
-    "{comment}   auto    = match the host: macOS -> macos, Windows -> windows, KDE -> plasma,\n"
-    "{comment}             anything else -> windows (default).\n"
+    "{comment}   auto    = match the host: macOS -> macos, Windows -> windows,\n"
+    "{comment}             anything else -> linux (default).\n"
     "{comment}   windows = trailing edge, flush rectangular buttons, red close hover.\n"
     "{comment}   macos   = leading edge, traffic lights, close/minimize/zoom order.\n"
     "{comment}   plasma  = trailing edge, circular hover fills (KDE Plasma's Breeze).\n"
+    "{comment}   linux   = round buttons with themed icons, in the order and on the sides the\n"
+    "{comment}             desktop's own button layout names (GNOME, KWin or GTK settings).\n"
     "window_control_style: {}\n"
     "\n"
 };
@@ -529,14 +560,19 @@ constexpr StringLiteral ScrollbarConfig {
     "    {comment} only: a contour.yml written by an earlier version keeps Hidden, so set Right there\n"
     "    {comment} to see the marks.\n"
     "    position: {}\n"
+    "    {comment} system follows the operating system's scroll bar setting; overlay hides the bar at the\n"
+    "    {comment} bottom of the scrollback; always shows it while there is scrollback.\n"
+    "    mode: {}\n"
     "    {comment} whether or not to hide the scrollbar when in alt-screen.\n"
     "    hide_in_alt_screen: {}\n"
     "    {comment} Which marks the scrollbar shows as ticks; clicking one scrolls its line to the top.\n"
     "    {comment} A list of:\n"
-    "    {comment}   failures   - commands that exited with an error\n"
-    "    {comment}   commands   - every other command, finished or still running\n"
-    "    {comment}   user_marks - lines marked with `mm` in vi normal mode\n"
-    "    {comment} [] shows none. The first two need a shell that emits OSC 133 (or systemd's\n"
+    "    {comment}   failures       - commands that exited with an error\n"
+    "    {comment}   commands       - every command that did not fail\n"
+    "    {comment}   running        - commands still running, drawn as hollow ticks\n"
+    "    {comment}   user_marks     - lines marked with `mm` in vi normal mode\n"
+    "    {comment}   search_matches - rows the active search matches, in yellow\n"
+    "    {comment} [] shows none. The command kinds need a shell that emits OSC 133 (or systemd's\n"
     "    {comment} OSC 3008).\n"
     "    marks: {}\n"
     "\n"
@@ -653,7 +689,8 @@ constexpr StringLiteral FontsConfig {
     "    {comment} weight/slant applied automatically).\n"
     "    regular:\n"
     "        {comment} Font family defines the font family name, such as:\n"
-    "        {comment} \"\"Fira Code\", \"Courier New\", or \"monospace\" (default).\n"
+    "        {comment} \"Fira Code\", \"Courier New\", or \"monospace\" (the classic default; native2026\n"
+    "        {comment} uses the bundled \"JetBrains Mono\", and \"Cascadia Mono\" on Windows).\n"
     "        family: {}\n"
     "\n"
     "        {comment} Font weight can be one of:\n"
@@ -744,6 +781,11 @@ constexpr StringLiteral ColorsConfig {
     "{comment} The dark color scheme is used when the system is configured to prefer dark mode and light "
     "theme otherwise.\n"
     "{comment}\n"
+    "{comment} Under defaults_edition native2026, `colors: default` (the stock scheme, unmodified) means "
+    "the\n"
+    "{comment} pair contour-dark / contour-light, so the terminal follows dark mode. Name another scheme\n"
+    "{comment} to keep it fixed. Under classic it stays the one fixed scheme.\n"
+    "{comment}\n"
     "{comment} A configuration reload applies the colors to running sessions too, replacing any a\n"
     "{comment} program set there (OSC 4, 10, 11), just as switching to another profile does.\n"
     "\n"
@@ -829,6 +871,29 @@ constexpr StringLiteral InputMethodEditorSupportConfig {
     "{comment} Enables Input Method Editor (IME) support.\n"
     "{comment} This is enabled by default.\n"
     "input_method_editor: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral InputMethodEditorStyleConfig {
+    "{comment} How text an input method is composing is drawn, at the cursor, or to its left when it\n"
+    "{comment} would not fit: `inline` in the terminal's default colours with a thin underline, or\n"
+    "{comment} `highlighted` in the colour scheme's `input_method_editor` colours.\n"
+    "input_method_editor_style: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral InputMethodEditorStyleWeb {
+    "How text an input method is composing is drawn, at the cursor, or to its left when it would not fit.\n"
+    "\n"
+    "Valid values are:\n"
+    "- `inline` - in the terminal's default colours with a thin underline, as it will read once committed\n"
+    "- `highlighted` - in the colour scheme's `input_method_editor` colours, bold and underlined\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    input_method_editor_style: inline\n"
+    "```\n"
     "\n"
 };
 
@@ -928,6 +993,27 @@ constexpr StringLiteral LiveConfig {
     "{comment} Determines whether the instance is reloading the configuration files "
     "whenever it is changing or not.\n"
     "live_config: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral DefaultsEditionConfig {
+    "{comment} The generation of built-in defaults this file is written against, so that a setting the\n"
+    "{comment} file does not spell out keeps the value it had when the file was written.\n"
+    "{comment}   classic    = the defaults of every release before the 2026 redesign. A file without\n"
+    "{comment}                this key is read as classic.\n"
+    "{comment}   native2026 = the 2026 redesign's defaults: JetBrains Mono (Cascadia Mono on Windows),\n"
+    "{comment}                a 100x30 page with margins, the contour-dark/contour-light schemes, a\n"
+    "{comment}                silent bell, 10000 lines of scrollback, a tab bar shown for two or\n"
+    "{comment}                more tabs, a scrollbar that follows the system's setting\n"
+    "{comment}                (scrollbar.mode: system), a link's target shown only while the\n"
+    "{comment}                follow modifier is held (hyperlink_hover_tooltip: false) and\n"
+    "{comment}                chrome that follows the terminal background\n"
+    "{comment}                (theme: terminal; classic follows the OS).\n"
+    "{comment}                The default profile's contour-dark/contour-light palettes come from\n"
+    "{comment}                the built-in schemes; a color_schemes: entry of either name takes\n"
+    "{comment}                effect only once a profile names it in colors:.\n"
+    "{comment} A settings.yml beside this file may set it too, and wins.\n"
+    "defaults_edition: {}\n"
     "\n"
 };
 
@@ -1035,6 +1121,16 @@ constexpr StringLiteral SnapToRowsConfig {
     "snap_to_rows: {}\n"
 };
 
+constexpr StringLiteral ConnectPickerOnStartConfig {
+    "\n"
+    "{comment} Whether a plain launch (no command-line arguments, as a Dock, Spotlight or launcher start "
+    "is)\n"
+    "{comment} first asks where the window's sessions should live: this computer's daemon, this window "
+    "only,\n"
+    "{comment} or a saved host. `contour connect` always asks; a launch with arguments never does.\n"
+    "connect_picker_on_start: {}\n"
+};
+
 constexpr StringLiteral RememberWindowPositionConfig {
     "\n"
     "{comment} Remember the normal window position and monitor, without saving window size.\n"
@@ -1093,9 +1189,11 @@ constexpr StringLiteral ThemeConfig {
     "\n"
     "{comment} Light/dark appearance of the GUI chrome (title bar, tab strip, command palette,\n"
     "{comment} settings pages, dialogs), independent of the terminal grid (ignore-case):\n"
-    "{comment}   system = follow the operating system's color scheme (default).\n"
-    "{comment}   dark   = force a dark GUI appearance regardless of the OS.\n"
-    "{comment}   light  = force a light GUI appearance regardless of the OS.\n"
+    "{comment}   terminal = follow the terminal's background: dark chrome over a dark background,\n"
+    "{comment}              light over a light one (the native2026 default).\n"
+    "{comment}   system   = follow the operating system's color scheme (the classic default).\n"
+    "{comment}   dark     = force a dark GUI appearance regardless of the OS.\n"
+    "{comment}   light    = force a light GUI appearance regardless of the OS.\n"
     "{comment} The terminal grid keeps following the OS light/dark preference via its color scheme.\n"
     "theme: {}\n"
 };
@@ -1157,7 +1255,6 @@ constexpr StringLiteral HostsConfig {
     "{comment}         url: \"tls://studio.tailnet.ts.net:7297\"\n"
     "{comment}         token_file: \"~/.config/contour/studio.token\"\n"
     "{comment}         tls_ca: \"~/.config/contour/studio-ca.pem\"\n"
-    "hosts:\n"
     "\n"
 };
 constexpr StringLiteral HostsWeb { "Saved remote hosts that \"Attach to Host\" lists." };
@@ -1257,6 +1354,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment}               single-step executed using custom actions. See "
     "TraceEnter/TraceStep/TraceLeave "
     "actions.\n"
+    "{comment} - BlockFocus: A command block holds the keyboard focus (FocusPreviousCommand and "
+    "FocusNextCommand).\n"
     "{comment}\n"
     "{comment} You can combine these modes by concatenating them via | and negate a single one\n"
     "{comment} by prefixing with ~.\n"
@@ -1319,6 +1418,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - MoveTabToRight    Moves the current tab to the right.\n"
     "{comment} - NewTerminal       Spawns a new terminal at the current terminals current working "
     "directory.\n"
+    "{comment} - NewWindowTo       Opens the Connect picker to choose where a new window's sessions "
+    "live.\n"
     "{comment} - NoSearchHighlight Disables current search highlighting, if anything is still "
     "highlighted "
     "due to "
@@ -1355,6 +1456,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ScrollUp          Scrolls up by the multiplier factor.\n"
     "{comment} - SearchReverse     Opens the find bar, searching upwards from the current cursor "
     "position.\n"
+    "{comment} - SearchSelection   Searches for the selected text: its first line becomes the find bar's\n"
+    "{comment}                     pattern, escaped when the bar searches by regular expression.\n"
     "{comment} - SendChars         Writes given characters in `chars` member to the applications input.\n"
     "{comment} - SwitchToTab       Switches to the tab position, given by extra parameter \"position\".\n"
     "{comment}                     The positions start at number 1.\n"
@@ -1401,7 +1504,6 @@ constexpr StringLiteral SpawnNewProcessConfig {
     "spawn_new_process: {}\n"
 };
 
-constexpr unsigned DefaultEarlyExitThreshold = 5u;
 constexpr StringLiteral EarlyExitThresholdConfig { "\n"
                                                    "{comment} Time in seconds to check for early threshold\n"
                                                    "early_exit_threshold: {}\n" };
@@ -1488,8 +1590,9 @@ constexpr StringLiteral HyperlinkDecorationConfig {
     "{comment} mode: when they are decorated\n"
     "{comment}   always   - always\n"
     "{comment}   hover    - only the one under the pointer\n"
-    "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held\n"
-    "{comment}   never    - never; Ctrl+click still opens them\n"
+    "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held; the\n"
+    "{comment}              native2026 default, which follows with Command+click on macOS\n"
+    "{comment}   never    - never; the follow gesture still opens them\n"
     "{comment} normal, hover: the decorator for a link at rest and under the pointer: underline,\n"
     "{comment} dotted-underline, double-underline, curly-underline, dashed-underline, overline,\n"
     "{comment} crossed-out, framed, encircle.\n"
@@ -1662,6 +1765,17 @@ constexpr StringLiteral HintLabelConfig {
     "    background_alpha: {}\n"
 };
 
+constexpr StringLiteral HintLabelTypedConfig {
+    "\n"
+    "{comment} Colors for hint mode labels once a prefix is typed: every label still on screen starts with\n"
+    "{comment} it, and is drawn whole in this pair. Unset: the typed characters fade toward the background.\n"
+    "hint_label_typed:\n"
+    "    foreground: {}\n"
+    "    foreground_alpha: {}\n"
+    "    background: {}\n"
+    "    background_alpha: {}\n"
+};
+
 constexpr StringLiteral HintMatchConfig {
     "\n"
     "{comment} Colors for hint mode match bodies (the text behind the labels).\n"
@@ -1812,7 +1926,7 @@ constexpr StringLiteral BlockStatusConfig {
     "{comment} Colors of the gutter's block column by how each command ended: its fold controls, the\n"
     "{comment} triangle beside a running command and the dot beside a finished one all take them.\n"
     "{comment} Unset by default: success then looks exactly like the fold column (fold_marker above),\n"
-    "{comment} failure takes this scheme's red (normal color 1) and running its yellow (normal color 3),\n"
+    "{comment} failure takes this scheme's red (normal color 1) and running its blue (normal color 4),\n"
     "{comment} so a scheme that has never heard of them still shows them legibly. Uncomment to override.\n"
     "{comment} The values shown are what the default scheme derives, so uncommenting failure and running\n"
     "{comment} as they are changes nothing. Uncommenting success changes one thing: a success the scheme\n"
@@ -1821,14 +1935,14 @@ constexpr StringLiteral BlockStatusConfig {
     "{comment} block_status:\n"
     "{comment}     success: '#7E7C7C'\n"
     "{comment}     failure: '#C63939'\n"
-    "{comment}     running: '#A0A000'\n"
+    "{comment}     running: '#4D79FF'\n"
 };
 
 constexpr StringLiteral BlockStatusHeaderConfig {
     "\n"
     "{comment} Colors of the gutter's block column by how each command ended. Written back because this\n"
     "{comment} scheme sets them; remove a key to derive it again -- success from the fold column, failure\n"
-    "{comment} from normal color 1, running from normal color 3.\n"
+    "{comment} from normal color 1, running from normal color 4.\n"
     "block_status:\n"
 };
 
@@ -1842,7 +1956,7 @@ constexpr StringLiteral BlockStatusHoverConfig {
     "{comment} block_status_hover:\n"
     "{comment}     success: '#D0D0D0'\n"
     "{comment}     failure: '#CB8484'\n"
-    "{comment}     running: '#B8B868'\n"
+    "{comment}     running: '#8EA4E7'\n"
 };
 
 constexpr StringLiteral BlockStatusHoverHeaderConfig {
@@ -1973,6 +2087,28 @@ constexpr StringLiteral GitDrawingsConfig {
     "    merge_commit_style: {}\n"
 };
 
+constexpr StringLiteral DefaultsEditionWeb {
+    "option names the generation of built-in defaults the configuration file is written against, so a "
+    "setting the file does not spell out keeps the value it had when the file was written. `classic` is "
+    "the defaults of every release before the 2026 redesign, and is what a file without the key gets. "
+    "`native2026` is the redesign's: JetBrains Mono (Cascadia Mono on Windows) at 13pt on macOS and 12pt "
+    "elsewhere, a 100x30 page with 8x6 margins, the `contour-dark`/`contour-light` color schemes, the "
+    "status line without hard-coded colors, a silent bell, 10000 lines of scrollback, a steady block "
+    "cursor, links decorated while the follow modifier (Command on macOS) is held, unfocused panes dimmed, "
+    "a tab bar shown only for two or more tabs, a scrollbar that follows the system's scroll bar setting "
+    "(`scrollbar.mode: system`, where `classic` always shows it), a hovered link's target shown only while "
+    "the follow modifier is held (`hyperlink_hover_tooltip: false`), and GUI chrome that follows the "
+    "terminal background (`theme: terminal`, where `classic` follows the OS). Under `native2026` `colors: "
+    "default`, "
+    "the stock scheme left unmodified, also means the `contour-dark`/`contour-light` pair, so an existing "
+    "configuration follows dark mode; naming any other scheme keeps it fixed. Under `native2026` the default "
+    "profile's "
+    "`contour-dark` and `contour-light` palettes come from the built-in schemes: a `color_schemes:` "
+    "entry of either name takes effect only when a profile names it in `colors:`. "
+    "A freshly generated configuration states "
+    "`native2026`. A `settings.yml` beside the file may set the key too, and wins."
+};
+
 constexpr StringLiteral PlatformPluginWeb {
     "option allows you to override the auto-detected platform plugin to be loaded. You can specify values "
     "like `auto`, `xcb`, `cocoa`, `direct2d`, or `winrt` to determine the platform plugin. The default value "
@@ -2024,9 +2160,10 @@ constexpr StringLiteral DefaultProfilesWeb {
 
 constexpr StringLiteral EarlyExitThresholdWeb {
     "option determines the early threshold time. If the shell ends earlier than the specified threshold "
-    "without a successful exit status, additional message will be printed that the shell terminated too "
-    "quickly and additional key press is required to close contour. A shell that exits successfully -- "
-    "`exit` or Ctrl+D -- closes the window at once."
+    "without a successful exit status, its pane stays open with the shell's last output and a footer naming "
+    "how it ended (its exit code or signal): Return restarts the shell in the same pane, and the `ClosePane` "
+    "binding (Ctrl+Shift+X by default) closes it. A shell that exits successfully -- `exit` or Ctrl+D -- "
+    "closes the pane at once."
 };
 
 constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
@@ -2061,6 +2198,14 @@ constexpr StringLiteral SnapToRowsWeb {
     "A change applies at the next startup or manual resize."
 };
 
+constexpr StringLiteral ConnectPickerOnStartWeb {
+    "option makes a plain launch, one with no command-line arguments such as a Dock, Spotlight or launcher "
+    "start, show the Connect picker first: a small window asking whether the new window's sessions live in "
+    "this computer's daemon, in this window only, or on a saved host. The default is `false`. `contour "
+    "connect` shows the picker whatever this says, and a launch with arguments never does. Also the "
+    "\"Ask every time Contour starts\" switch of the picker and of Settings."
+};
+
 constexpr StringLiteral RememberWindowPositionWeb {
     "option remembers the last normal window position and monitor, without saving window size. "
     "The default is `true` on Windows and `false` on other platforms. Enable it to opt in on macOS "
@@ -2085,9 +2230,10 @@ constexpr StringLiteral GuiConfigLockedWeb {
 
 constexpr StringLiteral ThemeWeb {
     "option selects the light/dark appearance of the GUI chrome (title bar, tab strip, command palette, "
-    "settings pages, dialogs) independently of the operating system. Possible values are `system` "
-    "(follow the OS color scheme), `dark`, and `light`. The terminal grid keeps following the OS "
-    "light/dark preference through its own color scheme. The default value is `system`."
+    "settings pages, dialogs) independently of the operating system. Possible values are `terminal` "
+    "(follow the terminal's background), `system` (follow the OS color scheme), `dark`, and `light`. "
+    "The terminal grid keeps following the OS light/dark preference through its own color scheme. "
+    "The default value is `terminal` under `defaults_edition: native2026` and `system` under `classic`."
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersWeb {
@@ -2113,6 +2259,33 @@ constexpr StringLiteral ImagesWeb {
     "`sixel_scrolling`, `sixel_register_count`, and `good_image_protocol` to control various aspects of "
     "image rendering. The maximum image size is derived from the screen size; `max_width` and "
     "`max_height` are deprecated and ignored."
+};
+
+constexpr StringLiteral QuickTerminalWeb {
+    "section sets a global hotkey that slides a terminal down from the top of the screen under the "
+    "pointer, full width and 40 % of its height, in Minimal density.\n"
+    "``` yaml\n"
+    "quick_terminal:\n"
+    "  hotkey: {{ mods: [Control], key: '`' }}\n"
+    "  hide_on_focus_loss: true\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==hotkey== The chord, spelled as an input mapping spells it; it needs at "
+    "least one of `Control`, `Alt` and `Super`. Unbound (`~`) by default.\n"
+    ":octicons-horizontal-rule-16: ==hide_on_focus_loss== Whether the quick terminal hides when it loses "
+    "the focus.\n"
+};
+
+constexpr StringLiteral QuickTerminalConfig {
+    "quick_terminal:\n"
+    "    {comment} A global hotkey that slides a terminal down from the top of the screen under the\n"
+    "    {comment} pointer, and the same hotkey hides it again. Unbound (~) by default. Spelled as an\n"
+    "    {comment} input mapping spells its chord; it needs at least one of Control, Alt and Super.\n"
+    "    {comment} Example: {{ mods: [Control], key: '`' }}\n"
+    "    hotkey: {}\n"
+    "\n"
+    "    {comment} Whether the quick terminal hides when it loses the focus.\n"
+    "    hide_on_focus_loss: {}\n"
+    "\n"
 };
 
 constexpr StringLiteral DaemonWeb {
@@ -2352,9 +2525,10 @@ constexpr StringLiteral AccessibilityCaretReportingWeb {
 
 constexpr StringLiteral HyperlinkHoverTooltipWeb {
     "\n"
-    "Whether hovering an [OSC 8 hyperlink](../vt-extensions/index.md) shows a tooltip naming its "
-    "target, so it can be read before it is followed. A local `file://` target is shown as a plain "
-    "path.\n"
+    "Whether hovering a link ([OSC 8](../vt-extensions/index.md) or detected) shows its target without "
+    "holding the follow modifier. While the modifier is held the target always shows. A local `file://` "
+    "target is shown as a plain path. Defaults to `false`; a configuration written before the 2026 "
+    "defaults keeps `true`.\n"
     "\n"
 };
 
@@ -2434,6 +2608,26 @@ constexpr StringLiteral UiStyleWeb {
     "\n"
 };
 
+constexpr StringLiteral ChromeDensityWeb {
+    "\n"
+    "Selects how much room the window chrome takes. Valid values (ignore-case):\n"
+    "\n"
+    "- `comfortable` — once a tab is split, its panes are cards with a header each and a 6 pt gap "
+    "between them. This is the default.\n"
+    "- `minimal` — panes are separated by 1 pt lines and carry no header; hold Alt (Option on macOS) "
+    "for half a second to show the headers. On macOS a tab that is not split gets a bare 28 pt band.\n"
+    "\n"
+    "A change is applied live.\n"
+    "\n"
+};
+
+constexpr StringLiteral SecureInputWeb {
+    "\n"
+    "Shows a lock while the program in a pane hides what you type (a password prompt) and, on macOS, "
+    "turns on Secure Keyboard Entry while that pane has focus. `auto` or `off`.\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleWeb {
     "\n"
     "Selects how the window's own minimize/maximize/close controls are drawn, and which side of the tab "
@@ -2442,14 +2636,18 @@ constexpr StringLiteral WindowControlStyleWeb {
     "doubles as the title bar; with the native frame shown, the operating system draws them itself. "
     "Valid values (ignore-case):\n"
     "\n"
-    "- `auto` — match the host: macOS gets `macos`, Windows gets `windows`, a KDE Plasma session gets "
-    "`plasma`, and anything else gets `windows`. This is the default.\n"
+    "- `auto` — match the host: macOS gets `macos`, Windows gets `windows`, and anything else (KDE "
+    "Plasma included) gets `linux`. This is the default.\n"
     "- `windows` — trailing (right) edge, flush rectangular buttons in minimize/maximize/close order, "
     "with a red close hover.\n"
     "- `macos` — leading (left) edge, traffic lights in close/minimize/zoom order. The dots reveal their "
     "glyphs while the group is hovered and grey out while the window is inactive.\n"
     "- `plasma` — trailing (right) edge, like `windows` but with the circular hover fills of KDE "
     "Plasma's Breeze decoration.\n"
+    "- `linux` — round buttons with the desktop's themed icons, in the order and on the side (or "
+    "sides) the desktop's own button layout names: GNOME's `button-layout`, KWin's `ButtonsOnLeft` and "
+    "`ButtonsOnRight`, or GTK's `gtk-decoration-layout`. Where none is set, minimize, maximize and "
+    "close sit at the trailing (right) edge.\n"
     "\n"
     "Independent of [`ui_style`](#ui_style): every value works in both the native and the terminal "
     "chrome, and takes its extents from whichever of those is active — so under `ui_style: terminal` the "
@@ -2482,10 +2680,10 @@ constexpr StringLiteral TabBarVisibilityWeb {
     "\n"
     "Selects when the GUI tab strip (tab bar) is shown. Valid values (ignore-case):\n"
     "\n"
-    "- `Always` — the tab strip is always shown. This is the default.\n"
+    "- `Always` — the tab strip is always shown. This is the `classic` default.\n"
     "- `Never` — the tab strip is never shown.\n"
     "- `Multiple` — the tab strip is shown only when the window has more than one tab, and hidden while a "
-    "single tab remains.\n"
+    "single tab remains. This is the `native2026` default.\n"
     "\n"
 };
 
@@ -2717,8 +2915,9 @@ constexpr StringLiteral ScrollbarWeb {
     "  profile_name:\n"
     "    scrollbar:\n"
     "      position: Right\n"
+    "      mode: system\n"
     "      hide_in_alt_screen: true\n"
-    "      marks: [failures, commands, user_marks]\n"
+    "      marks: [failures, commands, running, user_marks, search_matches]\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==position==  This option specifies the position of the scrollbar in the "
     "terminal window. It can be set to one of the following values: Left, Right, Hidden. The default is "
@@ -2726,14 +2925,22 @@ constexpr StringLiteral ScrollbarWeb {
     "`position: Right` there to see the marks. Hidden turns the scrollbar, and with it the command marks, "
     "off. The scrollbar floats over the edge of the terminal, takes no column from it, and is shown only "
     "while there is history to scroll through. <br/>\n"
+    ":octicons-horizontal-rule-16: ==mode== `system` follows the operating system's scroll bar setting; "
+    "`overlay` hides the bar at the bottom of the scrollback, unless a failed or running command or a "
+    "user mark is above the view; `always` shows it while there is scrollback. Defaults to `system`; a "
+    "configuration written before the 2026 defaults keeps `always`. Where the system publishes no "
+    "setting, `system` means `overlay`. <br/>\n"
     ":octicons-horizontal-rule-16: ==hide_in_alt_screen== This boolean option determines whether the "
     "scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the "
     "scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the "
     "scrollbar will remain visible even in the alternate screen mode. <br/>\n"
     ":octicons-horizontal-rule-16: ==marks== Which marks the scrollbar shows as thin ticks; clicking a tick "
     "scrolls its line to the top of the view, opening it if it is folded. A list of `failures` (commands "
-    "that exited with an error), `commands` (every other command, finished or still running) and "
-    "`user_marks` (lines marked with `mm` in vi normal mode); `[]` shows none. Command ticks need the OSC "
+    "that exited with an error), `commands` (every command that did not fail; `running` is listed on its "
+    "own), `running` (commands still running, drawn as hollow ticks), `user_marks` (lines marked with `mm` "
+    "in vi normal mode) and `search_matches` (the rows the active search matches, in yellow); `[]` shows "
+    "none. The default is `[failures, running, search_matches]`, or, in a configuration written before the "
+    "2026 defaults, `[failures, commands, running, user_marks]`. Command ticks need the OSC "
     "133 marks a shell with shell integration emits -- or, without one, systemd's OSC 3008 contexts. "
     "Ticks are hidden whenever the scrollbar is. <br/>\n"
     "\n"
@@ -2873,7 +3080,7 @@ constexpr StringLiteral FontsWeb {
     "      emoji: \"emoji\"\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==size== Specifies the initial font size in pixels. The default value is "
-    "12. <br/>\n"
+    "12, and 13 on macOS under the `native2026` defaults. <br/>\n"
     ":octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font "
     "files and font fallback. Possible values are `native` and `mock`.<br/> `native` will use the "
     "operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), "
@@ -3076,6 +3283,10 @@ constexpr StringLiteral ColorsWeb {
     "`gruvbox-light`, `gruvbox-dark`, `solarized-light`, `solarized-dark`, `papercolor-light`, "
     "`papercolor-dark`.\n"
     "\n"
+    "Under `defaults_edition: native2026`, `colors: default` (the stock scheme, unmodified) means the pair "
+    "`contour-dark`/`contour-light`, so the terminal follows the system's dark mode; naming another scheme "
+    "keeps it fixed, and `classic` keeps `default` as one fixed scheme.\n"
+    "\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
@@ -3166,21 +3377,24 @@ constexpr StringLiteral FileOpenerWeb {
 };
 
 constexpr StringLiteral OptionKeyAsAltConfig {
-    "{comment} Tells Contour how to handle Option-Key events on MacOS.\n"
+    "{comment} Which Option keys act as Alt (Meta) on macOS: off, left, right or both. The other Option key\n"
+    "{comment} keeps typing accents like \u00e9 and \u00fc. true and false are still read, as both and off.\n"
     "{comment} This value is ignored on other platforms.\n"
     "{comment}\n"
-    "{comment} Default: false\n"
+    "{comment} Default: off\n"
     "option_as_alt: {}\n"
     "\n"
 };
 
 constexpr StringLiteral OptionKeyAsAltWeb {
-    "section tells Contour how to handle Option-Key events on MacOS.\n"
+    "section tells Contour which Option keys act as Alt (Meta) on macOS: `off`, `left`, `right` or `both`.\n"
+    "The other Option key keeps typing accents like \u00e9 and \u00fc. `true` and `false` are still read, as "
+    "`both` and `off`.\n"
     "This value is ignored on other platforms.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
-    "    option_as_alt: false\n"
+    "    option_as_alt: left\n"
     "```\n"
     "\n"
 };
@@ -3197,14 +3411,24 @@ constexpr StringLiteral FullscreenWeb {
     "\n"
 };
 
-constexpr StringLiteral ShowTitleBarWeb { "configuration option determines whether or not the title bar will "
-                                          "be shown when the terminal profile is activated.\n"
-                                          "``` yaml\n"
-                                          "profiles:\n"
-                                          "  profile_name:\n"
-                                          "    show_title_bar: true\n"
-                                          "```\n"
-                                          "\n"
+constexpr StringLiteral ShowTitleBarWeb {
+    "configuration option determines whether or not the title bar will "
+    "be shown when the terminal profile is activated.\n"
+    "On Linux, `false` (the default) is Contour's own header bar with the "
+    "desktop's window buttons; with `true` the window manager draws the "
+    "frame (KWin, Mutter, or a tiling WM's border or none), and the header "
+    "bar keeps the tabs, new tab, search and menu: only the window buttons "
+    "move out of it.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    show_title_bar: true\n"
+    "```\n"
+    "With `false`, the header bar rounds the window's top corners while it is "
+    "neither maximised nor full screen. Outside the corners the window is "
+    "transparent, which takes a compositor: on X11 without one, the corners "
+    "show black. Run a compositor there, or set `show_title_bar: true`.\n"
+    "\n"
 
 };
 
@@ -3228,8 +3452,8 @@ constexpr StringLiteral WindowShadowWeb {
 constexpr StringLiteral DimUnfocusedWeb {
     "configuration option dims a pane while it is not the focused one (an inactive pane of a split, or "
     "any pane of an unfocused window) by blending it toward its own background color. The value is the "
-    "blend amount between 0.0 (dimming disabled; the default) and 1.0 (fully blended to the "
-    "background).\n"
+    "blend amount between 0.0 (dimming disabled; the `classic` default) and 1.0 (fully blended to the "
+    "background). The `native2026` default is 0.15.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
@@ -3333,54 +3557,195 @@ constexpr StringLiteral MomentumScrollingWeb {
     "\n"
 };
 
-using Shell = DocumentationEntry<ShellConfig, ShellWeb>;
-using EscapeSandbox = DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>;
-using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
-using Maximized = DocumentationEntry<MaximizedConfig, MaximizedWeb>;
-using Fullscreen = DocumentationEntry<FullscreenConfig, FullscreenWeb>;
-using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>;
-using WindowShadow = DocumentationEntry<WindowShadowConfig, WindowShadowWeb>;
-using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
-using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
-using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
-using SearchCaseSensitivity = DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>;
-using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
-using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
-using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
-using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
-using TabColor = DocumentationEntry<TabColorConfig, TabColorWeb>;
-using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
-using AccessibilityAnnouncements =
-    DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
-using AccessibilityCaretReporting =
-    DocumentationEntry<AccessibilityCaretReportingConfig, AccessibilityCaretReportingWeb>;
-using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
-using ProgressTimeout = DocumentationEntry<ProgressTimeoutConfig, ProgressTimeoutWeb>;
-using NotificationCloseTimeout =
-    DocumentationEntry<NotificationCloseTimeoutConfig, NotificationCloseTimeoutWeb>;
-using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
-using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
-using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;
-using WindowControlStyle = DocumentationEntry<WindowControlStyleConfig, WindowControlStyleWeb>;
-using UiFontFamily = DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>;
-using UiFontSize = DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>;
-using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
-using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
-using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
-using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
-using Folding = DocumentationEntry<FoldingConfig, FoldingWeb>;
-using Gutter = DocumentationEntry<GutterConfig, GutterWeb>;
-using OscContext = DocumentationEntry<OscContextConfig, OscContextWeb>;
-using CommandBlocks = DocumentationEntry<CommandBlocksConfig, CommandBlocksWeb>;
-using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
-using StickyHeader = DocumentationEntry<StickyHeaderConfig, StickyHeaderWeb>;
-using NotifyOnCommandFinish = DocumentationEntry<NotifyOnCommandFinishConfig, NotifyOnCommandFinishWeb>;
-using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
-using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
-using Fonts = DocumentationEntry<FontsConfig, FontsWeb>;
-using Permissions = DocumentationEntry<PermissionsConfig, PermissionsWeb>;
-using DrawBoldTextWithBrightColors =
-    DocumentationEntry<DrawBoldTextWithBrightColorsConfig, DrawBoldTextWithBrightColorsWeb>;
+template <>
+struct Text<Shell>: DocumentationEntry<ShellConfig, ShellWeb>
+{
+};
+template <>
+struct Text<EscapeSandbox>: DocumentationEntry<EscapeSandboxConfig, EscapeSandboxWeb>
+{
+};
+template <>
+struct Text<SshHostConfig>: DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>
+{
+};
+template <>
+struct Text<Maximized>: DocumentationEntry<MaximizedConfig, MaximizedWeb>
+{
+};
+template <>
+struct Text<Fullscreen>: DocumentationEntry<FullscreenConfig, FullscreenWeb>
+{
+};
+template <>
+struct Text<ShowTitleBar>: DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>
+{
+};
+template <>
+struct Text<WindowShadow>: DocumentationEntry<WindowShadowConfig, WindowShadowWeb>
+{
+};
+template <>
+struct Text<DimUnfocused>: DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>
+{
+};
+template <>
+struct Text<ShowIndicatorOnResize>: DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>
+{
+};
+template <>
+struct Text<Mouse>: DocumentationEntry<MouseConfig, MouseWeb>
+{
+};
+template <>
+struct Text<SearchCaseSensitivity>: DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>
+{
+};
+template <>
+struct Text<InsertAfterYank>: DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>
+{
+};
+template <>
+struct Text<CopyLastMarkRangeOffset>:
+    DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>
+{
+};
+template <>
+struct Text<WMClass>: DocumentationEntry<WMClassConfig, WMClassWeb>
+{
+};
+template <>
+struct Text<TabLabel>: DocumentationEntry<TabLabelConfig, TabLabelWeb>
+{
+};
+template <>
+struct Text<TabColor>: DocumentationEntry<TabColorConfig, TabColorWeb>
+{
+};
+template <>
+struct Text<PixelReporting>: DocumentationEntry<PixelReportingConfig, PixelReportingWeb>
+{
+};
+template <>
+struct Text<AccessibilityAnnouncements>:
+    DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>
+{
+};
+template <>
+struct Text<AccessibilityCaretReporting>:
+    DocumentationEntry<AccessibilityCaretReportingConfig, AccessibilityCaretReportingWeb>
+{
+};
+template <>
+struct Text<HyperlinkHoverTooltip>: DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>
+{
+};
+template <>
+struct Text<ProgressTimeout>: DocumentationEntry<ProgressTimeoutConfig, ProgressTimeoutWeb>
+{
+};
+template <>
+struct Text<NotificationCloseTimeout>:
+    DocumentationEntry<NotificationCloseTimeoutConfig, NotificationCloseTimeoutWeb>
+{
+};
+template <>
+struct Text<TabBarPosition>: DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>
+{
+};
+template <>
+struct Text<TabBarVisibility>: DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>
+{
+};
+template <>
+struct Text<UiStyle>: DocumentationEntry<UiStyleConfig, UiStyleWeb>
+{
+};
+template <>
+struct Text<ChromeDensity>: DocumentationEntry<ChromeDensityConfig, ChromeDensityWeb>
+{
+};
+template <>
+struct Text<SecureInput>: DocumentationEntry<SecureInputConfig, SecureInputWeb>
+{
+};
+template <>
+struct Text<WindowControlStyle>: DocumentationEntry<WindowControlStyleConfig, WindowControlStyleWeb>
+{
+};
+template <>
+struct Text<UiFontFamily>: DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>
+{
+};
+template <>
+struct Text<UiFontSize>: DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>
+{
+};
+template <>
+struct Text<Margins>: DocumentationEntry<MarginsConfig, MarginsWeb>
+{
+};
+template <>
+struct Text<TerminalSize>: DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>
+{
+};
+template <>
+struct Text<TerminalId>: DocumentationEntry<TerminalIdConfig, TerminalIdWeb>
+{
+};
+template <>
+struct Text<History>: DocumentationEntry<HistoryConfig, HistoryWeb>
+{
+};
+template <>
+struct Text<Folding>: DocumentationEntry<FoldingConfig, FoldingWeb>
+{
+};
+template <>
+struct Text<Gutter>: DocumentationEntry<GutterConfig, GutterWeb>
+{
+};
+template <>
+struct Text<OscContext>: DocumentationEntry<OscContextConfig, OscContextWeb>
+{
+};
+template <>
+struct Text<CommandBlocks>: DocumentationEntry<CommandBlocksConfig, CommandBlocksWeb>
+{
+};
+template <>
+struct Text<Scrollbar>: DocumentationEntry<ScrollbarConfig, ScrollbarWeb>
+{
+};
+template <>
+struct Text<StickyHeader>: DocumentationEntry<StickyHeaderConfig, StickyHeaderWeb>
+{
+};
+template <>
+struct Text<NotifyOnCommandFinish>: DocumentationEntry<NotifyOnCommandFinishConfig, NotifyOnCommandFinishWeb>
+{
+};
+template <>
+struct Text<StatusLine>: DocumentationEntry<StatusLineConfig, StatusLineWeb>
+{
+};
+template <>
+struct Text<OptionKeyAsAlt>: DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>
+{
+};
+template <>
+struct Text<Fonts>: DocumentationEntry<FontsConfig, FontsWeb>
+{
+};
+template <>
+struct Text<Permissions>: DocumentationEntry<PermissionsConfig, PermissionsWeb>
+{
+};
+template <>
+struct Text<DrawBoldTextWithBrightColors>:
+    DocumentationEntry<DrawBoldTextWithBrightColorsConfig, DrawBoldTextWithBrightColorsWeb>
+{
+};
 constexpr StringLiteral BlinkStyleConfig {
     "{comment} Determines the visual style of cell blink animation (SGR 5/6).\n"
     "{comment}\n"
@@ -3408,7 +3773,10 @@ constexpr StringLiteral BlinkStyleWeb {
     "\n"
 };
 
-using BlinkStyle = DocumentationEntry<BlinkStyleConfig, BlinkStyleWeb>;
+template <>
+struct Text<BlinkStyle>: DocumentationEntry<BlinkStyleConfig, BlinkStyleWeb>
+{
+};
 
 constexpr StringLiteral ScreenTransitionStyleConfig {
     "{comment} Determines the visual style of screen transitions between primary and alternate screens.\n"
@@ -3428,7 +3796,7 @@ constexpr StringLiteral ScreenTransitionStyleWeb {
     "\n"
     "Valid values are:\n"
     "- `classic` - instant switch (no animation)\n"
-    "- `fade` - smooth fade-out/fade-in (default 250ms)\n"
+    "- `fade` - smooth fade-out/fade-in (250ms by default; 150ms under the `native2026` defaults)\n"
     "\n"
     "``` yaml\n"
     "profiles:\n"
@@ -3438,7 +3806,10 @@ constexpr StringLiteral ScreenTransitionStyleWeb {
     "\n"
 };
 
-using ScreenTransitionStyle = DocumentationEntry<ScreenTransitionStyleConfig, ScreenTransitionStyleWeb>;
+template <>
+struct Text<ScreenTransitionStyle>: DocumentationEntry<ScreenTransitionStyleConfig, ScreenTransitionStyleWeb>
+{
+};
 
 constexpr StringLiteral ScreenTransitionDurationConfig {
     "{comment} Duration in milliseconds for the screen transition animation.\n"
@@ -3460,8 +3831,11 @@ constexpr StringLiteral ScreenTransitionDurationWeb {
     "\n"
 };
 
-using ScreenTransitionDuration =
-    DocumentationEntry<ScreenTransitionDurationConfig, ScreenTransitionDurationWeb>;
+template <>
+struct Text<ScreenTransitionDuration>:
+    DocumentationEntry<ScreenTransitionDurationConfig, ScreenTransitionDurationWeb>
+{
+};
 
 constexpr StringLiteral CursorMotionAnimationDurationConfig {
     "{comment} Duration in milliseconds for cursor motion animation.\n"
@@ -3483,98 +3857,382 @@ constexpr StringLiteral CursorMotionAnimationDurationWeb {
     "\n"
 };
 
-using CursorMotionAnimationDuration =
-    DocumentationEntry<CursorMotionAnimationDurationConfig, CursorMotionAnimationDurationWeb>;
+template <>
+struct Text<CursorMotionAnimationDuration>:
+    DocumentationEntry<CursorMotionAnimationDurationConfig, CursorMotionAnimationDurationWeb>
+{
+};
 
-using Colors = DocumentationEntry<ColorsConfig, ColorsWeb>;
-using ModalCursorScrollOff = DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>;
-using ModeInsert = DocumentationEntry<ModeInsertConfig, ModeInsertWeb>;
-using ModeNormal = DocumentationEntry<ModeNormalConfig, ModeNormalWeb>;
-using ModeVisual = DocumentationEntry<ModeVisualConfig, ModeVisualWeb>;
-using SmoothLineScrolling = DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>;
-using SmoothScrolling = DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>;
-using MomentumScrolling = DocumentationEntry<MomentumScrollingConfig, MomentumScrollingWeb>;
-using HighlightTimeout = DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>;
-using HighlightDoubleClickerWord =
-    DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>;
-using Background = DocumentationEntry<BackgroundConfig, BackgroundWeb>;
-using Bell = DocumentationEntry<BellConfig, BellWeb>;
-using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
-using Live = DocumentationEntry<LiveConfig, LiveWeb>;
-using PlatformPlugin = DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>;
-using Renderer = DocumentationEntry<RendererConfig, RendererWeb>;
-using CommandPaletteRecentCount =
-    DocumentationEntry<CommandPaletteRecentCountConfig, CommandPaletteRecentCountWeb>;
-using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
-using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
-using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
-using SnapToRows = DocumentationEntry<SnapToRowsConfig, SnapToRowsWeb>;
-using RememberWindowPosition = DocumentationEntry<RememberWindowPositionConfig, RememberWindowPositionWeb>;
-using TabSwitchOnHorizontalWheel =
-    DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>;
-using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
-using Theme = DocumentationEntry<ThemeConfig, ThemeWeb>;
-using TextScalingMethod = DocumentationEntry<TextScalingMethodConfig, TextScalingMethodWeb>;
-using GraphemeClustering = DocumentationEntry<GraphemeClusteringConfig, GraphemeClusteringWeb>;
-using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
-using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
-using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
-using Layouts = DocumentationEntry<LayoutsConfig, LayoutsWeb>;
-using Hosts = DocumentationEntry<HostsConfig, HostsWeb>;
-using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, DefaultLayoutWeb>;
-using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
-using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
-using BypassMouseProtocolModifiers =
-    DocumentationEntry<BypassMouseProtocolModifiersConfig, BypassMouseProtocolModifiersWeb>;
-using OnMouseSelection = DocumentationEntry<OnMouseSelectionConfig, OnMouseSelectionWeb>;
-using MouseBlockSelectionModifiers =
-    DocumentationEntry<MouseBlockSelectionModifiersConfig, MouseBlockSelectionModifiersWeb>;
-using InputMappings = DocumentationEntry<InputMappingsConfig, Dummy>;
-using SpawnNewProcess = DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>;
-using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>;
-using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
-using Daemon = DocumentationEntry<DaemonConfig, DaemonWeb>;
-using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
-using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
-using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;
-using LinkDetection = DocumentationEntry<LinkDetectionConfig, LinkDetectionWeb>;
-using FileOpener = DocumentationEntry<FileOpenerConfig, FileOpenerWeb>;
-using HyperlinkDecorationColors = DocumentationEntry<HyperlinkDecorationColorsConfig, Dummy>;
-using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;
-using NormalModeCursorline = DocumentationEntry<NormalModeCursorlineConfig, Dummy>;
-using Selection = DocumentationEntry<SelectionConfig, Dummy>;
-using SearchHighlight = DocumentationEntry<SearchHighlightConfig, Dummy>;
-using SearchHighlightFocused = DocumentationEntry<SearchHighlightFocusedConfig, Dummy>;
-using WordHighlightCurrent = DocumentationEntry<WordHighlightCurrentConfig, Dummy>;
-using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
-using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
-using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
-using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
-using Extensions = DocumentationEntry<ExtensionsConfig, ExtensionsWeb>;
-using HintScrollbackLines = DocumentationEntry<HintScrollbackLinesConfig, Dummy>;
-using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
-using FoldMarker = DocumentationEntry<FoldMarkerConfig, Dummy>;
-using FoldMarkerHeader = DocumentationEntry<FoldMarkerHeaderConfig, Dummy>;
-using FoldMarkerDefault = DocumentationEntry<FoldMarkerDefaultConfig, Dummy>;
-using FoldMarkerHover = DocumentationEntry<FoldMarkerHoverConfig, Dummy>;
-using ContextTint = DocumentationEntry<ContextTintConfig, Dummy>;
-using ContextTintHeader = DocumentationEntry<ContextTintHeaderConfig, Dummy>;
-using BlockStatus = DocumentationEntry<BlockStatusConfig, Dummy>;
-using BlockStatusHeader = DocumentationEntry<BlockStatusHeaderConfig, Dummy>;
-using BlockStatusHover = DocumentationEntry<BlockStatusHoverConfig, Dummy>;
-using BlockStatusHoverHeader = DocumentationEntry<BlockStatusHoverHeaderConfig, Dummy>;
-using GutterText = DocumentationEntry<GutterTextConfig, Dummy>;
-using GutterTextSet = DocumentationEntry<GutterTextSetConfig, Dummy>;
-using IndentedEntry = DocumentationEntry<IndentedEntryConfig, Dummy>;
-using StickyHeaderColors = DocumentationEntry<StickyHeaderColorsConfig, Dummy>;
-using StickyHeaderColorsHeader = DocumentationEntry<StickyHeaderColorsHeaderConfig, Dummy>;
-using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
-using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
-using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;
-using BrightColors = DocumentationEntry<BrightColorsConfig, Dummy>;
-using DimColors = DocumentationEntry<DimColorsConfig, Dummy>;
-using GitDrawings = DocumentationEntry<GitDrawingsConfig, Dummy>;
-using BoxArcStyle = DocumentationEntry<BoxArcStyleConfig, Dummy>;
-using BrailleStyle = DocumentationEntry<BrailleStyleConfig, Dummy>;
+template <>
+struct Text<Colors>: DocumentationEntry<ColorsConfig, ColorsWeb>
+{
+};
+template <>
+struct Text<ModalCursorScrollOff>: DocumentationEntry<ModalCursorScrollOffConfig, ModalCursorScrollOffWeb>
+{
+};
+template <>
+struct Text<ModeInsert>: DocumentationEntry<ModeInsertConfig, ModeInsertWeb>
+{
+};
+template <>
+struct Text<ModeNormal>: DocumentationEntry<ModeNormalConfig, ModeNormalWeb>
+{
+};
+template <>
+struct Text<ModeVisual>: DocumentationEntry<ModeVisualConfig, ModeVisualWeb>
+{
+};
+template <>
+struct Text<SmoothLineScrolling>: DocumentationEntry<SmoothLineScrollingConfig, SmoothLineScrollingWeb>
+{
+};
+template <>
+struct Text<SmoothScrolling>: DocumentationEntry<SmoothScrollingConfig, SmoothScrollingWeb>
+{
+};
+template <>
+struct Text<MomentumScrolling>: DocumentationEntry<MomentumScrollingConfig, MomentumScrollingWeb>
+{
+};
+template <>
+struct Text<HighlightTimeout>: DocumentationEntry<HighlightTimeoutConfig, HighlightTimeoutWeb>
+{
+};
+template <>
+struct Text<HighlightDoubleClickerWord>:
+    DocumentationEntry<HighlightDoubleClickerWordConfig, HighlightDoubleClickerWordWeb>
+{
+};
+template <>
+struct Text<Background>: DocumentationEntry<BackgroundConfig, BackgroundWeb>
+{
+};
+template <>
+struct Text<Bell>: DocumentationEntry<BellConfig, BellWeb>
+{
+};
+template <>
+struct Text<FrozenDecMode>: DocumentationEntry<FrozenDecModeConfig, Dummy>
+{
+};
+template <>
+struct Text<Live>: DocumentationEntry<LiveConfig, LiveWeb>
+{
+};
+template <>
+struct Text<DefaultsEdition>: DocumentationEntry<DefaultsEditionConfig, DefaultsEditionWeb>
+{
+};
+template <>
+struct Text<PlatformPlugin>: DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>
+{
+};
+template <>
+struct Text<Renderer>: DocumentationEntry<RendererConfig, RendererWeb>
+{
+};
+template <>
+struct Text<CommandPaletteRecentCount>:
+    DocumentationEntry<CommandPaletteRecentCountConfig, CommandPaletteRecentCountWeb>
+{
+};
+template <>
+struct Text<PTYReadBufferSize>: DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>
+{
+};
+template <>
+struct Text<PTYBufferObjectSize>: DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>
+{
+};
+template <>
+struct Text<ReflowOnResize>: DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>
+{
+};
+template <>
+struct Text<SnapToRows>: DocumentationEntry<SnapToRowsConfig, SnapToRowsWeb>
+{
+};
+template <>
+struct Text<ConnectPickerOnStart>: DocumentationEntry<ConnectPickerOnStartConfig, ConnectPickerOnStartWeb>
+{
+};
+template <>
+struct Text<RememberWindowPosition>:
+    DocumentationEntry<RememberWindowPositionConfig, RememberWindowPositionWeb>
+{
+};
+template <>
+struct Text<TabSwitchOnHorizontalWheel>:
+    DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>
+{
+};
+template <>
+struct Text<GuiConfigLocked>: DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>
+{
+};
+template <>
+struct Text<Theme>: DocumentationEntry<ThemeConfig, ThemeWeb>
+{
+};
+template <>
+struct Text<TextScalingMethod>: DocumentationEntry<TextScalingMethodConfig, TextScalingMethodWeb>
+{
+};
+template <>
+struct Text<GraphemeClustering>: DocumentationEntry<GraphemeClusteringConfig, GraphemeClusteringWeb>
+{
+};
+template <>
+struct Text<ColorSchemes>: DocumentationEntry<ColorSchemesConfig, Dummy>
+{
+};
+template <>
+struct Text<Profiles>: DocumentationEntry<ProfilesConfig, ProfilesWeb>
+{
+};
+constexpr StringLiteral DefaultProfilesConfig { "default_profile: {}\n" };
+template <>
+struct Text<DefaultProfiles>: DocumentationEntry<DefaultProfilesConfig, DefaultProfilesWeb>
+{
+};
+template <>
+struct Text<Layouts>: DocumentationEntry<LayoutsConfig, LayoutsWeb>
+{
+};
+template <>
+struct Text<Hosts>: DocumentationEntry<HostsConfig, HostsWeb>
+{
+};
+constexpr StringLiteral DefaultLayoutConfig { "default_layout: {}\n" };
+template <>
+struct Text<DefaultLayout>: DocumentationEntry<DefaultLayoutConfig, DefaultLayoutWeb>
+{
+};
+template <>
+struct Text<WordDelimiters>: DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>
+{
+};
+template <>
+struct Text<ExtendedWordDelimiters>:
+    DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>
+{
+};
+template <>
+struct Text<BypassMouseProtocolModifiers>:
+    DocumentationEntry<BypassMouseProtocolModifiersConfig, BypassMouseProtocolModifiersWeb>
+{
+};
+template <>
+struct Text<OnMouseSelection>: DocumentationEntry<OnMouseSelectionConfig, OnMouseSelectionWeb>
+{
+};
+template <>
+struct Text<MouseBlockSelectionModifiers>:
+    DocumentationEntry<MouseBlockSelectionModifiersConfig, MouseBlockSelectionModifiersWeb>
+{
+};
+template <>
+struct Text<InputMappings>: DocumentationEntry<InputMappingsConfig, Dummy>
+{
+};
+template <>
+struct Text<SpawnNewProcess>: DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>
+{
+};
+template <>
+struct Text<EarlyExitThreshold>: DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>
+{
+};
+template <>
+struct Text<Images>: DocumentationEntry<ImagesConfig, ImagesWeb>
+{
+};
+template <>
+struct Text<Daemon>: DocumentationEntry<DaemonConfig, DaemonWeb>
+{
+};
+template <>
+struct Text<QuickTerminal>: DocumentationEntry<QuickTerminalConfig, QuickTerminalWeb>
+{
+};
+constexpr StringLiteral ExperimentalFeaturesWeb { "" };
+template <>
+struct Text<ExperimentalFeatures>: DocumentationEntry<ExperimentalFeaturesConfig, ExperimentalFeaturesWeb>
+{
+};
+template <>
+struct Text<DefaultColors>: DocumentationEntry<DefaultColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<HyperlinkDecoration>: DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>
+{
+};
+template <>
+struct Text<LinkDetection>: DocumentationEntry<LinkDetectionConfig, LinkDetectionWeb>
+{
+};
+template <>
+struct Text<FileOpener>: DocumentationEntry<FileOpenerConfig, FileOpenerWeb>
+{
+};
+template <>
+struct Text<HyperlinkDecorationColors>: DocumentationEntry<HyperlinkDecorationColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<YankHighlight>: DocumentationEntry<YankHighlightConfig, Dummy>
+{
+};
+template <>
+struct Text<NormalModeCursorline>: DocumentationEntry<NormalModeCursorlineConfig, Dummy>
+{
+};
+template <>
+struct Text<Selection>: DocumentationEntry<SelectionConfig, Dummy>
+{
+};
+template <>
+struct Text<SearchHighlight>: DocumentationEntry<SearchHighlightConfig, Dummy>
+{
+};
+template <>
+struct Text<SearchHighlightFocused>: DocumentationEntry<SearchHighlightFocusedConfig, Dummy>
+{
+};
+template <>
+struct Text<WordHighlightCurrent>: DocumentationEntry<WordHighlightCurrentConfig, Dummy>
+{
+};
+template <>
+struct Text<WordHighlight>: DocumentationEntry<WordHighlightConfig, Dummy>
+{
+};
+template <>
+struct Text<HintLabel>: DocumentationEntry<HintLabelConfig, Dummy>
+{
+};
+template <>
+struct Text<HintLabelTyped>: DocumentationEntry<HintLabelTypedConfig, Dummy>
+{
+};
+template <>
+struct Text<HintMatch>: DocumentationEntry<HintMatchConfig, Dummy>
+{
+};
+template <>
+struct Text<HintPatterns>: DocumentationEntry<HintPatternsConfig, Dummy>
+{
+};
+template <>
+struct Text<Extensions>: DocumentationEntry<ExtensionsConfig, ExtensionsWeb>
+{
+};
+template <>
+struct Text<HintScrollbackLines>: DocumentationEntry<HintScrollbackLinesConfig, Dummy>
+{
+};
+template <>
+struct Text<IndicatorStatusLine>: DocumentationEntry<IndicatorStatusLineConfig, Dummy>
+{
+};
+template <>
+struct Text<FoldMarker>: DocumentationEntry<FoldMarkerConfig, Dummy>
+{
+};
+template <>
+struct Text<FoldMarkerHeader>: DocumentationEntry<FoldMarkerHeaderConfig, Dummy>
+{
+};
+template <>
+struct Text<FoldMarkerDefault>: DocumentationEntry<FoldMarkerDefaultConfig, Dummy>
+{
+};
+template <>
+struct Text<FoldMarkerHover>: DocumentationEntry<FoldMarkerHoverConfig, Dummy>
+{
+};
+template <>
+struct Text<ContextTint>: DocumentationEntry<ContextTintConfig, Dummy>
+{
+};
+template <>
+struct Text<ContextTintHeader>: DocumentationEntry<ContextTintHeaderConfig, Dummy>
+{
+};
+template <>
+struct Text<BlockStatus>: DocumentationEntry<BlockStatusConfig, Dummy>
+{
+};
+template <>
+struct Text<BlockStatusHeader>: DocumentationEntry<BlockStatusHeaderConfig, Dummy>
+{
+};
+template <>
+struct Text<BlockStatusHover>: DocumentationEntry<BlockStatusHoverConfig, Dummy>
+{
+};
+template <>
+struct Text<BlockStatusHoverHeader>: DocumentationEntry<BlockStatusHoverHeaderConfig, Dummy>
+{
+};
+template <>
+struct Text<GutterText>: DocumentationEntry<GutterTextConfig, Dummy>
+{
+};
+template <>
+struct Text<GutterTextSet>: DocumentationEntry<GutterTextSetConfig, Dummy>
+{
+};
+template <>
+struct Text<IndentedEntry>: DocumentationEntry<IndentedEntryConfig, Dummy>
+{
+};
+template <>
+struct Text<StickyHeaderColors>: DocumentationEntry<StickyHeaderColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<StickyHeaderColorsHeader>: DocumentationEntry<StickyHeaderColorsHeaderConfig, Dummy>
+{
+};
+template <>
+struct Text<InputMethodEditor>: DocumentationEntry<InputMethodEditorConfig, Dummy>
+{
+};
+template <>
+struct Text<InputMethodEditorSupport>: DocumentationEntry<InputMethodEditorSupportConfig, Dummy>
+{
+};
+template <>
+struct Text<InputMethodEditorStyle>:
+    DocumentationEntry<InputMethodEditorStyleConfig, InputMethodEditorStyleWeb>
+{
+};
+template <>
+struct Text<NormalColors>: DocumentationEntry<NormalColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<BrightColors>: DocumentationEntry<BrightColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<DimColors>: DocumentationEntry<DimColorsConfig, Dummy>
+{
+};
+template <>
+struct Text<GitDrawings>: DocumentationEntry<GitDrawingsConfig, Dummy>
+{
+};
+template <>
+struct Text<BoxArcStyle>: DocumentationEntry<BoxArcStyleConfig, Dummy>
+{
+};
+template <>
+struct Text<BrailleStyle>: DocumentationEntry<BrailleStyleConfig, Dummy>
+{
+};
 
 } // namespace contour::config::documentation

@@ -90,8 +90,8 @@ output does not repeat the same second all the way down. Recording the time cost
 A finished command's output can be collapsed to its prompt line (see
 [`folding`](../configuration/index.md#folding)): click its fold control in the block column, or use the
 `ToggleFold`, `ToggleLastFold`, `CollapseLastFold`, `CollapseAllFolds` and `ExpandAllFolds` actions. A
-collapsed block says how much it hides — `⋯ 1,234 lines` — after its prompt; that label is drawn over the
-page and is never selected or copied. In Vi normal mode, vim's fold keys work:
+collapsed block says how much it hides — `1,234 lines hidden ⌄` — after its prompt; that chip is drawn over
+the page and is never selected or copied. In Vi normal mode, vim's fold keys work:
 
 | Key | Action |
 |-----|--------|
@@ -105,19 +105,45 @@ Unlike vim's, these know one fold level only, take no count, and work in normal 
 `zi` do not exist. With `folding.enabled: false`, `za`, `zc` and `zM` do nothing, while `zo` and `zR` still
 open what is collapsed.
 
+## The rail, the chip and the block menu
+
+On the native chrome styles each block gets a **rail**: a thin strip after the line numbers and timestamps,
+beside the block's rows. It is neutral for a success (a ✓ appears while the pointer is over the block), red
+with a ✗ for a failure, and the accent colour with a ▸ while the command runs. The strip has a fixed width,
+so the page never changes size when a block starts or ends. The `ui_style: terminal` row keeps the block
+column described above.
+
+- **The chip.** Right of a finished command's prompt, in cells that are blank, a small pill says how it
+  went — `Failed · exit 1 · 0.0 s` — and a running command's pill ticks. The pill is placed only where it
+  covers nothing: a prompt with an RPROMPT keeps it, and a prompt filling the whole row shows the rail's
+  mark alone, with the details in the block menu and read out by screen readers. A folded block's chip
+  says `80 lines hidden ⌄`; clicking it expands the block.
+- **The menu.** A ⋯ button beside the block, or a right-click on it, opens a native menu whose header names
+  the command and how it ended, above *Copy Output*, *Copy Command*, *Rerun*, *Open in Pager* and
+  *Collapse Output*. The block's tooltip is gone; the header carries what it said.
+- **Keyboard.** `Cmd+Up` and `Cmd+Down` (macOS) step through the blocks and announce each one;
+  `Shift+Cmd+Up` and `Shift+Cmd+Down` also select its output. `Ctrl+Enter` or `Shift+F10` opens the
+  focused block's menu, `Enter` toggles its fold, `Escape` leaves the block, and typing reaches the shell
+  again. The actions are `FocusPreviousCommand`, `FocusNextCommand`, `SelectPreviousCommandOutput`,
+  `SelectNextCommandOutput`, `OpenBlockMenu`, `ClearCommandBlockFocus` and `ToggleCommandFold`, and the
+  keys are free to rebind; while a block holds the focus the input mode `BlockFocus` is on.
+- **Ending a session** with a command still running closes its block as abandoned: no ▸, no tick and no
+  finish notification stay behind, and a restarted pane starts with no blocks.
+
 ## Scrollbar marks
 
 The scrollbar marks where commands are, so a failure far up the history is one glance — and one
 click — away. Clicking a mark scrolls its line to the top, opening its block if that was collapsed.
 Marks that fall on the same pixel merge, the most important winning: a failure, then a running command,
-then a user mark, then any other command. A command's mark takes its
+then a user mark, then any other command. A failure is a solid tick, a running command a hollow one, and
+a search match (`search_matches`) a yellow one. A command's mark takes its
 [`block_status`](../configuration/colors.md#block_status) color.
 
 ```yaml
 profiles:
   main:
     scrollbar:
-      marks: [failures, commands, user_marks]   # [] turns the marks off
+      marks: [failures, commands, user_marks, running, search_matches]   # [] turns the marks off
 ```
 
 The scrollbar is shown on the right by default, so the marks are there from the start. It floats over the
@@ -141,8 +167,9 @@ default), and with `position: Hidden`, or *hidden* on the settings page.
 
 ## Sticky command header
 
-Scrolled back into a long output, the command that produced it stays pinned above it with its exit
-status and duration — or `running 12s` while it runs. Click the header to jump to the command.
+Scrolled back into a long output, the command that produced it stays pinned above it — in the pane
+header of a split, in the title band of a single pane, and in the grid's own band under
+`show_title_bar: true` — with its exit status and duration — or `running 12s` while it runs. Click the header to jump to the command.
 
 ```yaml
 profiles:
@@ -260,6 +287,35 @@ All of this works in a [`contour client`](../persistent-sessions.md) session att
 daemon sends the block records along with the screen. Reattaching does not replay notifications for
 commands that finished while you were away. `OpenCommandOutput` opens no pane there — the pane would run
 on the daemon's side, which never sees the file — so bind it with `placement: detached` instead.
+
+## Restored sessions
+
+When the daemon brings a workspace back after a restart, each pane's history comes back above a dimmed
+"Restored · session ended hh:mm" row, which names the day too when it is not today. A command that was still
+running when the snapshot was taken is shown as abandoned: its chip stops counting, since the program it
+belonged to is gone. The first window to attach also shows one toast, such as "Restored 2 windows, 7 tabs".
+
+## Installing shell integration
+
+Contour offers to turn shell integration on when a bash, zsh or fish session needs it. After you have entered
+three commands in a pane whose shell writes no prompt marks, a card appears in the pane's bottom rows: *Turn on
+command blocks*, with *Install* and *Not Now*. *Install* shows the one line it would add to the shell's startup
+file (`~/.zshrc`, `~/.bashrc` or `~/.bash_profile` on macOS, or `~/.config/fish/config.fish`) and nothing is
+written yet. *Add Line* appends it and says so in a toast; new sessions of that shell then show command blocks.
+*Cancel* hides the card for this run, and *Not Now* is remembered for that shell, in `gui-state.yml` beside
+`contour.yml`.
+
+The line runs `contour generate integration shell <shell>` from the binary that is running, and only in a shell
+Contour started (`TERM_PROGRAM` is `contour`). Contour only ever appends: it never rewrites or replaces the
+file, a file that is a symlink is appended through, and the line is not added twice. It adds nothing when
+Contour runs as root, when the file changed while it was being read, or when an earlier append was cut short
+and left half a Contour line at the end of the file: delete that line, then install again. The card is not
+offered in a window attached to another host.
+
+*Shell Integration* on the settings page starts with an *Install* group: one row per shell, saying *Installed
+in ~/.zshrc*, *Not installed* or why the file cannot be read. *Install…* asks the same question, with the same
+line, and adds it the same way, also for a shell you declined at the card. A row whose file ends in a
+cut-short Contour line shows that exact line to delete.
 
 ## Settings page
 

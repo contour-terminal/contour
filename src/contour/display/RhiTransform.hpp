@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <QtCore/QPoint>
+#include <QtCore/QPointF>
 #include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QVector3D>
@@ -39,8 +41,29 @@ namespace contour::display
     return 1.0f;
 }
 
+/// Where the item's origin lands in the render target, in device pixels, rounded to a whole pixel.
+///
+/// The scene graph places an item wherever its layout puts it, and in logical pixels: a title band of 30
+/// is 37.5 device pixels at 125%, any odd coordinate is x.5 at 150%, and a centred or split item is
+/// fractional at any scale. The rasterizer's own coordinates are whole device pixels, so this is the one
+/// place a fraction can enter the terminal's geometry -- and composeItemToClip() removes it here, by
+/// moving the item onto the pixel this names. The scissor is translated by the same point, so geometry
+/// and clip agree by construction.
+///
+/// @param nodeMatrix The node's model-view matrix (item-local/logical space → scene space).
+/// @param dpr        The device→logical scale; values <= 0 are treated as 1.
+/// @return The item origin's device-pixel position, rounded to the nearest pixel.
+[[nodiscard]] inline QPoint snappedItemOrigin(QMatrix4x4 const& nodeMatrix, float dpr) noexcept
+{
+    auto const scale = dpr > 0.0f ? static_cast<double>(dpr) : 1.0;
+    auto const origin = nodeMatrix.map(QPointF(0.0, 0.0));
+    return { static_cast<int>(std::round(origin.x() * scale)),
+             static_cast<int>(std::round(origin.y() * scale)) };
+}
+
 /// Composes the item-local→clip transform fed to the terminal's RHI vertex shader, correcting for the
-/// device-pixel-ratio mismatch between Qt's scene graph and the terminal rasterizer.
+/// device-pixel-ratio mismatch between Qt's scene graph and the terminal rasterizer, and placing the item
+/// on a whole device pixel.
 ///
 /// Qt's QSGRenderNode contract places a vertex at `projection * nodeMatrix * vertex`, where both matrices
 /// operate in **logical** (device-independent) pixels — the scene graph applies the device-pixel ratio
@@ -53,6 +76,15 @@ namespace contour::display
 /// logical space, so the grid is positioned correctly while each device-resolution glyph texel still maps to
 /// exactly one hardware pixel (no GPU up/downscaling → crisp).
 ///
+/// The scale alone is not enough: the item's ORIGIN must be a whole device pixel too. At an origin of
+/// x.5 every quad edge lies on a pixel centre and every sample point on a texel boundary, and which of
+/// the two neighbouring rows the rasterizer keeps is decided by its fill rule rather than by the glyph.
+/// On OpenGL, whose framebuffer is y-up, the row it drops is the tile's first -- the top row of every
+/// glyph on every line, which is what cut off the tops of capitals and ascenders. The window is wider than
+/// the exact half: vertices snap to the rasterizer's sub-pixel grid first, so ±1/256 of a pixel around
+/// it drops the row as well. The origin is therefore rounded to the pixel snappedItemOrigin() names,
+/// which moves the item by under half a pixel and makes the glyph texels land exactly on hardware pixels.
+///
 /// @param projection The scene graph's projection matrix (scene/logical space → clip space).
 /// @param nodeMatrix The node's model-view matrix (item-local/logical space → scene space).
 /// @param dpr        The device→logical scale, which MUST be the ratio the scene graph built @p projection
@@ -63,9 +95,16 @@ namespace contour::display
                                                   QMatrix4x4 const& nodeMatrix,
                                                   float dpr) noexcept
 {
+    auto const scale = dpr > 0.0f ? static_cast<double>(dpr) : 1.0;
+    auto const origin = nodeMatrix.map(QPointF(0.0, 0.0));
+    auto const snapped = snappedItemOrigin(nodeMatrix, dpr);
+
     auto deviceToLogical = QMatrix4x4 {};
     if (dpr > 0.0f)
         deviceToLogical.scale(1.0f / dpr, 1.0f / dpr);
+    // In device pixels, after the scale: the vertex moves by what rounding the origin moved it.
+    deviceToLogical.translate(static_cast<float>(snapped.x() - (origin.x() * scale)),
+                              static_cast<float>(snapped.y() - (origin.y() * scale)));
     return projection * nodeMatrix * deviceToLogical;
 }
 
@@ -80,8 +119,8 @@ namespace contour::display
 /// Measuring the composed result therefore catches the failure whatever produced it, where checking
 /// `dpr` alone would not.
 ///
-/// Only the SCALE is measured. A fractional translation is harmless here: the quad still spans as
-/// many device pixels as the tile has texels, so the sample points still step one texel per pixel.
+/// Only the SCALE is measured. A fractional translation is composeItemToClip()'s to remove, and it does
+/// so by rounding the item's origin, which cannot change a scale.
 ///
 /// @param itemToClip      The composed transform, as fed to the vertex shader.
 /// @param targetPixelWidth The render target's width in DEVICE pixels.

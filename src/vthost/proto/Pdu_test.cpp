@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/InputEchoWire.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/testing/PduExamples.hpp>
@@ -113,6 +114,15 @@ std::vector<std::byte> encodeWithFieldsEdited(DecodedPdu const& pdu, EditFn edit
     return frameOf(type, out.view());
 }
 
+/// @param pdu A PDU.
+/// @return How many bytes its fields end in that a peer from before the ClientHello's color preference
+///         lacks: the preference's byte for a ClientHello, else none. The frame helpers below cut it first,
+///         so "a peer from before field X" stays a peer that predates every later field too.
+std::size_t colorPreferenceBytes(DecodedPdu const& pdu)
+{
+    return std::holds_alternative<ClientHello>(pdu) ? 1 : 0;
+}
+
 /// Encodes @p pdu with the tail of its fields cut off, as a peer from before they were appended would.
 /// @param pdu The PDU, as this version encodes it.
 /// @param bytesToCut Given the fields, how many bytes from their end the older peer did not send.
@@ -146,7 +156,8 @@ std::vector<std::byte> encodeWithFieldAppended(DecodedPdu const& pdu)
 /// @return The frame's bytes.
 std::vector<std::byte> encodeWithoutTrailingField(DecodedPdu const& pdu, std::size_t bytesToDrop)
 {
-    return encodeWithFieldsCut(pdu, [&](std::span<std::byte const>) { return bytesToDrop; });
+    return encodeWithFieldsCut(
+        pdu, [&](std::span<std::byte const>) { return bytesToDrop + colorPreferenceBytes(pdu); });
 }
 
 /// The frame as a peer from before the last appended `string` field would send it: that string's varint
@@ -157,13 +168,14 @@ std::vector<std::byte> encodeWithoutTrailingField(DecodedPdu const& pdu, std::si
 /// @return The frame's bytes.
 std::vector<std::byte> encodeWithoutTrailingString(DecodedPdu const& pdu, std::string_view last)
 {
-    return encodeWithFieldsCut(pdu, [last](std::span<std::byte const> fields) {
+    return encodeWithFieldsCut(pdu, [last, pdu](std::span<std::byte const> fields) {
         auto encoded = Writer {};
         encoded.string(last);
         auto const view = encoded.view();
-        REQUIRE(fields.size() >= view.size());
-        REQUIRE(std::ranges::equal(fields.last(view.size()), view));
-        return view.size();
+        auto const after = colorPreferenceBytes(pdu);
+        REQUIRE(fields.size() >= view.size() + after);
+        REQUIRE(std::ranges::equal(fields.last(view.size() + after).first(view.size()), view));
+        return view.size() + after;
     });
 }
 
@@ -337,7 +349,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .hostTime = 1'700'000'040'000'000'000,
                            .commandBlockIdEpoch = 3,
                            .commandBlocksFloor = 0xFFFFFFFF,
-                           .commandBlocks = { sampleBlock() } },
+                           .commandBlocks = { sampleBlock() },
+                           .interruptedCommand = "make test" },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
@@ -415,6 +428,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
             PerformOperation { .session = 5, .operation = EngineOperation::ClearToPrompt, .text = {} },
             PerformOperation {
                 .session = 6, .operation = EngineOperation::WriteScreen, .text = "\033[2J\033[3J" },
+            PerformOperation { .session = 8, .operation = EngineOperation::UseDarkColors },
+            PerformOperation { .session = 8, .operation = EngineOperation::UseLightColors },
             // A row's id is signed: rows the host pushed above its origin have negative ones.
             PerformOperation { .session = 7,
                                .operation = EngineOperation::SetUserMark,
@@ -743,6 +758,32 @@ TEST_CASE("a Control-role ClientHello round-trips and an absent role reads as At
     CHECK(decodeAs<ClientHello>(legacy).role == ConnectionRole::Attach);
 }
 
+TEST_CASE("a ClientHello's color preference round-trips, and an older sender's hello states none",
+          "[vthost][proto][colors]")
+{
+    for (auto const preference: { WireColorPreference::Dark, WireColorPreference::Light })
+    {
+        auto const hello = ClientHello { .profileName = "work", .colorPreference = preference };
+        CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    }
+    // A hello from before the field: everything up to the profile name, and not the byte after it.
+    auto const legacy = encodeWithFieldsCut(
+        DecodedPdu { ClientHello { .profileName = "work", .colorPreference = WireColorPreference::Dark } },
+        [](auto) { return std::size_t { 1 }; });
+    auto const decoded = decodeAs<ClientHello>(legacy);
+    CHECK(decoded.profileName == "work");
+    CHECK(decoded.colorPreference == WireColorPreference::Unstated);
+    // A value a later version numbers reads as stating none, rather than ending the connection.
+    auto const later =
+        encodeWithFieldsEdited(DecodedPdu { ClientHello { .colorPreference = WireColorPreference::Dark } },
+                               [](std::span<std::byte const> fields) {
+                                   auto changed = std::vector<std::byte>(fields.begin(), fields.end());
+                                   changed.back() = std::byte { 9 };
+                                   return changed;
+                               });
+    CHECK(decodeAs<ClientHello>(later).colorPreference == WireColorPreference::Unstated);
+}
+
 TEST_CASE("a ClientHello's client area round-trips and an absent one decodes as none", "[vthost][proto]")
 {
     auto const hello = ClientHello { .clientArea = WireClientArea { .columns = 132, .lines = 43 } };
@@ -786,9 +827,9 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    // The release string (length byte and five characters), and the followed-window count and the instance
-    // behind it.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/8);
+    // The release string (length byte and five characters), and the followed-window count, the instance and
+    // the two restored counts behind it.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/10);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
 
@@ -858,9 +899,9 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        // "r", "zeta" and their lengths, the followed-window count and the instance
-        auto const frame = encodeWithoutTrailingField(hello, 9);
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 9);
+        // "r", "zeta" and their lengths, the followed-window count, the instance and the two restored counts
+        auto const frame = encodeWithoutTrailingField(hello, 11);
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 11);
         auto expected = hello;
         expected.hostname.clear();
         expected.releaseVersion.clear();
@@ -892,7 +933,8 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
     {
         auto const hello = ClientHello { .token = "tok", .profileName = "work" };
         auto const frame = encodeWithoutTrailingString(hello, "work");
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
+        // The profile string (length byte and four letters) and the color preference after it.
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 6);
         auto expected = hello;
         expected.profileName.clear();
         CHECK(decodeAs<ClientHello>(frame) == expected);
@@ -1294,6 +1336,17 @@ TEST_CASE("an announced grid beyond MaxGridExtent is malformed", "[vthost][proto
         CHECK(state->columns == MaxGridExtent);
     }
 
+    SECTION("a body that ends before the interrupted command decodes with it empty")
+    {
+        // sessionStateWith() stops after commandBlocks, as an older sender's body does.
+        auto const stream = sessionStateWith(80, 24);
+        auto const decoded = decodePdu(stream.view());
+        REQUIRE(decoded.has_value());
+        auto const* const state = std::get_if<SessionState>(&decoded->pdu);
+        REQUIRE(state != nullptr);
+        CHECK(state->interruptedCommand.empty());
+    }
+
     SECTION("one column past it is refused")
     {
         auto const stream = sessionStateWith(MaxGridExtent + 1, 24);
@@ -1340,6 +1393,12 @@ TEST_CASE("asSessionEvent projects the catalog onto the transient events", "[vth
     REQUIRE(clipboard.has_value());
     CHECK(std::holds_alternative<SessionClipboard>(*clipboard));
     CHECK(sessionOf(*clipboard) == 5);
+
+    // State rather than an event, but pushed per session the same way: a mirror applies it as it arrives.
+    auto const echo = asSessionEvent(DecodedPdu { SessionInputEcho { .session = 6, .echo = 3 } });
+    REQUIRE(echo.has_value());
+    CHECK(std::holds_alternative<SessionInputEcho>(*echo));
+    CHECK(sessionOf(*echo) == 6);
 }
 
 TEST_CASE("asSessionEvent rejects everything that is not a session event", "[vthost][proto]")
@@ -1804,8 +1863,8 @@ TEST_CASE("an attach intent kind no enumerator names decodes as AllWindows", "[v
         ClientHello { .attachIntent = { .kind = AttachIntentKind::Windows, .windows = { 4 } } };
     auto const future = encodeWithFieldsEdited(DecodedPdu { hello }, [](std::span<std::byte const> fields) {
         auto edited = std::vector<std::byte>(fields.begin(), fields.end());
-        // The kind precedes the count, the one id, and the empty profile's length byte.
-        edited.rbegin()[3] = std::byte { 0xEE };
+        // The kind precedes the count, the one id, the empty profile's length byte and the color preference.
+        edited.rbegin()[4] = std::byte { 0xEE };
         return edited;
     });
     auto const decoded = decodeAs<ClientHello>(future);
@@ -1820,8 +1879,9 @@ TEST_CASE("ServerHello carries the followed windows; a refusal carries none", "[
           == std::vector<uint64_t> { 1, 3 });
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } }))
               .followedWindows.empty());
-    // A daemon from before the field: the count, its ids and the instance after them are missing.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    // A daemon from before the field: the count, its ids, the instance and the restored counts after them are
+    // missing.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 6);
     CHECK(decodeAs<ServerHello>(legacy).followedWindows.empty());
 }
 
@@ -1831,10 +1891,26 @@ TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as
         ServerHello { .agreedVersion = 4, .followedWindows = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
     // A daemon from before the field: the followed windows end the blob.
-    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 1);
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 3);
     auto const decoded = decodeAs<ServerHello>(legacy);
     CHECK(decoded.daemonInstance == 0);
     CHECK(decoded.agreedVersion == 4);
+}
+
+TEST_CASE("ServerHello carries what a restore brought back; an older daemon's reads as nothing",
+          "[vthost][pdu]")
+{
+    auto const hello =
+        ServerHello { .agreedVersion = 4, .daemonInstance = 7, .restoredWindows = 2, .restoredTabs = 7 };
+    auto const decoded = std::get<ServerHello>(roundTrip(DecodedPdu { hello }));
+    CHECK(decoded.restoredWindows == 2);
+    CHECK(decoded.restoredTabs == 7);
+    CHECK(decoded.daemonInstance == 7);
+    // A daemon from before the fields: the two varints at the blob's end are missing.
+    auto const legacy = decodeAs<ServerHello>(encodeWithoutTrailingField(DecodedPdu { hello }, 2));
+    CHECK(legacy.restoredWindows == 0);
+    CHECK(legacy.restoredTabs == 0);
+    CHECK(legacy.daemonInstance == 7);
 }
 
 TEST_CASE("EditTab and Heartbeat round-trip", "[vthost][pdu]")
@@ -1857,6 +1933,24 @@ TEST_CASE("the tab-edit and heartbeat tags are pinned", "[vthost][pdu]")
 {
     STATIC_CHECK(std::to_underlying(PduType::EditTab) == 28);
     STATIC_CHECK(std::to_underlying(PduType::Heartbeat) == 29);
+}
+
+TEST_CASE("MergeTabIntoSplit round-trips and carries a side no enumerator names", "[vthost][pdu][merge]")
+{
+    auto const merge = MergeTabIntoSplit { .tabSessions = { 4, 6 }, .targetSession = 9, .side = 3 };
+    CHECK(roundTrip(DecodedPdu { merge }) == DecodedPdu { merge });
+    auto const unknown = MergeTabIntoSplit { .tabSessions = { 1 }, .targetSession = 2, .side = 0xEE };
+    CHECK(std::get<MergeTabIntoSplit>(roundTrip(DecodedPdu { unknown })).side == 0xEE);
+    STATIC_CHECK(std::to_underlying(PduType::MergeTabIntoSplit) == 35);
+}
+
+TEST_CASE("TabMergeRefused round-trips, and carries a reason this build does not know",
+          "[vthost][pdu][merge]")
+{
+    for (auto const reason: { uint8_t { 0 }, uint8_t { 3 }, uint8_t { 0xEE } })
+        CHECK(std::get<TabMergeRefused>(roundTrip(DecodedPdu { TabMergeRefused { .reason = reason } })).reason
+              == reason);
+    STATIC_CHECK(std::to_underlying(PduType::TabMergeRefused) == 36);
 }
 
 TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[vthost][pdu]")
@@ -1986,4 +2080,42 @@ TEST_CASE("the connection role byte: absent is Attach, 1 is Control, unknown is 
               encodeWithoutTrailingField(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, 5))
               .role
           == ConnectionRole::Attach);
+}
+
+TEST_CASE("inputEchoFromWire reads every known state back and anything else as Unknown",
+          "[vthost][proto][inputecho]")
+{
+    // Total: a newer peer's state must neither lock a pane nor turn secure input on here.
+    for (auto const echo: { vtpty::InputEcho::Unknown,
+                            vtpty::InputEcho::Echoed,
+                            vtpty::InputEcho::Raw,
+                            vtpty::InputEcho::Hidden })
+        CHECK(vthost::inputEchoFromWire(vthost::inputEchoToWire(echo)) == echo);
+    CHECK(vthost::inputEchoFromWire(4) == vtpty::InputEcho::Unknown);
+    CHECK(vthost::inputEchoFromWire(255) == vtpty::InputEcho::Unknown);
+}
+
+TEST_CASE("LayoutState carries the served edit, and a body from before it reads as none",
+          "[vthost][proto][tab-edit-acks]")
+{
+    auto const tab = WireTab { .tabId = 3, .activePane = 1, .root = WirePane { .paneId = 1, .session = 9 } };
+    auto const stamped = LayoutState { .window = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 7 };
+    CHECK(roundTrip(DecodedPdu { stamped }) == DecodedPdu { stamped });
+    // Stamped with no edit served yet: 0, still told apart from a daemon that says nothing.
+    auto const none = LayoutState { .window = 2, .activeTab = 0, .tabs = { tab }, .servedEdit = 0 };
+    CHECK(std::get<LayoutState>(roundTrip(DecodedPdu { none })).servedEdit == std::optional<uint64_t> { 0 });
+
+    // A daemon from before the field ends the body where the field starts (7 is one varint byte).
+    auto unstamped = stamped;
+    unstamped.servedEdit = std::nullopt;
+    CHECK(decodeAs<LayoutState>(encodeWithoutTrailingField(DecodedPdu { stamped }, 1)) == unstamped);
+    CHECK(roundTrip(DecodedPdu { unstamped }) == DecodedPdu { unstamped });
+}
+
+TEST_CASE("the TabEditAcks capability is pinned", "[vthost][proto][tab-edit-acks]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::TabEditAcks) == 14);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::TabEditAcks && row.name == "tab-edit-acks";
+    }));
 }

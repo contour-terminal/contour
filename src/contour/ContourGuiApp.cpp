@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/Logging.hpp>
+#include <contour/cli/ConnectList.hpp>
+#include <contour/cli/ConnectProbe.hpp>
 #include <contour/cli/Hosting.hpp>
+#include <contour/command/LauncherEntries.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/GuiStateStore.hpp>
+#include <contour/config/LaunchTarget.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
@@ -14,8 +22,10 @@
 #include <contour/display/OpenGlGpuEnvironment.hpp>
 #include <contour/display/RenderingBackendSelection.hpp>
 #include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
+#include <contour/display/ShortcutOverride.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/FontFamilySource.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/MultimediaEnvironment.hpp>
 #include <contour/platform/Notifier.hpp>
@@ -26,12 +36,19 @@
 #include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/remote/TmuxController.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/Permission.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/HotkeyRefusals.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
+#include <contour/window/QtSaveScheduler.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsPreview.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/WindowController.hpp>
-#include <contour/window/WindowLiveness.hpp>
+#include <contour/window/WindowLivenessQt.hpp>
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
@@ -48,6 +65,7 @@
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/FontLocator.hpp>
 
 #include <crispy/ScopedTimer.hpp>
@@ -87,30 +105,37 @@
 #endif
 #include <QtCore/QtPlugin>
 #include <QtDBus/QtDBus>
+#include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtGui/QSurfaceFormat>
 #include <QtGui/rhi/qrhi.h>
 #include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickGraphicsDevice>
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QFileDialog>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <system_error>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #ifndef _WIN32
@@ -275,14 +300,7 @@ namespace
     /// for a daemon restart, and a failed restart must not leave a windowless process behind.
     void quitIfWindowless()
     {
-        auto facts = std::vector<window::WindowFacts> {};
-        for (auto const* topLevel: QGuiApplication::topLevelWindows())
-            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
-                                                                  : window::WindowVisibility::Hidden,
-                              .transience = topLevel->transientParent() != nullptr
-                                                ? window::WindowTransience::Transient
-                                                : window::WindowTransience::Independent });
-        if (!window::anyWindowKeepsAppAlive(facts))
+        if (!window::anyWindowKeepsAppAlive(window::windowFactsOf(QGuiApplication::topLevelWindows())))
             QCoreApplication::quit();
     }
 
@@ -315,8 +333,9 @@ namespace
         /// @param endpoint Where the daemon listens.
         /// @param placement Places a daemon spawned on demand.
         /// @param options What a spawned daemon is told.
-        /// @return A registered service when there is one, spawning on demand otherwise. Valid while
-        ///         this object lives.
+        /// @return A registered service when there is one that serves @p endpoint, spawning on demand
+        ///         otherwise (an endpoint from `$CONTOUR_MUX` or `--socket` is not the service's). Valid
+        ///         while this object lives.
         [[nodiscard]] std::unique_ptr<vthost::DaemonStarter> starter(
             std::string_view label,
             vthost::UnixEndpoint const& endpoint,
@@ -325,6 +344,7 @@ namespace
         {
             return vthost::chooseDaemonStarter(
                 vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+                vthost::labelSocketPath(label, services.environment),
                 vthost::OnDemandSpawn { .endpoint = endpoint,
                                         .spawner = *spawner,
                                         .binary = *binary,
@@ -404,13 +424,18 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::optional<vtbackend::LinkDetectionServices> linkServices,
                              std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress,
                              std::unique_ptr<window::WindowPositionStore> windowPositionStore,
-                             core::platform::SteadyTimePoint processStart):
+                             platform::AppearanceServices const& appearanceServices,
+                             core::platform::SteadyTimePoint processStart,
+                             window::SettingsWindowFactory settingsWindowFactory,
+                             ShellIntegrationServices shellIntegration):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
+    _attachedHostLabel(std::move(shellIntegration.attachedHostLabel)),
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
+    _gitFileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _linkProbeExecutor(makeBackgroundExecutor(LinkProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
@@ -432,6 +457,11 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
     _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
+    _titleBandMaterial(appearanceServices.titleBand()),
+    _secureInput(appearanceServices.secureInput()),
+    _userNotificationCenter(appearanceServices.userNotifications),
+    _captionButtons(appearanceServices.caption()),
+    _framePlatform(appearanceServices.framePlatform),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -439,8 +469,36 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_layoutStore,
                     *_commandHistoryStore,
                     QDir::homePath().toStdString(),
-                    *_taskbarProgressSink),
-    _gpuInventory { display::makePlatformGpuInventory() }
+                    *_taskbarProgressSink,
+                    *_secureInput),
+    _gpuInventory { display::makePlatformGpuInventory() },
+    _hostPlatform(appearanceServices.hostPlatform.value_or(config::detectHostPlatform(env))),
+    _shellHostPlatform(shellIntegration.host.value_or(_hostPlatform)),
+    _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
+    _guiState(std::move(shellIntegration.state)),
+    _settingsWindowFactory { settingsWindowFactory ? std::move(settingsWindowFactory)
+                                                   : engineSettingsWindowFactory() },
+    _makeAccessibilitySource { [this, build = appearanceServices.accessibility] {
+        return build([this](config::AccessibilityPreferences preferences) {
+            onAccessibilityPreferencesChanged(preferences);
+        });
+    } },
+    _makePlatformAppearance { [this, build = appearanceServices.appearance] {
+        return build([this](platform::PlatformAppearance const& appearance) {
+            onPlatformAppearanceChanged(appearance);
+        });
+    } },
+    _nativeMenus(appearanceServices.menus()),
+    _menuBarPlacement(command::menuBarPlacementFor(_hostPlatform)),
+    _menuBarIntegration(appearanceServices.menuBar()),
+    _shellRcEditor(shellIntegration.editor
+                       ? std::move(shellIntegration.editor)
+                       : std::make_unique<platform::FileShellRcEditor>(
+                             _fileSystem, env, _shellHostPlatform, platform::currentRunningAs())),
+    _contourBinary(std::move(shellIntegration.contourBinary)),
+    _binaryEnvironment(window::binaryEnvironmentOf(env)),
+    _globalHotkey(appearanceServices.globalHotkey()),
+    _quickPanel(appearanceServices.quickPanel())
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
@@ -449,6 +507,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
+    link("contour.connect", bind(&ContourGuiApp::connectAction, this));
 }
 
 vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
@@ -460,6 +519,23 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
              .fileSystem = fileSystem(),
              .clock = _terminalClocks.steady.get(),
              .tuning = {} };
+}
+
+window::LocatedBinary ContourGuiApp::locatedContourBinary() const
+{
+    if (!_contourBinary.empty())
+        return { .path = _contourBinary, .reach = window::BinaryReach::Reachable };
+    return window::locateBinary(
+        _binaryEnvironment,
+        std::filesystem::path { QCoreApplication::applicationFilePath().toStdU16String() });
+}
+
+std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexcept
+{
+    // NativeGitFileSystem probes this machine's disk: a test's injected files are not to be paired with it.
+    if (&_fileSystem != &core::platform::NativeFileSystem::instance())
+        return std::nullopt;
+    return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -789,8 +865,18 @@ void ContourGuiApp::reportGpuFallback(std::string_view failed, std::string_view 
 {
     auto const message = std::format("{} could not render; using {} for this session.", failed, used);
     errorLog()("{}", message);
+    // Through the centre where there is one, so a GPU notice and a session's never come from two delegates.
     if (!_gpuNotifier)
-        _gpuNotifier = platform::makeDesktopNotifier(std::chrono::seconds(10));
+        _gpuNotifier = platform::makeDesktopNotifier(
+            std::chrono::seconds(10),
+            // No window to show a tray message through at this point: where the platform's notifier is the
+            // tray, the message is dropped, as it was before the centre.
+            [](QString const& /*title*/,
+               QString const& /*body*/,
+               std::function<void()> const& /*onClicked*/) {},
+            _userNotificationCenter,
+            std::string { platform::ApplicationRequestPrefix },
+            _hostPlatform);
     auto notification = vtbackend::DesktopNotification {};
     notification.title = "Contour";
     notification.body = message;
@@ -961,25 +1047,29 @@ namespace
     };
 } // namespace
 
-std::expected<cli::HostTransport, std::string> ContourGuiApp::resolveClientHost(std::string const& nameOrUrl,
-                                                                                ClientRequest& request)
+std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::openHost(std::string const& configPath,
+                                                                              std::string const& nameOrUrl)
 {
-    if (auto const given = firstGivenOption("contour.client", HostExclusions))
-        return std::unexpected { std::format("pass either --host or --{}, not both", *given) };
-    auto host = config::resolveHost(request.config, nameOrUrl);
+    auto host = config::resolveHost(configPath, nameOrUrl);
     if (!host)
         return std::unexpected { host.error() };
-    // The host's profile, unless --profile names one: the GUI renders with it and the daemon creates with it.
-    if (request.profile.empty())
-        request.profile = host->profile;
+    return transportOf(nameOrUrl, *std::move(host));
+}
+
+std::expected<ContourGuiApp::OpenedHost, std::string> ContourGuiApp::transportOf(std::string const& nameOrUrl,
+                                                                                 config::HostEntry host)
+{
     // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
-    auto label = nameOrUrl.contains("://") ? config::toString(host->url) : nameOrUrl;
+    auto label = nameOrUrl.contains("://") ? config::toString(host.url) : nameOrUrl;
     return cli::makeHostTransport(
-        std::move(label),
-        *host,
-        fileSystem(),
-        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
-            .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }));
+               std::move(label),
+               host,
+               fileSystem(),
+               vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+                   .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }))
+        .transform([&](cli::HostTransport transport) {
+            return OpenedHost { .entry = std::move(host), .transport = std::move(transport) };
+        });
 }
 
 int ContourGuiApp::clientAction()
@@ -1027,15 +1117,31 @@ int ContourGuiApp::clientAction()
         return EXIT_FAILURE;
     }
     request.token = *std::move(token);
-    if (auto const host = parameters().get<string>("contour.client.host"); !host.empty())
-    {
-        auto resolved = resolveClientHost(host, request);
-        if (!resolved)
+    auto const host = parameters().get<string>("contour.client.host");
+    if (!host.empty())
+        if (auto const given = firstGivenOption("contour.client", HostExclusions))
         {
-            cerr << std::format("contour client: {}\n", resolved.error());
+            cerr << std::format("contour client: pass either --host or --{}, not both\n", *given);
             return EXIT_FAILURE;
         }
-        request.host = *std::move(resolved);
+    return launchClient(std::move(request), host);
+}
+
+int ContourGuiApp::launchClient(ClientRequest request, std::string const& host)
+{
+    if (!host.empty())
+    {
+        auto opened = openHost(request.config, host);
+        if (!opened)
+        {
+            cerr << std::format("contour client: {}\n", opened.error());
+            return EXIT_FAILURE;
+        }
+        // The host's profile, unless --profile names one: the GUI renders with it and the daemon creates with
+        // it.
+        if (request.profile.empty())
+            request.profile = opened->entry.profile;
+        request.host = std::move(opened->transport);
     }
 
     // Boot the GUI under the terminal verb's parameter surface: re-parse a synthetic argv so every
@@ -1062,6 +1168,10 @@ int ContourGuiApp::clientAction()
 
 std::expected<void, std::string> ContourGuiApp::establishHosting()
 {
+    // The picker decides where the sessions live, in a process of its own: nothing is attached here.
+    if (firstWindow() == FirstWindow::ConnectPicker)
+        return {};
+
     // The verb that launched, for what a failure is prefixed with.
     auto const verb = std::string_view { _clientRequest ? "contour client" : "contour" };
     auto const mode =
@@ -1122,6 +1232,22 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
 
 namespace
 {
+    /// Where the fonts shipped with the application live, relative to the running executable:
+    /// `Contents/Resources/fonts` in the macOS bundle, `<prefix>/share/contour/fonts` on Linux
+    /// (the executable being `<prefix>/bin/contour`). Windows ships none; it uses Cascadia Mono.
+    [[nodiscard]] text::BundledFontDirectories bundledFontDirectories(fs::path const& executableDirectory)
+    {
+#ifdef __APPLE__
+        return { .paths = { (executableDirectory / ".." / "Resources" / "fonts").lexically_normal() } };
+#elifdef _WIN32
+        (void) executableDirectory;
+        return {};
+#else
+        return { .paths = {
+                     (executableDirectory / ".." / "share" / "contour" / "fonts").lexically_normal() } };
+#endif
+    }
+
     /// Where a native attach connects, and what it follows there.
     struct NativeAttachTarget
     {
@@ -1275,6 +1401,7 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         profileName(),
         std::move(attachSettings),
         [this] { return currentEmulationSettings(); },
+        _colorPreference,
         core::platform::defaultSteadyClock(),
         _startupTimeline);
     // A window spawned to host a daemon window binds itself here (from its Main.qml, via
@@ -1287,12 +1414,33 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // to its remote session. Incremental — what is already shown is left untouched.
     _onGuiBooted = [this] {
         reconcileAttachWindows();
+        expireRestoreSummaryAfterLayout();
     };
+    // First: a Reconnect from a footer has the panes lost with the connection take their sessions back
+    // before the layout is reconciled, which would otherwise find no live pane for them and realize them
+    // again beside the ended ones.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::layoutChanged,
+        this,
+        [this] { _sessionManager.rebindDisconnected(); },
+        Qt::QueuedConnection);
     connect(_nativeController.get(),
             &remote::NativeController::layoutChanged,
             this,
             _onGuiBooted,
             Qt::QueuedConnection);
+    // The daemon's restore is told once, ahead of the layout it restored: the manager holds it until a
+    // window of that layout is realized or reconciled, and says it there.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::workspaceRestored,
+        this,
+        [this](quint32 windows, quint32 tabs) {
+            _sessionManager.noteWorkspaceRestored(
+                vthost::RestoredCounts { .windows = windows, .tabs = tabs });
+        },
+        Qt::QueuedConnection);
     connectReconnectSignals();
     // A dying connection ends every mirror session (stop() closes the ptys), closing the tabs through the
     // shell-exit teardown.
@@ -1304,10 +1452,22 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             // Null once a connect that failed has been given up on (see _awaitAttach).
             if (!_nativeController)
                 return;
-            // Before stop(), which closes every mirror pty — the order matters.
-            // @see TerminalSession::noteTransportLost
-            _sessionManager.noteTransportLost();
+            // Before stop(), which closes every mirror pty — the order matters. A Reconnect from a footer
+            // that ends here did not bring the daemon back: the panes it was for say so, with the
+            // connection's own words. @see TerminalSessionManager::connectionClosed
+            _sessionManager.connectionClosed(_nativeController->failure());
             _nativeController->stop();
+        },
+        Qt::QueuedConnection);
+    // A drop the daemon refused did nothing there, and nothing local follows: say so.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::tabMergeRefused,
+        this,
+        [this] {
+            _sessionManager.postNoticeToEveryWindow(
+                window::Notice { .kind = window::NoticeKind::DropRefused,
+                                 .text = std::string { window::TabMergeRefusedText } });
         },
         Qt::QueuedConnection);
 #ifdef CONTOUR_EXTENSIONS
@@ -1369,6 +1529,41 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
     auto command = cli::ContourApp::parameterDefinition();
 
     // NOLINTBEGIN
+    command.children.insert(
+        command.children.begin(),
+        CLI::Command {
+            "connect",
+            "Opens a window on a chosen place for its sessions. TARGET is `daemon` (this computer's daemon; "
+            "`daemon:LABEL` for another one), `local` (this window only, no daemon), the name of a saved "
+            "host, "
+            "or an `ssh://` or `tls://` address. Without a TARGET the Connect picker asks.",
+            CLI::OptionList {
+                CLI::Option { "config",
+                              CLI::Value { ""s },
+                              "Path to configuration file the GUI loads; it names the saved hosts.",
+                              "FILE" },
+                CLI::Option { "list",
+                              CLI::Value { false },
+                              "Prints the targets the picker would show, with the local daemon's state, and "
+                              "exits." },
+                CLI::Option { "json", CLI::Value { false }, "With --list: prints a JSON array." },
+                CLI::Option { "log",
+                              CLI::Value { ""s },
+                              "Enables logging for a comma (,) separated list of tags, or `all` "
+                              "(see `contour list-debug-tags`). Overrides $LOG.",
+                              "TAGS" },
+                CLI::Option { "log-file",
+                              CLI::Value { ""s },
+                              "Appends log output to FILE instead of standard error ('-' means "
+                              "standard error).",
+                              "FILE" },
+            },
+            CLI::CommandList {},
+            CLI::CommandSelect::Explicit,
+            CLI::Verbatim { "TARGET",
+                            "Where the sessions live: daemon, daemon:LABEL, local, a saved host's name, or "
+                            "an ssh:// or tls:// address. Omitted: the Connect picker asks." } });
+
     command.children.insert(
         command.children.begin(),
         CLI::Command {
@@ -1591,14 +1786,14 @@ std::chrono::seconds ContourGuiApp::earlyExitThreshold() const
     auto const configThreshold = config().earlyExitThreshold.value();
     auto const parameterThreshold = parameters().get<int>("contour.terminal.early-exit-threshold");
 
-    // default threshold is documentation::DefaultEarlyExitThreshold seconds
+    // default threshold is config::DefaultEarlyExitThreshold seconds
     if (parameterThreshold >= 0)
         return std::chrono::seconds(parameterThreshold);
 
-    if (configThreshold != config::documentation::DefaultEarlyExitThreshold)
+    if (configThreshold != config::DefaultEarlyExitThreshold)
         return std::chrono::seconds(configThreshold);
 
-    return std::chrono::seconds(config::documentation::DefaultEarlyExitThreshold);
+    return std::chrono::seconds(config::DefaultEarlyExitThreshold);
 }
 
 std::expected<vtbackend::Settings, std::string> ContourGuiApp::currentEmulationSettings() const
@@ -1646,11 +1841,15 @@ void ContourGuiApp::onExit(session::TerminalSession& session)
 #endif
 }
 
-void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
+void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
+                                  config::ColorConfig const& colors,
+                                  std::optional<vtbackend::RGBColor> liveBackground)
 {
-    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
-    // std::nullopt for system.
-    auto const scheme = platform::qtColorSchemeFor(theme);
+    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.hpp): a forced scheme for dark/light,
+    // std::nullopt for system -- and for every theme while the OS runs a contrast theme.
+    _appliedContrastTheme = platformAppearance().contrastTheme;
+    _effectiveGuiTheme = platform::effectiveGuiTheme(theme, _appliedContrastTheme);
+    auto const scheme = platform::qtColorSchemeFor(_effectiveGuiTheme, colors, liveBackground);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
@@ -1660,22 +1859,20 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
     if (scheme)
     {
         // Capture the OS palette once, before the first override, so System can later restore it.
-        if (!_guiPaletteOverridden)
-        {
+        if (!_appliedGuiScheme.has_value())
             _guiSystemPalette = QGuiApplication::palette();
-            _guiPaletteOverridden = true;
-        }
+        _appliedGuiScheme = scheme;
         display::displayLog()("Applying GUI theme override: {}", theme);
         QGuiApplication::setPalette(platform::buildThemePalette(*scheme));
     }
-    else if (_guiPaletteOverridden)
+    else if (_appliedGuiScheme.has_value())
     {
         // Returning to System after a prior dark/light override: restore the captured OS palette.
         // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
         // switches for the chrome until the next restart (the documented System-mode tradeoff).
         display::displayLog()("Applying GUI theme: system (restore OS palette)");
         QGuiApplication::setPalette(_guiSystemPalette);
-        _guiPaletteOverridden = false;
+        _appliedGuiScheme = std::nullopt;
     }
     else
         display::displayLog()("Applying GUI theme: system (follow OS color scheme)");
@@ -1685,12 +1882,49 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
     // Controls internals and the platforms that DO regenerate their own palette (Windows/macOS) honor
     // it. On the palette-owning Linux platform themes this is inert on its own — hence the explicit
     // setPalette above. Setting the scheme emits no colorSchemeChanged to the terminal grid unless the
-    // reported scheme actually changes, and the grid handler is gated to System mode regardless.
+    // reported scheme actually changes, and the grid handler tracks the OS whenever the chrome is not pinned
+    // (_appliedGuiScheme empty).
     if (scheme)
         QGuiApplication::styleHints()->setColorScheme(*scheme);
     else
         QGuiApplication::styleHints()->unsetColorScheme();
 #endif
+
+    // The title band's appearance is the scheme just forced, or the OS's again. The palette change above
+    // reaches every window too, but not when the palette came out the same (the OS already showed that
+    // scheme), and the band must not keep asking for the old one then.
+    _sessionManager.refreshChromeDependents();
+
+    // A pinned dark/light chrome carries the terminal with it; leaving the pin hands it back to the OS.
+    refreshColorPreference();
+}
+
+QString ContourGuiApp::applicationVersion() const
+{
+    return QStringLiteral(CONTOUR_VERSION_STRING);
+}
+
+void ContourGuiApp::followLiveBackground(vtbackend::RGBColor liveBackground)
+{
+    // Only `theme: terminal` follows the terminal's background; any other theme would only repaint the
+    // whole application for the scheme it already shows. Likewise when the background moved without
+    // crossing the light/dark threshold.
+    // Kept even when nothing repaints now: leaving a contrast theme re-applies it.
+    _liveBackground = liveBackground;
+    auto const theme = _config.theme.value();
+    if (theme != config::GuiTheme::Terminal)
+        return;
+    if (guiSchemeFor(theme, liveBackground) == _appliedGuiScheme)
+        return;
+    applyGuiTheme(theme, defaultProfileColors(), liveBackground);
+}
+
+std::optional<Qt::ColorScheme> ContourGuiApp::guiSchemeFor(
+    config::GuiTheme theme, std::optional<vtbackend::RGBColor> liveBackground) const
+{
+    return platform::qtColorSchemeFor(platform::effectiveGuiTheme(theme, platformAppearance().contrastTheme),
+                                      defaultProfileColors(),
+                                      liveBackground);
 }
 
 config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
@@ -1702,7 +1936,7 @@ config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
     //
     // One place does it, so the style the first frame draws and the style every later reload applies
     // cannot come to different answers about what this host is.
-    return config::resolveWindowControlStyle(configured, config::detectHostPlatform(processEnvironment()));
+    return config::resolveWindowControlStyle(configured, _hostPlatform);
 }
 
 void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
@@ -1717,7 +1951,344 @@ void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
     // without ever running the GUI action -- would otherwise dereference a null unique_ptr. There is
     // nothing to apply to yet, and the provider is constructed with the resolved style regardless.
     if (_windowControlStyleProvider)
-        _windowControlStyleProvider->setStyle(resolved);
+        _windowControlStyleProvider->update(resolved, windowControlPlacement(resolved));
+}
+
+config::WindowButtonLayout ContourGuiApp::windowControlPlacement(config::WindowControlStyle resolved) const
+{
+    return config::windowButtonPlacement(resolved, platformAppearance().buttonLayout);
+}
+
+platform::IAccessibilityPreferenceSource const* ContourGuiApp::accessibilitySource() const
+{
+    if (!_accessibilitySource)
+        _accessibilitySource = _makeAccessibilitySource();
+    if (!_accessibilitySource)
+        logUnbuiltAppearanceSource();
+    return _accessibilitySource.get();
+}
+
+platform::IPlatformAppearance const* ContourGuiApp::platformAppearanceSource() const
+{
+    if (!_platformAppearance)
+        _platformAppearance = _makePlatformAppearance();
+    if (!_platformAppearance)
+        logUnbuiltAppearanceSource();
+    return _platformAppearance.get();
+}
+
+void ContourGuiApp::logUnbuiltAppearanceSource() const
+{
+    std::call_once(_unbuiltAppearanceSourceLogged, [] {
+        startupLog()("The OS appearance sources cannot be built yet; their defaults stand in until a later "
+                     "read builds them.");
+    });
+}
+
+config::AccessibilityPreferences ContourGuiApp::accessibilityPreferences() const
+{
+    auto const* source = accessibilitySource();
+    return source != nullptr ? source->current() : config::AccessibilityPreferences {};
+}
+
+platform::PlatformAppearance ContourGuiApp::platformAppearance() const
+{
+    auto const* source = platformAppearanceSource();
+    return source != nullptr ? source->current() : platform::PlatformAppearance {};
+}
+
+config::WindowButtonLayout ContourGuiApp::desktopButtonLayout() const
+{
+    return platformAppearance().buttonLayout.value_or(config::fallbackButtonLayout());
+}
+
+platform::INativeMenuPresenter& ContourGuiApp::nativeMenuPresenter() noexcept
+{
+    return *_nativeMenus;
+}
+
+platform::ITitleBandMaterial& ContourGuiApp::titleBandMaterial() noexcept
+{
+    return *_titleBandMaterial;
+}
+
+platform::INativeCaptionButtons& ContourGuiApp::captionButtons() noexcept
+{
+    return *_captionButtons;
+}
+
+config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept
+{
+    return config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)].layout.menu;
+}
+
+window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre) const
+{
+    if (_chromeStyleHost)
+        return _chromeStyleHost->provider().titleBandTokens(centre);
+    // No provider yet: an empty band is its bare-band token, the Pill rows' band their title-bar token; the
+    // Flat rows' is their measured strip, which nobody has measured, so 0 leaves the band to its own height.
+    auto const density = _config.chromeDensity.value();
+    auto const row = resolvedChromeTokens();
+    auto const height = [&] {
+        if (centre == window::BarCentre::Empty)
+            return static_cast<double>(row.size.bareBand);
+        return row.layout.tabShape == config::TabShape::Pill ? static_cast<double>(row.size.titleBar) : 0.0;
+    }();
+    return window::TitleBandTokens {
+        .style = _chromeStyle,
+        .material = row.material.titleBand,
+        .height = height,
+        .cellHeight = 0.0,
+        .density = density,
+    };
+}
+
+window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inputs) const
+{
+    if (_chromeStyleHost)
+        return _chromeStyleHost->provider().titleBandOf(inputs);
+    // No provider yet: the row as the provider would resolve it.
+    return window::resolveTitleBand(
+        window::titleBandRowOf(resolvedChromeTokens().layout, _config.chromeDensity.value()), inputs);
+}
+
+config::ChromeTokenRow ContourGuiApp::resolvedChromeTokens() const
+{
+    return config::resolveChromeTokens(_chromeStyle,
+                                       accessibilityPreferences(),
+                                       _config.chromeDensity.value(),
+                                       platformAppearance().materials);
+}
+
+window::ChromeInputs ContourGuiApp::quickTerminalChromeInputs() const
+{
+    auto inputs = chromeInputs();
+    inputs.density = window::chromeDensityFor(window::WindowRole::QuickTerminal, inputs.density);
+    return inputs;
+}
+
+window::ChromeInputs ContourGuiApp::chromeInputs() const
+{
+    auto const* palette = config::preferredColorPalette(defaultProfileColors(), _colorPreference);
+    return window::ChromeInputs {
+        .row = _chromeStyle,
+        .font = window::resolveChromeFont(_config, _chromeStyle, profileName()),
+        .accessibility = accessibilityPreferences(),
+        .appearance = window::chromeAppearanceOf(platformAppearance()),
+        .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
+        .density = _config.chromeDensity.value(),
+        .secureInput = _secureInput->support(),
+    };
+}
+
+vtworkspace::SplitChrome ContourGuiApp::splitChrome(double devicePixelRatio) const
+{
+    if (_chromeStyleHost)
+    {
+        auto const& provider = _chromeStyleHost->provider();
+        return window::splitChromeOf(
+            provider.resolvedRow(), provider.units().horizontal, provider.units().vertical, devicePixelRatio);
+    }
+    return window::splitChromeOf(resolvedChromeTokens(), 1.0, 1.0, devicePixelRatio);
+}
+
+std::chrono::milliseconds ContourGuiApp::headerRevealDelay() const
+{
+    auto const milliseconds = _chromeStyleHost
+                                  ? _chromeStyleHost->provider().resolvedRow().motion.headerRevealMs
+                                  : resolvedChromeTokens().motion.headerRevealMs;
+    return std::chrono::milliseconds { milliseconds };
+}
+
+int ContourGuiApp::windowRadius() const
+{
+    return _chromeStyleHost ? _chromeStyleHost->provider().resolvedRow().radii.window
+                            : config::resolveChromeTokens(
+                                  _chromeStyle, accessibilityPreferences(), _config.chromeDensity.value())
+                                  .radii.window;
+}
+
+void ContourGuiApp::refreshChromeStyle()
+{
+    // Guarded as applyWindowControlStyle() is: the host is built partway through terminalGuiAction(),
+    // and a reload or an OS change may arrive before it (or without it, in a headless test).
+    if (_chromeStyleHost)
+        _chromeStyleHost->update(chromeInputs());
+    if (_quickChromeStyleHost)
+    {
+        _quickChromeStyleHost->update(quickTerminalChromeInputs());
+    }
+    // The quick terminal follows a changed hotkey, its focus-loss rule and the motion preference.
+    if (_quickTerminal)
+        _quickTerminal->reconfigure(_config.quickTerminal.value(), resolvedChromeTokens().motion);
+    // Not behind the guard: which pane headers show (the density) and each window's title band (its material
+    // under Reduce Transparency) are decided headless too.
+    _sessionManager.refreshChromeDependents();
+}
+
+window::WindowController* ContourGuiApp::focusedController() const noexcept
+{
+    auto const window = _sessionManager.focusedWindow();
+    return window ? _sessionManager.controllerFor(*window) : nullptr;
+}
+
+window::AppMenuBarSources ContourGuiApp::appMenuBarSources()
+{
+    return window::AppMenuBarSources {
+        .state =
+            [this] {
+                if (auto const* const controller = focusedController())
+                    return controller->menuBarState();
+                return command::menuBarStateOf(_config);
+            },
+        .chords = [this] { return command::chordIndex(_config); },
+        .run = [this](actions::Action const& action,
+                      command::ActionScope scope) { runMenuBarAction(action, scope); },
+    };
+}
+
+void ContourGuiApp::runMenuBarAction(actions::Action const& action, command::ActionScope scope)
+{
+    switch (scope)
+    {
+        case command::ActionScope::Window:
+            if (auto* const controller = focusedController())
+                controller->runMenuBarAction(action);
+            return;
+        case command::ActionScope::Application:
+            if (auto* const controller = _sessionManager.applicationController();
+                controller != nullptr && controller->activeSession() != nullptr)
+                controller->runMenuBarAction(action);
+            else
+                runWithoutWindow(action, controller != nullptr ? controller->screen() : nullptr);
+            return;
+    }
+}
+
+void ContourGuiApp::warnOfMenuOwnedBindings() const
+{
+    for (auto const& chord: window::menuOwnedBindings(_config.inputMappings.value(), _menuBarPlacement))
+        errorLog()(
+            "input_mapping binds {}, which the macOS menu bar owns: the menu takes it, and the binding "
+            "never runs.",
+            command::shortcutText(chord, command::ShortcutStyle::Text));
+}
+
+void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anchor)
+{
+    if (std::holds_alternative<actions::Quit>(action))
+    {
+        // As TerminalSession's Quit does: unwind the event loop rather than exit().
+        QCoreApplication::exit(EXIT_SUCCESS);
+        return;
+    }
+    if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
+    {
+        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give.
+        if (!requestRemoteWindow(
+                session::RemoteSpawn { .profileName = newTerminal->profileName.value_or("") }))
+            newWindow();
+        return;
+    }
+    if (std::holds_alternative<actions::NewWindowTo>(action))
+    {
+        // With no terminal window to hang from, the picker is a window of its own.
+        openConnectPicker(PickerPresentation::Launcher, anchor);
+        return;
+    }
+    if (auto const* const configuration = std::get_if<actions::OpenConfiguration>(&action);
+        configuration != nullptr && configuration->target == actions::ConfigurationTarget::SettingsWindow)
+    {
+        // The Settings window is the app's own, and opens with no terminal window at all.
+        openSettings(anchor);
+        return;
+    }
+    // About, Open Configuration File and the rest show in a window, or act on a session's configuration.
+    errorLog()("Menu bar action \"{}\" needs a window, and none is open.", actions::name(action));
+}
+
+void ContourGuiApp::onConfigurationReloaded()
+{
+    refreshChromeStyle();
+    // The app's Settings reads the configuration the reload replaced; built on first use, so maybe not yet.
+    if (_settingsController)
+        _settingsController->refresh();
+    // Guarded as refreshChromeStyle() is: the notice is built with the QML engine, which a headless
+    // app never creates.
+    if (_newDefaultsNotice)
+        _newDefaultsNotice->refresh();
+    // Hosts may have come or gone; the Dock menu and the jump list list them. Not before the first window
+    // exists, which builds the menu.
+    if (_launcherMenu)
+        refreshLauncherMenu();
+    // Guarded likewise: the bar is built with the engine, under a global placement alone. Its rows carry
+    // the profiles, hosts, layouts and chords the reload may have changed.
+    if (_appMenuBar)
+    {
+        _appMenuBar->rebuild();
+        warnOfMenuOwnedBindings();
+    }
+}
+
+void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences)
+{
+    refreshChromeStyle();
+    // The terminal's own animations follow the motion preference too, in every running session.
+    sessionsManager().updateMotionPreference(preferences.motion);
+}
+
+void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance const& appearance)
+{
+    // A contrast theme coming or going hands the chrome to the OS palette, or back to the configured
+    // theme's (R-l). Only then: an accent or light/dark change must not undo a live pin -- the settings
+    // page's, or a live (OSC 11) background's, which is followLiveBackground()'s. Applied over the focused
+    // session's live background, if it set one, as followLiveBackground() would.
+    if (appearance.contrastTheme != _appliedContrastTheme)
+        applyGuiTheme(_config.theme.value(), defaultProfileColors(), _liveBackground);
+    // Under a contrast theme the close button washes like its neighbours instead of turning red.
+    if (_windowControlStyleProvider)
+        _windowControlStyleProvider->setContrastTheme(appearance.contrastTheme);
+    refreshChromeStyle();
+    // The window controls follow the desktop's button layout live.
+    if (_windowControlStyleProvider)
+    {
+        auto const resolved = resolvedWindowControlStyle(_config.windowControlStyle.value());
+        _windowControlStyleProvider->update(resolved,
+                                            config::windowButtonPlacement(resolved, appearance.buttonLayout));
+    }
+    // And so does the Settings window's own close button, where it draws one.
+    if (_settingsWindow)
+        _settingsWindow->refreshWindowControls();
+    // Every overlay scrollbar follows the system's scroller style live.
+    sessionsManager().updateSystemScrollBars(appearance.scrollBars);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    // The terminal's light/dark follows what the OS publishes, over Qt's own reading (ruling R-h).
+    applyOsColorPreference(
+        platform::osColorPreference(appearance.colorScheme, QGuiApplication::styleHints()->colorScheme()));
+#endif
+}
+
+void ContourGuiApp::applyOsColorPreference(vtbackend::ColorPreference preference)
+{
+    _osColorPreference = preference;
+    refreshColorPreference();
+}
+
+void ContourGuiApp::refreshColorPreference()
+{
+    auto const preference = platform::terminalColorPreference(_effectiveGuiTheme, _osColorPreference);
+    if (_colorPreference == preference)
+        return;
+
+    _colorPreference = preference;
+    display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
+    sessionsManager().updateColorPreference(_colorPreference);
+    // The settings page previews a light/dark profile in the appearance the terminals now use.
+    if (_settingsController)
+        _settingsController->setColorPreference(_colorPreference);
+    // The Terminal row paints with the scheme the new preference selects.
+    refreshChromeStyle();
 }
 
 int ContourGuiApp::checkConfig()
@@ -1896,10 +2467,39 @@ bool ContourGuiApp::loadConfig(string const& target)
     return true;
 }
 
+void ContourGuiApp::registerBundledFonts() const
+{
+    // Qt-free, so the headless verbs need no QCoreApplication to find the fonts shipped beside them.
+    auto const executable = vthost::currentExecutablePath();
+    if (!executable)
+    {
+        errorLog()("Bundled fonts not registered: cannot locate the executable: {}.",
+                   executable.error().message());
+        return;
+    }
+
+    auto const registered = text::registerBundledFonts(bundledFontDirectories(executable->parent_path()));
+    if (registered)
+        return;
+    // A missing directory (a build tree that was never installed) is expected: the configured fonts, or the
+    // system's, are used instead. A rejected font file is not.
+    switch (registered.error())
+    {
+        case text::FontRegistrationError::DirectoryMissing:
+            startupLog()("Bundled fonts not registered: DirectoryMissing.");
+            break;
+        case text::FontRegistrationError::RegistrationFailed:
+            errorLog()("Bundled fonts not registered: RegistrationFailed.");
+            break;
+    }
+}
+
 int ContourGuiApp::fontConfigAction()
 {
     if (!loadConfig("font-locator"))
         return EXIT_FAILURE;
+
+    registerBundledFonts();
 
     vtrasterizer::FontDescriptions const& fonts =
         _config.profile(_config.defaultProfileName.value())->fonts.value();
@@ -2014,13 +2614,36 @@ int ContourGuiApp::terminalGuiAction()
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
     auto const qtInitStart = std::chrono::steady_clock::now();
+    // Before the QApplication: Qt (6.11+) registers this id with the host portal itself, and must do so
+    // before its own platform theme makes the first portal call -- the portal associates the bus connection
+    // with an application on that first call and refuses a later Register on it.
+    // The same name setupQCoreApplication settles on later (on Wayland, the profile's wm_class), so Qt does
+    // not try a second Register when that call changes it. The platform is not chosen yet; Qt picks Wayland
+    // when QT_QPA_PLATFORM asks for it or, unset, when a Wayland display is there.
+    QGuiApplication::setDesktopFileName([&] {
+        auto const* const profile = _config.profile(profileName());
+        auto const wmClass = profile ? QString::fromStdString(profile->wmClass.value()) : QString {};
+        auto const requested = qEnvironmentVariable("QT_QPA_PLATFORM");
+        auto const likelyWayland = requested.isEmpty() ? qEnvironmentVariableIsSet("WAYLAND_DISPLAY")
+                                                       : requested.startsWith(QStringLiteral("wayland"));
+        return likelyWayland && !wmClass.isEmpty() ? wmClass : QStringLiteral(CONTOUR_APP_ID);
+    }());
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
     openDaemonSpawnGate();
     // Every Qt object this app owns goes before QApplication, on every return from here on -- the
     // failed-attach one included, which leaves before the event loop ever runs. Declared right after
     // `app`, so it runs before `app` is destroyed.
     auto const releaseQtObjects = core::Finally { [this] {
-        // The QML engine first: its context properties point at the style providers, and the windows
+        // The menu bar first of all: its sources read the windows the engine owns, and it is Qt Widgets.
+        _appMenuBar.reset();
+        // The Settings window next, built on the engine, and then the controller its host borrowed.
+        _settingsWindow.reset();
+        // Built on the engine, and the Dock menu is a widget: both go before the engine and the application.
+        _connectPickerWindow.reset();
+        _connectPicker.reset();
+        _launcherMenu.reset();
+        _settingsController.reset();
+        // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
         _qmlEngine.reset();
         // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance).
@@ -2032,6 +2655,9 @@ int ContourGuiApp::terminalGuiAction()
 #endif
     } };
     setupQCoreApplication();
+
+    registerBundledFonts();
+
     if (startupLog.isEnabled())
     {
         auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;
@@ -2043,44 +2669,37 @@ int ContourGuiApp::terminalGuiAction()
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     // Seed the terminal's light/dark preference from the *real* OS color scheme. This is read
-    // before applyGuiTheme() may override the application color scheme below, so a force-pinned GUI
-    // theme (theme: dark|light) never drags the terminal grid away from the OS preference.
-    _colorPreference = QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
-                           ? vtbackend::ColorPreference::Dark
-                           : vtbackend::ColorPreference::Light;
+    // before applyGuiTheme() may override the application color scheme below, which would make the
+    // style hints report our own pin; applyGuiTheme() then lets a pinned theme (theme: dark|light) carry
+    // the terminal with it.
+    // The platform appearance source is built here, on this first read, now that the QGuiApplication
+    // exists; what it publishes outranks Qt's own reading (ruling R-h).
+    _osColorPreference = platform::osColorPreference(platformAppearance().colorScheme,
+                                                     QGuiApplication::styleHints()->colorScheme());
+    _colorPreference = _osColorPreference;
 
     display::displayLog()("Color theme mode at startup: {}", _colorPreference);
 
     connect(
         QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [this](Qt::ColorScheme newScheme) {
-            // Only the terminal grid tracks the OS here, and only while the GUI theme defers to the
-            // system (theme: system). When the GUI theme is force-pinned (dark/light), colorScheme()
-            // reflects our own override, which must not move the terminal palette.
-            if (_config.theme.value() != config::GuiTheme::System)
-                return;
-
-            auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
-                                                                     : vtbackend::ColorPreference::Light;
-            if (_colorPreference == newValue)
-                return;
-
-            _colorPreference = newValue;
-            display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
-            sessionsManager().updateColorPreference(_colorPreference);
+            applyOsColorPreference(platform::osColorPreference(platformAppearance().colorScheme, newScheme));
         });
 #endif
 
     // Apply the configured GUI chrome theme (dark/light/system). Must run after the OS scheme has
     // been captured above and before the first QQuickWindow is created, so the chrome opens themed.
-    applyGuiTheme(_config.theme.value());
+    applyGuiTheme(_config.theme.value(), defaultProfileColors());
 
-    // Pin the Fusion Qt Quick Controls style app-wide so the hand-drawn tab strip, its controls, and the
-    // tab context menu render, blend, and stay readable on every OS. Qt otherwise picks the native style
-    // per platform (e.g. Windows/FluentWinUI3 on Qt 6.7+, whose opaque button chrome and dark-only menu
-    // text clash with our custom palette-driven title bar) or the flat Basic style, neither of which
-    // gives the menu an opaque, themed, readable surface on our transparent window. NB: set
-    // unconditionally — QQuickStyle::name() already resolves to the (non-empty) native default here, so
-    // guarding on it silently skips Fusion.
+    // Pin the chrome row's Qt Quick Controls style app-wide, so the hand-drawn tab strip, its controls and
+    // the tab context menu render, blend and stay readable on every OS. Qt otherwise picks the native style
+    // per platform, or the flat Basic style, which gives the menu no opaque, themed, readable surface on our
+    // transparent window. NB: set unconditionally — QQuickStyle::name() already resolves to the (non-empty)
+    // native default here, so guarding on it silently skips the row's style.
+    //
+    // The macOS and ContourLinux rows take Fusion. The Fluent row takes FluentWinUI3, Windows 11's own:
+    // its opaque button chrome and dark-only menu text no longer clash with the palette-driven title bar,
+    // because every chrome control sets its own `background` and `contentItem`, and ContourMenu.qml sets its
+    // palette per colour group, so the style paints only what the chrome leaves to it.
     //
     // `ui_style: terminal` swaps that for ContourTui, our own style (src/contour/styles/ContourTui),
     // which paints a control as terminal chrome: cell-quantized, square-cornered, in the terminal
@@ -2089,50 +2708,11 @@ int ContourGuiApp::terminalGuiAction()
     //
     // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
     // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
+    _chromeStyle = config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform);
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
-    QQuickStyle::setStyle(
-        QString::fromUtf8(config::uiStyleTokens(_config.uiStyle.value()).quickControlsStyle));
+    QQuickStyle::setStyle(QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
 
-    // Select the Qt RHI graphics API from the configured renderer backend, before the first
-    // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
-    // platform-native backend (Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux). The renderer
-    // is backend-portable (RhiRenderer uses QRhi::clipSpaceCorrMatrix()/isYUpInFramebuffer(), and the
-    // shaders are compiled for every backend), so no GL-specific assumptions leak through here.
-    auto const graphicsApiFor =
-        [](config::RenderingBackend backend) -> std::optional<QSGRendererInterface::GraphicsApi> {
-        switch (backend)
-        {
-            case config::RenderingBackend::Auto: return std::nullopt;
-            case config::RenderingBackend::OpenGL: return QSGRendererInterface::OpenGL;
-            case config::RenderingBackend::Software: return QSGRendererInterface::OpenGL;
-            case config::RenderingBackend::Vulkan: return QSGRendererInterface::Vulkan;
-            case config::RenderingBackend::Direct3D11: return QSGRendererInterface::Direct3D11;
-            case config::RenderingBackend::Direct3D12: return QSGRendererInterface::Direct3D12;
-            case config::RenderingBackend::Metal: return QSGRendererInterface::Metal;
-        }
-        return std::nullopt;
-    };
-
-    // Resolve the configured backend against what this platform can actually composite (see
-    // RenderingBackendSelection.h): an unavailable backend — including desktop OpenGL on macOS, which
-    // maps a window but never composites the scene graph, leaving the user with an invisible window —
-    // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
-    auto const configuredBackend = _config.renderer.value().renderingBackend;
-    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
-    if (requestedBackend != configuredBackend)
-        errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
-                   configuredBackend);
-
-    if (auto const api = graphicsApiFor(requestedBackend))
-        QQuickWindow::setGraphicsApi(*api);
-
-#ifdef CONTOUR_WITH_GPU_SELECTION
-    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
-    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
-        implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
-        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
-            display::makeQtAdapterLister(*implementation), effectiveGpuSelector());
-#endif
+    selectGraphicsApi();
 
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
@@ -2153,25 +2733,31 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<window::WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
-    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::NoticeModel>("Contour.Terminal", 1, 0, "NoticeModel", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the application.");
+    qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
+    qmlRegisterUncreatableType<window::SettingsPreview>("Contour.Terminal", 1, 0, "SettingsPreview", "Created by the Settings window host.");
+    session::registerPermissionQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
     qRegisterMetaType<window::CommandPaletteModel*>("CommandPaletteModel*");
+    qRegisterMetaType<window::NoticeModel*>("NoticeModel*");
     qRegisterMetaType<window::SettingsController*>("SettingsController*");
+    qRegisterMetaType<window::SettingsWindowHost*>("SettingsWindowHost*");
+    qRegisterMetaType<window::SettingsPreview*>("SettingsPreview*");
     // clang-format on
-
-    // The chrome's design tokens. An injected instance rather than a QML-created singleton, because
-    // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
-    // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
-    _uiStyleProvider = make_unique<window::UiStyleProvider>(
-        _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
 
     // Constructed with the resolved style rather than default-constructed and then applied: a
     // constructed object is a usable object, and the first frame must already draw the right
     // controls. applyWindowControlStyle() below exists for the reloads that follow.
-    _windowControlStyleProvider = make_unique<window::WindowControlStyleProvider>(
-        resolvedWindowControlStyle(_config.windowControlStyle.value()));
+    auto const windowControlStyle = resolvedWindowControlStyle(_config.windowControlStyle.value());
+    _windowControlStyleProvider =
+        make_unique<window::WindowControlStyleProvider>(windowControlStyle,
+                                                        windowControlPlacement(windowControlStyle),
+                                                        _chromeStyle,
+                                                        platformAppearance().contrastTheme,
+                                                        window::fontDatabaseAvailability());
 
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
@@ -2201,12 +2787,27 @@ int ContourGuiApp::terminalGuiAction()
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
         context->setContextProperty("daemonDrift", &_daemonDrift);
+        // The new-defaults banner's decision: "Use New" writes settings.yml through the one Settings save
+        // model, which reloads; "Keep Mine" remembers the answer in the GUI state file beside contour.yml.
+        _newDefaultsNotice = make_unique<window::NewDefaultsNotice>(
+            [this]() -> config::Config const& { return _config; },
+            [this](std::string_view key, std::string_view value) {
+                return settingsController()
+                    .writeGlobalOverride(key, value)
+                    .transform_error([](config::SettingsError const& error) { return error.message; });
+            },
+            guiState());
+        context->setContextProperty("newDefaults", _newDefaultsNotice.get());
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
         // the style module import this application's own C++ URI, which a style that Qt resolves by
         // name must not do. It also gives each test engine its own style (see test/QmlChromeStyle.h).
         // See UiStyleProvider.h for the price this trade pays.
-        context->setContextProperty("chromeStyle", _uiStyleProvider.get());
+        //
+        // An injected instance rather than a QML-created singleton, because it is configured entirely
+        // at construction (see AGENT.md's complete-constructor rule) and its configuration is this
+        // app's, not the engine's. The host republishes a new provider when an input changes.
+        _chromeStyleHost = make_unique<window::ChromeStyleHost>(*context, chromeInputs());
         // A second provider beside chromeStyle rather than more properties on it: this one changes
         // live and chromeStyle's are CONSTANT by contract. See WindowControlStyleProvider.hpp.
         context->setContextProperty("windowControls", _windowControlStyleProvider.get());
@@ -2215,6 +2816,28 @@ int ContourGuiApp::terminalGuiAction()
         // QML primitives without banding, and the engine takes ownership of this.
         _qmlEngine->addImageProvider(QStringLiteral("popupshadow"), new window::PopupShadowImageProvider());
     }
+
+    // The application's menu bar, where the host has one apart from its windows. It reads the focused
+    // window, or the configuration alone without one, and runs its rows on that window's active session.
+    if (_menuBarPlacement == command::MenuBarPlacement::Global)
+    {
+        _appMenuBar = make_unique<window::AppMenuBar>(appMenuBarSources(), *_menuBarIntegration);
+        warnOfMenuOwnedBindings();
+        // Built before any window, so its window rows start disabled; a menu-owned key (⌘M) fires its row
+        // with no menu ever opened, so the rows follow the focused window as it changes. Posted, so the
+        // window controllers have taken the change first (WindowController::onOSWindowActiveChanged).
+        connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this] {
+            platform::postToObject(this, [this] {
+                if (_appMenuBar)
+                    _appMenuBar->refreshAll();
+            });
+        });
+    }
+    refreshLauncherMenu();
+    // A process that only asks where to connect has no terminal to slide down, and its hotkey would race the
+    // process it starts.
+    if (firstWindow() == FirstWindow::Terminal)
+        startQuickTerminal();
     _startupTimeline.mark(vthost::latency::StartupMark::QmlEngineReady);
 
     // Attach mode's connect has run beside everything above; the first window needs it done, and decides
@@ -2263,10 +2886,10 @@ int ContourGuiApp::terminalGuiAction()
         multimediaWarmedUp.store(true, std::memory_order_release);
     });
 
-    // Spawn initial window.
+    if (auto const opened = openFirstWindow(); !opened)
     {
-        auto const timer = crispy::ScopedTimer(startupLog, "newWindow (QML load)");
-        newWindow();
+        cerr << opened.error() << '\n';
+        return EXIT_FAILURE;
     }
     _startupTimeline.mark(vthost::latency::StartupMark::WindowCreated);
     // The window that runs its shells itself, as the daemon could not be had, says so.
@@ -2274,6 +2897,9 @@ int ContourGuiApp::terminalGuiAction()
         if (auto const window = _sessionManager.focusedWindow())
             if (auto* controller = _sessionManager.controllerFor(*window))
                 controller->showHostingNotice(QString::fromStdString(_hostingNotice));
+
+    // The hotkey the desktop refused while the app started, which no window existed to be told of.
+    announceQuickTerminalHotkeyProblem();
 
     // Attach mode adopts the remaining remote sessions as tabs now that a
     // window exists to put them in.
@@ -2313,6 +2939,50 @@ int ContourGuiApp::terminalGuiAction()
 
     // printf("\r%s", TBC);
     return rv; // releaseQtObjects tears the Qt objects down before `app`
+}
+
+void ContourGuiApp::selectGraphicsApi()
+{
+    // Select the Qt RHI graphics API from the configured renderer backend, before the first
+    // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
+    // platform-native backend (Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux). The renderer
+    // is backend-portable (RhiRenderer uses QRhi::clipSpaceCorrMatrix()/isYUpInFramebuffer(), and the
+    // shaders are compiled for every backend), so no GL-specific assumptions leak through here.
+    auto const graphicsApiFor =
+        [](config::RenderingBackend backend) -> std::optional<QSGRendererInterface::GraphicsApi> {
+        switch (backend)
+        {
+            case config::RenderingBackend::Auto: return std::nullopt;
+            case config::RenderingBackend::OpenGL: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Software: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Vulkan: return QSGRendererInterface::Vulkan;
+            case config::RenderingBackend::Direct3D11: return QSGRendererInterface::Direct3D11;
+            case config::RenderingBackend::Direct3D12: return QSGRendererInterface::Direct3D12;
+            case config::RenderingBackend::Metal: return QSGRendererInterface::Metal;
+        }
+        return std::nullopt;
+    };
+
+    // Resolve the configured backend against what this platform can actually composite (see
+    // RenderingBackendSelection.h): an unavailable backend — including desktop OpenGL on macOS, which
+    // maps a window but never composites the scene graph, leaving the user with an invisible window —
+    // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
+    auto const configuredBackend = _config.renderer.value().renderingBackend;
+    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
+    if (requestedBackend != configuredBackend)
+        errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
+                   configuredBackend);
+
+    if (auto const api = graphicsApiFor(requestedBackend))
+        QQuickWindow::setGraphicsApi(*api);
+
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
+    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
+        implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
+        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
+            display::makeQtAdapterLister(*implementation), effectiveGpuSelector());
+#endif
 }
 
 void ContourGuiApp::setupQCoreApplication()
@@ -2365,6 +3035,171 @@ void ContourGuiApp::ensureTermInfoFile()
         fs::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
 }
 
+namespace
+{
+    /// @return The screen under the pointer, or the primary one.
+    [[nodiscard]] QScreen* targetScreen()
+    {
+        auto* screen = QGuiApplication::screenAt(QCursor::pos());
+        return screen != nullptr ? screen : QGuiApplication::primaryScreen();
+    }
+
+    /// @return The available geometry of the screen under the pointer, or of the primary one.
+    [[nodiscard]] window::ScreenRect screenUnderPointer()
+    {
+        auto const* const screen = targetScreen();
+        if (screen == nullptr)
+            return window::ScreenRect {};
+        auto const area = screen->availableGeometry();
+        return window::ScreenRect {
+            .x = area.x(), .y = area.y(), .width = area.width(), .height = area.height()
+        };
+    }
+
+    /// @return The full geometry of every screen but the one under the pointer.
+    [[nodiscard]] std::vector<window::ScreenRect> otherScreens()
+    {
+        auto const* const target = targetScreen();
+        auto others = std::vector<window::ScreenRect> {};
+        for (auto const* const screen: QGuiApplication::screens())
+            if (screen != target)
+            {
+                auto const area = screen->geometry();
+                others.push_back(window::ScreenRect {
+                    .x = area.x(), .y = area.y(), .width = area.width(), .height = area.height() });
+            }
+        return others;
+    }
+
+    /// @return Who places windows: only the compositor does under Wayland.
+    [[nodiscard]] window::PlacementControl placementControl()
+    {
+        return QGuiApplication::platformName().startsWith(QStringLiteral("wayland"))
+                   ? window::PlacementControl::Compositor
+                   : window::PlacementControl::Client;
+    }
+} // namespace
+
+void ContourGuiApp::startQuickTerminal()
+{
+    if (_quickTerminal)
+        return;
+    _quickTerminal = std::make_unique<window::QuickTerminalController>(
+        window::QuickTerminalHost {
+            .hotkey = *_globalHotkey,
+            .panel = *_quickPanel,
+            .createWindow = [this] { return openQuickTerminal(); },
+            .screenUnderPointer = screenUnderPointer,
+            .otherScreens = otherScreens,
+            .onHotkeyError = [this](platform::HotkeyError error) { reportQuickTerminalHotkeyError(error); },
+            .onHotkeyBound = [this] { reportQuickTerminalHotkeyBound(); },
+            .onOffScreen = [this] { quitIfNothingKeepsAppAlive(); },
+            .isMenuOwned =
+                [this](config::HotkeyChord const& chord) {
+                    return display::isMenuOwnedChord(chord, _menuBarPlacement);
+                },
+            .cornerRadius = [this] { return resolvedChromeTokens().radii.quickTerminal; },
+            .placement = placementControl() },
+        _config.quickTerminal.value(),
+        resolvedChromeTokens().motion);
+    // The last ordinary window closing is Qt's to see on most hosts, but a quick terminal parked off screen
+    // may still count as a visible window to it (a macOS panel is ordered out, not hidden): the app asks
+    // for itself, with the quick terminal counted by its state.
+    connect(&_sessionManager, &session::TerminalSessionManager::windowRemoved, this, [this] {
+        platform::postToObject(this, [this] { quitIfNothingKeepsAppAlive(); });
+    });
+}
+
+void ContourGuiApp::quitIfNothingKeepsAppAlive()
+{
+    // Suspended for a daemon restart, which closes every window and reopens them.
+    if (!QGuiApplication::quitOnLastWindowClosed() || !_quickTerminal)
+        return;
+    auto const panelVisibility = window::quickTerminalKeepsAppAlive(_quickTerminal->state())
+                                     ? window::WindowVisibility::Shown
+                                     : window::WindowVisibility::Hidden;
+    auto const facts =
+        window::windowFactsOf(QGuiApplication::topLevelWindows(), _quickTerminal->window(), panelVisibility);
+    if (!window::anyWindowKeepsAppAlive(facts))
+        QCoreApplication::quit();
+}
+
+void ContourGuiApp::reportQuickTerminalHotkeyError(platform::HotkeyError error)
+{
+    errorLog()("{}", window::hotkeyUnavailableNoticeText(error));
+    // Kept, because this usually runs at startup, before any window and before Settings exists: Settings
+    // picks it up when it is built (settingsController()), and the first window posts the toast
+    // (announceQuickTerminalHotkeyProblem()).
+    _hotkeyRefusal.refused(error);
+    showHotkeyProblemInSettings();
+    announceQuickTerminalHotkeyProblem();
+}
+
+void ContourGuiApp::reportQuickTerminalHotkeyBound()
+{
+    _hotkeyRefusal.bound();
+    showHotkeyProblemInSettings();
+}
+
+void ContourGuiApp::showHotkeyProblemInSettings()
+{
+    if (!_settingsController)
+        return;
+    // Beside the Settings field, which stays after a toast is gone (ruling Q2); empty clears it.
+    auto const problem = _hotkeyRefusal.problem();
+    auto const sentence = problem ? window::hotkeyRefusalText(*problem) : std::string_view {};
+    _settingsController->setHotkeyProblem(
+        QString::fromUtf8(sentence.data(), static_cast<qsizetype>(sentence.size())));
+}
+
+void ContourGuiApp::announceQuickTerminalHotkeyProblem()
+{
+    // Not taken while no window can show it, so the first window's call still finds it.
+    auto* const controller = focusedController();
+    if (controller == nullptr)
+        return;
+    if (auto const error = _hotkeyRefusal.takeUnannounced())
+        controller->notices().post(window::Notice { .kind = window::NoticeKind::HotkeyUnavailable,
+                                                    .text = window::hotkeyUnavailableNoticeText(*error) });
+}
+
+QWindow* ContourGuiApp::openQuickTerminal()
+{
+    if (!_qmlEngine)
+        return nullptr;
+    // One child context for every quick window: its `chromeStyle` is the Minimal one, and the window's own
+    // controller finds `terminalSessions` and the rest in the root context behind it.
+    if (!_quickContext)
+    {
+        auto* const root = _qmlEngine->rootContext();
+        _quickContext = new QQmlContext(root, root);
+        _quickChromeStyleHost =
+            make_unique<window::ChromeStyleHost>(*_quickContext, quickTerminalChromeInputs());
+    }
+    // Consumed by the controller Main.qml mints in its Component.onCompleted, which runs inside create().
+    _sessionManager.stageWindowRole(window::WindowRole::QuickTerminal);
+    auto component = QQmlComponent(_qmlEngine.get(), "Contour.Ui", "Main");
+    auto* const created = component.create(_quickContext);
+    if (created == nullptr)
+    {
+        errorLog()("The quick terminal's window could not be created: {}",
+                   component.errorString().toStdString());
+        return nullptr;
+    }
+    auto* const quickWindow = qobject_cast<QWindow*>(created);
+    if (quickWindow == nullptr)
+    {
+        delete created;
+        return nullptr;
+    }
+    // Owned by the engine, so it goes with it; closed, which is what ending its last tab does, it goes at
+    // once, and the controller sees it destroyed.
+    created->setParent(_qmlEngine.get());
+    if (auto* const quick = qobject_cast<QQuickWindow*>(quickWindow))
+        connect(quick, &QQuickWindow::closing, quickWindow, &QObject::deleteLater);
+    return quickWindow;
+}
+
 void ContourGuiApp::newWindow(QScreen* targetScreen)
 {
     _pendingSpawnScreen = targetScreen;
@@ -2400,19 +3235,21 @@ void ContourGuiApp::reconcileAttachWindows()
             // Already shown: bring its tree up to date.
             contour::remote::applyRemoteLayout(
                 _sessionManager, mapped->second, *_nativeController, daemonWindow);
+            _sessionManager.deliverRestoreSummaryTo(mapped->second);
             continue;
         }
         if (_pendingAttachWindow == daemonWindow)
             continue; // an OS window is already spawning for this daemon window
 
-        if (_attachBoot == AttachBoot::Pending)
+        if (_attachBoot == session::AttachBoot::Pending)
         {
             // The primary daemon window adopts the boot window (already created before
             // the first layout arrived). A missing focused window (mid-boot) stages
             // the daemon window so bindPendingAttachWindow can bind it once the boot
             // window becomes ready, instead of hoping for another layout push.
-            if (auto const boot = _sessionManager.focusedWindow())
-                bindDaemonWindow(daemonWindow, *boot);
+            // Never the quick terminal, which is no daemon window: an ordinary window adopts it.
+            if (auto const* const boot = _sessionManager.applicationController())
+                bindDaemonWindow(daemonWindow, boot->windowId());
             else if (!_pendingAttachWindow)
                 _pendingAttachWindow = daemonWindow;
             continue;
@@ -2459,7 +3296,7 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
     // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
-    if (_attachBoot == AttachBoot::Pending)
+    if (_attachBoot == session::AttachBoot::Pending)
     {
         if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
             bindDaemonWindow(*adopt, controller->windowId());
@@ -2518,10 +3355,431 @@ void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& dae
 
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
-    _attachBoot = AttachBoot::Adopted;
+    _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+    _sessionManager.deliverRestoreSummaryTo(osWindow);
 }
+
+void ContourGuiApp::expireRestoreSummaryAfterLayout()
+{
+    if (!_nativeController)
+        return;
+    auto const layout =
+        _nativeController->windowIds().empty() ? session::LayoutWindows::None : session::LayoutWindows::Some;
+    auto const spawn = _pendingAttachWindow ? session::AttachSpawn::Spawning : session::AttachSpawn::Idle;
+    if (session::restoreSummaryFateAfterLayout(layout, spawn, _attachBoot)
+        == session::RestoreSummaryFate::Keep)
+        return;
+    _sessionManager.expireRestoreSummary();
+}
+
+window::SettingsController& ContourGuiApp::settingsController()
+{
+    // Its collaborators: the app's live configuration, a side-file store rooted at the configuration
+    // directory, a debounce timer, and a reload of every session after Settings wrote a side file. That
+    // reload runs onConfigurationReloaded(), the one refresh of the page after a save as after a hand edit.
+    if (!_settingsController)
+    {
+        _settingsController = std::make_unique<window::SettingsController>(
+            [this]() -> config::Config const& { return _config; },
+            window::SettingsControllerServices {
+                .store = std::make_shared<config::FileGuiConfigStore>(_fileSystem,
+                                                                      _config.configFile.parent_path()),
+                .reload = [this]() -> std::expected<void, std::string> {
+                    auto reloaded = _sessionManager.reloadAllSessions();
+                    // The GUI chrome theme is re-applied by reloadAllSessions() itself. The window controls
+                    // are QML bindings on their provider, so re-applying their style makes every window
+                    // follow.
+                    applyWindowControlStyle(_config.windowControlStyle.value());
+                    return reloaded;
+                },
+                .gpuInventory = _gpuInventory,
+                .fontFamilies = std::make_shared<platform::QtFontFamilySource>(),
+                .scheduler = std::make_shared<window::QtSaveScheduler>(),
+                // The Shell Integration page's Install rows go through the editor the pane's card uses.
+                .shell = { .editor = _shellRcEditor.get(),
+                           .contourBinary = [this] { return locatedContourBinary(); },
+                           .host = _shellHostPlatform,
+                           .homeDirectory = std::filesystem::path { QDir::homePath().toStdString() } },
+                .menuBar = _menuBarPlacement,
+                // A host page's Attach runs as the menu bar's commands do: in the window the app would use.
+                .runAction =
+                    [this](actions::Action const& action) {
+                        runMenuBarAction(action, command::ActionScope::Application);
+                    },
+                .chooseFile = [](std::string const& title,
+                                 std::filesystem::path const& start) -> std::optional<std::filesystem::path> {
+                    auto const chosen = QFileDialog::getOpenFileName(
+                        nullptr, QString::fromStdString(title), platform::toQString(start));
+                    if (chosen.isEmpty())
+                        return std::nullopt;
+                    return std::filesystem::path { chosen.toStdWString() };
+                },
+            },
+            _colorPreference);
+        // A hotkey the desktop refused at startup, before this existed.
+        showHotkeyProblemInSettings();
+        QObject::connect(
+            QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ContourGuiApp::flushForQuit);
+    }
+    return *_settingsController;
+}
+
+void ContourGuiApp::flushForQuit()
+{
+    if (_settingsController)
+        _settingsController->flushPendingChanges();
+}
+
+window::SettingsWindowFactory ContourGuiApp::engineSettingsWindowFactory()
+{
+    return [this](window::SettingsWindowHost& host)
+               -> std::expected<std::unique_ptr<QQuickWindow>, window::SettingsWindowError> {
+        // A headless app builds no engine, so it has nothing to build on.
+        if (!_qmlEngine)
+            return std::unexpected { window::SettingsWindowError::Unavailable };
+        return window::loadSettingsWindow(*_qmlEngine, host);
+    };
+}
+
+std::shared_ptr<config::GuiStateStore> const& ContourGuiApp::guiState()
+{
+    if (!_guiState)
+        _guiState =
+            std::make_shared<config::FileGuiStateStore>(_fileSystem, _config.configFile.parent_path());
+    return _guiState;
+}
+
+Qt::ColorScheme ContourGuiApp::effectiveColorScheme() const
+{
+    return _appliedGuiScheme.value_or(QGuiApplication::styleHints()->colorScheme());
+}
+
+window::SettingsWindowHost& ContourGuiApp::settingsWindow()
+{
+    if (_settingsWindow)
+        return *_settingsWindow;
+    // The Settings window keeps the OS's title bar (R-m), which follows the chrome's light or dark -- unless
+    // the terminal window draws a Linux header bar, beside which it draws its own frame too (R-l).
+    _settingsFrame = platform::makeNativeWindowFrame([this] { return effectiveColorScheme(); });
+    auto const* const profile = _config.profile(profileName());
+    auto const mainWindow = profile != nullptr && profile->showTitleBar.value()
+                                ? platform::WindowDecoration::Server
+                                : platform::WindowDecoration::Client;
+    _settingsWindow = std::make_unique<window::SettingsWindowHost>(
+        settingsController(),
+        window::settingsWindowConventionsFor(_hostPlatform),
+        _settingsWindowFactory,
+        window::SettingsWindowDressing {
+            .frame = *_settingsFrame,
+            .material = titleBandMaterial(),
+            .inputs =
+                [this] {
+                    return window::SettingsBackdropInputs {
+                        .row = _chromeStyle,
+                        .material = titleBandTokens(window::BarCentre::Empty).material,
+                        .scheme = effectiveColorScheme(),
+                    };
+                },
+            .decoration = window::settingsWindowDecoration(
+                config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)].layout.headerBar, mainWindow),
+            .placement =
+                [this] {
+                    return windowControlPlacement(
+                        resolvedWindowControlStyle(_config.windowControlStyle.value()));
+                },
+        },
+        *guiState(),
+        [this](config::Config const& preview, std::string const& profileName) {
+            return sessionsManager().createPreviewSession(preview, profileName);
+        },
+        [this] {
+            auto const url = QUrl::fromLocalFile(platform::toQString(_config.configFile));
+            if (auto const opened = externalLauncher().openUrl(url); !opened)
+                errorLog()("Could not open the configuration file \"{}\": {}.",
+                           _config.configFile.string(),
+                           platform::describe(opened.error()));
+        },
+        [this](std::string const& profileName) {
+            // A command of the app's own, as the menu bar's: the tab opens in the window the app would
+            // run one in, and without a window says so.
+            runMenuBarAction(actions::CreateNewTab { .profileName = profileName },
+                             command::ActionScope::Application);
+        });
+    return *_settingsWindow;
+}
+
+void ContourGuiApp::openSettings(QScreen* anchor)
+{
+    if (auto const shown = settingsWindow().show(anchor); !shown)
+        errorLog()("Cannot open the Settings window. {}", shown.error());
+}
+
+// {{{ The Connect picker and `contour connect`
+int ContourGuiApp::connectAction()
+{
+    if (auto const installed = installLogging("contour.connect", /*showProcessId=*/true); !installed)
+    {
+        cerr << std::format("contour connect: {}\n", installed.error());
+        return EXIT_FAILURE;
+    }
+    auto const configPath = parameters().get<string>("contour.connect.config");
+    auto const wantsList = parameters().get<bool>("contour.connect.list");
+    auto const wantsJson = parameters().get<bool>("contour.connect.json");
+    auto const targetText =
+        parameters().verbatim.empty() ? string {} : string { parameters().verbatim.front() };
+
+    if (wantsJson && !wantsList)
+    {
+        cerr << "contour connect: --json goes with --list\n";
+        return EXIT_FAILURE;
+    }
+
+    // The saved hosts, which a bare name is looked up in and the list is made of.
+    auto loaded = config::tryLoadConfigNamed(configPath);
+    if (!loaded)
+    {
+        cerr << std::format("contour connect: {}\n", loaded.error());
+        return EXIT_FAILURE;
+    }
+
+    if (wantsList)
+    {
+        auto const daemon = probeLocalDaemon(loaded->daemon.value().socket);
+        auto const rows = cli::connectRows({ .hosts = loaded->hosts.value(), .daemon = daemon }, "");
+        std::cout << cli::renderTargetList(rows, wantsJson ? cli::ListFormat::Json : cli::ListFormat::Text);
+        return EXIT_SUCCESS;
+    }
+
+    // The windows this verb opens run under the terminal verb's surface, with this configuration.
+    auto reparse = [&](std::vector<char const*> extra) {
+        auto argv = std::vector<char const*> { "contour", "terminal" };
+        if (!configPath.empty())
+        {
+            argv.push_back("config");
+            argv.push_back(configPath.c_str());
+        }
+        argv.insert(argv.end(), extra.begin(), extra.end());
+        return reparseParameters(static_cast<int>(argv.size()), argv.data());
+    };
+
+    if (targetText.empty())
+    {
+        // No target: the app opens on the picker alone, and choosing there starts another process.
+        _connectLaunch = ConnectLaunch::Untargeted;
+        if (!reparse({}))
+            return EXIT_FAILURE;
+        auto const rv = terminalGuiAction();
+        _connectLaunch = ConnectLaunch::Targeted;
+        return rv;
+    }
+
+    auto const target = config::parseLaunchTarget(targetText, loaded->hosts.value());
+    if (!target)
+    {
+        cerr << std::format("contour connect: {}\n", target.error().describe());
+        return EXIT_FAILURE;
+    }
+    auto const plan = config::attachPlanOf(*target);
+    switch (plan.hosting)
+    {
+        case config::Hosting::InProcess:
+            if (!reparse({ "daemon-mode", "in_process" }))
+                return EXIT_FAILURE;
+            return terminalGuiAction();
+        case config::Hosting::LocalDaemon:
+        case config::Hosting::RemoteHost: break;
+    }
+
+    // Every other target is what `contour client` is: the same request, filled from the plan.
+    auto request = ClientRequest {};
+    request.logFilter = parameters().get<string>("contour.connect.log");
+    request.logFile = parameters().get<string>("contour.connect.log-file");
+    request.config = configPath;
+    request.label = plan.label.empty() ? string { vthost::DefaultSocketLabel } : plan.label;
+    return launchClient(std::move(request), plan.host);
+}
+
+std::expected<void, std::string> ContourGuiApp::openFirstWindow()
+{
+    // Ask where the sessions should live first, or open the window at once.
+    if (firstWindow() == FirstWindow::ConnectPicker)
+    {
+        openConnectPicker(PickerPresentation::Launcher, nullptr);
+        // No terminal window instead: hosting was left to the picker, so one opened here would run its shells
+        // in-process whatever `daemon.mode` says.
+        if (!_connectPickerWindow)
+            return std::unexpected { "contour: the Connect picker could not be opened" };
+        return {};
+    }
+    auto const timer = crispy::ScopedTimer(startupLog, "newWindow (QML load)");
+    newWindow();
+    return {};
+}
+
+ContourGuiApp::FirstWindow ContourGuiApp::firstWindow() const
+{
+    if (_connectLaunch == ConnectLaunch::Untargeted)
+        return FirstWindow::ConnectPicker;
+    // A plain launch carries no arguments at all, which is all a Dock, Spotlight or launcher start can say.
+    auto const isPlainLaunch = _argc <= 1 && !_clientRequest && !_cliCommand;
+    return isPlainLaunch && _config.connectPickerOnStart.value() ? FirstWindow::ConnectPicker
+                                                                 : FirstWindow::Terminal;
+}
+
+std::function<std::expected<void, std::string>()> ContourGuiApp::prepareCheck(
+    config::LaunchTarget const& target)
+{
+    switch (target.kind)
+    {
+        // The daemon starts when the window connects, and this window needs nothing: neither can fail ahead.
+        case config::LaunchTargetKind::LocalDaemon:
+        case config::LaunchTargetKind::InProcess:
+            return [] {
+                return std::expected<void, std::string> {};
+            };
+        case config::LaunchTargetKind::SavedHost:
+        case config::LaunchTargetKind::Address: break;
+    }
+    auto const& saved = _config.hosts.value();
+    auto const found = saved.find(target.name);
+    auto opened = found != saved.end()
+                      ? transportOf(target.name, found->second)
+                      : openHost(core::platform::normalizePath(_config.configFile), target.name);
+    if (!opened)
+        return [reason = opened.error()]() -> std::expected<void, std::string> {
+            return std::unexpected { reason };
+        };
+    return [transport = std::make_shared<cli::HostTransport>(std::move(opened->transport))]() {
+        return cli::checkHostReachable(*cli::makeHostControl(transport->factory, transport->connectTimeout));
+    };
+}
+
+std::expected<void, std::string> ContourGuiApp::startProcess(std::vector<std::string> const& arguments)
+{
+    auto list = QStringList {};
+    for (auto const& argument: arguments)
+        list.push_back(QString::fromStdString(argument));
+    return externalLauncher()
+        .runDetached(QString::fromStdString(programPath()), list)
+        .transform_error(
+            [](platform::SpawnError const& error) { return std::string { platform::describe(error) }; });
+}
+
+std::expected<void, std::string> ContourGuiApp::launchConnect(config::LaunchTarget const& target)
+{
+    return startProcess(config::connectArguments(target, core::platform::normalizePath(_config.configFile)));
+}
+
+cli::LocalDaemonState ContourGuiApp::probeLocalDaemon(std::string const& socketOption)
+{
+    auto const spawner = vthost::makeNativeDaemonSpawner();
+    return cli::probeLocalDaemon(*spawner,
+                                 vthost::muxSocketPath(vthost::DefaultSocketLabel, socketOption),
+                                 cli::nativeSessionCounter());
+}
+
+void ContourGuiApp::refreshLauncherMenu()
+{
+    if (!_launcherMenu)
+    {
+        _launcherMenu =
+            platform::makeLauncherMenu(programPath(), [this](command::LauncherEntry const& entry) {
+                if (auto const started = startProcess(entry.arguments); !started)
+                    errorLog()("Could not open \"{}\": {}.", entry.title, started.error());
+            });
+        if (!_launcherMenu)
+            return;
+    }
+    auto const entries = command::launcherEntries(
+        _launcherMenu->surface(), _config.hosts.value(), core::platform::normalizePath(_config.configFile));
+    _launcherMenu->set(entries);
+}
+
+window::ConnectPickerServices ContourGuiApp::connectPickerServices()
+{
+    return window::ConnectPickerServices {
+        .config = [this]() -> config::Config const& { return _config; },
+        .daemon =
+            [this] {
+                // The socket is read here, on the GUI thread; the job holds a copy.
+                return [socket = _config.daemon.value().socket] {
+                    return probeLocalDaemon(socket);
+                };
+            },
+        .check = [this](config::LaunchTarget const& target) { return prepareCheck(target); },
+        .launch = [this](config::LaunchTarget const& target) { return launchConnect(target); },
+        .showSettingsPage = [this](std::string const& page) { openSettingsPage(page, nullptr); },
+        .setStartPrompt =
+            [this](window::StartPrompt prompt) {
+                if (auto const set =
+                        settingsController().setGlobalField(QStringLiteral("connect_picker_on_start"),
+                                                            QVariant { prompt == window::StartPrompt::Ask });
+                    !set)
+                    errorLog()("Could not store the Connect picker's start-up switch.");
+            },
+        .state = *guiState(),
+        .quickKey = _hostPlatform == config::HostPlatform::MacOS ? cli::QuickSelectKey::Command
+                                                                 : cli::QuickSelectKey::Alt,
+    };
+}
+
+void ContourGuiApp::openConnectPicker(PickerPresentation presentation, QScreen* anchor)
+{
+    if (!_qmlEngine)
+        return;
+    if (!_connectPicker)
+    {
+        _connectPicker = std::make_unique<window::ConnectPickerController>(connectPickerServices());
+        _connectPickerWindow = window::loadConnectPickerWindow(*_qmlEngine, *_connectPicker);
+        if (!_connectPickerWindow)
+        {
+            _connectPicker.reset();
+            return;
+        }
+        // Cancelling closes the window, and Qt ends the app when it was the last one; a connection that was
+        // started ends a launcher's process, which has nothing left to show, and only closes a sheet.
+        connect(_connectPicker.get(), &window::ConnectPickerController::cancelled, this, [this] {
+            if (_connectPickerWindow)
+                _connectPickerWindow->close();
+        });
+        connect(_connectPicker.get(), &window::ConnectPickerController::connected, this, [this] {
+            if (_connectPickerPresentation == PickerPresentation::Launcher)
+                QCoreApplication::quit();
+            else if (_connectPickerWindow)
+                _connectPickerWindow->close();
+        });
+    }
+    else
+        _connectPicker->refresh();
+
+    _connectPickerPresentation = presentation;
+    switch (presentation)
+    {
+        case PickerPresentation::Launcher:
+            _connectPickerWindow->setTransientParent(nullptr);
+            _connectPickerWindow->setModality(Qt::NonModal);
+            break;
+        case PickerPresentation::Sheet:
+            _connectPickerWindow->setTransientParent(QGuiApplication::focusWindow());
+            _connectPickerWindow->setModality(
+                _connectPickerWindow->transientParent() != nullptr ? Qt::WindowModal : Qt::NonModal);
+            break;
+    }
+    if (anchor != nullptr)
+        _connectPickerWindow->setScreen(anchor);
+    _connectPickerWindow->show();
+    _connectPickerWindow->raise();
+    _connectPickerWindow->requestActivate();
+}
+
+void ContourGuiApp::openSettingsPage(std::string const& page, QScreen* anchor)
+{
+    settingsWindow().requestPage(QString::fromStdString(page));
+    openSettings(anchor);
+}
+// }}}
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()
 {

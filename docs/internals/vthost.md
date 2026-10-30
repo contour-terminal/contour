@@ -157,6 +157,9 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 |--------------|-------|------|-------|
 | `ExtensionPermissions` | 1 | `extension-permissions` | `PermissionRequest` / `PermissionReply`: the daemon asks an extension's permission question only of a client with which it shares it; one that did not offer it is never asked, and the question waits for another client, as it does while none is attached |
 | `ControlPermissions` | 11 | `control-permissions` | A `PermissionRequest`'s appended `control` list (the control-API permissions an extension's manifest declares, granted with its commands): a question that asks for any is sent only to a client sharing it, whose prompt shows them; one that would prompt with the commands alone is not asked, and the question waits for another. So an older client is never asked about such an extension at all -- its commands stay ungranted there too, and the extension shows only its own "not granted yet" text until a client sharing the capability answers |
+| `InputEcho` | 12 | `input-echo` | `SessionInputEcho`: the daemon tells a client sharing it what each session's terminal does with typed text, so the client locks a pane at a password prompt and turns its OS's Secure Keyboard Entry on. A client of an older daemon stays at `Unknown`: no lock, no secure input |
+| `TabMerge` | 13 | `tab-merge` | `MergeTabIntoSplit`: the daemon grafts a whole tab, sessions and all, beside a pane of another tab. A client offers a drop-to-split only to a daemon sharing it; against an older one the tab is left to tear off into its own window, as before |
+| `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -259,6 +262,38 @@ client re-asserting state the daemon already holds fires no model event and so c
 layout push; a change fans out as a fresh `LayoutState` to every client, the sender included. An
 edit naming an unknown session or kind is logged with `describe(TabEditError)` and answered with
 nothing.
+
+The daemon pushes a layout on every model change, so a push composed before it read a client's edit
+(a title a shell set in another pane, say) still shows what the edit changed, and would undo a click
+until the echo arrives. Under `Capability::TabEditAcks` the daemon notes each `EditTab`'s serial
+before applying it, and stamps every push with it (`LayoutState::servedEdit`, an appended varint). The
+client lays the `ActivatePane` and `ActivateTab` edits a push has not seen over it, and forgets those it
+has: the push is then the daemon's word, another client's later change included.
+
+**`MergeTabIntoSplit`** (tag 35, gated on `Capability::TabMerge`; without it the daemon answers
+`Unsupported`) is what dropping a tab on the edge of a pane sends. It names the dragged tab by ALL of its
+sessions, the pane to split by its session, and a `vtworkspace::SplitSide` byte; both ends are sessions
+because tab and pane ids are minted per model. `vthost::applyTabMerge` reads the side (`splitSideFrom`,
+never a cast) and runs the same `SessionModel::mergeTabIntoSplit` an in-process window runs: the dragged
+tab's sessions move into the target tab, and **none is spawned or closed**, which is why neither
+`SplitPane` (it spawns a fresh session) nor `ClosePane` (it would kill the dragged ones) could carry it.
+The model's events fan out as a `LayoutState` push per event the merge fires (five today), each already
+showing the merged tree. A request is refused, and logged with `describe(TabMergeError)`, for an unknown
+session or side, both sessions in one tab, two windows (`CrossWindow`), or a tab that no longer holds
+exactly the sessions named (`StaleTab`: another client merged into it meanwhile, so the request would
+drag along panes nobody dragged).
+
+A refusal is not silent: the daemon answers it with **`TabMergeRefused`** (tag 36, under the request's
+serial, to a client that negotiated `TabMerge`), carrying the `TabMergeError` as a byte, and the client
+tells its user in a toast (`NativeClient`'s `TabMergeRefusedHandler`, `NativeController::tabMergeRefused`).
+A merge that succeeds is answered by the layout push alone.
+
+A client does not merge locally, since the next push would undo it: `NativeController::requestRemoteTabMerge`
+sends the verb and `applyRemoteLayout` grafts the tab when the push arrives (`findNewMerge` recognises a
+leaf beside a subtree that is exactly one other local tab's sessions). The merge stays within one window,
+because a layout is pushed and reconciled per window. `NativeClient::mergeTabIntoSplit` writes nothing
+unless the daemon shares `TabMerge`, and `SessionFactory::tabMergeSupport()` tells the window, so a tab
+dropped on a pane of such a daemon is not offered a split.
 
 #### Where a split ratio lives
 
@@ -1016,6 +1051,28 @@ both only to a connection granted `screen`: a record names a program and what it
 command line `block.finished` keeps behind `screen` does.
 
 The text is never traced (`ProgramStatus session=1 records=2`).
+
+### Input echo
+
+What a hosted session's terminal does with typed text (`vtpty::InputEcho`: `Echoed`, `Raw`, `Hidden`, or
+`Unknown` where the device cannot tell) travels to viewers so a client can lock a pane at a password prompt,
+gated on `Capability::InputEcho` (`input-echo`, 12):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `SessionInputEcho` | 34 | daemon → client | a session id and the echo state's value (`vthost/InputEchoWire.hpp`) |
+
+The daemon reads it from the hosted PTY (`UnixPty::inputEcho()`, under the device's own lock, never the
+terminal's; `TappingPty` forwards it) on the loop thread at each flush, before the session's output, after
+input the client sent, and in a snapshot, and sends it only when it differs from what that connection was
+last told. A program may turn echo off after its prompt, or back on without printing, with no output or
+input to carry the change: so a connection that shares the capability also runs a coarse idle check
+(`FlushPolicy::inputEchoCheck`, 250 ms), on the loop's clock, that reads every followed session's echo when it
+is due and rides the flush machinery (a flush armed for the next check, superseded by any earlier one). The
+client stores the value on the pane's `ChannelPty` on the reactor thread, which then runs the pane's observer
+(`vtpty::Pty::setInputEchoObserver`); the session installs one that posts to its own thread and re-reads the
+echo there, so the lock appears without waiting for output. A value the client does not know reads as
+`Unknown`. tmux panes have no such field and stay `Unknown`.
 
 ### Who configures a daemon session
 

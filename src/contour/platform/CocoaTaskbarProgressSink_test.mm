@@ -102,3 +102,31 @@ TEST_CASE("Dock busy progress animates and determinate progress stops animating"
     advanceAnimation();
     CHECK([before isEqualToData:snapshot()]);
 }
+
+TEST_CASE("Dock badge counts waiting tabs and restores the label it found",
+          "[contour][taskbar-native][display]")
+{
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
+        SKIP("Requires CONTOUR_TEST_DISPLAY=1 and the Cocoa Qt platform.");
+    auto* const tile = NSApp.dockTile;
+    NSString* const original = tile.badgeLabel;
+    tile.badgeLabel = @"7"; // another owner's
+    auto sink = contour::platform::makeTaskbarProgressSink();
+
+    sink->setApplicationAttention({ .waiting = 3 });
+    CHECK([tile.badgeLabel isEqualToString:@"3"]);
+    sink->setApplicationAttention({ .waiting = 0 });
+    CHECK([tile.badgeLabel isEqualToString:@"7"]);
+
+    // Progress and count at once: the progress view is the tile's content, the count its label.
+    sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
+    sink->setApplicationAttention({ .waiting = 2 });
+    CHECK([tile.badgeLabel isEqualToString:@"2"]);
+    CHECK(tile.contentView != nil);
+
+    // Destroyed with a count shown: the other owner's label comes back.
+    sink.reset();
+    CHECK([tile.badgeLabel isEqualToString:@"7"]);
+    tile.badgeLabel = original;
+    [tile display];
+}

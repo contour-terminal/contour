@@ -38,6 +38,8 @@ void MockPty::wakeupReader()
 
 int MockPty::write(std::string_view data)
 {
+    if (_writeObserver)
+        _writeObserver();
     switch (_writeBehavior)
     {
         case PtyWriteBehavior::FailAgain: errno = EAGAIN; return -1;
@@ -63,13 +65,13 @@ void MockPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 
 StartResult MockPty::start()
 {
-    _closed = false;
+    _isClosed = false;
     return {};
 }
 
 void MockPty::close()
 {
-    _closed = true;
+    _isClosed = true;
 }
 
 void MockPty::waitForClosed()
@@ -79,7 +81,7 @@ void MockPty::waitForClosed()
 
 bool MockPty::isClosed() const noexcept
 {
-    return _closed;
+    return _isClosed;
 }
 
 } // namespace vtpty

@@ -22,6 +22,50 @@ namespace vthost
 
 namespace
 {
+    /// The glyph the divider's rules are made of.
+    constexpr std::string_view DividerRule = "─";
+
+    /// @return @p glyph written @p count times.
+    [[nodiscard]] std::string repeated(std::string_view glyph, size_t count)
+    {
+        return std::ranges::to<std::string>(std::views::repeat(glyph, count) | std::views::join);
+    }
+
+    /// @return The number of cells @p text takes, for text whose every glyph is one cell wide: its code
+    /// points.
+    [[nodiscard]] size_t cellsOf(std::string_view text) noexcept
+    {
+        return static_cast<size_t>(std::ranges::count_if(text, [](char byte) {
+            return (static_cast<unsigned char>(byte) & 0b1100'0000U) != 0b1000'0000U;
+        }));
+    }
+
+    /// @return The first @p cells cells of @p text (one-cell glyphs, see cellsOf()).
+    [[nodiscard]] std::string cutToCells(std::string_view text, size_t cells)
+    {
+        auto seen = size_t { 0 };
+        auto end = text.size();
+        for (auto const [index, byte]: core::views::enumerate(text))
+        {
+            if ((static_cast<unsigned char>(byte) & 0b1100'0000U) == 0b1000'0000U)
+                continue;
+            if (seen++ == cells)
+            {
+                end = index;
+                break;
+            }
+        }
+        return std::string { text.substr(0, end) };
+    }
+
+    /// Ends a seeded history's still-Running command record as Abandoned: a snapshot taken mid-command
+    /// carries one, and the program it belonged to is not coming back, so its chip must not tick.
+    /// @param terminal The terminal being seeded; its lock is held by the caller.
+    void abandonSeededRunningCommand(vtbackend::Terminal& terminal)
+    {
+        terminal.abandonRunningCommand();
+    }
+
     /// Registers @p history's hyperlinks with @p terminal, as a mirror does.
     /// @return Wire id to the terminal's own id.
     [[nodiscard]] std::unordered_map<uint16_t, vtbackend::HyperlinkId> adoptHyperlinks(
@@ -88,21 +132,50 @@ namespace
     }
 } // namespace
 
-void seedRestoredHistory(vtbackend::Terminal& terminal, proto::Delta const& history, std::string_view marker)
+void seedRestoredHistory(vtbackend::Terminal& terminal,
+                         proto::Delta const& history,
+                         RestoreDivider const& divider)
 {
     {
         auto const guard = std::lock_guard { terminal };
         auto const links = adoptHyperlinks(terminal, history);
         landRows(terminal.primaryScreen(), history, links);
         adoptRecords(terminal, history);
+        abandonSeededRunningCommand(terminal);
     }
-    // Home first: the page was blank, and the marker belongs on its top row.
-    terminal.writeToScreen(std::format("\033[H{}", marker));
+    // Home first: the page was blank, and the divider belongs on its top row. The row is never wider than
+    // the page, so it needs no autowrap switching and leaves the profile's DECAWM as it was.
+    auto const columns = terminal.pageSize().columns;
+    auto const row = cutToCells(restoredDivider(divider, columns), unbox<size_t>(columns));
+    terminal.writeToScreen(std::format("\033[H\033[2m{}\033[m", row));
+    {
+        // Before the line feed: on a one-line page it scrolls the divider into the history, and the flag
+        // must travel with that row rather than land on the blank one that replaces it.
+        auto const guard = std::lock_guard { terminal };
+        terminal.primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).setWrappable(false);
+    }
+    terminal.writeToScreen("\r\n");
 }
 
-std::string restoredMarker(std::chrono::local_seconds takenAt)
+std::string restoredDividerText(RestoreDivider const& divider)
 {
-    return std::format("\033[2m── restored · snapshot of {:%Y-%m-%d %H:%M} ──\033[m\r\n", takenAt);
+    auto const endedOn = std::chrono::floor<std::chrono::days>(divider.sessionEndedAt);
+    return endedOn == divider.today
+               ? std::format("Restored · session ended {:%H:%M}", divider.sessionEndedAt)
+               : std::format("Restored · session ended {:%Y-%m-%d %H:%M}", divider.sessionEndedAt);
+}
+
+std::string restoredDivider(RestoreDivider const& divider, vtbackend::ColumnCount columns)
+{
+    auto text = restoredDividerText(divider);
+    auto const width = cellsOf(text);
+    auto const available = unbox<size_t>(columns);
+    if (available < width + 2)
+        return text;
+    auto const leftover = available - width - 2;
+    auto const left = leftover / 2;
+    auto const right = leftover - left;
+    return std::format("{} {} {}", repeated(DividerRule, left), text, repeated(DividerRule, right));
 }
 
 } // namespace vthost

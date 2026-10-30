@@ -53,6 +53,29 @@ double contrastRatio(RGBColor a, RGBColor b) noexcept
     return contrastRatioOf(relativeLuminance(a), relativeLuminance(b));
 }
 
+RGBColor liftToContrast(RGBColor ink, RGBColor toward, RGBColor ground, double minimumContrast) noexcept
+{
+    auto const groundLuminance = relativeLuminance(ground);
+    auto const reads = [&](RGBColor color) {
+        return contrastRatioOf(relativeLuminance(color), groundLuminance) >= minimumContrast;
+    };
+    if (reads(ink))
+        return ink;
+
+    // The least lift that reads, to well under one channel step.
+    auto fallsShort = 0.0F;
+    auto enough = 1.0F;
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 12))
+    {
+        auto const middle = (fallsShort + enough) / 2.0F;
+        if (reads(mixColor(ink, toward, middle)))
+            enough = middle;
+        else
+            fallsShort = middle;
+    }
+    return mixColor(ink, toward, enough);
+}
+
 RGBColor fadeKeepingContrast(RGBColor from, RGBColor toward, float t, double minimumContrast) noexcept
 {
     auto const towardLuminance = relativeLuminance(toward);

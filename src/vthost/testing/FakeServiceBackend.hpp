@@ -6,6 +6,8 @@
 
 #include <expected>
 #include <memory>
+#include <string>
+#include <utility>
 
 #include <vthost/ServiceControl.hpp>
 
@@ -27,10 +29,12 @@ class FakeServiceBackend final: public ServiceBackend
     /// @param state What status() reports.
     /// @param log Where the calls are counted; outlives the backend.
     /// @param style What launchStyle() reports.
+    /// @param commandLine What status() reports the registration to run.
     FakeServiceBackend(ServiceRunState state,
                        FakeServiceLog& log,
-                       DaemonLaunchStyle style = DaemonLaunchStyle::Foreground):
-        _state { state }, _log { log }, _style { style }
+                       DaemonLaunchStyle style = DaemonLaunchStyle::Foreground,
+                       std::string commandLine = {}):
+        _state { state }, _log { log }, _style { style }, _commandLine { std::move(commandLine) }
     {
     }
 
@@ -55,7 +59,7 @@ class FakeServiceBackend final: public ServiceBackend
 
     [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override
     {
-        return ServiceStatus { .state = _state };
+        return ServiceStatus { .state = _state, .commandLine = _commandLine };
     }
 
     [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override { return _style; }
@@ -64,6 +68,7 @@ class FakeServiceBackend final: public ServiceBackend
     ServiceRunState _state;
     FakeServiceLog& _log;
     DaemonLaunchStyle _style;
+    std::string _commandLine;
 };
 
 } // namespace vthost::testing

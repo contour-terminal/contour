@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/detail/StreamSocketOptions.hpp>
 
+#include <core/net/detail/SocketErrors.hpp>
+
 #include <sys/socket.h>
 
 #include <algorithm>
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <tuple>
 
@@ -20,6 +23,15 @@ namespace core::net::detail
 
 namespace
 {
+    /// macOS spells the idle time `TCP_KEEPALIVE`; it is `TCP_KEEPIDLE` everywhere else.
+#ifdef __APPLE__
+    constexpr int KeepAliveIdleOption = TCP_KEEPALIVE;
+    constexpr char const* KeepAliveIdleName = "setsockopt(TCP_KEEPALIVE)";
+#else
+    constexpr int KeepAliveIdleOption = TCP_KEEPIDLE;
+    constexpr char const* KeepAliveIdleName = "setsockopt(TCP_KEEPIDLE)";
+#endif
+
     /// Whole seconds, and never zero.
     ///
     /// The keepalive options take seconds, and a zero is not "immediately" — it is rejected, or
@@ -35,38 +47,29 @@ namespace
         return whole.count() > 0 ? static_cast<int>(whole.count()) : 1;
     }
 
-    /// Arms TCP keepalive with @p settings. Best-effort by contract; see the header.
-    /// @param fd The connected socket.
-    /// @param settings The intervals to apply.
-    /// @return True when the flag AND the intervals were all applied.
-    [[nodiscard]] bool armKeepAlive(int fd, KeepAliveSettings const& settings) noexcept
-    {
-        // macOS spells the idle time `TCP_KEEPALIVE`; it is `TCP_KEEPIDLE` everywhere else.
-#ifdef __APPLE__
-        constexpr int IdleOption = TCP_KEEPALIVE;
-#else
-        constexpr int IdleOption = TCP_KEEPIDLE;
-#endif
-        auto const idle = wholeSeconds(settings.idle);
-        auto const interval = wholeSeconds(settings.interval);
-        auto const count = static_cast<int>(settings.count);
-
-        // **The INTERVALS FIRST, and the flag last.** Reversed, a socket whose intervals could
-        // not be applied would be left probing on the system default — two hours on Linux —
-        // which is indistinguishable from no keepalive at all for every deadline this protects,
-        // while reading back as armed to anything that checks the flag.
-        if (::setsockopt(fd, IPPROTO_TCP, IdleOption, &idle, sizeof(idle)) != 0)
-            return false;
-        if (::setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval)) != 0)
-            return false;
-        if (::setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count)) != 0)
-            return false;
-
-        int const on = 1;
-        return ::setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)) == 0;
-    }
-
 } // namespace
+
+std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket, KeepAliveSettings const& settings)
+{
+    auto const idle = wholeSeconds(settings.idle);
+    auto const interval = wholeSeconds(settings.interval);
+    auto const count = static_cast<int>(settings.count);
+
+    // **The INTERVALS FIRST, and the flag last.** Reversed, a socket whose intervals could
+    // not be applied would be left probing on the system default -- two hours on Linux --
+    // which is indistinguishable from no keepalive at all for every deadline this protects,
+    // while reading back as armed to anything that checks the flag.
+    auto const apply =
+        [socket](int level, int option, int value, char const* what) -> std::expected<void, NetError> {
+        if (::setsockopt(socket, level, option, &value, sizeof(value)) != 0)
+            return std::unexpected(socketError(lastSocketError(), what));
+        return {};
+    };
+    return apply(IPPROTO_TCP, KeepAliveIdleOption, idle, KeepAliveIdleName)
+        .and_then([&] { return apply(IPPROTO_TCP, TCP_KEEPINTVL, interval, "setsockopt(TCP_KEEPINTVL)"); })
+        .and_then([&] { return apply(IPPROTO_TCP, TCP_KEEPCNT, count, "setsockopt(TCP_KEEPCNT)"); })
+        .and_then([&] { return apply(SOL_SOCKET, SO_KEEPALIVE, 1, "setsockopt(SO_KEEPALIVE)"); });
+}
 
 namespace
 {
@@ -110,6 +113,9 @@ void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive
     std::ignore = ::setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 
     if (keepAlive == KeepAlive::Yes)
+        // Best-effort: a dial does not fail over it. A failure builds a `NetError` (an allocated string)
+        // inside this `noexcept` function, so `bad_alloc` here terminates -- accepted: an allocation
+        // failure that small is the process's end on every other path too.
         std::ignore = armKeepAlive(socket, KeepAliveSettings {});
 }
 
@@ -128,6 +134,10 @@ StreamSocketReport reportStreamSocketOptions(platform::NativeHandle socket) noex
         .noDelay = readOption(socket, IPPROTO_TCP, TCP_NODELAY) != 0,
         .sendBuffer = clampedSize(readOption(socket, SOL_SOCKET, SO_SNDBUF)),
         .receiveBuffer = clampedSize(readOption(socket, SOL_SOCKET, SO_RCVBUF)),
+        .keepAlive = readOption(socket, SOL_SOCKET, SO_KEEPALIVE) != 0,
+        .keepAliveIdleSeconds = readOption(socket, IPPROTO_TCP, KeepAliveIdleOption),
+        .keepAliveIntervalSeconds = readOption(socket, IPPROTO_TCP, TCP_KEEPINTVL),
+        .keepAliveCount = readOption(socket, IPPROTO_TCP, TCP_KEEPCNT),
     };
 }
 

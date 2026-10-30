@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -36,10 +37,13 @@
 
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/RestoredCounts.hpp>
+#include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/Liveness.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Unsupported.hpp>
+#include <vtworkspace/Primitives.hpp>
 
 namespace vthost::client
 {
@@ -159,6 +163,14 @@ struct RemoteScreen
     /// vtbackend::MaxRecordedWorkingDirectoryBytes), and the count to `commandBlockLimits`, the oldest
     /// dropped first. One older than every record a full table holds is not taken at all.
     std::map<uint32_t, MirroredCommandBlock> commandBlocks;
+    /// The command line a restart stopped in this session, as the last SessionState stated it (held to
+    /// vtbackend::MaxRecordedCommandLineBytes); empty for none. Cleared once the session starts a command of
+    /// its own: a block newer than @ref interruptedAfterBlock that has left its prompt. Untrusted text.
+    /// @see proto::SessionState::interruptedCommand
+    std::string interruptedCommand;
+    /// The id of the newest record the shell had already used when @ref interruptedCommand was stated: a
+    /// record above it that is no longer Prompting is the command that ends the interruption.
+    uint32_t interruptedAfterBlock = 0;
     /// Each record of `commandBlocks` under the revision it last changed at, mapped to its id: one entry
     /// per record. A consumer synced at a revision finds what changed since with an upper_bound, rather
     /// than by walking the table.
@@ -276,6 +288,8 @@ class NativeClient final
     /// Handler invoked when a status-line extension the daemon runs asks this client's user whether it may
     /// run its declared commands; answered with answerPermission().
     using PermissionHandler = std::function<void(proto::PermissionRequest const&)>;
+    /// Handler invoked when the daemon answers a mergeTabIntoSplit() with a refusal: it changed nothing.
+    using TabMergeRefusedHandler = std::function<void(proto::TabMergeRefused const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -306,6 +320,9 @@ class NativeClient final
         /// daemon sharing Capability::ProfileByName; @ref sessionSettings is still sent, for one that does
         /// not.
         std::string profileName = {};
+        /// The light/dark preference this client shows: the daemon builds the sessions it follows under it,
+        /// before their first snapshot. @see proto::ClientHello::colorPreference.
+        proto::WireColorPreference colorPreference = proto::WireColorPreference::Unstated;
     };
 
     /// @param loop The event loop everything runs on.
@@ -324,6 +341,7 @@ class NativeClient final
     /// @param liveness When a silent daemon is probed and given up on, timed by @p loop's clock; applied
     ///        only when both ends share Capability::Heartbeat, save for its handshake deadline, which
     ///        applies to every daemon.
+    /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -333,7 +351,8 @@ class NativeClient final
                  SessionEventHandler onSessionEvent,
                  LayoutHandler onLayout,
                  PermissionHandler onPermissionRequest = {},
-                 LivenessPolicy liveness = {});
+                 LivenessPolicy liveness = {},
+                 TabMergeRefusedHandler onTabMergeRefused = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -398,10 +417,23 @@ class NativeClient final
     Delivery closePane(uint64_t session);
 
     /// Tells the daemon how the user changed a tab's presentation, so its model and every other client
-    /// follow.
+    /// follow. Where the daemon shares Capability::TabEditAcks, an activation is kept in force over the
+    /// layouts pushed before the daemon served it (@see PendingTabEdits).
     /// @param edit The change.
     /// @return Sent, or Unsupported — nothing written — unless the daemon shares Capability::TabEdits.
     Delivery editTab(proto::EditTab edit);
+
+    /// Asks the daemon to graft a whole tab beside a pane of another tab. The daemon moves the tab's sessions
+    /// into the target tab -- none is spawned or closed -- and re-pushes a LayoutState to every attached
+    /// client.
+    /// @param tabSessions Every session of the tab to merge, as this client sees it; the daemon refuses the
+    ///                    request when its tab holds others now.
+    /// @param targetSession The session of the pane to split.
+    /// @param side Which side of that pane the tab goes on.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::TabMerge.
+    Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
+                               uint64_t targetSession,
+                               vtworkspace::SplitSide side);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.
@@ -481,6 +513,11 @@ class NativeClient final
     ///         a daemon that predates the field. @see proto::ServerHello::daemonInstance
     [[nodiscard]] uint64_t daemonInstance() const noexcept { return _daemonInstance; }
 
+    /// @return What the daemon's restore brought back, when this connection's hello said so: only the first
+    ///         accepted Attach connection after a restore is told. Empty for zero counts, from a daemon that
+    ///         predates the fields, and before the handshake. @see proto::ServerHello::restoredWindows
+    [[nodiscard]] std::optional<RestoredCounts> restoredCounts() const noexcept { return _restoredCounts; }
+
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
     ///
     /// Public because it is a pure decision about @p handshake with no state behind it, and one
@@ -558,6 +595,7 @@ class NativeClient final
     SessionEventHandler _onSessionEvent;
     LayoutHandler _onLayout;
     PermissionHandler _onPermissionRequest;
+    TabMergeRefusedHandler _onTabMergeRefused;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
@@ -566,12 +604,15 @@ class NativeClient final
     /// Answers the daemon's unknown PDUs, and holds back the ones it said it does not know.
     proto::UnsupportedTracker _unsupported;
     uint64_t _nextSerial = 1;
-    vtbackend::HostIdentity _daemonIdentity;         ///< @see daemonIdentity()
-    std::string _daemonRelease;                      ///< @see daemonRelease()
-    uint64_t _daemonInstance = 0;                    ///< @see daemonInstance()
-    std::vector<uint64_t> _followedWindows;          ///< @see followedWindows()
-    std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
-    std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
+    /// The EditTabs the daemon has not served yet, laid over its pushes (Capability::TabEditAcks).
+    PendingTabEdits _pendingEdits;
+    vtbackend::HostIdentity _daemonIdentity;          ///< @see daemonIdentity()
+    std::string _daemonRelease;                       ///< @see daemonRelease()
+    uint64_t _daemonInstance = 0;                     ///< @see daemonInstance()
+    std::optional<RestoredCounts> _restoredCounts {}; ///< @see restoredCounts()
+    std::vector<uint64_t> _followedWindows;           ///< @see followedWindows()
+    std::optional<proto::Negotiated> _negotiated;     ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal;  ///< @see refusal()
     LivenessTracker _liveness;              ///< When the daemon last spoke, and whether it was probed.
     std::optional<std::string> _lossReason; ///< @see lossReason()
     uint64_t _nextHeartbeatNonce = 1;

@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 // clang-format off
 #ifdef _WIN32
@@ -372,7 +373,7 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
         cerr << std::format("Screen size: {}x{}. Capturing lines {} ({}) to file {}.\r\n",
                             numColumns,
                             numLines,
-                            settings.logicalLines ? "logical" : "physical",
+                            settings.lineMode,
                             settings.lineCount,
                             settings.words ? "words" : "lines",
                             settings.outputFile);
@@ -381,7 +382,8 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
     //
     // The ',' intermediate is what distinguishes XTCAPTURE from xterm's XTSMTITLE, which owns the bare
     // `CSI > Ps ; Ps t` this used to send. @see vtbackend/Functions.h, XTCAPTURE.
-    if (transport.write(std::format("\033[>{};{},t", settings.logicalLines ? '1' : '0', settings.lineCount))
+    if (transport.write(
+            std::format("\033[>{};{},t", std::to_underlying(settings.lineMode), settings.lineCount))
         < 0)
     {
         cerr << "Could not request screen capture.\r\n";

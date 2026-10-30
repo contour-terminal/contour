@@ -35,6 +35,8 @@ AppDir:
     - liblzma5:amd64
     - libpcre3:amd64
     - qt6-qpa-plugins:amd64
+    # Qt SVG's image plugin, for the header bar's bundled icons (in libqt6svg6 on noble).
+    - libqt6svg6:amd64
     - zlib1g:amd64
     - libgl1-mesa-dev:amd64
     - libglvnd-dev:amd64

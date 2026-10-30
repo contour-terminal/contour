@@ -28,7 +28,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <format>
 #include <functional>
 #include <limits>
@@ -53,6 +52,7 @@
 #include <vthost/client/ScreenMirror.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/GridParity.hpp>
+#include <vthost/testing/ScenarioGuard.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -118,6 +118,12 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
     [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept override { return identity.view(); }
     [[nodiscard]] vtbackend::OutputFollowing outputFollowing() const noexcept override { return following; }
     void bell() override { ++bells; }
+    /// Every default background the terminal announced, in order.
+    std::vector<vtbackend::RGBColor> announcedBackgrounds;
+    void defaultBackgroundColorChanged(vtbackend::RGBColor color) override
+    {
+        announcedBackgrounds.push_back(color);
+    }
     void notify(std::string_view title, std::string_view body) override
     {
         notifyTitle = title;
@@ -127,7 +133,14 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
     {
         shownNotifications.push_back(notification);
     }
-    void copyToClipboard(std::string_view data) override { clipboard = data; }
+    void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
+    {
+        clipboard = data;
+    }
+    int screenUpdates = 0; ///< Frames that brought output.
+    int screenReplays = 0; ///< Frames that repainted what the mirror showed already.
+    void screenUpdated() override { ++screenUpdates; }
+    void screenReplayed() override { ++screenReplays; }
     void commandBlockFinished(vtbackend::CommandBlockSummary const& summary) override
     {
         finishedBlocks.push_back(summary);
@@ -247,49 +260,12 @@ Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready)
         co_await loop->delay(1ms);
 }
 
-/// The longest a scenario may take before the client is detached under it.
-constexpr auto ScenarioDeadline = std::chrono::seconds { 30 };
-
-/// Runs @p scenario, detaching the client when it fails: a REQUIRE that throws leaves the scenario before its
-/// own detach(), and the client's run() would wait for the daemon forever, with blockOn parked under it.
-Task<void> detachOnFailure(MirrorHarness* h, Task<void> scenario, bool* finished)
-{
-    auto failure = std::exception_ptr {};
-    try
-    {
-        co_await std::move(scenario);
-    }
-    catch (...)
-    {
-        failure = std::current_exception();
-    }
-    *finished = true;
-    if (!failure)
-        co_return;
-    h->client->detach();
-    std::rethrow_exception(failure);
-}
-
-/// Detaches the client once ScenarioDeadline passes with the scenario still running: the bound on a scenario
-/// that awaits something that never comes.
-Task<void> scenarioWatchdog(MirrorHarness* h, bool const* finished)
-{
-    auto const deadline = std::chrono::steady_clock::now() + ScenarioDeadline;
-    while (!*finished && std::chrono::steady_clock::now() < deadline)
-        co_await h->loop.delay(10ms);
-    if (*finished)
-        co_return;
-    FAIL_CHECK("the scenario did not finish in time");
-    h->client->detach();
-}
-
 Task<void> drive(MirrorHarness* h, Task<void> scenario)
 {
-    auto finished = false;
-    co_await core::async::whenAll(h->server->run(),
-                                  h->client->run(),
-                                  detachOnFailure(h, std::move(scenario), &finished),
-                                  scenarioWatchdog(h, &finished));
+    co_await core::async::whenAll(
+        h->server->run(),
+        h->client->run(),
+        vthost::testing::guardScenario(&h->loop, [h] { h->client->detach(); }, std::move(scenario)));
 }
 
 /// Writes @p bytes on the server terminal and pushes the resulting delta.
@@ -476,6 +452,7 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
         largeGridSnapshot(screen, { wideRowAt(1, 40, 0, U'A'), wideRowAt(20, 40, 39, U'X') }, cellAt(2, 2));
     bare.mirror->apply(screen, first);
     auto const& page = bare.terminal->primaryScreen();
+    REQUIRE(bare.events.screenReplays == 1);
     REQUIRE(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
     REQUIRE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
     REQUIRE(page.cursor().position == cellAt(2, 2));
@@ -495,6 +472,9 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
     CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
     CHECK_FALSE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
     CHECK(page.cursor().position == cellAt(4, 9));
+    // The pan is the window moving, not the program's output: a repaint, not news.
+    CHECK(bare.events.screenReplays == 2);
+    CHECK(bare.events.screenUpdates == 0);
 }
 
 TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
@@ -548,6 +528,216 @@ TEST_CASE("a restarted mirror applies a new connection's snapshot from scratch",
     CHECK(bare.terminal->primaryScreen().grid().renderMainPageText().contains("new"));
     CHECK_FALSE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
     CHECK(bare.historyLines() == 0);
+}
+
+TEST_CASE("a mirror's replays are repaints, and only its deltas are output", "[vthost][mirror]")
+{
+    // A replay repaints what the host already showed -- the attach, a ResyncRequired snapshot, a resize --
+    // and must not read as news to whatever tracks unseen output (the GUI's tab badge).
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    SECTION("the first replay into a fresh terminal")
+    {
+        auto seed = proto::Delta {};
+        seed.snapshot = 1;
+        seed.stableViewportBase = 1;
+        seed.stableFloor = 1;
+        seed.lines = { rowAt(1, "a") };
+        screen.apply(seed);
+        bare.mirror->apply(screen, seed);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 0);
+
+        auto tick = proto::Delta {};
+        tick.stableViewportBase = 1;
+        tick.stableFloor = 1;
+        tick.lines = { rowAt(1, "b") };
+        screen.apply(tick);
+        bare.mirror->apply(screen, tick);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 1);
+
+        // A server resync while connected: a snapshot delta.
+        auto resync = proto::Delta {};
+        resync.snapshot = 1;
+        resync.stableViewportBase = 1;
+        resync.stableFloor = 1;
+        resync.lines = { rowAt(1, "b") };
+        screen.apply(resync);
+        bare.mirror->apply(screen, resync);
+        CHECK(bare.events.screenReplays == 2);
+        CHECK(bare.events.screenUpdates == 1);
+    }
+
+    SECTION("an explicit full replay, as binding a pane makes")
+    {
+        bare.mirror->fullReplay(screen, vthost::client::LocalHistory::Discard);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 0);
+    }
+}
+
+TEST_CASE("a replay's frame is news only when the program caused it", "[vthost][mirror]")
+{
+    using vthost::client::MirrorFrame;
+    using vthost::client::ReplayCause;
+    CHECK(vthost::client::frameOf(ReplayCause::Attach) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::Resync) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::Resize) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::WindowMoved) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::ScreenSwitch) == MirrorFrame::Output);
+    CHECK(vthost::client::frameOf(ReplayCause::HistoryCleared) == MirrorFrame::Output);
+    CHECK(vthost::client::frameOf(ReplayCause::Reset) == MirrorFrame::Output);
+}
+
+namespace
+{
+
+/// The snapshot a host at generation 1 sends of its one-line page at row 1, holding @p text.
+/// @return The delta, applied to @p screen as well.
+proto::Delta seedSnapshot(vthost::client::RemoteScreen& screen, std::string_view text)
+{
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.generation = 1;
+    seed.stableViewportBase = 1;
+    seed.stableFloor = 1;
+    seed.lines = { rowAt(1, text) };
+    screen.apply(seed);
+    return seed;
+}
+
+} // namespace
+
+TEST_CASE("a primed mirror reports what the program did to its screen as output", "[vthost][mirror]")
+{
+    // Once primed, a replay the program caused -- the alternate screen entered or left, a `clear`, a RIS --
+    // is news for its tab; one the host's plumbing caused -- a resize, a resync snapshot -- is not.
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+    bare.mirror->apply(screen, seedSnapshot(screen, "a"));
+    REQUIRE(bare.events.screenReplays == 1);
+    REQUIRE(bare.events.screenUpdates == 0);
+
+    SECTION("a program entering and leaving the alternate screen")
+    {
+        // A page flip reaches the mirror as the snapshot the host forces for it (ResyncRequired).
+        screen.screenType = 1;
+        auto const enter = seedSnapshot(screen, "vim");
+        bare.mirror->apply(screen, enter);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenReplays == 1);
+
+        screen.screenType = 0;
+        auto const leave = seedSnapshot(screen, "a");
+        bare.mirror->apply(screen, leave);
+        CHECK_FALSE(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 2);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a clear that discarded the host's history")
+    {
+        // Output scrolls three rows into the host's history (floor 1, page at row 4) ...
+        auto output = proto::Delta {};
+        output.generation = 1;
+        output.stableViewportBase = 4;
+        output.stableFloor = 1;
+        output.lines = { rowAt(4, "d") };
+        screen.apply(output);
+        bare.mirror->apply(screen, output);
+        REQUIRE(bare.events.screenUpdates == 1);
+
+        // ... and the clear moves the floor up to the page, which did not move.
+        auto clear = proto::Delta {};
+        clear.snapshot = 1;
+        clear.generation = 1;
+        clear.stableViewportBase = 4;
+        clear.stableFloor = 4;
+        clear.lines = { rowAt(4, "") };
+        screen.apply(clear);
+        bare.mirror->apply(screen, clear);
+        CHECK(bare.events.screenUpdates == 2);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a reset that destroyed the host's row identity at an unchanged size")
+    {
+        auto reset = seedSnapshot(screen, "b");
+        reset.generation = 2;
+        screen.apply(reset);
+        bare.mirror->apply(screen, reset);
+        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a resize, which reflowed the host's rows")
+    {
+        screen.columns = 6;
+        auto resize = seedSnapshot(screen, "a");
+        resize.generation = 2;
+        screen.apply(resize);
+        bare.mirror->apply(screen, resize);
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
+
+    SECTION("a resync snapshot, as one for output that overran the host's scrollback floor")
+    {
+        // The overrun's output is lost to the dot: a missed one, never a false one.
+        bare.mirror->apply(screen, seedSnapshot(screen, "z"));
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
+}
+
+TEST_CASE("an unprimed mirror's first replay is the attach, whatever it finds", "[vthost][mirror]")
+{
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    SECTION("a session already on the alternate screen, with history cleared and reset behind it")
+    {
+        screen.screenType = 1;
+        auto seed = seedSnapshot(screen, "vim");
+        seed.generation = 7;
+        seed.stableFloor = 9;
+        seed.stableViewportBase = 9;
+        seed.lines = { rowAt(9, "vim") };
+        screen.apply(seed);
+        bare.mirror->apply(screen, seed);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a restarted mirror, whose next connection finds another screen, generation and floor")
+    {
+        bare.mirror->apply(screen, seedSnapshot(screen, "a"));
+        bare.mirror->restart();
+        auto fresh = vthost::client::RemoteScreen {};
+        fresh.columns = 5;
+        fresh.lines = 1;
+        fresh.screenType = 1;
+        auto first = seedSnapshot(fresh, "vim");
+        first.generation = 3;
+        first.stableFloor = 4;
+        first.stableViewportBase = 4;
+        first.lines = { rowAt(4, "vim") };
+        fresh.apply(first);
+        bare.mirror->apply(fresh, first);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
 }
 
 TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][mirror]")
@@ -2006,6 +2196,35 @@ TEST_CASE("a fractionally scaled wire cell takes its mirrored line off the batch
     CHECK(mirrored.shape == written.shape);
 }
 
+TEST_CASE("a render-only cell flag never comes off the wire", "[vthost][mirror]")
+{
+    // InputMethodPreedit is put on render cells only, never in a grid, so no honest peer sends it; a cell
+    // carrying it would draw a preedit underline under text nobody is composing.
+    auto const sent = vtbackend::GraphicsAttributes {
+        .flags = vtbackend::CellFlags { vtbackend::CellFlag::Bold, vtbackend::CellFlag::InputMethodPreedit }
+    };
+
+    SECTION("a cell")
+    {
+        auto mirrored = vtbackend::LineSoA {};
+        vtbackend::initializeLineSoA(mirrored, vtbackend::ColumnCount(4));
+        auto cell = vthost::wireCellOf(sent);
+        cell.codepoint = U'x';
+        vthost::applyWireCell(mirrored, 1, cell, vtbackend::HyperlinkId {});
+        CHECK(mirrored.sgr[1].flags.test(vtbackend::CellFlag::Bold));
+        CHECK_FALSE(mirrored.sgr[1].flags.test(vtbackend::CellFlag::InputMethodPreedit));
+    }
+
+    SECTION("a line's fill")
+    {
+        auto line = vthost::proto::WireLine {};
+        line.fillFlags = sent.flags.value();
+        auto const fill = vthost::fillAttrsOf(line);
+        CHECK(fill.flags.test(vtbackend::CellFlag::Bold));
+        CHECK_FALSE(fill.flags.test(vtbackend::CellFlag::InputMethodPreedit));
+    }
+}
+
 TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[vthost][mirror]")
 {
     auto h = MirrorHarness {};
@@ -2343,6 +2562,10 @@ TEST_CASE("a live default-color change reaches the mirror", "[vthost][mirror]")
         CHECK(h->mirror->colorPalette().defaultBackground.value() == 0xABCDEF);
         // The server saw the same change.
         CHECK(h->serverTerminal(session)->colorPalette().defaultForeground.value() == 0x123456);
+        // And the mirror's frontend was told, as it is of an OSC 11 it parses itself: what binds the
+        // background repaints only on that.
+        REQUIRE_FALSE(h->mirrorEvents.announcedBackgrounds.empty());
+        CHECK(h->mirrorEvents.announcedBackgrounds.back().value() == 0xABCDEF);
 
         h->client->detach();
     }(&h, session);
@@ -2796,6 +3019,27 @@ TEST_CASE("PARITY OSC 133 shell-integration marks", "[vthost][parity]")
     // (CommandBlocks) and the accessibility prompt span (PromptRegion). All three read the grid,
     // which is why none of them needed a wire surface of its own.
     checkParity(gaps);
+}
+
+TEST_CASE("a mirrored shell's finished command folds on the client as on the host",
+          "[vthost][mirror][folding]")
+{
+    // The marks arrive as row flags written past the parser, which is where a local terminal learns that
+    // its fold ranges are stale. Folding is the client's own view state, so a mirror that never learnt
+    // had nothing to fold: every vi z key, the fold chip and the block column found no range.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    std::ignore = gapsAfter(&h, session, commandRun("ls", { "file-one" }) + "done", mirrorShows(&h, "done"));
+
+    auto const serverRanges = h.serverTerminal(session)->foldRanges();
+    REQUIRE(serverRanges.size() == 1);
+    REQUIRE(h.mirror->foldRanges().size() == serverRanges.size());
+
+    auto const head = vtbackend::LineOffset(0);
+    REQUIRE(h.mirror->toggleFoldContaining(head));
+    CHECK(h.mirror->isLineHiddenByFold(vtbackend::LineOffset(1)));
+    CHECK(h.mirror->expandFoldContaining(head));
+    CHECK_FALSE(h.mirror->isLineHiddenByFold(vtbackend::LineOffset(1)));
 }
 
 TEST_CASE("PARITY DECDWL double-width line", "[vthost][parity]")
@@ -3784,6 +4028,66 @@ TEST_CASE("the attach snapshot's command blocks are adopted without finish event
     CHECK(m.record(2)->state == vtbackend::CommandBlockState::Running);
     CHECK(m.record(2)->commandLine.raw() == "cmd-2");
     CHECK(m.events.finishedBlocks.empty()); // it finished before this client looked: history, not news
+}
+
+TEST_CASE("the command a restart stopped is reported until the session runs one of its own",
+          "[vthost][mirror][interrupted]")
+{
+    auto m = BlockMirror {};
+    auto state = stateWith({ finishedWire(1, 0), promptingWire(2) });
+    state.interruptedCommand = "make test";
+    m.snapshot(state);
+    CHECK(m.mirror->interruptedCommand() == "make test");
+
+    SECTION("an increment that says nothing about blocks leaves it")
+    {
+        m.increment({});
+        CHECK(m.mirror->interruptedCommand() == "make test");
+    }
+
+    SECTION("the shell's own prompt record changing, still at its prompt, leaves it")
+    {
+        m.increment({ promptingWire(2) });
+        CHECK(m.mirror->interruptedCommand() == "make test");
+    }
+
+    SECTION("a live Running block clears it")
+    {
+        m.increment({ runningWire(2) });
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a command quicker than one delta clears it too")
+    {
+        m.increment({ finishedWire(2, 0), promptingWire(3) });
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a resync that states none clears it")
+    {
+        m.snapshot(stateWith({ finishedWire(1, 0), promptingWire(2) }));
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+
+    SECTION("a resync after it cleared does not bring it back")
+    {
+        m.increment({ runningWire(2) });
+        REQUIRE(m.mirror->interruptedCommand().empty());
+        // A resync that states none, with the value the mirror was first told gone from it: nothing the
+        // mirror kept may resurrect the stale value.
+        m.snapshot(stateWith({ finishedWire(1, 0), promptingWire(2) }));
+        CHECK(m.mirror->interruptedCommand().empty());
+    }
+}
+
+TEST_CASE("an over-long interrupted command is cut to what a record keeps", "[vthost][mirror][interrupted]")
+{
+    auto m = BlockMirror {};
+    auto state = stateWith({ promptingWire(1) });
+    state.interruptedCommand = std::string(vtbackend::MaxRecordedCommandLineBytes + 100, 'x');
+    m.snapshot(state);
+    CHECK(m.mirror->interruptedCommand().size() <= vtbackend::MaxRecordedCommandLineBytes);
+    CHECK_FALSE(m.mirror->interruptedCommand().empty());
 }
 
 TEST_CASE("a finish the mirror watched start raises exactly one finish event", "[vthost][mirror][blocks]")

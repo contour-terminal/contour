@@ -91,6 +91,25 @@ class Pane
     std::pair<Pane*, Pane*> split(
         SplitState direction, PaneId splitNodeId, PaneId newLeafId, SessionId newSession, double ratio = 0.5);
 
+    /// Grafts @p subtree beside this leaf, which becomes a split node.
+    ///
+    /// The leaf's own session moves into a freshly created child that keeps this pane's old id (as
+    /// split() does); @p subtree, with every id and session it already carries, becomes the other
+    /// child; this node takes the new id @p splitNodeId.
+    ///
+    /// @pre isLeaf(), @p subtree is not null, and @p state is not None.
+    /// @param subtree     The tree to graft, adopted whole.
+    /// @param splitNodeId The id this node adopts as a split.
+    /// @param state       Horizontal or Vertical.
+    /// @param order       Whether @p subtree becomes the first or the second child.
+    /// @param ratio       The first child's space share, in (0, 1).
+    /// @return The root of the grafted subtree (now a child of this node).
+    Pane* graft(std::unique_ptr<Pane> subtree,
+                PaneId splitNodeId,
+                SplitState state,
+                GraftOrder order,
+                double ratio = 0.5);
+
     /// Absorbs the surviving sibling when @p child (which must be a direct child of this split) is
     /// being closed. After this call, this node *becomes* the surviving sibling (taking over its
     /// leaf session or its split children and id).
@@ -113,6 +132,14 @@ class Pane
     /// terminal living in each slot trades places. Both nodes must be leaves.
     /// @param other The other leaf to trade sessions with (must be a leaf, and not this node).
     void swapLeafPayload(Pane* other) noexcept;
+
+    /// Puts @p session into this leaf in place of the one it carries, keeping the PaneId.
+    ///
+    /// What a restart needs: the pane (the slot hosts address by its id) stays, and a new terminal
+    /// takes the place of one that ended. @pre isLeaf().
+    /// @param session The session the leaf carries from now on.
+    /// @return The session it carried before.
+    SessionId replaceSession(SessionId session) noexcept;
 
     /// Swaps the two children of this split node (their whole subtrees, ids and sessions intact).
     ///

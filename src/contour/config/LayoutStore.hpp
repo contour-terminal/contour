@@ -24,6 +24,7 @@ enum class LayoutSaveError : std::uint8_t
     EmptyName,       ///< The SaveLayout action carried no layout name.
     StoreUnreadable, ///< The existing store could not be read back, so rewriting it would destroy it.
     WriteFailed,     ///< The store could not be written (permissions, disk full, I/O error).
+    NameTaken,       ///< A layout has the name, and the save was not to replace it.
 };
 
 /// A human-readable explanation of @p error, for logs and user-facing notices.
@@ -38,6 +39,7 @@ enum class LayoutSaveError : std::uint8_t
         case LayoutSaveError::StoreUnreadable:
             return "the existing layouts file could not be read; fix or remove it";
         case LayoutSaveError::WriteFailed: return "the layouts file could not be written";
+        case LayoutSaveError::NameTaken: return "a layout with that name already exists";
     }
     return "unknown error";
 }

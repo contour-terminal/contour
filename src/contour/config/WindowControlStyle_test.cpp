@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/ChromeTokenRows.hpp>
+#include <contour/config/WindowControlLook.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
 #include <core/testing/Environment.hpp>
@@ -7,6 +10,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <ranges>
+#include <string_view>
+#include <vector>
 
 using contour::config::configEnumValues;
 using contour::config::HostPlatform;
@@ -26,8 +33,10 @@ namespace
 using core::testing::FakeEnvironment;
 
 /// Every style a user can actually end up with, i.e. every enumerator except the one that resolves.
-constexpr auto ConcreteStyles =
-    std::array { WindowControlStyle::Windows, WindowControlStyle::MacOS, WindowControlStyle::Plasma };
+constexpr auto ConcreteStyles = std::array { WindowControlStyle::Windows,
+                                             WindowControlStyle::MacOS,
+                                             WindowControlStyle::Plasma,
+                                             WindowControlStyle::Linux };
 
 constexpr auto EveryHost =
     std::array { HostPlatform::Other, HostPlatform::Windows, HostPlatform::MacOS, HostPlatform::KdePlasma };
@@ -101,14 +110,39 @@ TEST_CASE("WindowControlStyle: Auto resolves against the host", "[windowcontrols
 {
     CHECK(resolveWindowControlStyle(WindowControlStyle::Auto, HostPlatform::MacOS)
           == WindowControlStyle::MacOS);
-    CHECK(resolveWindowControlStyle(WindowControlStyle::Auto, HostPlatform::KdePlasma)
-          == WindowControlStyle::Plasma);
     CHECK(resolveWindowControlStyle(WindowControlStyle::Auto, HostPlatform::Windows)
           == WindowControlStyle::Windows);
-    // A host with no convention of its own keeps what Contour has always drawn, which is what makes
-    // `auto` a safe default to ship: it changes what an existing user sees on macOS and KDE only.
+    // Every other desktop, KDE's included, takes the Linux header bar's round buttons, placed where the
+    // desktop's own button layout puts them (R-c); Breeze's look stays an explicit `plasma`.
+    CHECK(resolveWindowControlStyle(WindowControlStyle::Auto, HostPlatform::KdePlasma)
+          == WindowControlStyle::Linux);
     CHECK(resolveWindowControlStyle(WindowControlStyle::Auto, HostPlatform::Other)
-          == WindowControlStyle::Windows);
+          == WindowControlStyle::Linux);
+}
+
+TEST_CASE("WindowControlStyle: the Linux row draws round buttons with themed icons", "[windowcontrols]")
+{
+    auto const& linuxRow = windowControlTokens(WindowControlStyle::Linux);
+    CHECK(linuxRow.presentation == WindowControlPresentation::Round);
+    CHECK(linuxRow.side == WindowControlSide::Trailing);
+    CHECK(
+        linuxRow.order
+        == std::array { WindowControlKind::Minimize, WindowControlKind::Maximize, WindowControlKind::Close });
+    CHECK(linuxRow.hoverCornerPercent == 100);
+    // The round fill is the affordance; no style hue tints close.
+    CHECK(linuxRow.closeHoverColor == 0);
+    CHECK(linuxRow.iconNames
+          == std::array<std::string_view, contour::config::WindowControlCount> {
+              "window-close-symbolic", "window-minimize-symbolic", "window-maximize-symbolic" });
+    CHECK(linuxRow.restoreIconName == "window-restore-symbolic");
+    // The glyph styles name no icon.
+    for (auto const style:
+         { WindowControlStyle::Windows, WindowControlStyle::MacOS, WindowControlStyle::Plasma })
+    {
+        auto const& tokens = windowControlTokens(style);
+        CHECK(std::ranges::all_of(tokens.iconNames, &std::string_view::empty));
+        CHECK(tokens.restoreIconName.empty());
+    }
 }
 
 TEST_CASE("WindowControlStyle: an explicit style survives every host", "[windowcontrols]")
@@ -118,6 +152,9 @@ TEST_CASE("WindowControlStyle: an explicit style survives every host", "[windowc
     for (auto const style: ConcreteStyles)
         for (auto const host: EveryHost)
             CHECK(resolveWindowControlStyle(style, host) == style);
+    // Plasma in particular stays Plasma on a KDE session, where Auto now answers Linux.
+    CHECK(resolveWindowControlStyle(WindowControlStyle::Plasma, HostPlatform::KdePlasma)
+          == WindowControlStyle::Plasma);
 }
 
 TEST_CASE("WindowControlStyle: resolving never answers Auto", "[windowcontrols]")
@@ -219,11 +256,114 @@ TEST_CASE("WindowControlStyle: the two platform conventions actually differ", "[
     CHECK(plasma.side == WindowControlSide::Trailing);
     CHECK(plasma.hoverCornerPercent > windows.hoverCornerPercent);
 
-    // And it differs from Windows in NOTHING else: revert its two stated deltas and the whole row
-    // must come back. This is what the derivation buys -- stated as a test so that a later edit
-    // adding a third difference has to say so here too.
+    // And it differs from Windows in NOTHING else: revert its stated deltas -- the round fill, Breeze red, no
+    // Segoe icon font, the highlight wash -- and the whole row must come back. This is what the derivation
+    // buys -- stated as a test so that a later edit adding another difference has to say so here too.
     auto reverted = plasma;
     reverted.hoverCornerPercent = windows.hoverCornerPercent;
     reverted.closeHoverColor = windows.closeHoverColor;
+    reverted.iconFamilies = windows.iconFamilies;
+    reverted.wash = windows.wash;
     CHECK(reverted == windows);
+}
+
+namespace
+{
+/// A font database that has exactly the families named.
+struct InstalledFonts
+{
+    std::vector<std::string_view> families {};
+
+    [[nodiscard]] bool operator()(std::string_view family) const
+    {
+        return std::ranges::find(families, family) != families.end();
+    }
+};
+} // namespace
+
+TEST_CASE("the Windows row draws Segoe Fluent glyphs where installed", "[windowcontrols]")
+{
+    using contour::config::ControlGlyphs;
+    using contour::config::controlGlyphsFor;
+    auto const& windows = windowControlTokens(WindowControlStyle::Windows);
+    auto const iconGlyphs = std::array<std::string_view, 3> { "\uE8BB", "\uE921", "\uE922" };
+
+    CHECK(controlGlyphsFor(windows, InstalledFonts { .families = { "Segoe MDL2 Assets" } })
+          == ControlGlyphs { .family = "Segoe MDL2 Assets", .glyphs = iconGlyphs, .restore = "\uE923" });
+    CHECK(controlGlyphsFor(windows,
+                           InstalledFonts { .families = { "Segoe MDL2 Assets", "Segoe Fluent Icons" } })
+              .family
+          == "Segoe Fluent Icons");
+    CHECK(controlGlyphsFor(windows, InstalledFonts {})
+          == ControlGlyphs { .family = {}, .glyphs = { "✕", "—", "▢" }, .restore = "❐" });
+}
+
+TEST_CASE("Breeze never borrows the Segoe glyphs", "[windowcontrols]")
+{
+    auto const everything = [](std::string_view) {
+        return true;
+    };
+    auto const glyphs =
+        contour::config::controlGlyphsFor(windowControlTokens(WindowControlStyle::Plasma), everything);
+    CHECK(glyphs.family.empty());
+    CHECK(glyphs.glyphs == windowControlTokens(WindowControlStyle::Plasma).glyphs);
+    // A traffic light names no icon font either.
+    CHECK(contour::config::controlGlyphsFor(windowControlTokens(WindowControlStyle::MacOS), everything)
+              .family.empty());
+}
+
+TEST_CASE("the Terminal row draws dots on every host", "[windowcontrols]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::presentationFor;
+    for (auto const style: ConcreteStyles)
+    {
+        CAPTURE(static_cast<int>(style));
+        CHECK(presentationFor(windowControlTokens(style), ChromeStyle::Terminal)
+              == WindowControlPresentation::TrafficLight);
+        // Elsewhere each style keeps its own shape.
+        CHECK(presentationFor(windowControlTokens(style), ChromeStyle::Fluent)
+              == windowControlTokens(style).presentation);
+    }
+    CHECK(presentationFor(windowControlTokens(WindowControlStyle::Windows), ChromeStyle::Fluent)
+          == WindowControlPresentation::Button);
+
+    // Each dot's hue says what it does: close the danger, minimise the warning, maximise the success.
+    using contour::config::DotRoles;
+    using contour::config::StatusColorRole;
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Close)] == StatusColorRole::Danger);
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Minimize)] == StatusColorRole::Warning);
+    CHECK(DotRoles[static_cast<size_t>(WindowControlKind::Maximize)] == StatusColorRole::Success);
+}
+
+TEST_CASE("every row that draws round buttons carries their size and icon and radius", "[windowcontrols]")
+{
+    // The Settings dropdown offers every style on every row, so a row that can draw a style's shape must also
+    // carry that shape's metrics: a zero there is an invisible, unclickable button.
+    using contour::config::ChromeStyle;
+    using contour::config::ChromeTokenRows;
+    using contour::config::presentationFor;
+    for (auto const rowIndex: std::views::iota(std::size_t { 0 }, contour::config::detail::ChromeStyleCount))
+    {
+        auto const row = static_cast<ChromeStyle>(rowIndex);
+        auto const& tokens = ChromeTokenRows[rowIndex];
+        for (auto const style: ConcreteStyles)
+        {
+            CAPTURE(rowIndex, static_cast<int>(style));
+            if (presentationFor(windowControlTokens(style), row) != WindowControlPresentation::Round)
+                continue;
+            CHECK(tokens.size.windowButton > 0);
+            CHECK(tokens.size.windowButtonGlyph > 0);
+            CHECK(tokens.size.windowButtonGlyph <= tokens.size.windowButton);
+            CHECK(tokens.radii.windowButton > 0);
+        }
+    }
+}
+
+TEST_CASE("the Windows row washes with the kit fill", "[windowcontrols]")
+{
+    using contour::config::ControlWash;
+    CHECK(windowControlTokens(WindowControlStyle::Windows).wash == ControlWash::KitFill);
+    CHECK(windowControlTokens(WindowControlStyle::Plasma).wash == ControlWash::Highlight);
+    CHECK(windowControlTokens(WindowControlStyle::MacOS).wash == ControlWash::Highlight);
 }

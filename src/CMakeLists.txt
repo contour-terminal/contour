@@ -12,6 +12,8 @@ if(CONTOUR_CODE_COVERAGE_ENABLED)
     add_compile_options(-g --coverage)
 endif()
 
+# Before every module: their suites link its test support.
+add_subdirectory(testing)
 add_subdirectory(crispy)
 add_subdirectory(text_shaper)
 add_subdirectory(vtpty)

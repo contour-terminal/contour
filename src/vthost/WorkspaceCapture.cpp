@@ -32,9 +32,9 @@ namespace
         {
             case vtbackend::CommandBlockState::Prompting: return std::nullopt;
             case vtbackend::CommandBlockState::Running:
-                // The shell this record belonged to is not coming back with the program in it.
+                // The program did not finish, and after a restore it cannot still be running.
                 record.state = vtbackend::CommandBlockState::Finished;
-                record.end = vtbackend::CommandBlockEnd::Implicit;
+                record.end = vtbackend::CommandBlockEnd::Abandoned;
                 return record;
             case vtbackend::CommandBlockState::Finished: return record;
         }

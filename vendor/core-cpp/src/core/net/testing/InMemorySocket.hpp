@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
@@ -236,6 +237,20 @@ class InMemorySocket final: public ISocket
     /// @c close it does nothing, as every platform socket does.
     [[nodiscard]] ResultAwaitable<void> shutdownWrite() override;
 
+    /// @copydoc ISocket::armKeepAlive
+    ///
+    /// **Records the request and succeeds**, so a consumer's test can assert that its server armed
+    /// keepalive on the connection it decided was long-lived (@c keepAliveRequests) without a real
+    /// TCP connection to probe. It probes nothing: no expiry is ever staged by it. After @c close it
+    /// answers @c NetErrorCode::BadHandle and records nothing, as the platform sockets do.
+    [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override;
+
+    /// @return Every successful @c armKeepAlive request, in order; empty if none was made.
+    [[nodiscard]] std::vector<KeepAliveSettings> const& keepAliveRequests() const noexcept
+    {
+        return _keepAliveRequests;
+    }
+
     [[nodiscard]] std::string peerAddress() const override { return _peerAddress; }
 
     void close() noexcept override;
@@ -328,6 +343,8 @@ class InMemorySocket final: public ISocket
     ReadOperation _read;
     WriteOperation _writePending;
     WriteOperation _write;
+
+    std::vector<KeepAliveSettings> _keepAliveRequests;
 
     bool _closed { false };
     bool _peerClosed { false };

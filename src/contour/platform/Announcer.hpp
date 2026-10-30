@@ -7,6 +7,8 @@
 #include <QtCore/QString>
 #include <QtGui/QAccessible>
 
+#include <functional>
+#include <memory>
 #include <utility>
 
 namespace contour::platform
@@ -53,14 +55,20 @@ class QtAnnouncer final: public Announcer
 {
   public:
     /// @param anchor The object an assistive client already knows about. Must outlive this announcer.
-    explicit QtAnnouncer(QObject* anchor): _anchor { anchor } {}
+    explicit QtAnnouncer(QObject* anchor): QtAnnouncer { [anchor]() { return anchor; } } {}
+
+    /// For an anchor that comes and goes with the object it belongs to -- a window's, which exists only
+    /// while the window is shown.
+    /// @param anchor Resolved on every announcement, on the announcing thread; null says nothing then.
+    explicit QtAnnouncer(std::function<QObject*()> anchor): _anchor { std::move(anchor) } {}
 
     void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
     {
-        if (_anchor == nullptr || message.isEmpty())
+        auto* const anchor = _anchor ? _anchor() : nullptr;
+        if (anchor == nullptr || message.isEmpty())
             return;
 
-        postToObject(_anchor, [anchor = _anchor, message, politeness]() {
+        postToObject(anchor, [anchor, message, politeness]() {
             auto event = QAccessibleAnnouncementEvent(anchor, message);
             event.setPoliteness(politeness);
             QAccessible::updateAccessibility(&event);
@@ -68,7 +76,30 @@ class QtAnnouncer final: public Announcer
     }
 
   private:
-    QObject* _anchor;
+    std::function<QObject*()> _anchor;
+};
+
+/// An Announcer that speaks only while a setting allows it -- the user's `accessibility_announcements` --
+/// asking on every announcement, so a configuration reload takes effect at the next one.
+class GatedAnnouncer final: public Announcer
+{
+  public:
+    /// @param inner     What speaks while allowed.
+    /// @param isAllowed Asked on every announcement, on the announcing thread.
+    GatedAnnouncer(std::unique_ptr<Announcer> inner, std::function<bool()> isAllowed):
+        _inner { std::move(inner) }, _isAllowed { std::move(isAllowed) }
+    {
+    }
+
+    void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
+    {
+        if (_isAllowed())
+            _inner->announce(message, politeness);
+    }
+
+  private:
+    std::unique_ptr<Announcer> _inner;
+    std::function<bool()> _isAllowed;
 };
 
 /// An Announcer that says nothing.

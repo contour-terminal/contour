@@ -1,8 +1,9 @@
 // vim:syntax=qml
 // Recursive renderer for one node of a tab's split-pane tree.
 //
-// A leaf node renders a single terminal pane (a ContourTerminal bound to the leaf's session); a
-// split node renders a SplitView containing two child panes laid out along the node's orientation.
+// A leaf node renders a single terminal pane in its card (PaneCard.qml: the header, the border, the
+// terminal); a split node renders a SplitView containing two child panes laid out along the node's
+// orientation.
 // The structure follows the vtworkspace::Pane tree, surfaced to QML as PaneProxy objects.
 //
 // A QML component cannot instantiate itself by name (Qt rejects that as "instantiated
@@ -38,8 +39,36 @@ FocusScope {
     // top-level instance in Main.qml still sets `node:` declaratively at construction.
     property var node: null
 
+    // The panes the tab shows (WindowController.visiblePaneCount): two or more make every leaf a card with
+    // a header. Main.qml gives it to the root; each split hands its own to its children.
+    property int visiblePanes: 1
+
+    // A window::HeaderReveal's value (WindowController.headerReveal), handed down as visiblePanes is.
+    property int headerReveal: 0
+
+    // Whether a locked pane draws its lock in a pill over its own grid (Main.qml's secureLockInPane), handed
+    // down as visiblePanes is. A bool by the QML-facing carve-out.
+    property bool lockInPane: false
+
+    // A window::TitleBandPresence's value (Main.qml's titleBandPresence): whether the window's band shows the
+    // title, handed down as visiblePanes is. 0 is TitleBandPresence::Absent, as ChromeBlockNames.bandAbsent.
+    property int titleBand: 0
+
+    // How deep in the tree this node sits: 0 for the tab's root, one more for each split above it.
+    property int depth: 0
+
     // Smallest first-child share a divider drag may persist; keeps both panes visible/grabbable.
     readonly property real minPaneRatio: 0.05
+
+    // What a split hands the child PaneNode it loads: its depth, and the tab's pane count and reveal as
+    // live bindings (the child is URL-loaded, so it cannot bind them declaratively; see `node`).
+    function handDown(child) {
+        child.depth = root.depth + 1
+        child.visiblePanes = Qt.binding(function() { return root.visiblePanes })
+        child.headerReveal = Qt.binding(function() { return root.headerReveal })
+        child.lockInPane = Qt.binding(function() { return root.lockInPane })
+        child.titleBand = Qt.binding(function() { return root.titleBand })
+    }
 
     // Clamp a raw drag ratio into [minPaneRatio, 1 - minPaneRatio]. Hoisted to the top-level item (and
     // kept a pure function) so the clamp arithmetic is unit-testable without synthesizing a drag.
@@ -47,20 +76,79 @@ FocusScope {
         return Math.max(minPaneRatio, Math.min(1.0 - minPaneRatio, raw))
     }
 
-    // Leaf branch: a single terminal pane.
+    // Round a logical extent to whole device pixels at ratio `dpr` (#2040): the first card's share, so
+    // the second card's origin (`inset + first + gap`) lands on the device grid. Pure and hoisted for the
+    // same reason as clampRatio: the offscreen screen's ratio is always 1.
+    function snapToDevice(logical, dpr) {
+        return Math.round(logical * dpr) / dpr
+    }
+
+    // Floor a gap or an inset to whole device pixels at ratio `dpr`, keeping a non-zero one at least one
+    // device pixel. Floor, not round: the window-size solver counts these extents rounded UP
+    // (window::snappedChromePixels mirrors this rule), so what is drawn never exceeds what was counted and
+    // no card loses a column to it. The 1e-9 keeps an exact product (6 x 1.5) from flooring a pixel short.
+    function snapGapToDevice(logical, dpr) {
+        if (logical <= 0)
+            return 0
+        return Math.max(1, Math.floor(logical * dpr + 1e-9)) / dpr
+    }
+
+    // The device-pixel grid both the geometry and the clip path agree about (#2040): the inset, the gap
+    // and the first card all sit on it.
+    //
+    // KNOWN GAP: this is the SCREEN's ratio, while every C++ consumer of the boundary rounds at
+    // QWindow::devicePixelRatio() -- TerminalDisplay::devicePixelRatio(), the frame-derived scale in
+    // TerminalRenderNode::prepare(), and the window-size solver's split chrome. The two agree unless
+    // something overrides the ratio per window (QT_SCALE_FACTOR, or a compositor handing Qt a window
+    // ratio distinct from its screen's), and there they would differ. Closing it needs C++:
+    // QWindow::devicePixelRatio() is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would
+    // take a QML-facing per-window object, which does not exist today (the only context properties are
+    // the app-global terminalSessions and chromeStyle). Where they differ, the solver's headroom is what
+    // absorbs it: it rounds the window-grid snap up to a whole logical pixel, which covers any screen-grid
+    // snap of a whole-pixel token -- but the Terminal row's tokens are cells, a fractional number of logical
+    // pixels, and there a finer screen grid can draw a gap or inset a fraction of a pixel wider than was
+    // counted, taking it from a card's last column or row.
+    readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+
+    // The session the backdrop takes its opacity from: the first leaf's. A split's panes share their
+    // tab's profile, and an opaque backdrop would hide the desktop a translucent profile shows through.
+    function firstLeafSession(node) {
+        if (node === null)
+            return null
+        return node.isLeaf ? node.session : firstLeafSession(node.first)
+    }
+
+    // Only a split tree's root draws the gap behind its cards and insets them; a leaf root, and every
+    // node inside a split, is edge to edge.
+    readonly property bool isSplitRoot: depth === 0 && node !== null && !node.isLeaf
+    readonly property var backdropSession: firstLeafSession(node)
+
+    // The gap's colour behind a split tree's cards, which the root's inset and every handle show.
+    Rectangle {
+        objectName: "splitBackdrop"
+        anchors.fill: parent
+        visible: root.isSplitRoot
+        color: chromeStyle.colors.paneGapFill
+        opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
+    }
+
+    // Leaf branch: a single terminal pane, in its card.
     Loader {
         anchors.fill: parent
         active: root.node !== null && root.node.isLeaf
-        sourceComponent: TerminalPane {
-            session: root.node ? root.node.session : null
-            paneActive: root.node ? root.node.active : false
-            onActivated: { if (root.node) root.node.activate() }
+        sourceComponent: PaneCard {
+            node: root.node
+            visiblePanes: root.visiblePanes
+            headerReveal: root.headerReveal
+            lockInPane: root.lockInPane
+            titleBand: root.titleBand
         }
     }
 
-    // Split branch: two child PaneNodes in a SplitView.
+    // Split branch: two child PaneNodes in a SplitView, inset from the content edge at the tree's root.
     Loader {
         anchors.fill: parent
+        anchors.margins: root.isSplitRoot ? root.snapGapToDevice(chromeStyle.space.paneInset, root.dprSnap) : 0
         active: root.node !== null && !root.node.isLeaf
         sourceComponent: splitComponent
     }
@@ -78,73 +166,140 @@ FocusScope {
             // orientation: vtworkspace::SplitState::Vertical (2) => side-by-side (Qt.Horizontal).
             orientation: (root.node && root.node.orientation === 2) ? Qt.Horizontal : Qt.Vertical
 
-            // The device-pixel grid both the geometry and the clip path agree about (#2040). Shared by
-            // the handle and the first child, because BOTH have to sit on it -- see below.
-            //
-            // KNOWN GAP: this is the SCREEN's ratio, while every C++ consumer of the boundary rounds at
-            // QWindow::devicePixelRatio() -- TerminalDisplay::devicePixelRatio(), and the frame-derived
-            // scale in TerminalRenderNode::prepare(). The two agree unless something overrides the ratio
-            // per window (QT_SCALE_FACTOR, or a compositor handing Qt a window ratio distinct from its
-            // screen's), and there they would differ. Closing it needs C++: QWindow::devicePixelRatio()
-            // is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would take a QML-facing
-            // per-window object, which does not exist today (the only context properties are the
-            // app-global terminalSessions and chromeStyle).
-            readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+            // The root's device-pixel grid, shared by the handle and the first child (see root.dprSnap).
+            readonly property real dprSnap: root.dprSnap
 
-            // Explicit handle so the thickness has ONE source (vtworkspace::DefaultSplitHandleThickness,
-            // surfaced as terminalSessions.splitHandleThickness) shared with the window-size solver.
-            // Visuals reproduce the Qt Quick "Basic" style default delegate this replaces.
+            // The handle IS the gap between two cards: `space.paneGap` wide side by side, `space.paneGapRows`
+            // high stacked -- the same tokens the window-size solver counts (window::splitChromeOf), so the
+            // two cannot diverge. Its containment mask widens what grabs it to `space.splitHit` without
+            // moving a card: Qt's documented way to make a SplitView handle easier to hit.
             //
-            // Snapped to whole device pixels for the same reason the first child's extent is: the SECOND
-            // pane's origin is `firstChild.width + handleThickness`, so snapping only the extent leaves
-            // that origin fractional whenever the handle is. At the very common 125% desktop scale the
-            // default 6 logical pixels is 7.5 device pixels, and 175% makes it 10.5 -- users on exactly
-            // those scales would have seen the #2040 artifact survive in the right/bottom pane.
-            handle: Rectangle {
-                readonly property real snappedThickness:
-                    Math.round(terminalSessions.splitHandleThickness * splitView.dprSnap) / splitView.dprSnap
-                implicitWidth: splitView.orientation === Qt.Horizontal
-                    ? snappedThickness : splitView.width
-                implicitHeight: splitView.orientation === Qt.Horizontal
-                    ? splitView.height : snappedThickness
-                color: SplitHandle.pressed ? splitView.palette.mid
-                    : (SplitHandle.hovered ? splitView.palette.midlight : splitView.palette.button)
+            // Floored to whole device pixels for the same reason the first child's extent is rounded: the
+            // SECOND pane's origin is `inset + firstChild.width + gap`, so snapping only the extent leaves
+            // that origin fractional whenever the gap is. At the very common 125% desktop scale a 6 point
+            // gap is 7.5 device pixels, and 175% makes it 10.5 -- users on exactly those scales would have
+            // seen the #2040 artifact survive in the right/bottom pane. Floored rather than rounded so the
+            // gap never outgrows what the solver counted (see root.snapGapToDevice).
+            handle: Item {
+                id: splitHandle
+                objectName: "splitHandle"
+
+                readonly property bool sideBySide: splitView.orientation === Qt.Horizontal
+                readonly property real thickness: root.snapGapToDevice(
+                    sideBySide ? chromeStyle.space.paneGap : chromeStyle.space.paneGapRows, splitView.dprSnap)
+                // The hit area's own hover counts too: SplitHandle.hovered follows the SplitView's
+                // hoverEnabled, which a platform without hover effects leaves off.
+                readonly property bool engaged: SplitHandle.hovered || SplitHandle.pressed || hitHover.hovered
+                // The Terminal row draws the split as a line of box glyphs; the native rows' gap is the line.
+                readonly property string lineGlyph: chromeStyle.splitLineGlyphs[sideBySide ? 0 : 1]
+
+                z: 1
+                implicitWidth: sideBySide ? thickness : splitView.width
+                implicitHeight: sideBySide ? splitView.height : thickness
+                containmentMask: hitArea
+
+                // Minimal draws its split line; Comfortable's gap is the root's backdrop showing through, so
+                // filling it again would composite a translucent profile's gap twice. Minimal's line is the
+                // separator ink, translucent by design, so it keeps the backdrop beneath it to sit on.
+                Rectangle {
+                    objectName: "splitLine"
+                    anchors.fill: parent
+                    visible: splitHandle.lineGlyph === "" && chromeStyle.density === "minimal"
+                    color: chromeStyle.colors.paneSplitLine
+                    opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
+                }
+
+                Item {
+                    id: hitArea
+                    objectName: "splitHitArea"
+                    // Centred exactly, half a pixel and all: the hit area is a mask, not something drawn.
+                    x: (parent.width - width) / 2
+                    y: (parent.height - height) / 2
+                    width: splitHandle.sideBySide
+                        ? Math.max(chromeStyle.space.splitHit, splitHandle.thickness) : parent.width
+                    height: splitHandle.sideBySide
+                        ? parent.height : Math.max(chromeStyle.space.splitHit, splitHandle.thickness)
+
+                    HoverHandler {
+                        id: hitHover
+                        cursorShape: splitHandle.sideBySide ? Qt.SplitHCursor : Qt.SplitVCursor
+                    }
+                }
+
+                Rectangle {
+                    objectName: "splitGrabber"
+                    anchors.centerIn: parent
+                    width: splitHandle.sideBySide ? chromeStyle.size.grabber : chromeStyle.size.grabberLength
+                    height: splitHandle.sideBySide ? chromeStyle.size.grabberLength : chromeStyle.size.grabber
+                    radius: chromeStyle.radii.grabber
+                    color: chromeStyle.colors.paneGrabber
+                    opacity: splitHandle.engaged ? 1.0 : 0.0
+                    visible: chromeStyle.size.grabber > 0 && opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.fast } }
+                }
+
+                // Clipped to the handle, as the last glyph overhangs it; the handle itself is not clipped,
+                // since its hit area overhangs it on purpose.
+                Item {
+                    objectName: "splitLineGlyphs"
+                    anchors.fill: parent
+                    clip: true
+
+                    Repeater {
+                        model: splitHandle.lineGlyph === "" ? 0
+                            : Math.ceil(splitHandle.sideBySide ? splitHandle.height / chromeStyle.cellHeight
+                                                               : splitHandle.width / chromeStyle.cellWidth)
+                        delegate: Text {
+                            required property int index
+                            objectName: "splitLineGlyph"
+                            x: splitHandle.sideBySide ? 0 : index * chromeStyle.cellWidth
+                            y: splitHandle.sideBySide ? index * chromeStyle.cellHeight : 0
+                            text: splitHandle.lineGlyph
+                            font: chromeStyle.font
+                            // The grabber's colour is the row's accent (the Terminal row draws no grabber).
+                            color: splitHandle.engaged ? chromeStyle.colors.paneGrabber : chromeStyle.colors.paneSplitLine
+                        }
+                    }
+                }
             }
 
             // First child (URL-loaded to allow recursion).
             Loader {
                 id: firstChild
+                objectName: "splitFirst"
                 source: "PaneNode.qml"
-                onLoaded: item.node = Qt.binding(function() { return root.node ? root.node.first : null })
+                onLoaded: {
+                    root.handDown(item)
+                    item.node = Qt.binding(function() { return root.node ? root.node.first : null })
+                }
                 // Snapped to whole DEVICE pixels, not left fractional (#2040).
                 //
                 // `view.width * ratio` is a real number, so the first child routinely gets a
-                // fractional width and the second child a fractional origin. That origin reaches the
-                // renderer twice, by two paths that round differently: the vertex transform composes
-                // it unrounded (TerminalRenderNode::prepare -> composeItemToClip), while the scissor
-                // rounds it to a whole pixel (qRound(originScene.x() * dpr)). Geometry and clip then
-                // disagree by up to half a pixel, and because the glyph atlas is sampled with
-                // QRhiSampler::Nearest the sample points land on texel boundaries -- a stem loses its
-                // bright column for a scanline or two while its neighbours in the same row are
-                // untouched.
+                // fractional width and the second child a fractional origin. composeItemToClip rounds
+                // every terminal's origin onto a whole device pixel, so the glyphs no longer depend on
+                // this snap; it keeps the pane boundary and the handle between panes on that grid.
                 //
                 // Snapping in LOGICAL coordinates would not be enough at a fractional device pixel
                 // ratio, hence the round-trip through splitView.dprSnap: the pane boundary has to land
                 // on a hardware pixel, which is the quantity both paths agree about. The handle is
                 // snapped to the same grid, which is what makes the SECOND pane's origin
-                // (`firstChild.width + handleThickness`) whole as well.
+                // (`firstChild.width + gap`) whole as well.
                 readonly property real dprSnap: splitView.dprSnap
                 SplitView.preferredWidth: SplitView.view.orientation === Qt.Horizontal
-                    ? Math.round(SplitView.view.width * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
+                    ? root.snapToDevice(SplitView.view.width * (root.node ? root.node.ratio : 0.5), dprSnap) : -1
                 SplitView.preferredHeight: SplitView.view.orientation === Qt.Vertical
-                    ? Math.round(SplitView.view.height * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
+                    ? root.snapToDevice(SplitView.view.height * (root.node ? root.node.ratio : 0.5), dprSnap) : -1
             }
 
             // Second child (fills the remaining space).
             Loader {
                 id: secondChild
+                objectName: "splitSecond"
                 source: "PaneNode.qml"
-                onLoaded: item.node = Qt.binding(function() { return root.node ? root.node.second : null })
+                onLoaded: {
+                    root.handDown(item)
+                    item.node = Qt.binding(function() { return root.node ? root.node.second : null })
+                }
                 SplitView.fillWidth: true
                 SplitView.fillHeight: true
             }

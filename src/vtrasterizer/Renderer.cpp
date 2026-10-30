@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/AtlasBudget.hpp>
 #include <vtrasterizer/GutterCells.hpp>
+#include <vtrasterizer/RailGeometry.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -40,7 +41,12 @@ namespace vtrasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper)
+    /// How thick the input method preedit's underline is, in logical points.
+    constexpr auto PreeditUnderlinePoints = 1.0;
+
+    /// Loads the font-derived fields of @p gm.
+    /// @param dpi The font's DPI, which the lengths given in points are drawn at.
+    void loadGridMetricsFromFont(text::FontKey font, GridMetrics& gm, text::Shaper& textShaper, text::DPI dpi)
     {
         auto const m = textShaper.metrics(font);
 
@@ -55,6 +61,8 @@ namespace
         gm.baseline = m.lineHeight - m.ascender;
         gm.underline.position = gm.baseline + m.underlinePosition;
         gm.underline.thickness = m.underlineThickness;
+        // A vertical length, so the vertical DPI.
+        gm.preeditUnderlineThickness = logicalPointsToPixels(PreeditUnderlinePoints, dpi.y);
 
         rendererLog()("Loading grid metrics {}", gm);
     }
@@ -62,7 +70,8 @@ namespace
     GridMetrics loadGridMetrics(text::FontKey font,
                                 vtbackend::PageSize pageSize,
                                 PageMargin pageMargin,
-                                text::Shaper& textShaper)
+                                text::Shaper& textShaper,
+                                text::DPI dpi)
     {
         auto gm = GridMetrics {};
 
@@ -74,7 +83,7 @@ namespace
         // until it runs this is what every consumer of gridMetrics() maps through.
         gm.pageMargin = pageMargin;
 
-        loadGridMetricsFromFont(font, gm, textShaper);
+        loadGridMetricsFromFont(font, gm, textShaper, dpi);
 
         return gm;
     }
@@ -161,7 +170,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
-    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, pageMargin, *_textShaper) },
+    _gridMetrics { loadGridMetrics(
+        _fonts.regular, pageSize, pageMargin, *_textShaper, _fontDescriptions.dpi) },
     _publishedMetrics { _gridMetrics },
     _publishedFontDescriptions { _fontDescriptions },
     _publishedCellSize { _gridMetrics.cellSize },
@@ -171,7 +181,8 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
     _textRenderer { _gridMetrics, *_textShaper,   _fontDescriptions,
                     _fonts,       _imageRenderer, glyphScalerFor(textScalingMethod) },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
-    _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block }
+    _cursorRenderer { _gridMetrics, vtbackend::CursorShape::Block },
+    _chipRenderer { _gridMetrics, _textRenderer, _fontDescriptions, _fonts }
 {
     _textRenderer.updateFontMetrics();
     _imageRenderer.setCellSize(cellSize());
@@ -517,12 +528,13 @@ void Renderer::updateFontMetrics()
     // Update only the font-derived fields (cellSize, baseline, underline) in place. Page geometry
     // (pageSize, pageMargin, cellMargin) is owned by the geometry path, not the font, so leave it
     // untouched — this is what lets callers avoid manually saving/restoring it around a font rebuild.
-    loadGridMetricsFromFont(_fonts.regular, _gridMetrics, *_textShaper);
+    loadGridMetricsFromFont(_fonts.regular, _gridMetrics, *_textShaper, _fontDescriptions.dpi);
 
     if (_renderTarget)
         configureTextureAtlas();
 
     _textRenderer.updateFontMetrics();
+    _chipRenderer.clearCache();
     _imageRenderer.setCellSize(cellSize());
 
     clearCache();
@@ -571,6 +583,7 @@ void Renderer::applyPendingReconfig()
         }
         _gridMetrics.pageSize = geometry.pageSize;
         _gridMetrics.pageMargin = geometry.pageMargin;
+        _gridMetrics.rail = geometry.rail;
         growAtlasForPage(geometry.pageSize);
     }
 
@@ -649,6 +662,7 @@ void Renderer::publishFontMetricsAndDescriptions()
         _publishedMetrics.cellSize = _gridMetrics.cellSize;
         _publishedMetrics.baseline = _gridMetrics.baseline;
         _publishedMetrics.underline = _gridMetrics.underline;
+        _publishedMetrics.preeditUnderlineThickness = _gridMetrics.preeditUnderlineThickness;
         _publishedMetrics.cellMargin = _gridMetrics.cellMargin;
         _publishedFontDescriptions = _fontDescriptions;
         // Keep the lock-free cell-size mirror in lockstep with _publishedMetrics.cellSize so the two
@@ -701,6 +715,20 @@ void Renderer::reconcileTotalPageSize(vtbackend::PageSize totalPageSize)
     _lastObservedTotalPageSize = totalPageSize;
 }
 
+namespace
+{
+    /// The frame's sticky header where the renderer draws it, over the top row; nullptr for none, and for one
+    /// the chrome shows -- the pane header, the title band --, which is data for it and covers no row here.
+    [[nodiscard]] vtbackend::RenderStickyHeader const* inGridStickyHeader(
+        vtbackend::RenderBuffer const& buffer)
+    {
+        auto const& header = buffer.stickyHeader;
+        if (!header || header->presentation != vtbackend::StickyHeaderPresentation::InGrid)
+            return nullptr;
+        return &*header;
+    }
+} // namespace
+
 bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     ZoneScoped;
@@ -722,8 +750,14 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     reconcileTotalPageSize(terminal.totalPageSize());
 
     // The renderer survives tab changes; snapshot the active terminal palette before taking a render buffer.
-    _backgroundRenderer.setDefaultColor(
-        terminal.runUnderStateLock([&] { return terminal.colorPalette().defaultBackground; }));
+    // Under the same lock, the terminal learns how wide its pills are in the face this renderer draws them
+    // in -- measured once per font and chip metrics, and taken only where they changed.
+    auto const& labelMetrics = _chipRenderer.labelMetrics();
+    _pageBackground = terminal.runUnderStateLock([&] {
+        terminal.setPillLabelMetrics(labelMetrics);
+        return terminal.colorPalette().defaultBackground;
+    });
+    _backgroundRenderer.setDefaultColor(_pageBackground);
 
     executeImageDiscards();
 
@@ -835,13 +869,16 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
                 renderStatusBar(*bar);
             renderCells(split.mainCells);
             renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
+            renderBlockHighlight(buffer.blockHighlight, mainPageSize.columns, 0);
             renderLines(split.mainLines);
-            renderGutter(std::span(buffer.gutter));
+            renderChipBands(std::span(buffer.chipBands), 0);
             renderAnnotations(std::span(buffer.annotations));
+            renderChips(std::span(buffer.chips), 0);
         });
+        renderGutter(std::span(buffer.gutter), 0);
         if (statusShifted)
             renderStatusRows(buffer, split);
-        if (auto const& header = buffer.stickyHeader)
+        if (auto const* const header = inGridStickyHeader(buffer))
         {
             _renderTarget->execute(now);
             renderStickyHeaderStep(*header);
@@ -860,11 +897,14 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             renderCells(split.mainCells, smoothPixelOffset);
             renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
+            renderBlockHighlight(renderBuffer.get().blockHighlight, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
-            renderGutter(std::span(renderBuffer.get().gutter));
+            renderChipBands(std::span(renderBuffer.get().chipBands), smoothPixelOffset);
             renderAnnotations(std::span(renderBuffer.get().annotations));
+            renderChips(std::span(renderBuffer.get().chips), smoothPixelOffset);
         });
+        renderGutter(std::span(renderBuffer.get().gutter), smoothPixelOffset);
 
         // Scissor clips the main display area so the offset content doesn't bleed into the status line.
         {
@@ -882,7 +922,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         }
 
         // The scissored step has flushed the page, and the header is not clipped with the content under it.
-        if (auto const& header = renderBuffer.get().stickyHeader)
+        if (auto const* const header = inGridStickyHeader(renderBuffer.get()))
             renderStickyHeaderStep(*header);
 
         // Pass 2: Status line (no scroll offset, no scissor), its bar ahead of its rows.
@@ -1007,25 +1047,114 @@ void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
     }
 }
 
-void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
+template <typename Content>
+void Renderer::renderShiftedLeft(int shift, Content&& content)
+{
+    _gridMetrics.pageMargin.left -= shift;
+    auto const restore = core::Finally { [&] { _gridMetrics.pageMargin.left += shift; } };
+    _textRenderer.beginFrame();
+    std::forward<Content>(content)();
+    _textRenderer.endFrame();
+}
+
+void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter, int smoothScrollOffset)
 {
     ZoneScoped;
-    for (auto const& marker: gutter)
-        renderOverlayCell(gutterRenderCell(marker), "renderGutter");
+    auto const isRailCell = [](vtbackend::RenderGutterCell const& cell) {
+        return cell.rail != vtbackend::RailSegment::None || cell.mark != vtbackend::RailMark::None;
+    };
+
+    // The bars, opaque, in the strip: rectangles draw before any glyph of the step, so the marks go over.
+    for (auto const& cell: gutter)
+    {
+        auto const rects = railRects(cell, _gridMetrics, smoothScrollOffset);
+        for (auto const& rect: rects.all())
+            _renderTarget->renderRectangle(rect.x,
+                                           rect.y,
+                                           vtbackend::Width::cast_from(rect.width),
+                                           vtbackend::Height::cast_from(rect.height),
+                                           vtbackend::RGBAColor(cell.railColor));
+    }
+
+    // The timestamps and line numbers, left of the strip; where there is none, where they always were.
+    renderShiftedLeft(cellGutterShift(_gridMetrics), [&] {
+        for (auto const& cell: gutter)
+            if (!isRailCell(cell))
+                renderOverlayCell(gutterRenderCell(cell), "renderGutter", OverlayGround::Painted);
+    });
+
+    // The marks the UI font draws -- ✗ on its disc, ▸, ✓ -- at size.railMark, centred on the bar.
+    for (auto const& cell: gutter)
+        if (cell.mark != vtbackend::RailMark::None && drawsMarkInUiFont(cell.mark, _gridMetrics))
+        {
+            try
+            {
+                _chipRenderer.renderMark(*_renderTarget, cell, _pageBackground, smoothScrollOffset);
+            }
+            catch (std::exception const& e)
+            {
+                errorLog()("renderGutter: skipping a mark on line {} due to exception: {}",
+                           cell.lineOffset,
+                           e.what());
+            }
+        }
+
+    // The rest -- the user mark's ◆ -- as their two-cell glyphs: text only, so no cell background covers the
+    // strip around them.
+    renderShiftedLeft(railMarkShift(_gridMetrics), [&] {
+        for (auto const& cell: gutter)
+            if (cell.mark != vtbackend::RailMark::None && !drawsMarkInUiFont(cell.mark, _gridMetrics))
+                renderOverlayCell(railMarkCell(cell), "renderGutter", OverlayGround::Bare);
+    });
+}
+
+void Renderer::renderChips(std::span<vtbackend::RenderChip const> chips, int smoothScrollOffset)
+{
+    ZoneScoped;
+    for (auto const& chip: chips)
+    {
+        try
+        {
+            _chipRenderer.renderChip(*_renderTarget, chip, smoothScrollOffset);
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()(
+                "renderChips: skipping a chip on line {} due to exception: {}", chip.lineOffset, e.what());
+        }
+    }
+}
+
+void Renderer::renderChipBands(std::span<vtbackend::RenderChipBand const> bands, int smoothScrollOffset)
+{
+    ZoneScoped;
+    for (auto const& band: bands)
+    {
+        auto const rects = chipBandRects(band, _gridMetrics, smoothScrollOffset);
+        for (auto const& rect: rects.all())
+            _renderTarget->renderRectangle(rect.x,
+                                           rect.y,
+                                           vtbackend::Width::cast_from(rect.width),
+                                           vtbackend::Height::cast_from(rect.height),
+                                           band.fill);
+    }
 }
 
 void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)
 {
     ZoneScoped;
     for (auto const& cell: annotations)
-        renderOverlayCell(cell, "renderAnnotations");
+        renderOverlayCell(cell, "renderAnnotations", OverlayGround::Painted);
 }
 
-void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what)
+void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell,
+                                 std::string_view what,
+                                 OverlayGround ground)
 {
     try
     {
-        _backgroundRenderer.renderCell(cell);
+        if (ground == OverlayGround::Painted)
+            _backgroundRenderer.renderCell(cell);
         _textRenderer.renderCell(cell);
     }
     catch (std::exception const& e)
@@ -1049,6 +1178,31 @@ void Renderer::renderLineFlash(std::optional<vtbackend::RenderLineFlash> const& 
     auto const alpha = static_cast<uint8_t>(std::lround(std::clamp(flash.alpha, 0.0f, 1.0f) * 255.0f));
     _renderTarget->renderRectangle(
         topLeft.x, topLeft.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(flash.color, alpha));
+}
+
+void Renderer::renderBlockHighlight(std::optional<vtbackend::RenderBlockHighlight> const& highlight,
+                                    vtbackend::ColumnCount columns,
+                                    int smoothScrollOffset)
+{
+    if (!highlight)
+        return;
+    ZoneScoped;
+    auto const topLeft = _gridMetrics.map(highlight->top, vtbackend::ColumnOffset(0), smoothScrollOffset);
+    auto const width = unbox<int>(_gridMetrics.cellSize.width) * unbox<int>(columns);
+    auto const height = unbox<int>(_gridMetrics.cellSize.height) * unbox<int>(highlight->height);
+    auto const rectangle = [&](int x, int y, int w, int h, vtbackend::RGBAColor color) {
+        if (w > 0 && h > 0 && color.alpha() > 0)
+            _renderTarget->renderRectangle(
+                x, y, vtbackend::Width::cast_from(w), vtbackend::Height::cast_from(h), color);
+    };
+
+    rectangle(topLeft.x, topLeft.y, width, height, highlight->tint);
+
+    // The ring inside the outline, but for the edges the block runs past: the page cuts it there.
+    auto const outline = RailRect { .x = topLeft.x, .y = topLeft.y, .width = width, .height = height };
+    for (auto const& edge:
+         hoverRingRects(outline, _gridMetrics.rail.chips.hoverRing, highlight->continues).all())
+        rectangle(edge.x, edge.y, edge.width, edge.height, highlight->ring);
 }
 
 void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)

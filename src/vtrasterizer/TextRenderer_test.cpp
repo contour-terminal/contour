@@ -34,6 +34,7 @@
 #include <set>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 static std::filesystem::path testFontPath;
 
@@ -1012,7 +1013,7 @@ TEST_CASE("Renderer.reconfig.geometry_published_synchronously", "[renderer]")
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
 
     // Published (UI-visible) metrics reflect the request synchronously...
     CHECK(renderer.gridMetrics().pageSize == newPageSize);
@@ -1037,7 +1038,7 @@ TEST_CASE("Renderer.reconfig.geometry_not_applied_to_live_until_render", "[rende
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
 
     // Before apply: the *live* metrics still hold the original page size, even though the published
     // (UI-visible) metrics already reflect the request.
@@ -1065,7 +1066,7 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
     auto const newMargin = vtrasterizer::PageMargin { .left = 7, .top = 11, .bottom = 13 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1280), Height(720) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
     CHECK(fixture.renderTarget.renderSize() != newPixelSize); // not yet applied
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
@@ -1142,8 +1143,10 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
     SECTION("growing the page past the budget rebuilds the atlas at the larger size")
     {
         auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-        renderer.applyResize(
-            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                             grown,
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
         auto const grownCells = static_cast<uint32_t>(grown.area());
@@ -1158,15 +1161,18 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
     SECTION("shrinking back does not rebuild the atlas again")
     {
         auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-        renderer.applyResize(
-            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                             grown,
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
         auto const grownTiles = backend.properties().tileCount.value;
         auto const grownConfigures = backend.configureCount;
 
         renderer.applyResize(vtbackend::ImageSize { Width(400), Height(300) },
                              PageSize { LineCount(10), ColumnCount(20) },
-                             vtrasterizer::PageMargin {});
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
         // Grow-only: a resize drag walks through dozens of sizes, and rebuilding on each would throw
@@ -1182,7 +1188,8 @@ TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]"
         // is the page's own cell count, not a round number near it.)
         renderer.applyResize(vtbackend::ImageSize { Width(700), Height(400) },
                              PageSize { LineCount(20), ColumnCount(70) },
-                             vtrasterizer::PageMargin {});
+                             vtrasterizer::PageMargin {},
+                             vtrasterizer::GutterRailMetrics {});
         vtrasterizer::RendererTest::applyPendingReconfig(renderer);
         CHECK(backend.configureCount == configuresAfterAttach);
     }
@@ -1249,7 +1256,8 @@ TEST_CASE("Renderer.reconfig.geometry_only_does_not_signal_font_resize", "[rende
 
     renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
                          PageSize { LineCount(30), ColumnCount(100) },
-                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 },
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     CHECK_FALSE(renderer.consumeFontReconfigApplied());
@@ -1381,7 +1389,8 @@ TEST_CASE("Renderer.reconfig.setup_apply_returns_consumed_font_reconfig_flag", "
     // A geometry-only change changes no cell size, so the setup apply reports no font reconfig.
     renderer.applyResize(vtbackend::ImageSize { Width(1280), Height(720) },
                          PageSize { LineCount(30), ColumnCount(100) },
-                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 });
+                         vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 },
+                         vtrasterizer::GutterRailMetrics {});
     CHECK_FALSE(renderer.applyStagedReconfigDuringSetup());
 }
 
@@ -1421,7 +1430,7 @@ TEST_CASE("Renderer.reconfig.geometry_preserved_across_font_change", "[renderer]
     auto const newMargin = vtrasterizer::PageMargin { .left = 5, .top = 9, .bottom = 3 };
     auto const newPixelSize = vtbackend::ImageSize { Width(1600), Height(900) };
 
-    renderer.applyResize(newPixelSize, newPageSize, newMargin);
+    renderer.applyResize(newPixelSize, newPageSize, newMargin, vtrasterizer::GutterRailMetrics {});
     REQUIRE(renderer.setFontSize(text::FontSize { 9.0 })); // BDF test font's only available size.
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
@@ -1452,7 +1461,10 @@ TEST_CASE("Renderer.reconfig.requests_coalesce_until_applied", "[renderer]")
 
     auto const finalPageSize = PageSize { LineCount(50), ColumnCount(140) };
     auto const finalMargin = vtrasterizer::PageMargin { .left = 1, .top = 2, .bottom = 3 };
-    renderer.applyResize(vtbackend::ImageSize { Width(1920), Height(1080) }, finalPageSize, finalMargin);
+    renderer.applyResize(vtbackend::ImageSize { Width(1920), Height(1080) },
+                         finalPageSize,
+                         finalMargin,
+                         vtrasterizer::GutterRailMetrics {});
 
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
@@ -1495,7 +1507,8 @@ TEST_CASE("Renderer.reconfig.concurrent_requests_and_apply", "[renderer]")
         auto const lines = 10 + (i % 50);
         renderer.applyResize(vtbackend::ImageSize { Width(640 + (i % 100)), Height(480 + (i % 100)) },
                              PageSize { LineCount(lines), ColumnCount(lines * 2) },
-                             vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 });
+                             vtrasterizer::PageMargin { .left = i % 5, .top = i % 7, .bottom = i % 3 },
+                             vtrasterizer::GutterRailMetrics {});
         if (i % 3 == 0)
             renderer.setPageSize(PageSize { LineCount(lines), ColumnCount(lines * 2) });
         if (i % 11 == 0)
@@ -1592,7 +1605,8 @@ TEST_CASE("Renderer.reconfig.published_cell_size_tracks_grid_metrics", "[rendere
     // A geometry-only change does not alter the cell size; the mirror stays consistent.
     renderer.applyResize(vtbackend::ImageSize { Width(800), Height(600) },
                          PageSize { LineCount(25), ColumnCount(80) },
-                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 });
+                         vtrasterizer::PageMargin { .left = 0, .top = 0, .bottom = 0 },
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
     CHECK(renderer.publishedCellSize() == renderer.gridMetrics().cellSize);
 
@@ -1613,7 +1627,10 @@ TEST_CASE("Renderer.reconfig.page_geometry_preserved_across_dpi_change", "[rende
 
     auto const newPageSize = PageSize { LineCount(33), ColumnCount(111) };
     auto const newMargin = vtrasterizer::PageMargin { .left = 4, .top = 8, .bottom = 6 };
-    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) }, newPageSize, newMargin);
+    renderer.applyResize(vtbackend::ImageSize { Width(1111), Height(666) },
+                         newPageSize,
+                         newMargin,
+                         vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
 
     // Re-stage the same (valid) font size, which exercises updateFontMetrics() in place.
@@ -2093,8 +2110,10 @@ TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[rendere
     auto const configuresBeforeGrow = backend.configureCount;
 
     auto const grown = PageSize { LineCount(120), ColumnCount(400) };
-    fixture.renderer.applyResize(
-        vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+    fixture.renderer.applyResize(vtbackend::ImageSize { Width(4000), Height(2400) },
+                                 grown,
+                                 vtrasterizer::PageMargin {},
+                                 vtrasterizer::GutterRailMetrics {});
     vtrasterizer::RendererTest::applyPendingReconfig(fixture.renderer);
 
     REQUIRE(backend.configureCount > configuresBeforeGrow); // the atlas was actually rebuilt
@@ -2135,7 +2154,10 @@ TEST_CASE("Renderer.stickyHeader.drawsABandItsCellsTheChipAndASeparator", "[rend
                                                   .cells = {},
                                                   .chip = {},
                                                   .background = band,
-                                                  .separator = edge };
+                                                  .separator = edge,
+                                                  .presentation = StickyHeaderPresentation::InGrid,
+                                                  .outcome = vtbackend::CommandBlockOutcome::Success,
+                                                  .commandLine = {} };
     for (auto const column: std::views::iota(0, 3))
         header.cells.push_back(vtbackend::RenderCell {
             .codepoints = {},
@@ -2241,6 +2263,41 @@ TEST_CASE("Renderer.stickyHeader.coversTheTopRowInAStepAfterThePage", "[renderer
     });
     REQUIRE(separator != rectangles.end());
     CHECK(separator->step == band->step);
+}
+
+TEST_CASE("Renderer.stickyHeader.aHeaderInTheChromeDrawsNothingOverTheTopRow", "[renderer][stickyheader]")
+{
+    // The pane header or the title band shows it: the frame still carries it, as data, but no band, no
+    // separator and no copied cell lands on row 0 -- with the page still or scrolling smoothly.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    vtbackend::test::startCommand(mc, "make");
+    vtbackend::test::printLines(mc, "out", 20);
+    mc.terminal.setStickyHeaderPresentation(StickyHeaderPresentation::Chrome);
+    mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    auto const smooth = GENERATE(false, true);
+    CAPTURE(smooth);
+    if (smooth)
+        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const header = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().stickyHeader;
+    }();
+    REQUIRE(header.has_value());
+    CHECK(header->presentation == StickyHeaderPresentation::Chrome);
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    CHECK(std::ranges::none_of(
+        rectangles, [&](auto const& r) { return r.color == RGBAColor(header->background, 0xFF); }));
+    CHECK(std::ranges::none_of(rectangles,
+                               [&](auto const& r) { return r.color == RGBAColor(header->separator, 0xFF); }));
 }
 
 TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[renderer][stickyheader]")
@@ -2473,6 +2530,209 @@ TEST_CASE("Renderer.lineFlash.tintsTheRowAJumpLandedOn", "[renderer][stickyheade
     CHECK(band->x == 0);
     CHECK(band->height == Height(20));
     CHECK(band->color.alpha() > 0);
+}
+
+TEST_CASE("Renderer.chips.aNativeRowsChipIsAPillInTheUiFont", "[renderer][chip]")
+{
+    // A failed block on a native row: the terminal lays out no cell for its chip, the renderer measures the
+    // UI face once and hands the terminal its advances, then draws the pill -- rounded rectangles of the
+    // chip's fill over its placed columns -- the label's glyphs in its ink from the grid's atlas over it, and
+    // the rail's ✗ as a disc of the mark's colour centred on the bar.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin.left = 30;
+    metrics.rail = GutterRailMetrics { .strip = 22, .bar = 3, .barInset = 8, .radius = 2, .endInset = 2 };
+    metrics.rail.chips.pills[static_cast<std::size_t>(PillStyle::Failed)] =
+        PillMetrics { .fontSize = 9, .weight = 600, .padX = 8, .padY = 1, .radius = 9 };
+    metrics.rail.chips.markEdge = 13;
+    metrics.rail.chips.markFontSize = 9;
+    metrics.rail.chips.markWeight = 700;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(700), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(60) }, LineCount(100) };
+    mc.terminal.settings().gutter =
+        GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+    mc.writeToScreen(vtbackend::test::commandRun("false", { "boom" }, 2));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+    REQUIRE(mc.terminal.pillLabelMetrics().measured());
+    CHECK(mc.terminal.pillLabelMetrics().cellWidth == 10);
+    CHECK(mc.terminal.pillLabelMetrics().styles[static_cast<std::size_t>(PillStyle::Failed)].padding == 16);
+
+    // The next frame is placed by the measured face.
+    (void) mc.terminal.refreshRenderBuffer();
+    fixture.renderTarget.rectangles.clear();
+    fixture.renderTarget.getMockBackend().renderCommands.clear();
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const [chips, gutter, annotations] = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return std::tuple { buffer.get().chips, buffer.get().gutter, buffer.get().annotations };
+    }();
+    REQUIRE(chips.size() == 1);
+    auto const& chip = chips.front();
+    CHECK(chip.style == PillStyle::Failed);
+    CHECK(annotations.empty());
+    REQUIRE(chip.fill.has_value());
+
+    // Seeded metrics: 10x20 cells right of a 30-px margin.
+    auto const rowTop = unbox<int>(chip.lineOffset) * 20;
+    auto const left = 30 + (unbox<int>(chip.columns.fromColumn) * 10);
+    auto const right = 30 + ((unbox<int>(chip.columns.toColumn) + 1) * 10);
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const pill = std::ranges::to<std::vector>(rectangles | std::views::filter([&](auto const& r) {
+                                                       // The rail's bar is the same hue, but opaque and in
+                                                       // the strip.
+                                                       return r.color.rgb() == chip.fill->rgb() && r.x >= 30
+                                                              && r.color.alpha() < 0xFF;
+                                                   }));
+    REQUIRE_FALSE(std::ranges::empty(pill));
+    for (auto const& r: pill)
+    {
+        CHECK(r.x >= left);
+        CHECK(r.x + unbox<int>(r.width) <= right);
+        CHECK(r.y >= rowTop);
+        CHECK(r.y + unbox<int>(r.height) <= rowTop + 20);
+        CHECK(r.color.alpha() <= chip.fill->alpha());
+    }
+    // Right-aligned: its right end meets the columns' right edge.
+    CHECK(std::ranges::max(pill
+                           | std::views::transform([](auto const& r) { return r.x + unbox<int>(r.width); }))
+          == right);
+
+    // The label's glyphs, in the chip's ink, inside the pill's columns.
+    auto const ink = vtrasterizer::atlas::normalize(chip.ink, 1.0f);
+    auto const& tiles = fixture.renderTarget.getMockBackend().renderCommands;
+    auto const label = std::ranges::to<std::vector>(
+        tiles | std::views::filter([&](auto const& tile) { return tile.color == ink; }));
+    REQUIRE_FALSE(std::ranges::empty(label));
+    for (auto const& tile: label)
+    {
+        CHECK(tile.x.value >= left);
+        CHECK(tile.x.value < right);
+    }
+
+    // The ✗: a 13-px disc in the mark's colour, centred on the bar at x 16 + 1.
+    auto const mark = std::ranges::find(gutter, RailMark::Cross, &RenderGutterCell::mark);
+    REQUIRE(mark != gutter.end());
+    auto const disc =
+        std::ranges::to<std::vector>(rectangles | std::views::filter([&](auto const& r) {
+                                         return r.color.rgb() == mark->attributes.foregroundColor && r.x < 30;
+                                     }));
+    REQUIRE_FALSE(std::ranges::empty(disc));
+    // Wider than the 3-px bar at 16 that shares its colour: the disc itself.
+    CHECK(std::ranges::min(disc | std::views::transform([](auto const& r) { return r.x; })) >= 11);
+    CHECK(std::ranges::min(disc | std::views::transform([](auto const& r) { return r.x; })) < 16);
+    CHECK(std::ranges::max(disc
+                           | std::views::transform([](auto const& r) { return r.x + unbox<int>(r.width); }))
+          <= 24);
+}
+
+TEST_CASE("Renderer.blockHighlight.tintsUnderTheTextAndRingsTheBlock", "[renderer][blockhover]")
+{
+    // The hovered block's tint across the page's columns on its rows, issued after the cells' backgrounds
+    // and in the same step -- so over them and under the text, which a step draws after every rectangle --
+    // and a one-pixel ring inside its outline, from the grid's first column to the page's last.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.rail.chips.hoverRing = 1;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes("one-dark", palette)); // a scheme that keeps a visible tint
+    mc.terminal.colorPalette() = palette;
+    mc.terminal.settings().gutter =
+        GutterSettings { .exitStatus = true, .blockColumnForm = BlockColumnForm::Rail };
+    mc.writeToScreen("\033[41m \033[m"); // a coloured cell background on row 0, outside every block
+    mc.writeToScreen(vtbackend::test::commandRun("ls", { "a", "b" }, 0));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+    auto const* block = mc.terminal.commandBlockAt(LineOffset(1));
+    REQUIRE(block != nullptr);
+    mc.terminal.setHoveredCommandBlock(block->id);
+    (void) mc.terminal.refreshRenderBuffer();
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+    auto const highlight = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().blockHighlight;
+    }();
+    REQUIRE(highlight.has_value());
+    REQUIRE(highlight->tint.alpha() > 0);
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const top = unbox<int>(highlight->top) * 20;
+    auto const height = unbox<int>(highlight->height) * 20;
+    auto const tint =
+        std::ranges::find_if(rectangles, [&](auto const& r) { return r.color == highlight->tint; });
+    REQUIRE(tint != rectangles.end());
+    CHECK(tint->x == 0);
+    CHECK(tint->y == top);
+    CHECK(tint->width == Width(200));
+    CHECK(tint->height == Height::cast_from(height));
+
+    // After the cells' backgrounds, in their step.
+    auto const background = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.color.rgb() == palette.normalColor(1) && r.color.alpha() == 0xFF;
+    });
+    REQUIRE(background != rectangles.end());
+    CHECK(background < tint);
+    CHECK(background->step == tint->step);
+
+    auto const ring = std::ranges::to<std::vector>(
+        rectangles | std::views::filter([&](auto const& r) { return r.color == highlight->ring; }));
+    REQUIRE(ring.size() == 4);
+    CHECK(std::ranges::all_of(ring, [&](auto const& r) { return r.step == tint->step; }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.y == top && r.width == Width(200); }));
+    CHECK(std::ranges::any_of(
+        ring, [&](auto const& r) { return r.y == top + height - 1 && r.height == Height(1); }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.x == 0 && r.width == Width(1); }));
+    CHECK(std::ranges::any_of(ring, [&](auto const& r) { return r.x == 199 && r.width == Width(1); }));
+}
+
+TEST_CASE("Renderer.gutter.theTerminalRowsCellsStayWhereTheyAre", "[renderer][rail]")
+{
+    // The Terminal row has no strip: renderGutter() moves none of its cells, however the rest of the rail's
+    // metrics read. Each gutter glyph lands inside the gutter's own columns, left of the page.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin.left = 100;
+    metrics.rail = GutterRailMetrics { .strip = 0, .bar = 3, .barInset = 8, .radius = 2, .endInset = 2 };
+    metrics.rail.chips.markEdge = 13;
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(400), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    auto const gutter = GutterSettings {
+        .foldMarkers = true, .exitStatus = true, .lineNumbers = LineNumberMode::Absolute, .lineNumberWidth = 3
+    };
+    mc.terminal.settings().gutter = gutter;
+    mc.writeToScreen(vtbackend::test::commandRun("false", { "boom" }, 2));
+    mc.writeToScreen(vtbackend::test::PromptStart);
+    (void) mc.terminal.refreshRenderBuffer();
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const gutterLeft = 100 - (vtbackend::gutterLayoutFor(gutter).totalColumns * 10);
+    auto const& tiles = fixture.renderTarget.getMockBackend().renderCommands;
+    auto const inGutter = std::ranges::to<std::vector>(
+        tiles | std::views::filter([](auto const& tile) { return tile.x.value < 100; }));
+    REQUIRE_FALSE(inGutter.empty());
+    for (auto const& tile: inGutter)
+    {
+        CAPTURE(tile.x.value);
+        CHECK(tile.x.value >= gutterLeft);
+        // On the cell grid: the test font's glyphs start at their cell's left edge, and no shift moved them.
+        CHECK((100 - tile.x.value) % 10 == 0);
+    }
 }
 
 TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", "[renderer][statusline]")

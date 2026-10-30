@@ -68,6 +68,7 @@ namespace
     using PKeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)>;
     using BignumPtr = std::unique_ptr<BIGNUM, decltype(&BN_free)>;
     using Asn1OctetStringPtr = std::unique_ptr<ASN1_OCTET_STRING, decltype(&ASN1_OCTET_STRING_free)>;
+    using X509NamePtr = std::unique_ptr<X509_NAME, decltype(&X509_NAME_free)>;
 
     [[nodiscard]] BioPtr memBio(std::string_view pem)
     {
@@ -531,6 +532,13 @@ namespace
         void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override
         {
             _inner->setReceiveDeadline(deadline);
+        }
+
+        /// @param settings The probe intervals; applied to the INNER transport, which is where the
+        ///        TCP connection is -- TLS records ride on it and notice nothing of the probes.
+        [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override
+        {
+            return _inner->armKeepAlive(settings);
         }
 
         [[nodiscard]] std::string peerAddress() const override { return _inner->peerAddress(); }
@@ -1172,16 +1180,20 @@ std::expected<CertKeyPem, std::string> generateSelfSignedCertificate(SelfSignedO
     if (X509_set_pubkey(cert.get(), key.get()) != 1)
         return std::unexpected("setting the certificate public key: " + opensslError());
 
-    auto* const subject = X509_get_subject_name(cert.get());
-    if (X509_NAME_add_entry_by_txt(subject,
-                                   "CN",
-                                   MBSTRING_UTF8,
-                                   reinterpret_cast<unsigned char const*>(options.commonName.c_str()),
-                                   -1,
-                                   -1,
-                                   0)
-            != 1
-        || X509_set_issuer_name(cert.get(), subject) != 1) // self-signed: issuer == subject
+    // Built apart and copied in by both setters: OpenSSL 4 returns the certificate's own subject as const,
+    // so it can no longer be written through X509_get_subject_name().
+    auto const subject = X509NamePtr { X509_NAME_new(), &X509_NAME_free };
+    if (!subject
+        || X509_NAME_add_entry_by_txt(subject.get(),
+                                      "CN",
+                                      MBSTRING_UTF8,
+                                      reinterpret_cast<unsigned char const*>(options.commonName.c_str()),
+                                      -1,
+                                      -1,
+                                      0)
+               != 1
+        || X509_set_subject_name(cert.get(), subject.get()) != 1
+        || X509_set_issuer_name(cert.get(), subject.get()) != 1) // self-signed: issuer == subject
         return std::unexpected("setting the certificate subject: " + opensslError());
 
     auto extensionContext = X509V3_CTX {};

@@ -10,9 +10,26 @@ profiles:
     your_profile:
         status_line:
             indicator:
-                left: "{VTType} │ {InputMode:Bold,Color=#C0C030}{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
-                middle: "{Tabs}{Title:Left= « ,Right= » ,Color=#20c0c0}"
-                right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} "
+                left: "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }{Git:Left=  }"
+                middle: "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }"
+                right: "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }"
+```
+
+This is the default of a configuration with `defaults_edition: native2026`: the vi mode as a chip
+(hidden while typing), the directory and Git branch, how the last command went, the selection and
+search, and the scroll position and clock. Its colours are roles, so it follows the color scheme.
+
+A configuration with `defaults_edition: classic` (one written before the redesign) keeps the earlier
+default, with the tabs, the title and fixed colors:
+
+```
+profiles:
+    your_profile:
+        status_line:
+            indicator:
+                left: " {InputMode:Bold,Color=#FFFF00}{TraceMode:Bold,Color=#FFFF00,Left= │ }{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }"
+                middle: "« {Title} »"
+                right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
 ```
 
 Each segment, `left`, `middle`, and `right` may contain text to be displayed in the
@@ -25,14 +42,19 @@ This text may contain placeholders to be replaced by their respective dynamic co
 Variable             | Description
 ---------------------|--------------------------------------------------------------------
 `{Clock}`            | current clock in HH:MM format
+`{Cwd}`              | the working directory the shell reports, with the home directory as `~` when it is on this machine; at most `MaxWidth=` columns (default `40`), eliding the middle directories (`/…/d59`)
 `{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
 `{Extension}`        | what the [status-line extension](../extensions.md) named by parameter `Name=...` (or the `{Extension:<name>}` shorthand) draws
+`{Git}`              | the branch of the Git repository the shell's directory is in (a ref outside `refs/heads/` as `remotes/origin/x`, a detached HEAD as its first 7 hex digits in parentheses, `(a1b2c3d)`), read from `.git/HEAD` or a worktree's `.git` file; empty outside a repository or in a directory on another machine. It is looked up in the background, so it shows a moment after the directory does, and again only after a command ends or the shell reports its directory, never per frame. As git does by default, the search for the repository stops at a filesystem boundary. The directory is walked as the shell reports it: in a symlink to a directory inside a repository, no branch shows. A repository using the reftable ref backend (`git init --ref-format=reftable`) shows no branch for now.
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
-`{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
+`{LastCommand}`      | how the last command went, from the shell integration's command blocks (OSC 133): `✓ make · 4ms` after a success, `✗ exit 8 ctest · 12s` after a failure; the status drawn in the `success` or `danger` role and the duration in `muted`, unless the item names a `Color=` of its own. Empty while a command runs, and when a newer prompt ended one that reported no exit status. A multi-line command's line breaks and tabs read as spaces. The command text is at most `MaxWidth=` columns (default `32`), cut at its end with `…`
+`{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL); see `Hide=` and `Chip` below
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
+`{Scroll}`           | how far the view is scrolled back into the history, out of how far it can be: `↑ 1 240 / 10 000`, thousands grouped by a space. Empty at the bottom, and while the view cannot scroll (the alternate screen)
 `{SearchMode}`       | indicates search highlight mode, if currently active
 `{SearchPrompt}`     | the active search pattern, if any (read-only; search is typed into the find bar)
+`{Selection}`        | how much the selection holds, as `y` would copy it: `12 lines · 418 chars`, thousands grouped by a space (`1 240`). Empty without a selection. The characters are those a copy yields: each row up to its last non-blank cell, the spaces between words included, a wide character once. They are counted only while the selection spans fewer than 10 000 cells (its rows at the page's width, or at a rectangle's own width); a larger one shows its lines alone, `1 240 lines`
 `{Tabs}`             | indicates active tabs
 `{Text}`             | given text (makes only sense when customized with flags)
 `{Title}`            | current window title
@@ -56,8 +78,8 @@ Parameter                 | Description
 --------------------------|--------------------------------------------------------------------
 `Left=TEXT`               | text to show on the left side, if the variable is to be shown
 `Right=TEXT`              | text to show on the right side, if the variable is to be shown
-`Color=#RRGGBB`           | text color in hexadecimal RGB notation
-`BackgroundColor=#RRGGBB` | background color in hexadecimal RGB notation
+`Color=COLOR`             | text color: `#RRGGBB`, or one of the roles `accent`, `success`, `danger`, `warning`, `muted`
+`BackgroundColor=COLOR`   | background color: `#RRGGBB`, or one of the roles `accent`, `success`, `danger`, `warning`, `muted`
 `Bold`                    | text in bold font face
 `Italic`                  | text in italic font face
 `Underline`               | underline text (only one underline style can be active)
@@ -71,6 +93,35 @@ Parameter                 | Description
 `Inverse`                 | inversed text/background coloring
 
 These parameters apply to all variables above.
+
+`{Cwd}`, `{Context}` and `{LastCommand}` additionally take this attribute:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}` and for `{LastCommand}`'s command text, which is cut at its end instead; a value that is not a number `> 0` keeps the default.
+
+A role names a color by what it means rather than by its value, and takes it from the active color
+scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),
+`success` 2 (green), `danger` 1 (red), `warning` 3 (yellow) and `muted` 8 (bright black). The scheme
+is the configured one: a program changing the palette (OSC 4) recolours its own text, not the status
+line. Where a role's color would not read on the bar it is drawn on (at 4.5:1; `muted`, secondary text, at 3:1), the role's text takes
+the bar's legible ink instead -- the scheme's foreground or background, bright white, then black or
+white -- so it stays readable in every input mode and scheme; a `#RRGGBB` color is drawn as written. Roles are
+read in any case and written lowercase. A value that is neither a role nor a color leaves the color
+unset. The same values are accepted by the `Tabs` attributes `ActiveColor` and `ActiveBackground`.
+
+The `InputMode` variable additionally takes these attributes:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`Hide=<mode>`             | shows nothing, `Left=`/`Right=` included, while the terminal is in that mode: `Normal`, `Insert`, `Visual`, `VisualLine`, `VisualBlock` or `Hint`, read in any case. An unknown mode hides the item in none.
+`Chip`                    | draws the item, `Left=` and `Right=` included, as a chip filled with its mode's colors (`indicatorStatusLine*Mode` of the color scheme), while the rest of the line keeps the idle (Insert) colors in every mode. The chip's text takes the fill's legible ink where the scheme's own would not read at 4.5:1. Only the focused pane's chip is colored, and an item naming `Color=` or `BackgroundColor=` takes those instead. Without `Chip`, the whole line takes the mode's colors.
+
+They are written after the other attributes:
+
+```
+{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}
+```
 
 The `Command` variable additionally takes these attributes:
 

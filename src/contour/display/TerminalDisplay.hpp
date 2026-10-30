@@ -2,8 +2,9 @@
 #pragma once
 
 #include <contour/config/Actions.hpp>
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/display/ContentScale.hpp>
+#include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/RedrawCoalescer.hpp>
 #include <contour/display/RenderState.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -89,6 +90,9 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     Q_PROPERTY(session::TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+    // Bumped whenever the cell-to-item mapping moves without the item moving (font size, DPI, margins): a
+    // binding over a rowBand() call reads it, since a Q_INVOKABLE carries no notify of its own.
+    Q_PROPERTY(int cellGeometryRevision READ cellGeometryRevision NOTIFY cellGeometryChanged)
     QML_ELEMENT
 
     session::TerminalSession* getSessionHelper() { return _session; }
@@ -216,6 +220,14 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// virtual one: without it the two names are ambiguous here and the surface stays abstract. The
     /// answer is QQuickItem's, unchanged.
     [[nodiscard]] QQuickWindow* window() const final { return QQuickItem::window(); }
+    [[nodiscard]] QPointF mapToWindow(QPointF local) const final { return mapToScene(local); }
+    [[nodiscard]] session::DisplayExposure exposure() const final
+    {
+        auto const* const host = QQuickItem::window();
+        auto const shown = host != nullptr && host->isExposed() && host->visibility() != QWindow::Minimized
+                           && host->visibility() != QWindow::Hidden;
+        return shown ? session::DisplayExposure::Exposed : session::DisplayExposure::Hidden;
+    }
 
     /// Announces a caret move to the platform: refreshes the IME cursor rectangle and, when assistive
     /// technology is listening, the accessible caret. The IME update is kept alongside the accessibility
@@ -409,6 +421,8 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void terminalBufferChanged(vtbackend::ScreenType);
     void terminated();
     void showNotification(QString const& title, QString const& body);
+    /// The cell size, the page margins or the content scale changed: every rowBand() answer may have moved.
+    void cellGeometryChanged();
 
   public:
     Q_INVOKABLE [[nodiscard]] int pageLineCount() const noexcept
@@ -429,6 +443,16 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
             return 0;
         return _session->historyLineCount();
     }
+
+    /// The band viewport rows @p first to @p last take in this item: where the find bar asks whether the
+    /// current match lies under it (window::placeFindBar).
+    /// @param first The first row.
+    /// @param last  The last row.
+    /// @return `{ top, bottom }` in item coordinates; empty before the renderer exists.
+    Q_INVOKABLE [[nodiscard]] QVariantMap rowBand(int first, int last) const;
+
+    /// @return How many times the cell geometry has changed (@ref cellGeometryChanged); a value to bind on.
+    [[nodiscard]] int cellGeometryRevision() const noexcept { return _cellGeometryRevision; }
 
   private:
     // helper methods
@@ -542,6 +566,10 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// changed, so it refreshes the WM size hints. No-op without a controller.
     void notifyCellGeometryChanged();
 
+    /// Tells the platform input method that the cursor's rectangle may have moved, so an open candidate
+    /// window follows its cell. GUI thread only, for the reason @ref reportCursorMoved gives.
+    void reannounceInputMethodRectangle();
+
     void statsSummary();
 
   public:
@@ -617,6 +645,18 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// Guards against piling up accessible-location posts while a resize or divider drag commits one
     /// geometry change per input event. GUI thread only, hence a plain bool.
     bool _locationReportPending = false;
+    /// @see cellGeometryRevision
+    int _cellGeometryRevision = 0;
+    /// The cell inputMethodQuery(Qt::ImCursorRectangle) last anchored the candidate window at; nothing
+    /// until the first answer, and forgotten when the display is bound to another session.
+    ///
+    /// Anchored at again whenever the cursor names no cell -- scrolled out of the viewport, or outside a
+    /// page that a resize has just shrunk -- so the candidate window stays where it was instead of jumping
+    /// to the pane's origin. A cell rather than its rectangle, so that what is answered follows the margins,
+    /// the gutter, the font and the pixel ratio as they change. GUI thread only: the query refuses
+    /// grid-backed questions on any other thread before it gets here. Mutable because Qt's query is const,
+    /// and this is a cache of its answer, not state.
+    mutable std::optional<ImeAnchor> _lastImeAnchor;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
     /// The cursor column of the frame prepareFrameRhi() drew last.

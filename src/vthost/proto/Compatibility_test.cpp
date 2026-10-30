@@ -29,6 +29,7 @@
 
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshot.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Pdu.hpp>
@@ -220,6 +221,49 @@ Task<void> attachWith(core::net::EventLoop* loop,
                                        core::net::testing::sleepFor(loop, AttachBudget));
     if (std::ranges::any_of(*out, endsSnapshotRun))
         *end = ExchangeEnd::Attached;
+    client->close();
+}
+
+/// @return Whether @p received holds a ServerHello.
+[[nodiscard]] bool hasServerHello(std::vector<proto::DecodedFrame> const& received)
+{
+    return std::ranges::any_of(
+        received, [](auto const& frame) { return std::holds_alternative<proto::ServerHello>(frame.pdu); });
+}
+
+/// Decodes what @p client sends into @p received until a ServerHello arrived or the stream ended.
+Task<void> readUntilHello(core::net::ISocket* client, std::vector<proto::DecodedFrame>* received)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto scratch = std::vector<std::byte>(4096);
+    while (!hasServerHello(*received))
+    {
+        if (auto decoded = proto::decodePdu(buffer))
+        {
+            buffer.erase(buffer.begin(), buffer.begin() + static_cast<long>(decoded->consumed));
+            received->push_back(std::move(*decoded));
+            continue;
+        }
+        auto const n = co_await client->read(scratch);
+        if (!n.has_value() || *n == 0)
+            break;
+        buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+    }
+}
+
+/// Writes @p bytes, decodes the answer until its ServerHello arrived, the stream ended or AttachBudget is
+/// spent, says what it was in @p out, and closes the client end.
+Task<void> helloWith(core::net::EventLoop* loop,
+                     core::net::ISocket* client,
+                     std::vector<std::byte> const* bytes,
+                     std::optional<proto::ServerHello>* out)
+{
+    std::ignore = co_await client->write(std::span<std::byte const> { *bytes });
+    auto received = std::vector<proto::DecodedFrame> {};
+    co_await core::net::testing::anyOf(readUntilHello(client, &received),
+                                       core::net::testing::sleepFor(loop, AttachBudget));
+    if (hasServerHello(received))
+        *out = std::get<proto::ServerHello>(received.front().pdu);
     client->close();
 }
 
@@ -497,8 +541,35 @@ TEST_CASE("every recorded transcript of a supported version is served", "[vthost
             REQUIRE(client.negotiated().has_value());
             CHECK(client.negotiated()->version == transcript.version);
             CHECK_FALSE(client.refusal().has_value());
+            // None of them predates the restored counts, so each hello reads as telling nothing.
+            CHECK_FALSE(client.restoredCounts().has_value());
         }
     }
+}
+
+TEST_CASE("a hello that tells what a restore brought back reaches the client", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = vthost::client::NativeClient { loop,
+                                                 std::move(pair.second),
+                                                 vthost::client::NativeClient::HandshakeOptions {},
+                                                 vtbackend::CommandBlockStoreLimits {},
+                                                 vthost::client::NativeClient::UpdateHandler {},
+                                                 vthost::client::NativeClient::ImageHandler {},
+                                                 vthost::client::NativeClient::SessionEventHandler {},
+                                                 vthost::client::NativeClient::LayoutHandler {} };
+    auto const hello = frameOf(1,
+                               proto::ServerHello { .agreedVersion = proto::SupportedVersions.max,
+                                                    .versions = proto::SupportedVersions,
+                                                    .restoredWindows = 2,
+                                                    .restoredTabs = 7 });
+    loop.blockOn(core::net::testing::allOf(client.run(), recordedDaemon(daemonSocket, hello)));
+
+    REQUIRE(client.negotiated().has_value());
+    CHECK(client.restoredCounts() == vthost::RestoredCounts { .windows = 2, .tabs = 7 });
 }
 
 // Prints this build's attach PDUs in the layout of RecordedTranscripts.hpp, to record a NEW protocol
@@ -527,4 +598,56 @@ TEST_CASE("dump this build's transcripts", "[.dump]")
     std::cout << spelled("ClientHello", frameOf(1, clientHello))
               << spelled("ServerHello", frameOf(1, serverHello))
               << spelled("ResizeRequest", frameOf(2, resize)) << spelled("Input", frameOf(3, input));
+}
+
+TEST_CASE("the summary of a restore is told once, to the first Attach connection",
+          "[vthost][daemon][restore]")
+{
+    // Two restored windows with three and four single-pane tabs.
+    auto snapshot = vthost::WorkspaceSnapshot {};
+    for (auto const tabs: { 3, 4 })
+    {
+        auto window = vthost::WindowSnapshot {};
+        std::ranges::generate_n(std::back_inserter(window.tabs), tabs, [] { return vthost::TabSnapshot {}; });
+        snapshot.windows.push_back(std::move(window));
+    }
+    auto source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto host = vthost::SessionHost {
+        loop,
+        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&)
+            -> std::unique_ptr<vtpty::Pty> { return std::make_unique<vtpty::MockPty>(size); },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .restore = vthost::WorkspaceRestore { .snapshot = std::move(snapshot) } },
+    };
+    REQUIRE(host.restoreOutcome() == vthost::RestoreOutcome::Realized);
+
+    auto connections = std::size_t { 0 };
+    auto const helloOf = [&](proto::ConnectionRole role) {
+        auto const bytes =
+            frameOf(1, proto::ClientHello { .versions = proto::SupportedVersions, .role = role });
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        auto session =
+            vthost::NativeSession { loop,
+                                    host,
+                                    vthost::ConnectionId { .endpoint = "restore", .index = ++connections },
+                                    std::move(pair.first) };
+        auto hello = std::optional<proto::ServerHello> {};
+        loop.blockOn(
+            core::net::testing::allOf(session.run(), helloWith(&loop, pair.second.get(), &bytes, &hello)));
+        REQUIRE(hello.has_value());
+        return std::pair { hello->restoredWindows, hello->restoredTabs };
+    };
+    using Counts = std::pair<uint32_t, uint32_t>;
+
+    // A probe or control caller is told nothing and leaves the summary for the first client that shows
+    // windows.
+    CHECK(helloOf(proto::ConnectionRole::Control) == Counts { 0, 0 });
+    CHECK(helloOf(proto::ConnectionRole::Attach) == Counts { 2, 7 });
+    // A second client, and a reconnect of the first, read zeros.
+    CHECK(helloOf(proto::ConnectionRole::Attach) == Counts { 0, 0 });
+    CHECK(helloOf(proto::ConnectionRole::Attach) == Counts { 0, 0 });
+    CHECK(helloOf(proto::ConnectionRole::Control) == Counts { 0, 0 });
 }

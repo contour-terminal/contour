@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/BlockRailKinds.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/UserMarkPresence.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/LocalTime.hpp>
@@ -158,13 +160,6 @@ enum class BlockHeadState : uint8_t
     Finished, ///< The head of a command that has finished.
 };
 
-/// Whether a row carries the user's own mark (LineFlag::UserMark).
-enum class UserMarkPresence : uint8_t
-{
-    Absent = 0, ///< The row carries no user mark.
-    Present,    ///< vi `mm` marked the row.
-};
-
 /// Whether the pointer is over the fold a gutter row belongs to.
 enum class GutterHover : uint8_t
 {
@@ -309,10 +304,18 @@ struct GutterRow
     BlockColumnGlyph glyph = BlockColumnGlyph::None; ///< The block column's glyph.
     RGBColorPair glyphColors {};           ///< The glyph's colours, as blockColumnColors() picks them.
     FoldWeight weight = FoldWeight::Light; ///< How heavy the glyph's strokes are (foldWeightOf()).
+
+    // The block rail, drawn instead of the glyph where the layout has the rail's strip.
+    RailSegment rail = RailSegment::None;          ///< The rail segment beside the row (railSegmentOf()).
+    RailMark railMark = RailMark::None;            ///< The mark on it (railMarkOf()).
+    std::optional<CommandBlockOutcome> outcome {}; ///< How the row's block reads; nullopt for none.
+    RGBColor railColor {};                         ///< The rail's colour (railColor()).
+    RGBColor railMarkColor {}; ///< The mark's ink: the rail's, or the user mark's own colour.
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,
-/// the gutter's left edge being column -layout.totalColumns.
+/// the gutter's left edge being column -layout.totalColumns -- and, where the layout has the rail's strip
+/// and the row draws a segment or a mark there, one rail cell.
 /// @param layout The gutter's segments.
 /// @param row What the row shows; text wider than its segment is cut at the segment's edge.
 /// @param textColors The timestamps' and line numbers' colours, from ColorPalette::gutterTextColors().
@@ -324,24 +327,76 @@ void appendGutterCells(GutterLayout const& layout,
 
 // }}}
 
+// {{{ status chip
+
+/// How wide a row's cells are drawn.
+enum class LineWidth : uint8_t
+{
+    Single = 0, ///< One column each.
+    Double,     ///< DECDWL, or a DECDHL half: two columns each, so only half the page's cells are shown.
+};
+
+/// @param line The row.
+/// @return Double for a DECDWL or DECDHL row, otherwise Single.
+[[nodiscard]] LineWidth lineWidthOf(Line const& line) noexcept;
+
+/// How many of a row's columns are shown: the page's, or half of them on a double-width row, whose second
+/// half is never drawn.
+/// @param width How wide the row's cells are drawn.
+/// @param pageColumns The page's width.
+/// @return The columns a chip may be placed in.
+[[nodiscard]] constexpr ColumnCount shownColumnsOf(LineWidth width, ColumnCount pageColumns) noexcept
+{
+    return width == LineWidth::Double ? ColumnCount(unbox<int>(pageColumns) / 2) : pageColumns;
+}
+
+/// The columns @p logical occupies once drawn: each cell of a double-width row takes two columns.
+/// @param logical A range of the row's cells.
+/// @param width How wide the row's cells are drawn.
+/// @return The same range in drawn columns; @p logical itself on a single-width row.
+[[nodiscard]] constexpr ColumnRange drawnColumnsOf(ColumnRange logical, LineWidth width) noexcept
+{
+    if (width == LineWidth::Single)
+        return logical;
+    return ColumnRange { .line = logical.line,
+                         .fromColumn = logical.fromColumn * 2,
+                         .toColumn = (logical.toColumn * 2) + ColumnOffset(1) };
+}
+
+/// The maximal runs of blank cells on @p line, ascending, both ends included: a blank cell is an empty or
+/// space cell on the default background -- what a chip may be drawn over (principle 5). On a double-width row
+/// only the shown half of the page is looked at, in the row's own columns.
+/// @param line The row.
+/// @param screenLine The screen row the runs are reported on (ColumnRange::line).
+/// @param pageColumns The page's width; columns past the line's own are blank.
+/// @return The runs.
+[[nodiscard]] std::vector<ColumnRange> blankRunsOf(Line const& line,
+                                                   LineOffset screenLine,
+                                                   ColumnCount pageColumns);
+
+// }}}
+
 // {{{ collapsed-fold label
 
-/// The label a collapsed fold's head row carries: `⋯ 1,234 lines`.
+/// The label a collapsed fold's head row carries, the fold chip's: `1,234 lines hidden ⌄`.
 /// @param hiddenLines How many rows the fold hides.
 /// @return The label, one column per codepoint.
 [[nodiscard]] std::u32string collapsedFoldLabel(uint64_t hiddenLines);
 
-/// The cells a collapsed fold's label covers on its row: one blank column after the row's text, clipped at
-/// the page's edge -- where layoutFoldLabel() draws it, and so where a click on it lands.
+/// The cells a click on a collapsed fold's chip lands in: the label, one blank column after the row's text
+/// -- where layoutFoldLabel() draws it -- widened evenly to @p minimumHitColumns, kept off the row's text
+/// and clipped at the page's edge (R-k: the chip's hit area is at least @c size.foldChipHit).
 /// @param screenLine The screen row the label is drawn on.
 /// @param textColumns How many columns of that row hold text (Line::trimmedColumns()).
 /// @param pageColumns The page's width.
 /// @param labelColumns How many columns the label takes (collapsedFoldLabel()'s, one per codepoint).
-/// @return The cells, or nullopt when not one of them fits on the page.
+/// @param minimumHitColumns The fewest columns the hit spans; 1 is the label's own cells.
+/// @return The cells, or nullopt when not one of the label's fits on the page.
 [[nodiscard]] std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
                                                          ColumnCount textColumns,
                                                          ColumnCount pageColumns,
-                                                         std::size_t labelColumns) noexcept;
+                                                         std::size_t labelColumns,
+                                                         ColumnCount minimumHitColumns) noexcept;
 
 /// Lays @p label out one blank column after a row's text, clipped by width at the page edge, appending
 /// its cells to @p output -- nothing when not one glyph of it fits.

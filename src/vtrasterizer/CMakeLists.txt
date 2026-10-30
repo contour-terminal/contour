@@ -2,6 +2,7 @@ set(_header_files
     AtlasBudget.hpp
     BackgroundRenderer.hpp
     BoxDrawingRenderer.hpp
+    ChipRenderer.hpp
     CursorRenderer.hpp
     DecorationRenderer.hpp
     GlyphAdvance.hpp
@@ -11,6 +12,7 @@ set(_header_files
     GutterCells.hpp
     ImageRenderer.hpp
     Pixmap.hpp
+    RailGeometry.hpp
     RenderTarget.hpp
     ReGISFontRasterizer.hpp
     Renderer.hpp
@@ -24,6 +26,7 @@ set(_header_files
 set(_source_files
     BackgroundRenderer.cpp
     BoxDrawingRenderer.cpp
+    ChipRenderer.cpp
     CursorRenderer.cpp
     DecorationRenderer.cpp
     ImageRenderer.cpp
@@ -41,6 +44,7 @@ set(_test_files
     AtlasBudget_test.cpp
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
+    ChipRenderer_test.cpp
     DecorationRenderer_test.cpp
     GlyphAdvance_test.cpp
     GlyphScaling_test.cpp
@@ -48,6 +52,7 @@ set(_test_files
     GridMetrics_test.cpp
     GutterCells_test.cpp
     ImageRenderer_test.cpp
+    RailGeometry_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
     UnderlineGeometry_test.cpp
@@ -72,7 +77,7 @@ endif()
 if(CONTOUR_TESTING)
     add_executable(vtrasterizer_test)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})
-    target_link_libraries(vtrasterizer_test vtrasterizer core::testing Catch2::Catch2)
+    target_link_libraries(vtrasterizer_test vtrasterizer core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtrasterizer_test COMMAND $<TARGET_FILE:vtrasterizer_test>)
     vtbackend_force_include_test_printers(vtrasterizer_test)
     if(NOT WIN32)

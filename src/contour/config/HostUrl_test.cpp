@@ -7,11 +7,19 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+using contour::config::checkHostDraft;
 using contour::config::describe;
+using contour::config::HostDraft;
+using contour::config::HostEntryError;
+using contour::config::HostField;
+using contour::config::HostFieldProblem;
 using contour::config::HostScheme;
+using contour::config::hostSchemeOf;
 using contour::config::HostUrlError;
 using contour::config::parseHostUrl;
 
@@ -103,4 +111,41 @@ TEST_CASE("describe says something for every host URL error", "[config][hosts]")
     auto const count = std::to_underlying(HostUrlError::UserNotAllowed) + 1;
     for (auto const value: std::views::iota(0, count))
         CHECK_FALSE(describe(static_cast<HostUrlError>(value)).empty());
+}
+
+TEST_CASE("hostSchemeOf reads the scheme of a half-typed address", "[config][hosts]")
+{
+    CHECK(hostSchemeOf("ssh://") == HostScheme::Ssh);
+    CHECK(hostSchemeOf("TLS://studio") == HostScheme::Tls);
+    CHECK(hostSchemeOf("starfive:22") == std::nullopt);
+    CHECK(hostSchemeOf("http://x") == std::nullopt);
+}
+
+TEST_CASE("checkHostDraft says what the loader would, under the field it is about", "[config][hosts]")
+{
+    using Problems = std::vector<HostFieldProblem>;
+
+    SECTION("a usable ssh host has none")
+    {
+        CHECK(checkHostDraft(HostDraft { .url = "ssh://me@starfive" }).empty());
+    }
+    SECTION("an address that does not parse is the address's")
+    {
+        CHECK(checkHostDraft(HostDraft { .url = "starfive:22" })
+              == Problems { { .field = HostField::Url,
+                              .message = std::string { describe(HostUrlError::MissingScheme) } } });
+    }
+    SECTION("a tls host needs a token file, even while its address is half-typed")
+    {
+        auto const tokenMissing =
+            HostFieldProblem { .field = HostField::TokenFile,
+                               .message = std::string { describe(HostEntryError::TokenRequired) } };
+        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box:7297" }) == Problems { tokenMissing });
+        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box" })
+              == Problems { { .field = HostField::Url,
+                              .message = std::string { describe(HostUrlError::PortRequired) } },
+                            tokenMissing });
+        CHECK(checkHostDraft(HostDraft { .url = "tls://build-box:7297", .tokenFile = "build-box.token" })
+                  .empty());
+    }
 }

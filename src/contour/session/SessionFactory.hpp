@@ -2,10 +2,12 @@
 #pragma once
 
 #include <contour/platform/Notifier.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandLineText.hpp>
 
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
@@ -14,11 +16,18 @@
 #endif
 
 #include <cstdint>
+#include <expected>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 
 #include <vthost/client/TabPresentation.hpp>
+#include <vtworkspace/Primitives.hpp>
+
+class QObject;
 
 namespace contour
 {
@@ -66,6 +75,22 @@ enum class SessionHosting : uint8_t
                ///< remote end hosts, and a command given for it is dropped.
 };
 
+/// Whether a whole tab can be merged into a split of a pane in a window this factory hosts.
+enum class TabMergeSupport : uint8_t
+{
+    Unsupported = 0, ///< No: the tab is left to tear off. A remote end's model would undo a local merge.
+    Supported,       ///< Yes, here or on the remote end.
+};
+
+/// Whether a request was handed to the remote end, which then owns the change.
+enum class RemoteRouting : uint8_t
+{
+    Local = 0, ///< Not routed: the caller performs the change itself.
+    Routed,    ///< Routed: the remote end's layout re-push reconciles the change in.
+    Refused,   ///< The remote end owns the layout and cannot take it now: nobody performs the change, because
+               ///< a local one would leave this window showing a layout the remote end does not have.
+};
+
 /// What a session authored on the remote end runs, as this client asks for it (SessionFactory's
 /// requestRemote* verbs). A struct rather than a bare name so that a later field -- a working directory,
 /// say -- is one more member, not one more parameter on every override.
@@ -90,6 +115,47 @@ struct LocalTabPresentation
     vthost::client::TabActivity activity = vthost::client::TabActivity::Inactive;
 };
 
+/// Where a factory that mirrors a daemon's sessions tells one what a restart stopped in its shell: the
+/// command line, or nullopt once it stands no more.
+///
+/// The factory learns it on its own reactor thread; @ref deliver runs on @ref context's thread (the GUI
+/// thread, the session's), posted there, and is dropped if @ref context is gone first.
+struct InterruptionSink
+{
+    QObject* context = nullptr; ///< The object whose thread @ref deliver runs on; null drops everything.
+    std::function<void(std::optional<vtbackend::CommandLineText>)> deliver {}; ///< What to run there.
+};
+
+/// Why SessionFactory::reconnect() started no new connection.
+enum class ReconnectError : uint8_t
+{
+    NotAttached = 0,  ///< The factory is not attached to a daemon: there was no connection to seek again.
+    AlreadyConnected, ///< A connection is up, or being sought by the supervisor that runs now.
+    ConnectionEnding, ///< A run failed and its owner has not yet been told: its connectionClosed is on the
+                      ///< way, and says why.
+};
+
+/// A short reason for @p error, for the footer's "Could not reconnect: {}." and logs.
+/// @param error The failure.
+/// @return A lower-case phrase without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(ReconnectError error) noexcept
+{
+    switch (error)
+    {
+        case ReconnectError::NotAttached: return "this window is not attached to a daemon";
+        case ReconnectError::AlreadyConnected: return "the connection is already being sought";
+        case ReconnectError::ConnectionEnding: return "the connection has just ended";
+    }
+    return "unknown error";
+}
+
+/// What SessionFactory::bindForReconnect() decided about an ended pane.
+enum class ReconnectBinding : uint8_t
+{
+    Gone = 0, ///< The daemon no longer has the pane's session: the pane stays ended.
+    Bound,    ///< The pane's remote session is named: the next createPty() mirrors it again.
+};
+
 class SessionFactory
 {
   public:
@@ -107,6 +173,21 @@ class SessionFactory
     /// the remote end announced, so a pager asked for in that moment would take that pane's place.
     /// @return Local for a factory that spawns here (the default); Remote for an attach-mode one.
     [[nodiscard]] virtual SessionHosting hosting() const noexcept { return SessionHosting::Local; }
+
+    /// The factory of sessions that run in this process whatever host the app is attached to. A window that
+    /// is no part of the host's workspace -- the quick terminal -- makes its sessions through it, so the
+    /// host neither authors nor remembers them.
+    /// @return This factory for one that spawns here (the default); the factory that does, for a routing one.
+    [[nodiscard]] virtual SessionFactory& localSessions() noexcept { return *this; }
+
+    /// Whether a tab can be merged into a split of a pane here: a local factory merges in-process, an attach
+    /// factory only when its remote end serves the merge (a remote end's model would undo a local one).
+    /// @return Supported for a local factory (the default); Unsupported for a remote one that does not
+    ///         override this.
+    [[nodiscard]] virtual TabMergeSupport tabMergeSupport() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? TabMergeSupport::Supported : TabMergeSupport::Unsupported;
+    }
 
     /// The notifier a new session raises its notifications through.
     ///
@@ -163,6 +244,26 @@ class SessionFactory
                                                   RemoteSpawn const& /*spawn*/)
     {
         return false;
+    }
+
+    /// Attach mode: authors the merge of a whole tab into a split on the DAEMON -- the tab holding
+    /// @p tabPty is grafted beside the pane backed by @p targetPty -- rather than merging locally. The
+    /// daemon moves the tab's sessions (none is spawned or closed) and its layout re-push reconciles the
+    /// result in. A local factory returns Local so the manager merges itself.
+    /// @param tabPtys   The ptys backing EVERY pane of the tab to merge, as this window shows it; a null one
+    ///                  stands for a pane that has no pty to name. The daemon refuses a request whose set is
+    ///                  no longer its tab's.
+    /// @param targetPty The pty of the pane to split.
+    /// @param side      The side of the target pane the tab goes on.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the layout and cannot take it (a
+    ///         pane not bound to a session yet, the capability gone); Local for a local factory, and for
+    ///         a merge the reconciler itself applies, which is the local half of one the daemon made. A
+    ///         null pty names no pane, which the daemon cannot take either.
+    [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(std::span<vtpty::Pty const* const> /*tabPtys*/,
+                                                              vtpty::Pty const* /*targetPty*/,
+                                                              vtworkspace::SplitSide /*side*/)
+    {
+        return RemoteRouting::Local;
     }
 
     /// Attach mode: reports that the user moved the divider of the split separating the panes backed
@@ -240,7 +341,40 @@ class SessionFactory
     /// parser puts it on the screen, so nothing outside needs a handle on the grid.
     /// @param pty The pty this factory produced.
     /// @param terminal The terminal now driving it.
-    virtual void bindTerminal(vtpty::Pty const* /*pty*/, vtbackend::Terminal& /*terminal*/) {}
+    /// @param interruptions Where the session is told what a restart stopped in its shell.
+    virtual void bindTerminal(vtpty::Pty const* /*pty*/,
+                              vtbackend::Terminal& /*terminal*/,
+                              InterruptionSink const& /*interruptions*/)
+    {
+    }
+
+    /// @return Whether an ended pane can seek the daemon again: Supported while attached to one, which is
+    ///         what a pane's Reconnect needs. Everything else (a local factory, tmux) cannot.
+    [[nodiscard]] virtual ReconnectSupport reconnectSupport() const noexcept
+    {
+        return ReconnectSupport::Unsupported;
+    }
+
+    /// Starts a new supervised connection to the daemon after the last one ended, resuming the windows
+    /// followed. The outcome arrives as connection state changes, not as this result.
+    /// @return Nothing once started; why none was.
+    [[nodiscard]] virtual std::expected<void, ReconnectError> reconnect()
+    {
+        return std::unexpected(ReconnectError::NotAttached);
+    }
+
+    /// Prepares the next createPty() to mirror again the daemon session an ended pane showed, when the daemon
+    /// still names it (in the layout it pushed on reconnecting).
+    /// @param endedPty The pty of the ended pane's session.
+    /// @return Bound when the next createPty() will; Gone otherwise, and nothing changed.
+    [[nodiscard]] virtual ReconnectBinding bindForReconnect(vtpty::Pty const* /*endedPty*/)
+    {
+        return ReconnectBinding::Gone;
+    }
+
+    /// Takes back a bindForReconnect() that came to nothing: the pane it was for could not be made, so the
+    /// next createPty() must not mirror its session. A no-op where nothing is bound.
+    virtual void cancelReconnectBinding() {}
 };
 
 /// The production SessionFactory: consults the app's active profile and produces either a local

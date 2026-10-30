@@ -66,14 +66,21 @@ if(CONTOUR_FRONTEND_GUI)
 
     message(STATUS "Qt components: ${QT_COMPONENTS}")
     find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
+
+    # One owner of the macOS title bar's safe area: Qt::ExpandedClientAreaHint, which needs Qt 6.9 and has
+    # no fallback (Step 1d, ruling D1). Checked here, inside the GUI gate, because a headless build finds
+    # no Qt and its empty Qt6_VERSION would compare as older.
+    if(APPLE AND Qt6_VERSION VERSION_LESS 6.9)
+        message(FATAL_ERROR "macOS builds need Qt 6.9 or later (Qt::ExpandedClientAreaHint, QWindow::safeAreaMargins).")
+    endif()
 endif()
 # }}}
 
 # {{{ Optional features excluded from this build
-# The Qt version CI builds and validates against. Building against an older Qt is supported, but a
-# feature needing a newer Qt — or an optional Qt module that is not installed — is then silently left
-# out of the binary. Silently is the problem: a packager discovers it from a bug report rather than
-# from their build log.
+# The Qt version CI builds and validates against. Building against an older Qt is supported (on macOS
+# only down to Qt 6.9, which the GUI gate above enforces), but a feature needing a newer Qt — or an
+# optional Qt module that is not installed — is then silently left out of the binary. Silently is the
+# problem: a packager discovers it from a bug report rather than from their build log.
 #
 # So a gate does not print its own warning. It records itself here, and the single report at the
 # bottom of this file names every excluded feature at once. Adding a gated feature is adding one
@@ -235,8 +242,21 @@ endif()
 
 set(_header_files
     session/HyperlinkTooltip.hpp
+    session/RestoreSummaryPolicy.hpp
+    session/ScrollbarVisibility.hpp
+    session/SizeIndicator.hpp
+    window/ChromeFocus.hpp
+    window/ChromeKeys.hpp
+    window/DropZonePolicy.hpp
+    window/DroppedText.hpp
     window/ProgramStatusBadge.hpp
+    window/QuickTerminalPolicy.hpp
+    window/SecureInputPolicy.hpp
+    window/SecureLockPlacement.hpp
+    window/StickyHeaderChrome.hpp
+    window/StickyHeaderPlacement.hpp
     window/TabLabel.hpp
+    window/TaskbarAttentionTally.hpp
 )
 
 # Sources are split into a reusable object library (contour_core) and the thin executable entry
@@ -263,6 +283,7 @@ set(_main_source_files
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
         window/CommandPaletteModel.hpp
+        window/AppMenuBar.hpp
         window/ContextMenuModel.hpp
         ContourGuiApp.hpp
         session/ExitCode.hpp
@@ -273,16 +294,46 @@ if(CONTOUR_FRONTEND_GUI)
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
+        window/SettingsFields.hpp
+        window/ProfileRules.hpp
+        window/SettingsControls.hpp
+        window/SettingsSearch.hpp
+        window/ColorContrastReadout.hpp
+        window/SettingsSections.hpp
+        window/SettingsHostFields.hpp
+        window/QtSaveScheduler.hpp
+        window/SettingsPreview.hpp
+        window/SettingsBackdrop.hpp
+        window/ConnectPickerController.hpp
+        window/SettingsWindowHost.hpp
+        session/PreviewTranscript.hpp
+        session/PastePreview.hpp
+        session/Permission.hpp
+        session/PermissionPrompt.hpp
+        session/PermissionQueue.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
+        window/ChromeStyleHost.hpp
+        window/NoticeModel.hpp
+        window/NoticeQueue.hpp
+        window/ToastPlacement.hpp
+        window/SaveLayoutCheck.hpp
+        window/ChromeTokenObjects.hpp
+        window/MenuRouting.hpp
+        window/SettingsWindowRules.hpp
+        window/NewDefaultsNotice.hpp
         window/UiStyleProvider.hpp
+        window/WindowActivation.hpp
         window/WindowControlStyleProvider.hpp
+        window/WindowLivenessQt.hpp
         session/SessionInput.hpp
         session/FontControl.hpp
+        session/GutterChrome.hpp
         session/SpawnCommand.hpp
         session/Logging.hpp
         Logging.hpp
         display/RenderState.hpp
+        display/ShortcutOverride.hpp
         display/RenderingBackendSelection.hpp
         display/FirstFrameWatchdog.hpp
         display/LatencyProbeDriver.hpp
@@ -302,15 +353,25 @@ if(CONTOUR_FRONTEND_GUI)
         remote/TmuxController.hpp
     )
     list(APPEND _core_source_files
+        window/AppMenuBar.cpp
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
+        window/NewDefaultsNotice.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
         config/LayoutBuilder.cpp
         config/LayoutStore.cpp
         session/SessionFactory.cpp
         window/SettingsController.cpp
+        window/SettingsFields.cpp
+        window/SettingsPreview.cpp
+        window/ConnectPickerController.cpp
+        window/SettingsWindowHost.cpp
+        session/Permission.cpp
+        session/PermissionPrompt.cpp
+        window/NoticeModel.cpp
+        window/QuickTerminalController.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
@@ -320,10 +381,13 @@ if(CONTOUR_FRONTEND_GUI)
         display/SysfsGpuInventory.cpp
         session/TerminalSessionManager.cpp
         window/PopupShadowImageProvider.cpp
+        window/ChromeStyleHost.cpp
+        window/ChromeTokenObjects.cpp
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/WindowController.cpp
         window/WindowPositionStore.cpp
+        window/SettingsWindowRules.cpp
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
@@ -368,41 +432,76 @@ if(CONTOUR_FRONTEND_GUI)
     # the window is Main.qml rather than the historical main.qml.
     set(_qml_files
         qml/Main.qml
+        qml/ThemedWindow.qml
         qml/BellSound.qml
         qml/DeferredBell.qml
-        qml/RequestPermission.qml
         qml/SearchBar.qml
         qml/SessionChrome.qml
         qml/TitleBar.qml
+        qml/HostChip.qml
+        qml/ToolbarButton.qml
+        qml/FocusRing.qml
+        qml/SymbolicIcon.qml
         qml/TabStrip.qml
-        qml/NewTabMenu.qml
         qml/TabItem.qml
-        qml/TabContextMenu.qml
+        qml/TabBadgeSlot.qml
         qml/TabColorFlyout.qml
         qml/WindowControls.qml
         qml/ResizeBorder.qml
+        qml/TitleBarGestures.qml
         qml/PaneNode.qml
+        qml/PaneCard.qml
+        qml/PaneHeader.qml
+        qml/ExitedFooter.qml
+        qml/ShellIntegrationCard.qml
         qml/TerminalPane.qml
         qml/ActionContextMenu.qml
+        qml/MenuSwatchRow.qml
         qml/CommandPalette.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
-        qml/SettingsNavItem.qml
-        qml/SettingsListItem.qml
+        qml/SettingsSidebar.qml
+        qml/SettingsGroup.qml
+        qml/SettingsRow.qml
+        qml/SettingsGroupsPage.qml
+        qml/SettingsSectionPage.qml
+        qml/ProfilePage.qml
+        qml/HostPage.qml
+        qml/SettingsPreview.qml
+        qml/SettingsWindow.qml
+        qml/ConnectPicker.qml
+        qml/ConnectPickerWindow.qml
         qml/ConfirmDialog.qml
         qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
+        qml/ContourMenuItem.qml
         qml/PopupSurface.qml
-        qml/SettingRow.qml
-        qml/SettingsSection.qml
-        qml/ColorSchemeEditor.qml
+        qml/ColorSchemesPage.qml
+        qml/SchemeCard.qml
         qml/StatusLineIndicatorEditor.qml
-        qml/LinkPatternList.qml
+        qml/LinkPatternsPage.qml
         qml/StatusLineSegmentRow.qml
+        qml/StatusLinePage.qml
         qml/StatusLineChip.qml
         qml/StatusLineItemDialog.qml
-        qml/StatusLinePreviewItem.qml
-        qml/ColorSlotField.qml
+        qml/StatusLineColorField.qml
+        qml/Banner.qml
+        qml/BlockActionsButton.qml
+        qml/Toast.qml
+        qml/LinkPill.qml
+        qml/SecureInputLock.qml
+        qml/SecureInputPill.qml
+        qml/ElevationShadow.qml
+        qml/KitDialog.qml
+        qml/KitSwitch.qml
+        qml/KitSegmented.qml
+        qml/KitStepper.qml
+        qml/KitSlider.qml
+        qml/KitPopUp.qml
+        qml/KitColorWell.qml
+        qml/KitShortcutField.qml
+        qml/KitFontPicker.qml
+        qml/PermissionDialog.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at
@@ -479,6 +578,43 @@ if(CONTOUR_FRONTEND_GUI)
         NO_GENERATE_QMLTYPES
         NO_PLUGIN
         QML_FILES ${_tui_style_files}
+    )
+    # }}}
+
+    # {{{ ContourLinux: the Qt Quick Controls style of the ContourLinux chrome row
+    # Built the way ContourTui is (spec §3.15), for the same NO_GENERATE_QMLTYPES / NO_PLUGIN reasons.
+    set(_linux_style_files
+        styles/ContourLinux/Button.qml
+        styles/ContourLinux/CheckBox.qml
+        styles/ContourLinux/ComboBox.qml
+        styles/ContourLinux/ItemDelegate.qml
+        styles/ContourLinux/Label.qml
+        styles/ContourLinux/Menu.qml
+        styles/ContourLinux/MenuItem.qml
+        styles/ContourLinux/MenuSeparator.qml
+        styles/ContourLinux/Popup.qml
+        styles/ContourLinux/ScrollBar.qml
+        styles/ContourLinux/ScrollView.qml
+        styles/ContourLinux/Switch.qml
+        styles/ContourLinux/TextField.qml
+        styles/ContourLinux/ToolButton.qml
+        styles/ContourLinux/ToolTip.qml
+    )
+
+    foreach(_style_file IN LISTS _linux_style_files)
+        get_filename_component(_style_name "${_style_file}" NAME)
+        set_source_files_properties("${_style_file}" PROPERTIES QT_RESOURCE_ALIAS "${_style_name}")
+    endforeach()
+
+    qt_add_qml_module(contour_linux_style
+        STATIC
+        URI ContourLinux
+        VERSION 1.0
+        RESOURCE_PREFIX /qt/qml
+        OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ContourLinux
+        NO_GENERATE_QMLTYPES
+        NO_PLUGIN
+        QML_FILES ${_linux_style_files}
     )
     # }}}
 
@@ -615,9 +751,6 @@ if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
 endif()
 
-if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-endif()
 # }}}
 
 # {{{ platform specific target set_target_properties
@@ -716,6 +849,7 @@ if(CONTOUR_FRONTEND_GUI)
         PUBLIC
         contour_qml
         contour_tui_style
+        contour_linux_style
         ContourTerminalDisplay
         Qt6::Core
         Qt6::DBus
@@ -749,43 +883,80 @@ if(CONTOUR_FRONTEND_GUI)
         add_executable(contour_gui_test
             test/test_main.cpp
             remote/RemoteController_test.cpp
+            platform/AppearanceSources_test.cpp
+            platform/WindowsAppearanceSources_test.cpp
+            platform/WindowsSettings_test.cpp
             platform/AudioNote_test.cpp
+            platform/FontFamilySource_test.cpp
+            platform/GuiTheme_test.cpp
+            platform/DBusGlobalShortcutsChannel_test.cpp
+            platform/DBusPortalSettingsChannel_test.cpp
+            platform/PortalGlobalHotkey_test.cpp
+            platform/HotkeyQtKeys_test.cpp
+            window/QuickTerminalController_test.cpp
+            window/QuickTerminalWindow_test.cpp
+            test/QuickTerminalFixtures.hpp
+            platform/PortalAppearanceSources_test.cpp
+            test/FakeGlobalShortcutsPortal.hpp
+            test/FakeSettingsPortal.hpp
             platform/MultimediaEnvironment_test.cpp
             test/BenignQtMessages_test.cpp
             config/GpuSelector_test.cpp
             test/Accessibility_qml_test.cpp
+            test/ConnectPickerQml_test.cpp
             platform/SpeechSynthesizer_test.cpp
             display/ContentScale_test.cpp
+            display/InGridVisualsRendering_test.cpp
             session/ExitCode_test.cpp
+            session/ShellIntegrationCard_test.cpp
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
             display/ImeQueryRect_test.cpp
+            display/ShortcutOverride_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
-            test/MainWindowQml_test.cpp
+            session/Permission_test.cpp
+            session/PermissionPrompt_test.cpp
+            window/NoticeModel_test.cpp
             test/MainWindowControllerMock.hpp
+            test/MockMainController.hpp
+            test/QmlMocks.hpp
+            test/RecordingAnnouncer.hpp
+            test/PermissionFixtures.hpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp
+            platform/UserNotificationNotifier_test.cpp
+            test/RecordingUserNotificationCenter.hpp
             platform/ExternalLauncher_test.cpp
             platform/PortalExternalLauncher_test.cpp
             platform/PortalNotificationTransport_test.cpp
             platform/TaskbarProgressRouter_test.cpp
             platform/LauncherProgress_test.cpp
             platform/LauncherProgressSink_test.cpp
+            platform/NativeCaptionButtons_test.cpp
             platform/NativeWindowFrame_test.cpp
+            platform/Win32CaptionButtons_test.cpp
+            platform/Win32GlobalHotkey_test.cpp
+            platform/Win32TaskbarOverlay_test.cpp
+            platform/Win32Settings_test.cpp
             window/WindowPositionStore_test.cpp
+            window/ContextMenuModel_test.cpp
+            window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
+            platform/ShellRcEditor_test.cpp
             platform/WindowShadowController_test.cpp
             platform/WindowShadowGeometry_test.cpp
             platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
+            test/ControlsStyle_test.cpp
             test/ThreadJoin_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/FirstFrameWatchdog_test.cpp
             display/ShaderConfig_test.cpp
+            config/HostsConfig_test.cpp
             display/GpuSelection_test.cpp
             display/GpuInventory_test.cpp
             display/OpenGlGpuEnvironment_test.cpp
@@ -795,63 +966,117 @@ if(CONTOUR_FRONTEND_GUI)
             display/ScreenshotRhiReadback_test.cpp
             window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
+            test/ContourLinuxStyle_test.cpp
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
+            platform/TitleBandMaterial_test.cpp
+            platform/Win32TitleBandMaterial_test.cpp
             platform/WindowResizeGrid_test.cpp
-        )
-        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
-        if(APPLE)
-            target_sources(contour_gui_test PRIVATE platform/CocoaWindowResizeGrid_test.mm platform/CocoaTaskbarProgressSink_test.mm)
-            set_target_properties(contour_gui_test PROPERTIES
-                OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
-                OBJCXX_STANDARD_REQUIRED ON)
-            set_source_files_properties(platform/CocoaTaskbarProgressSink_test.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-        endif()
-        if(CONTOUR_WITH_GPU_SELECTION)
-            target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
-        endif()
-
-        # The suite's heavyweight sources: every one whose compile peaks at 2 GB or more with GCC at -O2 -g, the
-        # flags of CI's RelWithDebInfo builds. Measured in October 2026 with GCC 16.2, as the compiler's peak
-        # resident set compiling each of the suite's sources alone: Config_test 7.96 GB, TerminalSession_test
-        # 4.15 GB, QmlComponents_test 3.32 GB, the others listed here 2.13 to 2.99 GB -- what the frontend's
-        # headers cost every source that includes them -- and every source not listed 1.73 GB or less. One at a
-        # time, beside three of the light ones, a 4-job build stays under 16 GB. To re-measure, compile each
-        # source alone with the flags compile_commands.json gives it, -O2 -g in place of the optimisation
-        # flags, and read the compiler's peak (wait4's ru_maxrss).
-        #
-        # They compile in an object library of their own, in contour_heavy_compile_pool (see the top-level
-        # CMakeLists.txt), as a pool is a target property before CMake 4.2 and CI has 3.31. A source listed
-        # here is not listed in the suite's own sources.
-        set(contour_gui_test_heavy_sources
             config/Config_test.cpp
-            display/DisplayRendering_test.cpp
+            config/ConfigExtensions_test.cpp
+            config/ConfigSideFiles_test.cpp
+            display/CommandBlockRendering_test.cpp
             display/TerminalAccessible_test.cpp
-            remote/NativeController_test.cpp
+            display/TerminalDisplayIme_test.cpp
             remote/TmuxController_test.cpp
             session/FocusRouting_test.cpp
             session/FontControl_test.cpp
             session/SessionInput_test.cpp
             session/TabSizeInheritance_test.cpp
-            session/TerminalSessionManager_test.cpp
-            session/TerminalSession_test.cpp
             test/ContourGuiApp_test.cpp
-            test/QmlComponents_test.cpp
-            test/SettingsPageQml_test.cpp
+            test/MainWindowQml_test.cpp
+            test/QmlPalette_test.cpp
+            test/QmlTitleBar_test.cpp
+            test/QmlDialogs_test.cpp
             window/CommandPaletteModel_test.cpp
-            window/MultiWindow_test.cpp
             window/SettingsController_test.cpp
+            window/SettingsPreview_test.cpp
+            window/SettingsBackdrop_test.cpp
+            window/SettingsWindowHost_test.cpp
+            window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp
+            window/CaptionController_test.cpp
+            window/TitleBandController_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowSizing_test.cpp
+        )
+        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        if(APPLE)
+            target_sources(contour_gui_test PRIVATE
+                platform/CocoaAppearanceSources_test.mm
+                platform/CocoaGlobalHotkey_test.mm
+                platform/CocoaMenuBarIntegration_test.mm
+                platform/CocoaNativeMenuPresenter_test.mm
+                platform/CocoaQuickTerminalPanel_test.mm
+                platform/CocoaSecureInput_test.mm
+                platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaTitleBandMaterial_test.mm
+                platform/CocoaUserNotificationCenter_test.mm
+                platform/CocoaWindowFrame_test.mm
+                platform/CocoaWindowResizeGrid_test.mm)
+            set_target_properties(contour_gui_test PROPERTIES
+                OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
+                OBJCXX_STANDARD_REQUIRED ON)
+            set_source_files_properties(
+                platform/CocoaAppearanceSources_test.mm platform/CocoaGlobalHotkey_test.mm
+                platform/CocoaMenuBarIntegration_test.mm
+                platform/CocoaNativeMenuPresenter_test.mm platform/CocoaQuickTerminalPanel_test.mm
+                platform/CocoaSecureInput_test.mm
+                platform/CocoaTaskbarProgressSink_test.mm platform/CocoaTitleBandMaterial_test.mm
+                platform/CocoaUserNotificationCenter_test.mm platform/CocoaWindowFrame_test.mm
+                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        endif()
+        if(CONTOUR_WITH_GPU_SELECTION)
+            target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
+        endif()
+
+        # The suite's heavyweight sources: every one whose compile peaks at 3 GB or more with GCC at -O2 -g, the flags
+        # of CI's RelWithDebInfo builds, as the compiler's peak resident set compiling each source alone. Measured
+        # with GCC 16.2.1 on 2026-10-30, over every source of src/contour: those listed here peak at 3.0 to 4.0 GB,
+        # every other test source at 2.9 GB or less. TerminalSessionExtensions_test (2.9 GB) stays for the guest paths
+        # only this library defines. The line was 2 GB until the window and session headers alone took a source that
+        # includes them to 2.5 GB, which put 45 sources in the pool and made it the build's serial tail. One at a
+        # time, beside three others of 3 GB or less, a 4-job build stays under 16 GB. Two sources that peaked at 10
+        # and 11 GB outside the pool, MenuRouting_test and ChromeFocusController_test, did so for copy-assigning
+        # Action variants; they move them in now. To re-measure, compile each source alone with the flags
+        # compile_commands.json gives it, -O2 -g in place of the optimisation flags, and read the compiler's peak
+        # (wait4's ru_maxrss).
+        #
+        # They compile in an object library of their own, in contour_heavy_compile_pool (see the top-level
+        # CMakeLists.txt), as a pool is a target property before CMake 4.2 and CI has 3.31. A source listed
+        # here is not listed in the suite's own sources.
+        set(contour_gui_test_heavy_sources
+            config/ConfigBlocksAndLinks_test.cpp
+            display/DisplayRendering_test.cpp
+            display/SettingsPreviewRendering_test.cpp
+            remote/NativeController_test.cpp
+            session/TerminalSessionBlocks_test.cpp
+            session/TerminalSessionManager_test.cpp
+            session/TerminalSessionPane_test.cpp
+            session/TerminalSessionPermissions_test.cpp
+            session/TerminalSessionView_test.cpp
+            session/TerminalSession_test.cpp
+            test/ChromeSnapshot_test.cpp
+            test/QmlComponents_test.cpp
+            test/QmlPaneCards_test.cpp
+            test/SettingsPageQml_test.cpp
+            window/AppMenuBar_test.cpp
+            window/ChromeFocusController_test.cpp
+            window/MenuRouting_test.cpp
+            window/MultiWindow_test.cpp
+            window/WindowMenus_test.cpp
         )
         if(CONTOUR_EXTENSIONS)
             list(APPEND contour_gui_test_heavy_sources session/TerminalSessionExtensions_test.cpp)
         endif()
-        add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources})
+        add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources}
+            test/QmlComponentsTestSupport.hpp) # a header with QObjects, so AUTOMOC sees it
+        # The chrome snapshots load the bundled fonts from the source tree, in every build type.
+        target_compile_definitions(contour_gui_test_heavy PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
         # The end-to-end permission test runs a guest that runs a command; it exists where guests are built.
         if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
             target_compile_definitions(contour_gui_test_heavy PRIVATE
@@ -884,7 +1109,7 @@ if(CONTOUR_FRONTEND_GUI)
                 target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
             endif()
         endforeach()
-        target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy)
+        target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy contour_test_trace)
 
         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
         if(TARGET contour_tsan_thread_join)
@@ -926,6 +1151,37 @@ if(CONTOUR_FRONTEND_GUI)
                 ENVIRONMENT
                     "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
 
+        # The chrome's QML once more under FluentWinUI3, the Fluent row's controls style. Qt resolves a style
+        # once per process, so only a run of its own exercises it; test_main.cpp's run-wide gate then fails it
+        # on any QML diagnostic the style raises against the hand-drawn chrome. Only this variant may skip: a
+        # distribution's Qt need not package FluentWinUI3 (Ubuntu 26.04's does not), and test_main.cpp then
+        # exits 77 (ControlsStyleMissingExitCode) before a test starts; not 4, Catch2's all-skipped code. The Contour styles below ship in this tree, so a missing one fails.
+        add_test(NAME contour_gui_test_fluent COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml]")
+        set_tests_properties(contour_gui_test_fluent
+            PROPERTIES
+                SKIP_RETURN_CODE 77
+                ENVIRONMENT
+                    "CONTOUR_TEST_CONTROLS_STYLE=FluentWinUI3;QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
+        # The QML suite again under the ContourLinux style, which production Linux runs every control
+        # under: a QML warning that appears only under the style fails here rather than in front of a
+        # user. A style is resolved once per process (test_main.cpp), hence a run of its own.
+        add_test(NAME contour_gui_test_contourlinux
+                 COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml],[contourlinux],[headerbar]")
+        set_tests_properties(contour_gui_test_contourlinux
+            PROPERTIES
+                ENVIRONMENT
+                    "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;CONTOUR_TEST_CONTROLS_STYLE=ContourLinux;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
+        # And under ContourTui, the Terminal row's controls style: a style Qt resolves once per process, which
+        # is how a control that states no implicit height (collapsing a header's window buttons to nothing)
+        # shows up only here.
+        add_test(NAME contour_gui_test_contourtui COMMAND $<TARGET_FILE:contour_gui_test> "[contour][gui][qml]")
+        set_tests_properties(contour_gui_test_contourtui
+            PROPERTIES
+                ENVIRONMENT
+                    "CONTOUR_TEST_CONTROLS_STYLE=ContourTui;QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
         if(WIN32)
             # Native HWND geometry cannot be exercised through the offscreen platform. Keep the
             # regular suite headless, and run the native cases separately on the Windows desktop.
@@ -935,6 +1191,17 @@ if(CONTOUR_FRONTEND_GUI)
                 PROPERTIES
                     ENVIRONMENT
                         "CONTOUR_TEST_DISPLAY=1;QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;${CONTOUR_QML_TEST_ENVIRONMENT}"
+                    RUN_SERIAL TRUE
+                    TIMEOUT 120
+                    LABELS "native;windows")
+            # The caption's hit test again at 150 %: Snap Layouts must trigger over the maximise button,
+            # and nowhere else, after a move to a monitor of another scale.
+            add_test(NAME contour_windows_native_scaled_test
+                     COMMAND $<TARGET_FILE:contour_gui_test> "[win32][hittest]")
+            set_tests_properties(contour_windows_native_scaled_test
+                PROPERTIES
+                    ENVIRONMENT
+                        "CONTOUR_TEST_DISPLAY=1;QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;QT_SCALE_FACTOR=1.5;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     RUN_SERIAL TRUE
                     TIMEOUT 120
                     LABELS "native;windows")
@@ -1051,6 +1318,9 @@ if(CONTOUR_FRONTEND_GUI)
             # lacks. The default `in_process` is what every other app run here already covers.
             add_test(NAME contour_e2e_hosting
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/hosting.sh $<TARGET_FILE:contour>)
+            # `contour connect`'s headless half: the target grammar's refusals and `--list [--json]`.
+            add_test(NAME contour_e2e_connect
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/connect.sh $<TARGET_FILE:contour>)
             # `contour daemon --stdio`, the remote end of an ssh attach: stdout carries its preamble and
             # nothing else, not even a warning the configuration logs before logging is installed.
             add_test(NAME contour_e2e_stdio_relay
@@ -1067,7 +1337,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
                 contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                contour_e2e_hosting contour_e2e_stdio_relay
+                contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1089,7 +1359,7 @@ if(CONTOUR_FRONTEND_GUI)
             if(CONTOUR_SANITIZE STREQUAL "thread")
                 set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
                                   contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                                  contour_e2e_hosting contour_e2e_stdio_relay
+                                  contour_e2e_hosting contour_e2e_stdio_relay contour_e2e_connect
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()
@@ -1104,33 +1374,56 @@ endif()
 # without the GUI frontend has none to give them. That is how that configuration came to have no
 # unit tests at all: every one of them lived in contour_gui_test, which needs a QGuiApplication.
 #
-# Config_test stays with the GUI tests deliberately: besides the configuration model it also asserts
-# the Qt colour-scheme mapping and uses qputenv, so it is not Qt-free however Qt-free the model is.
+# The Config_test*.cpp files stay with the GUI tests deliberately: besides the configuration model they also
+# assert the Qt colour-scheme mapping and use qputenv, so they are not Qt-free however Qt-free the model is.
 if(CONTOUR_TESTING)
     enable_testing()
     add_executable(contour_test
         test/core_test_main.cpp
         config/Actions_test.cpp
+        config/BindingCollisions_test.cpp
+        config/ChromeTokenGroups_test.cpp
+        config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
+        config/QuickTerminalConfig_test.cpp
+        config/DesktopButtonLayout_test.cpp
         config/GlobalOverrides_test.cpp
+        config/GuiConfigStore_test.cpp
+        config/SettingsEditSession_test.cpp
+        config/GuiStateStore_test.cpp
+        config/IndicatorTemplate_test.cpp
         config/HostUrl_test.cpp
+        config/LaunchTarget_test.cpp
         config/LayoutBuilder_test.cpp
+        config/NewDefaultsOffer_test.cpp
+        config/OptionAsAlt_test.cpp
         config/PtyReadBufferSize_test.cpp
+        config/ScrollBarMode_test.cpp
+        config/TabBarMode_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
+        test/ChromeSnapshotPlan_test.cpp
+        command/BlockMenu_test.cpp
         command/CommandCatalog_test.cpp
+        command/CommandPaletteTree_test.cpp
         command/CommandHistory_test.cpp
         command/ContextMenu_test.cpp
         command/FuzzyFilter_test.cpp
+        command/MenuBarTable_test.cpp
+        command/MenuTree_test.cpp
         command/Shortcut_test.cpp
+        command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentSkill_test.cpp
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
         cli/ControlVerbs_test.cpp
         cli/DaemonVerbs_test.cpp
+        cli/ConnectList_test.cpp
+        cli/ConnectProbe_test.cpp
         cli/Hosting_test.cpp
+        command/LauncherEntries_test.cpp
         cli/HostTransport_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ConfigProfileCatalog_test.cpp
@@ -1139,15 +1432,65 @@ if(CONTOUR_TESTING)
         cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
+        session/PastePreview_test.cpp
+        session/RestoreSummaryPolicy_test.cpp
+        session/ScrollbarVisibility_test.cpp
+        session/SizeIndicator_test.cpp
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
         session/LocalFileAction_test.cpp
+        session/EndReason_test.cpp
+        platform/CaptionHitTest_test.cpp
+        platform/SystemBackdrop_test.cpp
         platform/FinishNotification_test.cpp
+        platform/AppBundle_test.cpp
+        platform/UserNotificationCenter_test.cpp
+        platform/PortalSettings_test.cpp
+        platform/HotkeyKeys_test.cpp
         platform/NotificationOccasion_test.cpp
+        platform/SecureInputGate_test.cpp
         platform/SessionVisibility_test.cpp
+        window/ChromeFocus_test.cpp
+        window/ChromeKeys_test.cpp
+        window/HeldModifierReveal_test.cpp
+        window/DropZonePolicy_test.cpp
+        window/DroppedText_test.cpp
+        window/FindBarPlacement_test.cpp
+        window/LinkPillPlacement_test.cpp
+        window/PaneHeaderPolicy_test.cpp
+        window/PaneState_test.cpp
+        window/HotkeyRefusals_test.cpp
+        window/QuickTerminalPolicy_test.cpp
+        window/WindowRole_test.cpp
+        window/PalettePlacement_test.cpp
+        window/SplitChrome_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
+        window/SecureInputPolicy_test.cpp
+        window/SecureLockPlacement_test.cpp
+        window/HostChipState_test.cpp
+        window/TabAttention_test.cpp
+        window/TabBadge_test.cpp
+        window/ShellIntegrationOffer_test.cpp
+        window/ShellInstallRows_test.cpp
+        window/TaskbarAttentionTally_test.cpp
+        platform/TaskbarOverlay_test.cpp
+        window/NoticeQueue_test.cpp
+        window/ToastPlacement_test.cpp
+        window/SaveLayoutCheck_test.cpp
+        window/ProfileRules_test.cpp
+        window/SettingsControls_test.cpp
+        window/SettingsSearch_test.cpp
+        window/ColorContrastReadout_test.cpp
+        window/SettingsSections_test.cpp
+        window/HeaderBarLayout_test.cpp
+        window/TabWellLayout_test.cpp
+        window/TitleBandLayout_test.cpp
+        window/TitleBandSurface_test.cpp
+        window/TitleBandGeometry_test.cpp
+        window/StickyHeaderPlacement_test.cpp
+        window/StickyHeaderChrome_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing
@@ -1164,7 +1507,8 @@ if(CONTOUR_TESTING)
         glaze::glaze
         vtbackend
         core::testing
-        Catch2::Catch2)
+        Catch2::Catch2
+        contour_test_trace)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     # `contour api wit` must print the checked-in WIT package, and the exit statuses the docs list must be the
     # skill's; the tests compare against the files themselves.
@@ -1246,7 +1590,7 @@ if(CONTOUR_TESTING)
     # Windows reads it. Its own executable, so that building the unit tests does not build the application.
     if(WIN32)
         add_executable(contour_manifest_test test/core_test_main.cpp test/ApplicationManifest_test.cpp)
-        target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2)
+        target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2 contour_test_trace)
         target_compile_definitions(contour_manifest_test PRIVATE CONTOUR_BINARY="$<TARGET_FILE:contour>")
         add_dependencies(contour_manifest_test contour)
         add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
@@ -1478,6 +1822,9 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
     install(DIRECTORY "cli/shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
+    # JetBrains Mono (SIL OFL 1.1), registered with CoreText at startup. The file names contain brackets,
+    # which install(DIRECTORY ... FILES_MATCHING) would read as globs, so the directory is copied whole.
+    install(DIRECTORY "res/fonts/" DESTINATION "${INSTALL_CMAKE_DIR}/fonts" PATTERN "README.md" EXCLUDE)
     # Before the deployment step below, which signs the bundle with them inside.
     contour_install_bundled_extensions("${INSTALL_CMAKE_DIR}/extensions")
 
@@ -1575,6 +1922,7 @@ else()
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
     contour_install_bundled_extensions("${CMAKE_INSTALL_DATADIR}/contour/extensions")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
@@ -1608,7 +1956,9 @@ else()
             endif()
         endif()
 
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins")
+        # Qt SVG's image plugin draws the header bar's bundled icons: in qt6-svg-plugins since Debian's
+        # 6.7.2-5, in libqt6svg6 before it (Ubuntu 24.04).
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
 
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
@@ -1624,6 +1974,7 @@ else()
         set(CPACK_COMPONENTS_ALL "contour")
 
         install(FILES "packaging/contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+        install(FILES "packaging/${AppId}.Connect.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
         install(FILES "packaging/contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
         install(FILES "packaging/${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
         install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")

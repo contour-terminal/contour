@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <span>
 #include <string>
@@ -29,12 +30,12 @@ namespace core::net::testing
 ///
 /// **What hand-written copies get wrong is the part they did not write.** @c ISocket has virtuals
 /// with default implementations -- @c readWithFd, @c handshakeIfNeeded, @c waitReadable,
-/// @c cancelRead, @c shutdownWrite, @c setReceiveDeadline, @c peerAddress -- and a decorator that
-/// overrides none of them silently answers from the BASE rather than from the socket it decorates:
-/// a decorated peer has no address, a half-close reaches nothing, a deadline bounds nothing. None of
-/// that is visible at a call site, because every one of those defaults succeeds. Forwarding them is a
-/// property of this type, so a double cannot omit it -- and when @c ISocket grows a virtual, this is
-/// the one place that must grow with it.
+/// @c cancelRead, @c shutdownWrite, @c setReceiveDeadline, @c armKeepAlive, @c peerAddress -- and a decorator
+/// that overrides none of them silently answers from the BASE rather than from the socket it decorates: a
+/// decorated peer has no address, a half-close reaches nothing, a deadline bounds nothing. None of that is
+/// visible at a call site, because every one of those defaults succeeds. Forwarding them is a property of
+/// this type, so a double cannot omit it -- and when @c ISocket grows a virtual, this is the one place that
+/// must grow with it.
 class SocketDecorator: public ISocket
 {
   public:
@@ -73,6 +74,14 @@ class SocketDecorator: public ISocket
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override
     {
         _inner.setReceiveDeadline(deadline);
+    }
+
+    /// Forwarded, so the request reaches the socket that has a connection to probe: the base default
+    /// answers @c NetErrorCode::Unsupported, and a decorator that kept it would turn a server's
+    /// keepalive request into a refusal the real socket would never have given.
+    [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override
+    {
+        return _inner.armKeepAlive(settings);
     }
 
     [[nodiscard]] std::string peerAddress() const override { return _inner.peerAddress(); }

@@ -3,8 +3,11 @@
 #include <contour/remote/RemoteController.hpp>
 
 #include <core/async/Cancellation.hpp>
+#include <core/async/StopToken.hpp>
 #include <core/async/Task.hpp>
+#include <core/async/WhenAny.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/net/InterruptibleSleep.hpp>
 #include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -18,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 
 using namespace std::chrono_literals;
 using contour::remote::awaitMuxConnect;
@@ -174,6 +178,49 @@ namespace
     };
 }
 
+/// Counts the frames of @ref sleepCountingItsEnd that have ended, however they ended.
+class EndCounter
+{
+  public:
+    explicit EndCounter(std::atomic<int>* ended): _ended { ended } {}
+    EndCounter(EndCounter const&) = delete;
+    EndCounter& operator=(EndCounter const&) = delete;
+    EndCounter(EndCounter&&) = delete;
+    EndCounter& operator=(EndCounter&&) = delete;
+    ~EndCounter() { ++*_ended; }
+
+  private:
+    std::atomic<int>* _ended;
+};
+
+/// Sleeps for an hour unless @p token stops first, counting itself into @p parked before it parks and
+/// into @p ended as its frame goes, so a frame torn down twice shows as one end too many.
+/// @param loop The reactor's loop.
+/// @param token What wakes the sleep early.
+/// @param parked Raised just before the sleep parks.
+/// @param ended Raised as the frame ends.
+[[nodiscard]] core::async::Task<void> sleepCountingItsEnd(core::net::EventLoop* loop,
+                                                          core::async::StopToken token,
+                                                          std::atomic<int>* parked,
+                                                          std::atomic<int>* ended)
+{
+    auto const counter = EndCounter { ended };
+    ++*parked;
+    std::ignore =
+        co_await core::net::interruptibleSleepUntil(loop, std::move(token), loop->clock().now() + 1h);
+}
+
+/// A root task racing two sleeps, as ClientSupervisor races its connect against its stop.
+[[nodiscard]] core::async::Task<void> racingRootTask(core::net::EventLoop* loop,
+                                                     core::async::StopToken wake,
+                                                     std::atomic<int>* parked,
+                                                     std::atomic<int>* ended)
+{
+    std::ignore =
+        co_await core::async::whenAny(sleepCountingItsEnd(loop, std::move(wake), parked, ended),
+                                      sleepCountingItsEnd(loop, core::async::StopToken {}, parked, ended));
+}
+
 } // namespace
 
 // The reactor runs the whole remote client flow: PDU decode of frames up to proto::MaxFrameSize,
@@ -212,6 +259,41 @@ TEST_CASE("the reactor thread survives a non-std exception too", "[mux][controll
     reactor.join();
 
     CHECK(reactor.failure() == "unknown exception");
+}
+
+TEST_CASE("a throw from a posted callback stops the reactor in order", "[mux][controller][threading]")
+{
+    // A posted callback is the owner's code, run inside a loop turn. Its throw used to leave that turn
+    // with the root task still suspended: blockOn then destroyed the root, and with it the whenAny
+    // runner the same turn had queued to resume, so the loop's teardown resumed a freed frame -- the
+    // sleep below ended twice, and a reconnect's thread state was handed to OpenSSL as well.
+    auto stopSource = core::async::StopSource {};
+    auto parked = std::atomic<int> { 0 };
+    auto ended = std::atomic<int> { 0 };
+    auto reported = std::string {};
+    {
+        auto reactor = contour::remote::ReactorThread {};
+        reactor.start(
+            [&](core::net::EventLoop* loop) {
+                return racingRootTask(loop, stopSource.get_token(), &parked, &ended);
+            },
+            [&reported](std::string const& reason) { reported = reason; });
+        while (parked.load() < 2)
+            std::this_thread::yield();
+
+        // Wakes one sleep, which queues its resumption in this very turn, and then throws.
+        reactor.post([&stopSource] {
+            stopSource.request_stop();
+            throw std::runtime_error { "posted callback failed" };
+        });
+        reactor.join();
+
+        CHECK_FALSE(reactor.wasCancelled());
+        CHECK(reactor.failure() == "posted callback failed");
+    } // the loop's teardown: where a frame left queued would be resumed after it was freed
+
+    CHECK(reported == "posted callback failed");
+    CHECK(ended.load() == 2);
 }
 
 TEST_CASE("a cancelled reactor root task is still the silent shutdown", "[mux][controller]")

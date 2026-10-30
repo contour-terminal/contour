@@ -6,7 +6,9 @@
 #include <charconv>
 #include <cstdint>
 #include <format>
+#include <ranges>
 
+#include <vtcontrol/Json.hpp>
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace vthost::tmux
@@ -215,6 +217,142 @@ namespace
         }
     };
 
+    /// One node of tmux 3.8's JSON layout (`{"V":2,"L":{...}}`), as glaze reads it. Keys tmux adds beyond
+    /// these are skipped, and a missing one stays unset for toLayout() to reject. A floating pane is a node
+    /// with a `"z"` key; it sits above the tiled layout and takes no part in the partition.
+    struct JsonNode
+    {
+        std::optional<std::string> type; ///< `"p"` pane, `"h"` side by side, `"v"` stacked.
+        std::optional<int> width;
+        std::optional<int> height;
+        std::optional<int> x;
+        std::optional<int> y;
+        std::optional<std::string> paneId; ///< `"%N"`.
+        std::optional<int> floatingOrder;  ///< Present only on a floating pane.
+        std::vector<JsonNode> children;
+
+        /// The JSON keys: single letters that are not member names. Glaze looks for this nested name.
+        struct glaze // NOLINT(readability-identifier-naming)
+        {
+            using T = JsonNode;
+            // NOLINTNEXTLINE(readability-identifier-naming)
+            static constexpr auto value = glz::object("t",
+                                                      &T::type,
+                                                      "w",
+                                                      &T::width,
+                                                      "h",
+                                                      &T::height,
+                                                      "x",
+                                                      &T::x,
+                                                      "y",
+                                                      &T::y,
+                                                      "I",
+                                                      &T::paneId,
+                                                      "z",
+                                                      &T::floatingOrder,
+                                                      "c",
+                                                      &T::children);
+        };
+    };
+
+    /// The document around the root node.
+    struct JsonDocument
+    {
+        std::optional<JsonNode> layout;
+
+        /// The JSON keys. Glaze looks for this nested name.
+        struct glaze // NOLINT(readability-identifier-naming)
+        {
+            using T = JsonDocument;
+            // NOLINTNEXTLINE(readability-identifier-naming)
+            static constexpr auto value = glz::object("L", &T::layout);
+        };
+    };
+
+    /// Glaze's depth guard bounds the nesting at the same 256 as MaxNestingDepth; the node count is
+    /// bounded by toLayout().
+    struct JsonLayoutOpts: glz::opts
+    {
+        /// Nothing but whitespace may follow the document. Glaze looks for this member by its spelling.
+        bool validate_trailing_whitespace = true; // NOLINT(readability-identifier-naming)
+    };
+
+    /// Keys tmux adds later are skipped, and a missing one is left for toLayout() to reject.
+    constexpr auto JsonLayoutOptions =
+        JsonLayoutOpts { { .error_on_unknown_keys = false, .error_on_missing_keys = false } };
+
+    /// @param node A node read from JSON, tiled or floating.
+    /// @return The number of nodes in its subtree, itself included.
+    [[nodiscard]] std::size_t countNodes(JsonNode const& node)
+    {
+        return std::ranges::fold_left(node.children, std::size_t { 1 }, [](auto sum, auto const& child) {
+            return sum + countNodes(child);
+        });
+    }
+
+    /// @return The node kind a `"t"` value names, or none for anything else.
+    [[nodiscard]] std::optional<ParsedLayout::Kind> kindOf(std::optional<std::string> const& type)
+    {
+        if (type == "p")
+            return ParsedLayout::Kind::Leaf;
+        if (type == "h")
+            return ParsedLayout::Kind::SideBySide;
+        if (type == "v")
+            return ParsedLayout::Kind::Stacked;
+        return std::nullopt;
+    }
+
+    /// Converts @p node into a ParsedLayout, leaving floating panes out of every container's children.
+    [[nodiscard]] std::expected<ParsedLayout, std::string> toLayout(JsonNode const& node)
+    {
+        auto const kind = kindOf(node.type);
+        if (!kind)
+            return std::unexpected("unknown node type");
+        if (!node.width || !node.height || !node.x || !node.y)
+            return std::unexpected("node lacks its geometry");
+
+        auto result = ParsedLayout { .kind = *kind,
+                                     .width = *node.width,
+                                     .height = *node.height,
+                                     .x = *node.x,
+                                     .y = *node.y,
+                                     .paneId = std::nullopt,
+                                     .children = {} };
+        if (node.paneId)
+        {
+            auto id = std::uint64_t {};
+            auto const digits = std::string_view { *node.paneId };
+            if (!digits.starts_with('%')
+                || std::from_chars(digits.data() + 1, digits.data() + digits.size(), id).ec != std::errc {})
+                return std::unexpected("expected a pane id");
+            result.paneId = id;
+        }
+        for (auto const& child:
+             node.children | std::views::filter([](auto const& c) { return !c.floatingOrder; }))
+        {
+            auto converted = toLayout(child);
+            if (!converted)
+                return converted;
+            result.children.push_back(std::move(*converted));
+        }
+        if (result.kind != ParsedLayout::Kind::Leaf && result.children.size() < 2)
+            return std::unexpected("container needs at least two children");
+        return result;
+    }
+
+    /// Reads tmux 3.8's JSON layout document.
+    [[nodiscard]] std::expected<ParsedLayout, std::string> parseJsonLayout(std::string_view text)
+    {
+        auto document = JsonDocument {};
+        if (auto const error = glz::read<JsonLayoutOptions>(document, text))
+            return std::unexpected(glz::format_error(error, text));
+        if (!document.layout)
+            return std::unexpected("document lacks its layout");
+        if (countNodes(*document.layout) > MaxNodeCount)
+            return std::unexpected("layout has too many nodes");
+        return toLayout(*document.layout);
+    }
+
     /// Mirrors tmux's layout_check: children partition the parent exactly along
     /// the split axis (one divider cell between neighbours) and match it on the
     /// cross axis.
@@ -246,6 +384,17 @@ namespace
 
 std::expected<ParsedLayout, std::string> parseLayout(std::string_view text)
 {
+    // tmux 3.8 writes a JSON document, which carries no checksum; older tmux a checksummed string.
+    if (text.starts_with('{'))
+    {
+        auto root = parseJsonLayout(text);
+        if (!root)
+            return root;
+        if (auto valid = check(*root); !valid)
+            return std::unexpected(valid.error());
+        return root;
+    }
+
     auto const comma = text.find(',');
     if (comma != 4 || text.size() < 5)
         return std::unexpected("expected 4-digit checksum prefix");

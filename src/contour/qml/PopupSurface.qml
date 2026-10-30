@@ -3,7 +3,7 @@
 // with a drop shadow.
 //
 // Why the shadow is DRAWN rather than asked of the compositor. Every menu here forces
-// `popupType: Popup.Item` (see TabContextMenu.qml for why a native platform menu is not an option),
+// `popupType: Popup.Item` (see ContourMenu.qml for why a native platform menu is not an option),
 // which makes it an item inside the window's own scene rather than an OS window of its own -- and a
 // thing that is not a surface cannot have a surface's shadow. That is the opposite of the main
 // window, which publishes a real shadow to the compositor; see platform/WindowShadow.hpp.
@@ -46,6 +46,7 @@ Rectangle {
     // the terminal can show through it, and a popup that inherited any of that would render its text
     // over whatever happens to be scrolling underneath.
     color: root.palette.window
+    // The generic popup corner; a menu sets the row's menu radius instead (ContourMenu.qml).
     radius: chromeStyle.radius
     border.width: chromeStyle.borderWidth
     border.color: root.palette.mid
@@ -66,16 +67,38 @@ Rectangle {
     // cannot be seen is far worse than any shadow.
     readonly property color _tint: chromeStyle.shadowTint(root.palette.shadow)
 
+    // An elevation level (one of chromeStyle.elevation's e0..e3) to lift the surface by instead of the
+    // style's popup shadow: ElevationShadow draws it, soft where the level blurs and a hard offset copy
+    // where it does not (the Terminal row). Null keeps the popup shadow below. By default e2 on a row
+    // whose e2 has no blur -- the popup shadow's nine-patch has nothing to soften there, and drew a slab
+    // wider than the box -- and the popup shadow everywhere else.
+    property var elevation: chromeStyle.elevation.e2.blur > 0 ? null : chromeStyle.elevation.e2
+
+    // Built only where a surface asks for it: the popups that take the style's shadow below carry no part of
+    // this path at all.
+    Loader {
+        objectName: "popupElevationShadow"
+        active: root.elevation !== null
+        anchors.fill: parent
+        z: -1
+        sourceComponent: ElevationShadow {
+            level: root.elevation
+            radius: root.radius
+        }
+    }
+
     // How far the shadow reaches beyond the surface, and the unstretched corner. Both are functions
     // of the same parameters the provider renders from, so the two cannot disagree.
     readonly property int _reach: chromeStyle.shadowBlur > 0
                                 ? 3 * Math.max(1, Math.round((chromeStyle.shadowBlur + 1) / 2))
                                 : 0
     readonly property int _margin: root._reach + Math.abs(chromeStyle.shadowOffsetY)
-    readonly property int _corner: root._margin + chromeStyle.radius
+    // The surface's own radius, not the style's: a popup that overrides `radius` (the find bar's) keeps a
+    // shadow whose corners follow its own.
+    readonly property int _corner: root._margin + root.radius
 
     BorderImage {
-        visible: chromeStyle.hasPopupShadow && root._margin > 0
+        visible: root.elevation === null && chromeStyle.hasPopupShadow && root._margin > 0
         // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts this under
         // the opaque surface without a second item to hold it.
         z: -1
@@ -85,7 +108,7 @@ Rectangle {
 
         source: "image://popupshadow/" + chromeStyle.shadowBlur
               + "/" + Math.round(chromeStyle.shadowOffsetY)
-              + "/" + chromeStyle.radius
+              + "/" + root.radius
               // The colour WITHOUT its leading '#': that character starts a URL fragment, and Qt
               // would strip everything after it before the provider ever saw the id.
               + "/" + root._tint.toString().substring(1)

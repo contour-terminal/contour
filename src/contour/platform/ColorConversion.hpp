@@ -36,4 +36,18 @@ namespace contour::platform
                                  static_cast<std::uint8_t>(color.blue()) };
 }
 
+/// @p base at @p percent opacity.
+///
+/// Every translucent colour the chrome paints -- the hover wash, the scrims, a token colour at the alpha
+/// its row states -- is a colour taken down to a percentage, so the one arithmetic step lives here.
+/// @param base    The colour; its alpha is replaced.
+/// @param percent The opacity, 0 to 100.
+/// @return @p base with alpha @p percent / 100.
+[[nodiscard]] inline QColor atOpacity(QColor const& base, int percent)
+{
+    auto faded = base;
+    faded.setAlphaF(static_cast<float>(percent) / 100.0F);
+    return faded;
+}
+
 } // namespace contour::platform

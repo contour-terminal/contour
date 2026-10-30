@@ -55,7 +55,7 @@ TEST_CASE("Taskbar progress retains updates until ready and replays after recrea
 {
     auto button = contour::platform::TaskbarProgressState {};
     auto const normal = TaskbarProgress { .state = ProgressState::Normal, .percentage = 40 };
-    button.setProgress(normal);
+    button.set(normal);
     CHECK_FALSE(button.pending());
     button.buttonCreated();
     CHECK(button.pending() == normal);
@@ -66,10 +66,39 @@ TEST_CASE("Taskbar progress retains updates until ready and replays after recrea
     CHECK(button.pending() == normal); // Explorer recreated the button.
     button.applied();
     button.surfaceDestroyed();
-    button.setProgress({});
+    button.set({});
     CHECK_FALSE(button.pending());
     button.buttonCreated();
     CHECK(button.pending() == TaskbarProgress {});
+}
+
+TEST_CASE("The taskbar overlay follows the same readiness rule as progress", "[contour][taskbar][progress]")
+{
+    auto overlay = contour::platform::TaskbarAttentionState {};
+    overlay.set({ .waiting = 2 });
+    CHECK_FALSE(overlay.pending()); // No button yet: retained, not sent.
+    overlay.buttonCreated();
+    CHECK(overlay.pending() == contour::platform::TaskbarAttention { .waiting = 2 });
+    overlay.applied();
+    CHECK_FALSE(overlay.pending());
+    overlay.set({});
+    CHECK(overlay.pending() == contour::platform::TaskbarAttention {}); // Clearing is an update too.
+    overlay.surfaceDestroyed();
+    CHECK_FALSE(overlay.pending());
+}
+
+TEST_CASE("An invalidated taskbar overlay is sent again, and only on a ready button",
+          "[contour][taskbar][progress]")
+{
+    auto overlay = contour::platform::TaskbarAttentionState {};
+    overlay.set({ .waiting = 2 });
+    overlay.invalidate();
+    CHECK_FALSE(overlay.pending()); // No button yet: invalidating does not make one.
+    overlay.buttonCreated();
+    overlay.applied();
+    REQUIRE_FALSE(overlay.pending());
+    overlay.invalidate();
+    CHECK(overlay.pending() == contour::platform::TaskbarAttention { .waiting = 2 });
 }
 
 TEST_CASE("Taskbar progress window selection preserves original report deadlines",
@@ -296,4 +325,11 @@ TEST_CASE("TaskbarProgressRouter.the_timeout_is_a_per_call_policy", "[contour][t
     CHECK(router.resolve(Epoch + 1h, 0ms).state == ProgressState::Normal); // explicitly off
     CHECK(router.resolve(Epoch + 1h, 15s) == TaskbarProgress {});          // and on again
     CHECK(router.resolve(Epoch + 5s, 15s).state == ProgressState::Normal); // same report, still fresh
+}
+
+TEST_CASE("TaskbarAttention.the_dock_badge_text_is_the_count_and_nothing_for_none", "[contour][taskbar]")
+{
+    CHECK(contour::platform::dockBadgeText({}).empty());
+    CHECK(contour::platform::dockBadgeText({ .waiting = 1 }) == "1");
+    CHECK(contour::platform::dockBadgeText({ .waiting = 12 }) == "12");
 }

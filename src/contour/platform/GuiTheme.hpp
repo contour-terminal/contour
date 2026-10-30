@@ -2,6 +2,10 @@
 #pragma once
 
 #include <contour/config/Config.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
+
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <QtCore/Qt>
 #include <QtGui/QColor>
@@ -9,9 +13,40 @@
 
 #include <array>
 #include <optional>
+#include <variant>
 
 namespace contour::platform
 {
+
+/// The luminance below which a terminal background reads as dark (WCAG relative luminance, 0 to 1).
+inline constexpr double DarkBackgroundLuminance = 0.18;
+
+/// Whether a terminal background of the given color calls for a dark or a light chrome.
+/// @param background The terminal's default background color.
+/// @return @c Dark when its relative luminance is below @c DarkBackgroundLuminance, else @c Light.
+[[nodiscard]] inline Qt::ColorScheme colorSchemeOfBackground(vtbackend::RGBColor background) noexcept
+{
+    return vtbackend::relativeLuminance(background) < DarkBackgroundLuminance ? Qt::ColorScheme::Dark
+                                                                              : Qt::ColorScheme::Light;
+}
+
+/// The GUI theme in effect while the operating system does or does not run a contrast theme.
+///
+/// A contrast theme owns the palette (R-l): forcing a scheme, the terminal's included, would paint over
+/// the very colours the user chose for legibility, so under one the chrome defers to the system palette.
+/// @param configured The configured GUI theme.
+/// @param contrast Whether the operating system runs a contrast theme.
+/// @return @c GuiTheme::System under @c ContrastTheme::Active, else @p configured.
+[[nodiscard]] constexpr config::GuiTheme effectiveGuiTheme(config::GuiTheme configured,
+                                                           ContrastTheme contrast) noexcept
+{
+    switch (contrast)
+    {
+        case ContrastTheme::None: return configured;
+        case ContrastTheme::Active: return config::GuiTheme::System;
+    }
+    return configured;
+}
 
 /// Maps the configured GUI theme to the Qt color-scheme override that should be applied to the
 /// application's chrome (title bar, tab strip, command palette, settings pages, dialogs).
@@ -21,17 +56,75 @@ namespace contour::platform
 /// @c QStyleHints::setColorScheme / @c unsetColorScheme.
 ///
 /// @param theme The configured GUI theme.
-/// @return The Qt color scheme to force, or @c std::nullopt for @c GuiTheme::System (defer to the
-///         operating system's color scheme, i.e. @c unsetColorScheme).
-[[nodiscard]] constexpr std::optional<Qt::ColorScheme> qtColorSchemeFor(config::GuiTheme theme) noexcept
+/// @param colors The default profile's color configuration, consulted for @c GuiTheme::Terminal.
+/// @param liveBackground The focused session's default background as a program set it at runtime
+///        (OSC 11), if known. Over a simple color configuration it outranks the configured background;
+///        over a dual one it is ignored, since the chrome then follows the OS.
+/// @return The Qt color scheme to force, or @c std::nullopt to defer to the operating system's color
+///         scheme (i.e. @c unsetColorScheme): for @c GuiTheme::System, and for @c GuiTheme::Terminal
+///         over a dual (dark/light) color configuration, which already follows the OS.
+[[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(
+    config::GuiTheme theme,
+    config::ColorConfig const& colors,
+    std::optional<vtbackend::RGBColor> liveBackground) noexcept
 {
     switch (theme)
     {
         case config::GuiTheme::System: return std::nullopt;
         case config::GuiTheme::Dark: return Qt::ColorScheme::Dark;
         case config::GuiTheme::Light: return Qt::ColorScheme::Light;
+        case config::GuiTheme::Terminal:
+            if (auto const* simple = std::get_if<config::SimpleColorConfig>(&colors))
+                return colorSchemeOfBackground(liveBackground.value_or(simple->colors.defaultBackground));
+            return std::nullopt;
     }
     return std::nullopt;
+}
+
+/// The color scheme for @p theme over the configured background alone, with no live background.
+/// @param theme The configured GUI theme.
+/// @param colors The default profile's color configuration.
+/// @return As the three-argument form with @c std::nullopt for the live background.
+[[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(
+    config::GuiTheme theme, config::ColorConfig const& colors) noexcept
+{
+    return qtColorSchemeFor(theme, colors, std::nullopt);
+}
+
+/// The terminal's light/dark preference from what the operating system says.
+/// @param published The preference the platform appearance source publishes, if any (the XDG Settings
+///        portal's @c color-scheme on Linux).
+/// @param qtScheme Qt's own reading of the OS colour scheme (@c QStyleHints::colorScheme).
+/// @return @p published when set; otherwise @c Dark for @c Qt::ColorScheme::Dark and @c Light for anything
+///         else.
+[[nodiscard]] inline vtbackend::ColorPreference osColorPreference(
+    std::optional<vtbackend::ColorPreference> published, Qt::ColorScheme qtScheme) noexcept
+{
+    if (published)
+        return *published;
+    return qtScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
+                                             : vtbackend::ColorPreference::Light;
+}
+
+/// The terminal's light/dark preference once the GUI theme is taken into account.
+///
+/// A chrome pinned to dark or light carries the terminal with it: a dark chrome around a light grid (or the
+/// reverse) is the one combination nobody picks on purpose. Every other theme defers to the OS, `Terminal`
+/// included, as that theme derives the chrome from the terminal and not the other way round.
+/// @param effectiveTheme The GUI theme in effect (see @ref effectiveGuiTheme).
+/// @param os What the OS says (see @ref osColorPreference).
+/// @return @c Dark or @c Light for the matching pinned theme, else @p os.
+[[nodiscard]] constexpr vtbackend::ColorPreference terminalColorPreference(
+    config::GuiTheme effectiveTheme, vtbackend::ColorPreference os) noexcept
+{
+    switch (effectiveTheme)
+    {
+        case config::GuiTheme::Dark: return vtbackend::ColorPreference::Dark;
+        case config::GuiTheme::Light: return vtbackend::ColorPreference::Light;
+        case config::GuiTheme::System:
+        case config::GuiTheme::Terminal: return os;
+    }
+    return os;
 }
 
 namespace detail

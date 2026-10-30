@@ -34,10 +34,11 @@ namespace contour::config
 /// unit. That is what lets every style here work in a cell-quantized chrome as well as a pixel one.
 enum class WindowControlStyle : uint8_t
 {
-    Auto = 0, //!< Match the host: macOS -> MacOS, Windows -> Windows, a KDE session -> Plasma.
+    Auto = 0, //!< Match the host: macOS -> MacOS, Windows -> Windows, any other desktop -> Linux.
     Windows,  //!< Trailing edge, flush rectangular buttons, red close hover (historical behavior).
     MacOS,    //!< Leading edge, traffic lights, close/minimize/zoom order.
     Plasma,   //!< Trailing edge, circular hover fills -- KDE Plasma's Breeze decoration.
+    Linux,    //!< Round buttons with themed icons, in the order and on the sides the desktop's layout names.
 };
 
 /// Which end of the title bar the window controls sit at.
@@ -59,6 +60,21 @@ enum class WindowControlPresentation : uint8_t
 {
     Button = 0,   //!< A rectangular button showing a glyph, with a hover fill behind it.
     TrafficLight, //!< A small colored dot that reveals its glyph while the group is hovered.
+    Round,        //!< A filled circle showing a themed icon: the Linux header bar's buttons.
+};
+
+/// What a @c Button presentation's hover and pressed fill is drawn with.
+enum class ControlWash : uint8_t
+{
+    Highlight = 0, //!< The palette highlight at the chrome's hover wash (UiStyleTokens::hoverWashPercent).
+    KitFill, //!< The kit's @c fill.4 (FillAlphas[3]): black 5 % on a light chrome, white 6 % on a dark one.
+};
+
+/// Where a style's controls take their order and side from.
+enum class ControlPlacement : uint8_t
+{
+    Own = 0, //!< The style's own @c order on its own @c side.
+    Desktop, //!< The desktop's button layout, both sides (config::windowButtonPlacement).
 };
 
 /// What one window control does. Also the index into @c WindowControlTokens::dotColors.
@@ -121,6 +137,29 @@ struct WindowControlTokens
     /// faces, so the one glyph that is not in the array above.
     std::string_view restoreGlyph;
 
+    /// The icon fonts the controls prefer, the first installed one winning (@see controlGlyphsFor); an empty
+    /// entry is none. An array rather than a span so the defaulted comparison below still exists.
+    std::array<std::string_view, 2> iconFamilies;
+
+    /// The glyph each control is drawn with in an icon font, indexed by @c WindowControlKind.
+    std::array<std::string_view, WindowControlCount> iconGlyphs;
+
+    /// The restore glyph in an icon font.
+    std::string_view iconRestoreGlyph;
+
+    /// What a hovered or pressed @c Button is filled with.
+    ControlWash wash;
+
+    /// The freedesktop icon each control is drawn with, indexed by @c WindowControlKind; empty on the glyph
+    /// styles. @c Round presentation only.
+    std::array<std::string_view, WindowControlCount> iconNames;
+
+    /// The maximize control's icon while the window is maximized; empty on the glyph styles.
+    std::string_view restoreIconName;
+
+    /// Where the controls' order and side come from.
+    ControlPlacement placement;
+
     /// Defaulted so a style derived from another (Breeze from Windows) can be checked against it as
     /// a whole rather than field by field, which is what keeps such a test honest when a field is
     /// added.
@@ -140,6 +179,9 @@ enum class HostPlatform : uint8_t
     KdePlasma,
 };
 
+/// The number of @c HostPlatform enumerators; tables indexed by host pin themselves to it.
+inline constexpr std::size_t HostPlatformCount = static_cast<std::size_t>(HostPlatform::KdePlasma) + 1;
+
 namespace detail
 {
     // inline, so every translation unit that includes this header shares one table rather than
@@ -157,6 +199,16 @@ namespace detail
         .inactiveDotColor = 0,
         .glyphs = { "✕", "—", "▢" },
         .restoreGlyph = "❐",
+        // Windows 11's caption glyphs; Windows 10 has the same code points in Segoe MDL2 Assets. Neither
+        // exists elsewhere, where the Unicode glyphs above are drawn in the chrome font instead.
+        .iconFamilies = { "Segoe Fluent Icons", "Segoe MDL2 Assets" },
+        .iconGlyphs = { "\uE8BB", "\uE921", "\uE922" },
+        .iconRestoreGlyph = "\uE923",
+        // The kit's fill.4, as Windows 11 lights its caption buttons.
+        .wash = ControlWash::KitFill,
+        .iconNames = {},
+        .restoreIconName = {},
+        .placement = ControlPlacement::Own,
     };
 
     // Traffic lights at the leading edge, in macOS's own order and colors. The glyphs are the ones
@@ -181,17 +233,50 @@ namespace detail
         // Zoom is a toggle on macOS and shows the same glyph either way, but the two arrows are
         // turned inward to say the window is coming back.
         .restoreGlyph = "⤡",
+        // A traffic light has no icon font and no fill.
+        .iconFamilies = {},
+        .iconGlyphs = {},
+        .iconRestoreGlyph = {},
+        .wash = ControlWash::Highlight,
+        .iconNames = {},
+        .restoreIconName = {},
+        .placement = ControlPlacement::Own,
     };
 
-    // Breeze differs from Windows in two values and agrees on the other seven, so it says only the
-    // two rather than restating the row: a glyph or an order that drifted between them would be a
-    // silent inconsistency no reader would spot in two adjacent literal blocks.
+    // Breeze differs from Windows in the values it states and agrees on the rest, so it says only those
+    // rather than restating the row: a glyph or an order that drifted between them would be a silent
+    // inconsistency no reader would spot in two adjacent literal blocks.
     inline constexpr auto PlasmaTokens = [] {
         auto tokens = WindowsTokens;
-        tokens.hoverCornerPercent = 100;   // a circular hover fill rather than a full-height rectangle
-        tokens.closeHoverColor = 0xC9312B; // Breeze's own red
+        tokens.hoverCornerPercent = 100;      // a circular hover fill rather than a full-height rectangle
+        tokens.closeHoverColor = 0xC9312B;    // Breeze's own red
+        tokens.iconFamilies = {};             // never Windows' Segoe glyphs, even where they are installed
+        tokens.wash = ControlWash::Highlight; // the chrome's ordinary hover wash, not the Windows kit's
         return tokens;
     }();
+
+    // The Linux header bar's buttons (spec §3.15): round, filled, each with its freedesktop symbolic icon.
+    // The order and side are the desktop's (windowButtonPlacement); the ones here are used only where no
+    // layout is given, and match the fallback layout. The Unicode glyphs stay for a chrome that draws cells.
+    inline constexpr auto LinuxControlTokens = WindowControlTokens {
+        .side = WindowControlSide::Trailing,
+        .presentation = WindowControlPresentation::Round,
+        .order = { WindowControlKind::Minimize, WindowControlKind::Maximize, WindowControlKind::Close },
+        .hoverCornerPercent = 100,
+        .closeHoverColor = 0,
+        .dotColors = { 0, 0, 0 },
+        .inactiveDotColor = 0,
+        .glyphs = { "✕", "—", "▢" },
+        .restoreGlyph = "❐",
+        .iconFamilies = {},
+        .iconGlyphs = {},
+        .iconRestoreGlyph = {},
+        // The round fill's hover and pressed steps are the kit's (ChromeColorRole::WindowButtonHoverFill).
+        .wash = ControlWash::KitFill,
+        .iconNames = { "window-close-symbolic", "window-minimize-symbolic", "window-maximize-symbolic" },
+        .restoreIconName = "window-restore-symbolic",
+        .placement = ControlPlacement::Desktop,
+    };
 
     // Rows are indexed by WindowControlStyle, so their order is the enumerator order --
     // windowControlTokens() relies on that, and the static_assert below pins it.
@@ -201,13 +286,14 @@ namespace detail
     // no arithmetic and no bounds check while making an unresolved value degrade to the appearance
     // Contour has always had rather than to an empty title bar.
     inline constexpr auto WindowControlTokenTable =
-        std::array { WindowsTokens, WindowsTokens, MacOsTokens, PlasmaTokens };
+        std::array { WindowsTokens, WindowsTokens, MacOsTokens, PlasmaTokens, LinuxControlTokens };
 
     inline constexpr auto WindowControlStyleTable = std::array {
         ConfigEnumInfo<WindowControlStyle> { WindowControlStyle::Auto, "auto", "Match the system" },
         ConfigEnumInfo<WindowControlStyle> { WindowControlStyle::Windows, "windows", "Windows" },
         ConfigEnumInfo<WindowControlStyle> { WindowControlStyle::MacOS, "macos", "macOS" },
         ConfigEnumInfo<WindowControlStyle> { WindowControlStyle::Plasma, "plasma", "KDE Plasma" },
+        ConfigEnumInfo<WindowControlStyle> { WindowControlStyle::Linux, "linux", "Linux" },
     };
 
     static_assert(WindowControlTokenTable.size() == WindowControlStyleTable.size(),
@@ -252,8 +338,8 @@ constexpr std::span<ConfigEnumInfo<WindowControlStyle> const> configEnumValues()
 ///
 /// Split from the host detection so the policy -- which host wants which controls -- is a pure
 /// function that a test can drive through every combination on whatever machine it happens to run
-/// on. A host this knows nothing about resolves to @c Windows, which is the appearance Contour has
-/// always shipped, so `auto` changes what an existing user sees on exactly one platform.
+/// on. Every desktop that is neither Windows nor macOS -- KDE's included -- resolves to @c Linux, whose
+/// buttons go where the desktop's own button layout puts them.
 ///
 /// @param configured What the user asked for.
 /// @param host       The host to resolve @c Auto against.
@@ -267,11 +353,11 @@ constexpr std::span<ConfigEnumInfo<WindowControlStyle> const> configEnumValues()
     switch (host)
     {
         case HostPlatform::MacOS: return WindowControlStyle::MacOS;
-        case HostPlatform::KdePlasma: return WindowControlStyle::Plasma;
-        case HostPlatform::Windows:
+        case HostPlatform::Windows: return WindowControlStyle::Windows;
+        case HostPlatform::KdePlasma:
         case HostPlatform::Other: break;
     }
-    return WindowControlStyle::Windows;
+    return WindowControlStyle::Linux;
 }
 
 /// The desktop environment @p env names.

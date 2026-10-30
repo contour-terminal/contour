@@ -5,11 +5,14 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/TestEnvironment.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 
 #include <vtpty/ChannelPty.hpp>
+
+#include <core/Environment.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -78,8 +81,11 @@ struct DisplayHarness
 
     /// @param mode Whether to stand the display up inside a shown window, and whether pump() renders it.
     /// @param configure Adjusts the application's configuration before the session is born from it.
+    /// @param seed Fills the session's terminal before the display is attached, as a restored session is
+    ///        filled before any window draws it; the display's first frame is the first one to show it.
     explicit DisplayHarness(HarnessWindow mode = HarnessWindow::Shown,
-                            std::function<void(contour::config::Config&)> const& configure = {}):
+                            std::function<void(contour::config::Config&)> const& configure = {},
+                            std::function<void(contour::session::TerminalSession&)> const& seed = {}):
         windowMode(mode), display(std::make_unique<contour::display::TerminalDisplay>())
     {
         if (configure)
@@ -89,6 +95,8 @@ struct DisplayHarness
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
         pty = ptyOwned.get();
         session = makeTestSession(&testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
+        if (seed)
+            seed(*session);
 
         if (windowMode != HarnessWindow::None)
         {

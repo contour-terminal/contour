@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/session/EndReason.hpp>
+
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #ifdef VTPTY_LIBSSH2
@@ -10,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
+#include <string>
 #include <variant>
 
 namespace contour::session
@@ -91,6 +94,44 @@ enum class QuickExitNotice : uint8_t
 [[nodiscard]] inline QuickExitNotice quickExitNoticeFor(SessionExitStatus const& status) noexcept
 {
     return exitCodeFor(status, EXIT_FAILURE) == EXIT_SUCCESS ? QuickExitNotice::Skip : QuickExitNotice::Show;
+}
+
+/// How a session's program ended, as its pane's footer names it.
+struct SessionEndReport
+{
+    EndReason reason = EndReason::None; ///< Exited or Signalled.
+    std::string detail {};              ///< The exit code or the signal; empty when unknown.
+
+    bool operator==(SessionEndReport const&) const = default;
+};
+
+/// Names how the program behind a session ended.
+/// @param status How it ended; nullopt for a device that cannot tell (a mirror, a mock).
+/// @return Exited with the code, or Signalled with the signal; Exited with no detail when unknown.
+[[nodiscard]] inline SessionEndReport endOf(SessionExitStatus const& status)
+{
+    if (!status.has_value())
+        return SessionEndReport { .reason = EndReason::Exited };
+
+    auto const ofProcess = [](vtpty::Process::ExitStatus const& s) {
+        if (auto const* normal = std::get_if<vtpty::Process::NormalExit>(&s))
+            return SessionEndReport { .reason = EndReason::Exited,
+                                      .detail = std::to_string(normal->exitCode) };
+        return SessionEndReport { .reason = EndReason::Signalled,
+                                  .detail = std::to_string(std::get<vtpty::Process::SignalExit>(s).signum) };
+    };
+
+#ifdef VTPTY_LIBSSH2
+    if (auto const* ssh = std::get_if<vtpty::SshSession::ExitStatus>(&*status))
+    {
+        if (auto const* normal = std::get_if<vtpty::SshSession::NormalExit>(ssh))
+            return SessionEndReport { .reason = EndReason::Exited,
+                                      .detail = std::to_string(normal->exitCode) };
+        return SessionEndReport { .reason = EndReason::Signalled,
+                                  .detail = std::get<vtpty::SshSession::SignalExit>(*ssh).signal };
+    }
+#endif
+    return ofProcess(std::get<vtpty::Process::ExitStatus>(*status));
 }
 
 } // namespace contour::session

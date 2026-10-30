@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/CaptureLineMode.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -13,6 +14,8 @@
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/screen/Cursor.hpp>
+#include <vtbackend/screen/SearchQuery.hpp>
+#include <vtbackend/screen/SearchTallyWalk.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/LivePromptMarks.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
@@ -596,7 +599,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void hyperlink(std::string id, std::string uri);                   // OSC 8
     void notify(std::string const& title, std::string const& content); // OSC 777
 
-    void captureBuffer(LineCount lineCount, bool logicalLines);
+    /// Replies with the last @p lineCount lines, counted as @p mode says, in XTCAPTURE chunks.
+    void captureBuffer(LineCount lineCount, CaptureLineMode mode);
 
     /// Replies the empty terminating PM chunk that closes every capture reply, and nothing else.
     ///
@@ -864,25 +868,27 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                && coord.column < boxed_cast<ColumnOffset>(pageSize().columns);
     }
 
-    /// Finds the first match at or after @p startPosition, walking forward through logical lines.
+    /// Finds the first literal match of @p searchText at or after @p startPosition.
+    ///
+    /// A convenience over a literal SearchQuery, for callers with a needle and no query.
     /// @param searchText    The needle. An empty needle matches nothing.
     /// @param startPosition Where to begin; a match starting exactly here is returned.
     /// @param mode          The case policy. @see caseComparisonFor.
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
                                                      CellLocation startPosition,
-                                                     SearchCaseSensitivity mode);
+                                                     SearchCaseSensitivity mode) const;
 
-    /// Finds the first match at or before @p startPosition, walking backward through logical lines.
+    /// Finds the first literal match of @p searchText at or before @p startPosition. @see search
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string_view searchText,
                                                             CellLocation startPosition,
-                                                            SearchCaseSensitivity mode);
+                                                            SearchCaseSensitivity mode) const;
 
-    /// Counts @p searchText's matches over the whole grid, scrollback included, and locates
+    /// Counts @p searchText's literal matches over the whole grid, scrollback included, and locates
     /// @p position among them.
     ///
-    /// Implemented as a forward walk that reuses search() rather than a matcher of its own, so the
-    /// count can never disagree with what stepping through the matches actually visits -- including
-    /// the overlapping ones, which navigation reaches and a non-overlapping count would hide.
+    /// Counted by a SearchTallyWalk drained at once, over the very matcher stepping uses, so the count can
+    /// never disagree with what stepping through the matches actually visits -- including the overlapping
+    /// ones, which navigation reaches and a non-overlapping count would hide.
     ///
     /// @param searchText The needle.
     /// @param position   Reported back as @c ordinal when a match starts exactly there.
@@ -891,32 +897,41 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] SearchMatchTally tallyMatches(std::u32string_view searchText,
                                                 CellLocation position,
                                                 SearchCaseSensitivity mode,
-                                                size_t limit);
+                                                size_t limit) const;
 
-    /// search() for callers that have already resolved the case policy.
-    ///
-    /// Resolving @c Smart means a UCD lookup per codepoint of the needle, and the two callers that
-    /// have the answer in hand call these on the hot path: tallyMatches() searches once per match, and
-    /// Terminal caches the resolved policy on @c Search::comparison precisely so that a keystroke does
-    /// not re-derive it. @see caseComparisonFor.
-    ///
-    /// @param searchText    The needle. An empty needle matches nothing.
-    /// @param startPosition Where to begin; a match starting exactly here is returned.
-    /// @param comparison    The already-resolved case policy.
-    /// @return The first match at or after @p startPosition, or nullopt if there is none.
-    [[nodiscard]] std::optional<CellLocation> searchFrom(std::u32string_view searchText,
-                                                         CellLocation startPosition,
-                                                         CaseComparison comparison);
+    /// Finds the first match of @p query at or after @p startPosition, walking forward segment by segment.
+    /// @param query         The compiled pattern.
+    /// @param startPosition Where to begin; a match starting exactly here is returned. A column past the
+    ///                      row's end begins at the next row.
+    /// @return The match's first cell, nothing where there is none, or SearchPatternError::TooComplex.
+    [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchFrom(
+        SearchQuery const& query, CellLocation startPosition) const;
 
-    /// searchReverse() for callers that have already resolved the case policy. @see searchFrom.
-    ///
-    /// @param searchText    The needle. An empty needle matches nothing.
+    /// Finds the last match of @p query at or before @p startPosition, walking backward segment by segment.
+    /// @param query         The compiled pattern.
     /// @param startPosition Where to begin; a match starting exactly here is returned.
-    /// @param comparison    The already-resolved case policy.
-    /// @return The first match at or before @p startPosition, or nullopt if there is none.
-    [[nodiscard]] std::optional<CellLocation> searchReverseFrom(std::u32string_view searchText,
-                                                                CellLocation startPosition,
-                                                                CaseComparison comparison);
+    /// @return The match's first cell, nothing where there is none, or SearchPatternError::TooComplex.
+    [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
+        SearchQuery const& query, CellLocation startPosition) const;
+
+    /// searchReverseFrom(), reading whole segments while @p read admits them: the keystroke probe's bound, so
+    /// typing never walks a deep scrollback, nor feeds a slow regex much.
+    /// @param query         The compiled pattern.
+    /// @param startPosition Where to begin; a match starting exactly here is returned.
+    /// @param read          What the read may take; exhausted() afterwards where it stopped short.
+    /// @return The match's first cell, nothing where there is none within the budget, or
+    ///         SearchPatternError::TooComplex.
+    [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
+        SearchQuery const& query, CellLocation startPosition, SearchReadBudget& read) const;
+
+    /// The match of @p query that begins at @p start.
+    /// @param query The compiled pattern.
+    /// @param start A cell of the grid.
+    /// @param memo  Where a regex's matches of the segment are remembered (Terminal::searchMatchMemo).
+    /// @return The match's first cell and last column, nothing where no match begins there, or
+    ///         SearchPatternError::TooComplex.
+    [[nodiscard]] std::expected<std::optional<CellLocationRange>, SearchPatternError> matchStartingAt(
+        std::shared_ptr<SearchQuery const> const& query, CellLocation start, SearchMatchMemo& memo) const;
 
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {
@@ -1135,7 +1150,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void noteUserMarkChange(LineOffset line, LineFlags before) noexcept;
 
     /// Tells everything that follows a row in place what rewriting row @p line whole did to it: the command
-    /// blocks (noteBlockRowChange()) and the user-mark index (noteUserMarkChange()).
+    /// blocks (noteBlockRowChange()), the user-mark index (noteUserMarkChange()) and the fold ranges
+    /// (Terminal::invalidateFoldRanges(), when a shell mark came or went).
     ///
     /// The one call each whole-row rewrite makes once it is done: an erase that resets the row, and a daemon
     /// mirror writing a host row over it.
@@ -1284,6 +1300,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     }
 
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept { return _grid.lineAt(line).empty(); }
+
+    /// Whether the cell at @p position is the right half of a wide glyph. @see Line::continuesAWideGlyphAt
+    [[nodiscard]] bool continuesAWideGlyphAt(CellLocation position) const noexcept
+    {
+        return _grid.lineAt(position.line).continuesAWideGlyphAt(position.column);
+    }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
     {

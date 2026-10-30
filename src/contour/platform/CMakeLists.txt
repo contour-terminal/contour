@@ -13,48 +13,87 @@
 # classes declare Q_OBJECT, but their moc output is referenced by the very code that emits their
 # signals, so the archive keeps it.
 add_library(contour_platform STATIC
+    AccessibilityPreferenceSource.cpp AccessibilityPreferenceSource.hpp
     Announcer.hpp
+    AppearanceServices.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
+    MenuBarIntegration.cpp MenuBarIntegration.hpp
     MultimediaEnvironment.hpp
+    NativeCaptionButtons.cpp NativeCaptionButtons.hpp
+    NativeMenuPresenter.cpp NativeMenuPresenter.hpp
     BlurBehind.cpp BlurBehind.hpp
     Clipboard.cpp Clipboard.hpp
     ColorConversion.hpp
     ExternalLauncher.cpp ExternalLauncher.hpp
     FinishNotification.hpp
+    FontFamilySource.cpp FontFamilySource.hpp
+    GlobalHotkey.cpp GlobalHotkey.hpp
+    GlobalShortcutsChannel.hpp
+    PortalGlobalHotkey.cpp PortalGlobalHotkey.hpp
+    HotkeyKeys.hpp HotkeyQtKeys.hpp
     NotificationOccasion.hpp
     SessionVisibility.hpp
+    ShellRcEditor.cpp ShellRcEditor.hpp
     # These translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
     # elsewhere. Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT.
     DBusNotificationTransport.cpp DBusNotificationTransport.hpp
+    DBusGlobalShortcutsChannel.cpp DBusGlobalShortcutsChannel.hpp
+    DBusPortalSettingsChannel.cpp DBusPortalSettingsChannel.hpp
     DBusSignalSubscription.hpp
     FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
     PortalCall.cpp PortalCall.hpp
     PortalExternalLauncher.cpp PortalExternalLauncher.hpp
+    PlatformAppearance.cpp PlatformAppearance.hpp
+    PortalAppearanceSources.cpp PortalAppearanceSources.hpp
+    PortalSettings.hpp
+    PortalSettingsChannel.hpp
     PortalNotificationTransport.cpp PortalNotificationTransport.hpp
+    SecureInput.cpp SecureInput.hpp
+    SecureInputGate.hpp
+    PortalSourceFactories.cpp
     GuiTheme.hpp
     NotificationIdMap.hpp
     NotificationRouter.hpp
     NotificationTransport.hpp
     Notifier.cpp Notifier.hpp
+    UserNotificationCenter.cpp UserNotificationCenter.hpp
+    AppBundle.hpp
+    UserNotificationNotifier.cpp UserNotificationNotifier.hpp
     QtExternalLauncher.cpp QtExternalLauncher.hpp
+    QuickTerminalPanel.cpp QuickTerminalPanel.hpp
     QtInvoke.hpp
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
+    SystemBackdrop.hpp
+    TaskbarOverlay.hpp
     TaskbarProgressRouter.hpp
     TaskbarProgressSink.cpp TaskbarProgressSink.hpp
     LauncherProgress.hpp LauncherProgressSink.cpp
     TaskbarProgressState.hpp
+    TitleBandMaterial.cpp TitleBandMaterial.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
     AlphaBlur.hpp
+    CocoaNativeMenu.hpp
     CocoaWindowFrame.hpp
     Dwmapi.hpp
+    DockMenu.cpp
+    LauncherMenu.cpp LauncherMenu.hpp
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     PopupShadow.cpp PopupShadow.hpp
+    QtPlatformPlugin.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
+    Win32CaptionButtons.cpp Win32CaptionButtons.hpp
+    Win32GlobalHotkey.cpp Win32GlobalHotkey.hpp
+    Win32JumpList.cpp
+    Win32Settings.cpp Win32Settings.hpp
+    Win32SystemBackdrop.cpp Win32SystemBackdrop.hpp
+    Win32TitleBandMaterial.cpp Win32TitleBandMaterial.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
+    WindowsAppearanceSources.cpp WindowsAppearanceSources.hpp
+    WindowsSettings.hpp
     WindowDecoration.hpp
     WindowResizeGrid.cpp WindowResizeGrid.hpp
     WindowShadow.cpp WindowShadow.hpp
@@ -67,7 +106,7 @@ add_library(contour_platform STATIC
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
 if(WIN32)
-    target_link_libraries(contour_platform PUBLIC comctl32 ole32 user32 uuid)
+    target_link_libraries(contour_platform PUBLIC advapi32 comctl32 ole32 propsys shell32 user32 uuid)
 endif()
 
 # The Cocoa adapters use Objective-C++; the parent enables the language for these and the native tests
@@ -79,17 +118,44 @@ if(APPLE)
     set_target_properties(contour_platform PROPERTIES
         OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
         OBJCXX_STANDARD_REQUIRED ON)
-    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaWindowResizeGrid.mm CocoaTaskbarProgressSink.mm)
-    set_source_files_properties(CocoaTaskbarProgressSink.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(contour_platform PRIVATE
+        CocoaAccessibilityPreferenceSource.mm
+        CocoaGlobalHotkey.mm
+        CocoaMenuBarIntegration.mm
+        CocoaNativeMenuPresenter.mm
+        CocoaPlatformAppearance.mm
+        CocoaQuickTerminalPanel.mm
+        CocoaSecureInput.mm
+        CocoaTaskbarProgressSink.mm
+        CocoaTitleBandMaterial.mm
+        CocoaUserNotificationCenter.mm
+        CocoaWindowFrame.mm
+        CocoaWindowResizeGrid.mm)
+    set_source_files_properties(
+        CocoaAccessibilityPreferenceSource.mm CocoaGlobalHotkey.mm CocoaMenuBarIntegration.mm
+        CocoaNativeMenuPresenter.mm
+        CocoaPlatformAppearance.mm CocoaQuickTerminalPanel.mm CocoaSecureInput.mm CocoaTaskbarProgressSink.mm
+        CocoaTitleBandMaterial.mm
+        CocoaUserNotificationCenter.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
+    # UNUserNotificationCenter, for CocoaUserNotificationCenter.mm.
+    target_link_libraries(contour_platform PUBLIC "-framework UserNotifications")
+    # EnableSecureEventInput() and DisableSecureEventInput(), for CocoaSecureInput.mm: HIToolbox's.
+    target_link_libraries(contour_platform PUBLIC "-framework Carbon")
+    # QMenu::toNSMenu(), for the menu bar integration alone; the interface only forward-declares QMenu.
+    target_link_libraries(contour_platform PRIVATE Qt6::Widgets)
 endif()
 
 # contour_config, because GuiTheme.hpp resolves a configured theme and ColorConversion.hpp converts the
-# palette the configuration model owns.
+# palette the configuration model owns; contour_command, because NativeMenuPresenter.hpp shows its
+# resolved MenuTree.
 target_link_libraries(contour_platform PUBLIC
+    contour_command
     contour_config
     core::base
     core::log
+    core::platform
     Qt6::Core
     Qt6::DBus
     Qt6::Gui

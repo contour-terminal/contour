@@ -3,11 +3,13 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/session/GutterChrome.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
+#include <vtrasterizer/GridMetrics.hpp>
 
 #include <text_shaper/Font.hpp>
 
@@ -56,41 +58,85 @@ class TerminalSession;
     return layout.totalColumns * unbox<int>(cellSize.width);
 }
 
-/// The gutter layout @p config asks for: what the window reserves, what the hit-test reads, and -- through
-/// the same config::gutterSettingsFor() -- what the terminal draws.
+/// The gutter layout @p config asks for under @p chrome: what the window reserves, what the hit-test reads,
+/// and -- through the same config::gutterSettingsFor() -- what the terminal draws.
 /// @param config The loaded configuration.
-/// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config)).
-[[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
+/// @param chrome The session's gutter chrome, whose form decides whether the block column is cells.
+/// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config, chrome.form)).
+[[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config,
+                                                             GutterChrome const& chrome);
 
-/// The gutter @p layout reserves, in device pixels, in its two parts: the blank lead-in against the pane's
-/// edge, and the columns behind it.
+/// The gutter @p layout reserves, in device pixels, in its three parts: the blank lead-in against the pane's
+/// edge, the cell columns behind it, and the rail's strip against the grid.
 /// @param layout The gutter's segments.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return Both parts; both 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome: the strip's width in points.
+/// @return The parts; all 0 when the layout has neither columns nor a rail.
 [[nodiscard]] geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
                                                      vtbackend::ImageSize cellSize,
-                                                     double scale);
+                                                     double scale,
+                                                     GutterChrome const& chrome);
 
-/// The gutter @p config reserves, in device pixels, in its two parts: the blank lead-in against the pane's
-/// edge, and the columns behind it. What the hit-test maps a pointer onto, the lead-in included.
+/// The gutter @p config reserves under @p chrome, in device pixels, in its three parts. What the hit-test
+/// maps a pointer onto, the lead-in included.
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return Both parts; both 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome.
+/// @return The parts; all 0 when there is no gutter.
 [[nodiscard]] geometry::GutterExtent configuredGutterExtent(config::Config const& config,
                                                             vtbackend::ImageSize cellSize,
-                                                            double scale);
+                                                            double scale,
+                                                            GutterChrome const& chrome);
 
-/// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
-/// takes off the page. Its columns behind the blank lead-in that keeps them clear of the window's edge.
+/// The gutter width, in device pixels, @p config reserves under @p chrome: what every page fit, window size
+/// and size hint takes off the page. Its cells and the rail's strip behind the blank lead-in that keeps them
+/// clear of the window's edge.
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
-/// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return configuredGutterExtent()'s two parts added up; 0 when the layout has no columns.
+/// @param scale The device-pixel ratio, which the lead-in and the strip are scaled by.
+/// @param chrome The session's gutter chrome.
+/// @return configuredGutterExtent()'s parts added up; 0 when there is no gutter.
 [[nodiscard]] geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                                           vtbackend::ImageSize cellSize,
-                                                          double scale);
+                                                          double scale,
+                                                          GutterChrome const& chrome);
+
+/// The native rows' block chips and rail marks in device pixels, as the renderer draws them in the UI font:
+/// @p chrome's tokens at @p scale, the type sizes left in points as the grid's are.
+/// @param chrome The session's gutter chrome.
+/// @param scale The device-pixel ratio.
+/// @return The metrics; all zero on the Terminal row.
+[[nodiscard]] vtrasterizer::BlockChipMetrics blockChipMetricsFor(GutterChrome const& chrome,
+                                                                 double scale) noexcept;
+
+/// The block rail's strip in device pixels, as the renderer draws it: what @p layout reserves under
+/// @p chrome at @p scale, and the bar's metrics within it -- all zero where the layout has no strip -- and,
+/// wherever the block column is the rail, the chips' (blockChipMetricsFor()).
+/// @param layout The gutter's segments.
+/// @param chrome The session's gutter chrome.
+/// @param scale The device-pixel ratio.
+/// @return The metrics.
+[[nodiscard]] vtrasterizer::GutterRailMetrics gutterRailMetricsFor(vtbackend::GutterLayout const& layout,
+                                                                   GutterChrome const& chrome,
+                                                                   double scale) noexcept;
+
+/// Resizes @p session's terminal to @p totalPageSize under its lock, and, when the page changed, asks for the
+/// size indicator. The request is posted to the session's thread, so it reads the main page as it is when it
+/// runs, outside the lock: this is reached from the render thread too (TerminalDisplay::createRenderer()).
+/// @param session The session whose terminal to resize.
+/// @param totalPageSize The new page, status line included.
+/// @param viewSize What the child is told the pixel size is.
+void resizeToFit(TerminalSession& session, vtbackend::PageSize totalPageSize, vtbackend::ImageSize viewSize);
+
+/// Tells @p session's QML that its page changed size: lineCountChanged() and columnsCountChanged(), each only
+/// where that dimension changed. Posted to the session's thread, as resizeToFit() posts the size indicator:
+/// applyResize() runs on the render thread too, and the signals wake QML bindings.
+/// @param session The session whose page changed.
+/// @param oldPage The page before the resize.
+/// @param newPage The page after it.
+void announcePageSize(TerminalSession& session, vtbackend::PageSize oldPage, vtbackend::PageSize newPage);
 
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,

@@ -3,12 +3,37 @@
 
 #include <contour/config/Actions.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace contour::command
 {
+
+/// The palette group a command is listed under.
+///
+/// The first seven are the groups §3.10 of the redesign names; the last four follow the macOS menu
+/// bar's menus, so that every catalogue action has a home. The display order is the palette's own
+/// table (`PaletteGroups`), not this enum's.
+enum class CommandCategory : std::uint8_t
+{
+    Pane = 0, ///< Splitting, focusing, moving and resizing panes.
+    Tab,      ///< Creating, closing, moving and switching tabs.
+    Window,   ///< The OS window: new window, full screen, minimise.
+    Layouts,  ///< Saved layouts.
+    Blocks,   ///< Shell-integration command blocks and their folds.
+    Profiles, ///< Configured profiles.
+    Hosts,    ///< Saved remote hosts.
+    Edit,     ///< Selection, clipboard, hyperlinks and search.
+    View,     ///< Font size, opacity and scrolling.
+    Shell,    ///< The terminal session itself: resets, modes, screenshots, tracing.
+    Contour,  ///< The application: configuration, about, quit.
+};
+
+/// The number of CommandCategory values.
+inline constexpr std::size_t CommandCategoryCount = static_cast<std::size_t>(CommandCategory::Contour) + 1;
 
 /// One entry the command palette can offer.
 ///
@@ -20,8 +45,10 @@ struct Command
 {
     std::string id;    ///< Stable identity, persisted in the MRU. "SplitVertical", "ChangeProfile:dark".
     std::string title; ///< Display name, e.g. "Split Vertical", "Change Profile: dark".
-    std::string description; ///< What it does; from the action catalog.
-    actions::Action action;  ///< What to run.
+    std::string description;                          ///< What it does; from the action catalog.
+    actions::Action action;                           ///< What to run.
+    CommandCategory category = CommandCategory::Pane; ///< The palette group, from the action's catalogue row.
+    std::string argument {}; ///< The title's argument suffix ("dark", "3: vim"); empty when there is none.
 };
 
 /// A contributor of commands to the palette.

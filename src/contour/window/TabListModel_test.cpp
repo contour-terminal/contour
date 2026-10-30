@@ -14,6 +14,7 @@
 //   * structural changes use the proper begin/end* notifications.
 
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp> // for the production Roles enum the static_asserts pin to
 
@@ -58,8 +59,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         PaneCountRole = Qt::UserRole + 4,
         SessionIdRole = Qt::UserRole + 5,
         RawTitleRole = Qt::UserRole + 6,
-        ProgramStatusRole = Qt::UserRole + 10,
-        ProgramStatusTextRole = Qt::UserRole + 11,
+        BadgeRole = Qt::UserRole + 10,
+        BadgeTextRole = Qt::UserRole + 11,
     };
 
     // This model's projection is a hand-copy of WindowController's (whose construction needs the full
@@ -78,10 +79,10 @@ class TabListModel: public QAbstractListModel, public ModelEvents
                   == static_cast<int>(contour::window::WindowController::Roles::SessionIdRole));
     static_assert(static_cast<int>(Roles::RawTitleRole)
                   == static_cast<int>(contour::window::WindowController::Roles::RawTitleRole));
-    static_assert(static_cast<int>(Roles::ProgramStatusRole)
-                  == static_cast<int>(contour::window::WindowController::Roles::ProgramStatusRole));
-    static_assert(static_cast<int>(Roles::ProgramStatusTextRole)
-                  == static_cast<int>(contour::window::WindowController::Roles::ProgramStatusTextRole));
+    static_assert(static_cast<int>(Roles::BadgeRole)
+                  == static_cast<int>(contour::window::WindowController::Roles::BadgeRole));
+    static_assert(static_cast<int>(Roles::BadgeTextRole)
+                  == static_cast<int>(contour::window::WindowController::Roles::BadgeTextRole));
 
     TabListModel():
         _model { *this, [this] { return SessionId { _nextSession++ }; } }, _window { _model.createWindow() }
@@ -111,7 +112,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         REQUIRE(decoded.has_value());
         std::ignore = _programStatus[session.value].apply(std::get<vtbackend::ProgramStatusRecord>(*decoded));
         if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); tab != nullptr)
-            notifyRow(tab->id(), { Roles::ProgramStatusRole, Roles::ProgramStatusTextRole });
+            notifyRow(tab->id(), { Roles::BadgeRole, Roles::BadgeTextRole });
     }
 
     /// Sets the per-profile tab-label template the model applies (mirrors profile().tabLabel).
@@ -149,14 +150,18 @@ class TabListModel: public QAbstractListModel, public ModelEvents
                 return QColor(Qt::transparent);
             case Roles::IsActiveRole: return _window != nullptr && row == _window->activeTabIndex();
             case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
-            // Mirror of WindowController::programStatusBadge, through the same badgeForTab.
-            case Roles::ProgramStatusRole:
-                return tab != nullptr
-                           ? static_cast<int>(std::to_underlying(programStatusBadge(*tab, row).kind))
-                           : 0;
-            case Roles::ProgramStatusTextRole:
-                return tab != nullptr ? QString::fromStdString(programStatusBadge(*tab, row).text)
-                                      : QString {};
+            // Mirror of WindowController::tabBadge, through the same badgeForTab and resolveTabBadge; this
+            // stand-in tracks no attention, so only the program status competes for the slot.
+            case Roles::BadgeRole:
+                return tab != nullptr ? static_cast<int>(std::to_underlying(tabBadge(*tab, row).kind)) : 0;
+            case Roles::BadgeTextRole: {
+                if (tab == nullptr)
+                    return QString {};
+                auto const program = programStatusBadge(*tab, row);
+                return contour::window::isProgramStatusBadge(tabBadge(*tab, row).kind, program.kind)
+                           ? QString::fromStdString(program.text)
+                           : QString {};
+            }
             default: return {};
         }
     }
@@ -170,8 +175,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
                  { static_cast<int>(Roles::PaneCountRole), "paneCount" },
                  { static_cast<int>(Roles::SessionIdRole), "sessionId" },
                  { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
-                 { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-                 { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" } };
+                 { static_cast<int>(Roles::BadgeRole), "badge" },
+                 { static_cast<int>(Roles::BadgeTextRole), "badgeText" } };
     }
     // }}}
 
@@ -303,6 +308,14 @@ class TabListModel: public QAbstractListModel, public ModelEvents
             templ = _tabLabelTemplate;
         return QString::fromStdString(contour::window::expandTabLabel(
             templ, contour::window::TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+    }
+
+    [[nodiscard]] contour::window::TabBadge tabBadge(Tab const& tab, int row) const
+    {
+        auto const program = programStatusBadge(tab, row);
+        return contour::window::resolveTabBadge({ .programStatus = program.kind,
+                                                  .progressPercent = program.progress.transform(
+                                                      [](uint8_t percent) { return int { percent }; }) });
     }
 
     [[nodiscard]] contour::window::ProgramStatusBadge programStatusBadge(Tab const& tab, int row) const
@@ -920,28 +933,28 @@ TEST_CASE("WindowController exposes the badge of a background tab", "[contour][g
     m.model().activateTab(m.window().id(), m.window().tabAt(0)->id());
     REQUIRE(m.window().activeTabIndex() == 0);
 
-    auto const working = static_cast<int>(contour::window::BadgeKind::Working);
-    auto const done = static_cast<int>(contour::window::BadgeKind::Done);
-    CHECK(roleAt(m, 1, TabListModel::Roles::ProgramStatusRole).toInt() == 0);
+    auto const working = static_cast<int>(contour::window::TabBadgeKind::Working);
+    auto const done = static_cast<int>(contour::window::TabBadgeKind::Done);
+    CHECK(roleAt(m, 1, TabListModel::Roles::BadgeRole).toInt() == 0);
 
     QSignalSpy const changed(&m, &QAbstractItemModel::dataChanged);
     m.reportProgramStatus(second->activePane()->session(), "state=working:app=cargo");
-    CHECK(roleAt(m, 1, TabListModel::Roles::ProgramStatusRole).toInt() == working);
-    CHECK(roleAt(m, 1, TabListModel::Roles::ProgramStatusTextRole).toString() == QStringLiteral("cargo"));
-    CHECK(roleAt(m, 0, TabListModel::Roles::ProgramStatusRole).toInt() == 0);
+    CHECK(roleAt(m, 1, TabListModel::Roles::BadgeRole).toInt() == working);
+    CHECK(roleAt(m, 1, TabListModel::Roles::BadgeTextRole).toString() == QStringLiteral("cargo"));
+    CHECK(roleAt(m, 0, TabListModel::Roles::BadgeRole).toInt() == 0);
     REQUIRE(changed.count() == 1);
 
     // A second pane of the tab: the tab shows the most urgent record of either.
     auto* leaf = m.model().splitActivePane(second->id(), SplitState::Vertical);
     REQUIRE(leaf != nullptr);
     m.reportProgramStatus(leaf->session(), "state=blocked:msg=QXBwcm92ZT8");
-    CHECK(roleAt(m, 1, TabListModel::Roles::ProgramStatusRole).toInt()
-          == static_cast<int>(contour::window::BadgeKind::Blocked));
-    CHECK(roleAt(m, 1, TabListModel::Roles::ProgramStatusTextRole).toString() == QStringLiteral("Approve?"));
+    CHECK(roleAt(m, 1, TabListModel::Roles::BadgeRole).toInt()
+          == static_cast<int>(contour::window::TabBadgeKind::Blocked));
+    CHECK(roleAt(m, 1, TabListModel::Roles::BadgeTextRole).toString() == QStringLiteral("Approve?"));
 
     // Done shows in the background tab only.
     m.reportProgramStatus(m.window().tabAt(0)->activePane()->session(), "state=done");
-    CHECK(roleAt(m, 0, TabListModel::Roles::ProgramStatusRole).toInt() == 0);
+    CHECK(roleAt(m, 0, TabListModel::Roles::BadgeRole).toInt() == 0);
     m.model().activateTab(m.window().id(), second->id());
-    CHECK(roleAt(m, 0, TabListModel::Roles::ProgramStatusRole).toInt() == done);
+    CHECK(roleAt(m, 0, TabListModel::Roles::BadgeRole).toInt() == done);
 }

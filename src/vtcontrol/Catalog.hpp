@@ -39,21 +39,36 @@ struct EnumTable<Permission>
     };
 };
 
+/// How much a permission lets its holder do: what a consent prompt sets apart.
+enum class ConsentWeight : uint8_t
+{
+    Observes = 0,   ///< It looks, or rearranges, but cannot make a shell do anything.
+    CanRunCommands, ///< It can type into a pane, so it can run commands.
+};
+
 /// What granting a permission lets an extension do, as its consent prompt says it: "May <phrase>.".
 struct PermissionPhrase
 {
     Permission permission;   ///< The permission.
     std::string_view phrase; ///< What it allows, lower-case, without the final full stop.
+    ConsentWeight weight = ConsentWeight::Observes; ///< Whether it can run commands.
 };
 
 /// One row per `Permission`, in enumerator order, as `EnumTable<Permission>` has.
 inline constexpr std::array PermissionPhrases {
-    PermissionPhrase { .permission = Permission::Read, .phrase = "see the windows, tabs and panes" },
+    PermissionPhrase { .permission = Permission::Read,
+                       .phrase = "see the windows, tabs and panes",
+                       .weight = ConsentWeight::Observes },
     PermissionPhrase { .permission = Permission::Screen,
-                       .phrase = "read what panes show, and their command history" },
-    PermissionPhrase { .permission = Permission::Input, .phrase = "type into panes" },
+                       .phrase = "read what panes show, and their command history",
+                       .weight = ConsentWeight::Observes },
+    PermissionPhrase { .permission = Permission::Input,
+                       .phrase = "type into panes",
+                       .weight = ConsentWeight::CanRunCommands },
+    // Opening a tab or a pane starts a shell in it, with the command it is given.
     PermissionPhrase { .permission = Permission::Write,
-                       .phrase = "open, split, close and label tabs and panes" },
+                       .phrase = "open, split, close and label tabs and panes",
+                       .weight = ConsentWeight::CanRunCommands },
 };
 
 static_assert(
@@ -65,6 +80,14 @@ static_assert(
         return index == EnumTable<Permission>::Rows.size();
     }(),
     "PermissionPhrases holds one row per Permission, in enumerator order");
+
+/// @param permission A permission.
+/// @return Whether it can run commands, which a consent prompt sets apart.
+[[nodiscard]] constexpr ConsentWeight consentWeightOf(Permission permission) noexcept
+{
+    auto const index = static_cast<std::size_t>(permission);
+    return index < PermissionPhrases.size() ? PermissionPhrases[index].weight : ConsentWeight::Observes;
+}
 
 /// @param permission A permission.
 /// @return What it allows, for a consent prompt ("type into panes").

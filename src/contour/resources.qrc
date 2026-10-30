@@ -5,6 +5,18 @@
         <file alias="logo-256.png">res/images/contour-logo-256.png</file>
         <file alias="logo.png">res/images/contour-logo-256.png</file>
     </qresource>
+    <!-- Symbolic icons, tinted where they are drawn (icon.color): one prefix, so a QML file names an icon by
+        its file alone. -->
+    <qresource prefix="/contour/icons">
+        <file alias="lock-symbolic.svg">res/icons/lock-symbolic.svg</file>
+        <file alias="edit-find-symbolic.svg">res/icons/edit-find-symbolic.svg</file>
+        <file alias="open-menu-symbolic.svg">res/icons/open-menu-symbolic.svg</file>
+        <file alias="tab-new-symbolic.svg">res/icons/tab-new-symbolic.svg</file>
+        <file alias="window-close-symbolic.svg">res/icons/window-close-symbolic.svg</file>
+        <file alias="window-maximize-symbolic.svg">res/icons/window-maximize-symbolic.svg</file>
+        <file alias="window-minimize-symbolic.svg">res/icons/window-minimize-symbolic.svg</file>
+        <file alias="window-restore-symbolic.svg">res/icons/window-restore-symbolic.svg</file>
+    </qresource>
 </RCC>
 <!-- Everything here is GUI-only, which is what lets CMakeLists.txt compile this file for the GUI
      frontend alone. The shell-integration scripts used to live here too, but `contour generate

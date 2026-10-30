@@ -16,6 +16,7 @@
 #include <array>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -38,6 +39,15 @@ enum class Direction : uint8_t
     Down,
 };
 
+/// Where OpenConfiguration shows the configuration.
+///
+/// The `in_editor` key of a binding, converted at the YAML boundary: `in_editor: true` is Editor.
+enum class ConfigurationTarget : uint8_t
+{
+    SettingsWindow = 0, ///< The app's Settings window: the default.
+    Editor,             ///< The configuration file, in the OS's external editor.
+};
+
 // clang-format off
 struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
@@ -55,9 +65,10 @@ struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtback
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
+struct NewWindowTo{}; // asks where the new window's sessions live: the Connect picker
 struct NoSearchHighlight{};
 struct OpenCommandPalette{};
-struct OpenConfiguration{ bool inEditor = false; }; // GUI settings page by default; in_editor opens the file
+struct OpenConfiguration{ ConfigurationTarget target = ConfigurationTarget::SettingsWindow; };
 struct OpenFileManager{};
 struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
@@ -84,8 +95,15 @@ struct ScrollToTop{};
 struct ToggleFold{};       // OSC 133: toggle the fold at the cursor's block
 struct ToggleFoldAt{ int line {}; }; // OSC 133: toggle the fold covering a given grid line
 struct ToggleLastFold{};   // OSC 133: toggle the most recent finished command's fold
+struct FocusPreviousCommand{};        // OSC 133: focus the previous command block
+struct FocusNextCommand{};            // OSC 133: focus the next command block
+struct SelectPreviousCommandOutput{}; // OSC 133: focus the previous command block and select its output
+struct SelectNextCommandOutput{};     // OSC 133: focus the next command block and select its output
+struct OpenBlockMenu{};               // OSC 133: open the focused command block's menu
+struct ClearCommandBlockFocus{};      // OSC 133: take the keyboard focus off the command block
 struct ScrollUp{};
 struct SearchReverse{};
+struct SearchSelection{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
@@ -153,9 +171,20 @@ struct CopyCommandBlock{ vtbackend::CommandBlockTarget target = vtbackend::Comma
 struct CopyCommandLine{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(CopyCommandLine const&) const = default; };
 // OSC 133: type a block's command line at the shell's prompt and run it, once the user confirmed it; a non-zero block pins it
 struct RerunCommand{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(RerunCommand const&) const = default; };
+// OSC 133: collapse a block's output to its head row, or expand it again; a non-zero block pins it
+struct ToggleCommandFold{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(ToggleCommandFold const&) const = default; };
 struct ClearToPrompt{}; // OSC 133: drop every row above the current prompt, scrollback and page alike
 // OSC 133: show a block's output in a pager (a split or a tab over a private file), or pipe it into a program
 struct OpenCommandOutput{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; std::string program {}; OutputPlacement placement = OutputPlacement::Split; std::optional<OutputFormat> format {}; vtbackend::CommandBlockId block {}; bool operator==(OpenCommandOutput const&) const = default; };
+struct CloseOtherTabs{};      // close every tab in THIS window except the current one
+struct CloseTabsToRight{};    // close every tab to the right of the current one
+struct MoveTabToNewWindow{};  // tear the current tab off into a window of its own
+struct ShowAbout{};           // show the version of Contour
+struct MinimizeWindow{};      // minimize this window
+struct ZoomWindow{};          // maximize this window, or restore it from maximized
+struct FocusNextArea{};       // move keyboard focus to the next of terminal, tabs and toolbar
+struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal, tabs and toolbar
+struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -174,6 +203,7 @@ using Action = std::variant<CancelSelection,
                             IncreaseFontSize,
                             IncreaseOpacity,
                             NewTerminal,
+                            NewWindowTo,
                             NoSearchHighlight,
                             OpenCommandPalette,
                             OpenConfiguration,
@@ -203,8 +233,15 @@ using Action = std::variant<CancelSelection,
                             ToggleFold,
                             ToggleFoldAt,
                             ToggleLastFold,
+                            FocusPreviousCommand,
+                            FocusNextCommand,
+                            SelectPreviousCommandOutput,
+                            SelectNextCommandOutput,
+                            OpenBlockMenu,
+                            ClearCommandBlockFocus,
                             ScrollUp,
                             SearchReverse,
+                            SearchSelection,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
@@ -267,8 +304,18 @@ using Action = std::variant<CancelSelection,
                             CopyCommandBlock,
                             CopyCommandLine,
                             RerunCommand,
+                            ToggleCommandFold,
                             ClearToPrompt,
-                            OpenCommandOutput>;
+                            OpenCommandOutput,
+                            CloseOtherTabs,
+                            CloseTabsToRight,
+                            MoveTabToNewWindow,
+                            ShowAbout,
+                            MinimizeWindow,
+                            ZoomWindow,
+                            FocusNextArea,
+                            FocusPreviousArea,
+                            FocusToolbar>;
 
 /// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
 /// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
@@ -280,8 +327,13 @@ using Action = std::variant<CancelSelection,
 /// joins by being named here. A default-constructed member compares equal to its defaults, which is how
 /// the writer and the palette tell a bare binding from a configured one.
 template <typename T>
-concept CommandBlockActionConcept =
-    core::oneOf<T, SelectCommandBlock, CopyCommandBlock, CopyCommandLine, RerunCommand, OpenCommandOutput>;
+concept CommandBlockActionConcept = core::oneOf<T,
+                                                SelectCommandBlock,
+                                                CopyCommandBlock,
+                                                CopyCommandLine,
+                                                RerunCommand,
+                                                ToggleCommandFold,
+                                                OpenCommandOutput>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -299,6 +351,8 @@ concept CommandBlockActionConcept =
 /// the first press did not do. OpenCommandOutput has the splits' reason too: each fire forks a pager
 /// pane.
 /// AttachToHost joins them too: each fire starts a client process that opens a window of its own.
+/// ZoomWindow is a toggle, and MinimizeWindow a one-shot gesture like the palette's: the window is gone
+/// from under the key by the second repeat.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
@@ -309,7 +363,10 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     CloseAllTabs,
                                                     ClosePane,
                                                     OpenCommandPalette,
+                                                    NewWindowTo,
                                                     OpenContextMenu,
+                                                    OpenBlockMenu,
+                                                    ClearCommandBlockFocus,
                                                     SetTabColor,
                                                     SplitVertical,
                                                     SplitHorizontal,
@@ -329,33 +386,24 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     ClearToPrompt,
                                                     CopyLastCommandPrompt,
                                                     CopyLastCommandOutput,
-                                                    CopyLastCommandBlock>;
+                                                    CopyLastCommandBlock,
+                                                    CloseOtherTabs,
+                                                    CloseTabsToRight,
+                                                    MoveTabToNewWindow,
+                                                    ShowAbout,
+                                                    MinimizeWindow,
+                                                    ZoomWindow>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
-[[nodiscard]] inline bool isNonRepeatable(Action const& action) noexcept
-{
-    return std::visit(core::Overloaded {
-                          [](NonRepeatableActionConcept auto const&) { return true; },
-                          [](auto const&) { return false; },
-                      },
-                      action);
-}
+[[nodiscard]] bool isNonRepeatable(Action const& action) noexcept;
 
 /// Filters @p actions down to those that may fire on a keyboard auto-repeat event, dropping every
 /// NonRepeatableActionConcept member (so a held key cannot be amplified into a burst of, e.g.,
 /// tab/pane closes).
 /// @param actions The actions bound to the key being repeated.
 /// @return A copy containing only the repeatable actions, preserving order.
-[[nodiscard]] inline std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions)
-{
-    std::vector<Action> result;
-    result.reserve(actions.size());
-    for (auto const& action: actions)
-        if (!isNonRepeatable(action))
-            result.push_back(action);
-    return result;
-}
+[[nodiscard]] std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions);
 
 /// Actions that carry a REQUIRED argument, so a default-constructed instance of them is not runnable.
 ///
@@ -391,14 +439,7 @@ concept ParameterizedActionConcept = core::oneOf<T,
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
 /// ParameterizedActionConcept member), false if it is runnable as-is.
-[[nodiscard]] inline bool isParameterized(Action const& action) noexcept
-{
-    return std::visit(core::Overloaded {
-                          [](ParameterizedActionConcept auto const&) { return true; },
-                          [](auto const&) { return false; },
-                      },
-                      action);
-}
+[[nodiscard]] bool isParameterized(Action const& action) noexcept;
 
 std::optional<Action> fromString(std::string const& name);
 
@@ -445,6 +486,11 @@ namespace documentation
     constexpr inline std::string_view NewTerminal {
         "Spawns a new terminal at the current terminals current working directory."
     };
+    constexpr inline std::string_view NewWindowTo {
+        "Opens the Connect picker as a sheet: choose where the new window's sessions live (this "
+        "computer's daemon, this window only, a saved host, or a typed `ssh://` or `tls://` address), "
+        "then the window opens attached there."
+    };
     constexpr inline std::string_view NoSearchHighlight {
         "Disables current search highlighting, if anything is still highlighted due to a prior search."
     };
@@ -454,8 +500,8 @@ namespace documentation
         "alphabetically."
     };
     constexpr inline std::string_view OpenConfiguration {
-        "Opens the in-app settings page (profiles, color schemes, global settings). Set `in_editor: true` "
-        "on the binding to instead open the configuration file in an external editor."
+        "Opens the Settings window (profiles, color schemes, global settings). Set `in_editor: true` on the "
+        "binding to instead open the configuration file in an external editor."
     };
     constexpr inline std::string_view OpenFileManager {
         "Opens the current working directory in a system file manager."
@@ -512,9 +558,35 @@ namespace documentation
     constexpr inline std::string_view ToggleLastFold {
         "Collapses or expands the most recently finished command"
     };
+    constexpr inline std::string_view FocusPreviousCommand {
+        "Focuses the command block before the focused one (else the last one in view), scrolls it into view "
+        "and announces how it went."
+    };
+    constexpr inline std::string_view FocusNextCommand {
+        "Focuses the command block after the focused one (else the first one in view), scrolls it into view "
+        "and announces how it went."
+    };
+    constexpr inline std::string_view SelectPreviousCommandOutput {
+        "Focuses the previous command block, as FocusPreviousCommand does, and selects its output."
+    };
+    constexpr inline std::string_view SelectNextCommandOutput {
+        "Focuses the next command block, as FocusNextCommand does, and selects its output."
+    };
+    constexpr inline std::string_view OpenBlockMenu {
+        "Opens the menu of the focused command block. Bind it with the BlockFocus mode, so the key keeps "
+        "reaching the application otherwise."
+    };
+    constexpr inline std::string_view ClearCommandBlockFocus {
+        "Takes the keyboard focus off the command block. Bind it with the BlockFocus mode, so the key keeps "
+        "reaching the application otherwise."
+    };
     constexpr inline std::string_view ScrollUp { "Scrolls up by the multiplier factor." };
     constexpr inline std::string_view SearchReverse {
         "Opens the find bar, searching upwards from the current cursor position."
+    };
+    constexpr inline std::string_view SearchSelection {
+        "Searches for the selected text: its first line becomes the find bar's pattern, escaped when the bar "
+        "searches by regular expression."
     };
     constexpr inline std::string_view SendChars {
         "Writes given characters in `chars` member to the applications input."
@@ -577,6 +649,27 @@ namespace documentation
     constexpr inline std::string_view CloseAllTabs {
         "Closes every tab in this window. With only one window open, that closes Contour."
     };
+    constexpr inline std::string_view CloseOtherTabs {
+        "Closes every tab in this window except the current one."
+    };
+    constexpr inline std::string_view CloseTabsToRight {
+        "Closes every tab to the right of the current one."
+    };
+    constexpr inline std::string_view MoveTabToNewWindow {
+        "Moves the current tab into a new window of its own. Does nothing with a single tab."
+    };
+    constexpr inline std::string_view ShowAbout { "Shows the version of Contour." };
+    constexpr inline std::string_view MinimizeWindow { "Minimizes this window." };
+    constexpr inline std::string_view ZoomWindow {
+        "Maximizes this window, or restores it when it is maximized (the macOS Zoom)."
+    };
+    constexpr inline std::string_view FocusNextArea {
+        "Moves keyboard focus to the next area of the window: terminal, tabs, toolbar, and back."
+    };
+    constexpr inline std::string_view FocusPreviousArea {
+        "Moves keyboard focus to the previous area of the window: terminal, toolbar, tabs, and back."
+    };
+    constexpr inline std::string_view FocusToolbar { "Moves keyboard focus to the window's toolbar." };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
         "window until it is closed; the settings page is where the choice is made permanent."
@@ -676,6 +769,10 @@ namespace documentation
         "shell that marks its prompts (OSC 133) and reports or shows its command lines; refused while a "
         "command is running, and for a command line that cannot be typed as it is."
     };
+    constexpr inline std::string_view ToggleCommandFold {
+        "Collapses or expands a command block's output (target: pointer, cursor or last). Requires a shell "
+        "that emits OSC 133 marks, and folding to be enabled."
+    };
     constexpr inline std::string_view ClearToPrompt {
         "Clears the scrollback and the screen above the current prompt. A prompt on the screen moves to its "
         "top, with a running command's output; one in the scrollback becomes the oldest line kept. Requires "
@@ -715,177 +812,12 @@ struct ActionCatalogEntry
 /// std::string, and a string cannot survive constant evaluation into a constexpr object (MSVC rejects
 /// it outright — "points to memory which was heap allocated during constant evaluation"). Built on
 /// first use and handed out by reference, so a lookup costs a scan and never an allocation.
-[[nodiscard]] inline auto const& actionCatalog()
-{
-    static auto const catalog = std::array {
-        ActionCatalogEntry {
-            "CancelSelection", Action { CancelSelection {} }, documentation::CancelSelection },
-        ActionCatalogEntry { "ChangeProfile", Action { ChangeProfile {} }, documentation::ChangeProfile },
-        ActionCatalogEntry {
-            "ClearHistoryAndReset", Action { ClearHistoryAndReset {} }, documentation::ClearHistoryAndReset },
-        ActionCatalogEntry { "CopyPreviousMarkRange",
-                             Action { CopyPreviousMarkRange {} },
-                             documentation::CopyPreviousMarkRange },
-        ActionCatalogEntry { "CopySelection", Action { CopySelection {} }, documentation::CopySelection },
-        ActionCatalogEntry {
-            "CreateDebugDump", Action { CreateDebugDump {} }, documentation::CreateDebugDump },
-        ActionCatalogEntry {
-            "CreateSelection", Action { CreateSelection {} }, documentation::CreateSelection },
-        ActionCatalogEntry {
-            "DecreaseFontSize", Action { DecreaseFontSize {} }, documentation::DecreaseFontSize },
-        ActionCatalogEntry {
-            "DecreaseOpacity", Action { DecreaseOpacity {} }, documentation::DecreaseOpacity },
-        ActionCatalogEntry {
-            "FocusNextSearchMatch", Action { FocusNextSearchMatch {} }, documentation::FocusNextSearchMatch },
-        ActionCatalogEntry { "FocusPreviousSearchMatch",
-                             Action { FocusPreviousSearchMatch {} },
-                             documentation::FocusPreviousSearchMatch },
-        ActionCatalogEntry {
-            "FollowHyperlink", Action { FollowHyperlink {} }, documentation::FollowHyperlink },
-        ActionCatalogEntry { "HintMode", Action { HintMode {} }, documentation::HintMode },
-        ActionCatalogEntry {
-            "IncreaseFontSize", Action { IncreaseFontSize {} }, documentation::IncreaseFontSize },
-        ActionCatalogEntry {
-            "IncreaseOpacity", Action { IncreaseOpacity {} }, documentation::IncreaseOpacity },
-        ActionCatalogEntry { "NewTerminal", Action { NewTerminal {} }, documentation::NewTerminal },
-        ActionCatalogEntry {
-            "NoSearchHighlight", Action { NoSearchHighlight {} }, documentation::NoSearchHighlight },
-        ActionCatalogEntry {
-            "OpenCommandPalette", Action { OpenCommandPalette {} }, documentation::OpenCommandPalette },
-        ActionCatalogEntry {
-            "OpenConfiguration", Action { OpenConfiguration {} }, documentation::OpenConfiguration },
-        ActionCatalogEntry {
-            "OpenFileManager", Action { OpenFileManager {} }, documentation::OpenFileManager },
-        ActionCatalogEntry { "OpenSelection", Action { OpenSelection {} }, documentation::OpenSelection },
-        ActionCatalogEntry { "PasteClipboard", Action { PasteClipboard {} }, documentation::PasteClipboard },
-        ActionCatalogEntry { "PasteSelection", Action { PasteSelection {} }, documentation::PasteSelection },
-        ActionCatalogEntry { "Quit", Action { Quit {} }, documentation::Quit },
-        ActionCatalogEntry { "ReloadConfig", Action { ReloadConfig {} }, documentation::ReloadConfig },
-        ActionCatalogEntry { "ResetConfig", Action { ResetConfig {} }, documentation::ResetConfig },
-        ActionCatalogEntry { "ResetFontSize", Action { ResetFontSize {} }, documentation::ResetFontSize },
-        ActionCatalogEntry { "ScreenshotVT", Action { ScreenshotVT {} }, documentation::ScreenshotVT },
-        ActionCatalogEntry { "SaveScreenshot", Action { SaveScreenshot {} }, documentation::SaveScreenshot },
-        ActionCatalogEntry { "CopyScreenshot", Action { CopyScreenshot {} }, documentation::CopyScreenshot },
-        ActionCatalogEntry {
-            "CollapseAllFolds", Action { CollapseAllFolds {} }, documentation::CollapseAllFolds },
-        ActionCatalogEntry {
-            "CollapseLastFold", Action { CollapseLastFold {} }, documentation::CollapseLastFold },
-        ActionCatalogEntry { "ExpandAllFolds", Action { ExpandAllFolds {} }, documentation::ExpandAllFolds },
-        ActionCatalogEntry { "ScrollDown", Action { ScrollDown {} }, documentation::ScrollDown },
-        ActionCatalogEntry { "ScrollMarkDown", Action { ScrollMarkDown {} }, documentation::ScrollMarkDown },
-        ActionCatalogEntry { "ScrollMarkUp", Action { ScrollMarkUp {} }, documentation::ScrollMarkUp },
-        ActionCatalogEntry { "ScrollOneDown", Action { ScrollOneDown {} }, documentation::ScrollOneDown },
-        ActionCatalogEntry { "ScrollOneUp", Action { ScrollOneUp {} }, documentation::ScrollOneUp },
-        ActionCatalogEntry { "ScrollPageDown", Action { ScrollPageDown {} }, documentation::ScrollPageDown },
-        ActionCatalogEntry { "ScrollPageUp", Action { ScrollPageUp {} }, documentation::ScrollPageUp },
-        ActionCatalogEntry { "ScrollToBottom", Action { ScrollToBottom {} }, documentation::ScrollToBottom },
-        ActionCatalogEntry { "ScrollToTop", Action { ScrollToTop {} }, documentation::ScrollToTop },
-        ActionCatalogEntry { "ToggleFold", Action { ToggleFold {} }, documentation::ToggleFold },
-        ActionCatalogEntry { "ToggleFoldAt", Action { ToggleFoldAt {} }, documentation::ToggleFoldAt },
-        ActionCatalogEntry { "ToggleLastFold", Action { ToggleLastFold {} }, documentation::ToggleLastFold },
-        ActionCatalogEntry { "ScrollUp", Action { ScrollUp {} }, documentation::ScrollUp },
-        ActionCatalogEntry { "SearchReverse", Action { SearchReverse {} }, documentation::SearchReverse },
-        ActionCatalogEntry { "SendChars", Action { SendChars {} }, documentation::SendChars },
-        ActionCatalogEntry {
-            "ToggleAllKeyMaps", Action { ToggleAllKeyMaps {} }, documentation::ToggleAllKeyMaps },
-        ActionCatalogEntry {
-            "ToggleFullscreen", Action { ToggleFullscreen {} }, documentation::ToggleFullscreen },
-        ActionCatalogEntry { "ToggleInputMethodHandling",
-                             Action { ToggleInputMethodHandling {} },
-                             documentation::ToggleInputMethodHandling },
-        ActionCatalogEntry { "ToggleInputProtection",
-                             Action { ToggleInputProtection {} },
-                             documentation::ToggleInputProtection },
-        ActionCatalogEntry {
-            "ToggleStatusLine", Action { ToggleStatusLine {} }, documentation::ToggleStatusLine },
-        ActionCatalogEntry { "ToggleTitleBar", Action { ToggleTitleBar {} }, documentation::ToggleTitleBar },
-        ActionCatalogEntry { "TraceBreakAtEmptyQueue",
-                             Action { TraceBreakAtEmptyQueue {} },
-                             documentation::TraceBreakAtEmptyQueue },
-        ActionCatalogEntry { "TraceEnter", Action { TraceEnter {} }, documentation::TraceEnter },
-        ActionCatalogEntry { "TraceLeave", Action { TraceLeave {} }, documentation::TraceLeave },
-        ActionCatalogEntry { "TraceStep", Action { TraceStep {} }, documentation::TraceStep },
-        ActionCatalogEntry { "ViNormalMode", Action { ViNormalMode {} }, documentation::ViNormalMode },
-        ActionCatalogEntry { "WriteScreen", Action { WriteScreen {} }, documentation::WriteScreen },
-        ActionCatalogEntry { "CreateNewTab", Action { CreateNewTab {} }, documentation::CreateNewTab },
-        ActionCatalogEntry { "CloseTab", Action { CloseTab {} }, documentation::CloseTab },
-        ActionCatalogEntry { "MoveTabTo", Action { MoveTabTo {} }, documentation::MoveTabTo },
-        ActionCatalogEntry { "MoveTabToLeft", Action { MoveTabToLeft {} }, documentation::MoveTabToLeft },
-        ActionCatalogEntry { "MoveTabToRight", Action { MoveTabToRight {} }, documentation::MoveTabToRight },
-        ActionCatalogEntry { "SwitchToTab", Action { SwitchToTab {} }, documentation::SwitchToTab },
-        ActionCatalogEntry {
-            "SwitchToPreviousTab", Action { SwitchToPreviousTab {} }, documentation::SwitchToPreviousTab },
-        ActionCatalogEntry {
-            "SwitchToTabLeft", Action { SwitchToTabLeft {} }, documentation::SwitchToTabLeft },
-        ActionCatalogEntry {
-            "SwitchToTabRight", Action { SwitchToTabRight {} }, documentation::SwitchToTabRight },
-        ActionCatalogEntry { "SetTabTitle", Action { SetTabTitle {} }, documentation::SetTabTitle },
-        ActionCatalogEntry { "SplitVertical", Action { SplitVertical {} }, documentation::SplitVertical },
-        ActionCatalogEntry {
-            "SplitHorizontal", Action { SplitHorizontal {} }, documentation::SplitHorizontal },
-        ActionCatalogEntry { "ClosePane", Action { ClosePane {} }, documentation::ClosePane },
-        ActionCatalogEntry { "FocusPaneLeft", Action { FocusPaneLeft {} }, documentation::FocusPaneLeft },
-        ActionCatalogEntry { "FocusPaneRight", Action { FocusPaneRight {} }, documentation::FocusPaneRight },
-        ActionCatalogEntry { "FocusPaneUp", Action { FocusPaneUp {} }, documentation::FocusPaneUp },
-        ActionCatalogEntry { "FocusPaneDown", Action { FocusPaneDown {} }, documentation::FocusPaneDown },
-        ActionCatalogEntry { "SwapPaneLeft", Action { SwapPaneLeft {} }, documentation::SwapPaneLeft },
-        ActionCatalogEntry { "SwapPaneRight", Action { SwapPaneRight {} }, documentation::SwapPaneRight },
-        ActionCatalogEntry { "SwapPaneUp", Action { SwapPaneUp {} }, documentation::SwapPaneUp },
-        ActionCatalogEntry { "SwapPaneDown", Action { SwapPaneDown {} }, documentation::SwapPaneDown },
-        ActionCatalogEntry { "MovePaneLeft", Action { MovePaneLeft {} }, documentation::MovePaneLeft },
-        ActionCatalogEntry { "MovePaneRight", Action { MovePaneRight {} }, documentation::MovePaneRight },
-        ActionCatalogEntry { "MovePaneUp", Action { MovePaneUp {} }, documentation::MovePaneUp },
-        ActionCatalogEntry { "MovePaneDown", Action { MovePaneDown {} }, documentation::MovePaneDown },
-        ActionCatalogEntry { "ToggleSplitOrientation",
-                             Action { ToggleSplitOrientation {} },
-                             documentation::ToggleSplitOrientation },
-        ActionCatalogEntry { "TogglePaneZoom", Action { TogglePaneZoom {} }, documentation::TogglePaneZoom },
-        ActionCatalogEntry {
-            "ResizePane", Action { ResizePane { Direction::Right } }, documentation::ResizePane },
-        ActionCatalogEntry { "LaunchLayout", Action { LaunchLayout {} }, documentation::LaunchLayout },
-        ActionCatalogEntry { "SaveLayout", Action { SaveLayout {} }, documentation::SaveLayout },
-        ActionCatalogEntry { "AttachToHost", Action { AttachToHost {} }, documentation::AttachToHost },
-        ActionCatalogEntry {
-            "OpenContextMenu", Action { OpenContextMenu {} }, documentation::OpenContextMenu },
-        ActionCatalogEntry { "SelectAll", Action { SelectAll {} }, documentation::SelectAll },
-        ActionCatalogEntry { "SoftReset", Action { SoftReset {} }, documentation::SoftReset },
-        ActionCatalogEntry { "CopyLastCommandPrompt",
-                             Action { CopyLastCommandPrompt {} },
-                             documentation::CopyLastCommandPrompt },
-        ActionCatalogEntry { "CopyLastCommandOutput",
-                             Action { CopyLastCommandOutput {} },
-                             documentation::CopyLastCommandOutput },
-        ActionCatalogEntry {
-            "CopyLastCommandBlock", Action { CopyLastCommandBlock {} }, documentation::CopyLastCommandBlock },
-        ActionCatalogEntry { "CopyHyperlink", Action { CopyHyperlink {} }, documentation::CopyHyperlink },
-        ActionCatalogEntry { "SetTabColor", Action { SetTabColor {} }, documentation::SetTabColor },
-        ActionCatalogEntry { "ResetTabColor", Action { ResetTabColor {} }, documentation::ResetTabColor },
-        ActionCatalogEntry { "CloseAllTabs", Action { CloseAllTabs {} }, documentation::CloseAllTabs },
-        ActionCatalogEntry {
-            "SetTabBarVisibility", Action { SetTabBarVisibility {} }, documentation::SetTabBarVisibility },
-        ActionCatalogEntry {
-            "SetTabBarPosition", Action { SetTabBarPosition {} }, documentation::SetTabBarPosition },
-        ActionCatalogEntry { "SpeakSelection", Action { SpeakSelection {} }, documentation::SpeakSelection },
-        ActionCatalogEntry { "StopSpeaking", Action { StopSpeaking {} }, documentation::StopSpeaking },
-        ActionCatalogEntry {
-            "SelectCommandBlock", Action { SelectCommandBlock {} }, documentation::SelectCommandBlock },
-        ActionCatalogEntry {
-            "CopyCommandBlock", Action { CopyCommandBlock {} }, documentation::CopyCommandBlock },
-        ActionCatalogEntry {
-            "CopyCommandLine", Action { CopyCommandLine {} }, documentation::CopyCommandLine },
-        ActionCatalogEntry { "RerunCommand", Action { RerunCommand {} }, documentation::RerunCommand },
-        ActionCatalogEntry { "ClearToPrompt", Action { ClearToPrompt {} }, documentation::ClearToPrompt },
-        ActionCatalogEntry {
-            "OpenCommandOutput", Action { OpenCommandOutput {} }, documentation::OpenCommandOutput },
-    };
-    return catalog;
-}
+[[nodiscard]] std::span<ActionCatalogEntry const> actionCatalog();
 
-static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(actionCatalog())>>
-                  == std::variant_size_v<Action>,
-              "every Action alternative must have exactly one actionCatalog() row: without it the action "
-              "cannot be named in input_mapping, is missing from the generated docs, and never shows up "
-              "in the command palette");
+/// Renders an action the way `input_mapping:` spells it: its name, plus its arguments as sibling keys.
+/// @param action The action to render.
+/// @return The rendering, e.g. "ResizePane, direction: Left, percent: 5".
+[[nodiscard]] std::string formatAction(Action const& action);
 
 /// The canonical name of @p action, as written in `input_mapping:` — e.g. "SplitVertical".
 ///
@@ -945,110 +877,6 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
     }
 };
 
-/// The sibling keys of a block action's own arguments, beside the ones that address its block: none for
-/// most.
-/// @return The keys, ready to append.
-template <contour::actions::CommandBlockActionConcept BlockAction>
-[[nodiscard]] std::string formatOwnArguments(BlockAction const& /*action*/)
-{
-    return {};
-}
-
-/// OpenCommandOutput's own sibling keys: the program only when the binding names one (without, the
-/// configured pager runs), then the placement, then the format only when the binding names one (without,
-/// the program's own format applies).
-/// @param action The action.
-/// @return The keys, ready to append.
-[[nodiscard]] inline std::string formatOwnArguments(contour::actions::OpenCommandOutput const& action)
-{
-    auto arguments = action.program == contour::actions::OpenCommandOutput {}.program
-                         ? std::string {}
-                         : std::format(", program: {}", contour::config::SingleQuoted { action.program });
-    arguments += std::format(", placement: {}", contour::config::configEnumToken(action.placement));
-    if (action.format)
-        arguments += std::format(", format: {}", contour::config::configEnumToken(*action.format));
-    return arguments;
-}
-
-/// The sibling keys of a block action: `, target: T`, then `, part: P` where it has a part, then the
-/// pinned `, block: N`, then the action's own. The target and the part are written even at their
-/// defaults; the block only when one is pinned.
-/// @param action The action.
-/// @return The keys, ready to append.
-template <contour::actions::CommandBlockActionConcept BlockAction>
-[[nodiscard]] std::string formatCommandBlockArguments(BlockAction const& action)
-{
-    auto arguments = std::format(", target: {}", contour::config::configEnumToken(action.target));
-    if constexpr (requires { action.part; })
-        arguments += std::format(", part: {}", contour::config::configEnumToken(action.part));
-    if (action.block != BlockAction {}.block)
-        arguments += std::format(", block: {}", action.block.value);
-    return arguments + formatOwnArguments(action);
-}
-
-/// Renders the arguments @p action carries as YAML sibling keys, e.g. ", position: 3".
-///
-/// A FLAT sibling-key form, deliberately: a serialized binding must stay a valid YAML flow map
-/// (`{ mods: [...], key: 'T', action: ResizePane, direction: Left, percent: 5 }`), so a nested
-/// `{ ... }` here would break the enclosing map. Empty for the actions that carry no arguments.
-///
-/// @param action The action whose arguments to render.
-/// @return The arguments, ready to append to the action's name.
-[[nodiscard]] inline std::string formatActionArguments(contour::actions::Action const& action)
-{
-    using namespace contour::actions;
-    return std::visit(
-        core::Overloaded {
-            [](ResizePane const& a) {
-                return std::format(", direction: {}, percent: {}", a.direction, a.percent);
-            },
-            [](MoveTabTo const& a) { return std::format(", position: {}", a.position); },
-            [](ToggleFoldAt const& a) { return std::format(", line: {}", a.line); },
-            [](SwitchToTab const& a) { return std::format(", position: {}", a.position); },
-            [](WriteScreen const& a) { return std::format(", chars: '{}'", a.chars); },
-            [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
-            [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
-            [](AttachToHost const& a) { return std::format(", name: '{}'", a.name); },
-            [](SaveLayout const& a) {
-                // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
-                // — it has no argument to write; a named one round-trips its name.
-                return a.name.empty() ? std::string {} : std::format(", name: '{}'", a.name);
-            },
-            [](CreateNewTab const& a) {
-                // A profile-less CreateNewTab opens the default profile, so it has no argument to write.
-                return a.profileName ? std::format(", profile: '{}'", *a.profileName) : std::string {};
-            },
-            [](CopySelection const& a) {
-                // Each argument is written only when it is not the default, so a plain CopySelection stays
-                // plain.
-                auto const defaults = CopySelection {};
-                auto arguments = std::string {};
-                if (a.format != defaults.format)
-                    arguments += std::format(", format: {}", a.format);
-                if (a.fallback != defaults.fallback)
-                    arguments += std::format(", fallback: {}", contour::config::configEnumToken(a.fallback));
-                return arguments;
-            },
-            // These render the tokens their ConfigEnum rows carry, so what is written back is by
-            // construction what the reader accepts.
-            [](SetTabBarVisibility const& a) {
-                return std::format(", mode: {}", contour::config::configEnumToken(a.mode));
-            },
-            [](SetTabBarPosition const& a) {
-                return std::format(", position: {}", contour::config::configEnumToken(a.position));
-            },
-            [](CommandBlockActionConcept auto const& a) { return formatCommandBlockArguments(a); },
-            [](SetTabColor const& a) {
-                // A colorless SetTabColor opens the picker, so it has no argument to write. The color
-                // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and
-                // unquoted a leading '#' would start a YAML COMMENT and swallow the rest of the line.
-                return a.color ? std::format(", color: {}", *a.color) : std::string {};
-            },
-            [](auto const&) { return std::string {}; },
-        },
-        action);
-}
-
 /// Renders an action the way `input_mapping:` spells it: its name, plus its arguments as sibling keys.
 ///
 /// The name comes from the SAME catalog row that fromString() parses with, so the config Contour
@@ -1060,8 +888,7 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
 {
     auto format(contour::actions::Action const& action, auto& ctx) const
     {
-        return formatter<string>::format(
-            std::format("{}{}", contour::actions::name(action), formatActionArguments(action)), ctx);
+        return formatter<string>::format(contour::actions::formatAction(action), ctx);
     }
 };
 

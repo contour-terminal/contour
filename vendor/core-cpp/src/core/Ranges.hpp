@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <concepts>
 #include <functional>
 #include <iterator>
@@ -96,9 +97,20 @@ template <std::ranges::forward_range Range, typename Predicate>
 } // namespace core
 
 // ---------------------------------------------------------------------------
-// C++23 range algorithms that a standard library core-cpp builds with does not ship yet:
-// `ranges::Iota` and `ranges::FoldLeft`. The libc++ of emsdk 3.1.56 (17.0.4) defines neither
-// feature-test macro, so the WebAssembly subset uses both fallbacks there.
+// C++23 range facilities that a standard library core-cpp builds with does not ship yet:
+// `ranges::Iota`, `ranges::FoldLeft` and `ranges::Stride`. The libc++ of emsdk 3.1.56 (17.0.4)
+// defines neither of the first two feature-test macros, so the WebAssembly subset uses both
+// fallbacks there.
+//
+// `std::views::stride` is missing from EVERY libc++, measured: `clang++ -std=c++23
+// -stdlib=libc++` answers `error: no member named 'stride' in namespace 'std::ranges::views'`
+// on LLVM 22 and on Apple's, while libstdc++ and the MSVC STL ship it. `ranges::Stride` is the
+// seam for it. Its fallback is a forward-range view (forward iterators, never bidirectional or
+// random access, even over a random-access base) with `size()` where the base is sized, and it
+// does not use `std::ranges::range_adaptor_closure`, which older libc++ lacks too -- the pipe
+// operator is spelled out. The fallback is a `common_range` when its base is one. It composes
+// with a range only: two closures joined without one (`views::filter(p) | Stride(3)`) are NOT
+// supported, since `StrideClosure` is not a range adaptor closure.
 //
 // ## Why a seam, and not the older spelling
 //
@@ -294,6 +306,249 @@ namespace detail
         }
     };
 
+    /// `std::ranges::stride_view` ([range.stride.view]), for a standard library that does not ship
+    /// it: every @p stride-th element of a forward range, starting with the first, so the last
+    /// partial step is included (size 10, stride 3 yields elements 0, 3, 6, 9).
+    ///
+    /// A forward range only: the iterator is forward and never bidirectional or random access.
+    template <std::ranges::view Base>
+        requires std::ranges::forward_range<Base>
+    class StrideView: public std::ranges::view_interface<StrideView<Base>>
+    {
+      private:
+        template <bool Const>
+        class Iterator;
+
+        template <bool Const>
+        class Sentinel;
+
+      public:
+        StrideView()
+            requires std::default_initializable<Base>
+        = default;
+
+        /// @param base The viewed range.
+        /// @param stride The step between yielded elements. Must be positive.
+        constexpr StrideView(Base base, std::ranges::range_difference_t<Base> stride):
+            _base(std::move(base)), _stride(stride)
+        {
+            assert(stride > 0);
+        }
+
+        /// @return The viewed range, copied.
+        [[nodiscard]] constexpr Base base() const&
+            requires std::copy_constructible<Base>
+        {
+            return _base;
+        }
+
+        /// @return The viewed range, moved out.
+        [[nodiscard]] constexpr Base base() && { return std::move(_base); }
+
+        /// @return The step between yielded elements.
+        [[nodiscard]] constexpr std::ranges::range_difference_t<Base> stride() const noexcept
+        {
+            return _stride;
+        }
+
+        /// @return An iterator at the first element.
+        [[nodiscard]] constexpr auto begin()
+        {
+            return Iterator<false> { std::ranges::begin(_base), std::ranges::end(_base), _stride };
+        }
+
+        /// @return An iterator at the first element.
+        [[nodiscard]] constexpr auto begin() const
+            requires std::ranges::forward_range<Base const>
+        {
+            return Iterator<true> { std::ranges::begin(_base), std::ranges::end(_base), _stride };
+        }
+
+        /// @return The end sentinel.
+        [[nodiscard]] constexpr auto end()
+        {
+            // A common base gives a common view, as `stride_view` does: code that needs one (a
+            // `std::vector` built from `begin()` and `end()`) must compile here as it does on
+            // libstdc++ and the MSVC STL.
+            if constexpr (std::ranges::common_range<Base>)
+                return Iterator<false> { std::ranges::end(_base), std::ranges::end(_base), _stride };
+            else
+                return Sentinel<false> { std::ranges::end(_base) };
+        }
+
+        /// @return The end sentinel.
+        [[nodiscard]] constexpr auto end() const
+            requires std::ranges::forward_range<Base const>
+        {
+            if constexpr (std::ranges::common_range<Base const>)
+                return Iterator<true> { std::ranges::end(_base), std::ranges::end(_base), _stride };
+            else
+                return Sentinel<true> { std::ranges::end(_base) };
+        }
+
+        /// @return The number of yielded elements, `ceil(size / stride)`.
+        [[nodiscard]] constexpr auto size()
+            requires std::ranges::sized_range<Base>
+        {
+            return count(std::ranges::size(_base));
+        }
+
+        /// @return The number of yielded elements, `ceil(size / stride)`.
+        [[nodiscard]] constexpr auto size() const
+            requires std::ranges::sized_range<Base const>
+        {
+            return count(std::ranges::size(_base));
+        }
+
+      private:
+        [[nodiscard]] constexpr auto count(auto baseSize) const
+        {
+            using Size = decltype(baseSize);
+            auto const step = static_cast<Size>(_stride);
+            return static_cast<Size>((baseSize / step) + (baseSize % step != 0 ? 1 : 0));
+        }
+
+        Base _base = Base();
+        std::ranges::range_difference_t<Base> _stride = 1;
+    };
+
+    template <typename Range>
+    StrideView(Range&&, std::ranges::range_difference_t<Range>) -> StrideView<std::views::all_t<Range>>;
+
+    template <std::ranges::view Base>
+        requires std::ranges::forward_range<Base>
+    template <bool Const>
+    class StrideView<Base>::Sentinel
+    {
+        using Parent = std::conditional_t<Const, Base const, Base>;
+
+      public:
+        Sentinel() = default;
+
+        constexpr explicit Sentinel(std::ranges::sentinel_t<Parent> const& end): _end(end) {}
+
+        /// @return Whether @p it has run off the end of the viewed range.
+        friend constexpr bool operator==(Iterator<Const> const& it, Sentinel const& sentinel)
+        {
+            return it.base() == sentinel._end;
+        }
+
+      private:
+        std::ranges::sentinel_t<Parent> _end = std::ranges::sentinel_t<Parent>();
+    };
+
+    template <std::ranges::view Base>
+        requires std::ranges::forward_range<Base>
+    template <bool Const>
+    class StrideView<Base>::Iterator
+    {
+        using Parent = std::conditional_t<Const, Base const, Base>;
+        using BaseIterator = std::ranges::iterator_t<Parent>;
+
+      public:
+        using difference_type = std::ranges::range_difference_t<Parent>;
+        using value_type = std::ranges::range_value_t<Parent>;
+        using reference = std::ranges::range_reference_t<Parent>;
+        using iterator_concept = std::forward_iterator_tag;
+        using iterator_category = std::conditional_t<std::is_lvalue_reference_v<reference>,
+                                                     std::forward_iterator_tag,
+                                                     std::input_iterator_tag>;
+
+        Iterator() = default;
+
+        // By const reference, copied: a forward iterator is copyable by definition, and one whose move is
+        // no cheaper than its copy (libstdc++'s `reverse_iterator`) makes a by-value parameter that
+        // is moved a `performance-unnecessary-value-param` finding.
+        constexpr Iterator(BaseIterator const& current,
+                           std::ranges::sentinel_t<Parent> const& end,
+                           difference_type stride):
+            _current(current), _end(end), _stride(stride)
+        {
+        }
+
+        /// @return The underlying position.
+        [[nodiscard]] constexpr BaseIterator const& base() const& noexcept { return _current; }
+
+        /// @return The element at this position.
+        [[nodiscard]] constexpr reference operator*() const { return *_current; }
+
+        constexpr Iterator& operator++()
+        {
+            std::ranges::advance(_current, _stride, _end);
+            return *this;
+        }
+
+        constexpr Iterator operator++(int)
+        {
+            auto previous = *this;
+            ++*this;
+            return previous;
+        }
+
+        /// @return Whether both iterators are at the same underlying position.
+        friend constexpr bool operator==(Iterator const& a, Iterator const& b)
+        {
+            return a._current == b._current;
+        }
+
+      private:
+        BaseIterator _current = BaseIterator();
+        std::ranges::sentinel_t<Parent> _end = std::ranges::sentinel_t<Parent>();
+        difference_type _stride = 1;
+    };
+
+    /// What `range | Stride(n)` holds until the range arrives.
+    struct StrideClosure
+    {
+        std::ptrdiff_t stride;
+
+        /// @param range The range to stride over.
+        /// @return A `StrideView` over @p range.
+        template <std::ranges::viewable_range Range>
+            requires std::ranges::forward_range<Range>
+        [[nodiscard]] constexpr auto operator()(Range&& range) const
+        {
+            return StrideView<std::views::all_t<Range>>(
+                std::views::all(std::forward<Range>(range)),
+                static_cast<std::ranges::range_difference_t<Range>>(stride));
+        }
+
+        /// @return `closure(range)`.
+        template <std::ranges::viewable_range Range>
+            requires std::ranges::forward_range<Range>
+        friend constexpr auto operator|(Range&& range, StrideClosure const& closure)
+        {
+            return closure(std::forward<Range>(range));
+        }
+    };
+
+    /// `std::views::stride` ([range.stride.overview]), for a standard library that does not ship it.
+    struct StrideFunction
+    {
+        /// @param range The range to stride over. Must be a forward range.
+        /// @param stride The step between yielded elements. Must be positive.
+        /// @return A view of elements 0, stride, 2 * stride, ... of @p range.
+        template <std::ranges::viewable_range Range>
+            requires std::ranges::forward_range<Range>
+        [[nodiscard]] constexpr auto operator()(Range&& range,
+                                                std::ranges::range_difference_t<Range> stride) const
+        {
+            return StrideView<std::views::all_t<Range>>(std::views::all(std::forward<Range>(range)), stride);
+        }
+
+        /// @param stride The step between yielded elements. Must be positive.
+        /// @return A closure for `range | Stride(stride)`.
+        template <std::integral Step>
+        [[nodiscard]] constexpr StrideClosure operator()(Step stride) const
+        {
+            assert(stride > 0);
+            return StrideClosure { static_cast<std::ptrdiff_t>(stride) };
+        }
+    };
+
+    /// The fallback for `ranges::Stride`, callable on every platform whether or not it is selected.
+    inline constexpr StrideFunction StrideFallback {};
+
     /// The fallback for `ranges::Iota`, callable on every platform whether or not it is selected.
     inline constexpr IotaFunction IotaFallback {};
 
@@ -316,6 +571,15 @@ inline constexpr auto Iota = detail::IotaFallback;
 inline constexpr auto FoldLeft = std::ranges::fold_left;
 #else
 inline constexpr auto FoldLeft = detail::FoldLeftFallback;
+#endif
+
+/// `std::views::stride` where the standard library ships it, `detail::StrideFallback` where it does
+/// not. Call it exactly as the standard facility: `core::ranges::Stride(values, 3)` or
+/// `values | core::ranges::Stride(3)`.
+#if defined(__cpp_lib_ranges_stride) && !defined(CORE_RANGES_FORCE_FALLBACK)
+inline constexpr auto Stride = std::views::stride;
+#else
+inline constexpr auto Stride = detail::StrideFallback;
 #endif
 
 } // namespace core::ranges

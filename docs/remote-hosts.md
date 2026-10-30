@@ -29,6 +29,12 @@ hosts:
     tls_ca: "~/.config/contour/studio-ca.pem"
 ```
 
+Hosts can also be added in **Settings › Hosts**, without editing the file: each one is written to
+`hosts/<name>.yml` beside `contour.yml`, with the same keys as an entry of `hosts:`. Its page shows the SSH
+or TLS fields its address calls for, says under a field what would keep the host from loading, and saves
+nothing until it is fixed; **Attach** opens a window attached to it. Hosts written in `contour.yml` are
+listed there too, read-only, with **Duplicate to Edit**.
+
 Then attach in any of these ways:
 
 - **"Attach to Host"** in the command palette lists the saved hosts; pick one.
@@ -44,6 +50,61 @@ Then attach in any of these ways:
 
 A window attached to a remote host says so in its chrome, so it is never mistaken for a local one: its
 title reads `home — <session title>`, and the tab strip starts with the host's name.
+
+## Choosing where a window lives: the Connect picker
+
+The **Connect picker** is one question before a window opens: where do its sessions live? It lists
+
+- **This computer**: *Persistent sessions*, the local daemon, with its state (`running · 3 sessions`, or
+  `not running · starts on connect`), and *This window only*, with no daemon: its shells end when the window
+  closes (`daemon.mode: in_process`);
+- **Saved hosts**: each host of [`hosts:`](configuration/hosts.md), tagged SSH or TLS;
+- and, while you type an `ssh://` or `tls://` address in the field, a leading **Connect to ADDRESS** row for
+  it. The address is not saved.
+
+Open it from **File › New Window to…** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd>, <kbd>⇧⌘K</kbd> on
+macOS; the `NewWindowTo` action), from `contour connect` with no target, from the launchers below, or at
+every plain start, with **Ask every time Contour starts** (`connect_picker_on_start`, also in Settings ›
+General). A launch with command-line arguments never shows it.
+
+The field has the focus. Type to filter by name or address; <kbd>↑</kbd> and <kbd>↓</kbd> move, <kbd>Return</kbd>
+connects and <kbd>Esc</kbd> cancels, which quits when no other window is open. Every row shows a key,
+<kbd>Alt</kbd>+<kbd>1</kbd> to <kbd>9</kbd> (<kbd>⌘1</kbd> to <kbd>⌘9</kbd> on macOS), that connects to it at
+once; plain digits stay typable, for addresses and ports. Filtering renumbers the rows, so `star` then
+<kbd>Alt</kbd>+<kbd>1</kbd> reaches a host named `starfive`. <kbd>Ctrl</kbd>+<kbd>L</kbd> (<kbd>⌘L</kbd>)
+puts the caret back in the field. The selection starts on the target you used last, which Contour remembers
+in `gui-state.yml`, not in `contour.yml`.
+
+A host that cannot be reached stays in the picker: the reason is shown under its row, in the words Attach to
+Host uses (an unknown host key, an authentication failure, Contour missing on the host, an unreachable
+host), with **Retry** and **Edit Host…**, which opens Settings › Hosts on it. **Manage Hosts…** opens
+Settings › Hosts.
+
+### `contour connect`
+
+``` sh
+contour connect                     # the picker
+contour connect daemon              # this computer's daemon; daemon:LABEL for another one
+contour connect local               # this window only, no daemon
+contour connect starfive            # a saved host, by name
+contour connect ssh://me@pi4.lan    # an ssh:// or tls:// address
+contour connect --list [--json]     # the targets the picker would show
+```
+
+A target opens the window as `contour client` does (`--label`, `--host`), or `contour terminal --daemon-mode
+in_process` for `local`; no target shows the picker. `--config FILE` names the configuration that holds the
+hosts. `--list` prints each target, as `contour connect` reads it, with its detail, or a JSON array with
+`--json`. An ad-hoc `tls://` address is refused, as for `contour client --host`: a TLS host needs its token
+file, so save it first.
+
+### From the launchers
+
+- **Linux**: the desktop entry has a **Connect…** action (`contour connect`) beside *Open a New Window*, and
+  `org.contourterminal.Contour.Connect.desktop` is a launcher of its own, "Contour — Connect…", for menus that
+  show no actions.
+- **macOS**: the Dock menu has **New Window to…** and each saved host.
+- **Windows**: the jump list has the task **Connect…** and one per saved host, and the installer adds a
+  **Contour (Connect…)** Start menu shortcut.
 
 ## Over SSH
 

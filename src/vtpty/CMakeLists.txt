@@ -48,6 +48,7 @@ set(vtpty_HEADERS
     EnvironmentBlock.hpp
     ErrnoText.hpp
     ImageSize.hpp
+    InputEcho.hpp
     MockPty.hpp
     MockViewPty.hpp
     OwnedFd.hpp
@@ -158,6 +159,7 @@ if(VTPTY_TESTING)
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
         ImageSize_test.cpp
+        MockPty_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
         SandboxInfo_test.cpp
@@ -189,7 +191,7 @@ if(VTPTY_TESTING)
             target_link_libraries(vtpty_test Libssh2::libssh2)
         endif()
     endif()
-    target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
+    target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2 contour_test_trace)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
 
     if(CONTOUR_WITH_SYSTEMD)

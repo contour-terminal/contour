@@ -14,6 +14,7 @@
 /// marshal completion (PTY closed) through EventLoop::post().
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
@@ -23,6 +24,7 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/Environment.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/platform/FileSystem.hpp>
@@ -43,6 +45,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -52,9 +55,11 @@
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/HistorySeed.hpp>
 #include <vthost/ObjectRegistry.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
+#include <vthost/RestoredCounts.hpp>
 #include <vthost/SessionEnd.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/SessionSnapshot.hpp>
@@ -298,6 +303,7 @@ class HostedSession
     ///        default.
     /// @param profileName The host profile the session was spawned under; empty for none named.
     /// @param settingsOrigin Where @p settings came from.
+    /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -313,7 +319,8 @@ class HostedSession
                   SessionSignalCallback onSignal,
                   HostedSessionExtensions extensions = {},
                   std::string profileName = {},
-                  SettingsOrigin settingsOrigin = SettingsOrigin::Profile);
+                  SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
+                  std::optional<vtbackend::GitHeadServices> git = std::nullopt);
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
     ~HostedSession();
@@ -434,6 +441,17 @@ class HostedSession
         /// daemon honors it by switching the terminal's status display on (the
         /// frontend decision the GUI makes too).
         std::function<void()> onShowHostWritableStatusLine;
+        /// A program asked for a buffer capture (XTCAPTURE). No one here can grant it, so the daemon refuses
+        /// it as `capture_buffer: deny` does locally -- with the terminating chunk alone -- rather than
+        /// leaving the program blocked on a reply that never comes. Parser thread, terminal lock held.
+        std::function<void()> onCaptureBuffer;
+
+        void requestCaptureBuffer(vtbackend::LineCount /*lines*/,
+                                  vtbackend::CaptureLineMode /*mode*/) override
+        {
+            if (onCaptureBuffer)
+                onCaptureBuffer();
+        }
 
         void screenUpdated() override
         {
@@ -456,7 +474,7 @@ class HostedSession
             if (onNotify)
                 onNotify(notification.title, notification.body, notification.occasion);
         }
-        void copyToClipboard(std::string_view data) override
+        void copyToClipboard(std::string_view data, vtbackend::ClipboardWriter /*writer*/) override
         {
             if (onCopyToClipboard)
                 onCopyToClipboard(std::string { data });
@@ -491,6 +509,14 @@ class HostedSession
                 onShowHostWritableStatusLine();
         }
         void extensionFramePublished() override
+        {
+            if (onStatusLineExtensionPublished)
+                onStatusLineExtensionPublished();
+        }
+        /// A `{Git}` lookup found another branch: the row is repainted on the loop and sent, as for an
+        /// extension's frame -- through the same pending flag, so a burst costs one repaint. Without
+        /// extensions the clients draw the row themselves, and nothing is to be sent.
+        void indicatorStatusLineItemChanged() override
         {
             if (onStatusLineExtensionPublished)
                 onStatusLineExtensionPublished();
@@ -601,12 +627,18 @@ struct SessionSpawnRequest
     /// (@see seedRestoredHistory); null for a session that restores nothing.
     std::shared_ptr<proto::Delta const> restoredHistory {};
 
-    /// Written under @ref restoredHistory, as the parser reads it (@see restoredMarker); only with history.
-    std::string restoredMarker {};
+    /// The divider written under @ref restoredHistory (@see seedRestoredHistory); read only with history,
+    /// which a restored pane without rows still carries, empty.
+    RestoreDivider restoredDivider {};
 
     /// Typed at the session's first OSC 133 `A` (prompt start), or after InitialInputFallback: a restored
     /// pane's re-run program (@see rerunInputFor). Empty for nothing.
     std::string initialInput {};
+
+    /// The command line the restart stopped in this session, when no re-run program retyped it: kept until
+    /// the session's next command starts, and stated in every snapshot of it meanwhile
+    /// (@see SessionHost::interruptedCommandOf). Empty for none.
+    std::string interruptedCommand {};
 
     /// The UUIDs and labels the objects this spawn creates come back with, instead of fresh ones: a restored
     /// workspace keeps its ids. Nullopt mints them all.
@@ -622,7 +654,7 @@ struct WorkspaceRestore
 {
     WorkspaceSnapshot snapshot;                ///< The windows, tabs and panes to bring back.
     std::vector<std::string> rerunPrograms {}; ///< The programs a restored pane may re-run (rerunInputFor).
-    std::string marker {}; ///< restoredMarker(snapshot.takenAt) in the daemon's local time.
+    RestoreDivider divider {}; ///< What every restored pane's divider says (@see seedRestoredHistory).
     RestoreSource source = RestoreSource::Snapshot; ///< Which file it came from, for endRestore().
 };
 
@@ -670,6 +702,12 @@ struct SessionHostConfig
     /// the host. The default is the machine's own.
     std::reference_wrapper<core::platform::FileSystem const> fileSystem =
         core::platform::NativeFileSystem::instance();
+    /// Where every session's `{Git}` looks up its branch: a row the host draws (one its extensions drive) is
+    /// what its clients mirror, branch included. Borrowed: they must outlive the host. nullopt has the host
+    /// run its own -- a probe thread of its own and this machine's files -- when @ref fileSystem is this
+    /// machine's, and none at all for any other (a test's in-memory files are not to be paired with the real
+    /// disk's).
+    std::optional<vtbackend::GitHeadServices> git {};
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
     /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
@@ -693,6 +731,28 @@ struct SessionHostConfig
     std::optional<WorkspaceRestore> restore {};
     /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+};
+
+/// Where a host's sessions look up their `{Git}` branch: the services it was given, or its own.
+class HostGitLookups
+{
+  public:
+    /// @param given The services a test or an embedder hands the host; borrowed.
+    /// @param fileSystem The host's filesystem. Without @p given, the host runs lookups of its own -- one
+    /// probe thread and this machine's files -- only when this is this machine's (NativeFileSystem).
+    HostGitLookups(std::optional<vtbackend::GitHeadServices> given,
+                   core::platform::FileSystem const& fileSystem);
+
+    /// @return What every session's terminal is given; nullopt for none, which shows no branch.
+    [[nodiscard]] std::optional<vtbackend::GitHeadServices> services() const noexcept { return _services; }
+
+  private:
+    /// Declared before the executor, so that it outlives every lookup the executor joins.
+    std::unique_ptr<vtbackend::NativeGitFileSystem> _fileSystem;
+    /// One thread for every session's lookups: a lookup on a hung mount stalls `{Git}` in every session of
+    /// this host, and nothing else.
+    std::unique_ptr<core::async::ThreadPoolExecutor> _executor;
+    std::optional<vtbackend::GitHeadServices> _services;
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -875,6 +935,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param bytes The input, as the client encoded it.
     void writeInput(vtworkspace::SessionId session, std::string_view bytes);
 
+    /// @param session The session asked about.
+    /// @return The command line a restart stopped in @p session, held until its next command starts; empty
+    ///         for none, or for an unknown session. Untrusted text (it came from a snapshot).
+    [[nodiscard]] std::string interruptedCommandOf(vtworkspace::SessionId session) const;
+
     /// When a client last handed @p session input, on the host loop's clock. Loop thread only.
     ///
     /// The time doubles as the input's identity (FlushInputs::answeredInput compares stamps), which holds
@@ -905,6 +970,17 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::expected<void, OperationError> performOperation(
         proto::PerformOperation const& request);
 
+    /// Makes @p preference the one sessions spawned from now on are built under, without touching the
+    /// running ones: what a client's hello states, before the spawn its attach causes.
+    /// @param preference The light/dark preference the client shows.
+    void adoptColorPreference(vtbackend::ColorPreference preference);
+
+    /// Re-seeds @p session's palette from its profile under @p preference, when that is a change, and has
+    /// every mirror follow; and makes @p preference the one later spawns are built under. Loop thread.
+    /// @param session The session; ignored when unknown, or when the host has no profiles.
+    /// @param preference The light/dark preference a client stated for it.
+    void applyColorPreference(vtworkspace::SessionId session, vtbackend::ColorPreference preference);
+
     /// Closes an open status-line extension's permission request with a client's answer, which is recorded
     /// for every session: from now on the extension's commands run, or are refused. A dismissed prompt
     /// (Pending) closes it and records nothing; the question is asked again when an extension next asks. An
@@ -931,6 +1007,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Whether SessionHostConfig::restore realized at least one pane; NothingRealized when no restore
     ///         was given.
     [[nodiscard]] RestoreOutcome restoreOutcome() const noexcept { return _restoreOutcome; }
+
+    /// Hands over, once, what the restore realized, for the first client to be told.
+    /// @param follows Whether the asking client follows a window, by its id: only those windows are counted.
+    /// @return The windows and tabs SessionHostConfig::restore brought back that @p follows names, the first
+    ///         time this is called after it brought something back, and nullopt every time after, and when it
+    ///         brought nothing, or nothing @p follows names.
+    [[nodiscard]] std::optional<RestoredCounts> takeRestoreAnnouncement(
+        std::function<bool(uint64_t)> const& follows);
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
@@ -1089,19 +1173,40 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
     void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
 
+    /// A window a restore brought back.
+    struct RestoredWindow
+    {
+        uint64_t window = 0; ///< Its id.
+        uint32_t tabs = 0;   ///< The tabs of it with at least one spawned pane.
+    };
+
+    /// What realizing one window of a restore brought back.
+    struct RealizedWindow
+    {
+        std::size_t panes = 0; ///< The panes that spawned.
+        uint32_t tabs = 0;     ///< The tabs with at least one such pane.
+    };
+
+    /// What a restore realized: the panes that spawned, and the windows holding at least one tab of them.
+    struct RealizedRestore
+    {
+        std::size_t panes = 0;               ///< The panes that spawned.
+        std::vector<RestoredWindow> windows; ///< Each window with a tab, in snapshot order.
+    };
+
     /// Realizes @p restore's windows: the first into the host's own window, each further one into a new
     /// window, every tab via vtworkspace::realizeLayoutTab, then each tab's active pane and zoom and each
     /// window's active tab. A pane's saved directory is used only while it still exists. Called once, from
     /// the constructor body.
     /// @param restore The snapshot, and what its panes re-run.
-    /// @return How many panes were realized.
-    std::size_t realizeRestoredWorkspace(WorkspaceRestore const& restore);
+    /// @return What was realized.
+    RealizedRestore realizeRestoredWorkspace(WorkspaceRestore const& restore);
 
     /// Realizes one window of a restore into @p window.
-    /// @return How many panes were realized.
-    std::size_t realizeRestoredWindow(vtworkspace::WindowId window,
-                                      WindowSnapshot const& snapshot,
-                                      WorkspaceRestore const& restore);
+    /// @return What was realized.
+    RealizedWindow realizeRestoredWindow(vtworkspace::WindowId window,
+                                         WindowSnapshot const& snapshot,
+                                         WorkspaceRestore const& restore);
 
     /// @param kind What the object is.
     /// @param identity What a snapshot captured of it.
@@ -1118,6 +1223,17 @@ class SessionHost final: public vtworkspace::ModelEvents
         std::string input;                                   ///< What is typed.
         std::optional<core::net::DeadlineTimer> fallback {}; ///< Types it anyway after InitialInputFallback.
     };
+
+    /// A restored session's interrupted command, with the newest command-block id it was restored behind.
+    struct Interruption
+    {
+        std::string commandLine;         ///< What the restart stopped.
+        vtbackend::CommandBlockId after; ///< A block newer than this that left its prompt ends it.
+    };
+
+    /// Forgets @p session's interruption once its terminal holds a command of its own: a record newer than
+    /// the restored ones that is no longer at its prompt. Loop thread, after a screen update.
+    void clearInterruptionOnNextCommand(vtworkspace::SessionId session);
 
     /// Holds @p input for @p session until its first prompt, arming the fallback. Loop thread.
     void holdInitialInput(vtworkspace::SessionId session, std::string input);
@@ -1282,6 +1398,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     ClientSizePolicy _sizePolicy;
     /// Where every session this host spawns looks up the paths printed on its screen.
     core::platform::FileSystem const& _fileSystem;
+    /// Where every session's `{Git}` looks up its branch. Declared before _sessions, so that its probe thread
+    /// is joined after every session's terminal stopped asking it.
+    HostGitLookups _git;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
     /// What each attached client reported it can display, keyed by its stream subscription so the
@@ -1301,6 +1420,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// When each session last got client input, on `_loop`'s clock (@see lastInputAt). Erased with the
     /// session's `_sessions` entry, by eraseSession().
     std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _lastInput;
+    /// The light/dark preference a session's palette was last seeded under, where a client changed it from
+    /// HostedColorPreference; erased with the session.
+    std::unordered_map<uint64_t, vtbackend::ColorPreference> _colorPreferences;
+    /// The preference the latest client stated, which new sessions are built under; HostedColorPreference
+    /// until one states its own.
+    vtbackend::ColorPreference _defaultColorPreference = HostedColorPreference;
     /// Every permission request no client answered yet, oldest first; one per installed extension and
     /// manifest digest.
     std::vector<proto::PermissionRequest> _pendingPermissions;
@@ -1324,7 +1449,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Every restored session's input not typed yet, by session id. Erased with the session, by
     /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
     std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;
+    /// The restored sessions whose command the restart stopped and that have run nothing since. Loop thread.
+    std::unordered_map<uint64_t, Interruption> _interruptions;
     RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome
+    std::vector<RestoredWindow>
+        _restoreAnnouncement {}; ///< What @ref takeRestoreAnnouncement has yet to tell.
 
     /// The UUIDs and labels of windows, tabs and panes. Declared before the model, whose events bind into it.
     ObjectRegistry _objects;

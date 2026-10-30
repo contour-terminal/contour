@@ -1,210 +1,225 @@
 // vim:syntax=qml
-// The in-app settings page, shown in the content area in place of the terminal when the
-// WindowController's settingsActive flag is set (see Main.qml). It binds entirely to a
-// SettingsController (the editable bridge over the configuration) and a WindowController (to close the
-// page). It never edits contour.yml: it creates/edits GUI-owned side files, and shows contour.yml /
-// builtin entities read-only.
+// The Settings window's content: a sidebar of the sections, the profiles and "Edit contour.yml…" beside the
+// page the sidebar selects, under the page header and the banners.
 //
-// Layout (Windows-Terminal style): a title bar, a left navigation rail with accent "pill" selection
-// (grouped GENERAL / PROFILES / COLOR SCHEMES), and a right content pane with a page header band and
-// elevated "setting cards". All colours follow the OS light/dark theme live via SystemPalette, the same
-// idiom the command palette and tab flyouts use.
+// The page binds to the SettingsController its `host` (the SettingsWindowHost) owns. Everything applies as it
+// is changed, and "Revert Changes" puts back what this session changed; the page never writes contour.yml.
+// What the layout looks like -- where the title sits, whether the rows are one card or each its own, how a
+// stepper's arrows sit -- is `chromeStyle.settingsTraits`, and every extent, colour and type size comes from
+// the chrome tokens, so the page never learns which style is active.
+//
+// Pages are named: "section:<id>", "profile:<name>", and under a profile "profile:<name>:schemes", ":links" and
+// ":statusline", and "host:<name>". `currentPage` is the page shown; `openPage` opens one.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
     id: root
+    objectName: "settingsPage"
 
-    // The SettingsController and the owning WindowController. Both null-guarded throughout: the
-    // controllers are torn down before the QML tree on window close, and bindings re-evaluate once
-    // against null during teardown (an unguarded access would raise a TypeError that fails the tests).
-    property var controller: null
+    /// The SettingsWindowHost: the controller the page edits, the Settings window's close, and "Edit
+    /// contour.yml…".
+    property var host: null
+    /// The SettingsController. Null-guarded throughout: the controllers are torn down before the QML tree
+    /// on window close, and bindings re-evaluate once against null during teardown.
+    property var controller: host ? host.controller : null
+    /// The page shown, as a host remembers it.
+    property string currentPage: "section:general"
+    /// What a frameless window's header row works its window through, as WindowControls asks of a
+    /// controller (SettingsWindow.qml); null while the OS draws the frame. Set, the header row is the
+    /// window's title bar: dragged, it moves the window, and double-clicked, it maximises it.
     property var windowController: null
+    /// The window controls a frameless window draws at the header row's ends; null draws none.
+    property Component leadingControls: null
+    property Component trailingControls: null
 
-    // Which editor the right pane shows: "profile", "scheme", "globals" or "keybindings".
-    //
-    // Opens on the global settings rather than on a chooser: the page is reached by asking for
-    // settings, so landing on a pane that says "pick something on the left" spends the user's first
-    // click telling them what they already came here to do. Global settings is the one pane that
-    // always exists — a fresh install has no GUI-owned profile or colour scheme to show instead.
-    property string editorMode: "globals"
+    // The kinds of page, taken from the page's id.
+    readonly property var _parts: root.currentPage.split(":")
+    readonly property string _kind: root._parts[0]
+    readonly property string _subpage: root._kind === "profile" && root._parts.length > 2 ? root._parts[2] : ""
+    readonly property string _profileName: root._kind === "profile" ? root._parts[1] : ""
+    readonly property bool _isProfilePage: root._kind === "profile"
+    readonly property string _hostName: root._kind === "host" ? root._parts.slice(1).join(":") : ""
+    readonly property bool _isHostPage: root._kind === "host"
+    readonly property var _sections: root.controller ? root.controller.sections : []
+    readonly property var _traits: chromeStyle.settingsTraits
+    readonly property bool _splitHeader: root._traits.header === root._traits.splitHeaderBar
+    // The page's pages keep a margin at each side.
+    readonly property real _pageMargins: 2 * chromeStyle.space.s8
+    readonly property bool _locked: root.controller !== null && root.controller.locked
+    // Where an id remembered by an older release now lives.
+    readonly property var _legacyPages: ({ "globals": "section:general", "keybindings": "section:keyboard" })
 
-    // Why the controller last refused what the page asked of it -- a value the configuration would reject,
-    // a name already taken, a file it could not write -- kept until the next change it saves, or until the
-    // pane or the draft it was about changes. The controller reports a refusal only through errorOccurred,
-    // and every change it saves (and every reopening of the page) through changed().
+    /// The title of the page shown.
+    readonly property string pageTitle: {
+        if (root._isProfilePage) {
+            const subtitle = root._subpageTitles[root._subpage];
+            if (root._traits.header === root._traits.breadcrumb) {
+                const trail = qsTr("Profiles") + " › " + root._profileName;
+                return subtitle ? trail + " › " + subtitle : trail;
+            }
+            return subtitle ? subtitle : root._profileName;
+        }
+        if (root._isHostPage)
+            return root._traits.header === root._traits.breadcrumb ? qsTr("Hosts") + " › " + root._hostName
+                                                                   : root._hostName;
+        const section = root._sections.find(row => row.id === root._parts[1]);
+        return section ? section.title : "";
+    }
+    readonly property var _subpageTitles: ({
+        "schemes": qsTr("Colors"),
+        "links": qsTr("Links"),
+        "statusline": qsTr("Status Line")
+    })
+
+    /// Opens the page @p id names.
+    /// @return Whether it opened it: a page or a profile this release does not know leaves the page as it is.
+    function openPage(id) {
+        const wanted = root._legacyPages[id] !== undefined ? root._legacyPages[id] : id;
+        const parts = wanted.split(":");
+        if (!root.controller)
+            return false;
+        if (parts[0] === "section") {
+            if (!root._sections.some(row => row.id === parts[1]))
+                return false;
+        } else if (parts[0] === "profile") {
+            if (!root.controller.profiles.some(row => row.name === parts[1]))
+                return false;
+            if (parts.length > 2 && root._subpageTitles[parts[2]] === undefined)
+                return false;
+            // The profile the controller edits is the one shown, whichever way it was opened.
+            if (root.controller.editingProfile !== parts[1])
+                root.controller.editProfile(parts[1]);
+        } else if (parts[0] === "host") {
+            const name = parts.slice(1).join(":");
+            if (!root.controller.hosts.some(row => row.name === name))
+                return false;
+            // The host the controller edits is the one shown, whichever way it was opened.
+            if (root.controller.editingHost !== name)
+                root.controller.editHost(name);
+        } else {
+            return false;
+        }
+        root.currentPage = wanted;
+        return true;
+    }
+
+    // Why the controller last refused what the page asked of it -- a value the configuration would reject, a
+    // name already taken, a file it could not write -- kept until the next change it saves, or until the page
+    // or the draft it was about changes. The controller reports a refusal only through errorOccurred, and
+    // every change it saves (and every reopening of the page) through changed().
     property string errorMessage: ""
+    // The row a search result asked to be shown, once its page is.
+    property string _pendingReveal: ""
 
     Connections {
         target: root.controller
         function onErrorOccurred(message) {
-            root.errorMessage = message
+            root.errorMessage = message;
             // Said as well as shown: a screen reader hears the edited value revert, and otherwise not why.
-            // The message's name changes only when the reason does, and a name change is not read out.
-            errorMessageLabel.Accessible.announce(message)
+            errorBanner.Accessible.announce(message);
         }
-        function onChanged() { root.errorMessage = "" }
+        function onChanged() {
+            root.errorMessage = "";
+            root.followProfile();
+            root.followHost();
+        }
+        function onHostRenamed(oldName, newName) {
+            if (root._isHostPage && root._hostName === oldName)
+                root.currentPage = "host:" + newName;
+        }
+        function onHostDraftChanged() { root.errorMessage = "" }
+        function onProfileRenamed(oldName, newName) {
+            // The page of the renamed profile stays open, on the same subpage, under its new name.
+            if (root._isProfilePage && root._profileName === oldName)
+                root.currentPage = ["profile", newName].concat(root._parts.slice(2)).join(":");
+        }
         function onDraftChanged() { root.errorMessage = "" }
+        function onGlobalFieldsChanged() { root.errorMessage = "" }
         function onSchemeDraftChanged() { root.errorMessage = "" }
         function onEditingSchemeChanged() { root.errorMessage = "" }
     }
-    onEditorModeChanged: root.errorMessage = ""
-
-    // Live OS palette handle, so the whole page follows dark/light in realtime (see CommandPalette.qml).
-    SystemPalette {
-        id: sys
-        colorGroup: SystemPalette.Active
-    }
-    readonly property color subtleText: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.6)
-    readonly property color hairline: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.12)
-
-    color: sys.window
-
-    readonly property var schemeNameList: {
-        var out = []
-        if (controller)
-            for (var i = 0; i < controller.colorSchemes.length; ++i)
-                out.push(controller.colorSchemes[i].name)
-        return out
+    onCurrentPageChanged: {
+        root.errorMessage = "";
+        pageFade.restart();
     }
 
-    // The page header, driven by which editor is open.
-    readonly property string headerTitle: {
-        if (root.editorMode === "profile")
-            return (root.controller && root.controller.editingProfile.length > 0)
-                   ? qsTr("Profile · %1").arg(root.controller.editingProfile)
-                   : qsTr("New profile")
-        if (root.editorMode === "scheme")
-            return (root.controller && root.controller.editingScheme.length > 0)
-                   ? qsTr("Color scheme · %1").arg(root.controller.editingScheme)
-                   : qsTr("New color scheme")
-        if (root.editorMode === "globals")
-            return qsTr("Global settings")
-        if (root.editorMode === "keybindings")
-            return qsTr("Keybindings")
-        return ""
-    }
-    readonly property string headerSubtitle: {
-        if (root.editorMode === "profile")
-            return qsTr("Appearance and behaviour for this profile — saved to profiles/<name>.yml.")
-        if (root.editorMode === "scheme")
-            return qsTr("A reusable palette — saved to colorschemes/<name>.yml.")
-        if (root.editorMode === "globals")
-            return qsTr("Application-wide overrides — saved to settings.yml.")
-        if (root.editorMode === "keybindings")
-            return qsTr("Configured in contour.yml, then the built-in bindings it leaves free (read-only here).")
-        return ""
+    /// A profile page whose profile is gone falls back to the Profiles page.
+    function followProfile() {
+        // A profile staged and not yet written is not in the list, but is the one the controller edits.
+        if (root._isProfilePage && root.controller && root.controller.editingProfile !== root._profileName
+            && !root.controller.profiles.some(row => row.name === root._profileName))
+            root.currentPage = "section:profiles";
     }
 
-    // {{{ Field grouping and live filter
-    //
-    // The field panes are long — a profile has around ninety settings — so they are shown as collapsible
-    // groups with a search box over them. The grouping is not decided here: each row of
-    // SettingsController.profileFields carries the `group` and `groupGlyph` it belongs under, so which
-    // fields belong together is a fact about the fields, stated next to them in C++.
-
-    /// Live filter over the field panes. Matches a field's label, help text or key.
-    property string filterText: ""
-    readonly property bool filtering: root.filterText.trim().length > 0
-
-    /// Per-group open state, keyed by group title. Absent means open.
-    ///
-    /// Held here rather than inside each SettingsSection because a keystroke in the search box changes
-    /// the group model, which rebuilds every delegate — state living in a delegate would reset on every
-    /// character typed.
-    property var expandedGroups: ({})
-
-    /// Whether the group titled @p title is currently open.
-    function groupExpanded(title) {
-        // A search opens whatever it matched: having to expand a group to see a hit you already searched
-        // for defeats the search.
-        if (root.filtering)
-            return true
-        return root.expandedGroups[title] !== false
+    /// A host page whose host is gone falls back to the Hosts page.
+    function followHost() {
+        if (root._isHostPage && root.controller && !root.controller.hosts.some(row => row.name === root._hostName))
+            root.currentPage = "section:hosts";
     }
 
-    /// Flips the open state of the group titled @p title.
-    function toggleGroup(title) {
-        // Reassigned as a fresh object, because mutating the existing one in place does not notify the
-        // bindings that read it.
-        var next = {}
-        for (var key in root.expandedGroups)
-            next[key] = root.expandedGroups[key]
-        next[title] = (root.expandedGroups[title] === false)
-        root.expandedGroups = next
+    /// Opens the page of the host the controller now edits: after a host was added or duplicated.
+    function showEditedHost() {
+        if (root.controller && root.controller.editingHost.length > 0)
+            root.currentPage = "host:" + root.controller.editingHost;
     }
 
-    /// Whether @p field passes the current filter.
-    function fieldMatches(field) {
-        var needle = root.filterText.trim().toLowerCase()
-        if (needle.length === 0)
-            return true
-        // The key is searched too, so a user who knows the YAML name of a setting can type that.
-        return String(field.label).toLowerCase().indexOf(needle) >= 0
-            || String(field.help).toLowerCase().indexOf(needle) >= 0
-            || String(field.key).toLowerCase().indexOf(needle) >= 0
+    /// Opens the page of the profile the controller now edits: after a profile was added or duplicated.
+    function showEditedProfile() {
+        if (root.controller && root.controller.editingProfile.length > 0)
+            root.currentPage = "profile:" + root.controller.editingProfile;
     }
 
-    /// Whether @p text passes the current filter. For the sections that are not lists of scalar fields
-    /// (the colour scheme, the status line indicator) and so have only their title to match on.
-    function textMatches(text) {
-        var needle = root.filterText.trim().toLowerCase()
-        return needle.length === 0 || String(text).toLowerCase().indexOf(needle) >= 0
+    /// Opens the page a section's link, or a search result for one, names.
+    /// @param target A link's target, as `controller.sections` and the search results spell it.
+    function openLink(target) {
+        if (target === "default-profile-status-line")
+            root.openPage("profile:" + root.controller.defaultProfile + ":statusline");
     }
 
-    /// Buckets @p rows into [{ title, glyph, fields }], keeping the order C++ listed them in and
-    /// dropping groups the filter emptied.
-    function groupFields(rows) {
-        var out = []
-        var byTitle = ({})
-        for (var i = 0; i < rows.length; ++i) {
-            var field = rows[i]
-            if (!root.fieldMatches(field))
-                continue
-            var title = field.group !== undefined ? field.group : ""
-            if (byTitle[title] === undefined) {
-                byTitle[title] = {
-                    "title": title,
-                    "glyph": field.groupGlyph !== undefined ? field.groupGlyph : "",
-                    "fields": []
-                }
-                out.push(byTitle[title])
-            }
-            byTitle[title].fields.push(field)
+    /// Opens a search result's page and shows its row.
+    function openResult(result) {
+        if (result.target !== undefined) {
+            root.openLink(result.target);
+            return;
         }
-        return out
+        if (result.scope === "profile") {
+            if (root.controller.editingProfile.length === 0)
+                root.controller.editProfile(root.controller.defaultProfile);
+            root.currentPage = "profile:" + root.controller.editingProfile;
+        } else if (result.scope === "host") {
+            // A host's rows are on a host's page: the open one, else the first; with none, the Hosts page.
+            if (root.controller.editingHost.length === 0 && root.controller.hosts.length > 0)
+                root.controller.editHost(root.controller.hosts[0].name);
+            root.currentPage = root.controller.editingHost.length > 0 ? "host:" + root.controller.editingHost
+                                                                      : "section:hosts";
+        } else {
+            root.currentPage = "section:" + result.section;
+        }
+        root._pendingReveal = result.key;
+        Qt.callLater(root.revealPending);
     }
 
-    readonly property var profileGroups: root.controller ? root.groupFields(root.controller.profileFields) : []
-    readonly property var globalFieldsFiltered: {
-        var out = []
-        if (!root.controller)
-            return out
-        var rows = root.controller.globalFields
-        for (var i = 0; i < rows.length; ++i)
-            if (root.fieldMatches(rows[i]))
-                out.push(rows[i])
-        return out
+    /// Shows the row a search result asked for, now its page is up.
+    function revealPending() {
+        const page = pageLoader.item;
+        if (root._pendingReveal.length > 0 && page && page.revealRow)
+            page.revealRow(root._pendingReveal);
+        root._pendingReveal = "";
     }
-    /// How many fields the filter is currently hiding, for the "no matches" hint.
-    readonly property int visibleFieldCount: {
-        var total = 0
-        for (var i = 0; i < root.profileGroups.length; ++i)
-            total += root.profileGroups[i].fields.length
-        return total
-    }
-    // }}}
 
-    // Delete is confirmed through a modal dialog; the row that asked stashes its target here first.
-    property string pendingDeleteKind: "" // "profile" | "scheme" | "linkPattern:<row>"
+    // Delete is confirmed through a modal dialog; whatever asked stashes its target here first.
+    property string pendingDeleteKind: "" // "profile" | "scheme" | "host" | "linkPattern:<row>"
     property string pendingDeleteName: ""
 
     function requestDelete(kind, name) {
-        root.pendingDeleteKind = kind
-        root.pendingDeleteName = name
-        deleteDialog.open()
+        root.pendingDeleteKind = kind;
+        root.pendingDeleteName = name;
+        deleteDialog.open();
     }
+
+    color: chromeStyle.colors.settingsPageFill
 
     ConfirmDialog {
         id: deleteDialog
@@ -214,754 +229,334 @@ Rectangle {
         confirmText: qsTr("Delete")
         message: root.pendingDeleteKind === "profile"
                  ? qsTr("Delete the profile “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
+                 : root.pendingDeleteKind === "host"
+                 ? qsTr("Delete the host “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
                  : isLinkPattern
                    ? qsTr("Remove the link pattern “%1” from this profile?").arg(root.pendingDeleteName)
                    : qsTr("Delete the color scheme “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
         onConfirmed: {
-            if (!root.controller) return
+            if (!root.controller)
+                return;
             if (root.pendingDeleteKind === "profile")
-                root.controller.deleteProfile(root.pendingDeleteName)
+                root.controller.requestDeleteProfile(root.pendingDeleteName);
+            else if (root.pendingDeleteKind === "host")
+                root.controller.requestDeleteHost(root.pendingDeleteName);
             else if (isLinkPattern)
-                root.controller.removeLinkPattern(parseInt(root.pendingDeleteKind.split(":")[1]))
+                root.controller.removeLinkPattern(parseInt(root.pendingDeleteKind.split(":")[1]));
             else
-                root.controller.deleteColorScheme(root.pendingDeleteName)
+                root.controller.requestDeleteScheme(root.pendingDeleteName);
         }
     }
 
-    ColumnLayout {
+    // Renaming a profile, or a host, asks for the new name.
+    KitDialog {
+        id: renameDialog
+        objectName: "renameProfileDialog"
+        // The host's page renames the host; any other the profile shown.
+        readonly property string _target: root._isHostPage ? root._hostName : root._profileName
+        heading: qsTr("Rename “%1”").arg(renameDialog._target)
+        acceptText: qsTr("Rename")
+        acceptEnabled: renameField.text.trim().length > 0
+        onOpened: {
+            renameField.text = renameDialog._target;
+            renameField.selectAll();
+            renameField.forceActiveFocus();
+        }
+        onAccepted: {
+            if (!root.controller)
+                return;
+            if (root._isHostPage)
+                root.controller.requestRenameHost(root._hostName, renameField.text.trim());
+            else
+                root.controller.requestRenameProfile(root._profileName, renameField.text.trim());
+        }
+        bodyData: [
+            TextField {
+                id: renameField
+                objectName: "renameProfileField"
+                Layout.fillWidth: true
+                Accessible.name: qsTr("New name")
+                onAccepted: renameDialog.pressDefault()
+            }
+        ]
+    }
+
+    RowLayout {
         anchors.fill: parent
         spacing: 0
 
-        // {{{ Title bar
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 56
-            color: "transparent"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 16
-                spacing: 12
-
-                Label {
-                    text: qsTr("Settings")
-                    font.pointSize: 18
-                    font.weight: Font.DemiBold
-                    color: sys.windowText
-                    Layout.fillWidth: true
-                }
-                Rectangle {
-                    objectName: "lockedBadge"
-                    visible: root.controller && root.controller.locked
-                    radius: 4
-                    color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.08)
-                    Layout.preferredHeight: 24
-                    Layout.preferredWidth: lockedLabel.implicitWidth + 20
-                    Label {
-                        id: lockedLabel
-                        anchors.centerIn: parent
-                        text: qsTr("🔒 read-only (gui_config_locked)")
-                        color: root.subtleText
-                        font.pointSize: 9
-                    }
-                }
-                Button {
-                    objectName: "closeSettingsButton"
-                    text: qsTr("Close")
-                    onClicked: if (root.windowController) root.windowController.closeSettings()
+        SettingsSidebar {
+            id: sidebar
+            Layout.preferredWidth: chromeStyle.settings.sidebarWidth
+            Layout.fillHeight: true
+            controller: root.controller
+            currentPage: root.currentPage
+            searchInHeader: root._splitHeader
+            windowController: root.windowController
+            editable: !root._locked
+            leadingControls: root.leadingControls
+            onOpenRequested: page => root.openPage(page)
+            onResultRequested: result => root.openResult(result)
+            onEditConfigurationRequested: if (root.host) root.host.editConfigurationFile()
+            onAddProfileRequested: {
+                root.controller.addProfile();
+                root.showEditedProfile();
+            }
+            onRemoveProfileRequested: root.requestDelete("profile", sidebar.selectedProfile)
+            onProfileActionRequested: action => {
+                if (action === "duplicate") {
+                    root.controller.duplicate(sidebar.selectedProfile);
+                    root.showEditedProfile();
+                } else if (action === "default") {
+                    root.controller.requestDefaultProfile(sidebar.selectedProfile);
+                } else {
+                    renameDialog.open();
                 }
             }
-
-            Rectangle { // bottom hairline
-                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                height: 1
-                color: root.hairline
+            onAddHostRequested: {
+                root.controller.addHost();
+                root.showEditedHost();
+            }
+            onRemoveHostRequested: root.requestDelete("host", sidebar.selectedHost)
+            onHostActionRequested: action => {
+                if (action === "duplicate") {
+                    root.controller.requestDuplicateHost(sidebar.selectedHost);
+                    root.showEditedHost();
+                } else if (action === "attach") {
+                    root.controller.requestAttachHost(sidebar.selectedHost);
+                } else {
+                    renameDialog.open();
+                }
             }
         }
-        // }}}
 
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
-            // {{{ Left navigation rail
+            // The page header: the title, and "Revert Changes".
             Rectangle {
-                Layout.preferredWidth: 280
-                Layout.minimumWidth: 280
-                Layout.maximumWidth: 280
-                Layout.fillHeight: true
-                color: "transparent"
+                id: header
+                objectName: "settingsHeader"
+                Layout.fillWidth: true
+                Layout.preferredHeight: chromeStyle.settings.headerBar
+                color: root._splitHeader ? chromeStyle.colors.settingsSidebarFill : chromeStyle.colors.settingsPageFill
 
-                ScrollView {
-                    id: navScroll
+                // A frameless window's title bar, as the terminal window's (TitleBar.qml).
+                TitleBarGestures {
+                    objectName: "settingsHeaderGestures"
                     anchors.fill: parent
-                    contentWidth: availableWidth
-                    clip: true
+                    windowController: root.windowController
+                }
 
-                    ColumnLayout {
-                        width: navScroll.availableWidth
-                        spacing: 4
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: chromeStyle.space.s8
+                    anchors.rightMargin: chromeStyle.space.s8
+                    spacing: chromeStyle.space.s6
 
-                        // General
-                        Label {
-                            text: qsTr("GENERAL")
-                            font.pointSize: 8
-                            font.bold: true
-                            font.letterSpacing: 1
-                            color: root.subtleText
-                            Layout.leftMargin: 16
-                            Layout.topMargin: 12
-                        }
-                        SettingsNavItem {
-                            objectName: "globalSettingsButton"
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 8
-                            Layout.rightMargin: 8
-                            text: qsTr("Global settings")
-                            glyph: "⚙"
-                            selected: root.editorMode === "globals"
-                            onClicked: root.editorMode = "globals"
-                        }
-                        SettingsNavItem {
-                            objectName: "keybindingsButton"
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 8
-                            Layout.rightMargin: 8
-                            text: qsTr("Keybindings")
-                            glyph: "⌨"
-                            selected: root.editorMode === "keybindings"
-                            onClicked: root.editorMode = "keybindings"
-                        }
+                    Label {
+                        objectName: "settingsPageTitle"
+                        Layout.fillWidth: true
+                        // Beside a kind, the title takes its own width and the kind the rest.
+                        Layout.maximumWidth: pageKind.visible ? implicitWidth : Number.POSITIVE_INFINITY
+                        text: root.pageTitle
+                        font: chromeStyle.settings.pageTitleType > 0
+                              ? Qt.font({ family: chromeStyle.type.title.family,
+                                          weight: chromeStyle.type.title.weight,
+                                          pixelSize: chromeStyle.settings.pageTitleType })
+                              : chromeStyle.type.title
+                        color: chromeStyle.colors.settingsLabel
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
 
-                        // Profiles
-                        Label {
-                            text: qsTr("PROFILES")
-                            font.pointSize: 8
-                            font.bold: true
-                            font.letterSpacing: 1
-                            color: root.subtleText
-                            Layout.leftMargin: 16
-                            Layout.topMargin: 14
-                        }
-                        Repeater {
-                            model: root.controller ? root.controller.profiles : []
-                            delegate: SettingsListItem {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 8
-                                Layout.rightMargin: 8
-                                entryName: modelData.name
-                                showHome: true
-                                isDefault: modelData.isDefault === true
-                                editable: modelData.editable === true
-                                locked: root.controller && root.controller.locked
-                                selected: root.editorMode === "profile" && root.controller
-                                          && root.controller.editingProfile === modelData.name
-                                onActivated: {
-                                    if (!root.controller) return
-                                    root.controller.editProfile(modelData.name)
-                                    root.editorMode = "profile"
-                                }
-                                onSetDefaultRequested: if (root.controller) root.controller.setDefaultProfile(modelData.name)
-                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameProfile(modelData.name, newName) }
-                                onDeleteRequested: root.requestDelete("profile", modelData.name)
-                            }
-                        }
-                        SettingsNavItem {
-                            objectName: "newProfileButton"
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 8
-                            Layout.rightMargin: 8
-                            text: qsTr("New profile")
-                            glyph: "＋"
-                            accent: true
-                            enabled: root.controller && !root.controller.locked
-                            onClicked: {
-                                root.controller.newProfile(root.controller.defaultProfile)
-                                root.editorMode = "profile"
-                            }
-                        }
+                        Accessible.role: Accessible.Heading
+                        Accessible.name: text
+                    }
 
-                        // Color schemes
-                        Label {
-                            text: qsTr("COLOR SCHEMES")
-                            font.pointSize: 8
-                            font.bold: true
-                            font.letterSpacing: 1
-                            color: root.subtleText
-                            Layout.leftMargin: 16
-                            Layout.topMargin: 14
-                        }
-                        Repeater {
-                            model: root.controller ? root.controller.colorSchemes : []
-                            delegate: SettingsListItem {
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 8
-                                Layout.rightMargin: 8
-                                entryName: modelData.name
-                                showHome: false
-                                editable: modelData.editable === true
-                                locked: root.controller && root.controller.locked
-                                selected: root.editorMode === "scheme" && root.controller
-                                          && root.controller.editingScheme === modelData.name
-                                onActivated: {
-                                    if (!root.controller) return
-                                    root.controller.editColorScheme(modelData.name)
-                                    root.editorMode = "scheme"
-                                }
-                                onRenameRequested: (newName) => { if (root.controller) root.controller.renameColorScheme(modelData.name, newName) }
-                                onDeleteRequested: root.requestDelete("scheme", modelData.name)
-                            }
-                        }
-                        SettingsNavItem {
-                            objectName: "newSchemeButton"
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 8
-                            Layout.rightMargin: 8
-                            text: qsTr("New color scheme")
-                            glyph: "＋"
-                            accent: true
-                            enabled: root.controller && !root.controller.locked
-                            onClicked: {
-                                root.controller.newColorScheme("")
-                                root.editorMode = "scheme"
-                            }
-                        }
+                    // What the page is about, beside its name: "Host". A breadcrumb already says so.
+                    Label {
+                        id: pageKind
+                        objectName: "settingsPageKind"
+                        Layout.fillWidth: true
+                        visible: root._isHostPage && root._traits.header !== root._traits.breadcrumb
+                        text: qsTr("Host")
+                        font: chromeStyle.type.footnote
+                        color: chromeStyle.colors.settingsHelp
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                    }
 
-                        Item { Layout.fillHeight: true; Layout.preferredHeight: 12 }
+                    // A host's page opens a window attached to it, as Attach to Host does.
+                    Button {
+                        objectName: "attachHostButton"
+                        visible: root._isHostPage
+                        enabled: root.controller !== null && root.controller.hostAttachable
+                        text: qsTr("Attach")
+                        font: chromeStyle.type.body
+                        Accessible.name: qsTr("Attach to %1").arg(root._hostName)
+                        onClicked: root.controller.requestAttachHost(root._hostName)
+                    }
+
+                    // Every change applies as it is made; this puts back what the session changed.
+                    Button {
+                        objectName: "revertChangesButton"
+                        visible: !root._locked
+                        enabled: root.controller !== null && root.controller.hasChanges
+                        text: qsTr("Revert Changes")
+                        font: chromeStyle.type.body
+                        Accessible.name: text
+                        onClicked: root.controller.revertChanges()
+                    }
+
+                    Loader {
+                        objectName: "trailingWindowControls"
+                        // The header's full height, as the title bar's slot: the controls span their bar, and
+                        // a style whose buttons state no height of their own would otherwise collapse to zero.
+                        Layout.fillHeight: true
+                        active: root.trailingControls !== null
+                        visible: active
+                        sourceComponent: root.trailingControls
                     }
                 }
             }
-            // }}}
 
-            Rectangle { // vertical rail separator
-                Layout.preferredWidth: 1
-                Layout.fillHeight: true
-                color: root.hairline
+            Banner {
+                objectName: "lockedBanner"
+                Layout.fillWidth: true
+                dismissible: false
+                glyph: "⚿"
+                text: root._locked ? qsTr("Settings are locked: gui_config_locked is set in contour.yml.") : ""
             }
 
-            // {{{ Right content pane
-            ColumnLayout {
+            // A profile that contour.yml defines, or that is built in, is read-only; a copy is editable.
+            Banner {
+                id: readOnlyBanner
+                objectName: "readOnlyBanner"
+                Layout.fillWidth: true
+                readonly property var _origin: root.controller && root._isProfilePage
+                                               ? root.controller.profiles.find(row => row.name === root._profileName)
+                                               : null
+                readonly property bool _shown: root.controller !== null && !root._locked
+                                               && ((root._isProfilePage && root.controller.editingReadOnly)
+                                                   || (root._isHostPage && root.controller.editingHostReadOnly))
+                dismissible: false
+                actionName: "duplicateToEditButton"
+                actionText: qsTr("Duplicate to Edit")
+                glyph: "⚿"
+                text: !_shown ? "" : (_origin && _origin.origin === "builtin")
+                                     ? qsTr("Built in · Duplicate to Edit")
+                                     : qsTr("Defined in contour.yml · Duplicate to Edit")
+                onActionTriggered: {
+                    if (root._isHostPage) {
+                        root.controller.requestDuplicateHost(root._hostName);
+                        root.showEditedHost();
+                        return;
+                    }
+                    root.controller.duplicate(root._profileName);
+                    root.showEditedProfile();
+                }
+            }
+
+            // The reason for the last refusal: a refused value leaves its row showing the stored value
+            // again, so this is the only place the page says why.
+            Banner {
+                id: errorBanner
+                objectName: "settingsErrorBanner"
+                Layout.fillWidth: true
+                text: root.errorMessage
+                onDismissed: root.errorMessage = ""
+            }
+
+            Loader {
+                id: pageLoader
+                objectName: "settingsPageLoader"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.margins: 20
-                spacing: 14
+                sourceComponent: root._kind === "section" ? sectionPage
+                                 : root._isHostPage ? hostPage
+                                 : root._subpage === "schemes" ? schemesPage
+                                 : root._subpage === "links" ? linksPage
+                                 : root._subpage === "statusline" ? statusLinePage
+                                 : root._isProfilePage ? profilePage
+                                 : sectionPage
 
-                // Page header band.
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    Label {
-                        text: root.headerTitle
-                        font.pointSize: 16
-                        font.weight: Font.DemiBold
-                        color: sys.windowText
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        text: root.headerSubtitle
-                        visible: text.length > 0
-                        color: root.subtleText
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    // Search over the fields of whichever field pane is open. Only those two panes have
-                    // fields to filter; the colour-scheme and keybinding panes have their own shapes.
-                    Rectangle {
-                        objectName: "fieldFilterBox"
-                        visible: root.editorMode === "profile" || root.editorMode === "globals"
-                        Layout.fillWidth: true
-                        Layout.topMargin: 8
-                        Layout.preferredHeight: 34
-                        radius: 8
-                        color: sys.base
-                        border.width: 1
-                        border.color: filterField.activeFocus
-                                      ? Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, 0.55)
-                                      : root.hairline
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 6
-                            spacing: 6
-
-                            Label {
-                                text: "🔍"
-                                color: root.subtleText
-                                font.pointSize: 9
-                            }
-                            TextField {
-                                id: filterField
-                                objectName: "fieldFilterField"
-                                Layout.fillWidth: true
-                                placeholderText: qsTr("Search settings…")
-                                selectByMouse: true
-                                background: null // the surrounding Rectangle is the field's frame
-                                Accessible.name: qsTr("Search settings")
-                                // Bound live rather than on commit, so the list narrows as you type.
-                                onTextChanged: root.filterText = text
-                                Keys.onEscapePressed: clear()
-                            }
-                            ToolButton {
-                                objectName: "fieldFilterClearButton"
-                                visible: filterField.text.length > 0
-                                text: "✕"
-                                flat: true
-                                Accessible.name: qsTr("Clear the search")
-                                onClicked: filterField.clear()
-                            }
-                        }
-                    }
-                }
-
-                // The reason for the last refusal, above whichever editor is open: a refused value leaves
-                // its row showing the stored value again, so this is the only place the page says why.
-                Rectangle {
-                    objectName: "settingsErrorBanner"
-                    visible: root.errorMessage.length > 0
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: errorRow.implicitHeight + 20
-                    radius: 8
-                    color: Qt.rgba(chromeStyle.errorColor.r, chromeStyle.errorColor.g, chromeStyle.errorColor.b, 0.10)
-                    border.width: 1
-                    border.color: Qt.rgba(chromeStyle.errorColor.r, chromeStyle.errorColor.g, chromeStyle.errorColor.b, 0.45)
-
-                    RowLayout {
-                        id: errorRow
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 8
-                        Label {
-                            text: "⚠"
-                            color: chromeStyle.errorColor
-                            Accessible.ignored: true // the message below says it all
-                        }
-                        Label {
-                            id: errorMessageLabel
-                            objectName: "settingsErrorMessage"
-                            Layout.fillWidth: true
-                            text: root.errorMessage
-                            wrapMode: Text.WordWrap
-                            color: sys.windowText
-                            Accessible.role: Accessible.AlertMessage
-                            Accessible.name: text
-                        }
-                    }
-                }
-
-                // The editors: mutually exclusive, visible-toggled, each anchored to fill this pane.
-                Item {
-                    id: rightPane
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-
-                    // {{{ Profile editor
-                    ColumnLayout {
-                        anchors.fill: parent
-                        visible: root.editorMode === "profile"
-                        spacing: 12
-
-                        Rectangle {
-                            objectName: "readOnlyBanner"
-                            visible: root.controller && root.controller.editingReadOnly
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: readOnlyLabel.implicitHeight + 20
-                            radius: 8
-                            color: Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, 0.10)
-                            border.width: 1
-                            border.color: Qt.rgba(sys.highlight.r, sys.highlight.g, sys.highlight.b, 0.35)
-                            Label {
-                                id: readOnlyLabel
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                text: qsTr("🔒 This profile is defined in contour.yml and is read-only here. "
-                                           + "Use \"Save As\" to create an editable copy.")
-                                wrapMode: Text.WordWrap
-                                verticalAlignment: Text.AlignVCenter
-                                color: sys.windowText
-                            }
-                        }
-
-                        ScrollView {
-                            id: profileScroll
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            contentWidth: availableWidth
-                            clip: true
-
-                            ColumnLayout {
-                                width: profileScroll.availableWidth
-                                spacing: 10
-
-                                // One collapsible card per field group. Which fields share a card is
-                                // decided in C++ (profileFieldGroups), not matched on here.
-                                Repeater {
-                                    model: root.profileGroups
-                                    delegate: SettingsSection {
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        title: modelData.title
-                                        glyph: modelData.glyph
-                                        badgeCount: modelData.fields.length
-                                        expanded: root.groupExpanded(modelData.title)
-                                        onToggleRequested: root.toggleGroup(modelData.title)
-
-                                        Repeater {
-                                            model: modelData.fields
-                                            delegate: SettingRow {
-                                                required property var modelData
-                                                required property int index
-                                                Layout.fillWidth: true
-                                                flat: true
-                                                showSeparator: index > 0
-                                                fieldKey: modelData.key
-                                                label: modelData.label
-                                                help: modelData.help
-                                                type: modelData.type
-                                                value: modelData.value
-                                                options: modelData.options
-                                                problem: modelData.problem || ""
-                                                editable: root.controller && !root.controller.editingReadOnly
-                                                onEdited: (key, value) => root.controller.setProfileField(key, value)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Says so when a search matched nothing, rather than showing an empty pane.
-                                Label {
-                                    objectName: "noFieldMatchesLabel"
-                                    visible: root.filtering && root.visibleFieldCount === 0
-                                    Layout.fillWidth: true
-                                    Layout.topMargin: 12
-                                    horizontalAlignment: Text.AlignHCenter
-                                    wrapMode: Text.WordWrap
-                                    color: root.subtleText
-                                    text: qsTr("No setting matches “%1”.").arg(root.filterText.trim())
-                                }
-
-                                // How links are opened, and the patterns that find them. Hand-built: a
-                                // profile-field descriptor reads the profile only, the gesture comes from
-                                // input_mapping, and a pattern is a row of a table, not a scalar field.
-                                SettingsSection {
-                                    objectName: "linksSection"
-                                    Layout.fillWidth: true
-                                    title: qsTr("Links: opening and patterns")
-                                    glyph: "⧉"
-                                    visible: !root.filtering || root.textMatches(title)
-                                    expanded: root.groupExpanded(title)
-                                    onToggleRequested: root.toggleGroup(title)
-
-                                    Label {
-                                        objectName: "linkGestureLabel"
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.WordWrap
-                                        text: root.controller ? root.controller.linkGesture : ""
-                                    }
-
-                                    LinkPatternList {
-                                        Layout.fillWidth: true
-                                        controller: root.controller
-                                        editable: root.controller && !root.controller.editingReadOnly
-                                        onDeleteRequested: (index, name) => root.requestDelete("linkPattern:" + index, name)
-                                    }
-                                }
-
-                                // Color-scheme selection group (with dark/light distinction). A section
-                                // like the field groups, so the pane reads as one list of groups; its
-                                // body is hand-built because a scheme choice is not a scalar field.
-                                SettingsSection {
-                                    id: schemeSection
-                                    Layout.fillWidth: true
-                                    title: qsTr("Color scheme")
-                                    glyph: "◐"
-                                    visible: !root.filtering || root.textMatches(title)
-                                    expanded: root.groupExpanded(title)
-                                    onToggleRequested: root.toggleGroup(title)
-
-                                    ColumnLayout {
-                                        id: schemeGroup
-                                        Layout.fillWidth: true
-                                        spacing: 8
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 8
-                                            Label { text: qsTr("Mode"); color: root.subtleText }
-                                            ComboBox {
-                                                id: schemeModeCombo
-                                                objectName: "schemeModeCombo"
-                                                enabled: root.controller && !root.controller.editingReadOnly
-                                                model: [qsTr("Single"), qsTr("Light / Dark")]
-                                                currentIndex: (root.controller && root.controller.colorSchemeMode === "dual") ? 1 : 0
-                                                onActivated: if (root.controller)
-                                                                 root.controller.setColorSchemeMode(currentIndex === 1 ? "dual" : "simple")
-                                            }
-                                        }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            visible: root.controller && root.controller.colorSchemeMode === "simple"
-                                            spacing: 8
-                                            Label { text: qsTr("Scheme"); color: root.subtleText }
-                                            ComboBox {
-                                                objectName: "simpleSchemeCombo"
-                                                Layout.preferredWidth: 220
-                                                enabled: root.controller && !root.controller.editingReadOnly
-                                                model: root.schemeNameList
-                                                currentIndex: root.controller ? root.schemeNameList.indexOf(root.controller.colorScheme) : -1
-                                                onActivated: if (root.controller) root.controller.setColorScheme(currentText)
-                                            }
-                                        }
-                                        GridLayout {
-                                            Layout.fillWidth: true
-                                            visible: root.controller && root.controller.colorSchemeMode === "dual"
-                                            columns: 2
-                                            columnSpacing: 8
-                                            rowSpacing: 6
-                                            Label { text: qsTr("Light"); color: root.subtleText }
-                                            ComboBox {
-                                                objectName: "lightSchemeCombo"
-                                                Layout.preferredWidth: 220
-                                                enabled: root.controller && !root.controller.editingReadOnly
-                                                model: root.schemeNameList
-                                                currentIndex: root.controller ? root.schemeNameList.indexOf(root.controller.colorSchemeLight) : -1
-                                                onActivated: if (root.controller) root.controller.setColorSchemeLight(currentText)
-                                            }
-                                            Label { text: qsTr("Dark"); color: root.subtleText }
-                                            ComboBox {
-                                                objectName: "darkSchemeCombo"
-                                                Layout.preferredWidth: 220
-                                                enabled: root.controller && !root.controller.editingReadOnly
-                                                model: root.schemeNameList
-                                                currentIndex: root.controller ? root.schemeNameList.indexOf(root.controller.colorSchemeDark) : -1
-                                                onActivated: if (root.controller) root.controller.setColorSchemeDark(currentText)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Status line indicator editor: a visual builder that replaces the three
-                                // raw template fields the descriptor list used to expose.
-                                SettingsSection {
-                                    id: indicatorSection
-                                    Layout.fillWidth: true
-                                    title: qsTr("Status line indicator")
-                                    glyph: "▤"
-                                    visible: !root.filtering || root.textMatches(title)
-                                    expanded: root.groupExpanded(title)
-                                    onToggleRequested: root.toggleGroup(title)
-
-                                    StatusLineIndicatorEditor {
-                                        Layout.fillWidth: true
-                                        controller: root.controller
-                                        editable: root.controller && !root.controller.editingReadOnly
-                                    }
-                                }
-
-                                Item { Layout.preferredHeight: 4 } // breathing room above the action bar
-                            }
-                        }
-
-                        // Pinned action bar.
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: actionRow.implicitHeight + 20
-                            radius: 8
-                            color: sys.base
-                            border.width: 1
-                            border.color: root.hairline
-
-                            RowLayout {
-                                id: actionRow
-                                anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                spacing: 8
-                                Button {
-                                    objectName: "saveProfileButton"
-                                    text: qsTr("Save")
-                                    highlighted: true
-                                    enabled: root.controller && !root.controller.locked
-                                             && !root.controller.editingReadOnly
-                                             && root.controller.editingProfile.length > 0
-                                    onClicked: root.controller.saveProfile()
-                                }
-                                ToolSeparator {}
-                                TextField {
-                                    id: saveAsField
-                                    objectName: "saveAsField"
-                                    Layout.preferredWidth: 180
-                                    placeholderText: qsTr("New profile name")
-                                    selectByMouse: true
-                                }
-                                Button {
-                                    objectName: "saveProfileAsButton"
-                                    text: qsTr("Save As")
-                                    enabled: root.controller && !root.controller.locked
-                                             && saveAsField.text.trim().length > 0
-                                    onClicked: {
-                                        if (root.controller.saveProfileAs(saveAsField.text.trim()))
-                                            saveAsField.clear()
-                                    }
-                                }
-                                Item { Layout.fillWidth: true }
-                                // Delete lives on the profile list row (hover trashcan / right-click),
-                                // routed through the page's confirmation dialog.
-                            }
-                        }
-                    }
-                    // }}}
-
-                    // Color-scheme editor.
-                    ColorSchemeEditor {
-                        anchors.fill: parent
-                        visible: root.editorMode === "scheme"
-                        controller: root.controller
-                    }
-
-                    // {{{ Global settings
-                    ScrollView {
-                        id: globalsScroll
-                        anchors.fill: parent
-                        visible: root.editorMode === "globals"
-                        contentWidth: availableWidth
-                        clip: true
-
-                        ColumnLayout {
-                            width: globalsScroll.availableWidth
-                            spacing: 10
-
-                            // A single section: there are only a handful of application-wide settings, so
-                            // splitting them further would be more chrome than content. Presented as a
-                            // section anyway, so both field panes look like the same kind of page.
-                            SettingsSection {
-                                id: globalsSection
-                                Layout.fillWidth: true
-                                title: qsTr("Application")
-                                glyph: "⚙"
-                                badgeCount: root.globalFieldsFiltered.length
-                                expanded: root.groupExpanded(title)
-                                onToggleRequested: root.toggleGroup(title)
-
-                                Repeater {
-                                    model: root.globalFieldsFiltered
-                                    delegate: RowLayout {
-                                        required property var modelData
-                                        required property int index
-                                        Layout.fillWidth: true
-                                        spacing: 8
-                                        SettingRow {
-                                            Layout.fillWidth: true
-                                            flat: true
-                                            showSeparator: index > 0
-                                            fieldKey: modelData.key
-                                            label: modelData.label
-                                            help: modelData.help
-                                            type: modelData.type
-                                            value: modelData.value
-                                            options: modelData.options
-                                            optionLabels: modelData.optionLabels || []
-                                            editable: root.controller && !root.controller.locked
-                                            onEdited: (key, value) => root.controller.setGlobalField(key, value)
-                                        }
-                                        Button {
-                                            text: qsTr("Reset")
-                                            visible: modelData.overridden
-                                            enabled: root.controller && !root.controller.locked
-                                            onClicked: root.controller.resetGlobalField(modelData.key)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Label {
-                                objectName: "noGlobalMatchesLabel"
-                                visible: root.filtering && root.globalFieldsFiltered.length === 0
-                                Layout.fillWidth: true
-                                Layout.topMargin: 12
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                                color: root.subtleText
-                                text: qsTr("No setting matches “%1”.").arg(root.filterText.trim())
-                            }
-                        }
-                    }
-                    // }}}
-
-                    // {{{ Keybindings (read-only viewer)
-                    Rectangle {
-                        anchors.fill: parent
-                        visible: root.editorMode === "keybindings"
-                        radius: 8
-                        color: sys.base
-                        border.width: 1
-                        border.color: root.hairline
-                        clip: true
-
-                        ListView {
-                            objectName: "keybindingsList"
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            clip: true
-                            model: root.controller ? root.controller.keybindings : []
-                            ScrollBar.vertical: ScrollBar {}
-                            delegate: Item {
-                                required property var modelData
-                                width: ListView.view.width
-                                height: 34
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    spacing: 12
-                                    Label {
-                                        text: modelData.trigger
-                                        Layout.preferredWidth: 200
-                                        font.family: "monospace"
-                                        color: sys.windowText
-                                        elide: Text.ElideRight
-                                    }
-                                    Label {
-                                        text: modelData.action
-                                        Layout.fillWidth: true
-                                        color: sys.windowText
-                                        elide: Text.ElideRight
-                                    }
-                                    Label {
-                                        text: modelData.mode
-                                        color: root.subtleText
-                                        Layout.preferredWidth: 90
-                                    }
-                                    // A binding no input_mapping row lists: Contour's own, in effect until
-                                    // contour.yml binds the same chord.
-                                    Label {
-                                        text: qsTr("built-in")
-                                        visible: modelData.builtIn === true
-                                        color: root.subtleText
-                                        font.pointSize: 9
-                                        Layout.preferredWidth: 60
-                                    }
-                                }
-                                Rectangle {
-                                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                                    height: 1
-                                    color: root.hairline
-                                    opacity: 0.5
-                                }
-                            }
-                        }
-                    }
-                    // }}}
+                // Page change follows the style's motion: a fade, none under Reduce Motion.
+                NumberAnimation {
+                    id: pageFade
+                    target: pageLoader
+                    property: "opacity"
+                    from: 0
+                    to: 1
+                    duration: chromeStyle.motion.animates ? chromeStyle.motion.standard : 0
                 }
             }
-            // }}}
         }
     }
+
+    Component {
+        id: sectionPage
+        SettingsSectionPage {
+            controller: root.controller
+            sectionId: root._kind === "section" ? root._parts[1] : "general"
+            onProfileRequested: name => root.openPage("profile:" + name)
+            onLinkRequested: target => root.openLink(target)
+            onHostRequested: name => root.openPage("host:" + name)
+            onAddHostRequested: {
+                root.controller.addHost();
+                root.showEditedHost();
+            }
+        }
+    }
+
+    Component {
+        id: hostPage
+        HostPage {
+            controller: root.controller
+            hostName: root._hostName
+        }
+    }
+
+    Component {
+        id: profilePage
+        ProfilePage {
+            controller: root.controller
+            preview: root.host ? root.host.preview : null
+            profileName: root._profileName
+            onSubpageRequested: kind => root.openPage("profile:" + root._profileName + ":" + kind)
+            onDuplicateRequested: {
+                root.controller.duplicate(root._profileName);
+                root.showEditedProfile();
+            }
+            onOpenInNewTabRequested: if (root.host) root.host.openProfileInNewTab(root._profileName)
+        }
+    }
+
+    // {{{ The profile's sub-pages: what is not a scalar setting.
+    Component {
+        id: schemesPage
+        ColorSchemesPage {
+            controller: root.controller
+            onDeleteRequested: name => root.requestDelete("scheme", name)
+        }
+    }
+
+    Component {
+        id: linksPage
+        LinkPatternsPage {
+            controller: root.controller
+            onDeleteRequested: (index, name) => root.requestDelete("linkPattern:" + index, name)
+        }
+    }
+
+    Component {
+        id: statusLinePage
+        StatusLinePage {
+            controller: root.controller
+            preview: root.host ? root.host.preview : null
+            profileName: root._profileName
+        }
+    }
+    // }}}
 }

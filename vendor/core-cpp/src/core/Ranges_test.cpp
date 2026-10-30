@@ -6,6 +6,7 @@
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <forward_list>
 #include <functional>
 #include <iterator>
 #include <ranges>
@@ -13,12 +14,14 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <version>
 
 using core::findOrNull;
 using core::ranges::detail::FoldLeftFallback;
 using core::ranges::detail::IotaFallback;
+using core::ranges::detail::StrideFallback;
 
 namespace
 {
@@ -266,4 +269,112 @@ TEST_CASE("Ranges seam: answers the calls this tree makes through it", "[base][r
 
     auto const swept = std::array<std::size_t, 3> { 2, 0, 5 };
     CHECK(core::ranges::FoldLeft(swept, std::size_t { 0 }, std::plus {}) == 7);
+}
+
+// ---------------------------------------------------------------------------
+// `core::ranges::Stride`. Each case runs against the fallback, called directly, and against
+// whatever the seam selected, so the fallback is exercised on every platform.
+
+namespace
+{
+template <typename Range>
+std::vector<int> collect(Range&& range)
+{
+    // Forwarded into a named reference: a filter view is not const-iterable, so `const&` will not do.
+    auto&& source = std::forward<Range>(range);
+    auto out = std::vector<int> {};
+    for (auto const value: source)
+        out.push_back(value);
+    return out;
+}
+
+template <typename Stride>
+void checkStrideSemantics(Stride const& stride)
+{
+    using Ints = std::vector<int>;
+    CHECK(collect(stride(std::views::iota(0, 10), 3)) == Ints { 0, 3, 6, 9 });
+    CHECK(collect(stride(std::views::iota(0, 9), 3)) == Ints { 0, 3, 6 });
+    CHECK(collect(stride(std::views::iota(0, 5), 1)) == Ints { 0, 1, 2, 3, 4 });
+    CHECK(collect(stride(std::views::iota(0, 5), 100)) == Ints { 0 });
+    CHECK(collect(stride(std::views::iota(0, 0), 3)).empty());
+
+    auto const values = Ints { 5, 6, 7, 8, 9, 10, 11 };
+    CHECK(collect(stride(values, 2)) == Ints { 5, 7, 9, 11 });
+    CHECK(collect(values | stride(3)) == Ints { 5, 8, 11 });
+    CHECK(collect(values | std::views::reverse | stride(3)) == Ints { 11, 8, 5 });
+    CHECK(std::ranges::size(stride(values, 3)) == 3);
+    CHECK(std::ranges::size(stride(std::views::iota(0, 9), 3)) == 3);
+    CHECK(std::ranges::size(stride(std::views::iota(0, 10), 3)) == 4);
+
+    // A common base gives a common view, so an iterator pair constructs a container.
+    using Strided = decltype(stride(values, 3));
+    STATIC_REQUIRE(std::ranges::common_range<Strided>);
+    auto strided = stride(values, 3);
+    CHECK(Ints(strided.begin(), strided.end()) == Ints { 5, 8, 11 });
+
+    auto list = std::forward_list<int> { 0, 1, 2, 3, 4, 5, 6 };
+    CHECK(collect(stride(list, 3)) == Ints { 0, 3, 6 });
+
+    // A forward-only view, not a container: the odd values are 5, 7, 9, 11.
+    auto const odd = [](int value) {
+        return value % 2 != 0;
+    };
+    CHECK(collect(values | std::views::filter(odd) | stride(3)) == Ints { 5, 11 });
+}
+} // namespace
+
+TEST_CASE("Stride fallback: yields every n-th element including the last partial step", "[base][ranges]")
+{
+    checkStrideSemantics(StrideFallback);
+}
+
+TEST_CASE("Stride seam: yields every n-th element through the selected implementation", "[base][ranges]")
+{
+    checkStrideSemantics(core::ranges::Stride);
+}
+
+TEST_CASE("Stride fallback: is a forward view and is usable in a constant expression", "[base][ranges]")
+{
+    constexpr auto Numbers = std::to_array({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 });
+    using View = decltype(StrideFallback(std::views::all(Numbers), 3));
+    STATIC_REQUIRE(std::ranges::view<View>);
+    STATIC_REQUIRE(std::ranges::forward_range<View>);
+    STATIC_REQUIRE(!std::ranges::bidirectional_range<View>);
+    STATIC_REQUIRE([&] {
+        auto sum = 0;
+        for (auto const value: StrideFallback(Numbers, 3))
+            sum += value;
+        return sum;
+    }() == 18);
+}
+
+TEST_CASE("Stride fallback: is common over a common base and default constructible", "[base][ranges]")
+{
+    using View = decltype(StrideFallback(std::declval<std::vector<int>&>(), 3));
+    STATIC_REQUIRE(std::ranges::common_range<View>);
+    // As the standard's: default constructible only where the base is. A `ref_view` is not.
+    STATIC_REQUIRE(!std::default_initializable<View>);
+    STATIC_REQUIRE(std::default_initializable<decltype(StrideFallback(std::views::iota(0, 4), 3))>);
+    STATIC_REQUIRE(!std::ranges::common_range<decltype(StrideFallback(std::views::iota(0), 3))>);
+}
+
+#ifdef __cpp_lib_ranges_stride
+TEST_CASE("Stride fallback: agrees with the standard facility", "[base][ranges]")
+{
+    auto const numbers = std::vector<int> { 4, 8, 15, 16, 23, 42, 7 };
+    for (auto const step: { 1, 2, 3, 7, 8 })
+        CHECK(collect(StrideFallback(numbers, step)) == collect(std::views::stride(numbers, step)));
+}
+#endif
+
+TEST_CASE("Stride seam: is the standard facility exactly where its feature-test macro is defined",
+          "[base][ranges]")
+{
+#if defined(__cpp_lib_ranges_stride) && !defined(CORE_RANGES_FORCE_FALLBACK)
+    STATIC_REQUIRE(std::same_as<std::remove_cvref_t<decltype(core::ranges::Stride)>,
+                                std::remove_cvref_t<decltype(std::views::stride)>>);
+#else
+    STATIC_REQUIRE(std::same_as<std::remove_cvref_t<decltype(core::ranges::Stride)>,
+                                core::ranges::detail::StrideFunction>);
+#endif
 }

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <vthost/DaemonControl.hpp>
+#include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/Transport.hpp>
@@ -116,6 +117,8 @@ struct ControlHarness
     proto::CapabilitySet capabilities;
     std::vector<std::unique_ptr<vthost::NativeSession>> sessions;
     std::size_t connections = 0;
+    /// After the sessions, so destroyed before them: every run() serving one ends while it still exists.
+    vthost::LoopDrain drain { loop };
 
     /// @return A connector handing out one end of a fresh pair, a NativeSession serving the other, until
     ///         the daemon has gone away -- then it refuses, in the words the OS uses.

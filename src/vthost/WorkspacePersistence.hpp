@@ -296,10 +296,12 @@ class DaemonPersistence
 /// @param store The snapshot file.
 /// @param config What a restored pane may re-run.
 /// @param report Where the verdict's line goes (none for an absent file).
+/// @param wall Today's date for the divider, as it reads in the daemon's local time zone.
 /// @return The restore; nullopt when there is nothing to restore.
 [[nodiscard]] std::optional<WorkspaceRestore> prepareRestore(SessionSnapshotStore const& store,
                                                              WorkspacePersistenceConfig const& config,
-                                                             DiagnosticSink const& report);
+                                                             DiagnosticSink const& report,
+                                                             core::platform::WallClockRef wall);
 
 /// @param takenAt When a snapshot was taken.
 /// @return @p takenAt in the daemon's local time zone; in UTC where none is known.

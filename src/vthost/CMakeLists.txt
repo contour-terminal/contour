@@ -37,6 +37,7 @@ add_library(vthost STATIC
     ImageWire.hpp
     TimeWire.hpp
     MouseWire.hpp
+    InputEchoWire.hpp
     NotifyWire.hpp
     WireEnum.hpp
     Daemon.cpp
@@ -68,6 +69,7 @@ add_library(vthost STATIC
     ServiceControl_systemd.cpp
     ServiceControl_systemd.hpp
     ServiceControl_win32.cpp
+    RestoredCounts.hpp
     SessionSettings.cpp
     SessionEnd.hpp
     SessionSettings.hpp
@@ -100,6 +102,8 @@ add_library(vthost STATIC
     StdioPreamble.hpp
     TabEdits.cpp
     TabEdits.hpp
+    TabMerge.cpp
+    TabMerge.hpp
     TappingPty.hpp
     Transport.cpp
     Transport.hpp
@@ -229,6 +233,7 @@ if(VTHOST_TESTING)
         AttachPlan_test.cpp
         ByteStream_test.cpp
         TabEdits_test.cpp
+        TabMerge_test.cpp
         GracefulClose_test.cpp
         HostIdentity_test.cpp
         LoopDrain_test.cpp
@@ -296,6 +301,7 @@ if(VTHOST_TESTING)
         testing/MemoryByteStream.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
+        testing/ScenarioGuard.hpp
         client/ClientSupervisor_test.cpp
         client/ControlClient_test.cpp
         client/DaemonControlClient_test.cpp
@@ -333,7 +339,7 @@ if(VTHOST_TESTING)
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
-    target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2)
+    target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2 contour_test_trace)
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
         target_link_libraries(vthost_test vtextension_runtime)
@@ -356,7 +362,10 @@ if(VTHOST_TESTING)
     # `ctest -L daemon` selects everything daemon mode must pass to be trusted -- see the same
     # label on vtworkspace, a layer it is built on. The other two, core::async and core::net, are
     # vendored in vendor/core-cpp, and their suites run in core-cpp's own CI.
-    set_tests_properties(vthost_test PROPERTIES LABELS daemon)
+    # TIMEOUT: the suite runs in under half a minute everywhere, sanitizers included, so a run five minutes
+    # long is a case that hangs -- failed here, with its output (and CONTOUR_TEST_TRACE's case names) shown,
+    # rather than left to eat a CI step's whole budget.
+    set_tests_properties(vthost_test PROPERTIES LABELS daemon TIMEOUT 300)
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
@@ -385,7 +394,7 @@ if(VTHOST_BUILD_BENCH_LATENCY)
     # `bench-latency e2e` and the display-gated runs find their executables beside the other tools.
     if(VTHOST_TESTING)
         add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp)
-        target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2)
+        target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2 contour_test_trace)
         if(NOT WIN32)
             target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)
         endif()

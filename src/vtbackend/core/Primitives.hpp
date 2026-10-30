@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
@@ -366,6 +367,8 @@ struct ColumnRange
     {
         return line == location.line && fromColumn <= location.column && location.column <= toColumn;
     }
+
+    [[nodiscard]] constexpr bool operator==(ColumnRange const&) const noexcept = default;
 };
 // }}}
 // {{{ Range
@@ -598,6 +601,9 @@ enum class ScreenType : uint8_t
     Primary = 0,
     Alternate = 1,
 };
+
+/// How many screen types there are, derived from the last one: the size of a table indexed by ScreenType.
+inline constexpr size_t ScreenTypeCount = static_cast<size_t>(ScreenType::Alternate) + 1;
 
 /// Returns the ScreenType for a given page index.
 constexpr ScreenType screenTypeFromPage(PageIndex page) noexcept
@@ -1364,6 +1370,33 @@ enum class ViMode : uint8_t
     /// Hint overlay mode (keyboard-driven link following).
     Hint,
 };
+
+/// Whether @p mode names a @ref ViMode enumerator.
+///
+/// Exhaustive and without a default, so a new mode is a -Wswitch error here (the build is -Werror), right
+/// beside @ref ViModeCount, which must then count it.
+/// @param mode The value to test.
+/// @return Whether it is one of the enumerators.
+[[nodiscard]] constexpr bool isViMode(ViMode mode) noexcept
+{
+    switch (mode)
+    {
+        case ViMode::Normal:
+        case ViMode::Insert:
+        case ViMode::Visual:
+        case ViMode::VisualLine:
+        case ViMode::VisualBlock:
+        case ViMode::Hint: return true;
+    }
+    return false;
+}
+
+/// How many @ref ViMode enumerators there are: a table with one row per mode checks its size against this, so
+/// a new mode is a compile error there rather than a row silently missing.
+inline constexpr auto ViModeCount = std::size_t { 6 };
+
+static_assert(isViMode(static_cast<ViMode>(ViModeCount - 1)) && !isViMode(static_cast<ViMode>(ViModeCount)),
+              "ViModeCount must count every ViMode, numbered from zero without gaps.");
 
 std::string toString(GraphicsRendition s);
 

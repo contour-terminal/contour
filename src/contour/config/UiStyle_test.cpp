@@ -1,13 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/UiStyle.hpp>
 
+#include <vtbackend/vt/ProgressState.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <optional>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 using contour::config::ChromeFontSource;
+using contour::config::ChromeStyle;
 using contour::config::configEnumValues;
+using contour::config::firstAvailableFamily;
+using contour::config::FluentFontFamilies;
+using contour::config::HostPlatform;
 using contour::config::LengthUnit;
+using contour::config::resolveChromeStyle;
 using contour::config::UiStyle;
 using contour::config::uiStyleTokens;
 
@@ -18,7 +31,7 @@ TEST_CASE("UiStyle: every style has a token row", "[uistyle]")
     // actually filled in rather than default-constructed.
     for (auto const& info: configEnumValues<UiStyle>())
     {
-        auto const& tokens = uiStyleTokens(info.value);
+        auto const& tokens = uiStyleTokens(resolveChromeStyle(info.value, HostPlatform::Other));
         CHECK(tokens.chromeHeightUnits > 0);
         CHECK(tokens.tabHeightUnits > 0);
         CHECK(tokens.controlUnits > 0);
@@ -64,7 +77,7 @@ TEST_CASE("UiStyle: a native tab is as wide as its historical literal made it", 
     //
     // Every term naturalWidth sums appears here, including the ones Native zeroes: a token that is 0
     // today is exactly the one a later edit can give a value to without anything else noticing.
-    auto const& native = uiStyleTokens(UiStyle::Native);
+    auto const& native = uiStyleTokens(ChromeStyle::ContourLinux);
 
     CHECK(native.labelPaddingUnits + native.labelGapUnits + native.controlUnits + native.trailingPaddingUnits
               + native.tabSlackUnits
@@ -79,7 +92,7 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
     // made style-driven. They are the regression gate for "an existing configuration keeps the
     // appearance it had": the QML now reads them from here, so a change to this row is a change to
     // every user's window, and MainWindowQml_test's chromeHeight == 34 assertion depends on it.
-    auto const& native = uiStyleTokens(UiStyle::Native);
+    auto const& native = uiStyleTokens(ChromeStyle::ContourLinux);
 
     CHECK(native.unit == LengthUnit::Pixel);
     CHECK(native.chromeHeightUnits == 34);
@@ -115,7 +128,7 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
     // Empty: a pixel-counting chrome draws a dot as the shape it is. @see the Terminal case below,
     // which is the whole reason this is a token rather than a test on the style.
     CHECK(native.trafficLightGlyph.empty());
-    CHECK(native.quickControlsStyle == "Fusion");
+    // The controls are the ContourLinux style's (UiStyle.quickControlsStylePerRow); the metrics stay.
     CHECK(native.fontSource == ChromeFontSource::PlatformUi);
 
     // Native draws no separator between tabs; they sit flush, as TabStrip's spacing: 0 always had it.
@@ -124,7 +137,7 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
 
 TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
 {
-    auto const& terminal = uiStyleTokens(UiStyle::Terminal);
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
 
     // The unit is what makes the same numbers describe both styles -- Cell is what snaps the chrome
     // to the grid, and is what the QML reads to decide its quantum.
@@ -185,4 +198,154 @@ TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
     // from, so neither is a branch on the enumerator somewhere else in the tree.
     CHECK(terminal.quickControlsStyle == "ContourTui");
     CHECK(terminal.fontSource == ChromeFontSource::TerminalProfile);
+}
+
+TEST_CASE("UiStyle.resolveChromeStyle", "[config]")
+{
+    using enum contour::config::ChromeStyle;
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::MacOS) == MacOS);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::Windows) == Fluent);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::KdePlasma) == ContourLinux);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::Other) == ContourLinux);
+    for (auto p: { HostPlatform::MacOS, HostPlatform::Windows, HostPlatform::KdePlasma, HostPlatform::Other })
+        CHECK(resolveChromeStyle(UiStyle::Terminal, p) == Terminal);
+}
+
+TEST_CASE("UiStyle.nativeRowsKeepTodaysGeometry", "[config]")
+{
+    // Phase 0 must not move a pixel: every native row starts as a copy of the old Native row. Fluent has
+    // left the copy for the Windows 11 board (UiStyle.fluentRowMatchesTheWinBoard).
+    for (auto row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux })
+    {
+        auto const& t = uiStyleTokens(row);
+        CHECK(t.chromeHeightUnits == 34);
+        CHECK(t.tabHeightUnits == 32);
+        CHECK(t.cornerRadiusPixels == 3);
+    }
+}
+
+TEST_CASE("UiStyle.quickControlsStylePerRow", "[config][uistyle]")
+{
+    CHECK(uiStyleTokens(ChromeStyle::MacOS).quickControlsStyle == "Fusion");
+    CHECK(uiStyleTokens(ChromeStyle::Fluent).quickControlsStyle == "FluentWinUI3");
+    CHECK(uiStyleTokens(ChromeStyle::ContourLinux).quickControlsStyle == "ContourLinux");
+    CHECK(uiStyleTokens(ChromeStyle::Terminal).quickControlsStyle == "ContourTui");
+}
+
+TEST_CASE("UiStyle.fluentRowMatchesTheWinBoard", "[uistyle]")
+{
+    auto const& fluent = uiStyleTokens(ChromeStyle::Fluent);
+    CHECK(fluent.chromeHeightUnits == 40);
+    CHECK(fluent.tabHeightUnits == 34);
+    CHECK(fluent.windowControlUnits == 46);
+    CHECK(fluent.stripButtonUnits == 36);
+    CHECK(std::ranges::equal(fluent.fontFamilies, FluentFontFamilies));
+    CHECK(fluent.quickControlsStyle == "FluentWinUI3");
+    // The other rows ask for the platform UI font as they always did.
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+        CHECK(uiStyleTokens(row).fontFamilies.empty());
+}
+
+TEST_CASE("UiStyle.firstAvailableFamily", "[uistyle]")
+{
+    using namespace std::string_view_literals;
+    auto constexpr Families = std::array { "A"sv, "B"sv };
+    auto const installed = [](std::vector<std::string_view> names) {
+        return [names = std::move(names)](std::string_view family) {
+            return std::ranges::find(names, family) != names.end();
+        };
+    };
+    CHECK(firstAvailableFamily(Families, installed({ "B" })) == std::optional { "B"sv });
+    CHECK(firstAvailableFamily(Families, installed({ "A", "B" })) == std::optional { "A"sv });
+    CHECK(firstAvailableFamily(Families, installed({})) == std::nullopt);
+    CHECK(firstAvailableFamily({}, installed({ "A" })) == std::nullopt);
+}
+
+TEST_CASE("UiStyle.chromeStyleName", "[config]")
+{
+    CHECK(contour::config::chromeStyleName(ChromeStyle::MacOS) == "macos");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::Fluent) == "fluent");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::ContourLinux) == "linux");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::Terminal) == "terminal");
+}
+
+TEST_CASE("UiStyle: progress follows the status roles", "[uistyle]")
+{
+    using contour::config::ProgressStatusRoles;
+    using contour::config::StatusColorRole;
+    using vtbackend::ProgressState;
+    auto const roleOf = [](ProgressState state) {
+        return ProgressStatusRoles[static_cast<size_t>(state)];
+    };
+    // Running is the accent, never a fixed green: the indicator says the program is working.
+    CHECK(roleOf(ProgressState::Normal) == StatusColorRole::Running);
+    CHECK(roleOf(ProgressState::Error) == StatusColorRole::Danger);
+    CHECK(roleOf(ProgressState::Indeterminate) == StatusColorRole::Running);
+    CHECK(roleOf(ProgressState::Paused) == StatusColorRole::Warning);
+}
+
+TEST_CASE("UiStyle: only the Terminal row draws the band's glyphs", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(tokens.tabColorGlyph.empty());
+        CHECK(tokens.chipOpenGlyph.empty());
+        CHECK(tokens.chipCloseGlyph.empty());
+        CHECK(tokens.hostDotGlyph.empty());
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    CHECK(terminal.tabColorGlyph == "▌");
+    CHECK(terminal.chipOpenGlyph == "[");
+    CHECK(terminal.chipCloseGlyph == "]");
+    CHECK(terminal.hostDotGlyph == "●");
+}
+
+TEST_CASE("UiStyle: the pane glyphs per row", "[uistyle]")
+{
+    using contour::config::PaneHeaderAction;
+    auto const glyphOf = [](ChromeStyle row, PaneHeaderAction action) {
+        return uiStyleTokens(row).paneActionGlyphs[static_cast<size_t>(action)];
+    };
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(glyphOf(row, PaneHeaderAction::SplitRight) == "⊞");
+        CHECK(glyphOf(row, PaneHeaderAction::SplitDown) == "⊟");
+        CHECK(glyphOf(row, PaneHeaderAction::Zoom) == "⤢");
+        CHECK(glyphOf(row, PaneHeaderAction::Close) == "✕");
+        CHECK(tokens.splitLineGlyphs[0].empty());
+        CHECK(tokens.splitLineGlyphs[1].empty());
+        CHECK(tokens.restartGlyph == "↩");
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    // A box-drawing cross, which every terminal font draws: the monospace fonts set U+229E (⊞) as a
+    // boxed X, which reads as Close.
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitRight) == "┼");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitDown) == "⊟");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Zoom) == "Z");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Close) == "×");
+    CHECK(terminal.splitLineGlyphs[0] == "│");
+    CHECK(terminal.splitLineGlyphs[1] == "─");
+    CHECK(terminal.restartGlyph == "↩");
+}
+
+TEST_CASE("UiStyle: the command palette's glyphs per row", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(tokens.drillInGlyph == "›");
+        CHECK(tokens.palettePromptGlyph.empty());
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    CHECK(terminal.drillInGlyph == "▸");
+    CHECK(terminal.palettePromptGlyph == "❯");
+}
+
+TEST_CASE("UiStyle: the scrollbar's thumb is a glyph on the Terminal row alone", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+        CHECK(uiStyleTokens(row).scrollThumbGlyph.empty());
+    CHECK(uiStyleTokens(ChromeStyle::Terminal).scrollThumbGlyph == "┃");
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/NativeWindowFrame.hpp>
 
+#include <QtGui/QWindow>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -23,6 +25,19 @@ constexpr auto AllPlatforms =
     std::array { FramePlatform::Other, FramePlatform::Windows, FramePlatform::MacOS };
 constexpr auto AllDecorations = std::array { WindowDecoration::Client, WindowDecoration::Server };
 } // namespace
+
+TEST_CASE("the window records the decoration its frame was given", "[contour][frame]")
+{
+    // The Win32 material reads this record to pick a server-framed window's margins (F32).
+    auto window = QWindow {};
+    CHECK_FALSE(appliedDecoration(window).has_value());
+    for (auto const decoration: AllDecorations)
+    {
+        CHECK(needsFrameApplied(window, decoration));
+        CHECK(appliedDecoration(window) == decoration);
+        CHECK_FALSE(needsFrameApplied(window, decoration));
+    }
+}
 
 #ifdef _WIN32
 TEST_CASE("Win32 custom frame fills the maximized work area", "[contour][frame][native]")
@@ -83,7 +98,8 @@ TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "
               == FramePolicy { .shadow = FrameShadowStrategy::NativeFrameKept,
                                .affordances = FrameAffordances::Client,
                                .controlPlacement = ControlPlacement::OwnBar,
-                               .framelessHint = FramelessHint::Withhold });
+                               .framelessHint = FramelessHint::Withhold,
+                               .expansion = ClientAreaExpansion::None });
     }
 
     SECTION("macOS keeps a decorated window and yields its controls in the same breath")
@@ -106,7 +122,8 @@ TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "
               == FramePolicy { .shadow = FrameShadowStrategy::None,
                                .affordances = FrameAffordances::Client,
                                .controlPlacement = ControlPlacement::OwnBar,
-                               .framelessHint = FramelessHint::Apply });
+                               .framelessHint = FramelessHint::Apply,
+                               .expansion = ClientAreaExpansion::None });
     }
 }
 
@@ -157,6 +174,34 @@ TEST_CASE("framePolicyFor gives the whole frame to whoever draws it", "[contour]
                     CHECK(policy.affordances == FrameAffordances::Native);
             }
     }
+}
+
+TEST_CASE("Linux draws its own header bar by default and hands the frame over on request", "[contour][frame]")
+{
+    // show_title_bar: false (the default) is client-side: frameless, our header bar holds the window
+    // buttons. show_title_bar: true is server-side: KWin, Mutter or a tiling WM draws the frame and the
+    // buttons, and the header bar keeps only the tabs and its items.
+    auto const client = framePolicyFor(FramePlatform::Other, WindowDecoration::Client);
+    CHECK(client.framelessHint == FramelessHint::Apply);
+    CHECK(client.affordances == FrameAffordances::Client);
+    CHECK(framePolicyFor(FramePlatform::Other, WindowDecoration::Server) == detail::ServerFramePolicy);
+}
+
+TEST_CASE("framePolicyFor expands the client area through Qt on macOS only", "[contour][frame]")
+{
+    // One owner of the full-size content view (Step 1d spike, D1 = Hint): Qt's ExpandedClientAreaHint on the
+    // macOS client band, and nothing anywhere else -- the frame adapter no longer touches the style mask.
+    CHECK(framePolicyFor(FramePlatform::MacOS, WindowDecoration::Client).expansion
+          == ClientAreaExpansion::QtHint);
+    for (auto const platform: AllPlatforms)
+        for (auto const decoration: AllDecorations)
+        {
+            if (platform == FramePlatform::MacOS && decoration == WindowDecoration::Client)
+                continue;
+            INFO("platform " << static_cast<int>(platform) << ", decoration "
+                             << static_cast<int>(decoration));
+            CHECK(framePolicyFor(platform, decoration).expansion == ClientAreaExpansion::None);
+        }
 }
 
 TEST_CASE("ncCalcSizeInset only insets a maximized window", "[contour][frame]")

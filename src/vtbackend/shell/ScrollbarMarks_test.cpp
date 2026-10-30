@@ -115,8 +115,8 @@ TEST_CASE("ScrollbarMarks.bucketing.rowsOutsideTheRangeAreDropped", "[scrollbar-
 
 TEST_CASE("ScrollbarMarks.bucketing.aPixelShowsItsHighestKind", "[scrollbar-marks]")
 {
-    // Failure > Running > UserMark > Command, whichever order the marks arrive in. Rows 3 and 7 share
-    // pixel 0 of a 10-pixel track over 100 rows.
+    // Failure > Running > SearchMatch > UserMark > Command, whichever order the marks arrive in. Rows 3 and 7
+    // share pixel 0 of a 10-pixel track over 100 rows.
     struct Case
     {
         Kind first {};
@@ -125,6 +125,10 @@ TEST_CASE("ScrollbarMarks.bucketing.aPixelShowsItsHighestKind", "[scrollbar-mark
     };
     constexpr auto Cases = std::array {
         Case { .first = Kind::Command, .second = Kind::UserMark, .winner = Kind::UserMark },
+        Case { .first = Kind::UserMark, .second = Kind::SearchMatch, .winner = Kind::SearchMatch },
+        Case { .first = Kind::SearchMatch, .second = Kind::Running, .winner = Kind::Running },
+        Case { .first = Kind::SearchMatch, .second = Kind::Failure, .winner = Kind::Failure },
+        Case { .first = Kind::Command, .second = Kind::SearchMatch, .winner = Kind::SearchMatch },
         Case { .first = Kind::UserMark, .second = Kind::Running, .winner = Kind::Running },
         Case { .first = Kind::Running, .second = Kind::Failure, .winner = Kind::Failure },
         Case { .first = Kind::Command, .second = Kind::Running, .winner = Kind::Running },
@@ -178,7 +182,8 @@ TEST_CASE("ScrollbarMarks.bucketing.sourcesChooseTheKinds", "[scrollbar-marks]")
     auto const marks = std::vector { markAt(0, Kind::Command, 1),
                                      markAt(10, Kind::UserMark, 2),
                                      markAt(20, Kind::Running, 3),
-                                     markAt(30, Kind::Failure, 4) };
+                                     markAt(30, Kind::Failure, 4),
+                                     markAt(35, Kind::SearchMatch, 5) };
     struct Case
     {
         ScrollbarMarkSources sources {};
@@ -186,10 +191,12 @@ TEST_CASE("ScrollbarMarks.bucketing.sourcesChooseTheKinds", "[scrollbar-marks]")
     };
     auto const cases = std::array {
         Case { .sources = ScrollbarMarkSource::Failures, .kinds = { Kind::Failure } },
-        Case { .sources = ScrollbarMarkSource::Commands, .kinds = { Kind::Command, Kind::Running } },
+        Case { .sources = ScrollbarMarkSource::Commands, .kinds = { Kind::Command } },
+        Case { .sources = ScrollbarMarkSource::Running, .kinds = { Kind::Running } },
         Case { .sources = ScrollbarMarkSource::UserMarks, .kinds = { Kind::UserMark } },
+        Case { .sources = ScrollbarMarkSource::SearchMatches, .kinds = { Kind::SearchMatch } },
         Case { .sources = AllScrollbarMarkSources,
-               .kinds = { Kind::Command, Kind::UserMark, Kind::Running, Kind::Failure } },
+               .kinds = { Kind::Command, Kind::UserMark, Kind::Running, Kind::Failure, Kind::SearchMatch } },
     };
     for (auto const& c: cases)
     {
@@ -244,7 +251,8 @@ TEST_CASE("ScrollbarMarks.kinds.kindsMapToTheirOutcomesAndSources", "[scrollbar-
     CHECK(scrollbarMarkKindOf(CommandBlockOutcome::Running) == Kind::Running);
 
     CHECK(scrollbarMarkSourceOf(Kind::Command) == ScrollbarMarkSource::Commands);
-    CHECK(scrollbarMarkSourceOf(Kind::Running) == ScrollbarMarkSource::Commands);
+    CHECK(scrollbarMarkSourceOf(Kind::Running) == ScrollbarMarkSource::Running);
+    CHECK(scrollbarMarkSourceOf(Kind::SearchMatch) == ScrollbarMarkSource::SearchMatches);
     CHECK(scrollbarMarkSourceOf(Kind::UserMark) == ScrollbarMarkSource::UserMarks);
     CHECK(scrollbarMarkSourceOf(Kind::Failure) == ScrollbarMarkSource::Failures);
 
@@ -278,4 +286,110 @@ TEST_CASE("ScrollbarMarks.kinds.colorsComeFromTheScheme", "[scrollbar-marks]")
         palette.defaultForeground = RGBColor { 0x0A, 0x0B, 0x0C };
         CHECK(scrollbarMarkColor(palette, Kind::UserMark) == RGBColor { 0x0A, 0x0B, 0x0C });
     }
+}
+
+TEST_CASE("ScrollbarMarks.kinds.runningIsHollow", "[scrollbar-marks]")
+{
+    for (auto const& row: ScrollbarMarkKindTable)
+    {
+        INFO("kind " << std::format("{}", row.kind));
+        CHECK(row.style
+              == (row.kind == Kind::Running ? ScrollbarTickStyle::Hollow : ScrollbarTickStyle::Solid));
+    }
+}
+
+TEST_CASE("ScrollbarMarks.kinds.searchIsYellowOnlyThere", "[scrollbar-marks]")
+{
+    // Yellow is search, and only search: under every bundled scheme the search tick is the highlight's
+    // colour, and no other kind's tick is that colour.
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const* const fill = std::get_if<RGBColor>(&palette.searchHighlight.background);
+        auto const expected = fill ? *fill : palette.normalColor(3);
+        auto const search = scrollbarMarkColor(palette, Kind::SearchMatch);
+        // Yellow, unless it would not mark on the track (searchTickMarksOnTheTrack).
+        if (marksOnScrollbarTrack(expected, palette.defaultBackground))
+            CHECK(search == expected);
+        for (auto const kind: ScrollbarMarkKindList)
+            if (kind != Kind::SearchMatch)
+            {
+                INFO("kind " << std::format("{}", kind));
+                CHECK(scrollbarMarkColor(palette, kind) != search);
+            }
+    }
+}
+
+TEST_CASE("ScrollbarMarks.kinds.searchFallsBackToTheSchemesYellow", "[scrollbar-marks]")
+{
+    auto palette = ColorPalette {};
+    palette.searchHighlight.background = CellForegroundColor {};
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == palette.normalColor(3));
+    palette.searchHighlight.background = RGBColor { 0xAA, 0xCC, 0xEE };
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0xAA, 0xCC, 0xEE });
+}
+
+TEST_CASE("ScrollbarMarks.kinds.searchFallsBackWhereYellowDoesNotMark", "[scrollbar-marks]")
+{
+    auto palette = ColorPalette {};
+    palette.defaultBackground = RGBColor { 0xFF, 0xFF, 0xFF };
+    palette.searchHighlight.background = CellForegroundColor {};
+    palette.palette.at(3) = RGBColor { 0xFF, 0xFF, 0x00 };
+    palette.palette.at(11) = RGBColor { 0xFF, 0xFF, 0x80 };
+    // Nothing in the scheme marks: black or white, whichever stands off the pane more.
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0x00, 0x00, 0x00 });
+
+    // The bright yellow, where it is the one that marks.
+    palette.palette.at(11) = RGBColor { 0x80, 0x60, 0x00 };
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0x80, 0x60, 0x00 });
+}
+
+TEST_CASE("ScrollbarMarks.overlayHold.column", "[scrollbar-marks]")
+{
+    // A finished command leaves a mark after every prompt, so only the marks worth a look hold an overlay bar
+    // at the bottom of the scrollback.
+    auto const expected = std::map<Kind, OverlayHold> {
+        { Kind::Command, OverlayHold::Quiet },      { Kind::UserMark, OverlayHold::KeepsShown },
+        { Kind::SearchMatch, OverlayHold::Quiet },  { Kind::Running, OverlayHold::KeepsShown },
+        { Kind::Failure, OverlayHold::KeepsShown },
+    };
+    REQUIRE(expected.size() == ScrollbarMarkKindTable.size());
+    for (auto const& row: ScrollbarMarkKindTable)
+    {
+        INFO("kind " << std::format("{}", row.kind));
+        CHECK(row.overlay == expected.at(row.kind));
+    }
+}
+
+TEST_CASE("ScrollbarMarks.marksAbove.onlyHeldDrawnKindsAboveTheRowCount", "[scrollbar-marks]")
+{
+    auto const marks = std::array {
+        markAt(5, Kind::Command, 1),
+        markAt(7, Kind::Failure, 2),
+        markAt(40, Kind::Failure, 3),
+    };
+    auto const commandsAndUserMarks =
+        ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks };
+
+    // A failure at row 7 is above a viewport whose first row is 30.
+    CHECK(marksAbove(marks, 30, AllScrollbarMarkSources) == MarksAbove::Some);
+    // Only a command is above row 6: commands do not hold the bar. The failure on row 7 is in view.
+    CHECK(marksAbove(marks, 6, AllScrollbarMarkSources) == MarksAbove::None);
+    // A failure the bar does not draw holds nothing.
+    CHECK(marksAbove(marks, 30, commandsAndUserMarks) == MarksAbove::None);
+    // The row itself is not above.
+    CHECK(marksAbove(marks, 7, AllScrollbarMarkSources) == MarksAbove::None);
+    CHECK(marksAbove({}, 30, AllScrollbarMarkSources) == MarksAbove::None);
+
+    // A user's own mark holds the bar too, unless the bar does not draw user marks.
+    auto const userMarked = std::array { markAt(5, Kind::Command, 1), markAt(9, Kind::UserMark, 4) };
+    CHECK(marksAbove(userMarked, 30, AllScrollbarMarkSources) == MarksAbove::Some);
+    CHECK(marksAbove(userMarked, 30, ScrollbarMarkSources { ScrollbarMarkSource::UserMarks })
+          == MarksAbove::Some);
+    CHECK(marksAbove(userMarked,
+                     30,
+                     ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::Failures })
+          == MarksAbove::None);
 }

@@ -130,6 +130,20 @@ constexpr RGBColor mixColor(RGBColor const& a, RGBColor const& b, float t = 0.5)
                                            float t,
                                            double minimumContrast) noexcept;
 
+/// @p ink, moved toward @p toward just far enough to reach @p minimumContrast against @p ground.
+///
+/// What a scheme's status colour needs where the scheme made it too faint for its own background: its hue
+/// kept as far as it can be, lifted toward an ink that reads.
+/// @param ink The colour wanted.
+/// @param toward A colour that reads on @p ground at @p minimumContrast; the lift ends there at the latest.
+/// @param ground What the colour is drawn on.
+/// @param minimumContrast The ratio to reach.
+/// @return @p ink where it already reads, else the least lift of it that does.
+[[nodiscard]] RGBColor liftToContrast(RGBColor ink,
+                                      RGBColor toward,
+                                      RGBColor ground,
+                                      double minimumContrast) noexcept;
+
 inline double distance(RGBColor e1, RGBColor e2) noexcept
 {
     auto const rmean = (uint32_t(e1.red) + uint32_t(e2.red)) / 2;

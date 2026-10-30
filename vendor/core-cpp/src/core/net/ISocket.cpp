@@ -97,4 +97,10 @@ void ISocket::setReceiveDeadline(std::chrono::milliseconds /*deadline*/) noexcep
 {
 }
 
+std::expected<void, NetError> ISocket::armKeepAlive(KeepAliveSettings const& /*settings*/)
+{
+    return std::unexpected(
+        makeNetError(NetErrorCode::Unsupported, 0, "this transport cannot arm TCP keepalive"));
+}
+
 } // namespace core::net

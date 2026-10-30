@@ -936,15 +936,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
 ClusterWidthPolicy Screen::clusterWidthPolicy() const noexcept
 {
-    // DEC mode 2027 is how an application says it expects whole clusters to be measured. Contour
-    // keeps the mode set by default and always clusters; what the mode gates is narrower -- whether
-    // a codepoint arriving AFTER the first may change how many columns the cluster occupies.
-    //
-    // NOTE: resetting 2027 does not restore the full pre-clustering behaviour, only this part of it.
-    // A terminal that also stopped segmenting would place every combining mark in its own cell, which
-    // is a larger change and is not what applications resetting the mode are usually after.
-    return _terminal->isModeEnabled(DECMode::Unicode) ? ClusterWidthPolicy::ClusterAware
-                                                      : ClusterWidthPolicy::FirstCodepoint;
+    return _terminal->clusterWidthPolicy();
 }
 
 void Screen::applyClusterWidthChange(int delta) noexcept
@@ -1613,13 +1605,9 @@ Line& Screen::eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttribut
         row.adoptProvenance(_stamp);
 
     // The row may have headed its block, whose heads are then looked at again when next read, and it may
-    // have carried a vi mark, which the scrollbar's index of them then forgets.
+    // have carried a vi mark, which the scrollbar's index of them then forgets, or a shell mark a fold hung
+    // off.
     noteRowRewritten(line, block, before);
-
-    // A fold may have hung off the row, or ended on it: the cached ranges are scanned again, as a mark
-    // stamped or cleared through setLogicalLineFlags() has them.
-    if ((row.flags() & ShellMarkLineFlags) != (before & ShellMarkLineFlags))
-        _terminal->invalidateFoldRanges();
     return row;
 }
 
@@ -1643,8 +1631,15 @@ void Screen::noteUserMarkChange(LineOffset line, LineFlags before) noexcept
 
 void Screen::noteRowRewritten(LineOffset line, CommandBlockId block, LineFlags before) noexcept
 {
-    noteBlockRowChange(block, before, std::as_const(_grid).lineAt(line));
+    auto const& row = std::as_const(_grid).lineAt(line);
+    noteBlockRowChange(block, before, row);
     noteUserMarkChange(line, before);
+
+    // A fold may have hung off the row, or ended on it: the cached ranges are scanned again, as a mark
+    // stamped or cleared through setLogicalLineFlags() has them. Here and not in the erase alone, because
+    // a daemon mirror writes the host's marks through this funnel and nowhere else.
+    if ((row.flags() & ShellMarkLineFlags) != (before & ShellMarkLineFlags))
+        _terminal->invalidateFoldRanges();
 }
 
 void Screen::endWrapBelow(LineOffset line) noexcept
@@ -2576,7 +2571,7 @@ void Screen::notify(string const& title, string const& content)
     _terminal->notify(title, content);
 }
 
-void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
+void Screen::captureBuffer(LineCount lineCount, CaptureLineMode mode)
 {
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
 
@@ -2584,12 +2579,13 @@ void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
 
     // TODO: when capturing lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
-        logicalLines ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
-                     : unbox(pageSize().lines - lineCount);
+        mode == CaptureLineMode::Logical
+            ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
+            : unbox(pageSize().lines - lineCount);
     auto const startLine =
         LineOffset::cast_from(clamp(relativeStartLine, -unbox(historyLineCount()), unbox(pageSize().lines)));
 
-    vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
+    vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, mode);
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
@@ -2613,7 +2609,7 @@ void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
 
     for (LineOffset line = startLine; line <= bottomLine; ++line)
     {
-        if (logicalLines && _grid.lineAt(line).wrapped() && !capturedBuffer.empty())
+        if (mode == CaptureLineMode::Logical && _grid.lineAt(line).wrapped() && !capturedBuffer.empty())
             capturedBuffer.pop_back();
 
         auto const& lineBuffer = _grid.lineAt(line);
@@ -3428,7 +3424,8 @@ void Screen::resetDynamicColor(DynamicColorName name)
             _terminal->colorPalette().defaultForeground = _terminal->defaultColorPalette().defaultForeground;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            _terminal->colorPalette().defaultBackground = _terminal->defaultColorPalette().defaultBackground;
+            // Through setDynamicColor(), which announces the background when it actually changes.
+            setDynamicColor(name, _terminal->defaultColorPalette().defaultBackground);
             break;
         case DynamicColorName::TextCursorColor:
             _terminal->colorPalette().cursor = _terminal->defaultColorPalette().cursor;
@@ -3458,7 +3455,11 @@ void Screen::setDynamicColor(DynamicColorName name, RGBColor color)
             _terminal->colorPalette().defaultForeground = color;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            _terminal->colorPalette().defaultBackground = color;
+            if (_terminal->colorPalette().defaultBackground != color)
+            {
+                _terminal->colorPalette().defaultBackground = color;
+                _terminal->notifyDefaultBackgroundColorChanged();
+            }
             break;
         case DynamicColorName::TextCursorColor: _terminal->colorPalette().cursor.color = color; break;
         case DynamicColorName::MouseForegroundColor: _terminal->colorPalette().mouseForeground = color; break;
@@ -4468,7 +4469,7 @@ namespace impl
             if (splits[1] == "?")
                 terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
             else
-                terminal.copyToClipboard(core::base64::decode(splits[1]));
+                terminal.copyToClipboard(core::base64::decode(splits[1]), ClipboardWriter::Program);
             return ApplyResult::Ok;
         }
 
@@ -4548,13 +4549,17 @@ namespace impl
             // Count: number of lines to capture from main page aera's bottom upwards
             //        If omitted or 0, the main page area's line count will be used.
 
-            auto const logicalLines = seq.paramOr(0, 0);
-            if (logicalLines != 0 && logicalLines != 1)
-                return ApplyResult::Invalid;
+            auto mode = CaptureLineMode::Physical;
+            switch (seq.paramOr(0, 0))
+            {
+                case 0: mode = CaptureLineMode::Physical; break;
+                case 1: mode = CaptureLineMode::Logical; break;
+                default: return ApplyResult::Invalid;
+            }
 
             auto const lineCount = LineCount(seq.paramOr(1, *terminal.pageSize().lines));
 
-            terminal.requestCaptureBuffer(lineCount, logicalLines);
+            terminal.requestCaptureBuffer(lineCount, mode);
 
             return ApplyResult::Ok;
         }
@@ -5306,7 +5311,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // An empty chunk is the end-of-transmission marker.
             if (packet.payload.empty())
             {
-                _terminal->copyToClipboard(_terminal->kittyClipboardWrite());
+                _terminal->copyToClipboard(_terminal->kittyClipboardWrite(), ClipboardWriter::Program);
                 _terminal->kittyClipboardWrite().clear();
                 _terminal->kittyClipboardWriteOpen() = false;
                 respond("DONE");
@@ -8707,132 +8712,142 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
+namespace
+{
+    /// @p searchText as a literal query under @p mode; nothing for an empty needle, which matches nothing.
+    [[nodiscard]] optional<SearchQuery> literalQuery(std::u32string_view searchText,
+                                                     SearchCaseSensitivity mode)
+    {
+        if (searchText.empty())
+            return nullopt;
+        // A literal always compiles, and with no whole-word option reads no delimiter.
+        return SearchQuery::compile(searchText, SearchOptions { .caseSensitivity = mode }, {}).value();
+    }
+} // namespace
+
 optional<CellLocation> Screen::search(std::u32string_view searchText,
                                       CellLocation startPosition,
-                                      SearchCaseSensitivity mode)
+                                      SearchCaseSensitivity mode) const
 {
-    return searchFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
-}
-
-optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
-                                          CellLocation startPosition,
-                                          CaseComparison comparison)
-{
-    if (searchText.empty())
+    auto const query = literalQuery(searchText, mode);
+    if (!query)
         return nullopt;
-
-    // A start past the end of its row begins at the next one; the find bar steps there from a match on
-    // the last column.
-    auto const columns = unbox<int>(pageSize().columns);
-    if (unbox(startPosition.column) >= columns)
-    {
-        ++startPosition.line;
-        startPosition.column = ColumnOffset(0);
-    }
-
-    auto const firstLine = std::max(unbox(startPosition.line), -unbox<int>(historyLineCount()));
-    for (auto const line: std::views::iota(firstLine, unbox<int>(pageSize().lines)))
-    {
-        auto const firstColumn = line == unbox(startPosition.line) ? unbox(startPosition.column) : 0;
-        for (auto const column: std::views::iota(firstColumn, columns))
-        {
-            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
-            if (_grid.textMatchesAt(searchText, candidate, comparison))
-                return candidate;
-        }
-    }
-    return nullopt;
+    // A literal never gives up: only a regex can be too complex.
+    return searchFrom(*query, startPosition).value_or(nullopt);
 }
 
 optional<CellLocation> Screen::searchReverse(std::u32string_view searchText,
                                              CellLocation startPosition,
-                                             SearchCaseSensitivity mode)
+                                             SearchCaseSensitivity mode) const
 {
-    return searchReverseFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
+    auto const query = literalQuery(searchText, mode);
+    if (!query)
+        return nullopt;
+    return searchReverseFrom(*query, startPosition).value_or(nullopt);
 }
 
-optional<CellLocation> Screen::searchReverseFrom(std::u32string_view searchText,
-                                                 CellLocation startPosition,
-                                                 CaseComparison comparison)
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(SearchQuery const& query,
+                                                                             CellLocation startPosition) const
 {
-    if (searchText.empty())
+    // A start past the end of its row begins at the next one; the find bar steps there from a match on
+    // the last column.
+    if (startPosition.column >= boxed_cast<ColumnOffset>(pageSize().columns))
+    {
+        ++startPosition.line;
+        startPosition.column = ColumnOffset(0);
+    }
+    auto const historyTop = -boxed_cast<LineOffset>(historyLineCount());
+    if (startPosition.line < historyTop)
+        startPosition = CellLocation { .line = historyTop, .column = ColumnOffset(0) };
+    if (startPosition.line >= boxed_cast<LineOffset>(pageSize().lines))
         return nullopt;
 
-    auto const columns = unbox<int>(pageSize().columns);
-    auto const lastLine = std::min(unbox(startPosition.line), unbox<int>(pageSize().lines) - 1);
-    auto const firstLine = -unbox<int>(historyLineCount());
-    for (auto const line: std::views::iota(firstLine, lastLine + 1) | std::views::reverse)
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line, query.segmentCells()) };
+    while (segment)
     {
-        auto const lastColumn = line == unbox(startPosition.line)
-                                    ? std::min(unbox(startPosition.column), columns - 1)
-                                    : columns - 1;
-        for (auto const column: std::views::iota(0, lastColumn + 1) | std::views::reverse)
-        {
-            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
-            if (_grid.textMatchesAt(searchText, candidate, comparison))
-                return candidate;
-        }
+        auto const matches = query.matchesIn(_grid, *segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+        auto const match = std::ranges::find_if(*matches, [startPosition](CellLocationRange const& range) {
+            return range.first >= startPosition;
+        });
+        if (match != matches->end())
+            return match->first;
+        segment = nextSearchSegment(_grid, *segment, query.segmentCells());
     }
     return nullopt;
+}
+
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
+    SearchQuery const& query, CellLocation startPosition) const
+{
+    // Bounded by the grid itself: every row it has, whatever the query.
+    auto read = SearchReadBudget::rowsOnly(_grid.linesUsed());
+    return searchReverseFrom(query, startPosition, read);
+}
+
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
+    SearchQuery const& query, CellLocation startPosition, SearchReadBudget& read) const
+{
+    auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
+    if (startPosition.line > lastLine)
+        startPosition =
+            CellLocation { .line = lastLine, .column = boxed_cast<ColumnOffset>(pageSize().columns) };
+    if (startPosition.line < -boxed_cast<LineOffset>(historyLineCount()))
+        return nullopt;
+
+    // Whole segments, so a match is found or missed as one; the budget refuses the next one once spent.
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line, query.segmentCells()) };
+    while (segment
+           && read.admit(*segment, boxed_cast<LineCount>(segment->last - segment->first) + LineCount(1)))
+    {
+        auto const matches = query.matchesIn(_grid, *segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+        auto const backwards = *matches | std::views::reverse;
+        auto const match = std::ranges::find_if(backwards, [startPosition](CellLocationRange const& range) {
+            return range.first <= startPosition;
+        });
+        if (match != backwards.end())
+            return match->first;
+        segment = previousSearchSegment(_grid, *segment, query.segmentCells());
+    }
+    return nullopt;
+}
+
+std::expected<optional<CellLocationRange>, SearchPatternError> Screen::matchStartingAt(
+    std::shared_ptr<SearchQuery const> const& query, CellLocation start, SearchMatchMemo& memo) const
+{
+    if (start.line < -boxed_cast<LineOffset>(historyLineCount())
+        || start.line >= boxed_cast<LineOffset>(pageSize().lines))
+        return nullopt;
+    auto const matches =
+        memo.matchesIn(query, _grid, searchSegmentAt(_grid, start.line, query->segmentCells()));
+    if (!matches)
+        return std::unexpected { matches.error() };
+    auto const match = std::ranges::find(*matches, start, &CellLocationRange::first);
+    if (match == matches->end())
+        return nullopt;
+    return *match;
 }
 
 SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
                                       CellLocation position,
                                       SearchCaseSensitivity mode,
-                                      size_t limit)
+                                      size_t limit) const
 {
-    auto tally = SearchMatchTally {};
-    if (searchText.empty() || limit == 0)
-        return tally;
+    auto literal = literalQuery(searchText, mode);
+    if (!literal)
+        return SearchMatchTally {};
 
-    auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
-    auto const lastColumn = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-
-    // The cell after @p location, or nullopt at the very end of the grid. Advancing by ONE cell (and
-    // not by the needle's length) is what keeps this count in step with searchNextMatch(), which does
-    // the same -- so overlapping matches, which navigation does visit, are counted rather than hidden.
-    auto const advance = [&](CellLocation location) -> optional<CellLocation> {
-        if (location.column < lastColumn)
-        {
-            ++location.column;
-            return location;
-        }
-        if (location.line < lastLine)
-        {
-            ++location.line;
-            location.column = ColumnOffset(0);
-            return location;
-        }
-        return nullopt;
-    };
-
-    auto cursor =
-        CellLocation { .line = -boxed_cast<LineOffset>(historyLineCount()), .column = ColumnOffset(0) };
-
-    // Resolved once for the whole walk, not per match. @see searchFrom.
-    auto const comparison = caseComparisonFor(searchText, mode);
-
-    while (auto const match = searchFrom(searchText, cursor, comparison))
-    {
-        if (tally.total == limit)
-        {
-            // A match exists beyond the limit, so the count the caller gets is a floor rather than a
-            // total. Saying so is the whole point of the flag: "9999" and "9999+" mean different things.
-            tally.exactness = TallyExactness::Capped;
-            break;
-        }
-
-        ++tally.total;
-        if (*match == position)
-            tally.ordinal = tally.total;
-
-        auto const next = advance(*match);
-        if (!next)
-            break;
-        cursor = *next;
-    }
-
-    return tally;
+    // A walk drained in one go: the count is the very one the find bar's stepped walk arrives at.
+    auto walk =
+        SearchTallyWalk { std::make_shared<SearchQuery const>(std::move(*literal)), _grid, position, limit };
+    auto progress = walk.step(_grid, _grid.linesUsed());
+    while (progress && *progress == WalkProgress::Running)
+        progress = walk.step(_grid, _grid.linesUsed());
+    // A literal never gives up: only a regex can be too complex.
+    return progress ? walk.tally() : SearchMatchTally {};
 }
 
 bool Screen::isCursorInsideHorizontalMargins() const noexcept

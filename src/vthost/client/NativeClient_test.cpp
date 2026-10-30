@@ -50,6 +50,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
 #ifdef CONTOUR_EXTENSIONS
     #include <vthost/DaemonExtensions.hpp>
@@ -58,6 +59,7 @@
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/PreNegotiationCodec.hpp>
+#include <vthost/testing/ScenarioGuard.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -69,6 +71,7 @@ using vthost::SessionHost;
 using vthost::client::NativeClient;
 using vthost::client::RemoteScreen;
 using vthost::testing::finishedWire;
+using vthost::testing::guardScenario;
 using vthost::testing::newSession;
 using vthost::testing::promptingWire;
 using vthost::testing::runningWire;
@@ -1165,6 +1168,244 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     CHECK(host.model().window(host.windowId())->tabCount() == 2); // the daemon really created the tab
 }
 
+namespace
+{
+
+/// The owner's sequence on a dark client of a daemon whose profile is built light: session A exists, the
+/// client turns dark, authors session B and states dark for it at once -- before B's first snapshot, built
+/// under the host's light palette, need have been read -- then goes 1, 2, 1, 2 across the tabs. Switching
+/// to a tab resizes its pane, which the daemon answers with a fresh snapshot.
+///
+/// B is learnt from the layout, as a client learns of a tab. A tab opened after the attach is first pushed
+/// when its screen first changes, and B, born dark, changes nothing when told dark: its first snapshot
+/// follows its shell's prompt, which @p printPrompt stands in for under manual pumping.
+/// @param tabSessions The session of each tab's single pane, in the latest layout the client was handed.
+/// @param printPrompt Has a session's shell print its prompt.
+Task<void> driveDarkTabSwitches(core::net::EventLoop* loop,
+                                NativeClient* client,
+                                vtworkspace::SessionId first,
+                                std::vector<uint64_t> const* tabSessions,
+                                std::function<void(uint64_t)> printPrompt,
+                                std::vector<vtbackend::RGBColor>* seenByTab)
+{
+    constexpr auto Dark = vthost::testing::FakeDualPaletteCatalog::DarkBackground;
+    auto const backgroundOf = [&](uint64_t session) {
+        return vtbackend::RGBColor { client->screens().at(session).defaultBackground };
+    };
+    auto const showsDark = [&](uint64_t session) {
+        return client->screens().contains(session) && backgroundOf(session) == Dark;
+    };
+    auto const stateDark = [&](uint64_t session) {
+        client->performOperation(proto::PerformOperation {
+            .session = session, .operation = proto::EngineOperation::UseDarkColors });
+    };
+
+    auto const attached =
+        co_await core::net::testing::waitUntil(loop, [&] { return client->screens().contains(first.value); });
+    REQUIRE(attached);
+    stateDark(first.value);
+    co_await core::net::testing::waitUntil(loop, [&] { return showsDark(first.value); });
+
+    client->createTab(0, {});
+    auto const created =
+        co_await core::net::testing::waitUntil(loop, [&] { return tabSessions->size() == 2; });
+    REQUIRE(created);
+    auto const second =
+        *std::ranges::find_if(*tabSessions, [&](uint64_t session) { return session != first.value; });
+    REQUIRE(second != first.value);
+    stateDark(second);
+    printPrompt(second);
+    auto const secondShown = co_await core::net::testing::waitUntil(loop, [&] { return showsDark(second); });
+    REQUIRE(secondShown);
+
+    auto columns = uint32_t { 90 };
+    auto const bind = [&](uint64_t session) {
+        ++columns;
+        client->resizePane(session, columns, 30);
+        return core::net::testing::waitUntil(loop, [&, session] {
+            return client->screens().contains(session) && client->screens().at(session).columns == columns;
+        });
+    };
+    for (auto const session: { first.value, second, first.value, second })
+    {
+        auto const bound = co_await bind(session);
+        REQUIRE(bound);
+        seenByTab->push_back(backgroundOf(first.value));
+        seenByTab->push_back(backgroundOf(second));
+    }
+    client->detach();
+}
+
+} // namespace
+
+TEST_CASE("a dark client's sessions keep the dark palette across new tabs and tab switches",
+          "[vthost][attach][colors]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const catalog = std::make_shared<vthost::testing::FakeDualPaletteCatalog>();
+    // As the daemon is built: the base settings are the default profile's, resolved under the host's own
+    // (light) preference.
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              catalog->resolve("").settings,
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .profiles = catalog } };
+    auto const first = newSession(host);
+    REQUIRE(host.terminal(first)->colorPalette().defaultBackground
+            == vthost::testing::FakeDualPaletteCatalog::LightBackground);
+
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto server = NativeSession {
+        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
+    };
+    auto tabSessions = std::vector<uint64_t> {};
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions {},
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler { [&tabSessions](proto::LayoutState const& layout) {
+                           tabSessions.clear();
+                           for (auto const& tab: layout.tabs)
+                               tabSessions.push_back(tab.root.session);
+                       } } };
+
+    auto seenByTab = std::vector<vtbackend::RGBColor> {};
+    loop.blockOn(core::net::testing::allOf(
+        server.run(),
+        client.run(),
+        guardScenario(
+            &loop,
+            [&client] { client.detach(); },
+            driveDarkTabSwitches(
+                &loop,
+                &client,
+                first,
+                &tabSessions,
+                [&](uint64_t session) {
+                    host.terminal(vtworkspace::SessionId { session })->writeToScreen("$ ");
+                    server.sessionScreenUpdated(vtworkspace::SessionId { session });
+                },
+                &seenByTab))));
+
+    REQUIRE(seenByTab.size() == 8);
+    for (auto const& background: seenByTab)
+        CHECK(background == vthost::testing::FakeDualPaletteCatalog::DarkBackground);
+}
+
+namespace
+{
+
+/// A host whose profile is built light, as the daemon builds it, and a client of @p preference attached to
+/// it over an in-memory socket; every default background the client's mirror is handed is recorded.
+/// @param seeded Whether the host already hosts a session when the client attaches.
+/// @param preference What the client's hello states.
+/// @return The default background of every update the client received, in order, and the host's sessions'
+///         palettes at the end.
+struct AttachObservation
+{
+    std::vector<vtbackend::RGBColor> seen;     ///< Each update's default background, in order.
+    std::vector<vtbackend::RGBColor> hostEnds; ///< Each hosted session's default background at the end.
+};
+
+/// Awaits the attach, asks for a resize so that more traffic follows it, and detaches.
+Task<void> driveAttachThenResize(core::net::EventLoop* loop, NativeClient* client)
+{
+    auto const attached =
+        co_await core::net::testing::waitUntil(loop, [&] { return !client->screens().empty(); });
+    REQUIRE(attached);
+    // A little more traffic after the attach, so a late light snapshot would show too.
+    client->requestResize(100, 40);
+    co_await core::net::testing::waitUntil(loop,
+                                           [&] { return client->screens().begin()->second.columns == 100; });
+    client->detach();
+}
+
+AttachObservation attachDarkClient(bool seeded, proto::WireColorPreference preference)
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const catalog = std::make_shared<vthost::testing::FakeDualPaletteCatalog>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              catalog->resolve("").settings,
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .profiles = catalog } };
+    if (seeded)
+        std::ignore = newSession(host);
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto server = NativeSession {
+        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
+    };
+    auto observation = AttachObservation {};
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions { .colorPreference = preference },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler { [&](RemoteScreen const& screen, proto::Delta const&) {
+                           observation.seen.emplace_back(screen.defaultBackground);
+                       } },
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler {} };
+    loop.blockOn(core::net::testing::allOf(
+        server.run(),
+        client.run(),
+        guardScenario(&loop, [&client] { client.detach(); }, driveAttachThenResize(&loop, &client))));
+    host.model().forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
+        tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            if (pane.isLeaf())
+                observation.hostEnds.push_back(
+                    host.terminal(pane.session())->colorPalette().defaultBackground);
+        });
+    });
+    return observation;
+}
+
+} // namespace
+
+TEST_CASE("a dark client's hello has the host build its sessions dark from the first snapshot",
+          "[vthost][attach][colors]")
+{
+    using vthost::testing::FakeDualPaletteCatalog;
+    SECTION("the session the attach spawns")
+    {
+        auto const observation = attachDarkClient(false, proto::WireColorPreference::Dark);
+        REQUIRE_FALSE(observation.seen.empty());
+        for (auto const& background: observation.seen)
+            CHECK(background == FakeDualPaletteCatalog::DarkBackground);
+        REQUIRE(observation.hostEnds.size() == 1);
+        CHECK(observation.hostEnds.front() == FakeDualPaletteCatalog::DarkBackground);
+    }
+
+    SECTION("a session the host already had, re-seeded before its snapshot")
+    {
+        auto const observation = attachDarkClient(true, proto::WireColorPreference::Dark);
+        REQUIRE_FALSE(observation.seen.empty());
+        for (auto const& background: observation.seen)
+            CHECK(background == FakeDualPaletteCatalog::DarkBackground);
+    }
+
+    SECTION("a hello that states none leaves the host's own light palette")
+    {
+        auto const observation = attachDarkClient(true, proto::WireColorPreference::Unstated);
+        REQUIRE_FALSE(observation.seen.empty());
+        for (auto const& background: observation.seen)
+            CHECK(background == FakeDualPaletteCatalog::LightBackground);
+    }
+}
+
 TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost][attach]")
 {
     auto const source = core::net::makeDefaultBackend();
@@ -1595,7 +1836,10 @@ TEST_CASE("a daemon's question keeps the control permissions it asks for",
     auto const consent = vthost::client::consentRequestOf(request);
     REQUIRE(consent.has_value());
     CHECK(consent->manifest.control == manifest.control);
-    CHECK(vtextension::consentText(*consent).contains("May type into panes."));
+    auto const question = vtextension::consentQuestion(*consent);
+    CHECK(std::ranges::any_of(question.lines, [](vtextension::ConsentLine const& line) {
+        return line.text == "May type into panes (can run commands).";
+    }));
 
     // A permission this build cannot name cannot be shown, so the question is not asked.
     auto unknown = request;
@@ -2167,7 +2411,10 @@ struct IntentHarness
     /// Runs both ends with @p scenario beside them; the scenario detaches the client when it is done.
     void drive(Task<void> scenario)
     {
-        loop.blockOn(core::net::testing::allOf(server->run(), client->run(), std::move(scenario)));
+        loop.blockOn(core::net::testing::allOf(
+            server->run(),
+            client->run(),
+            guardScenario(&loop, [this] { client->detach(); }, std::move(scenario))));
     }
 
     /// @return The profile each hosted session was spawned under, in session order.
@@ -2287,6 +2534,134 @@ TEST_CASE("against a daemon without the capabilities nothing new is written", "[
         CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
         CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
     }
+}
+
+TEST_CASE("mergeTabIntoSplit is sent to a daemon that shares TabMerge, and the tab joins the target",
+          "[vthost][attach][tab-merge][daemon]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::TabMerge }) } };
+    auto const* target = h.host.createTab();
+    auto const* dragged = h.host.createTab();
+    REQUIRE((target != nullptr && dragged != nullptr));
+    auto const targetSession = target->rootPane()->session();
+    auto const draggedSession = dragged->rootPane()->session();
+    auto delivery = vthost::client::Delivery::Unsupported;
+    auto scenario = [](IntentHarness* h,
+                       vthost::client::Delivery* delivery,
+                       uint64_t draggedSession,
+                       uint64_t targetSession) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        auto const tabsBefore = h->layouts.back().tabs.size();
+        *delivery = h->client->mergeTabIntoSplit(
+            std::array { draggedSession }, targetSession, vtworkspace::SplitSide::Left);
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, tabsBefore] { return h->layouts.back().tabs.size() == tabsBefore - 1; });
+        h->client->detach();
+    }(&h, &delivery, draggedSession.value, targetSession.value);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery == vthost::client::Delivery::Sent);
+    // The mirror holds the merged tree: the tab that took the drop now has both sessions as leaves.
+    auto const merged = std::ranges::find_if(h.layouts.back().tabs, [&](auto const& tab) {
+        return vthost::client::paneTreeHosts(tab.root, targetSession.value)
+               && vthost::client::paneTreeHosts(tab.root, draggedSession.value);
+    });
+    CHECK(merged != h.layouts.back().tabs.end());
+    CHECK(h.host.terminal(draggedSession) != nullptr);
+}
+
+TEST_CASE("a daemon's TabMergeRefused reaches the client's handler once per refusal",
+          "[vthost][attach][compat][tab-merge]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto refusals = std::vector<uint8_t> {};
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions {
+                           .capabilities = proto::CapabilitySet::of({ proto::Capability::TabMerge }) },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler {},
+                       NativeClient::PermissionHandler {},
+                       vthost::client::LivenessPolicy {},
+                       NativeClient::TabMergeRefusedHandler { [&](proto::TabMergeRefused const& refused) {
+                           refusals.push_back(refused.reason);
+                       } } };
+    // Refuses every merge (as a daemon that finds the tab stale does), accepts the hello.
+    auto const refusing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::TabMerge })) } };
+        if (std::holds_alternative<proto::MergeTabIntoSplit>(frame.pdu))
+            return Script { { std::nullopt, proto::TabMergeRefused { .reason = 3 } } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<uint8_t> const* refusals) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        std::ignore =
+            client->mergeTabIntoSplit(std::array<uint64_t, 1> { 1 }, 2, vtworkspace::SplitSide::Right);
+        co_await core::net::testing::waitUntil(loop, [&] { return !refusals->empty(); });
+        client->detach();
+    }(&loop, &client, &refusals);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, refusing, &seen), std::move(scenario)));
+
+    CHECK(refusals == std::vector<uint8_t> { 3 });
+}
+
+TEST_CASE("against a daemon without TabMerge no MergeTabIntoSplit is written",
+          "[vthost][attach][compat][tab-merge]")
+{
+    // A newer client, an older daemon: the daemon shares nothing, so the verb is not written at all and the
+    // caller learns it, to tear the tab off as it did before the verb existed.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                      { proto::Capability::TabMerge }) },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto delivery = vthost::client::Delivery::Sent;
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen,
+                       vthost::client::Delivery* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        *delivery =
+            client->mergeTabIntoSplit(std::array<uint64_t, 1> { 1 }, 2, vtworkspace::SplitSide::Right);
+        // A verb that is written reaches the daemon in order, so this one arriving proves the other was not
+        // sent.
+        client->createTab(0, "x");
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+        client->detach();
+    }(&loop, &client, &seen, &delivery);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(
+            &loop, daemonSocket, answeringHello(Script { { std::nullopt, acceptingHello() } }), &seen),
+        std::move(scenario)));
+
+    CHECK(delivery == vthost::client::Delivery::Unsupported);
+    CHECK_FALSE(std::ranges::any_of(seen, carries<proto::MergeTabIntoSplit>));
 }
 
 TEST_CASE("editTab is sent when the daemon shares TabEdits", "[vthost][attach][intent]")
@@ -2458,4 +2833,144 @@ TEST_CASE("a client whose daemon echoes stays connected", "[vthost][attach][live
     CHECK_FALSE(h.client->lossReason().has_value());
     CHECK(std::ranges::count_if(h.seen, carries<proto::Heartbeat>) >= 2);
     h.settle();
+}
+
+namespace
+{
+/// What a client saw of a focus change that raced an unrelated layout change on a real daemon.
+struct FocusRace
+{
+    uint64_t activated = 0;                 ///< The pane the client activated.
+    uint64_t previous = 0;                  ///< The pane that was active before.
+    std::vector<proto::LayoutState> pushes; ///< Every layout the client was handed after its edit.
+};
+
+/// Splits a tab on a real daemon, then has the client activate the pane that is not active while, before the
+/// daemon has read that, another change -- a tab title, as a shell sets one -- makes the daemon push a layout
+/// composed before the edit.
+/// @param clientCapabilities What the client offers; the daemon offers its defaults.
+/// @return What the client was handed from its edit on, until the daemon's echo.
+[[nodiscard]] FocusRace raceFocusAgainstTitle(proto::CapabilitySet clientCapabilities)
+{
+    auto h =
+        IntentHarness { vthost::NativeSessionServices {},
+                        NativeClient::HandshakeOptions { .capabilities = std::move(clientCapabilities) } };
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const tabId = tab->id();
+    h.host.splitActivePane(tabId, vtworkspace::SplitState::Vertical);
+    auto race = FocusRace {};
+    auto scenario = [](IntentHarness* h, vtworkspace::TabId tabId, FocusRace* race) -> Task<void> {
+        auto const split = co_await core::net::testing::waitUntil(
+            &h->loop, [h] { return !h->layouts.empty() && h->layouts.back().tabs.front().root.isSplit(); });
+        REQUIRE(split);
+        auto const& shown = h->layouts.back().tabs.front();
+        race->previous = shown.activePane;
+        auto const other = shown.root.children[0].paneId == shown.activePane ? shown.root.children[1]
+                                                                             : shown.root.children[0];
+        race->activated = other.paneId;
+        auto const seen = h->layouts.size();
+        auto const delivery =
+            h->client->editTab({ .session = other.session, .kind = proto::TabEditKind::ActivatePane });
+        CHECK(delivery == vthost::client::Delivery::Sent);
+        // Before the daemon reads the edit: it pushes a layout with the old pane active.
+        h->host.model().setTabTitle(tabId, "racing");
+        co_await core::net::testing::waitUntil(&h->loop, [h, race, seen] {
+            return h->layouts.size() > seen + 1 && h->layouts.back().tabs.front().title == "racing"
+                   && h->layouts.back().tabs.front().activePane == race->activated;
+        });
+        race->pushes.assign(h->layouts.begin() + static_cast<std::ptrdiff_t>(seen), h->layouts.end());
+        h->client->detach();
+    }(&h, tabId, &race);
+    h.drive(std::move(scenario));
+    return race;
+}
+} // namespace
+
+TEST_CASE("a pane the client activates stays active over a push the daemon composed before it",
+          "[vthost][attach][tab-edit-acks][daemon]")
+{
+    auto capabilities = thinClientCapabilities();
+    capabilities.idents.push_back(std::to_underlying(proto::Capability::TabEditAcks));
+    auto const race = raceFocusAgainstTitle(std::move(capabilities));
+
+    REQUIRE(race.activated != race.previous);
+    REQUIRE(race.pushes.size() >= 2);
+    for (auto const& push: race.pushes)
+    {
+        CHECK(push.tabs.front().activePane == race.activated);
+        CHECK(push.servedEdit.has_value());
+    }
+}
+
+TEST_CASE("a client without TabEditAcks gets the daemon's pushes as they were",
+          "[vthost][attach][tab-edit-acks][compat][daemon]")
+{
+    // An older client, a newer daemon: no push carries the field, and the stale one undoes the edit until the
+    // echo, as it always did.
+    auto const race = raceFocusAgainstTitle(thinClientCapabilities());
+
+    REQUIRE(race.pushes.size() >= 2);
+    CHECK(race.pushes.front().tabs.front().activePane == race.previous);
+    CHECK(race.pushes.back().tabs.front().activePane == race.activated);
+    for (auto const& push: race.pushes)
+        CHECK_FALSE(push.servedEdit.has_value());
+}
+
+TEST_CASE("against a daemon without TabEditAcks a push is shown as it came",
+          "[vthost][attach][tab-edit-acks][compat]")
+{
+    // A newer client, an older daemon: it shares TabEdits but stamps nothing, so nothing is kept in force --
+    // nor left waiting for an acknowledgement that never comes.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto layouts = std::vector<proto::LayoutState> {};
+    auto capabilities = thinClientCapabilities();
+    capabilities.idents.push_back(std::to_underlying(proto::Capability::TabEditAcks));
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions { .capabilities = std::move(capabilities) },
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       [&layouts](proto::LayoutState const& layout) { layouts.push_back(layout); } };
+    auto split = proto::WirePane { .paneId = 10, .split = 2 };
+    split.children = { proto::WirePane { .paneId = 11, .session = 1 },
+                       proto::WirePane { .paneId = 12, .session = 2 } };
+    auto const layout =
+        proto::LayoutState { .window = 1,
+                             .activeTab = 0,
+                             .tabs = { proto::WireTab { .tabId = 1, .activePane = 11, .root = split } } };
+    auto const answer = [layout](proto::DecodedFrame const& frame) -> Script {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return { { std::nullopt,
+                       acceptingHello(proto::CapabilitySet::of({ proto::Capability::TabEdits })) },
+                     { 0, layout } };
+        // The edit arrives after a push the daemon had already composed: the old pane still active.
+        if (std::holds_alternative<proto::EditTab>(frame.pdu))
+            return { { 0, layout } };
+        return {};
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::LayoutState> const* layouts) -> Task<void> {
+        auto const attached = co_await core::net::testing::waitUntil(loop, [&] { return !layouts->empty(); });
+        REQUIRE(attached);
+        std::ignore = client->editTab({ .session = 2, .kind = proto::TabEditKind::ActivatePane });
+        co_await core::net::testing::waitUntil(loop, [&] { return layouts->size() == 2; });
+        client->detach();
+    }(&loop, &client, &layouts);
+    loop.blockOn(
+        core::net::testing::allOf(client.run(),
+                                  scriptedDaemon(&loop, daemonSocket, answer, &seen),
+                                  guardScenario(&loop, [&client] { client.detach(); }, std::move(scenario))));
+
+    REQUIRE(layouts.size() == 2);
+    CHECK(layouts.back() == layout);
+    CHECK(std::ranges::any_of(seen, carries<proto::EditTab>));
 }

@@ -19,13 +19,56 @@ namespace
     /// LeftArrow), for two reasons: a second key-name table would be one more thing to keep in step
     /// with the first, and the config's own vocabulary is the more useful one to show — a user who
     /// wants to REBIND what the palette just taught them types exactly this name into `input_mapping:`.
-    [[nodiscard]] std::string inputText(ShortcutInput input)
+    [[nodiscard]] std::string inputText(ShortcutInput input, ShortcutStyle style)
     {
         return std::visit(core::Overloaded {
-                              [](vtbackend::Key key) { return std::format("{}", key); },
+                              [style](vtbackend::Key key) {
+                                  if (style == ShortcutStyle::MacGlyphs)
+                                      if (auto const row = std::ranges::find(
+                                              ShortcutKeyGlyphTable, key, &ShortcutKeyGlyphRow::key);
+                                          row != ShortcutKeyGlyphTable.end())
+                                          return std::string { row->glyph };
+                                  return std::format("{}", key);
+                              },
                               [](char32_t ch) { return unicode::convert_to<char>(ch); },
                           },
                           input);
+    }
+
+    /// Whether @p preference shows @p candidate rather than @p shown, for one command.
+    [[nodiscard]] bool prefers(ChordPreference preference,
+                               ShortcutChord const& candidate,
+                               ShortcutChord const& shown)
+    {
+        switch (preference)
+        {
+            case ChordPreference::FirstBound: return false;
+            case ChordPreference::CommandKey:
+                return candidate.modifiers.test(vtbackend::Modifier::Super)
+                       && !shown.modifiers.test(vtbackend::Modifier::Super);
+        }
+        return false;
+    }
+
+    /// Indexes one binding into @p target, under @p preference where the command already has a chord.
+    template <typename Input>
+    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
+                      ChordPreference preference,
+                      ChordIndex& target)
+    {
+        // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
+        // would do all of the others too, so advertising it next to a single command would be a lie.
+        if (binding.binding.size() != 1)
+            return;
+
+        // First binding wins, so a command bound twice renders under its first (config-order)
+        // shortcut rather than flip-flopping between them -- unless the platform prefers a later one: a
+        // Mac menu shows the ⌘ chord where one is bound.
+        auto const chord =
+            ShortcutChord { .modifiers = binding.modifiers, .input = ShortcutInput { binding.input } };
+        auto const [entry, inserted] = target.try_emplace(commandId(binding.binding.front()), chord);
+        if (!inserted && prefers(preference, chord, entry->second))
+            entry->second = chord;
     }
 
     /// Indexes one half of the input mappings (the key half or the char half) into @p target.
@@ -34,26 +77,12 @@ namespace
     /// restating it — the only thing that differs between them is which member of ShortcutInput the
     /// binding's `input` lands in, and the variant absorbs that.
     template <typename Input>
-    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
-                      std::unordered_map<std::string, std::string>& target)
-    {
-        // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
-        // would do all of the others too, so advertising it next to a single command would be a lie.
-        if (binding.binding.size() != 1)
-            return;
-
-        // First binding wins, so a command bound twice renders under its first (config-order)
-        // shortcut rather than flip-flopping between them.
-        target.try_emplace(commandId(binding.binding.front()),
-                           shortcutText(binding.modifiers, ShortcutInput { binding.input }));
-    }
-
-    template <typename Input>
     void indexBindings(std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings,
-                       std::unordered_map<std::string, std::string>& target)
+                       ChordPreference preference,
+                       ChordIndex& target)
     {
         for (auto const& binding: bindings)
-            indexBinding(binding, target);
+            indexBinding(binding, preference, target);
     }
 
     /// Indexes the enabled built-in rows of one table whose chord @p userBindings leaves unbound.
@@ -61,7 +90,8 @@ namespace
     void indexFallbacks(std::vector<config::FallbackMapping<Input>> const& rows,
                         std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& userBindings,
                         config::Config const& config,
-                        std::unordered_map<std::string, std::string>& target)
+                        ChordPreference preference,
+                        ChordIndex& target)
     {
         for (auto const& row: rows)
         {
@@ -69,12 +99,12 @@ namespace
                 return binding.modifiers == row.mapping.modifiers && binding.input == row.mapping.input;
             });
             if (row.enabled(config) && !shadowed)
-                indexBinding(row.mapping, target);
+                indexBinding(row.mapping, preference, target);
         }
     }
 } // namespace
 
-std::string modifiersText(vtbackend::Modifiers modifiers)
+std::string modifiersText(vtbackend::Modifiers modifiers, ShortcutStyle style)
 {
     auto result = std::string {};
 
@@ -82,49 +112,95 @@ std::string modifiersText(vtbackend::Modifiers modifiers)
     {
         if (!modifiers.test(row.modifier))
             continue;
+        if (style == ShortcutStyle::MacGlyphs && !row.glyph.empty())
+        {
+            result += row.glyph;
+            continue;
+        }
         result += row.name;
         result += '+';
     }
     return result;
 }
 
-std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input)
+std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input, ShortcutStyle style)
 {
-    return modifiersText(modifiers) + inputText(input);
+    return modifiersText(modifiers, style) + inputText(input, style);
 }
 
-std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings const& mappings)
+std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style)
 {
-    auto result = std::unordered_map<std::string, std::string> {};
+    return shortcutText(chord.modifiers, chord.input, style);
+}
+
+ChordIndex chordIndex(config::InputMappings const& mappings, ChordPreference preference)
+{
+    auto result = ChordIndex {};
 
     // Mouse bindings are deliberately not indexed: the palette's shortcut column teaches the user what
     // to TYPE, and "Ctrl+Left-click" is not that.
-    indexBindings(mappings.keyMappings, result);
-    indexBindings(mappings.charMappings, result);
+    indexBindings(mappings.keyMappings, preference, result);
+    indexBindings(mappings.charMappings, preference, result);
 
     return result;
 }
 
-std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config)
+ChordIndex chordIndex(config::Config const& config, ChordPreference preference)
 {
     auto const& mappings = config.inputMappings.value();
-    auto result = shortcutIndex(mappings);
-    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, result);
-    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, result);
+    auto result = chordIndex(mappings, preference);
+    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, preference, result);
+    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, preference, result);
     return result;
 }
 
-std::string describeLinkGesture(config::Config const& config)
+namespace
+{
+    [[nodiscard]] std::unordered_map<std::string, std::string> renderChords(ChordIndex const& chords,
+                                                                            ShortcutStyle style)
+    {
+        auto result = std::unordered_map<std::string, std::string> {};
+        for (auto const& [id, chord]: chords)
+            result.emplace(id, shortcutText(chord, style));
+        return result;
+    }
+} // namespace
+
+std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings const& mappings,
+                                                           ShortcutStyle style)
+{
+    return renderChords(chordIndex(mappings), style);
+}
+
+std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config, ShortcutStyle style)
+{
+    return renderChords(chordIndex(config), style);
+}
+
+std::string describeLinkGesture(config::Config const& config, ShortcutStyle style)
 {
     auto const follow = config::followHyperlinkModifiers(config);
     if (!follow)
         return "No mouse binding follows links (input_mapping has no FollowHyperlink)";
-    auto plain = modifiersText(*follow) + "Click";
+    auto plain = modifiersText(*follow, style) + "Click";
     auto const bypass = config.bypassMouseProtocolModifiers.value();
     if (bypass == vtbackend::Modifiers {})
         return plain;
     return std::format(
-        "{} ({}{} inside applications that use the mouse)", plain, modifiersText(bypass), plain);
+        "{} ({}Click inside applications that use the mouse)", plain, modifiersText(*follow | bypass, style));
+}
+
+std::string linkOpenHint(std::optional<vtbackend::Modifiers> follow,
+                         vtbackend::Modifiers bypass,
+                         ShortcutStyle style)
+{
+    if (!follow)
+        return {};
+    // The glyph style reads as a gesture, "⌘-click"; the text style as the shortcut column spells a chord.
+    auto const click =
+        style == ShortcutStyle::MacGlyphs ? std::string_view { "-click" } : std::string_view { "Click" };
+    // One set, so the modifiers read in the table's order whichever side they came from, and none twice.
+    return std::format("{}{} to open", modifiersText(*follow | bypass, style), click);
 }
 
 } // namespace contour::command

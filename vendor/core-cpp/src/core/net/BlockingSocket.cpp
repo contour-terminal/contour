@@ -3,6 +3,7 @@
 
 #include <core/net/SocketContract.hpp>
 #include <core/net/detail/BlockingPrimitives.hpp>
+#include <core/net/detail/StreamSocketOptions.hpp>
 
 #include <expected>
 #include <string>
@@ -106,6 +107,13 @@ void BlockingSocket::setReceiveDeadline(std::chrono::milliseconds deadline) noex
 {
     if (!_closed)
         detail::setIoTimeout(_socket, detail::IoDirection::Receive, deadline);
+}
+
+std::expected<void, NetError> BlockingSocket::armKeepAlive(KeepAliveSettings const& settings)
+{
+    if (_closed)
+        return std::unexpected(closedSocket("armKeepAlive"));
+    return detail::armKeepAlive(_socket, settings);
 }
 
 void BlockingSocket::setSendDeadline(std::chrono::milliseconds deadline) const noexcept

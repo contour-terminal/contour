@@ -79,6 +79,9 @@ class BlockingSocket final: public ISocket
     /// the option itself reads zero.
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override;
 
+    /// @copydoc ISocket::armKeepAlive
+    [[nodiscard]] std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings) override;
+
     /// Bounds how long one write may block (`SO_SNDTIMEO`); non-positive removes the bound.
     /// @param deadline How long a single send may block.
     void setSendDeadline(std::chrono::milliseconds deadline) const noexcept;

@@ -162,7 +162,7 @@ TEST_CASE("captureScreen: words mode splits the payload one word per line", "[ca
                                        "\033^314;\033\\" };
     auto settings = contour::cli::CaptureSettings {};
     settings.words = true;
-    settings.logicalLines = true;
+    settings.lineMode = vtbackend::CaptureLineMode::Logical;
 
     auto out = std::ostringstream {};
     CHECK(contour::cli::captureScreen(settings, transport, out));

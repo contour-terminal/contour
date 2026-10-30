@@ -68,6 +68,14 @@ enum class DisplayOccasion : uint8_t
     Invisible, ///< Only display when terminal window is not visible.
 };
 
+/// Whether a notification makes a sound when the desktop raises it.
+enum class NotificationSound : uint8_t
+{
+    DesktopDefault = 0, ///< Whatever the desktop does for a notification of its own accord.
+    Silent,             ///< Raised without a sound.
+    Chime,              ///< Raised with the desktop's notification sound.
+};
+
 /// Represents a single OSC 99 desktop notification with all parsed metadata.
 struct DesktopNotification
 {
@@ -77,6 +85,10 @@ struct DesktopNotification
     std::string applicationName;                               ///< Application name for display (`f=`).
     NotificationUrgency urgency = NotificationUrgency::Normal; ///< Urgency level (`u=`).
     DisplayOccasion occasion = DisplayOccasion::Always;        ///< Display occasion filter (`o=`).
+    /// The sound the notification makes. Never carried by OSC 99, so the parser leaves it
+    /// DesktopDefault and it does not travel over the daemon wire: only Contour's own notices (a
+    /// finished command) set it, GUI-side.
+    NotificationSound sound = NotificationSound::DesktopDefault;
     int timeout = -1;                 ///< Auto-close timeout in ms (`w=`), -1 = server default.
     bool closeEventRequested = false; ///< Report close events back (`c=1`).
     bool focusOnActivation = true;    ///< Focus terminal on click (`a` contains `focus`).

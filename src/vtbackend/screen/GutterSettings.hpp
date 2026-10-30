@@ -122,6 +122,16 @@ inline constexpr int MinBlockColumnWidth = 1;
 /// centred; a fold control two cells wide is as tall as the row already allows.
 inline constexpr int MaxBlockColumnWidth = 2;
 
+/// How the block column is drawn: in cells, or as a pixel strip beside them.
+///
+/// A chrome decision rather than a configuration key: contour's chrome row picks it, and this header holds
+/// it so that both the configuration and the terminal can name it.
+enum class BlockColumnForm : uint8_t
+{
+    Glyphs = 0, ///< The private-use glyph column, in cells after the line numbers.
+    Rail,       ///< A strip of fixed pixel width after the cells, holding the block rail.
+};
+
 /// What hovering a fold does to its column's strokes, beside bringing them to full strength.
 enum class FoldHoverStroke : uint8_t
 {
@@ -169,6 +179,10 @@ struct GutterSettings
     /// What hovering a fold does to its strokes (`gutter.bold_on_hover`, converted at the boundary).
     FoldHoverStroke hoverStroke = FoldHoverStroke::Unchanged;
 
+    /// How the block column is drawn: in cells, or as the rail's pixel strip after them. From the chrome row,
+    /// not the YAML: @c blockColumnWidth applies to the glyph cells only.
+    BlockColumnForm blockColumnForm = BlockColumnForm::Glyphs;
+
     bool operator==(GutterSettings const&) const = default;
 };
 
@@ -182,6 +196,13 @@ struct GutterSegment
     bool operator==(GutterSegment const&) const = default;
 };
 
+/// Whether the gutter has the block rail's pixel strip after its cells.
+enum class BlockRailPresence : uint8_t
+{
+    Absent = 0, ///< No strip: the block column, if any, is cells.
+    Present,    ///< The strip, whose width is the chrome's, not a number of cells.
+};
+
 /// The gutter's segments in drawing order, and the width they add up to.
 ///
 /// One description of the strip for whatever reserves, hit-tests or paints it: read from one place, the
@@ -193,6 +214,10 @@ struct GutterLayout
     /// The format the timestamp segment spells, as resolveTimestampFormat() picked it; empty without that
     /// segment. Carried here so a painter never resolves, or validates, the configured format again.
     std::string timestampFormat;
+
+    /// Whether the block rail's strip follows the cells: under BlockColumnForm::Rail, exactly when any of
+    /// the block column's three jobs is on. Not counted in @ref totalColumns.
+    BlockRailPresence rail = BlockRailPresence::Absent;
 
     /// The segments present, left to right.
     [[nodiscard]] std::span<GutterSegment const> segments() const noexcept
@@ -216,6 +241,13 @@ struct GutterLayout
     std::array<GutterSegment, static_cast<std::size_t>(GutterSegmentKind::Count)> _segments {};
     std::size_t _segmentCount = 0; ///< How many of _segments are present.
 };
+
+/// Whether @p settings draw the block rail's strip: under BlockColumnForm::Rail, exactly when any of the
+/// block column's three jobs is on. What gutterLayoutFor() reports as GutterLayout::rail, without building
+/// a layout.
+/// @param settings What the gutter shows.
+/// @return Present or Absent.
+[[nodiscard]] BlockRailPresence railPresenceFor(GutterSettings const& settings) noexcept;
 
 /// The layout @p settings ask for.
 ///

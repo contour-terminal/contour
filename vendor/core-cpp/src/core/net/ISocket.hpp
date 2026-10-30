@@ -21,6 +21,8 @@
 
 #include <core/net/IoAwaitable.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/KeepAlive.hpp>
+#include <core/net/NetError.hpp>
 #include <core/net/SocketContract.hpp>
 
 #include <chrono>
@@ -287,6 +289,40 @@ class ISocket
     /// is ONE deadline mechanism in this library and a receive deadline is a consumer of it.
     /// @param deadline How long a read may wait; non-positive removes the bound entirely.
     virtual void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept;
+
+    /// Arms TCP keepalive on THIS connection, with the intervals @p settings names.
+    ///
+    /// **For a server to call on a socket its listener accepted, once it decides the connection is
+    /// long-lived** -- when it starts holding it on a peer's behalf. @c DialOptions::keepAlive arms a
+    /// socket this process dials; an accepted one had no way to, so a server holding a connection for
+    /// the length of a long job could not notice that the peer's HOST had vanished (lid closed, power
+    /// lost, cable pulled) until TCP retransmission gave up, because such a host sends no FIN and no
+    /// RST. It is a per-socket call rather than a listener option because most accepted connections
+    /// are short, and arming those would only add probes to connections that end first.
+    ///
+    /// It applies exactly what the dial side applies (one shared helper), so the intervals-first,
+    /// flag-last order and the Windows note on @c KeepAliveSettings::count hold here too.
+    ///
+    /// **The probes end the connection like any other broken socket**: a pending or later read
+    /// resolves with the OS's error, which classifies as @c NetErrorCode::ConnReset or
+    /// @c NetErrorCode::Timeout (`ETIMEDOUT`/`WSAETIMEDOUT`) -- a caller cannot tell an expiry from a
+    /// reset by anything but that code and @c NetError::systemCode, exactly as on a dialled socket,
+    /// which records no cause of its own either.
+    ///
+    /// **The default answers @c NetErrorCode::Unsupported**, a refusal rather than a silent success:
+    /// a transport with no TCP connection under it (an in-process pipe, a decorator that forgot to
+    /// forward) cannot probe anything, and a server that asked deserves to hear so. Every decorator
+    /// in this library forwards it.
+    ///
+    /// **Threading: call it on the socket's loop thread, like every other member.** It reads
+    /// `_closed` and the handle that @c close writes, and takes no lock to do it -- so a call from
+    /// another thread races @c close, and may arm a descriptor that has just been closed (and
+    /// possibly reused).
+    /// @param settings The probe intervals; @c KeepAliveSettings::count is ignored on Windows.
+    /// @return Nothing on success; @c NetErrorCode::BadHandle on a closed socket; otherwise the
+    ///         classified OS error of the option the platform refused (an AF_UNIX socket has none
+    ///         to give).
+    [[nodiscard]] virtual std::expected<void, NetError> armKeepAlive(KeepAliveSettings const& settings);
 
     /// @return The remote peer's printable address ("127.0.0.1", "::1"), or "" if unknown (an
     ///         in-memory transport).

@@ -331,6 +331,15 @@ class Line
         return _storage.widths[unbox<size_t>(column)];
     }
 
+    /// Whether the cell at @p column is the right half of a wide glyph drawn from the column before it.
+    /// @param column Any column; one outside the line continues nothing.
+    [[nodiscard]] bool continuesAWideGlyphAt(ColumnOffset column) const noexcept
+    {
+        if (isBlank() || column < ColumnOffset(0) || column >= boxed_cast<ColumnOffset>(size()))
+            return false;
+        return _storage.sgr[unbox<size_t>(column)].flags.test(CellFlag::WideCharContinuation);
+    }
+
     [[nodiscard]] LineFlags flags() const noexcept { return _flags; }
     [[nodiscard]] LineFlags& flags() noexcept
     {

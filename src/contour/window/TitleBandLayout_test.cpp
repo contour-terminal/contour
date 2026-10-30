@@ -1,0 +1,376 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <contour/config/ChromeTokenRows.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <ranges>
+#include <span>
+
+using namespace contour::window;
+using contour::config::ChromeDensity;
+using contour::config::TabBarPosition;
+using contour::config::TabShape;
+
+namespace
+{
+
+struct BandCase
+{
+    TitleBandInputs inputs;
+    TitleBand expected;
+};
+
+constexpr auto Pill = TabShape::Pill;
+constexpr auto Flat = TabShape::Flat;
+constexpr auto Joined = TabShape::Joined;
+constexpr auto ClientBand = WindowFrame::ClientBand;
+constexpr auto NativeFrame = WindowFrame::NativeFrame;
+constexpr auto Windowed = WindowMode::Windowed;
+constexpr auto GateHidden = TabStripGate::Hidden;
+constexpr auto GateShown = TabStripGate::Shown;
+constexpr auto Top = TabBarPosition::Top;
+constexpr auto Bottom = TabBarPosition::Bottom;
+
+// One row per R-e rule, under both gates and both edges where the rule reads them.
+constexpr auto BandCases = std::array {
+    // Pill on a client band: the band is always shown at the top, for the traffic lights (D1).
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    // Pill with the tabs at the bottom: the title band stays on top, the tabs get their own bar (D6).
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Bottom },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    // Flat on a client band: the band is the strip, per the gate, at its edge (today).
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    // Joined on a client band: the tabs are the title bar, so the band always shows, holding the caption
+    // buttons -- and its tabs, one tab being still a tab (R-j). With the tabs at the bottom it is Pill's
+    // band: the title on top, the tabs in a bar of their own (Q3).
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    // A native frame: no band of ours, the strip per the gate at its edge, whatever the shape.
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+};
+
+constexpr auto FullScreen = WindowMode::FullScreen;
+constexpr auto Interrupted = HostNotice::Interrupted;
+
+// In full screen a band shown at the top reveals on the edge (D3); a bottom band and the tab bar stay as
+// they are windowed. A remote window whose connection is interrupted keeps its top band pinned instead,
+// overlaying the top rows: its chip is all that says why the screen stopped.
+constexpr auto FullScreenCases = std::array {
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateHidden, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Bottom },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Pill, ClientBand, FullScreen, GateHidden, Bottom },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, FullScreen, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, FullScreen, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Top, Interrupted },
+               { BarPresence::Pinned, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Top, Interrupted },
+               { BarPresence::Pinned, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+};
+
+// A remote window whose connection is not up: wherever the band is the strip, it shows whatever the gate
+// says, since it is the host chip's home (R-d). The Pill band on a client band shows anyway.
+constexpr auto InterruptedCases = std::array {
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Joined, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+};
+
+/// @return Whether @p cases holds a row for @p inputs.
+[[nodiscard]] bool hasRowFor(std::span<BandCase const> cases, TitleBandInputs const& inputs)
+{
+    return std::ranges::any_of(cases, [&](BandCase const& row) {
+        return row.inputs.shape == inputs.shape && row.inputs.frame == inputs.frame
+               && row.inputs.mode == inputs.mode && row.inputs.strip == inputs.strip
+               && row.inputs.position == inputs.position && row.inputs.notice == inputs.notice;
+    });
+}
+
+/// @return @p inputs under @p density.
+[[nodiscard]] constexpr TitleBandInputs withDensity(TitleBandInputs inputs, ChromeDensity density) noexcept
+{
+    inputs.density = density;
+    return inputs;
+}
+
+} // namespace
+
+TEST_CASE("titleBand.rules", "[titleband]")
+{
+    for (auto const& [inputs, expected]: BandCases)
+    {
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(resolveTitleBand(inputs) == expected);
+    }
+    static_assert(resolveTitleBand({}) == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs });
+}
+
+TEST_CASE("titleBand.casesCoverEveryInput", "[titleband]")
+{
+    // Every windowed input has a row above: a rule change cannot slip past the table.
+    detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        if (inputs.mode != Windowed)
+            return;
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
+                      << int(inputs.notice));
+        CHECK(hasRowFor(inputs.notice == HostNotice::None ? std::span<BandCase const> { BandCases }
+                                                          : std::span<BandCase const> { InterruptedCases },
+                        inputs));
+    });
+}
+
+TEST_CASE("titleBand.anInterruptedConnectionShowsTheStrip", "[titleband]")
+{
+    for (auto const& [inputs, expected]: InterruptedCases)
+    {
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(resolveTitleBand(inputs) == expected);
+    }
+    // In full screen the forced band stays pinned rather than revealing on the edge: nothing else says why
+    // the screen stopped.
+    CHECK(resolveTitleBand({ Flat, ClientBand, FullScreen, GateHidden, Top, Interrupted }).band
+          == BarPresence::Pinned);
+}
+
+TEST_CASE("titleBand.fullScreenReveals", "[titleband]")
+{
+    for (auto const& [inputs, expected]: FullScreenCases)
+    {
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(resolveTitleBand(inputs) == expected);
+    }
+}
+
+TEST_CASE("titleBand.minimalBareBand", "[titleband]")
+{
+    // One tab under Minimal: the Pill band stays for the traffic lights, its middle empty (R-f).
+    auto const bare = TitleBandInputs { .shape = Pill,
+                                        .frame = ClientBand,
+                                        .mode = Windowed,
+                                        .strip = GateHidden,
+                                        .position = Top,
+                                        .density = ChromeDensity::Minimal };
+    CHECK(resolveTitleBand(bare)
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+    // In full screen there are no traffic lights to carry: the empty band stays hidden rather than sliding a
+    // strip of nothing over the top rows (M1)...
+    auto full = bare;
+    full.mode = FullScreen;
+    CHECK(resolveTitleBand(full)
+          == TitleBand { BarPresence::Hidden, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+    // ...unless the connection is interrupted: then it stays pinned, for the host chip.
+    full.notice = Interrupted;
+    CHECK(resolveTitleBand(full)
+          == TitleBand { BarPresence::Pinned, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+
+    // With the gate shown, Minimal resolves as Comfortable.
+    auto shown = bare;
+    shown.strip = GateShown;
+    CHECK(resolveTitleBand(shown) == resolveTitleBand(withDensity(shown, ChromeDensity::Comfortable)));
+
+    // Every Flat row and every native-frame row answers alike in both densities.
+    detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        if (inputs.shape != Flat && inputs.frame != NativeFrame)
+            return;
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
+                      << int(inputs.notice));
+        for (auto const density: std::views::iota(size_t { 0 }, contour::config::ChromeDensityCount))
+            CHECK(resolveTitleBand(withDensity(inputs, static_cast<ChromeDensity>(density)))
+                  == resolveTitleBand(withDensity(inputs, ChromeDensity::Comfortable)));
+    });
+}
+
+TEST_CASE("titleBand.joinedKeepsItsBar", "[titleband]")
+{
+    // One tab under Multiple: the joined band still shows, its one tab with it (R-j).
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateHidden, Top })
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden });
+    // The tabs at the bottom: Pill's answer, whose centre is the title, since the tabs have a bar of their
+    // own there (Q3).
+    CHECK(resolveTitleBand({ Joined, ClientBand, Windowed, GateShown, Bottom })
+          == resolveTitleBand({ Pill, ClientBand, Windowed, GateShown, Bottom }));
+    // Under a native frame the band is the strip, as on Flat.
+    CHECK(resolveTitleBand({ Joined, NativeFrame, Windowed, GateShown, Top })
+          == resolveTitleBand({ Flat, NativeFrame, Windowed, GateShown, Top }));
+    // Full screen turns a top band into one revealed on the edge, as for every shape.
+    CHECK(resolveTitleBand({ Joined, ClientBand, FullScreen, GateHidden, Top }).band
+          == BarPresence::RevealOnEdge);
+
+    // Minimal with one tab: Pill's bare band, which still carries the caption buttons (Q3), and Pill's
+    // answer in full screen.
+    for (auto const mode: { Windowed, FullScreen })
+        for (auto const notice: { HostNotice::None, Interrupted })
+        {
+            auto const joined = TitleBandInputs { .shape = Joined,
+                                                  .frame = ClientBand,
+                                                  .mode = mode,
+                                                  .strip = GateHidden,
+                                                  .position = Top,
+                                                  .notice = notice,
+                                                  .density = ChromeDensity::Minimal };
+            auto pill = joined;
+            pill.shape = Pill;
+            CHECK(resolveTitleBand(joined) == resolveTitleBand(pill));
+        }
+}
+
+TEST_CASE("titleBand.rowOverload", "[titleband]")
+{
+    // The row overload fills the row's side -- tab shape and density -- whatever the inputs said of it.
+    auto const window = TitleBandInputs { .shape = Flat, .strip = GateHidden };
+    CHECK(resolveTitleBand(TitleBandRow { .shape = Pill, .density = ChromeDensity::Minimal }, window).centre
+          == BarCentre::Empty);
+    CHECK(
+        resolveTitleBand(TitleBandRow { .shape = Pill, .density = ChromeDensity::Comfortable }, window).centre
+        == BarCentre::Title);
+    CHECK(resolveTitleBand(TitleBandRow { .shape = Flat, .density = ChromeDensity::Minimal }, window).band
+          == BarPresence::Hidden);
+}
+
+TEST_CASE("titleBand.unifiedHeaderBarIsTheStrip", "[titleband]")
+{
+    // The Linux header bar follows the strip's rules (Q1), its pills notwithstanding; a band row keeps its
+    // shape.
+    using contour::config::HeaderBarArrangement;
+    auto const& linuxLayout =
+        contour::config::ChromeTokenRows[static_cast<size_t>(contour::config::ChromeStyle::ContourLinux)]
+            .layout;
+    REQUIRE(linuxLayout.headerBar == HeaderBarArrangement::Unified);
+    CHECK(titleBandRowOf(linuxLayout, ChromeDensity::Minimal).shape == Flat);
+    auto const window = TitleBandInputs { .strip = GateHidden };
+    // One tab under Multiple: no bar, under either density -- never Minimal's bare band.
+    for (auto const density: { ChromeDensity::Comfortable, ChromeDensity::Minimal })
+        CHECK(resolveTitleBand(titleBandRowOf(linuxLayout, density), window).band == BarPresence::Hidden);
+    auto const& macLayout =
+        contour::config::ChromeTokenRows[static_cast<size_t>(contour::config::ChromeStyle::MacOS)].layout;
+    CHECK(titleBandRowOf(macLayout, ChromeDensity::Comfortable).shape == Pill);
+}
+
+TEST_CASE("titleBand.names", "[titleband]")
+{
+    constexpr auto PresenceNames = std::array { "hidden", "shown", "reveal", "pinned" };
+    constexpr auto EdgeNames = std::array { "top", "bottom" };
+    constexpr auto CentreNames = std::array { "empty", "tabs", "title" };
+    REQUIRE(PresenceNames.size() == BarPresenceCount);
+    REQUIRE(EdgeNames.size() == BarEdgeCount);
+    REQUIRE(CentreNames.size() == BarCentreCount);
+    for (auto const i: std::views::iota(size_t { 0 }, BarPresenceCount))
+        CHECK(barPresenceName(BarPresence(i)) == PresenceNames[i]);
+    for (auto const i: std::views::iota(size_t { 0 }, BarEdgeCount))
+        CHECK(barEdgeName(BarEdge(i)) == EdgeNames[i]);
+    for (auto const i: std::views::iota(size_t { 0 }, BarCentreCount))
+        CHECK(barCentreName(BarCentre(i)) == CentreNames[i]);
+}

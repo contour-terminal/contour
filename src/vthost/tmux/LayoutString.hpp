@@ -67,7 +67,10 @@ struct ParsedLayout
 /// @return The layout string, e.g. `b25f,160x50,0,0{80x50,0,0,1,79x50,81,0,2}`.
 [[nodiscard]] std::string encodeLayout(vtworkspace::Pane const& root, vtpty::PageSize area);
 
-/// Parses and validates a checksummed tmux layout string.
+/// Parses and validates a tmux layout string: the checksummed one, or tmux 3.8's JSON document
+/// (`{"V":2,"L":{"t":"h","w":160,"h":50,"x":0,"y":0,"c":[{"t":"p",...,"I":"%0"},...]}}`, which has no
+/// checksum). Floating panes of the JSON form (nodes with a `"z"` key) are left out of the tree: they sit
+/// above the tiled layout and take no part in its partition.
 ///
 /// Validation mirrors tmux's layout_check: within a container the children's
 /// split-axis extents must satisfy `sum(extent + 1) - 1 == parent extent` and
@@ -80,7 +83,7 @@ struct ParsedLayout
 /// count — and a string exceeding either is rejected like any other malformed one. Both limits sit
 /// far above any layout a terminal can display; @see the constants in the implementation for what a
 /// missing bound on each axis actually cost.
-/// @param text The layout string including its checksum prefix.
+/// @param text The layout string, including its checksum prefix unless it is the JSON form.
 /// @return The parsed n-ary tree, or a diagnostic message.
 [[nodiscard]] std::expected<ParsedLayout, std::string> parseLayout(std::string_view text);
 

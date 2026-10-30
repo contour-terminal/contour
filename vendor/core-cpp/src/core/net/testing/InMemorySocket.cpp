@@ -207,6 +207,14 @@ void InMemorySocket::cancelRead() noexcept
         parked->complete(std::unexpected(cancelledBy("cancelRead")));
 }
 
+std::expected<void, NetError> InMemorySocket::armKeepAlive(KeepAliveSettings const& settings)
+{
+    if (_closed)
+        return std::unexpected(closedSocket("armKeepAlive"));
+    _keepAliveRequests.push_back(settings);
+    return {};
+}
+
 ResultAwaitable<void> InMemorySocket::shutdownWrite()
 {
     // After `close` there is no write side left to shut, and each platform socket answers success

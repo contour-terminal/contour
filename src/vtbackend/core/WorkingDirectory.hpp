@@ -104,8 +104,33 @@ struct ResolvedWorkingDirectory
 /// path (`/home/bobby` against a home of `/home/bob`) is left alone rather than mangled into `~by`.
 ///
 /// @param path The absolute path to abbreviate.
-/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @param home The user's home directory, with or without a trailing separator. An empty value
+///             abbreviates nothing.
 /// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
 [[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
+
+/// The path @p directory reads as where it is SHOWN -- the pane header, the status line's `{Cwd}`:
+/// abbreviated as a shell prompt writes it, but only for a directory on this machine, because this
+/// machine's home says nothing about another machine's paths (an ssh shell's `/home/bob` is not `~`).
+///
+/// One function for every such surface, so two views of the same pane cannot disagree about it. Not made
+/// safe to show: the caller sanitizes, as it does any text it draws.
+///
+/// @param directory The resolved working directory.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return The path, home-abbreviated when @p directory is Local.
+[[nodiscard]] std::string homeAbbreviatedPath(ResolvedWorkingDirectory const& directory,
+                                              std::string_view home);
+
+/// The path @p path reads as where it is shown, by the rule of the overload above, for a directory known
+/// only by its path and locality -- a command block's snapshot, as a finish notification shows it.
+///
+/// @param path The absolute path.
+/// @param locality Whether @p path names this machine; only a Local one is abbreviated.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return The path, home-abbreviated when @p locality is Local.
+[[nodiscard]] std::string homeAbbreviatedPath(std::string_view path,
+                                              ContextLocality locality,
+                                              std::string_view home);
 
 } // namespace vtbackend

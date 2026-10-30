@@ -23,6 +23,17 @@ fi
 # The longest command line sent, in bytes: a little more than vtbackend::MaxRecordedCommandLineBytes.
 __contour_cmdline_max_bytes=4100
 
+# The machine OSC 7 names: gethostname(2), as the terminal names itself when it judges a directory local.
+# Not $HOSTNAME, which bash takes from the environment when one is inherited, however stale (a login
+# carried over from another machine, a container's image); its \H prompt escape is gethostname(2) as
+# bash read it at start-up. ${…@P} is bash 4.4; before it, uname -n, once, as the file is sourced.
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+    __contour_hostname='\H'
+    __contour_hostname=${__contour_hostname@P}
+else
+    __contour_hostname=$(uname -n 2>/dev/null) || __contour_hostname=$HOSTNAME
+fi
+
 # OSC 133;B as it sits at the end of PS1: \[ \] tell readline it takes no room on the line.
 __contour_prompt_end_mark='\[\e]133;B\e\\\]'
 
@@ -93,7 +104,7 @@ __contour_precmd() {
         __contour_encoded_pwd=$__contour_encoded
         __contour_encoded_pwd_of=$PWD
     fi
-    printf '\e[?2028l\e]7;file://%s%s\e\\\e]133;A\e\\' "$HOSTNAME" "$__contour_encoded_pwd"
+    printf '\e[?2028l\e]7;file://%s%s\e\\\e]133;A\e\\' "$__contour_hostname" "$__contour_encoded_pwd"
 
     # Keep the prompt-end mark the LAST precmd hook, so that a prompt framework which registered a
     # PS1-building hook of its own after this file was sourced (starship, oh-my-bash) cannot build over

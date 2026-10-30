@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
+
+#include <core/Environment.hpp>
+#include <core/Utils.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
+#include <core/testing/Environment.hpp>
+
+#include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -587,7 +601,7 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
         auto const& item = std::get<Extension>(segment[0]);
         CHECK(item.name == "git");
         REQUIRE(item.foregroundColor.has_value());
-        CHECK(*item.foregroundColor == RGBColor { 0xFF, 0x00, 0x00 });
+        CHECK(*item.foregroundColor == StatusLineDefinitions::ItemColor { RGBColor { 0xFF, 0x00, 0x00 } });
         CHECK(item.textLeft == "[");
     }
 
@@ -622,3 +636,987 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
         }
     }
 }
+
+// {{{ Role colours
+// A colour attribute names either a hex colour, drawn as written, or one of five scheme roles, resolved
+// against the terminal's palette each time the line is drawn -- so a role follows a scheme change.
+
+TEST_CASE("statusLine.colors.everyRoleParsesAndRoundTrips", "[statusline][colors]")
+{
+    using StatusLineDefinitions::ItemColor;
+    for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+    {
+        INFO(row.name);
+        CHECK(StatusLineDefinitions::parseItemColor(row.name) == ItemColor { row.role });
+        auto const upper = core::toUpper(row.name);
+        CHECK(StatusLineDefinitions::parseItemColor(upper) == ItemColor { row.role });
+        CHECK(StatusLineDefinitions::formatItemColor(ItemColor { row.role }) == row.name);
+    }
+
+    CHECK(StatusLineDefinitions::parseItemColor("#FF0000") == ItemColor { RGBColor { 0xFF, 0, 0 } });
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("magenta").has_value());
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("Yellow").has_value());
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("").has_value());
+}
+
+TEST_CASE("statusLine.colors.hexAndRolesMix", "[statusline][colors]")
+{
+    constexpr auto Mixed =
+        "{VTType:Color=#C0C030}{Clock:Color=muted}{Title:Color=#000000,BackgroundColor=accent}"sv;
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment(Mixed)) == Mixed);
+
+    // Written lowercase, whatever the spelling it was read with.
+    CHECK(canonical("{Clock:Color=Accent}"sv) == "{Clock:Color=accent}");
+
+    // A word that is neither a role nor a colour leaves the colour unset rather than turning it black.
+    auto const unknown = parseStatusLineSegment("{Clock:Color=magenta}"sv);
+    REQUIRE(unknown.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(unknown[0]));
+    CHECK_FALSE(std::get<StatusLineDefinitions::Clock>(unknown[0]).foregroundColor.has_value());
+}
+
+namespace
+{
+/// The SGR that selects @p color as the text colour.
+[[nodiscard]] std::string textSgrOf(RGBColor color)
+{
+    return std::format("\033[38:2:{}:{}:{}m", color.red, color.green, color.blue);
+}
+
+/// Draws every status-line bar of @p palette, whatever the focus and the input mode, on black.
+void paintEveryBarBlack(ColorPalette& palette)
+{
+    for (auto* const pair: { &palette.indicatorStatusLineInactive,
+                             &palette.indicatorStatusLineInsertMode,
+                             &palette.indicatorStatusLineNormalMode,
+                             &palette.indicatorStatusLineVisualMode })
+        pair->background = 0x000000_rgb;
+}
+} // namespace
+
+TEST_CASE("serializeToVT.roleIsResolvedWhenDrawn", "[statusline][colors]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    paintEveryBarBlack(mc.terminal.colorPalette());
+    mc.terminal.defaultColorPalette().palette[4] = 0x5599FF_rgb;
+    auto const segment = parseStatusLineSegment("{VTType:Color=accent}"sv);
+
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains(textSgrOf(0x5599FF_rgb)));
+
+    // A scheme change reaches the next frame: nothing resolved the role when the template was parsed.
+    mc.terminal.defaultColorPalette().palette[4] = 0xFFAA00_rgb;
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains(textSgrOf(0xFFAA00_rgb)));
+
+    // A role the bar would swallow gives way to the bar's legible ink: the scheme's better end on it.
+    mc.terminal.defaultColorPalette().palette[4] = 0x123456_rgb;
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled)
+              .contains(textSgrOf(legibleInkOn(mc.terminal.defaultColorPalette(), 0x000000_rgb))));
+
+    // A hex colour is the user's, drawn as written even where it does not read.
+    CHECK(serializeToVT(
+              mc.terminal, parseStatusLineSegment("{VTType:Color=#123456}"sv), StatusLineStyling::Enabled)
+              .contains(textSgrOf(0x123456_rgb)));
+}
+
+TEST_CASE("serializeToVT.rolesIgnoreTheProgramsPalette", "[statusline][colors]")
+{
+    // The status line is the host's chrome: OSC 4 recolours the program's own text, never the furniture.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    paintEveryBarBlack(mc.terminal.colorPalette());
+    mc.terminal.defaultColorPalette().palette[4] = 0x5599FF_rgb;
+    mc.terminal.defaultColorPalette().palette[8] = 0xA0A0A0_rgb;
+    mc.terminal.resetColorPalette();
+    paintEveryBarBlack(mc.terminal.colorPalette());
+
+    mc.writeToScreen("\033]4;4;rgb:ff/ff/00\033\\\033]4;8;rgb:00/00/00\033\\");
+    REQUIRE(mc.terminal.colorPalette().palette[4] == 0xFFFF00_rgb);
+
+    auto const line = serializeToVT(mc.terminal,
+                                    parseStatusLineSegment("{VTType:Color=accent}{Clock:Color=muted}"sv),
+                                    StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(0x5599FF_rgb)));
+    CHECK(line.contains(textSgrOf(0xA0A0A0_rgb)));
+    CHECK_FALSE(line.contains(textSgrOf(0xFFFF00_rgb)));
+}
+
+TEST_CASE("serializeToVT.roleReadsOnTheBarOfTheModeItIsDrawnIn", "[statusline][colors]")
+{
+    // The ground is the bar the line is drawn on now: vi Normal mode's, not the idle one's.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    REQUIRE(defaultColorPalettes("contour-dark", mc.terminal.defaultColorPalette()));
+    mc.terminal.resetColorPalette();
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+
+    auto const& palette = mc.terminal.defaultColorPalette();
+    auto const accent = StatusLineDefinitions::ItemColor { StatusLineDefinitions::ColorRole::Accent };
+    auto const onNormal = StatusLineDefinitions::resolveItemColor(
+        accent, palette, palette.indicatorStatusLineNormalMode.background);
+    auto const onInactive = StatusLineDefinitions::resolveItemColor(
+        accent, palette, palette.indicatorStatusLineInactive.background);
+    REQUIRE(onNormal != onInactive); // contour-dark's accent is its Normal bar: the fallback must show
+
+    auto const line = serializeToVT(
+        mc.terminal, parseStatusLineSegment("{VTType:Color=accent}"sv), StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(onNormal)));
+    CHECK_FALSE(line.contains(textSgrOf(onInactive)));
+}
+
+TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
+{
+    // The roles' own colours, before any fallback: the Contour schemes are designed for them on the idle bar.
+    for (auto const scheme: { "contour-dark"sv, "contour-light"sv })
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        auto const background = palette.indicatorStatusLineInactive.background;
+        for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+        {
+            INFO(scheme << ": " << row.name);
+            auto const ratio = contrastRatio(StatusLineDefinitions::roleColor(row.role, palette), background);
+            CHECK(ratio >= row.minimumContrast);
+        }
+    }
+}
+
+TEST_CASE("statusLine.colors.rolesReadOnEveryBar", "[statusline][colors]")
+{
+    // Resolved against the bar it is drawn on, every role reads on every bundled scheme's every bar.
+    for (auto const scheme: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        for (auto const& bar: { palette.indicatorStatusLineInactive,
+                                palette.indicatorStatusLineNormalMode,
+                                palette.indicatorStatusLineInsertMode,
+                                palette.indicatorStatusLineVisualMode })
+            for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+            {
+                INFO(scheme << ": " << row.name << " on " << formatColor(bar.background));
+                auto const ink = StatusLineDefinitions::resolveItemColor(
+                    StatusLineDefinitions::ItemColor { row.role }, palette, bar.background);
+                CHECK(contrastRatio(ink, bar.background) >= row.minimumContrast);
+            }
+    }
+}
+
+TEST_CASE("serializeToVT.lastCommandDurationKeepsMutedOnTheContourSchemes", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    for (auto const scheme: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO(scheme);
+        auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+        REQUIRE(defaultColorPalettes(scheme, mc.terminal.defaultColorPalette()));
+        mc.terminal.resetColorPalette();
+        test::typeAtPrompt(mc, "ctest");
+        mc.writeToScreen("\033]133;C\033\\");
+        mc.steadyClock.advance(134s);
+        mc.writeToScreen(test::commandEnd(0));
+        mc.writeToScreen("\033]133;A\033\\$ ");
+
+        auto const palette = mc.terminal.defaultColorPalette();
+        auto const line =
+            serializeToVT(mc.terminal, parseStatusLineSegment("{LastCommand}"sv), StatusLineStyling::Enabled);
+        CHECK(line.contains(textSgrOf(palette.indexedColor(8)) + " · 2m 14s"));
+    }
+}
+// }}}
+
+// {{{ {Cwd}
+namespace
+{
+/// The home directory every `{Cwd}` case below runs with, whatever the machine's own.
+constexpr auto TestHome = "/home/bob"sv;
+
+/// What `{Cwd}` shows once the shell has reported @p url (OSC 7), with @ref TestHome as the home.
+[[nodiscard]] std::string cwdAfterReporting(std::string_view url)
+{
+    auto const environment = core::testing::FakeEnvironment { { { "HOME", std::string { TestHome } } } };
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
+    mc.writeToScreen(std::format("\033]7;{}\033\\", url));
+    return serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled);
+}
+
+/// The width of @p text in columns, as the grid lays it out (mode 2027, which Contour keeps set).
+[[nodiscard]] int columnsOf(std::string_view text)
+{
+    return unbox<int>(columnsOnTheGrid(text, ClusterWidthPolicy::ClusterAware));
+}
+
+/// @p text repeated @p count times.
+[[nodiscard]] std::string repeated(std::string_view text, int count)
+{
+    auto result = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, count))
+        result += text;
+    return result;
+}
+
+constexpr auto Family = "\U0001F468\u200D\U0001F469\u200D\U0001F467"sv;
+constexpr auto Heart = "\u2764\uFE0F"sv;
+constexpr auto Flag = "\U0001F1E9\U0001F1EA"sv;
+constexpr auto DecomposedE = "e\u0301"sv;
+} // namespace
+
+TEST_CASE("serializeToVT.cwdShowsWhereTheShellIs", "[statusline][cwd]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled).empty());
+
+    CHECK(cwdAfterReporting("file:///srv/app") == "/srv/app");
+    // Shown though it is another machine's: the status line says where the user is.
+    CHECK(cwdAfterReporting("file://elsewhere.example/srv/app") == "/srv/app");
+
+    CHECK(cwdAfterReporting("file:///home/bob/repo/contour") == "~/repo/contour");
+    // This machine's home says nothing about another machine's paths, as the pane header has it.
+    CHECK(cwdAfterReporting("file://elsewhere.example/home/bob/x") == "/home/bob/x");
+}
+
+TEST_CASE("serializeToVT.cwdTakesTheHomeItIsGiven", "[statusline][cwd]")
+{
+    // The composition root's home (the GUI's QDir::homePath(), the pane header's) wins over the
+    // environment's, so the status line and the header above it abbreviate alike.
+    auto const environment = core::testing::FakeEnvironment { { { "HOME", "/elsewhere" } } };
+    auto settings = MockTerm<>::createSettings(PageSize { LineCount(3), ColumnCount(80) }, {}, 1024);
+    settings.homeDirectory = "/home/bob";
+    auto mc = MockTerm { std::move(settings), environment };
+    CHECK(mc.terminal.homeDirectory() == "/home/bob");
+    mc.writeToScreen("\033]7;file:///home/bob/src\033\\");
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled)
+          == "~/src");
+
+    // Without one, the environment's.
+    auto plain = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
+    CHECK(plain.terminal.homeDirectory() == "/elsewhere");
+}
+
+TEST_CASE("serializeToVT.cwdFindsAWindowsHome", "[statusline][cwd]")
+{
+    // Windows names the home USERPROFILE, not HOME.
+    auto const environment = core::testing::FakeEnvironment { { { "USERPROFILE", "/Users/bob" } } };
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
+    CHECK(mc.terminal.homeDirectory() == "/Users/bob");
+}
+
+TEST_CASE("serializeToVT.cwdWithATrailingSlash", "[statusline][cwd]")
+{
+    // A trailing separator names no further directory, so a long path elides to its last real one rather
+    // than to "/…/" or to nothing.
+    auto deep = std::string { "file://" };
+    for (auto const level: std::views::iota(0, 60))
+        deep += std::format("/d{}", level);
+    CHECK(cwdAfterReporting(deep + "/") == "/…/d59");
+    CHECK(cwdAfterReporting("file:///" + std::string(300, 'a') + "/").starts_with("…a"));
+    CHECK(cwdAfterReporting("file:///") == "/");
+}
+
+TEST_CASE("serializeToVT.cwdOfADeepOrBrokenPath", "[statusline][cwd]")
+{
+    auto deep = std::string { "file://" };
+    for (auto const level: std::views::iota(0, 60))
+        deep += std::format("/d{}", level);
+    CHECK(cwdAfterReporting(deep) == "/…/d59");
+
+    auto const wide = cwdAfterReporting("file:///" + std::string(300, 'a'));
+    CHECK(columnsOf(wide) <= 40);
+    CHECK(wide.starts_with("…"));
+
+    CHECK(cwdAfterReporting("file:///tmp/a%FFb") == "/tmp/a\uFFFDb");
+    CHECK_FALSE(cwdAfterReporting("file:///tmp/a%1Bb").contains('\033'));
+}
+
+TEST_CASE("serializeToVT.cwdElidesByGraphemeCluster", "[statusline][cwd]")
+{
+    // A long last component is cut at its start, a whole cluster at a time: never a base without its mark,
+    // never half a ZWJ sequence or flag, and measured as the grid draws it.
+    struct Row
+    {
+        std::string_view name;
+        std::string_view cluster;
+        int keptOf40; ///< Clusters kept after the "…" at the default MaxWidth of 40.
+    };
+    for (auto const& row: { Row { "CJK", "漢"sv, 19 },
+                            Row { "decomposed é", DecomposedE, 39 },
+                            Row { "ZWJ family", Family, 19 },
+                            Row { "flag", Flag, 19 },
+                            Row { "VS16 heart", Heart, 19 } })
+    {
+        INFO(row.name);
+        auto const shown = cwdAfterReporting("file:///" + repeated(row.cluster, 60));
+        CHECK(shown == "…" + repeated(row.cluster, row.keptOf40));
+        CHECK(columnsOf(shown) <= 40);
+    }
+
+    // Measured as the grid draws it, a path that fits is not elided because its codepoints would not.
+    auto const families = "/f/" + repeated(Family, 7);
+    CHECK(cwdAfterReporting("file://" + families) == families);
+}
+
+TEST_CASE("parseStatusLineSegment.maxWidthIsGeneric", "[statusline][cwd]")
+{
+    CHECK(canonical("{Cwd:MaxWidth=20}"sv) == "{Cwd:MaxWidth=20}");
+    auto const narrow = parseStatusLineSegment("{Cwd:MaxWidth=20}"sv);
+    REQUIRE(narrow.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(narrow[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(narrow[0]).maxWidth == ColumnCount(20));
+
+    auto const plain = parseStatusLineSegment("{Cwd}"sv);
+    REQUIRE(plain.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(plain[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(plain[0]).maxWidth == ColumnCount(40));
+    CHECK(serializeStatusLineSegment(plain) == "{Cwd}");
+
+    auto const zero = parseStatusLineSegment("{Cwd:MaxWidth=0}"sv);
+    REQUIRE(zero.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(zero[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(zero[0]).maxWidth == ColumnCount(40));
+}
+// }}}
+
+// {{{ {Git}
+namespace
+{
+/// The indicator status line's text, trailing blanks dropped, after a fresh frame.
+[[nodiscard]] std::string indicatorTextAfterRefresh(Terminal& terminal)
+{
+    terminal.refreshRenderBuffer();
+    auto text = terminal.indicatorStatusLineDisplay().renderMainPageText();
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\n'))
+        text.pop_back();
+    return text;
+}
+} // namespace
+
+namespace
+{
+/// A terminal showing `{Git}`, whose lookups read in-memory files and run when a test drains their executor.
+struct GitTerm
+{
+    core::platform::testing::InMemoryFileSystem files;
+    test::InMemoryGitFileSystem git { files };
+    core::async::testing::ManualExecutor executor;
+    MockTerm<> mc { PageSize { LineCount(3), ColumnCount(40) },
+                    files,
+                    GitHeadServices { .executor = executor, .fileSystem = git } };
+
+    GitTerm()
+    {
+        files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+        REQUIRE(files.createDirectories("/r/src"));
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    }
+
+    /// The line once every lookup a frame asked for has run and the frame its answer asks for is drawn.
+    [[nodiscard]] std::string settledLine()
+    {
+        mc.terminal.refreshRenderBuffer();
+        executor.drain();
+        return indicatorTextAfterRefresh(mc.terminal);
+    }
+};
+} // namespace
+
+TEST_CASE("serializeToVT.gitFollowsTheShell", "[statusline][git]")
+{
+    auto term = GitTerm {};
+    auto& mc = term.mc;
+    mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(term.settledLine() == "main");
+
+    // A frame asks for nothing: only a command's end or a directory report makes it look again.
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    CHECK(term.settledLine() == "main");
+    CHECK(term.settledLine() == "main");
+
+    test::typeAtPrompt(mc, "git switch next");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("\033]133;D;0\033\\");
+    CHECK(term.settledLine() == "next");
+
+    // Another machine's directory has no branch here, whatever this machine holds at that path.
+    mc.writeToScreen("\033]7;file://elsewhere.example/r/src\033\\");
+    CHECK(term.settledLine().empty());
+}
+
+TEST_CASE("serializeToVT.gitLooksAgainWhenTheShellReReportsItsDirectory", "[statusline][git]")
+{
+    // A shell re-reports its directory at every prompt; a branch switched by a program that marked no command
+    // shows at the next one.
+    auto term = GitTerm {};
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(term.settledLine() == "main");
+
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(term.settledLine() == "next");
+}
+
+TEST_CASE("serializeToVT.gitNeverReadsOnTheFrame", "[statusline][git]")
+{
+    auto term = GitTerm {};
+    auto& terminal = term.mc.terminal;
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+
+    // The frame, under the terminal's lock, only queues a lookup: nothing is read until the executor runs it.
+    CHECK(indicatorTextAfterRefresh(terminal).empty());
+    CHECK(indicatorTextAfterRefresh(terminal).empty());
+    CHECK(term.git.calls() == 0);
+    CHECK(term.executor.pending() == 1);
+
+    // Its answer asks for a frame, which shows it.
+    terminal.ensureFreshRenderBuffer();
+    REQUIRE(terminal.renderBufferState() == RenderBufferState::WaitingForRefresh);
+    term.executor.drain();
+    CHECK(term.git.calls() > 0);
+    CHECK(terminal.renderBufferState() == RenderBufferState::RefreshBuffersAndTrySwap);
+    CHECK(indicatorTextAfterRefresh(terminal) == "main");
+}
+
+TEST_CASE("serializeToVT.gitFollowsADaemonClientsCommands", "[statusline][git]")
+{
+    // A daemon client runs no parser: a command's end reaches it as an adopted record, never as OSC 133 D.
+    auto term = GitTerm {};
+    auto& terminal = term.mc.terminal;
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    terminal.bindReplica(
+        ReplicaRole::SameMachine,
+        HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" });
+    CHECK(term.settledLine() == "main");
+
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    terminal.adoptCommandBlock(test::mirroredRecord(5, CommandBlockState::Running), AdoptMode::Live);
+    CHECK(term.settledLine() == "main");
+
+    terminal.adoptCommandBlock(test::mirroredFinish(5, 0, CommandBlockEnd::Reported), AdoptMode::Live);
+    CHECK(term.settledLine() == "next");
+}
+
+TEST_CASE("serializeToVT.gitShowsNoBranchForAReftableRepository", "[statusline][git]")
+{
+    // reftable keeps HEAD in .git/reftable/ and leaves .git/HEAD naming the stub branch ".invalid".
+    auto term = GitTerm {};
+    term.files.addFile("/t/.git/HEAD", "ref: refs/heads/.invalid\n");
+    term.files.addDirectory("/t/.git/reftable");
+    term.mc.writeToScreen("\033]7;file:///t\033\\");
+    CHECK(term.settledLine().empty());
+}
+
+TEST_CASE("serializeToVT.gitShowsNothingWithoutGitServices", "[statusline][git]")
+{
+    // A terminal given no Git services -- one over a test's files, or a tmux client's -- shows no branch and
+    // reads nothing.
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
+    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    mc.writeToScreen("\033]7;file:///r\033\\");
+    CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
+}
+// }}}
+
+// {{{ {LastCommand}
+namespace
+{
+/// What `{LastCommand…}` (@p placeholder) shows on @p mc now.
+[[nodiscard]] std::string lastCommandOf(MockTerm<>& mc,
+                                        StatusLineStyling styling = StatusLineStyling::Disabled,
+                                        std::string_view placeholder = "{LastCommand}")
+{
+    return serializeToVT(mc.terminal, parseStatusLineSegment(placeholder), styling);
+}
+
+/// Runs @p command at a fresh prompt for @p duration, ending it with @p exitCode and a new prompt.
+void runFor(MockTerm<>& mc, std::string_view command, std::chrono::milliseconds duration, int exitCode)
+{
+    test::typeAtPrompt(mc, command);
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.steadyClock.advance(duration);
+    mc.writeToScreen(test::commandEnd(exitCode));
+    mc.writeToScreen("\033]133;A\033\\$ ");
+}
+
+/// The SGR that selects @p role's colour on @p mc's palette as the text colour.
+[[nodiscard]] std::string roleSgr(MockTerm<> const& mc, StatusLineDefinitions::ColorRole role)
+{
+    auto const rgb =
+        StatusLineDefinitions::resolveItemColor(StatusLineDefinitions::ItemColor { role },
+                                                mc.terminal.defaultColorPalette(),
+                                                mc.terminal.indicatorStatusLineColors().background);
+    return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
+}
+} // namespace
+
+TEST_CASE("serializeToVT.lastCommandSaysHowItWent", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    CHECK(lastCommandOf(mc).empty());
+
+    runFor(mc, "ctest", 134s, 0);
+    CHECK(lastCommandOf(mc) == "✓ ctest · 2m 14s");
+
+    runFor(mc, "ctest -R gui", 12'400ms, 8);
+    CHECK(lastCommandOf(mc) == "✗ exit 8 ctest -R gui · 12s");
+
+    // While a command runs, the last one is no longer news.
+    test::typeAtPrompt(mc, "sleep 9");
+    mc.writeToScreen("\033]133;C\033\\");
+    CHECK(lastCommandOf(mc).empty());
+
+    // A block a newer prompt ended without ;D reported nothing about how it went.
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    CHECK(lastCommandOf(mc).empty());
+}
+
+TEST_CASE("serializeToVT.lastCommandIsBoundedAndSafe", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(200) } };
+
+    auto const command = std::string(100, 'x');
+    runFor(mc, command, 4ms, 0);
+    auto const text = lastCommandOf(mc);
+    auto constexpr Status = "✓ "sv;
+    auto constexpr Duration = " · 4ms"sv;
+    REQUIRE(text.starts_with(Status));
+    REQUIRE(text.ends_with(Duration));
+    auto const commandPart =
+        std::string_view { text }.substr(Status.size(), text.size() - Status.size() - Duration.size());
+    CHECK(columnsOf(commandPart) == 32);
+    CHECK(commandPart.ends_with("…"));
+    CHECK(commandPart.starts_with("xxx"));
+
+    mc.writeToScreen(test::reportedCommandStart("evil%1B%5B2Jx"));
+    mc.writeToScreen(test::commandEnd(0));
+    CHECK_FALSE(lastCommandOf(mc).contains('\033'));
+    CHECK(lastCommandOf(mc).contains("evil"));
+}
+
+TEST_CASE("serializeToVT.lastCommandFoldsLineBreaksToSpaces", "[statusline][lastcommand]")
+{
+    // A multi-line command reads on a one-line bar, rather than as a replacement character per break.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    mc.writeToScreen(test::reportedCommandStart("for%20f%20in%20x%0Ado%09echo%0D%0Adone"));
+    mc.writeToScreen(test::commandEnd(0));
+    CHECK(lastCommandOf(mc) == "✓ for f in x do echo  done · 0ms");
+}
+
+TEST_CASE("serializeToVT.lastCommandElidesByGraphemeCluster", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(200) } };
+    for (auto const cluster: { Family, Heart })
+    {
+        runFor(mc, repeated(cluster, 30), 4ms, 0);
+        auto const text = lastCommandOf(mc, StatusLineStyling::Disabled, "{LastCommand:MaxWidth=11}");
+        // Five whole two-column clusters and the "…": the next would not fit the eleven columns.
+        CHECK(text == "✓ " + repeated(cluster, 5) + "… · 4ms");
+    }
+}
+
+TEST_CASE("serializeToVT.lastCommandColoursItsStatus", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    runFor(mc, "ctest -R gui", 12'400ms, 8);
+
+    auto const coloured = lastCommandOf(mc, StatusLineStyling::Enabled);
+    CHECK(coloured.contains(roleSgr(mc, StatusLineDefinitions::ColorRole::Danger) + "✗"));
+    CHECK(coloured.contains(roleSgr(mc, StatusLineDefinitions::ColorRole::Muted) + " · "));
+
+    // The item's own colour wins: it is the only one drawn.
+    auto const own = lastCommandOf(mc, StatusLineStyling::Enabled, "{LastCommand:Color=#102030}");
+    CHECK(own.contains("38:2:16:32:48"));
+    CHECK(std::ranges::distance(own | std::views::split("38:2"sv)) == 2);
+}
+
+TEST_CASE("parseStatusLineSegment.lastCommandMaxWidth", "[statusline][lastcommand]")
+{
+    CHECK(canonical("{LastCommand:MaxWidth=20}"sv) == "{LastCommand:MaxWidth=20}");
+    CHECK(canonical("{LastCommand}"sv) == "{LastCommand}");
+}
+// }}}
+
+// {{{ {Selection}
+namespace
+{
+/// What `{Selection}` shows on @p mc.
+[[nodiscard]] std::string selectionOf(MockTerm<> const& mc)
+{
+    return serializeToVT(mc.terminal, parseStatusLineSegment("{Selection}"sv), StatusLineStyling::Disabled);
+}
+
+/// Selects from @p from to @p to on @p mc, as a mouse drag does.
+void select(MockTerm<>& mc, CellLocation from, CellLocation to)
+{
+    mc.terminal.setSelector(std::make_unique<LinearSelection>(mc.terminal.selectionHelper(), from, []() {}));
+    REQUIRE(mc.terminal.selector()->extend(to));
+}
+} // namespace
+
+TEST_CASE("groupDigits.thousandsAreJoinedByASpace", "[statusline][selection]")
+{
+    CHECK(groupDigits(0) == "0");
+    CHECK(groupDigits(999) == "999");
+    CHECK(groupDigits(1000) == "1 000");
+    CHECK(groupDigits(1240) == "1 240");
+    CHECK(groupDigits(10000) == "10 000");
+    CHECK(groupDigits(1234567) == "1 234 567");
+}
+
+TEST_CASE("serializeToVT.selectionSaysWhatYWouldCopy", "[statusline][selection]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    mc.writeToScreen("hello world\r\nabc");
+    CHECK(selectionOf(mc).empty());
+
+    // A selection not yet dragged anywhere selects nothing.
+    mc.terminal.setSelector(
+        std::make_unique<LinearSelection>(mc.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          []() {}));
+    REQUIRE(mc.terminal.selector()->state() == Selection::State::Waiting);
+    CHECK(selectionOf(mc).empty());
+
+    // Row 0 whole and row 1 to "c", as `y` copies them: "hello world" with its space, not the 69 blank
+    // columns after it, and "abc".
+    select(mc,
+           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+    CHECK(selectionOf(mc) == "2 lines · 14 chars");
+
+    select(mc,
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) });
+    CHECK(selectionOf(mc) == "1 line · 1 char");
+}
+
+TEST_CASE("serializeToVT.selectionOfManyCellsCountsOnlyItsLines", "[statusline][selection]")
+{
+    // 200 rows of 80 columns is above the limit: counting what it holds is not worth a frame.
+    auto mc = MockTerm { PageSize { LineCount(200), ColumnCount(80) } };
+    mc.writeToScreen("abc");
+    select(mc,
+           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+           CellLocation { .line = LineOffset(199), .column = ColumnOffset(79) });
+    CHECK(selectionOf(mc) == "200 lines");
+}
+
+TEST_CASE("parseStatusLineSegment.selectionRoundTrips", "[statusline][selection]")
+{
+    CHECK(canonical("{Selection}"sv) == "{Selection}");
+    CHECK(canonical("{Selection:Faint}"sv) == "{Selection:Faint}");
+}
+// }}}
+
+// {{{ {Scroll}
+TEST_CASE("serializeToVT.scrollIsEmptyAtTheBottom", "[statusline][scroll]")
+{
+    // A fresh terminal, its page the one on display, with more history than the item's own numbers need.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(2000) };
+    for (auto const i: std::views::iota(0, 1400))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    auto const scrollable = mc.terminal.viewport().scrollableLineCount();
+    REQUIRE(scrollable >= LineCount(1300));
+    auto const scroll = parseStatusLineSegment("{Scroll}"sv);
+
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled).empty());
+
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(1240)));
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled)
+          == std::format("↑ 1 240 / {}", groupDigits(unbox<std::uint64_t>(scrollable))));
+
+    REQUIRE(mc.terminal.viewport().scrollToBottom());
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled).empty());
+}
+
+TEST_CASE("serializeToVT.scrollIsEmptyWhileTheViewCannotScroll", "[statusline][scroll]")
+{
+    // The alternate screen has no history to scroll through.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(100) };
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(5)));
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(mc.terminal.viewport().scrollingDisabled());
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Scroll}"sv), StatusLineStyling::Disabled)
+              .empty());
+}
+
+TEST_CASE("parseStatusLineSegment.scrollRoundTrips", "[statusline][scroll]")
+{
+    CHECK(canonical("{Scroll}"sv) == "{Scroll}");
+    CHECK(canonical("{Scroll:Faint}"sv) == "{Scroll:Faint}");
+}
+// }}}
+
+// {{{ {InputMode}: Hide=<mode> and Chip
+TEST_CASE("parseStatusLineSegment.inputModeHideAndChip", "[statusline][inputmode]")
+{
+    auto const inputModeOf = [](std::string_view text) {
+        auto const segment = parseStatusLineSegment(text);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::InputMode>(segment[0]));
+        return std::get<StatusLineDefinitions::InputMode>(segment[0]);
+    };
+
+    for (auto const& row: StatusLineDefinitions::InputModeNames)
+    {
+        INFO(row.name);
+        CHECK(inputModeOf(std::format("{{InputMode:Hide={}}}", row.name)).hiddenIn == row.mode);
+        auto lower = std::string { row.name };
+        std::ranges::transform(lower, lower.begin(), [](char c) {
+            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        });
+        CHECK(inputModeOf(std::format("{{InputMode:Hide={}}}", lower)).hiddenIn == row.mode);
+        CHECK(StatusLineDefinitions::inputModeFrom(row.name) == row.mode);
+        CHECK(StatusLineDefinitions::inputModeName(row.mode) == row.name);
+    }
+
+    // An unknown mode hides the item in none, rather than in all.
+    CHECK_FALSE(inputModeOf("{InputMode:Hide=Typing}"sv).hiddenIn.has_value());
+    CHECK(inputModeOf("{InputMode}"sv).look == StatusLineDefinitions::InputModeLook::Text);
+    CHECK(inputModeOf("{InputMode:Chip}"sv).look == StatusLineDefinitions::InputModeLook::Chip);
+
+    CHECK(canonical("{InputMode:Chip,Hide=Insert}"sv) == "{InputMode:Chip,Hide=Insert}");
+    // Chip and Hide are written after the styles, Left and Right among them.
+    CHECK(canonical("{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}"sv)
+          == "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}");
+    CHECK(canonical("{InputMode:Hide=insert,Chip,Bold}"sv) == "{InputMode:Bold,Chip,Hide=Insert}");
+    CHECK(canonical("{InputMode:Hide=Typing}"sv) == "{InputMode}");
+}
+
+TEST_CASE("serializeToVT.inputModeHidesInItsMode", "[statusline][inputmode]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const segment = parseStatusLineSegment("{InputMode:Hide=Insert,Left=<,Right=>}"sv);
+    REQUIRE(mc.terminal.inputHandler().mode() == ViMode::Insert);
+
+    // Hidden with its adornments, as an item with nothing to say is.
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled).empty());
+
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
+}
+
+TEST_CASE("statusLine.colors.modeChipReadsOnEveryScheme", "[statusline][inputmode][colors]")
+{
+    // The chip is filled with its mode's pair; its text keeps the pair's foreground while that reads
+    // at 4.5:1, and takes the fill's legible ink where it does not.
+    for (auto const scheme: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        for (auto const& pair: { palette.indicatorStatusLineNormalMode,
+                                 palette.indicatorStatusLineInsertMode,
+                                 palette.indicatorStatusLineVisualMode })
+        {
+            INFO(scheme << ": " << formatColor(pair.foreground) << " on " << formatColor(pair.background));
+            auto const chip = StatusLineDefinitions::modeChipColors(pair, palette);
+            CHECK(chip.background == pair.background);
+            CHECK(contrastRatio(chip.foreground, chip.background) >= MinimumTextContrast);
+            if (contrastRatio(pair.foreground, pair.background) >= MinimumTextContrast)
+                CHECK(chip.foreground == pair.foreground);
+        }
+    }
+}
+
+namespace
+{
+/// The status row's background at @p column, after a fresh frame of @p mc's terminal.
+[[nodiscard]] RGBColor statusRowBackgroundAt(MockTerm<>& mc, int column)
+{
+    REQUIRE(mc.terminal.refreshRenderBuffer());
+    auto const buffer = mc.terminal.renderBuffer();
+    REQUIRE(buffer.get().statusBar.has_value());
+    return test::backgroundAt(
+        buffer.get(),
+        CellLocation { .line = buffer.get().statusBar->lineOffset, .column = ColumnOffset(column) });
+}
+
+/// Gives @p mc the contour-dark scheme, whose Normal, Insert and Visual bars differ -- MockTerm's own default
+/// palette gives all four indicator pairs the same colours, against which no chip could be told apart.
+void useContourDark(MockTerm<>& mc)
+{
+    REQUIRE(defaultColorPalettes("contour-dark", mc.terminal.defaultColorPalette()));
+    mc.terminal.resetColorPalette();
+    auto const& palette = mc.terminal.colorPalette();
+    REQUIRE(palette.indicatorStatusLineNormalMode.background
+            != palette.indicatorStatusLineInsertMode.background);
+    REQUIRE(palette.indicatorStatusLineVisualMode.background
+            != palette.indicatorStatusLineInsertMode.background);
+    REQUIRE(palette.indicatorStatusLineVisualMode.background
+            != palette.indicatorStatusLineNormalMode.background);
+    REQUIRE(palette.indicatorStatusLineInactive.background
+            != palette.indicatorStatusLineNormalMode.background);
+}
+} // namespace
+
+TEST_CASE("Terminal.indicatorStatusLine.aChipKeepsTheLineQuiet", "[terminal][statusline][inputmode]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    useContourDark(mc);
+    auto const& palette = mc.terminal.colorPalette();
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    SECTION("a chip takes its mode's pair, the line the idle one")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        for (auto const column: std::views::iota(0, 8))
+        {
+            INFO(column);
+            CHECK(statusRowBackgroundAt(mc, column) == palette.indicatorStatusLineNormalMode.background);
+        }
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+
+        mc.terminal.inputHandler().setMode(ViMode::Visual);
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineVisualMode.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+    }
+
+    SECTION("without a chip the whole line takes the mode's pair")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineNormalMode.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineNormalMode.background);
+    }
+
+    SECTION("an unfocused pane draws the chip's text on the inactive line")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        (void) mc.terminal.sendFocusOutEvent();
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineInactive.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInactive.background);
+        CHECK(test::trimRight(mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)))
+              == " NORMAL  x");
+
+        (void) mc.terminal.sendFocusInEvent();
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineNormalMode.background);
+    }
+
+    SECTION("a colour of the item's own wins over the chip")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,BackgroundColor=#102030,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        CHECK(statusRowBackgroundAt(mc, 0) == RGBColor { 0x10, 0x20, 0x30 });
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+    }
+}
+
+TEST_CASE("serializeToVT.modeChipTextReads", "[statusline][inputmode][colors]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    useContourDark(mc);
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+    auto const chip = StatusLineDefinitions::modeChipColors(
+        mc.terminal.colorPalette().indicatorStatusLineNormalMode, mc.terminal.defaultColorPalette());
+    auto const line =
+        serializeToVT(mc.terminal, parseStatusLineSegment("{InputMode:Chip}"sv), StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(chip.foreground)));
+    // Measured unstyled, the chip is its text alone.
+    CHECK(
+        serializeToVT(mc.terminal, parseStatusLineSegment("{InputMode:Chip}"sv), StatusLineStyling::Disabled)
+        == "NORMAL");
+}
+// }}}
+
+// {{{ Collapse by priority
+TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal][statusline][collapse]")
+{
+    // An Essential mode, a Normal terminal type, a title in the middle and a Low clock on the right: in a
+    // narrow pane the clock goes first, then the type; every piece drawn is drawn whole, in its own place,
+    // and the mode is cut only when it alone is wider than the line.
+    for (auto const width: std::views::iota(1, 41))
+    {
+        INFO(width);
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(width) } };
+        mc.writeToScreen("\033]2;@@\033\\");
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition(
+            "{InputMode:Left= ,Right= }{VTType:Left= }", "{Title}", "{Clock:Left= }"));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        REQUIRE(mc.terminal.refreshRenderBuffer());
+
+        auto const line = mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0));
+        auto const vtType = serializeToVT(
+            mc.terminal, parseStatusLineSegment("{VTType:Left= }"sv), StatusLineStyling::Disabled);
+        auto const clock = serializeToVT(
+            mc.terminal, parseStatusLineSegment("{Clock:Left= }"sv), StatusLineStyling::Disabled);
+        REQUIRE(clock.size() == 6);
+
+        if (width >= 8)
+            CHECK(line.starts_with(" NORMAL "));
+        else
+            CHECK(std::string_view { " NORMAL " }.starts_with(test::trimRight(line)));
+        // The type follows the mode, whole, or is not there at all.
+        if (line.contains(vtType.substr(1, 2)))
+            CHECK(line.substr(8).starts_with(vtType));
+        // The title is centred, whole, or not there at all.
+        if (line.contains('@'))
+            CHECK(line.substr(static_cast<std::size_t>((width - 2) / 2), 2) == "@@");
+        // The clock ends in the last column, whole, or is not there at all.
+        if (line.contains(':'))
+            CHECK(line.ends_with(clock));
+
+        if (width == 12)
+            CHECK(test::trimRight(line) == " NORMAL");
+        if (width == 40)
+        {
+            CHECK(line.contains(vtType));
+            CHECK(line.contains("@@"));
+            CHECK(line.ends_with(clock));
+        }
+    }
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][statusline][collapse]")
+{
+    // A title too long for the middle takes nothing else with it: the right segment keeps its clock and its
+    // separator, and the middle leaves no lone «. (The native2026 template shows no title; its widths are
+    // swept in contour's IndicatorTemplate_test, against the shipped constant.)
+    struct Template
+    {
+        std::string_view name;
+        std::string_view left;
+        std::string_view middle;
+        std::string_view right;
+    };
+    auto const shipped = std::array {
+        Template { .name = "Classic",
+                   .left =
+                       " {InputMode:Bold,Color=#FFFF00}{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+                       "{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }",
+                   .middle = "« {Title} »",
+                   .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" },
+    };
+    for (auto const& shape: shipped)
+    {
+        INFO(shape.name);
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+        mc.writeToScreen(std::format("\033]2;{}\033\\", std::string(70, 't')));
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition(shape.left, shape.middle, shape.right));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        REQUIRE(mc.terminal.refreshRenderBuffer());
+
+        auto const line = mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0));
+        auto const right =
+            serializeToVT(mc.terminal, parseStatusLineSegment(shape.right), StatusLineStyling::Disabled);
+        INFO(line);
+        CHECK(line.ends_with(right));
+        CHECK(line.starts_with(" INSERT"));
+        CHECK_FALSE(line.contains('t'));
+        CHECK_FALSE(line.contains("«"));
+        CHECK_FALSE(line.contains("»"));
+    }
+}
+
+// }}}

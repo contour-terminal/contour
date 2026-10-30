@@ -26,6 +26,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -64,6 +65,45 @@ namespace detail
 [[nodiscard]] constexpr bool namesMatch(std::string_view a, std::string_view b) noexcept
 {
     return std::ranges::equal(detail::normalized(a), detail::normalized(b));
+}
+
+/// A generic family name and the concrete family a platform without fontconfig puts behind it.
+struct GenericFontFamily
+{
+    std::string_view generic; ///< The name a configuration may use, e.g. `monospace`.
+    std::string_view family;  ///< The family the platform's font locator resolves it to.
+};
+
+/// The generic family of the platform's user-interface font -- what the native rows' block chips are drawn
+/// in, beside the grid's own font. CoreText answers it with the system font itself; elsewhere it is the
+/// family GenericFontFamilies names.
+inline constexpr std::string_view SystemUiFontFamily = "system-ui";
+
+/// The generic family names this platform's font locator resolves itself. Fontconfig knows `monospace` on
+/// Linux and the BSDs, but not every version knows `system-ui`, which is its `sans-serif` there.
+#ifdef _WIN32
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { "monospace", "Consolas" },
+                 GenericFontFamily { SystemUiFontFamily, "Segoe UI" } };
+#elifdef __APPLE__
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { "monospace", "Menlo" },
+                 GenericFontFamily { SystemUiFontFamily, ".AppleSystemUIFont" } };
+#else
+inline constexpr auto GenericFontFamilies =
+    std::array { GenericFontFamily { SystemUiFontFamily, "sans-serif" } };
+#endif
+
+/// The concrete family the terminal grid's font locator uses for @p family: what a generic name such as
+/// `monospace` means on this platform, or @p family itself. Whatever must line up with the grid -- the
+/// Terminal-row chrome, notably -- resolves its family through this too.
+///
+/// @param family A configured font family.
+/// @return The family the grid is drawn in.
+[[nodiscard]] constexpr std::string_view platformFontFamily(std::string_view family) noexcept
+{
+    auto const row = std::ranges::find(GenericFontFamilies, family, &GenericFontFamily::generic);
+    return row != GenericFontFamilies.end() ? row->family : family;
 }
 
 namespace detail

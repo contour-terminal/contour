@@ -1665,7 +1665,7 @@ TEST_CASE("Terminal.statusLine.takesNoHighlightOfTheMainPage", "[terminal][statu
         REQUIRE(vt.isHighlighted(from));
     }
     else
-        (void) vt.setNewSearchTerm(U"match", SearchOrigin::Typed);
+        REQUIRE(vt.setNewSearchTerm(U"match", SearchOrigin::Typed).has_value());
 
     CHECK(sample() == unmarked);
 }
@@ -4728,6 +4728,34 @@ TEST_CASE("Terminal.processInputOnce.passive.aHeldFrontBufferIsRetriedWhenTheDis
 }
 #endif
 
+TEST_CASE("Terminal.screenUpdated.aRetriedSwapThatSucceedsIsAnnounced", "[terminal][threading]")
+{
+    // The display's last frame lost its swap to a paint, and the display then went away -- its tab was
+    // switched from -- leaving the frame waiting to be swapped in. The first output afterwards retries the
+    // swap, which now succeeds, and must still say the screen changed: a background tab learns of its
+    // output from nothing else.
+    struct CountingTerm final: MockTerm<>
+    {
+        using MockTerm<>::MockTerm;
+        int screenUpdates = 0; ///< How often the terminal said the screen changed.
+        void screenUpdated() override { ++screenUpdates; }
+    };
+    auto mock = CountingTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    {
+        auto const painting = mock.terminal.renderBuffer();
+        // On a thread of its own: the swap's try_lock must fail as it does against the render thread, and a
+        // mutex may not be tried by the thread that holds it.
+        std::thread { [&mock] { std::ignore = mock.terminal.refreshRenderBuffer(); } }.join();
+        REQUIRE(mock.terminal.renderBufferState() == vtbackend::RenderBufferState::TrySwapBuffers);
+    }
+    mock.screenUpdates = 0;
+
+    mock.writeToScreen("x");
+
+    CHECK(mock.terminal.renderBufferState() == vtbackend::RenderBufferState::WaitingForRefresh);
+    CHECK(mock.screenUpdates == 1);
+}
+
 TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
 {
     // While another thread -- the render thread, building a frame -- holds the terminal's state, the
@@ -5747,4 +5775,309 @@ TEST_CASE("Terminal looks a printed path up in the filesystem it was given", "[t
     auto const& matches = terminal.hintMatches();
     REQUIRE(matches.size() == 1);
     CHECK(matches[0].matchedText == core::pathToUtf8(file.lexically_normal()));
+}
+
+// {{{ Overlay clearance
+TEST_CASE("Terminal.overlayClearance.blankRuns", "[terminal][overlayclearance]")
+{
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    mc.writeToScreen("hello");
+    auto const clearance = mc.terminal.overlayClearance();
+    CHECK(clearance.columns == 20);
+    CHECK(clearance.trailingBlankColumns == std::vector { 15, 20, 20, 20 });
+}
+
+TEST_CASE("Terminal.overlayClearance.aColouredSpaceIsNotBlank", "[terminal][overlayclearance]")
+{
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+
+    SECTION("a row of spaces on a coloured background")
+    {
+        mc.writeToScreen("\r\n\033[44m" + std::string(20, ' ') + "\033[m");
+        auto const clearance = mc.terminal.overlayClearance();
+        REQUIRE(clearance.trailingBlankColumns.size() == 4);
+        CHECK(clearance.trailingBlankColumns[1] == 0);
+        CHECK(clearance.trailingBlankColumns[0] == 20);
+    }
+
+    SECTION("a full-screen program's coloured clear")
+    {
+        mc.writeToScreen("\033[44m\033[2J");
+        CHECK(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 0, 0, 0, 0 });
+    }
+}
+
+TEST_CASE("Terminal.overlayClearance.avoidsTheCursorAndTheLivePrompt", "[terminal][overlayclearance]")
+{
+    SECTION("the cursor's row")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+        mc.writeToScreen("$ https://x.y");
+        CHECK(mc.terminal.overlayClearance().avoidRows == std::vector { 0 });
+    }
+
+    SECTION("a live prompt over two rows, the cursor on its second")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+        mc.writeToScreen("out 0\r\nout 1\r\n\033]133;A\033\\user@host:~/work\r\n$ ");
+        REQUIRE(mc.terminal.livePromptSpan().has_value());
+        CHECK(mc.terminal.overlayClearance().avoidRows == std::vector { 2, 3 });
+    }
+
+    SECTION("a cursor scrolled off the page is avoided nowhere")
+    {
+        auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(20) };
+        for (auto const i: std::views::iota(0, 10))
+            mc.writeToScreen(std::format("line {}\r\n", i));
+        mc.writeToScreen("$ ");
+        REQUIRE(mc.terminal.overlayClearance().avoidRows == std::vector { 3 });
+        REQUIRE(mc.terminal.viewport().scrollUp(LineCount(4)));
+        CHECK(mc.terminal.overlayClearance().avoidRows.empty());
+    }
+}
+
+TEST_CASE("Terminal.overlayClearance.theStatusLineIsNeverBlank", "[terminal][overlayclearance]")
+{
+    // The rows count from the display's first drawn row, status line included: its text is drawn chrome, so
+    // its entry is 0 and an overlay never lands on it.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen("hello");
+
+    SECTION("at the bottom")
+    {
+        auto const clearance = mc.terminal.overlayClearance();
+        CHECK(clearance.trailingBlankColumns == std::vector { 15, 20, 20, 0 });
+        CHECK(clearance.avoidRows == std::vector { 0 });
+    }
+
+    SECTION("at the top, the page's rows below it")
+    {
+        mc.terminal.settings().statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
+        auto const clearance = mc.terminal.overlayClearance();
+        CHECK(clearance.trailingBlankColumns == std::vector { 0, 15, 20, 20 });
+        CHECK(clearance.avoidRows == std::vector { 1 });
+    }
+}
+// }}}
+
+// {{{ Hint labels
+namespace
+{
+
+/// Puts @p mock into hint mode over its visible page, with the built-ins and @p userPatterns.
+void activateHints(MockTerm<vtpty::MockPty>& mock,
+                   std::span<vtbackend::LinkPatternSpec const> userPatterns = {})
+{
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = { .table = std::make_shared<vtbackend::LinkPatterns const>(
+                                                       vtbackend::LinkPatterns::compile(userPatterns)),
+                                                   .names = {},
+                                                   .resolve = {} },
+                                     .action = vtbackend::HintAction::Copy });
+}
+
+/// The rendered cell at @p line, @p column, if one was emitted there.
+[[nodiscard]] vtbackend::RenderCell const* cellAt(vtbackend::RenderBuffer const& frame, int line, int column)
+{
+    auto const at = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+    auto const found = std::ranges::find(frame.cells, at, &vtbackend::RenderCell::position);
+    return found != frame.cells.end() ? &*found : nullptr;
+}
+
+/// Gives @p mock the palette scheme @p name sets, with no screen transition: a frame then shows the colours
+/// themselves rather than a blend on the way to them.
+void usePalette(MockTerm<vtpty::MockPty>& mock, std::string_view name)
+{
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+    mock.terminal.settings().screenTransitionDuration = std::chrono::milliseconds { 0 };
+    mock.terminal.setColorPalette(palette);
+}
+
+} // namespace
+
+TEST_CASE("Terminal.hintLabels.useTheCursorColourAndDimTheRest", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    usePalette(mock, "contour-dark");
+    // Below the top row, which hint mode's vi cursor starts on and draws highlighted.
+    mock.writeToScreen("\r\nsee https://example.com now");
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto const* label = cellAt(frame, 1, 4);
+    REQUIRE(label != nullptr);
+    CHECK(label->attributes.backgroundColor == RGBColor { 0xE8, 0xC2, 0x6E });
+    CHECK(label->attributes.foregroundColor == RGBColor { 0x1C, 0x1E, 0x24 });
+
+    // An unmatched cell keeps 45 % of its colour: it is blended 55 % toward the background.
+    auto const* unmatched = cellAt(frame, 1, 0);
+    REQUIRE(unmatched != nullptr);
+    CHECK(unmatched->attributes.foregroundColor
+          == vtbackend::mixColor(RGBColor { 0xD9, 0xDC, 0xE3 }, RGBColor { 0x1C, 0x1E, 0x24 }, 0.55f));
+}
+
+TEST_CASE("Terminal.hintLabels.aTypedPrefixTurnsTheLabelsToTheSelection", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    // 27 URLs, as HintModeHandler.LabelAssignment.TwoChar writes them: two-character labels.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(120) } };
+    usePalette(mock, "contour-dark");
+    for (auto const i: std::views::iota(0, 27))
+        mock.writeToScreen(std::format("https://site{}.com{}", i, i % 5 == 4 ? "\r\n" : " "));
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintMatches().size() == 27);
+    REQUIRE(mock.terminal.hintMatches().front().label.size() == 2);
+
+    REQUIRE(mock.terminal.hintModeHandler().processInput(U'a'));
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto labelCells = 0;
+    for (auto const& match: mock.terminal.hintModeHandler().matches())
+    {
+        INFO("label " << match.label);
+        auto const screen = mock.terminal.viewport().translateGridToScreenCoordinate(match.start);
+        for (auto const index: std::views::iota(0, static_cast<int>(match.label.size())))
+        {
+            auto const* cell = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column) + index);
+            REQUIRE(cell != nullptr);
+            CHECK(cell->attributes.backgroundColor == RGBColor { 0x3A, 0x4A, 0x6B });
+            CHECK(cell->attributes.foregroundColor == RGBColor { 0xD9, 0xDC, 0xE3 });
+            ++labelCells;
+        }
+    }
+    CHECK(labelCells > 0);
+}
+
+TEST_CASE("Terminal.hintLabels.otherSchemesKeepTheirLook", "[terminal][hintmode][hintlabels]")
+{
+    using vtbackend::RGBColor;
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(120) } };
+    auto const& palette = mock.terminal.colorPalette();
+    REQUIRE_FALSE(palette.hintLabelTyped.has_value());
+    CHECK(palette.hintUnmatchedOpacity == 0.5f);
+    for (auto const i: std::views::iota(0, 27))
+        mock.writeToScreen(std::format("https://site{}.com{}", i, i % 5 == 4 ? "\r\n" : " "));
+    mock.writeToScreen("\r\nplain");
+    activateHints(mock);
+    REQUIRE(mock.terminal.hintModeHandler().processInput(U'a'));
+
+    auto const frame = vtbackend::test::drawFrame(mock.terminal);
+    auto const label = RGBColor { 0xFF, 0xCC, 0x00 };
+    auto const background = palette.defaultBackground;
+    auto const& first = mock.terminal.hintModeHandler().matches().front();
+    auto const screen = mock.terminal.viewport().translateGridToScreenCoordinate(first.start);
+    auto const* typed = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column));
+    auto const* untyped = cellAt(frame, unbox<int>(screen.line), unbox<int>(screen.column) + 1);
+    REQUIRE(typed != nullptr);
+    REQUIRE(untyped != nullptr);
+    CHECK(typed->attributes.backgroundColor == vtbackend::mixColor(label, background, 0.5f));
+    CHECK(untyped->attributes.backgroundColor == label);
+
+    // "plain" is no match: blended halfway, as before.
+    auto const* plain = cellAt(frame, 6, 0);
+    REQUIRE(plain != nullptr);
+    CHECK(plain->attributes.foregroundColor
+          == vtbackend::mixColor(palette.defaultForeground, background, 0.5f));
+}
+
+TEST_CASE("Terminal.hintLabels.aLabelOverAWideCharacterIsNarrowCells", "[terminal][hintmode][hintlabels]")
+{
+    // A label character is one narrow cell wherever it lands: over a wide glyph's head, or over a scaled
+    // (OSC 66) cell, it must not keep their width or their sizing and draw over its neighbour.
+    auto const narrow = [](vtbackend::RenderCell const& cell) {
+        return cell.width == 1 && cell.sizing == vtbackend::GlyphSizing {};
+    };
+    auto const checkLabel = [&](MockTerm<vtpty::MockPty>& mock) {
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        auto const& match = mock.terminal.hintMatches().front();
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto shown = std::string {};
+        for (auto const index: std::views::iota(0, static_cast<int>(match.label.size())))
+        {
+            auto const* cell = cellAt(frame, 0, unbox<int>(match.start.column) + index);
+            REQUIRE(cell != nullptr);
+            CHECK(narrow(*cell));
+            REQUIRE(cell->codepoints.size() == 1);
+            shown += static_cast<char>(cell->codepoints.front());
+        }
+        CHECK(shown == match.label);
+    };
+
+    SECTION("a wide character's head")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("日本/notes.txt");
+        auto const patterns = std::array { vtbackend::LinkPatternSpec {
+            .name = "cjk", .regex = R"(日本\S*)", .activation = {} } };
+        activateHints(mock, patterns);
+        checkLabel(mock);
+
+        // The label is one character over 日's head: the continuation column beside it draws nothing, so no
+        // half of the wide glyph shows next to the label.
+        REQUIRE(mock.terminal.hintMatches().front().label.size() == 1);
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto const* continuation = cellAt(frame, 0, 1);
+        CHECK((continuation == nullptr || continuation->codepoints.empty()));
+    }
+
+    SECTION("a scaled cell")
+    {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("\033]66;s=2;X\a/notes.txt");
+        auto const patterns = std::array { vtbackend::LinkPatternSpec {
+            .name = "scaled", .regex = R"(X\S*)", .activation = {} } };
+        activateHints(mock, patterns);
+        checkLabel(mock);
+    }
+}
+// }}}
+
+TEST_CASE("Terminal.overlayClearance.readsWhatIsDrawn", "[terminal][overlayclearance]")
+{
+    // A collapsed fold hides its rows: the rows drawn after its head are the ones below it. And at the bottom
+    // the page ends in rows past the history, which show no line at all, so are blank.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(30) };
+    mc.writeToScreen("\033]133;A\033\\$ make\r\n\033]133;C\033\\out1\r\nout22\r\nout333\r\n");
+    mc.writeToScreen("\033]133;D;0\033\\\033]133;A\033\\$ ");
+    REQUIRE(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 14, 16, 15, 14, 19, 20 });
+
+    REQUIRE_FALSE(mc.terminal.foldRanges().empty());
+    mc.terminal.foldState().collapse(mc.terminal.foldRanges().front().headStableId);
+    // The head, then the prompt below the folded output ("$ " ends in a plain space, which is blank), then
+    // rows past the history.
+    CHECK(mc.terminal.overlayClearance().trailingBlankColumns == std::vector { 14, 19, 20, 20, 20, 20 });
+}
+
+TEST_CASE("Terminal.hintLabels.everySchemeDimsByItsOpacityAndKeepsItsLabelsLegible",
+          "[terminal][hintmode][hintlabels]")
+{
+    // The rest of the page is inactive while the labels are up, dimmed by the scheme's own opacity (45 % in
+    // the contour schemes, 50 % elsewhere) -- deliberately, so it may read below 4.5:1. The labels may not.
+    using vtbackend::RGBColor;
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        usePalette(mock, name);
+        mock.writeToScreen("\r\nsee https://example.com now");
+        activateHints(mock);
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        auto const& palette = mock.terminal.colorPalette();
+
+        auto const frame = vtbackend::test::drawFrame(mock.terminal);
+        auto const* unmatched = cellAt(frame, 1, 0);
+        REQUIRE(unmatched != nullptr);
+        CHECK(unmatched->attributes.foregroundColor
+              == vtbackend::mixColor(
+                  palette.defaultForeground, palette.defaultBackground, 1.0f - palette.hintUnmatchedOpacity));
+
+        auto const* label = cellAt(frame, 1, 4);
+        REQUIRE(label != nullptr);
+        CHECK(vtbackend::contrastRatio(label->attributes.foregroundColor, label->attributes.backgroundColor)
+              >= vtbackend::MinimumTextContrast);
+    }
 }
