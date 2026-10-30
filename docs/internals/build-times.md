@@ -162,3 +162,17 @@ CMake 3.25, which has both. What was missing was a persisted cache directory, so
 `hendrikmuhs/ccache-action` like the Linux jobs, and its final step prints the binary CMake used,
 its configuration and `ccache -s`; "Uncacheable calls" there would mean `/Zi` survived.
 The dead `sccache` steps and `SCCACHE_*` environment are gone.
+
+## What a pull request runs
+
+A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (build and tests, no
+signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
+builds, the lint jobs and clang-tidy on the changed lines. Master pushes, the merge queue and the
+`release` branch's pull request run everything: the other three compiler legs, packaging,
+valgrind, conformance, bench-headless, notcurses, FreeBSD, the full-tree clang-tidy.
+
+A required status check is never gated off pull requests. `tests matrix` and
+`Ubuntu Linux 24.04 post-check` always run and treat a skipped dependency as passed (a failed or
+cancelled one still fails them). `scripts/check-workflows.py` enforces both rules, and its
+`--self-test` pins them against fixtures. A master run is never cancelled by the next push
+(`cancel-in-progress` is off on master), so it finishes and saves the compiler cache.

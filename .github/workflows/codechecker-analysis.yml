@@ -19,11 +19,8 @@ on:
     # Note: Keep this in sync with relase.yml!
     tags:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
-  pull_request:
-    branches:
-      - master
 
-# Attempt to cancel any in-progress jobs for a given PR.
+# Cancel any in-progress run for the same ref.
 concurrency:
   group: codechecker-${{ github.ref }}
   cancel-in-progress: true

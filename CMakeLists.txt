@@ -254,6 +254,10 @@ if(CONTOUR_TESTING)
         # pushed.
         contour_add_lint_gate(check_workflows check-workflows.py)
 
+        # The rule that keeps every required status check runnable on a pull request, tested against
+        # inline fixtures; it needs neither the network nor actionlint.
+        contour_add_lint_gate(check_workflows_selftest check-workflows.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.

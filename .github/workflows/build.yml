@@ -27,7 +27,8 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # A master run is never cancelled by the next push: it is the one that saves the compiler cache.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
@@ -49,6 +50,14 @@ env:
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_NOHASHDIR: "1"
   CCACHE_SLOPPINESS: include_file_mtime,include_file_ctime
+
+# What runs where. A pull request runs the platform builds and tests (Windows, macOSArm, one Linux
+# leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
+# the other compiler legs, packaging, valgrind, conformance, bench, notcurses, FreeBSD, the full-tree
+# clang-tidy -- runs on master pushes, in the merge queue and on the `release` branch's pull request.
+# Those jobs say so with `if: github.event_name != 'pull_request' || github.head_ref == 'release'`.
+# A required status check is never gated that way: it always runs and judges a skipped job as passed
+# (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 
 jobs:
 
@@ -628,7 +637,7 @@ jobs:
   # }}}
   # {{{ FreeBSD
   freebsd:
-    if: github.ref == 'refs/heads/master'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # Unversioned deliberately: the VM's release is whatever vmactions/freebsd-vm defaults to, which
     # has moved on to 15.1-RELEASE. This job was named "FreeBSD 13" long after that stopped being
@@ -737,6 +746,8 @@ jobs:
           # that was in no keychain (breaking every PR run of this job), while a release
           # branch's signing path went completely unexercised until it was already on
           # master. Signing has to be proven before the merge, not after it.
+          # (An ordinary pull request no longer packages or signs at all; the merge queue and the
+          # release branch, which carry the secrets, prove it before it ships.)
           if [[ -n "$HAS_SIGNING_SECRETS" ]]; then
             echo "CODE_SIGN_CERTIFICATE_ID=Developer ID Application: Christian Parpart (6T525MU9UR)" >> "$GITHUB_OUTPUT"
             echo "NOTARIZE=ON" >> "$GITHUB_OUTPUT"
@@ -756,6 +767,8 @@ jobs:
           else
             echo "STAPLE_APP=OFF" >> "$GITHUB_OUTPUT"
           fi
+          # Whether this run produces the .dmg at all (see PACKAGE_IMAGE below).
+          echo "PACKAGE_IMAGE=$PACKAGE_IMAGE" >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
           # Via the environment, not interpolated into the script: a branch name is
@@ -764,7 +777,12 @@ jobs:
           GH_HEAD_REF: ${{ github.head_ref }}
           # Empty on fork pull requests, where GitHub withholds secrets. Only the
           # emptiness is observable here -- the value never reaches the log.
-          HAS_SIGNING_SECRETS: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          #
+          # Not even read on an ordinary pull request: nothing is signed there, so the secret is
+          # never exposed to the job and the PR path is the same with or without secrets.
+          HAS_SIGNING_SECRETS: ${{ (github.event_name != 'pull_request' || github.head_ref == 'release') && secrets.BUILD_CERTIFICATE_BASE64 || '' }}
+          # A pull request builds and tests; it does not package, so it neither signs nor notarizes.
+          PACKAGE_IMAGE: ${{ github.event_name != 'pull_request' || github.head_ref == 'release' }}
       - name: Install the Apple signing certificate
         if: steps.set_vars.outputs.NOTARIZE == 'ON'
         env:
@@ -1031,6 +1049,7 @@ jobs:
             exit 1
           fi
       - name: "Create Package(s)"
+        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         # cpack deploys, prunes unloadable plugins, verifies the bundle is self-contained,
         # signs it inside-out, notarizes and staples both the app and the image. Each of
         # those steps is fatal on failure now, so a broken bundle stops here instead of
@@ -1065,6 +1084,7 @@ jobs:
           mv -vf "out/macos-package/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
           echo "DMG=${BASENAME}.dmg" >> "$GITHUB_ENV"
       - name: "verify the DMG is something a user can actually open"
+        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         # The assertion that was missing all along: a green package step used to mean only
         # that hdiutil succeeded.
         #
@@ -1131,6 +1151,7 @@ jobs:
           staple_check "$DMG"
           spctl --assess --verbose=4 --type install "$DMG"
       - name: upload to artifact store (DMG)
+        if: steps.set_vars.outputs.PACKAGE_IMAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm.dmg"
@@ -1441,21 +1462,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cxx: [23]
-        build_type: ["RelWithDebInfo"]
-        compiler:
-          [
-            "GCC 15",
-            "Clang 22",
-          ]
-        qt_version: [6]
-        runner:
-          [
-             "ubuntu-24.04",
-             "ubuntu-24.04-arm",
-          ]
+        # Chosen by event, as data: a pull request builds one leg -- Clang 22 on x86, the compiler
+        # that also gates -Werror -- while master, the merge queue and the `release` pull request
+        # build all four. `werror` is OFF only where the leg is not known to build clean with it
+        # (GCC: a local GCC 16 build stops on -Werror=bidi-chars; GCC 15 is unverified). `artifacts`
+        # marks the single leg that runs the chrome snapshots and uploads the test binaries: the GCC
+        # x86 leg on master, where valgrind/conformance/bench consume them, the Clang x86 leg on pull
+        # requests, which have no consumers but keep the steps exercised.
+        # The arm Clang leg is OFF too: it runs on master only, so nothing proves it builds clean with
+        # -Werror before merge, whereas the x86 Clang leg is proven by every pull request.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '[{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":true}]' || '[{"runner":"ubuntu-24.04","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":true},{"runner":"ubuntu-24.04-arm","compiler":"GCC 15","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false},{"runner":"ubuntu-24.04","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"ON","artifacts":false},{"runner":"ubuntu-24.04-arm","compiler":"Clang 22","cxx":23,"build_type":"RelWithDebInfo","qt_version":6,"werror":"OFF","artifacts":false}]') }}
     name: "${{ matrix.runner }} (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ${{ matrix.runner }}
+    env:
+      # python3-yaml is installed below; see scripts/check-workflows.py.
+      CHECK_WORKFLOWS_REQUIRE_YAML: 1
     outputs:
       id: "${{ matrix.runner }} ${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
@@ -1471,6 +1492,11 @@ jobs:
         run: sudo ./scripts/apt-update.sh
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
+      # PyYAML lets check_workflows run its required-checks rule against the real workflow files;
+      # CHECK_WORKFLOWS_REQUIRE_YAML (job env below) makes a missing PyYAML a failure, so a pull
+      # request cannot pass with that rule silently skipped.
+      - name: Installing PyYAML for the workflow lint
+        run: sudo apt -qy install python3-yaml
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -1616,7 +1642,7 @@ jobs:
               -DCONTOUR_LINK_JOBS=1 \
               -DCONTOUR_WAYLAND=OFF \
               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
-              -DPEDANTIC_COMPILER_WERROR=OFF \
+              -DPEDANTIC_COMPILER_WERROR=${{ matrix.werror }} \
               --preset gcc-debug
       - name: "build"
         # -j$(nproc) rather than a hardcoded -j3: a quarter of a 4-vCPU runner was sitting idle.
@@ -1755,13 +1781,13 @@ jobs:
       - name: "chrome snapshots (headless weston)"
         # Review artefacts, never acceptance: every chrome row, edition and appearance as a PNG.
         # Non-gating like the display step above.
-        if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        if: ${{ matrix.artifacts }}
         continue-on-error: true
         # grabWindow() can wait forever for a frame callback; continue-on-error does not end a hang.
         timeout-minutes: 20
         run: ./scripts/run-chrome-snapshots.sh out/gcc-debug/src/contour/contour_gui_test chrome-snapshots
       - name: "Upload chrome snapshots"
-        if: ${{ always() && matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        if: ${{ always() && matrix.artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: chrome-snapshots
@@ -1769,7 +1795,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
+        if: ${{ matrix.artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2404-tests
@@ -1833,6 +1859,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04
   package_for_Ubuntu:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
     strategy:
       fail-fast: false
@@ -1931,6 +1958,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Run tests via valgrind"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -1986,6 +2014,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Run VT conformance suites"
     runs-on: ubuntu-24.04
     needs: [ubuntu_2404_cc_matrix]
@@ -2045,6 +2074,7 @@ jobs:
   # }}}
   # {{{ Ubuntu 24.04: Test bench-headless
   test_ubuntu2404_bench_headless:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     strategy:
       matrix:
         test_case:
@@ -2079,6 +2109,7 @@ jobs:
   # }}}
   # {{{ Latency trend: in-process vs daemon, recorded on every platform, never gating
   latency_trend:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     # Records, never gates: a shared runner is too noisy to hold a 1 ms budget to, and the gate is a
     # reproducible local run (docs/internals/latency.md). What this gives is the trend -- a regression
     # shows up as a step in the artifacts across commits. continue-on-error keeps a leg that cannot
@@ -2275,16 +2306,27 @@ jobs:
       - test_ubuntu2404_bench_headless
       - test_ubuntu2404_conformance
     steps:
+      # Uniform: every needed job must have succeeded or been skipped (on a pull request the
+      # packaging, valgrind, bench and conformance jobs are skipped by design). Failed and
+      # cancelled both fail the check.
       - name: Print matrix status
         run: |
           echo "Result (CC matrix)        : ${{ needs.ubuntu_2404_cc_matrix.result }}"
           echo "Result (packaging matrix) : ${{ needs.package_for_Ubuntu.result }}"
+          echo "Result (valgrind)         : ${{ needs.test_ubuntu2404_valgrind.result }}"
+          echo "Result (bench-headless)   : ${{ needs.test_ubuntu2404_bench_headless.result }}"
           echo "Result (conformance)      : ${{ needs.test_ubuntu2404_conformance.result }}"
       - name: Check build matrix status
         if: ${{ needs.ubuntu_2404_cc_matrix.result != 'success' && needs.ubuntu_2404_cc_matrix.result != 'skipped' }}
         run: exit 1
       - name: Check package_for_Ubuntu matrix status
         if: ${{ needs.package_for_Ubuntu.result != 'success' && needs.package_for_Ubuntu.result != 'skipped' }}
+        run: exit 1
+      - name: Check valgrind status
+        if: ${{ needs.test_ubuntu2404_valgrind.result != 'success' && needs.test_ubuntu2404_valgrind.result != 'skipped' }}
+        run: exit 1
+      - name: Check bench-headless status
+        if: ${{ needs.test_ubuntu2404_bench_headless.result != 'success' && needs.test_ubuntu2404_bench_headless.result != 'skipped' }}
         run: exit 1
       - name: Check conformance status
         if: ${{ needs.test_ubuntu2404_conformance.result != 'success' && needs.test_ubuntu2404_conformance.result != 'skipped' }}
@@ -2296,6 +2338,7 @@ jobs:
   # }}}
   # {{{ GUI: test: contour quick shell exit
   test_quick_exit:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "GUI: Quick Shell Exit"
     needs: [package_for_Ubuntu]
     strategy:
@@ -2364,6 +2407,7 @@ jobs:
   # }}}
   # {{{ GUI: external test: notcurses
   test_notcurses:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "GUI: notcurses-demo ${{ matrix.name }}"
     # Must match the OS the consumed .deb targets (26.04): a 26.04-built package links Qt 6.10 and a
     # newer libstdc++ than a 24.04 runner provides, so running it there fails with GLIBCXX/Qt-version
@@ -2477,11 +2521,12 @@ jobs:
     needs: test_notcurses
     steps:
     - name: Check build matrix status
-      if: ${{ needs.test_notcurses.result != 'success' }}
+      if: ${{ needs.test_notcurses.result != 'success' && needs.test_notcurses.result != 'skipped' }}
       run: exit 1
   # }}}
   # {{{ Check Ubuntu package
   check_package_ubuntu:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Check packages for Ubuntu "
     strategy:
       fail-fast: false
