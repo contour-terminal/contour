@@ -1,0 +1,950 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Settings window and its host, offscreen: the real SettingsWindow.qml over a real SettingsController,
+// shown, hidden and shown again as the app's entry points will ask for it.
+
+#include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/config/ChromeTokenRows.hpp>
+#include <contour/config/ConfigFwd.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/UiStyle.hpp>
+#include <contour/test/InMemoryGuiStateStore.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlIncubation.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
+#include <contour/test/SettingsDressingFixtures.hpp>
+#include <contour/test/SettingsFixtures.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/UiStyleProvider.hpp>
+#include <contour/window/WindowLivenessQt.hpp>
+
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
+#include <QtGui/QColor>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QKeySequence>
+#include <QtGui/QPalette>
+#include <QtGui/QScreen>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
+#include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <expected>
+#include <format>
+#include <memory>
+#include <ranges>
+#include <string_view>
+#include <vector>
+
+#include <QtTest/QSignalSpy>
+#include <QtTest/QTest>
+
+using namespace contour;
+using contour::test::ControllerFixture;
+using contour::window::SettingsWindowError;
+using contour::window::SettingsWindowHost;
+
+namespace
+{
+
+constexpr auto OneProfile =
+    std::string_view { "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n" };
+
+/// A Settings window host over a controller of its own, on an engine carrying the chrome tokens.
+struct HostFixture: ControllerFixture
+{
+    QQmlEngine engine;
+    test::IncubationDriver incubation;
+    int factoryCalls = 0;       ///< How often the host asked for its window to be built.
+    int configurationEdits = 0; ///< How often the host was asked to open contour.yml in an editor.
+    std::vector<std::string> openedInNewTab; ///< The profiles the host was asked to open in a tab.
+    test::InMemoryGuiStateStore ownState;    ///< What the host remembers, unless the case shares another's.
+    config::GuiStateStore& state;            ///< What the host remembers across closes and restarts.
+    test::SettingsDressingRecorder dressing; ///< What the host dressed its window with.
+    SettingsWindowHost host;
+
+    /// @param conventions The conventions the host presents the window with.
+    /// @param chrome      The chrome row the engine's tokens resolve.
+    /// @param remembered  What the host remembers; null for a store of its own.
+    /// @param decoration  Who draws the window's frame.
+    explicit HostFixture(window::SettingsWindowConventions conventions =
+                             window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                         test::ChromeSetup const& chrome = test::defaultChromeSetup(),
+                         config::GuiStateStore* remembered = nullptr,
+                         platform::WindowDecoration decoration = platform::WindowDecoration::Server):
+        ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} },
+        state { remembered != nullptr ? *remembered : ownState },
+        host { *controller,
+               conventions,
+               [this](SettingsWindowHost& self) {
+                   ++factoryCalls;
+                   return window::loadSettingsWindow(engine, self);
+               },
+               dressingWith(decoration),
+               state,
+               window::SettingsPreview::SessionFactory {},
+               [this] { ++configurationEdits; },
+               [this](std::string const& profile) { openedInNewTab.push_back(profile); } }
+    {
+        // The preview is a terminal display; the test engine has no real one, and without the stub the
+        // window fails to load whenever no earlier case of the run registered one.
+        qmlRegisterType<test::StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+        test::installChromeStyle(engine, chrome);
+        engine.setIncubationController(&incubation);
+    }
+
+    /// @return The recorder's dressing, drawing the frame as @p decoration says.
+    [[nodiscard]] window::SettingsWindowDressing dressingWith(platform::WindowDecoration decoration)
+    {
+        dressing.decoration = decoration;
+        return dressing.dressing();
+    }
+
+    /// Shows the window, which the case cannot go on without.
+    /// @return The window.
+    QQuickWindow& show()
+    {
+        REQUIRE(host.show(nullptr).has_value());
+        incubation.settle();
+        REQUIRE(host.window() != nullptr);
+        return *host.window();
+    }
+
+    /// @return The settings page inside the window.
+    [[nodiscard]] QQuickItem& page() const
+    {
+        REQUIRE(host.window() != nullptr);
+        auto* item = host.window()->findChild<QQuickItem*>("settingsPage");
+        REQUIRE(item != nullptr);
+        return *item;
+    }
+
+    /// Opens a new profile draft and edits its first scalar field to a value it did not hold.
+    /// @return The key of the edited field.
+    [[nodiscard]] QString draftAProfileField()
+    {
+        auto* newProfile = page().findChild<QObject*>("addProfileButton");
+        REQUIRE(newProfile != nullptr);
+        QMetaObject::invokeMethod(newProfile, "clicked");
+        incubation.settle();
+
+        for (auto const& raw: controller->profileFields())
+        {
+            auto const row = raw.toMap();
+            auto const type = row.value("type").toString();
+            auto value = QVariant {};
+            if (type == "string")
+                value = row.value("value").toString() + QStringLiteral("x");
+            else if (type == "int")
+                value = row.value("value").toInt() + 1;
+            else
+                continue;
+            auto const key = row.value("key").toString();
+            REQUIRE(controller->setProfileField(key, value).has_value());
+            return key;
+        }
+        FAIL("the profile draft offers no scalar field");
+        return {};
+    }
+
+    /// @param key A field of the profile draft.
+    /// @return Its value in the draft, or a null variant when the draft has no such field.
+    [[nodiscard]] QVariant profileFieldValue(QString const& key) const
+    {
+        for (auto const& raw: controller->profileFields())
+            if (raw.toMap().value("key").toString() == key)
+                return raw.toMap().value("value");
+        return {};
+    }
+
+    /// @return The provider the engine publishes as `chromeStyle`.
+    [[nodiscard]] window::UiStyleProvider& provider() const
+    {
+        auto* provider = engine.rootContext()
+                             ->contextProperty(QStringLiteral("chromeStyle"))
+                             .value<window::UiStyleProvider*>();
+        REQUIRE(provider != nullptr);
+        return *provider;
+    }
+};
+
+/// @return The size the window asks for, as its `preferredSize` property gives it.
+[[nodiscard]] QSizeF preferredSizeOf(QQuickWindow const& window)
+{
+    return window.property("preferredSize").toSizeF();
+}
+
+} // namespace
+
+TEST_CASE("the Settings window opens once, however often it is asked for",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+
+    auto& first = fx.show();
+    auto& second = fx.show();
+    CHECK(fx.factoryCalls == 1);
+    CHECK(&first == &second);
+    CHECK(second.isVisible());
+    CHECK(second.color() == QGuiApplication::palette().color(QPalette::Active, QPalette::Window));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window opens contour.yml in the editor it was given",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    auto fx = HostFixture {};
+    REQUIRE(fx.configurationEdits == 0);
+    fx.host.editConfigurationFile();
+    CHECK(fx.configurationEdits == 1);
+    fx.host.editConfigurationFile();
+    CHECK(fx.configurationEdits == 2);
+}
+
+TEST_CASE("the Settings window opens a profile in a tab through the seam it was given",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    auto fx = HostFixture {};
+    REQUIRE(fx.openedInNewTab.empty());
+    fx.host.openProfileInNewTab("main");
+    fx.host.openProfileInNewTab("work");
+    CHECK(fx.openedInNewTab == std::vector<std::string> { "main", "work" });
+}
+
+TEST_CASE("the Settings window comes back in front", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    SECTION("over another window")
+    {
+        auto other = QQuickWindow {};
+        other.show();
+        other.requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(&other));
+
+        REQUIRE(fx.host.show(nullptr).has_value());
+        CHECK(QTest::qWaitForWindowActive(&settings));
+    }
+
+    SECTION("out of the minimised state, and still maximised")
+    {
+        // Maximised beneath the minimised state, so a show() that went through showNormal() would fail.
+        settings.setWindowStates(Qt::WindowMaximized | Qt::WindowMinimized);
+        REQUIRE(fx.host.show(nullptr).has_value());
+        CHECK_FALSE(settings.windowStates().testFlag(Qt::WindowMinimized));
+        CHECK(settings.windowStates().testFlag(Qt::WindowMaximized));
+    }
+
+    SECTION("still maximised")
+    {
+        settings.setWindowStates(Qt::WindowMaximized);
+        REQUIRE(fx.host.show(nullptr).has_value());
+        CHECK(settings.windowStates() == Qt::WindowMaximized);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window is placed on first show", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    auto const anchor = QGuiApplication::primaryScreen()->availableGeometry();
+    auto const expected = window::settingsWindowGeometry({ .preferred = preferredSizeOf(settings).toSize(),
+                                                           .minimum = settings.minimumSize(),
+                                                           .previous = std::nullopt,
+                                                           .anchor = anchor,
+                                                           .screens = { anchor },
+                                                           .frame = settings.frameMargins() });
+    CHECK(settings.geometry() == expected);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a chrome republish keeps the Settings window's size", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+    auto const userSize = QSize(750, 500);
+    settings.resize(userSize);
+
+    // As ChromeStyleHost republishes it: a new provider, under the same name.
+    auto* republished = new window::UiStyleProvider(fx.provider().inputs(), &fx.engine);
+    fx.engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), republished);
+    QCoreApplication::processEvents();
+
+    CHECK(settings.size() == userSize);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window takes the keyboard focus", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    REQUIRE(QTest::qWaitForWindowActive(&settings));
+    CHECK(fx.page().hasActiveFocus());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Close shortcut closes the Settings window", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    REQUIRE(QTest::qWaitForWindowActive(fx.host.window()));
+    QTest::keySequence(&settings, QKeySequence::Close);
+    CHECK_FALSE(settings.isVisible());
+    CHECK(fx.host.window() == &settings);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("closing Settings after the last terminal window lets the app quit",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // Ruling D1: Settings keeps the app running after the last terminal window closes, until Settings
+    // closes too. Qt's quit-on-last-window rule runs on a close, never on a hide, so the Close shortcut must
+    // close the window as its title bar would.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    // What ContourGuiApp's quitIfWindowless() judges by: is any independent top-level window still shown?
+    auto const appStaysAlive = []() {
+        return window::anyWindowKeepsAppAlive(window::windowFactsOf(QGuiApplication::topLevelWindows()));
+    };
+
+    auto terminal = std::make_unique<QQuickWindow>();
+    terminal->show();
+    auto& settings = fx.show();
+    REQUIRE(terminal->close());
+    terminal.reset();
+    CHECK(appStaysAlive());
+
+    settings.requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(&settings));
+    QTest::keySequence(&settings, QKeySequence::Close);
+    CHECK(settings.handle() == nullptr); // closed, as Qt's quit rule needs; a hidden window keeps its handle
+    CHECK_FALSE(appStaysAlive());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("closing the Settings window keeps the window, its pane and its draft",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    auto const key = fx.draftAProfileField();
+    auto const editing = fx.controller->editingProfile();
+    auto const drafted = fx.profileFieldValue(key);
+    REQUIRE(fx.page().property("currentPage").toString().startsWith("profile:"));
+
+    // The state the window reopens in: the one it closed in.
+    auto states = Qt::WindowStates { Qt::WindowNoState };
+    SECTION("through the page's Close button and the Close shortcut")
+    {
+        fx.host.closeSettings();
+    }
+    SECTION("through the title bar's close button, which destroys the platform window")
+    {
+        REQUIRE(settings.close());
+        CHECK(settings.handle() == nullptr);
+    }
+    SECTION("while maximised, which it reopens as")
+    {
+        states = Qt::WindowMaximized;
+        settings.setWindowStates(states);
+        REQUIRE(settings.close());
+    }
+    REQUIRE_FALSE(settings.isVisible());
+    CHECK(&fx.show() == &settings);
+    CHECK(settings.windowStates() == states);
+
+    CHECK(fx.page().property("currentPage").toString().startsWith("profile:"));
+    CHECK(fx.controller->editingProfile() == editing);
+    CHECK(fx.profileFieldValue(key) == drafted);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// Where the Settings window opens over @p previous, as SettingsWindowHost::show() computes it on the primary
+/// screen.
+[[nodiscard]] QRect placedOver(QQuickWindow const& settings, QRect previous)
+{
+    auto const anchor = QGuiApplication::primaryScreen()->availableGeometry();
+    auto screens = std::vector<QRect> {};
+    for (auto const* screen: QGuiApplication::screens())
+        screens.push_back(screen->availableGeometry());
+    return window::settingsWindowGeometry({ .preferred = preferredSizeOf(settings).toSize(),
+                                            .minimum = settings.minimumSize(),
+                                            .previous = previous,
+                                            .anchor = anchor,
+                                            .screens = screens,
+                                            .frame = settings.frameMargins() });
+}
+} // namespace
+
+TEST_CASE("Settings reopens where it closed after a restart", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const frame = QRect(300, 200, 900, 700);
+
+    SECTION("its frame and its page")
+    {
+        {
+            auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                       test::defaultChromeSetup(),
+                                       &remembered };
+            auto& settings = first.show();
+            settings.setGeometry(frame);
+            first.host.setLastPage(QStringLiteral("section:appearance"));
+            first.host.closeSettings();
+        }
+        REQUIRE(remembered.state.settingsWindow.has_value());
+        CHECK(remembered.state.settingsWindow->page == "section:appearance");
+
+        auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                    test::defaultChromeSetup(),
+                                    &remembered };
+        CHECK(second.host.lastPage() == QStringLiteral("section:appearance"));
+        auto& settings = second.show();
+        CHECK(settings.geometry() == placedOver(settings, frame));
+        CHECK(settings.windowStates() == Qt::WindowNoState);
+    }
+
+    SECTION("a frame mostly off its screen is pulled onto it")
+    {
+        // m1: a sliver of it on screen, on a screen whose name is gone: the window comes whole onto the
+        // screen it overlaps, at the size it had.
+        auto const available = QGuiApplication::primaryScreen()->availableGeometry();
+        remembered.state.settingsWindow = config::SettingsWindowState { .x = available.right() - 10,
+                                                                        .y = available.top() + 40,
+                                                                        .width = 740,
+                                                                        .height = 500,
+                                                                        .screen = "a screen unplugged since",
+                                                                        .show = {},
+                                                                        .page = {} };
+        auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                test::defaultChromeSetup(),
+                                &remembered };
+        auto& settings = fx.show();
+        REQUIRE(available.width() >= 740);
+        REQUIRE(available.height() >= 540);
+        CHECK(available.contains(settings.frameGeometry()));
+        CHECK(settings.geometry().size() == QSize(740, 500));
+        CHECK(settings.geometry().top() == available.top() + 40);
+    }
+
+    SECTION("maximised")
+    {
+        auto normalFrame = QRect {};
+        {
+            auto first = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                       test::defaultChromeSetup(),
+                                       &remembered };
+            auto& settings = first.show();
+            settings.setGeometry(frame);
+            normalFrame = settings.geometry();
+            // The platform reports the new frame asynchronously, as a user's resize is long done before
+            // they maximise.
+            QCoreApplication::processEvents();
+            settings.setWindowStates(Qt::WindowMaximized);
+            REQUIRE(settings.geometry() != normalFrame);
+            REQUIRE(settings.close());
+        }
+        REQUIRE(remembered.state.settingsWindow.has_value());
+        CHECK(remembered.state.settingsWindow->show == config::WindowShowState::Maximized);
+        // m2: what it remembers is the normal frame, not the maximised one.
+        auto const& normal = *remembered.state.settingsWindow;
+        CHECK(QRect(normal.x, normal.y, normal.width, normal.height) == normalFrame);
+
+        auto second = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                    test::defaultChromeSetup(),
+                                    &remembered };
+        auto& settings = second.show();
+        CHECK(settings.windowStates() == Qt::WindowMaximized);
+    }
+
+    SECTION("what else the state holds is kept")
+    {
+        remembered.state.dismissedOffers = { config::NewDefaultsOffer::ExistingConfig };
+        auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                                test::defaultChromeSetup(),
+                                &remembered };
+        fx.show();
+        fx.host.closeSettings();
+        CHECK(remembered.state.dismissedOffers == std::vector { config::NewDefaultsOffer::ExistingConfig });
+        CHECK(remembered.state.settingsWindow.has_value());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Settings reopens on the page it showed, or on its first page",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // I4: a profile page is remembered with its profile's name, and opens only with it.
+    contour::test::QmlMessageCapture const warnings;
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const rememberPage = [&remembered](std::string page) {
+        remembered.state.settingsWindow = config::SettingsWindowState {
+            .x = 0, .y = 0, .width = 0, .height = 0, .screen = {}, .show = {}, .page = std::move(page)
+        };
+    };
+    auto const open = [&remembered]() {
+        return std::make_unique<HostFixture>(
+            window::settingsWindowConventionsFor(config::HostPlatform::Other),
+            test::defaultChromeSetup(),
+            &remembered);
+    };
+
+    SECTION("a page is written back with its name")
+    {
+        auto fx = open();
+        fx->show();
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("profile:main"))));
+        CHECK(fx->host.lastPage() == QStringLiteral("profile:main"));
+        CHECK(fx->controller->editingProfile() == QStringLiteral("main"));
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("profile:main:links"))));
+        CHECK(fx->host.lastPage() == QStringLiteral("profile:main:links"));
+        REQUIRE(QMetaObject::invokeMethod(
+            &fx->page(), "openPage", Q_ARG(QVariant, QStringLiteral("section:keyboard"))));
+        CHECK(fx->host.lastPage() == QStringLiteral("section:keyboard"));
+    }
+
+    SECTION("a remembered profile opens with its draft")
+    {
+        rememberPage("profile:main");
+        auto fx = open();
+        fx->show();
+        CHECK(fx->page().property("currentPage").toString() == QStringLiteral("profile:main"));
+        CHECK(fx->controller->editingProfile() == QStringLiteral("main"));
+        CHECK_FALSE(fx->controller->profileFields().isEmpty());
+    }
+
+    SECTION("a remembered section opens, and so does the id an older release wrote")
+    {
+        rememberPage("section:appearance");
+        auto fx = open();
+        fx->show();
+        CHECK(fx->page().property("currentPage").toString() == QStringLiteral("section:appearance"));
+
+        remembered.state.settingsWindow->page = "keybindings";
+        auto older = open();
+        older->show();
+        CHECK(older->page().property("currentPage").toString() == QStringLiteral("section:keyboard"));
+    }
+
+    SECTION("a profile that is gone, or a page this release does not know, opens the first page")
+    {
+        for (auto const* page: { "profile:gone", "profile", "scheme:default", "section:gone", "section", "" })
+        {
+            INFO(page);
+            rememberPage(page);
+            auto fx = open();
+            fx->show();
+            CHECK(fx->page().property("currentPage").toString() == QStringLiteral("section:general"));
+            CHECK(fx->controller->editingProfile().isEmpty());
+        }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("closing Settings flushes a pending edit", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    fx.show();
+    REQUIRE(fx.store->write(config::profileFile("work"), config::emitProfileYaml(*fx.cfg.findProfile("main")))
+                .has_value());
+    fx.reload();
+    fx.controller->editProfile("work");
+    fx.controller->commitProfileField("font_size", 21.0);
+    REQUIRE(fx.scheduler->pendingDelay().has_value());
+
+    SECTION("through the page's Close button and the Close shortcut")
+    {
+        fx.host.closeSettings();
+    }
+    SECTION("through the title bar's close button")
+    {
+        REQUIRE(fx.host.window()->close());
+    }
+
+    CHECK_FALSE(fx.scheduler->pendingDelay().has_value());
+    CHECK(fx.cfg.findProfile("work")->fonts.value().size.pt == 21.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a Settings window closed maximised reopens maximised at its maximised frame",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // The offscreen platform pins a maximised window to the screen and keeps no restore rectangle, so
+    // whether a reopen called setGeometry() is invisible here; settingsWindowReopenFor() pins that decision.
+    // What is observable: the window reopens maximised, at its maximised frame.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    settings.setWindowStates(Qt::WindowMaximized);
+    auto const maximised = settings.geometry();
+    REQUIRE(settings.close());
+    REQUIRE_FALSE(settings.isVisible());
+
+    CHECK(&fx.show() == &settings);
+    CHECK(settings.windowStates() == Qt::WindowMaximized);
+    CHECK(settings.geometry() == maximised);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("asking for the open Settings window keeps what is being edited",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // A config reload refreshes the controller already; a show of the window on screen must not, or the
+    // rows rebuild under the field being typed into.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto const& settings = fx.show();
+    auto const key = fx.draftAProfileField();
+    auto const drafted = fx.profileFieldValue(key);
+    auto const changes = QSignalSpy(fx.controller.get(), &window::SettingsController::changed);
+
+    REQUIRE(settings.isVisible());
+    REQUIRE(fx.host.show(nullptr).has_value());
+    CHECK(changes.count() == 0);
+    CHECK(fx.profileFieldValue(key) == drafted);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window follows its host's conventions", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    for (auto const& row: window::SettingsWindowConventionRows)
+    {
+        INFO("host " << static_cast<int>(row.host));
+        auto fx = HostFixture { row };
+        auto const& settings = fx.show();
+
+        CHECK(settings.title().toStdString() == row.title);
+        switch (row.buttons)
+        {
+            case window::SettingsWindowButtons::CloseOnly:
+                CHECK_FALSE(settings.flags().testFlag(Qt::WindowMinimizeButtonHint));
+                CHECK_FALSE(settings.flags().testFlag(Qt::WindowMaximizeButtonHint));
+                break;
+            case window::SettingsWindowButtons::All: CHECK(settings.flags() == Qt::Window); break;
+        }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window's Terminal row counts it in cells",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto const& row = config::ChromeTokenRows[static_cast<std::size_t>(config::ChromeStyle::Terminal)];
+    auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                            test::defaultChromeSetup(config::UiStyle::Terminal) };
+    auto const& settings = fx.show();
+
+    CHECK(preferredSizeOf(settings).width()
+          == Catch::Approx(row.size.settingsWidth * fx.provider().widthQuantum()));
+    CHECK(settings.minimumHeight() == Catch::Approx(row.size.settingsMinHeight * fx.provider().cellHeight()));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window keeps the app alive", "[contour][gui][qml][settingswindow][host]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+
+    CHECK(fx.show().transientParent() == nullptr);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a Settings window factory that fails leaves no window",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    auto fx = ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} };
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto host = SettingsWindowHost {
+        *fx.controller,
+        window::settingsWindowConventionsFor(config::HostPlatform::Other),
+        [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
+            return std::unexpected { SettingsWindowError::LoadFailed };
+        },
+        test::undressedSettingsWindow(),
+        remembered,
+        window::SettingsPreview::SessionFactory {},
+        [] {},
+        [](std::string const&) {},
+    };
+
+    auto const shown = host.show(nullptr);
+    REQUIRE_FALSE(shown.has_value());
+    CHECK(shown.error() == SettingsWindowError::LoadFailed);
+    CHECK(std::format("{}", shown.error()) == "LoadFailed");
+    CHECK(host.window() == nullptr);
+}
+
+TEST_CASE("a Settings window host has a preview exactly when it can make its session",
+          "[contour][gui][settingswindow][host][settingspreview]")
+{
+    auto fx = ControllerFixture { OneProfile, std::shared_ptr<config::GuiConfigStore> {} };
+    auto remembered = test::InMemoryGuiStateStore {};
+    auto const hostWith = [&](window::SettingsPreview::SessionFactory factory) {
+        return std::make_unique<SettingsWindowHost>(
+            *fx.controller,
+            window::settingsWindowConventionsFor(config::HostPlatform::Other),
+            [](SettingsWindowHost&) -> std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> {
+                return std::unexpected { SettingsWindowError::LoadFailed };
+            },
+            test::undressedSettingsWindow(),
+            remembered,
+            std::move(factory),
+            [] {},
+            [](std::string const&) {});
+    };
+
+    CHECK(hostWith({})->preview() == nullptr);
+    CHECK(hostWith([](config::Config const&, std::string const&) {
+              return std::unique_ptr<session::TerminalSession> {};
+          })->preview()
+          != nullptr);
+}
+
+namespace
+{
+
+/// The inputs under which the Settings window's title bar shows Mica.
+constexpr auto FluentMica = window::SettingsBackdropInputs { .row = config::ChromeStyle::Fluent,
+                                                             .material = config::Material::Mica,
+                                                             .scheme = Qt::ColorScheme::Dark };
+
+/// Sends @p window the palette change that follows every flip of the chrome's light or dark.
+void changePalette(QQuickWindow& window)
+{
+    auto change = QEvent { QEvent::ApplicationPaletteChange };
+    QCoreApplication::sendEvent(&window, &change);
+}
+
+/// @return Whether every decoration @p frame was asked for is the OS's own.
+[[nodiscard]] bool onlyServerFrames(test::RecordingWindowFrame const& frame)
+{
+    return std::ranges::all_of(frame.applied, [](platform::WindowDecoration decoration) {
+        return decoration == platform::WindowDecoration::Server;
+    });
+}
+
+/// @return The colour the Settings sidebar paints in @p window.
+[[nodiscard]] QColor sidebarColor(QQuickWindow const& window)
+{
+    auto const* sidebar = window.findChild<QQuickItem*>(QStringLiteral("settingsSidebar"));
+    REQUIRE(sidebar != nullptr);
+    return sidebar->property("color").value<QColor>();
+}
+
+} // namespace
+
+TEST_CASE("the Settings window keeps the OS's frame, with Mica behind its title bar on the Fluent row",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = FluentMica;
+    auto& window = fx.show();
+
+    REQUIRE_FALSE(fx.dressing.frame.applied.empty());
+    CHECK(onlyServerFrames(fx.dressing.frame));
+    REQUIRE(fx.dressing.record.applied.size() == 1);
+    CHECK(fx.dressing.record.applied.front() == window::settingsBackdropFor(FluentMica));
+
+    SECTION("a palette change dresses the frame again and asks for no second backdrop")
+    {
+        auto const before = fx.dressing.frame.applied.size();
+        changePalette(window);
+        CHECK(fx.dressing.frame.applied.size() == before + 1);
+        CHECK(onlyServerFrames(fx.dressing.frame));
+        CHECK(fx.dressing.record.applied.size() == 1);
+    }
+
+    SECTION("the chrome turning light asks for the backdrop in light")
+    {
+        fx.dressing.inputs.scheme = Qt::ColorScheme::Light;
+        changePalette(window);
+        REQUIRE(fx.dressing.record.applied.size() == 2);
+        CHECK(fx.dressing.record.applied.back().scheme == Qt::ColorScheme::Light);
+    }
+
+    SECTION("Mica taken away takes the backdrop off")
+    {
+        fx.dressing.inputs.material = config::Material::Solid;
+        changePalette(window);
+        REQUIRE(fx.dressing.record.applied.size() == 2);
+        CHECK(fx.dressing.record.applied.back().backdrop == config::BandBackdrop::Client);
+    }
+}
+
+TEST_CASE("a failed material leaves the Settings window its own paint for good",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = FluentMica;
+    fx.dressing.record.failWith = platform::TitleBandMaterialError::Unsupported;
+    auto& window = fx.show();
+    CHECK(fx.dressing.record.applied.size() == 1);
+
+    // A request that would differ is not made: the window's material failed once (R-g).
+    fx.dressing.inputs.scheme = Qt::ColorScheme::Light;
+    changePalette(window);
+    CHECK(fx.dressing.record.applied.size() == 1);
+}
+
+TEST_CASE("the Settings sidebar keeps its own surface fill on every row and backdrop",
+          "[contour][gui][qml][settings][window]")
+{
+    // The window is server-framed: the OS's material sits in its title bar only, and the client area behind
+    // the sidebar stays opaque, so a sidebar that went clear would show the page's fill instead.
+    for (auto const rowIndex: std::views::iota(std::size_t { 0 }, config::detail::ChromeStyleCount))
+    {
+        auto const row = static_cast<config::ChromeStyle>(rowIndex);
+        for (auto const materialIndex: std::views::iota(std::size_t { 0 }, config::MaterialCount))
+        {
+            auto const material = static_cast<config::Material>(materialIndex);
+            INFO("row " << rowIndex << ", material " << materialIndex);
+            auto chrome = test::defaultChromeSetup();
+            chrome.row = row;
+            auto fx =
+                HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other), chrome };
+            fx.dressing.inputs = window::SettingsBackdropInputs { .row = row,
+                                                                  .material = material,
+                                                                  .scheme = Qt::ColorScheme::Dark };
+            auto const& window = fx.show();
+
+            auto const fill = fx.provider().colors()->property("settingsSidebarFill").value<QColor>();
+            CHECK(sidebarColor(window) == fill);
+        }
+    }
+}
+
+TEST_CASE("the Settings window on the macOS row asks for no backdrop",
+          "[contour][gui][qml][settings][window]")
+{
+    auto fx = HostFixture {};
+    fx.dressing.inputs = window::SettingsBackdropInputs { .row = config::ChromeStyle::MacOS,
+                                                          .material = config::Material::Glass,
+                                                          .scheme = Qt::ColorScheme::Dark };
+    auto& window = fx.show();
+    changePalette(window);
+
+    CHECK_FALSE(fx.dressing.frame.applied.empty());
+    CHECK(onlyServerFrames(fx.dressing.frame));
+    CHECK(fx.dressing.record.applied.empty());
+}
+
+namespace
+{
+
+/// @return The kinds @p controls lists, as the host publishes them to QML.
+[[nodiscard]] std::vector<config::WindowControlKind> kindsOf(QVariantList const& controls)
+{
+    auto kinds = std::vector<config::WindowControlKind> {};
+    for (auto const& control: controls)
+        kinds.push_back(static_cast<config::WindowControlKind>(control.toInt()));
+    return kinds;
+}
+
+/// @return Whether every decoration @p frame was asked for is the window's own.
+[[nodiscard]] bool onlyClientFrames(test::RecordingWindowFrame const& frame)
+{
+    return std::ranges::all_of(frame.applied, [](platform::WindowDecoration decoration) {
+        return decoration == platform::WindowDecoration::Client;
+    });
+}
+
+} // namespace
+
+TEST_CASE("beside a Linux header bar the Settings window draws its own frame and the desktop's close button",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    using enum config::WindowControlKind;
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture { window::settingsWindowConventionsFor(config::HostPlatform::Other),
+                            test::defaultChromeSetup(),
+                            nullptr,
+                            platform::WindowDecoration::Client };
+    fx.dressing.placement = { .leading = {}, .trailing = { Minimize, Maximize, Close } };
+    fx.host.refreshWindowControls();
+
+    CHECK(fx.host.frameless());
+    CHECK(fx.host.windowFlags().testFlag(Qt::FramelessWindowHint));
+    CHECK(kindsOf(fx.host.leadingControls()).empty());
+    CHECK(kindsOf(fx.host.trailingControls()) == std::vector { Close });
+
+    auto const& window = fx.show();
+    CHECK(window.flags().testFlag(Qt::FramelessWindowHint));
+    REQUIRE_FALSE(fx.dressing.frame.applied.empty());
+    CHECK(onlyClientFrames(fx.dressing.frame));
+
+    SECTION("the desktop moving its buttons moves the close button")
+    {
+        auto spy = QSignalSpy { &fx.host, &SettingsWindowHost::windowControlsChanged };
+        fx.dressing.placement = { .leading = { Close, Minimize, Maximize }, .trailing = {} };
+        fx.host.refreshWindowControls();
+        CHECK(spy.count() == 1);
+        CHECK(kindsOf(fx.host.leadingControls()) == std::vector { Close });
+        CHECK(kindsOf(fx.host.trailingControls()).empty());
+
+        // The same placement again changes nothing.
+        fx.host.refreshWindowControls();
+        CHECK(spy.count() == 1);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Settings window keeps the OS's frame and draws no controls of its own beside it",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    using enum config::WindowControlKind;
+    auto fx = HostFixture {};
+    fx.dressing.placement = { .leading = {}, .trailing = { Minimize, Maximize, Close } };
+    fx.host.refreshWindowControls();
+
+    CHECK_FALSE(fx.host.frameless());
+    CHECK_FALSE(fx.host.windowFlags().testFlag(Qt::FramelessWindowHint));
+    CHECK(fx.host.leadingControls().isEmpty());
+    CHECK(fx.host.trailingControls().isEmpty());
+}

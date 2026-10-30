@@ -3,7 +3,7 @@
 //
 // The indicator is configured as three template strings — left, middle and right — of the form
 // "{InputMode:Bold,Color=#FFFF00}{Tabs:ActiveColor=#FFFF00,Left= │ }". This editor shows each segment as a
-// row of chips, one per placeholder, over a preview of what the finished status line will look like.
+// row of chips, one per placeholder; the status line page above it shows the finished status line, live.
 // Clicking a chip opens its full style sheet: every cell flag the template grammar accepts, both colours,
 // the side adornments, and whatever else that particular placeholder carries.
 //
@@ -37,15 +37,7 @@ ColumnLayout {
     /// re-evaluate on. See the note above.
     property int _revision: 0
 
-    // Live OS palette handle, so the editor follows dark/light in realtime (see CommandPalette.qml).
-    SystemPalette {
-        id: sys
-        colorGroup: SystemPalette.Active
-    }
-    readonly property color subtleText: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.6)
-    readonly property color hairline: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.12)
-
-    spacing: 10
+    spacing: chromeStyle.space.s5
 
     Connections {
         target: root.controller
@@ -92,9 +84,6 @@ ColumnLayout {
             out.push(root.flagCatalog[i].key)
         return out
     }
-
-    readonly property bool isEmpty: root.leftItems.length === 0 && root.middleItems.length === 0
-                                    && root.rightItems.length === 0
 
     // }}}
     // {{{ Mutation
@@ -179,86 +168,21 @@ ColumnLayout {
 
     // }}}
 
-    // {{{ Preview strip
-    //
-    // Each item renders itself (StatusLinePreviewItem), so what the preview knows is only how the three
-    // segments are arranged: left flush, middle centred, right flush to the end.
-    Rectangle {
-        objectName: "indicatorPreview"
-        Layout.fillWidth: true
-        Layout.preferredHeight: 30
-        radius: 6
-        // A tinted band rather than the card colour, so it reads as a rendering of the status line and not
-        // as another row of the form.
-        color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.07)
-        border.width: 1
-        border.color: root.hairline
-        clip: true
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            spacing: 0
-
-            // Left, then middle centred, then right pushed to the end — the way the indicator itself lays
-            // its three segments out.
-            Repeater {
-                model: root.leftItems
-                delegate: StatusLinePreviewItem {
-                    required property var modelData
-                    item: modelData
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Repeater {
-                model: root.middleItems
-                delegate: StatusLinePreviewItem {
-                    required property var modelData
-                    item: modelData
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Repeater {
-                model: root.rightItems
-                delegate: StatusLinePreviewItem {
-                    required property var modelData
-                    item: modelData
-                }
-            }
-        }
-
-        Label {
-            anchors.centerIn: parent
-            visible: root.isEmpty
-            text: qsTr("The indicator status line is empty.")
-            color: root.subtleText
-            font.pointSize: 9
-        }
-    }
-
-    Label {
-        Layout.fillWidth: true
-        text: qsTr("Preview — placeholders stand in with example values.")
-        color: root.subtleText
-        font.pointSize: 8
-        wrapMode: Text.WordWrap
-    }
-    // }}}
-
     // {{{ The three segment rows
+    //
+    // The labels share one column width, the widest of the three, so the chips of every row start together.
+    readonly property real _labelWidth: Math.max(leftRow.naturalLabelWidth, middleRow.naturalLabelWidth,
+                                                 rightRow.naturalLabelWidth)
     //
     // Written out rather than repeated over a three-element model: left, middle and right are a fixed,
     // individually named set, not a collection that varies, and each row wants its own index baked into
     // its handlers anyway.
     StatusLineSegmentRow {
+        id: leftRow
         objectName: "indicatorSegmentLeft"
         Layout.fillWidth: true
         segmentLabel: qsTr("Left")
+        labelWidth: root._labelWidth
         items: root.leftItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys
@@ -271,9 +195,11 @@ ColumnLayout {
     }
 
     StatusLineSegmentRow {
+        id: middleRow
         objectName: "indicatorSegmentMiddle"
         Layout.fillWidth: true
         segmentLabel: qsTr("Middle")
+        labelWidth: root._labelWidth
         items: root.middleItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys
@@ -286,9 +212,11 @@ ColumnLayout {
     }
 
     StatusLineSegmentRow {
+        id: rightRow
         objectName: "indicatorSegmentRight"
         Layout.fillWidth: true
         segmentLabel: qsTr("Right")
+        labelWidth: root._labelWidth
         items: root.rightItems
         placeholders: root.placeholders
         flagKeys: root.flagKeys
@@ -305,6 +233,7 @@ ColumnLayout {
     StatusLineItemDialog {
         id: stylePopup
         flagCatalog: root.flagCatalog
+        colorRoles: root.controller ? root.controller.indicatorColorRoles() : []
         onApplied: (segmentIndex, itemIndex, item) => root.replaceItem(segmentIndex, itemIndex, item)
         onRemoved: (segmentIndex, itemIndex) => root.removeItem(segmentIndex, itemIndex)
         onMoved: (segmentIndex, itemIndex, delta) => root.moveItem(segmentIndex, itemIndex, delta)
