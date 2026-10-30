@@ -22,10 +22,11 @@
 // Every session access is null-guarded: a split pane's session can be rebound to null during teardown,
 // and the single-pane session is never null, so the guards are safe for both.
 // SessionChrome is a plain Item (not a ContourTerminal), so it needs no Contour.Terminal import; its
-// sibling components (RequestPermission, DeferredBell) resolve via the implicit same-directory import.
+// sibling components (PermissionDialog, DeferredBell) resolve via the implicit same-directory import.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import Contour.Terminal
 
 Item {
     id: chrome
@@ -37,13 +38,21 @@ Item {
     // The enclosing ContourTerminal display, used to relay showNotification and to grab keyboard focus.
     property var displayItem: parent
 
+    // The pane header's find slot and whether the pane has an inline header (PaneCard, through
+    // TerminalPane): where the Terminal row's find bar goes. None outside a card.
+    property Item headerFindSlot: null
+    property int headerPresent: 0
+    // A bool by the QML-facing carve-out: it relays SearchBar.occupiesHeaderRow, a predicate derived from
+    // the placement's named anchor, up to TerminalPane; it decides nothing itself.
+    readonly property bool findInHeaderRow: searchBar.occupiesHeaderRow
+
     // Whether the scrollbar is moving to follow the session's viewport (@see updateScrollBarPosition): a move
     // of the session's own, which onScrollBarPositionChanged does not write back.
     property bool followingSession: false
 
     // The scrollbar's tick marks (`scrollbar.marks`): one { position, kind, targetLine } per tick, top
     // first, and one colour per kind. Guarded against `undefined`, not merely against a null session, for
-    // the reason hyperlinkTip gives: other tests bind a mock session that carries no marks at all. Each
+    // the reason LinkPill gives: other tests bind a mock session that carries no marks at all. Each
     // list is read from the session once: every read converts the whole of it to JavaScript.
     readonly property var scrollbarMarks: {
         let marks = chrome.session ? chrome.session.scrollbarMarks : undefined;
@@ -54,78 +63,48 @@ Item {
         return colors !== undefined ? colors : [];
     }
 
-    // OSC 8 hyperlink tooltip. A plain Item carrying an attached ToolTip rather than a Popup of its
-    // own, so it follows the same idiom TabItem.qml uses and inherits the app palette for free.
-    //
-    // Placed above the anchor cell where there is room and below it otherwise, and clamped to the
-    // chrome's width: a link near the right edge would otherwise hang the tooltip off the pane.
-    // Bound rather than assigned on a signal, because C++ already pushes only on a real transition --
-    // moving within one link announces nothing, so the show delay is not restarted per cell.
-    Item {
-        id: hyperlinkTip
-        objectName: "hyperlinkTooltip"
+    /// Where the pane's own overlays (the link pill) sit over the grid: an item its host lays exactly over this
+    /// chrome, above the pane's dim and outside any fade. Null: this chrome.
+    property Item overlayHost: null
+    /// The pane header's link pill slot, where the pane shows an inline header; null where it shows none.
+    property Item headerLinkSlot: null
+    /// Whether a locked pane draws its lock in a pill over its grid (window::SecureIndicatorRules: no header,
+    /// tab well or band holds it); a bool by the QML-facing carve-out.
+    property bool lockInPane: false
+    /// Whether the link pill sits in the pane header (QML-facing): the header hides what it would cover --
+    /// until the pill has faded out, not from when it starts to, so nothing comes back under it.
+    readonly property bool linkPillInHeader: linkPill.inHeader && linkPill.visible
 
-        // Guarded against `undefined`, not merely against a null session: other tests bind this
-        // component to a MOCK session that has no tooltip properties at all, and assigning undefined to
-        // a typed property is a QML warning the run-wide diagnostic gate fails the suite on.
-        readonly property rect anchorRect: (chrome.session && chrome.session.hyperlinkTooltipAnchor !== undefined)
-                                           ? chrome.session.hyperlinkTooltipAnchor
-                                           : Qt.rect(0, 0, 0, 0)
-        readonly property string tipText: (chrome.session && chrome.session.hyperlinkTooltipText !== undefined)
-                                          ? chrome.session.hyperlinkTooltipText
-                                          : ""
-        readonly property bool showAbove: anchorRect.y > height + 8
-
-        width: 1
-        height: 1
-        x: Math.max(0, Math.min(anchorRect.x, chrome.width - 1))
-        y: showAbove ? anchorRect.y : anchorRect.y + anchorRect.height
-
-        ToolTip.text: hyperlinkTip.tipText
-        // Withheld while the window is inactive: a tooltip left standing over an unfocused window is
-        // the pointer describing something the user is no longer looking at.
-        ToolTip.visible: hyperlinkTip.tipText !== ""
-                         && chrome.Window.window !== null
-                         && chrome.Window.window.active
-        ToolTip.delay: 600
+    // The link under the pointer: its target and how to open it, over blank cells or in the pane header. It
+    // replaces the hover tooltip.
+    LinkPill {
+        id: linkPill
+        session: chrome.session
+        gridItem: chrome
+        gridHost: chrome.overlayHost ? chrome.overlayHost : chrome
+        headerSlot: chrome.headerLinkSlot
+        headerPresent: chrome.headerPresent
+        // Where the find bar is while it is open: the pill keeps out of the places it holds.
+        findBar: chromeStyle.findBarPresence(searchBar.visible ? searchBar.placement.anchor : "")
     }
 
-    // The gutter's block-column tooltip: how the hovered command ended, how long it took, when and where it
-    // ran, and what it was. The anchor is a NOTIFY property; the text is read through the session's
-    // commandBlockTooltip() each time that property's signal fires, so a hover that never happens formats
-    // nothing. Guarded against mock sessions without the members, as hyperlinkTip is.
-    Item {
-        id: blockTip
-        objectName: "commandBlockTooltip"
+    // The lock, where no header, tab well or band holds it: over blank cells at the top right, yielding to the
+    // link pill and the find bar.
+    SecureInputPill {
+        id: secureLockPill
+        session: chrome.session
+        gridItem: chrome
+        gridHost: chrome.overlayHost ? chrome.overlayHost : chrome
+        enabledByRule: chrome.lockInPane
+        findBar: linkPill.findBar
+        linkPillAnchor: linkPill.visible ? linkPill.placement.anchor : "hidden"
+    }
 
-        readonly property rect anchorRect: (chrome.session && chrome.session.commandBlockTooltipAnchor !== undefined)
-                                           ? chrome.session.commandBlockTooltipAnchor
-                                           : Qt.rect(0, 0, 0, 0)
-        // Bound to the SESSION's property, not to anchorRect: output scrolling under a stationary pointer
-        // lets the next block be entered at the very cell the last one was, and an anchor that did not
-        // change would leave this showing the last block's text.
-        readonly property string tipText: (chrome.session
-                                           && chrome.session.commandBlockTooltipAnchor !== undefined
-                                           && chrome.session.commandBlockTooltipAnchor.width > 0
-                                           && typeof chrome.session.commandBlockTooltip === "function")
-                                          ? chrome.session.commandBlockTooltip()
-                                          : ""
-        readonly property bool showAbove: anchorRect.y > height + 8
-        // Half the hyperlink tip's: a pointer brought to the gutter is there on purpose, where one crossing
-        // a link is usually on its way to something else.
-        readonly property int showDelay: 300
-
-        width: 1
-        height: 1
-        // On the grid side of the gutter cell: over the strip it would cover the column being read.
-        x: Math.max(0, Math.min(anchorRect.x + anchorRect.width, chrome.width - 1))
-        y: showAbove ? anchorRect.y : anchorRect.y + anchorRect.height
-
-        ToolTip.text: blockTip.tipText
-        ToolTip.visible: blockTip.tipText !== ""
-                         && chrome.Window.window !== null
-                         && chrome.Window.window.active
-        ToolTip.delay: blockTip.showDelay
+    // The hovered block's ⋯ button, beside its first row in the rail's strip (the block's menu holds what its
+    // tooltip once said).
+    BlockActionsButton {
+        id: blockActions
+        session: chrome.session
     }
 
     // Vertical scrollbar, bidirectionally bound to the VT viewport (drag -> viewport here; viewport ->
@@ -151,9 +130,16 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         x: vbar.atRightEdge ? parent.width - vbar.width : 0
-        visible: (chrome.session ? chrome.session.isScrollbarVisible : false) && vbar.hasScrollback
+        // Whether the bar is wanted: the session's decision (an overlay bar hides at the bottom), and history to
+        // move through. It shows and hides by fading over motion.standard (a cross-fade under Reduce Motion);
+        // only once fully faded out is it gone, so a hidden bar takes no press.
+        readonly property bool wanted: (chrome.session ? chrome.session.isScrollbarVisible : false)
+                                       && vbar.hasScrollback
+        opacity: vbar.wanted ? 1.0 : 0.0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.standard } }
         orientation: Qt.Vertical
-        policy: visible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+        policy: vbar.wanted ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
         minimumSize: 0.1
         size: chrome.session
             ? chrome.session.pageLineCount / (chrome.session.pageLineCount + chrome.session.historyLineCount)
@@ -165,25 +151,12 @@ Item {
         onSizeChanged: chrome.updateScrollBarPosition()
         onAvailableHeightChanged: chrome.publishMarkTrack()
 
-        // Comfortable hit target that floats just off the terminal edge. Overlay only — no gutter is
-        // reserved, so the grid/window geometry is untouched.
-        implicitWidth: 12
-        padding: 2
-
-        // A stock ScrollBar inherits the app-pinned Fusion style's thin, low-contrast, hover-only handle
-        // (see ContourGuiApp's QQuickStyle::setStyle("Fusion")), nearly invisible over a terminal's
-        // per-profile background. An explicit contentItem/background — the same remedy WindowControls.qml
-        // uses for Fusion's illegible defaults — makes the handle style-independent: clearly visible at
-        // rest, emphasized on hover/drag.
-
-        // Auto-contrast handle color derived from the profile background (QColor r/g/b are 0..1), so it
-        // reads on any theme without plumbing a foreground color to QML: light handle over dark
-        // backgrounds, dark handle over light ones. Null-guarded during split-teardown rebinds.
-        readonly property color handleColor: {
-            let bg = chrome.session ? chrome.session.backgroundColor : Qt.rgba(0, 0, 0, 1);
-            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
-            return luminance < 0.5 ? Qt.rgba(1, 1, 1, 1) : Qt.rgba(0, 0, 0, 1);
-        }
+        // The track and, toward the pane's edge, the inset beside it: inside the hit area, so a press at the
+        // very edge still takes the bar. Overlay only: no gutter is reserved, so the grid is untouched.
+        implicitWidth: chromeStyle.size.scrollbar + chromeStyle.space.scrollbarInset
+        padding: 0
+        leftPadding: vbar.atRightEdge ? 0 : chromeStyle.space.scrollbarInset
+        rightPadding: vbar.atRightEdge ? chromeStyle.space.scrollbarInset : 0
 
         // True only while there is scrollback to move through. Because we supply our own contentItem, the
         // style's "hide when content fits" no longer applies, so we gate the whole bar's visibility on
@@ -192,23 +165,55 @@ Item {
         // capture mouse events in its strip).
         readonly property bool hasScrollback: vbar.size < 1.0
 
+        // The Terminal row draws the thumb as a column of a glyph (one per cell row); the native rows as a
+        // rounded shape. Hovered or dragged, the thumb takes its active colour (and on the native rows the
+        // track shows).
+        readonly property bool glyphThumb: chromeStyle.scrollThumbGlyph !== ""
+        readonly property bool engaged: vbar.hovered || vbar.pressed
+        // Resolved on the pane's own background (colorOn) on every row, so a light profile under a dark
+        // default keeps a thumb that stands off it.
+        readonly property color paneBackground: chrome.session ? chrome.session.backgroundColor : "transparent"
+        readonly property color thumbColor: chromeStyle.paletteRevision < 0 ? "transparent"
+            : chromeStyle.colorOn(vbar.engaged ? chromeStyle.roles.scrollbarThumbActive
+                                               : chromeStyle.roles.scrollbarThumb,
+                                  vbar.paneBackground)
+
         contentItem: Rectangle {
+            id: thumb
+            objectName: "scrollbarThumb"
             // Above the tick layer below, so the handle is drawn over the ticks it passes.
             z: 1
-            implicitWidth: 8
-            radius: width / 2
-            color: vbar.handleColor
-            // Visible at rest, brighter on hover, brightest while dragging. Opacity is ours (not the
-            // style's active-driven fade), so the handle never vanishes when merely idle.
-            opacity: vbar.pressed ? 0.55 : vbar.hovered ? 0.45 : 0.28
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            implicitWidth: chromeStyle.size.scrollbar
+            radius: chromeStyle.radii.scrollbar
+            color: vbar.glyphThumb ? "transparent" : vbar.thumbColor
+            Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
+
+            Column {
+                visible: vbar.glyphThumb
+                Repeater {
+                    model: vbar.glyphThumb ? Math.max(1, Math.floor(thumb.height / chromeStyle.cellHeight)) : 0
+                    Text {
+                        objectName: "scrollbarThumbGlyph"
+                        width: thumb.width
+                        height: chromeStyle.cellHeight
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        text: chromeStyle.scrollThumbGlyph
+                        font: chromeStyle.type.body
+                        color: vbar.thumbColor
+                        Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
+                    }
+                }
+            }
         }
 
         background: Rectangle {
-            color: vbar.handleColor
-            // A faint track that only surfaces while the user interacts, keeping the resting look clean.
-            opacity: (vbar.hovered || vbar.pressed) ? 0.10 : 0.0
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            objectName: "scrollbarTrack"
+            radius: chromeStyle.radii.scrollbar
+            color: vbar.engaged && !vbar.glyphThumb && chromeStyle.paletteRevision >= 0
+                ? chromeStyle.colorOn(chromeStyle.roles.scrollbarTrack, vbar.paneBackground)
+                : "transparent"
+            Behavior on color { ColorAnimation { duration: chromeStyle.motion.fast } }
         }
 
         // Tick marks over the track (`scrollbar.marks`): where commands ran, failed or are still running, and
@@ -231,9 +236,9 @@ Item {
             width: vbar.availableWidth
             height: vbar.availableHeight
 
-            // A tick's drawn height, and how far past it the tick takes a press on either side: 3 + 2 * 3 makes a
-            // target nine pixels tall, where a two-pixel line taking one more on each side was a hard one.
-            readonly property int tickHeight: 3
+            // How far past a tick's drawn height (size.scrollTick) the tick takes a press on either side: a
+            // three-pixel line and 3 each side make a target nine pixels tall, where a two-pixel line taking
+            // one more on each side was a hard one.
             readonly property int hitMargin: 3
 
             Repeater {
@@ -251,9 +256,12 @@ Item {
                     y: Math.min(markLayer.height - tick.height,
                                 Math.round(tick.modelData.position * markLayer.height))
                     width: markLayer.width
-                    height: markLayer.tickHeight
-                    radius: 1
-                    color: chrome.markColor(tick.modelData.kind)
+                    height: chromeStyle.size.scrollTick
+                    // A mark of something still going on is an outline in its colour, not a fill.
+                    readonly property bool hollow: tick.modelData.style === chromeStyle.blocks.tickHollow
+                    color: tick.hollow ? "transparent" : chrome.markColor(tick.modelData.kind)
+                    border.width: tick.hollow ? chromeStyle.size.scrollTickOutline : 0
+                    border.color: chrome.markColor(tick.modelData.kind)
 
                     MouseArea {
                         // The hit area reaches past the line without moving what is drawn.
@@ -288,73 +296,63 @@ Item {
         id: bell
     }
 
-    // Permission-wall dialogs.
-    RequestPermission {
-        id: requestFontChangeDialog
-        text: qsTr("The host application is requesting to change the display font.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, false);
-    }
+    // The session's permission question: one at a time, the next shown once this one is answered. What it
+    // shows is the session's pendingPermission -- program-supplied text the session has already made safe to
+    // show. An answer goes to the session that asked, naming the question it answers, so a late or doubled
+    // answer can never answer a question the user did not see.
+    PermissionDialog {
+        id: permissionDialog
+        prompt: ({})
+        focusTarget: chrome.displayItem
 
-    RequestPermission {
-        id: requestLargeFilePaste
-        text: qsTr("The host application is going to paste a large file. Are you sure?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingPaste(false, false);
-    }
+        // The session whose question is shown, and its id; null and -1 while none is.
+        property var askingSession: null
+        property int questionId: -1
 
-    RequestPermission {
-        id: requestBufferCaptureDialog
-        text: qsTr("The host application is requesting to capture the terminal buffer.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, false);
-    }
+        // Unbound before the answer goes: the session may put its next question up from inside the answer,
+        // binding it here, and clearing afterwards would leave that one with nobody to answer it.
+        onAnswered: (decision, memory) => {
+            let session = askingSession;
+            let id = questionId;
+            askingSession = null;
+            questionId = -1;
+            if (session !== null && id >= 0)
+                session.answerPermission(id, decision, memory);
+        }
 
-    RequestPermission {
-        id: requestShowHostWritableStatusLine
-        text: qsTr("The host application is requesting to show the host-writable status line.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
-    }
-
-    // Asked before RerunCommand types a command at the prompt and enters it: the command line is what the
-    // shell reported, or what the screen showed, and a program writing to the terminal can forge either. The
-    // text is set as the dialog opens, from the command the session holds for it.
-    RequestPermission {
-        id: requestRerunCommandDialog
-        title: qsTr("Run this command again?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
-    }
-
-    // Asked when a status-line extension first runs one of the commands its manifest declares, with
-    // `run_command: ask`. The text names the extension, its module and every command it declares, made safe to
-    // show by the session. Every answer is remembered in the grants file, so "to all" means the same as the
-    // plain one; Abort, or closing the dialog, is no answer.
-    RequestPermission {
-        id: requestExtensionCommandsDialog
-        objectName: "extensionCommandsDialog"
-        title: qsTr("Allow this status-line extension to run commands?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
-        onYesClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
-        onNoClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
-        onRejected: if (chrome.session !== null) chrome.session.dismissPendingExtension();
+        // Shows what @p session asks now, or closes the dialog when it asks nothing.
+        function follow(session) {
+            let asked = session !== null && session.pendingPermission !== undefined ? session.pendingPermission : ({});
+            if (asked.title === undefined) {
+                askingSession = null;
+                questionId = -1;
+                if (visible)
+                    close();
+                return;
+            }
+            // Another question while one is shown -- the same one asked again with more to it, or the next --
+            // is shown anew: the dialog closes and opens with it, so a click aimed at what was shown can never
+            // reach the question that replaced it. The session says the new one to a screen reader.
+            if (visible && (askingSession !== session || questionId !== asked.id)) {
+                askingSession = null;
+                questionId = -1;
+                close();
+            }
+            askingSession = session;
+            questionId = asked.id;
+            // Put up from inside the answer to the last one, it is presented once that answer's dialog has
+            // closed -- presented now, the close would take it too -- and only if it is still the one asked,
+            // as the session publishes it then (Allow may have been held or given back meanwhile).
+            if (answering) {
+                Qt.callLater(() => {
+                    if (askingSession === session && questionId === asked.id
+                        && session.pendingPermission.id === asked.id)
+                        present(session.pendingPermission);
+                });
+                return;
+            }
+            present(asked);
+        }
     }
 
     // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
@@ -364,6 +362,8 @@ Item {
         id: searchBar
         session: chrome.session
         displayItem: chrome.displayItem
+        header: chrome.headerPresent
+        headerSlot: chrome.headerFindSlot
     }
 
     // Play the session's bell, at once or once multimedia is ready.
@@ -403,11 +403,11 @@ Item {
             vt.scrollOffset = Math.round(vt.historyLineCount - vbar.position * totalLineCount);
     }
 
-    // The colour of a tick of @p kind, from the session's colour scheme; the handle's own colour while the
+    // The colour of a tick of @p kind, from the session's colour scheme; the thumb's own colour while the
     // session has published none (a mock, or the instant before its first refresh).
     function markColor(kind) {
         return kind >= 0 && kind < chrome.scrollbarMarkColors.length ? chrome.scrollbarMarkColors[kind]
-                                                                       : vbar.handleColor;
+                                                                       : vbar.thumbColor;
     }
 
     // Whether @p y, in the mark layer's coordinates, lies under the scrollbar's handle as it is drawn.
@@ -440,9 +440,16 @@ Item {
             chrome.session.setScrollbarMarkTrackPixels(Math.round(vbar.availableHeight));
     }
 
-    // A rebound session has never been told this pane's track height.
-    onSessionChanged: chrome.publishMarkTrack()
-    Component.onCompleted: chrome.publishMarkTrack()
+    // A rebound session has never been told this pane's track height, and may have asked its question while
+    // no chrome showed it: the dialog follows what the session asks now.
+    onSessionChanged: {
+        chrome.publishMarkTrack();
+        permissionDialog.follow(chrome.session);
+    }
+    Component.onCompleted: {
+        chrome.publishMarkTrack();
+        permissionDialog.follow(chrome.session);
+    }
 
     // Update the GUI scrollbar whenever the VT's viewport changes.
     function updateScrollBarPosition() {
@@ -476,24 +483,14 @@ Item {
         // open() is a no-op on an already-open Popup (and onOpened does not re-fire), so focusing
         // afterwards covers both cases: a second Ctrl+Shift+F means "search for something else"
         // rather than doing nothing.
+        // A request may also have set the pattern (Use Selection for Find), which an open bar must then show.
         function onSearchBarRequested() {
+            searchBar.showSessionPattern();
             searchBar.open();
             searchBar.focusField();
         }
 
-        // Permission-wall hooks.
-        function onRequestPermissionForFontChange() { requestFontChangeDialog.open(); }
-        function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
-        function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
-        function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
-        function onRequestPermissionForExtension() {
-            requestExtensionCommandsDialog.text = chrome.session.pendingExtensionPermissionText();
-            requestExtensionCommandsDialog.open();
-        }
-        function onRequestPermissionForRerunCommand() {
-            requestRerunCommandDialog.text = qsTr("It is typed at the prompt and entered:") + "\n\n"
-                                             + chrome.session.pendingRerunCommandLine();
-            requestRerunCommandDialog.open();
-        }
+        // The session asks another question, or what the one shown asks changed.
+        function onPendingPermissionChanged() { permissionDialog.follow(chrome.session); }
     }
 }

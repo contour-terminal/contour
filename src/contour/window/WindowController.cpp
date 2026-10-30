@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/ContextMenu.hpp>
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/command/Shortcut.hpp>
+#include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
-#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/Config.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
+#include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
@@ -15,24 +19,42 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/DropZonePolicy.hpp>
+#include <contour/window/HeaderBarLayout.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneState.hpp>
 #include <contour/window/RemoteChrome.hpp>
-#include <contour/window/SettingsController.hpp>
+#include <contour/window/SecureInputPolicy.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
+#include <contour/window/ToastPlacement.hpp>
+#include <contour/window/WindowActivation.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <core/Overloaded.hpp>
+
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QUuid>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
-#include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
 
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <mutex>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <vtworkspace/Pane.hpp>
@@ -43,11 +65,25 @@
 namespace contour::window
 {
 
+QString const& processToken()
+{
+    // QUuid draws from the platform's random source; it is unique per process, not per PID namespace.
+    static auto const token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return token;
+}
+
 WindowController::WindowController(session::TerminalSessionManager& manager,
                                    vtworkspace::WindowId windowId,
-                                   std::optional<WindowPosition> initialPosition):
+                                   config::MenuPresentation menuPresentation,
+                                   std::optional<WindowPosition> initialPosition,
+                                   core::platform::IClock const& clock,
+                                   NoticeAnnouncerFactory const& noticeAnnouncer,
+                                   QString processToken,
+                                   WindowRole role):
     _manager { manager },
     _windowId { windowId },
+    _processToken { std::move(processToken) },
+    _role { role },
     _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
     // and survives a config reload in place (the loaded values are assigned into it, the object is not
@@ -57,88 +93,74 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
-    _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) }
+    _commandPalette { std::make_unique<CommandPaletteModel>(
+        manager.commandHistory(),
+        std::vector<command::CommandSource const*> { &_tabCommands,
+                                                     &_profileCommands,
+                                                     &_layoutCommands,
+                                                     &_hostCommands,
+                                                     &_boundCommands,
+                                                     &_actionCommands },
+        command::platformShortcutStyle(),
+        this) },
+    _menuPresentation { menuPresentation },
+    _nativeMenus { manager.app().nativeMenuPresenter() },
+    _clock { clock },
+    _heldModifier { manager.app().headerRevealDelay() },
+    _noticeAnnouncer { std::make_unique<platform::GatedAnnouncer>(
+        noticeAnnouncer([this]() -> QObject* { return _osWindow; }),
+        [&config = manager.app().config()]() { return config.accessibilityAnnouncements.value(); }) },
+    _notices { _clock, *_noticeAnnouncer, [this](NoticeAction action) {
+                  switch (action)
+                  {
+                      case NoticeAction::None: break;
+                      case NoticeAction::OpenConfigFile: _manager.openConfigFile(); break;
+                  }
+              } }
 {
-    _commandPalette->setSources({ &_tabCommands,
-                                  &_profileCommands,
-                                  &_layoutCommands,
-                                  &_hostCommands,
-                                  &_boundCommands,
-                                  &_actionCommands });
+    _headerRevealTimer.setSingleShot(true);
+    // A coarse timer may fire early, which would only re-arm it; the reveal is due when it is due.
+    _headerRevealTimer.setTimerType(Qt::PreciseTimer);
+    connect(&_headerRevealTimer, &QTimer::timeout, this, &WindowController::refreshHeaderReveal);
+
+    // The band's centre follows the tab-bar gate, its edge and the host's connection (titleBand()); under
+    // Minimal an empty centre is the bare band, which is shorter and detaches the compact toolbar.
+    connect(this, &WindowController::activeSessionChanged, this, &WindowController::followActiveStickyHeader);
+    connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
 
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
     // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
     // reason this is injected rather than read from a global at the point of use.
-    _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
-        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value()))
-            return *configured;
-        return QGuiApplication::styleHints()->colorScheme();
-    });
-
-    // The editable settings bridge. Its collaborators are injected so the whole workflow is testable:
-    // a config accessor into the app's live (reload-in-place) Config, a file-backed side-file store
-    // rooted at the config directory, and an apply step that reloads every session after a save.
-    _settingsController = std::make_unique<SettingsController>(
-        [this]() -> config::Config const& { return _manager.app().config(); },
-        std::make_shared<config::FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
-        [this]() {
-            if (auto const reloaded = _manager.reloadAllSessions(); !reloaded)
-                errorLog()("Failed to reload configuration. {}", reloaded.error());
-            // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
-            // reloaded Config, so the chrome recolors without a restart.
-            _manager.app().applyGuiTheme(_manager.app().config().theme.value());
-            // Likewise for `window_control_style`: which corner the min/max/close buttons sit in,
-            // and what shape they take, are QML bindings on the provider, so they re-evaluate the
-            // moment it says so. Application-wide, so every open window follows.
-            _manager.app().applyWindowControlStyle(_manager.app().config().windowControlStyle.value());
-        },
-        _manager.app().gpuInventory(),
-        this);
+    _nativeFrame =
+        platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme { return effectiveColorScheme(); });
 }
 
-WindowController::~WindowController() = default;
+NoticeAnnouncerFactory qtNoticeAnnouncer()
+{
+    return [](std::function<QObject*()> anchor) -> std::unique_ptr<platform::Announcer> {
+        return std::make_unique<platform::QtAnnouncer>(std::move(anchor));
+    };
+}
+
+WindowController::~WindowController()
+{
+    detachCaption();
+}
 
 void WindowController::openCommandPalette()
 {
-    // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
-    // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
-    _commandPalette->setShortcuts(command::shortcutIndex(_manager.app().config()));
-
-    // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
-    // last open left behind.
-    _commandPalette->refresh();
+    // Re-reads the bindings on every open, not once at construction: a ReloadConfig can have rebound a
+    // key since, and a shortcut column that advertises the OLD chord is worse than none at all. Also
+    // re-queries the sources (so the tab rows track the tabs that exist now) and returns to the top level
+    // with an empty filter.
+    _commandPalette->refresh(
+        command::shortcutIndex(_manager.app().config(), command::platformShortcutStyle()));
 
     emit commandPaletteRequested();
-}
-
-void WindowController::openSettings()
-{
-    // Rebuild the models against the current config on every open, so a config reload since the last
-    // visit is reflected — the same freshness discipline openCommandPalette() uses.
-    _settingsController->refresh();
-    setSettingsActive(true);
-}
-
-void WindowController::closeSettings()
-{
-    setSettingsActive(false);
-}
-
-void WindowController::toggleSettings()
-{
-    setSettingsActive(!_settingsActive);
-}
-
-void WindowController::setSettingsActive(bool active)
-{
-    if (_settingsActive == active)
-        return;
-    _settingsActive = active;
-    emit settingsActiveChanged();
-    // Toggling the settings view flips whether a terminal tab reads as active (see IsActiveRole), so
-    // repaint the strip: the active tab de-highlights on open and re-highlights on close.
-    refreshActiveTabHighlight();
 }
 
 void WindowController::openContextMenu()
@@ -155,42 +177,254 @@ void WindowController::openContextMenu()
     auto const* tab = activeModelTab();
     state.hasSplits = tab != nullptr && tab->hasMultiplePanes();
 
-    auto const entries = command::buildContextMenu(state);
-
-    _paneContextMenu.publish(entries);
-
     // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
     // active by the time the click lands.
     _contextMenuSession = session;
 
-    // Model first, then the request to show: both are synchronous, so the QML has rebuilt the menu's rows
-    // by the time it is told to pop it.
-    emit contextMenuModelChanged();
-    emit contextMenuRequested();
+    presentSurface(MenuSurface::Pane, resolveMenu(command::buildContextMenu(state)));
+}
+
+void WindowController::openBlockMenu(session::TerminalSession& session,
+                                     vtbackend::CommandBlockId block,
+                                     std::optional<QPointF> anchor)
+{
+    auto const state = session.blockMenuState(block);
+    if (!state)
+        return;
+
+    // The pane the rows were built for, held for the reason openContextMenu() holds it. A row names its
+    // block by id: one evicted since resolves to nothing, and does nothing.
+    _contextMenuSession = &session;
+    presentSurface(MenuSurface::Pane, resolveMenu(command::buildBlockMenu(*state)), anchor);
 }
 
 void WindowController::triggerContextMenuAction(int actionId)
 {
-    // The session the menu was OPENED over, not whichever one is active now. Null when that pane has since
-    // died — its shell exited while the menu stood open — in which case the row has nothing left to act on.
-    auto* session = _contextMenuSession.data();
-    if (session == nullptr)
+    triggerSurfaceAction(MenuSurface::Pane, actionId);
+}
+
+void WindowController::openTabContextMenu(int index, QPointF /*windowPosition*/)
+{
+    auto const* tab = tabAtRow(index);
+    if (tab == nullptr)
         return;
 
+    auto const palette = _manager.model().colorPalette();
+    auto const state = command::TabContextMenuState {
+        .tabIndex = index,
+        .tabCount = count(),
+        .palette = { palette.begin(), palette.end() },
+        .color = tab->color(),
+        .userColor = tab->color(vtworkspace::TabColorSource::User).has_value()
+                         ? command::UserColorPresence::Present
+                         : command::UserColorPresence::Absent,
+    };
+
+    // Pinned by id: the strip can reorder or close tabs while the menu stands open.
+    _tabContextMenuTab = tab->id();
+
+    presentSurface(MenuSurface::Tab, resolveMenu(command::buildTabContextMenu(state)));
+}
+
+void WindowController::triggerTabContextMenuAction(int actionId)
+{
+    triggerSurfaceAction(MenuSurface::Tab, actionId);
+}
+
+void WindowController::openNewTabMenu(QPointF /*windowPosition*/)
+{
+    auto state = command::NewTabMenuState {
+        .profileNames =
+            std::ranges::to<std::vector>(_manager.app().config().profiles.value() | std::views::keys),
+    };
+    std::ranges::sort(state.profileNames);
+
+    presentSurface(MenuSurface::NewTab, resolveMenu(command::buildNewTabMenu(state)));
+}
+
+void WindowController::triggerNewTabMenuAction(int actionId)
+{
+    triggerSurfaceAction(MenuSurface::NewTab, actionId);
+}
+
+void WindowController::activateHeaderBarItem(int item, QPointF windowPosition)
+{
+    if (item < 0 || std::cmp_greater_equal(item, HeaderBarItemCount))
+        return;
+
+    switch (static_cast<HeaderBarItem>(item))
+    {
+        case HeaderBarItem::NewTab: createNewTab(); break;
+        case HeaderBarItem::Search:
+            // Run on the session directly rather than through runCommand(): a button is not a command
+            // reached for by name, so it stays out of the palette's history, as menu rows do.
+            if (auto* session = activeSession())
+                session->executeAction(actions::Action { actions::SearchReverse {} });
+            break;
+        case HeaderBarItem::MainMenu: openMainMenu(windowPosition); break;
+    }
+}
+
+void WindowController::openMainMenu(QPointF /*windowPosition*/)
+{
+    presentSurface(MenuSurface::MainMenu, resolveMenu(command::buildMenuBar(menuBarState())));
+}
+
+void WindowController::triggerMainMenuAction(int actionId)
+{
+    triggerSurfaceAction(MenuSurface::MainMenu, actionId);
+}
+
+command::MenuTree WindowController::resolveMenu(std::span<command::ContextMenuEntry const> entries) const
+{
+    // Re-read on every open: a ReloadConfig can have rebound a key since the last one.
+    return resolveMenuTree(entries, _manager.app().config());
+}
+
+void WindowController::presentSurface(MenuSurface surface,
+                                      command::MenuTree tree,
+                                      std::optional<QPointF> anchor)
+{
+    // Only the pane menu is opened anywhere but at the pointer; the others have no anchor to remember.
+    if (surface == MenuSurface::Pane)
+        _contextMenuAnchor = anchor;
+
+    if (_menuPresentation == config::MenuPresentation::InScene)
+    {
+        showInScene(surface, std::move(tree));
+        return;
+    }
+
+    // Posted, not run here: this is called from inside a press handler, and AppKit's tracking loop would
+    // swallow the release and run Qt events that may destroy the item under that handler's frame. Posted
+    // to `this`, the call is dropped if this window goes first; the OS window is held weakly for the same
+    // reason.
+    platform::postToObject(this,
+                           [this,
+                            surface,
+                            tree = std::move(tree),
+                            anchor,
+                            target = currentMenuTarget(),
+                            window = QPointer<QWindow> { _osWindow }] {
+                               // The presenter blocks until the menu closes, and Qt keeps delivering events
+                               // meanwhile -- the same surface may even be reopened. So the pick resolves
+                               // against the menu that was SHOWN and the target it was opened for, both held
+                               // by value here, and this window is held weakly.
+                               auto const self = QPointer<WindowController> { this };
+                               if (!self)
+                                   return;
+                               auto onAction = [self, surface, target](actions::Action const& action) {
+                                   if (self)
+                                       platform::postToObject(self.data(), [self, surface, target, action] {
+                                           self->runSurfaceAction(surface, target, action);
+                                       });
+                               };
+                               auto const route =
+                                   presentMenu(self->_menuPresentation,
+                                               self->_nativeMenus,
+                                               tree,
+                                               { .window = window.data(), .position = anchor },
+                                               pickFromShown(tree.actions, std::move(onAction)));
+                               // presentMenu() ran a nested event loop: this window may be gone by now.
+                               if (route == MenuRoute::InScene && self)
+                                   self->showInScene(surface, tree);
+                           });
+}
+
+WindowController::MenuTarget WindowController::currentMenuTarget() const
+{
+    return MenuTarget { .session = _contextMenuSession, .tab = _tabContextMenuTab };
+}
+
+void WindowController::showInScene(MenuSurface surface, command::MenuTree tree)
+{
+    // Published for the scene alone: a native pick resolves against the tree it showed, never the model.
+    _menus[static_cast<std::size_t>(surface)].publish(std::move(tree));
+
+    // Model first, then the request to show, so the QML has rebuilt the rows by the time it pops them.
+    switch (surface)
+    {
+        case MenuSurface::Pane: emit contextMenuModelChanged(); break;
+        case MenuSurface::TitleBar: emit titleBarContextMenuModelChanged(); break;
+        case MenuSurface::Tab: emit tabContextMenuModelChanged(); break;
+        case MenuSurface::NewTab: emit newTabMenuModelChanged(); break;
+        case MenuSurface::MainMenu: emit mainMenuModelChanged(); break;
+    }
+
+    switch (surface)
+    {
+        case MenuSurface::Pane: emit contextMenuRequested(); break;
+        case MenuSurface::TitleBar: emit titleBarContextMenuRequested(); break;
+        case MenuSurface::Tab:
+            if (_tabContextMenuTab)
+                if (auto const row = rowOfTab(*_tabContextMenuTab); row >= 0)
+                    emit tabContextMenuRequested(row);
+            break;
+        case MenuSurface::NewTab: emit newTabMenuRequested(); break;
+        case MenuSurface::MainMenu: emit mainMenuRequested(); break;
+    }
+}
+
+void WindowController::triggerSurfaceAction(MenuSurface surface, int actionId)
+{
     // Copied out of the model before running, for the same reason runCommand() does: an action can
     // rebuild this window (ClosePane, ChangeProfile) and free the vector it was standing in.
-    auto const action = _paneContextMenu.actionAt(actionId);
-    if (!action)
-        return;
+    if (auto const action = menu(surface).actionAt(actionId))
+        runSurfaceAction(surface, currentMenuTarget(), *action);
+}
 
+void WindowController::runSurfaceAction(MenuSurface surface,
+                                        MenuTarget const& target,
+                                        actions::Action const& action)
+{
     // Deliberately NOT recorded in the command history: that list is "commands the user reached for by
     // name", and it exists to float them to the top of the palette. A right-click on "Copy" is not that.
-    session->executeAction(*action);
+    switch (surface)
+    {
+        case MenuSurface::Pane:
+            // The session the menu was OPENED over, not whichever one is active now. Null when that pane
+            // has since died, in which case the row has nothing left to act on.
+            if (auto* session = target.session.data())
+                session->executeAction(action);
+            break;
+        case MenuSurface::Tab:
+            // The TabId overload does nothing when the pinned tab has gone.
+            if (target.tab)
+                runTabAction(*target.tab, action);
+            break;
+        case MenuSurface::TitleBar:
+        case MenuSurface::NewTab:
+        case MenuSurface::MainMenu:
+            // Window-scoped rows (a new tab, this window's tab bar, the menu bar's menus): no particular
+            // pane was opened over.
+            if (auto* session = activeSession())
+                session->executeAction(action);
+            break;
+    }
 }
 
 QString WindowController::hostLabel() const
 {
     return QString::fromStdString(_manager.app().attachedHostLabel());
+}
+
+QString WindowController::shortcutText(QString const& commandName) const
+{
+    auto const chords = command::chordIndex(_manager.app().config());
+    auto const chord = chords.find(commandName.toStdString());
+    if (chord == chords.end())
+        return {};
+    return QString::fromStdString(command::shortcutText(chord->second, command::platformShortcutStyle()));
+}
+
+int WindowController::hostChipState() const noexcept
+{
+    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection())));
+}
+
+QString WindowController::applicationVersion() const
+{
+    return _manager.app().applicationVersion();
 }
 
 QString WindowController::windowTitle(QString const& sessionTitle) const
@@ -220,24 +454,45 @@ void WindowController::openTitleBarContextMenu()
         state.profileNames.push_back(name);
     std::ranges::sort(state.profileNames);
 
-    _titleBarContextMenu.publish(command::buildTitleBarContextMenu(state));
+    presentSurface(MenuSurface::TitleBar, resolveMenu(command::buildTitleBarContextMenu(state)));
+}
 
-    // Model first, then the request to show: both are synchronous, so QML has rebuilt the rows by the
-    // time it is told to pop them.
-    emit titleBarContextMenuModelChanged();
-    emit titleBarContextMenuRequested();
+command::MenuBarState WindowController::menuBarState() const
+{
+    auto state = command::menuBarStateOf(_manager.app().config());
+    state.window = command::WindowPresence::Present;
+    state.tabCount = count();
+    state.activeTab = activeTabIndex();
+    auto const* tab = activeModelTab();
+    state.paneCount = tab != nullptr ? tab->paneCount() : 0;
+    state.tabTitles = tabTitles();
+    // The WINDOW's live modes, as the title-bar menu shows them.
+    state.tabBarVisibility = _tabBarVisibility;
+    state.tabBarPosition = _tabBarPosition;
+
+    if (auto* session = activeSession())
+    {
+        auto const pane = session->contextMenuState();
+        state.selection =
+            pane.hasSelection ? command::SelectionPresence::Present : command::SelectionPresence::Absent;
+        state.speech =
+            pane.canSpeak ? command::SpeechAvailability::Available : command::SpeechAvailability::Unavailable;
+        state.inputProtection =
+            pane.inputProtected ? command::InputProtection::On : command::InputProtection::Off;
+        state.activeProfile = session->profileName();
+    }
+    return state;
+}
+
+void WindowController::runMenuBarAction(actions::Action const& action) const
+{
+    if (auto* session = activeSession())
+        session->executeAction(action);
 }
 
 void WindowController::triggerTitleBarContextMenuAction(int actionId)
 {
-    auto const action = _titleBarContextMenu.actionAt(actionId);
-    if (!action)
-        return;
-
-    // Runs against the window's ACTIVE session, unlike the pane menu: every row here is window-scoped
-    // (a new tab, this window's tab bar), so there is no particular pane it was opened over.
-    if (auto* session = activeSession())
-        session->executeAction(*action);
+    triggerSurfaceAction(MenuSurface::TitleBar, actionId);
 }
 
 void WindowController::runCommand(QString const& id)
@@ -310,6 +565,18 @@ vtworkspace::Tab* WindowController::tabAtRow(int index) const noexcept
     return win != nullptr ? win->tabAt(index) : nullptr;
 }
 
+std::optional<vtworkspace::TabId> WindowController::tabIdAtRow(int row) const noexcept
+{
+    if (auto const* tab = tabAtRow(row); tab != nullptr)
+        return tab->id();
+    return std::nullopt;
+}
+
+int WindowController::focusedTabIndex() const noexcept
+{
+    return _focusedTab ? rowOfTab(*_focusedTab) : -1;
+}
+
 int WindowController::rowOfTab(vtworkspace::TabId tab) const noexcept
 {
     auto* win = window();
@@ -330,9 +597,10 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::ZoomedRole), "zoomed" },
         { static_cast<int>(Roles::ProgressStateRole), "progressState" },
         { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
-        { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-        { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
-        { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" },
+        { static_cast<int>(Roles::BadgeRole), "badge" },
+        { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
+        { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
+        { static_cast<int>(Roles::SecureRole), "tabSecure" },
     };
 }
 
@@ -357,9 +625,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
             return color.has_value() ? platform::toQColor(*color) : QColor(Qt::transparent);
         }
-        // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
-        // active view then, so the strip must not highlight two tabs at once.
-        case Roles::IsActiveRole: return !_settingsActive && row == activeTabIndex();
+        case Roles::IsActiveRole: return row == activeTabIndex();
         case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         case Roles::ZoomedRole: return tab != nullptr && tab->isZoomed();
         // resolvedProgress() rather than progress(): this runs on the GUI thread, and _progress is
@@ -376,19 +642,21 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
                        ? static_cast<int>(std::to_underlying(progress.state))
                        : static_cast<int>(progress.percentage);
         }
-        // The three badge roles share one computation per tab, which takes every pane's terminal lock.
-        case Roles::ProgramStatusRole:
-            return tab != nullptr
-                       ? static_cast<int>(std::to_underlying(cachedProgramStatusBadge(*tab, row).kind))
-                       : 0;
-        case Roles::ProgramStatusTextRole:
-            return tab != nullptr ? QString::fromStdString(cachedProgramStatusBadge(*tab, row).text)
-                                  : QString {};
-        case Roles::ProgramStatusProgressRole: {
-            auto const progress =
-                tab != nullptr ? cachedProgramStatusBadge(*tab, row).progress : std::nullopt;
-            return progress ? static_cast<int>(*progress) : -1;
+        // The three badge roles share one program-status computation per tab, which takes every pane's
+        // terminal lock; the attention they weigh it against is the manager's, and takes none.
+        case Roles::BadgeRole:
+            return tab != nullptr ? static_cast<int>(std::to_underlying(tabBadge(*tab, row).kind)) : 0;
+        case Roles::BadgeTextRole: {
+            if (tab == nullptr)
+                return QString {};
+            auto const& program = cachedProgramStatusBadge(*tab, row);
+            return isProgramStatusBadge(tabBadge(*tab, row).kind, program.kind)
+                       ? QString::fromStdString(program.text)
+                       : QString {};
         }
+        case Roles::BadgeProgressRole:
+            return tab != nullptr ? tabBadge(*tab, row).progressPercent.value_or(-1) : -1;
+        case Roles::SecureRole: return tab != nullptr ? static_cast<int>(tabSecureIndicator(*tab)) : 0;
         default: return {};
     }
 }
@@ -415,9 +683,8 @@ int WindowController::activeTabIndex() const noexcept
 
 ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& tab, int row) const
 {
-    // In front exactly when the strip highlights it: the settings view hides every terminal tab.
-    auto const focus =
-        !_settingsActive && row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
+    // In front exactly when the strip highlights it.
+    auto const focus = row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
     return badgeForTab(tab, focus, [this](vtworkspace::SessionId id) {
         auto const* session = _manager.sessionForId(id);
         if (session == nullptr)
@@ -432,6 +699,43 @@ ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& 
 ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const
 {
     return _badges.get(tab.id(), [&] { return programStatusBadge(tab, row); });
+}
+
+TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab, int row) const
+{
+    auto const program = cachedProgramStatusBadge(tab, row);
+    auto const pooled = pooledAttention(tab, _manager.tabAttention());
+    // The model holds a percentage as uint8_t; the badge decision speaks int (§3.4), widened here.
+    return resolveTabBadge({
+        .programStatus = program.kind,
+        .progressPercent = program.progress.transform([](uint8_t percent) { return int { percent }; }),
+        .finishedBlock = pooled.finished,
+        .activity = pooled.activity,
+        .bell = pooled.bell,
+    });
+}
+
+SecureIndicator WindowController::tabSecureIndicator(vtworkspace::Tab const& tab) const
+{
+    // Every pane, not only the active one: a background pane waiting for a password locks its tab. The
+    // strongest wins, so the tab says "on" only if one of its panes is the one the OS secures.
+    auto strongest = SecureIndicator::None;
+    if (auto* root = tab.rootPane())
+        root->walkTree([&](vtworkspace::Pane& pane) {
+            if (!pane.isLeaf())
+                return;
+            if (auto const* session = _manager.sessionForId(pane.session()))
+                strongest = std::max(strongest, static_cast<SecureIndicator>(session->secureIndicator()));
+        });
+    return strongest;
+}
+
+std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const
+{
+    auto const [entry, inserted] = _processNames.try_emplace(session.modelSessionId().value);
+    if (inserted)
+        entry->second = session.foregroundProcessName();
+    return entry->second;
 }
 
 QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
@@ -457,8 +761,13 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     else
         return QString::fromStdString(windowTitle);
 
-    return QString::fromStdString(
-        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+    auto expanded =
+        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle });
+    // A blank tab names nothing: a label that came out empty falls back to the process's name. Asked only
+    // then, since the name costs a query of the process table.
+    if (expanded.empty() && session != nullptr)
+        expanded = cachedProcessName(*session);
+    return QString::fromStdString(expanded);
 }
 
 // {{{ Tab-strip invokables — structural/session-lifetime ops delegate to the manager, tagged with
@@ -466,8 +775,6 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
 // Pure per-tab attributes (title, color) resolve the tab locally and write the model directly.
 void WindowController::createNewTab(QString const& profileName)
 {
-    // A new terminal tab is a terminal view: leave the settings page so the content area shows it.
-    setSettingsActive(false);
     auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
                                          : std::optional<std::string> { profileName.toStdString() };
     _manager.createNewTab(_windowId, profile);
@@ -475,9 +782,6 @@ void WindowController::createNewTab(QString const& profileName)
 
 void WindowController::activateTab(int index)
 {
-    // Selecting a tab returns to the terminal content — the settings page and the tabs are mutually
-    // exclusive views of the same region, so activating any tab dismisses the settings page.
-    setSettingsActive(false);
     _manager.activateTab(_windowId, index);
 }
 
@@ -491,20 +795,8 @@ QString WindowController::tabWorkingDirectory(int index) const
     if (session == nullptr)
         return {};
 
-    // Abbreviated as a shell prompt writes it, but only for a directory on this machine: this machine's
-    // home says nothing about another machine's paths, where `~` would name a different directory.
-    // Purely presentational, which is why it happens here and not at the source: a caller that wants a
-    // path to act on wants the real one.
-    auto const& home = _manager.homeDirectory();
-    auto const resolved = session->resolveWorkingDirectory(vtbackend::CwdPurpose::Display);
-    if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
-        return QString::fromStdString(
-            vtbackend::abbreviateHomePath(session->displayWorkingDirectory(), home));
-
-    auto const shown = resolved->locality == vtbackend::ContextLocality::Local
-                           ? vtbackend::abbreviateHomePath(resolved->path, home)
-                           : resolved->path;
-    return QString::fromStdString(vtbackend::sanitizeCommandLine(shown, vtbackend::SanitizePurpose::Display));
+    // The same answer the pane header shows: abbreviated for a directory on this machine, made safe to show.
+    return QString::fromStdString(session->shownWorkingDirectory(_manager.homeDirectory()));
 }
 
 void WindowController::dispatchTabStripWheel(
@@ -569,6 +861,170 @@ void WindowController::tearOffTab(int index)
     _manager.tearOffTabToNewWindow(_windowId, index, _osWindow != nullptr ? _osWindow->screen() : nullptr);
 }
 
+namespace
+{
+    /// A tab drag's payload, as `TabItem.qml` writes it: the window the tab is in and its row.
+    struct TabDrag
+    {
+        vtworkspace::WindowId window;
+        int row = 0;
+    };
+
+    /// Reads the `application/x-contour-tab` JSON of a drag. It is data from whichever process started the
+    /// drag, so nothing is assumed: a missing, non-integral or out-of-range field, or a `token` that is not
+    /// @p ownToken, reads as no drag.
+    [[nodiscard]] std::optional<TabDrag> parseTabDrag(QString const& json, QString const& ownToken)
+    {
+        auto const document = QJsonDocument::fromJson(json.toUtf8());
+        if (!document.isObject())
+            return std::nullopt;
+        auto const object = document.object();
+        auto const windowId = object.value("windowId");
+        auto const tabIndex = object.value("tabIndex");
+        // Ids and rows are only meaningful in the model of the process that wrote them.
+        if (auto const token = object.value("token"); !token.isString() || token.toString() != ownToken)
+            return std::nullopt;
+        auto const isWhole = [](QJsonValue const& value, double max) {
+            return value.isDouble() && value.toDouble() >= 0.0 && value.toDouble() <= max
+                   && value.toDouble() == std::floor(value.toDouble());
+        };
+        // A window id is a small sequential integer, exact in a double up to 2^53.
+        constexpr auto MaxExactInteger = 9007199254740992.0;
+        if (!isWhole(windowId, MaxExactInteger) || !isWhole(tabIndex, std::numeric_limits<int>::max()))
+            return std::nullopt;
+        return TabDrag { .window = vtworkspace::WindowId { static_cast<uint64_t>(windowId.toDouble()) },
+                         .row = tabIndex.toInt() };
+    }
+
+    /// Whether a tab can be merged into a split, as the window's session factory reports it.
+    [[nodiscard]] constexpr SplitSupport splitSupportFor(session::TabMergeSupport support) noexcept
+    {
+        switch (support)
+        {
+            case session::TabMergeSupport::Supported: return SplitSupport::Supported;
+            case session::TabMergeSupport::Unsupported: return SplitSupport::Unsupported;
+        }
+        return SplitSupport::Unsupported;
+    }
+} // namespace
+
+int WindowController::dropZoneAt(session::TerminalSession const* pane,
+                                 int payload,
+                                 qreal x,
+                                 qreal y,
+                                 qreal width,
+                                 qreal height,
+                                 QString const& tabPayload) const
+{
+    auto const none = static_cast<int>(DropZone::None);
+    if (pane == nullptr || payload < 0 || std::cmp_greater_equal(payload, DropPayloadCount))
+        return none;
+
+    auto inputs = DropZoneInputs { .payload = static_cast<DropPayload>(payload),
+                                   .pane = DropExtent { .width = width, .height = height },
+                                   .at = DropPoint { .x = x, .y = y },
+                                   .origin = DropOrigin::OtherTab };
+
+    switch (inputs.payload)
+    {
+        case DropPayload::None: break;
+        case DropPayload::Files:
+        case DropPayload::Text:
+            // Typed into a pane that has ended, text would be swallowed -- or kept for the restart.
+            if (pane->paneState() == PaneState::Ended)
+                return none;
+            break;
+        case DropPayload::Tab: {
+            auto const drag = parseTabDrag(tabPayload, _processToken);
+            auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
+            auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
+            if (source == nullptr)
+                return none;
+            inputs.split = splitSupportFor(_manager.tabMergeSupport(drag->window, _windowId));
+            if (std::get<1>(_manager.model().findSessionLeaf(pane->modelSessionId())) == source)
+                inputs.origin = DropOrigin::OwnTab;
+            break;
+        }
+    }
+    return static_cast<int>(resolveDropZone(inputs));
+}
+
+void WindowController::dropTabOnPane(session::TerminalSession const* pane,
+                                     int zone,
+                                     QString const& tabPayload)
+{
+    if (pane == nullptr || zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return;
+    auto const side = dropZoneRowOf(static_cast<DropZone>(zone)).side;
+    if (!side)
+        return;
+
+    // Re-resolved here, not trusted from the caller: the payload names a window and a row, which may be
+    // anything by now.
+    auto const drag = parseTabDrag(tabPayload, _processToken);
+    auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
+    auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
+    auto const [targetWindow, targetTab, leaf] = _manager.model().findSessionLeaf(pane->modelSessionId());
+    if (source == nullptr || targetWindow == nullptr || targetTab == nullptr || leaf == nullptr
+        || targetTab == source
+        || splitSupportFor(_manager.tabMergeSupport(drag->window, targetWindow->id()))
+               != SplitSupport::Supported)
+        return;
+    _manager.mergeTabIntoSplit(
+        drag->window, drag->row, targetWindow->id(), targetTab->id(), leaf->id(), *side);
+}
+
+QString WindowController::dropGhostLabel(int zone) const
+{
+    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return {};
+    return QString::fromUtf8(dropZoneRowOf(static_cast<DropZone>(zone)).label.data(),
+                             static_cast<qsizetype>(dropZoneRowOf(static_cast<DropZone>(zone)).label.size()));
+}
+
+QRectF WindowController::dropGhostRect(int zone, qreal width, qreal height, qreal inset) const
+{
+    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
+        return {};
+    auto const ghost =
+        dropGhostOf(static_cast<DropZone>(zone), DropExtent { .width = width, .height = height }, inset);
+    return ghost ? QRectF { ghost->x, ghost->y, ghost->width, ghost->height } : QRectF {};
+}
+
+void WindowController::runTabAction(int row, actions::Action const& action)
+{
+    std::visit(core::Overloaded {
+                   [&](actions::SetTabTitle const&) { emit tabTitleEditRequested(row); },
+                   [&](actions::SetTabColor const& color) {
+                       if (color.color.has_value())
+                           setTabColor(row, platform::toQColor(*color.color));
+                       else
+                           emit tabColorPickRequested(row);
+                   },
+                   [&](actions::ResetTabColor const&) { resetTabColor(row); },
+                   [&](actions::MoveTabToNewWindow const&) { tearOffTab(row); },
+                   [&](actions::CloseTab const&) { closeTabAtIndex(row); },
+                   [&](actions::CloseOtherTabs const&) { closeOtherTabs(row); },
+                   [&](actions::CloseTabsToRight const&) { closeTabsToRight(row); },
+                   [&](auto const& other) {
+                       if (auto* session = activeSession())
+                           session->executeAction(actions::Action { other });
+                   },
+               },
+               action);
+}
+
+void WindowController::runTabAction(vtworkspace::TabId tab, actions::Action const& action)
+{
+    if (auto const row = rowOfTab(tab); row >= 0)
+        runTabAction(row, action);
+}
+
+void WindowController::showAbout()
+{
+    emit aboutRequested();
+}
+
 void WindowController::setTabTitle(int index, QString const& title)
 {
     if (auto* tab = tabAtRow(index); tab != nullptr)
@@ -600,21 +1056,78 @@ void WindowController::beginActiveTabColorPick()
 void WindowController::beginSaveLayoutPrompt()
 {
     // Window-scoped, not tab-scoped: the layout is the whole window's tab set, so unlike the tab-title /
-    // tab-color prompts there is no row to name — the dialog just opens over this window.
+    // tab-color prompts there is no row to name — the dialog just opens over this window. The names
+    // already saved are read once here -- the layouts file included -- rather than on every key typed.
+    _savedLayoutNames = _manager.savedLayoutNames();
     emit saveLayoutRequested();
 }
 
+namespace
+{
+    /// Saves @p window under @p name through @p manager, and has @p notices say how it went.
+    void saveWindowLayoutAndTell(session::TerminalSessionManager& manager,
+                                 vtworkspace::WindowId window,
+                                 QString const& name,
+                                 LayoutReplace replace,
+                                 NoticeModel& notices)
+    {
+        // A blank prompt must never write a nameless layout (see the header). Trim first, so trailing
+        // whitespace neither passes the guard nor lands in the saved key.
+        auto const trimmed = name.trimmed().toStdString();
+        if (trimmed.empty())
+            return;
+        if (auto const saved = manager.saveWindowLayout(window, trimmed, replace); saved)
+            notices.post(Notice { .kind = NoticeKind::LayoutSaved, .text = layoutSavedNoticeText(trimmed) });
+        else
+            notices.post(Notice { .kind = NoticeKind::LayoutSaveFailed,
+                                  .text = layoutSaveFailedNoticeText(trimmed, saved.error()) });
+    }
+} // namespace
+
 void WindowController::saveLayoutAs(QString const& name)
 {
-    // A blank prompt must never write a nameless layout (see the header). Trim first, so trailing
-    // whitespace neither passes the guard nor lands in the saved key.
+    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Keep, _notices);
+}
+
+void WindowController::replaceLayout(QString const& name)
+{
+    saveWindowLayoutAndTell(_manager, _windowId, name, LayoutReplace::Replace, _notices);
+}
+
+QVariantMap WindowController::layoutCheckMap(SaveLayoutCheck const& check, QString const& trimmed)
+{
+    return QVariantMap {
+        { QStringLiteral("nameState"), QString::fromUtf8(layoutNameStateName(check.name)) },
+        { QStringLiteral("button"), QString::fromUtf8(saveLayoutButtonName(check.button)) },
+        { QStringLiteral("trimmed"), trimmed },
+    };
+}
+
+QVariantMap WindowController::checkLayoutName(QString const& name, bool replace) const
+{
     auto const trimmed = name.trimmed();
-    if (trimmed.isEmpty())
-        return;
-    // Route through the same manager entry point the SaveLayout keybinding uses, targeting THIS window's
-    // active session — saveLayout() resolves the hosting window from it and serializes that window.
-    if (auto* session = activeSession(); session != nullptr)
-        _manager.saveLayout(trimmed.toStdString(), session);
+    auto existing = _savedLayoutNames;
+    for (auto const& layoutName: _manager.app().config().layouts.value() | std::views::keys)
+        if (std::ranges::find(existing, layoutName) == existing.end())
+            existing.push_back(layoutName);
+    auto const check = window::checkLayoutName(
+        trimmed.toStdString(), existing, replace ? LayoutReplace::Replace : LayoutReplace::Keep);
+    return layoutCheckMap(check, trimmed);
+}
+
+QString WindowController::layoutSummary() const
+{
+    auto const* const window = _manager.model().window(_windowId);
+    auto tabs = 0;
+    auto panes = 0;
+    if (window != nullptr)
+        for (auto const index: std::views::iota(0, window->tabCount()))
+            if (auto const* const tab = window->tabAt(index))
+            {
+                ++tabs;
+                panes += tab->paneCount();
+            }
+    return QString::fromStdString(layoutSummaryText(tabs, panes));
 }
 
 // Both of these route through the row-based setters the color flyout already uses, so the keyboard and
@@ -644,6 +1157,310 @@ void WindowController::resetTabColor(int index)
     if (auto* tab = tabAtRow(index); tab != nullptr)
         _manager.model().resetTabColor(tab->id(), vtworkspace::TabColorSource::User);
 }
+
+// {{{ Keyboard focus in the chrome
+namespace
+{
+    /// A Qt key and the chrome key it is.
+    struct QtChromeKeyRow
+    {
+        Qt::Key qt;
+        window::ChromeKey key;
+    };
+
+    inline constexpr auto QtChromeKeyRows = std::array {
+        QtChromeKeyRow { .qt = Qt::Key_Left, .key = window::ChromeKey::Left },
+        QtChromeKeyRow { .qt = Qt::Key_Right, .key = window::ChromeKey::Right },
+        QtChromeKeyRow { .qt = Qt::Key_Up, .key = window::ChromeKey::Up },
+        QtChromeKeyRow { .qt = Qt::Key_Down, .key = window::ChromeKey::Down },
+        QtChromeKeyRow { .qt = Qt::Key_Home, .key = window::ChromeKey::Home },
+        QtChromeKeyRow { .qt = Qt::Key_End, .key = window::ChromeKey::End },
+        QtChromeKeyRow { .qt = Qt::Key_Return, .key = window::ChromeKey::Return },
+        QtChromeKeyRow { .qt = Qt::Key_Enter, .key = window::ChromeKey::Return },
+        QtChromeKeyRow { .qt = Qt::Key_Space, .key = window::ChromeKey::Space },
+        QtChromeKeyRow { .qt = Qt::Key_Backspace, .key = window::ChromeKey::Backspace },
+        QtChromeKeyRow { .qt = Qt::Key_Delete, .key = window::ChromeKey::Delete },
+        QtChromeKeyRow { .qt = Qt::Key_Escape, .key = window::ChromeKey::Escape },
+        QtChromeKeyRow { .qt = Qt::Key_Tab, .key = window::ChromeKey::Tab },
+        QtChromeKeyRow { .qt = Qt::Key_Backtab, .key = window::ChromeKey::Tab },
+    };
+
+    [[nodiscard]] window::ChromeKey chromeKeyOf(int qtKey) noexcept
+    {
+        auto const row =
+            std::ranges::find(QtChromeKeyRows, qtKey, [](auto const& r) { return static_cast<int>(r.qt); });
+        return row != QtChromeKeyRows.end() ? row->key : window::ChromeKey::Other;
+    }
+
+    /// Qt's keypad flag marks where a key sits, not a chord; the chrome ignores it.
+    [[nodiscard]] window::ChromeKeyModifier chromeModifierOf(Qt::KeyboardModifiers modifiers) noexcept
+    {
+        modifiers &= ~Qt::KeypadModifier;
+        if (modifiers == Qt::NoModifier)
+            return window::ChromeKeyModifier::None;
+        if (modifiers == Qt::AltModifier)
+            return window::ChromeKeyModifier::Alt;
+        if (modifiers == Qt::ShiftModifier)
+            return window::ChromeKeyModifier::Shift;
+        return window::ChromeKeyModifier::Other;
+    }
+
+    /// The Qt key codes of the printable ASCII characters equal their codepoints (upper case for letters).
+    inline constexpr auto PrintableAsciiBegin = 0x20;
+    inline constexpr auto PrintableAsciiEnd = 0x80;
+
+    /// The focus action each action of the key bindings is.
+    struct ChromeFocusRow
+    {
+        actions::Action action;
+        window::ChromeFocusAction focus;
+    };
+
+    /// @return The rows the focus chords are matched against, in order.
+    [[nodiscard]] std::array<ChromeFocusRow, 3> const& chromeFocusRows()
+    {
+        static auto const rows = std::array {
+            ChromeFocusRow { .action = actions::FocusNextArea {}, .focus = window::ChromeFocusAction::Next },
+            ChromeFocusRow { .action = actions::FocusPreviousArea {},
+                             .focus = window::ChromeFocusAction::Previous },
+            ChromeFocusRow { .action = actions::FocusToolbar {},
+                             .focus = window::ChromeFocusAction::Toolbar },
+        };
+        return rows;
+    }
+
+    /// The first of @p bound that is a focus action.
+    [[nodiscard]] std::optional<window::ChromeFocusAction> focusActionOf(
+        std::vector<actions::Action> const& bound)
+    {
+        for (auto const& action: bound)
+            for (auto const& row: chromeFocusRows())
+                if (action.index() == row.action.index())
+                    return row.focus;
+        return std::nullopt;
+    }
+} // namespace
+
+void WindowController::enterChromeArea(window::ChromeArea area)
+{
+    if (area == window::ChromeArea::Terminal)
+    {
+        leaveChrome();
+        return;
+    }
+    _chromeArea = area;
+    _focusedTab = area == window::ChromeArea::Tabs ? tabIdAtRow(std::max(activeTabIndex(), 0)) : std::nullopt;
+    _focusedToolbarIndex = area == window::ChromeArea::Toolbar ? 0 : -1;
+    emit chromeFocusChanged();
+}
+
+window::FocusMove WindowController::moveChromeFocus(window::ChromeFocusAction action)
+{
+    auto const target = window::chromeFocusTarget(action, _chromeArea, _chromePresence);
+    if (target == _chromeArea)
+        return window::FocusMove::Stayed;
+    enterChromeArea(target);
+    return window::FocusMove::Moved;
+}
+
+bool WindowController::dropChromeFocus()
+{
+    if (_chromeArea == window::ChromeArea::Terminal)
+        return false;
+    _chromeArea = window::ChromeArea::Terminal;
+    _focusedTab.reset();
+    _focusedToolbarIndex = -1;
+    emit chromeFocusChanged();
+    return true;
+}
+
+void WindowController::leaveChrome()
+{
+    if (dropChromeFocus() && _activeDisplay != nullptr)
+        _activeDisplay->forceActiveFocus();
+}
+
+void WindowController::setChromePresence(bool tabsShown, int toolbarItems)
+{
+    _toolbarItemCount = std::max(toolbarItems, 0);
+    _chromePresence = window::ChromeAreaPresence {
+        .tabs = tabsShown ? window::AreaPresence::Present : window::AreaPresence::Absent,
+        .toolbar = _toolbarItemCount > 0 ? window::AreaPresence::Present : window::AreaPresence::Absent,
+    };
+    if (!window::isPresent(_chromeArea, _chromePresence))
+        leaveChrome();
+    else
+        clampChromeFocus();
+}
+
+void WindowController::clampChromeFocus()
+{
+    auto const tabs = _chromeArea == window::ChromeArea::Tabs;
+    auto const toolbar = _chromeArea == window::ChromeArea::Toolbar;
+    if (!tabs && !toolbar)
+        return;
+    auto const items = tabs ? count() : _toolbarItemCount;
+    if (items <= 0)
+    {
+        leaveChrome();
+        return;
+    }
+    if (tabs)
+    {
+        // The focused tab is still there, or the keyboard goes to the active one.
+        if (_focusedTab && rowOfTab(*_focusedTab) >= 0)
+            return;
+        _focusedTab = tabIdAtRow(std::max(activeTabIndex(), 0));
+        emit chromeFocusChanged();
+        return;
+    }
+    auto const clamped = std::clamp(_focusedToolbarIndex, 0, items - 1);
+    if (clamped == _focusedToolbarIndex)
+        return;
+    _focusedToolbarIndex = clamped;
+    emit chromeFocusChanged();
+}
+
+std::vector<actions::Action> const* WindowController::boundActionsFor(int qtKey,
+                                                                      Qt::KeyboardModifiers modifiers) const
+{
+    auto const* session = activeSession();
+    if (session == nullptr)
+        return nullptr;
+
+    // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
+    constexpr auto NoModes = uint8_t { 0 };
+    auto const& mappings = session->config().inputMappings.value();
+    auto chord = input::makeModifiers(modifiers).chord;
+
+    // A key a binding can name, as the terminal keys it: a named key, Shift+Tab's Backtab, or a character.
+    auto const named =
+        qtKey == Qt::Key_Backtab ? std::optional { vtbackend::Key::Tab } : input::namedKeyOf(qtKey);
+    if (named)
+    {
+        if (qtKey == Qt::Key_Backtab)
+            chord.enable(vtbackend::Modifier::Shift);
+        return config::apply(mappings.keyMappings, *named, chord, NoModes);
+    }
+    if (qtKey < PrintableAsciiBegin || qtKey >= PrintableAsciiEnd)
+        return nullptr;
+    // As TerminalSession matches a character: letters folded, and under Shift the unshifted key as well.
+    auto const folded = config::foldedBindingCodepoint(static_cast<char32_t>(qtKey));
+    auto const* bound = config::apply(mappings.charMappings, folded, chord, NoModes);
+    if (bound == nullptr && chord.test(vtbackend::Modifier::Shift))
+        if (auto const base = input::unshiftedCodepoint(folded); base != folded)
+            bound = config::apply(mappings.charMappings, base, chord, NoModes);
+    return bound;
+}
+
+bool WindowController::chromeKey(int qtKey, int qtModifiers)
+{
+    auto const modifiers = Qt::KeyboardModifiers { qtModifiers };
+    auto const* bound = boundActionsFor(qtKey, modifiers);
+    if (bound != nullptr)
+        if (auto const action = focusActionOf(*bound))
+        {
+            moveChromeFocus(*action);
+            return true;
+        }
+    if (_chromeArea == window::ChromeArea::Terminal)
+        return false;
+    auto const key = chromeKeyOf(qtKey);
+    auto const modifier = chromeModifierOf(modifiers);
+    if (window::chromeConsumes(key, modifier))
+        return runChromeCommand(window::chromeCommandFor(_chromeArea, key, modifier));
+    // Every other chord is the application's, as in the terminal: bound actions run, plain typing does not
+    // reach the shell.
+    if (bound == nullptr)
+        return false;
+    // A copy: an action may close the tab, and with it the session whose configuration holds the list.
+    auto const actions = *bound;
+    return activeSession()->executeBoundActions(actions) > 0;
+}
+
+bool WindowController::runChromeCommand(window::ChromeCommand command)
+{
+    using window::ChromeCommand;
+    auto const inTabs = _chromeArea == window::ChromeArea::Tabs;
+    switch (command)
+    {
+        case ChromeCommand::None: return false;
+        case ChromeCommand::FocusPrevious:
+        case ChromeCommand::FocusNext:
+        case ChromeCommand::FocusFirst:
+        case ChromeCommand::FocusLast: {
+            auto const focused = inTabs ? focusedTabIndex() : _focusedToolbarIndex;
+            auto const moved =
+                window::focusedIndexAfter(command, focused, inTabs ? count() : _toolbarItemCount);
+            if (moved == focused)
+                return true;
+            if (inTabs)
+                _focusedTab = tabIdAtRow(moved);
+            else
+                _focusedToolbarIndex = moved;
+            emit chromeFocusChanged();
+            return true;
+        }
+        case ChromeCommand::Activate:
+            if (!inTabs)
+                return false; // a toolbar item is pressed by the item itself
+            // Leave first: the window gives the terminal the keyboard when the active tab changes, and only
+            // while the chrome no longer holds it (a reorder or a background close keeps it).
+            {
+                auto const tab = focusedTabIndex();
+                leaveChrome();
+                activateTab(tab);
+            }
+            return true;
+        case ChromeCommand::Close: closeTabAskingIfBusy(focusedTabIndex()); return true;
+        case ChromeCommand::MoveLeft:
+        case ChromeCommand::MoveRight: {
+            auto const row = focusedTabIndex();
+            auto const target = row + (command == ChromeCommand::MoveLeft ? -1 : 1);
+            // The focus is on the tab, so it goes with it.
+            if (row >= 0 && target >= 0 && target < count())
+                moveTab(row, target);
+            return true;
+        }
+        case ChromeCommand::Leave: leaveChrome(); return true;
+    }
+    return false;
+}
+
+void WindowController::closeTabAskingIfBusy(int row)
+{
+    auto* tab = tabAtRow(row);
+    if (tab == nullptr)
+        return;
+
+    auto activities = std::vector<window::PaneActivity> {};
+    auto program = std::string {};
+    tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (!pane.isLeaf())
+            return;
+        auto const* session = _manager.sessionForId(pane.session());
+        auto const activity = session != nullptr ? session->paneActivity() : window::PaneActivity::Unknown;
+        activities.push_back(activity);
+        if (activity == window::PaneActivity::Running && program.empty())
+            program = session->foregroundProcessName();
+    });
+
+    if (window::closeConfirmationFor(activities) == window::CloseConfirmation::None)
+    {
+        closeTabAtIndex(row);
+        return;
+    }
+    auto* active = _manager.sessionForId(tab->activePane()->session());
+    emit closeTabConfirmationRequested(
+        tab->id().value, resolvedTabLabel(tab, active, row), QString::fromStdString(program));
+}
+
+void WindowController::confirmCloseTab(quint64 tab)
+{
+    if (auto const row = rowOfTab(vtworkspace::TabId { tab }); row >= 0)
+        closeTabAtIndex(row);
+}
+// }}}
 
 void WindowController::closeTabAtIndex(int index)
 {
@@ -708,7 +1525,10 @@ void WindowController::closeWindow()
     _closing = true;
 
     rememberWindowPosition();
-    if (_manager.app().config().rememberWindowPosition.value() && _lastWindowPosition
+    // A placed window (the quick terminal) is opened where its opener puts it, so what it last was is no
+    // one's business.
+    if (windowRoleRow(_role).memory == PositionMemory::Remembered
+        && _manager.app().config().rememberWindowPosition.value() && _lastWindowPosition
         && !_manager.app().config().configFile.empty())
         if (auto const saved = _manager.app().windowPositionStore().save(
                 _manager.app().config().configFile.parent_path() / WindowPositionFileName,
@@ -790,6 +1610,16 @@ bool WindowController::canCloseWindow() const noexcept
 // }}}
 
 // {{{ Window-service reads
+std::vector<TabBadgeKind> WindowController::tabBadgeKinds() const
+{
+    auto kinds = std::vector<TabBadgeKind> {};
+    if (auto const* win = window())
+        for (auto const row: std::views::iota(0, win->tabCount()))
+            if (auto const* tab = win->tabAt(row))
+                kinds.push_back(tabBadge(*tab, row).kind);
+    return kinds;
+}
+
 session::TerminalSession* WindowController::activeSession() const noexcept
 {
     if (auto* tab = activeModelTab())
@@ -822,12 +1652,29 @@ platform::WindowDecoration WindowController::decoration() const noexcept
 
 platform::FramePolicy WindowController::framePolicy() const noexcept
 {
-    return framePolicyFor(platform::currentFramePlatform(), decoration());
+    return framePolicyFor(_manager.app().framePlatform(), decoration());
 }
 
 bool WindowController::needsFramelessHint() const noexcept
 {
     return framePolicy().framelessHint == platform::FramelessHint::Apply;
+}
+
+int WindowController::roleFlags() const noexcept
+{
+    switch (windowRoleRow(_role).level)
+    {
+        case WindowLevel::Normal: return 0;
+        // Candidate B of ruling S1: a tool window the Cocoa panel turns non-activating; frameless, as the
+        // quick terminal draws its own rounded bottom corners.
+        case WindowLevel::Panel: return static_cast<int>(Qt::Tool | Qt::FramelessWindowHint);
+    }
+    return 0;
+}
+
+bool WindowController::needsExpandedClientArea() const noexcept
+{
+    return framePolicy().expansion == platform::ClientAreaExpansion::QtHint;
 }
 
 bool WindowController::needsClientFrameAffordances() const noexcept
@@ -838,7 +1685,10 @@ bool WindowController::needsClientFrameAffordances() const noexcept
 qreal WindowController::nativeControlsInset() const noexcept
 {
     // Only where the OS paints its controls over our chrome; elsewhere it has its own bar and costs
-    // us nothing. The number itself is the adapter's, not ours -- see the declaration.
+    // us nothing. The number itself is the adapter's, not ours -- see the declaration. In full screen too:
+    // AppKit moves the traffic lights into the strip it reveals below the menu bar, and the standard buttons
+    // still answer for their place there. Main.qml decides where they sit over the band: nowhere in full
+    // screen, where the band rests below that strip (TitleBandGeometry::revealTop).
     if (_osWindow == nullptr || !_nativeFrame
         || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome)
         return 0.0;
@@ -857,15 +1707,36 @@ void WindowController::setTitleBarVisible(bool visible)
     if (_osWindow != nullptr)
     {
         auto const target = visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
-        auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
-        _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
+        auto const policy = framePolicyFor(_manager.app().framePlatform(), target);
+        // A panel stays frameless whatever the frame policy says: the role's flags are not the policy's to
+        // undo.
+        auto const framelessByRole = (roleFlags() & Qt::FramelessWindowHint) != 0;
+        _osWindow->setFlag(Qt::FramelessWindowHint,
+                           framelessByRole || policy.framelessHint == platform::FramelessHint::Apply);
         _nativeFrame->apply(*_osWindow, target);
     }
 
     if (_titleBarVisible == visible)
         return;
+    // A decoration change makes the band's request a new one to this window. Leaving the full-size
+    // content view, the default request takes back what the material set -- the toolbar, the appearance
+    // -- so the native title bar is an ordinary one; nothing is applied under it after that.
+    if (_appliedTitleBand && visible && _osWindow != nullptr)
+    {
+        // Best-effort: the native frame draws its own title bar whatever the material makes of this.
+        if (auto const reset =
+                _manager.app().titleBandMaterial().apply(*_osWindow, platform::TitleBandRequest {});
+            !reset)
+            display::displayLog()("Resetting the title band's material: {}.",
+                                  platform::titleBandMaterialErrorName(reset.error()));
+    }
+    _appliedTitleBand.reset();
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
+    refreshTitleBand();
+    // The OS draws its own caption buttons on the server frame; on the kept client frame ours are handed
+    // over.
+    refreshCaptionAttachment();
 
     // Which decoration is showing decides whether we publish a shadow at all: with the native frame
     // the window manager draws its own, and a second would stack on it. If setFlag() above recreated
@@ -895,13 +1766,7 @@ int WindowController::tabBarVisibility() const noexcept
 
 bool WindowController::tabBarShouldShow() const noexcept
 {
-    switch (_tabBarVisibility)
-    {
-        case config::TabBarVisibility::Always: return true;
-        case config::TabBarVisibility::Never: return false;
-        case config::TabBarVisibility::Multiple: return count() > 1;
-    }
-    return true;
+    return config::isTabBarShown(_tabBarVisibility, count());
 }
 
 void WindowController::setTabBarVisibility(config::TabBarVisibility visibility)
@@ -1049,6 +1914,20 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             &WindowController::onWindowScaleMaybeChanged,
             Qt::UniqueConnection);
 
+    // The band is measured again wherever the native title bar may have moved: another screen, and -- on
+    // macOS, where Qt::ExpandedClientAreaHint reports the title bar as the safe area -- a new safe area
+    // (the toolbar attached, full screen). QWindow::safeAreaMarginsChanged is Qt 6.9's, which macOS builds
+    // require; elsewhere an older Qt is still supported and the band measures nothing native anyway.
+    connect(
+        osWindow, &QWindow::screenChanged, this, &WindowController::refreshTitleBand, Qt::UniqueConnection);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    connect(osWindow,
+            &QWindow::safeAreaMarginsChanged,
+            this,
+            &WindowController::refreshTitleBand,
+            Qt::UniqueConnection);
+#endif
+
     // OS window activation (alt-tab, clicking another application) moves terminal focus, so a shell
     // running under DECSET 1004 is told the window went away. Item-level Qt focus events usually cover
     // this, but not for a window whose panes hold no focused display -- and the manager, not Qt, is the
@@ -1074,10 +1953,107 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onWindowStateChanged,
             Qt::UniqueConnection);
+
+    // Publishes the band's request now, so Main.qml's `flags` carry its hints before the first frame; with no
+    // platform window yet, nothing is applied until the first expose.
+    refreshTitleBand();
+    refreshCaptionAttachment();
+}
+
+void WindowController::setCaptionButtonRect(
+    QObject* owner, int kind, qreal x, qreal y, qreal width, qreal height)
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, _captionLayout.buttons.size()))
+        return;
+    _captionLayout.buttons[static_cast<size_t>(kind)] =
+        platform::LogicalRect { .x = x, .y = y, .width = width, .height = height };
+    _captionOwners[static_cast<size_t>(kind)] = owner;
+}
+
+void WindowController::clearCaptionButtonRect(QObject* owner, int kind)
+{
+    if (kind < 0 || std::cmp_greater_equal(kind, _captionLayout.buttons.size()))
+        return;
+    if (_captionOwners[static_cast<size_t>(kind)] != owner)
+        return;
+    _captionLayout.buttons[static_cast<size_t>(kind)].reset();
+    _captionOwners[static_cast<size_t>(kind)] = nullptr;
+}
+
+platform::CaptionBinding WindowController::captionBinding()
+{
+    return platform::CaptionBinding {
+        // Logical throughout: the rectangles are the scene's, and the adapter converts the message's
+        // physical point with the window's current ratio, so a scale change moves nothing here. The
+        // resize border is ResizeBorder.qml's, a constant of the window geometry.
+        .layout =
+            [this] {
+                auto layout = _captionLayout;
+                layout.windowWidth = _osWindow != nullptr ? _osWindow->width() : 0;
+                layout.resizeBorder = geometry::ResizeBorderThickness;
+                return layout;
+            },
+        .visual = [this](platform::CaptionButtonVisual visual) { setNativeMaximizeVisual(visual); },
+        // The same show-mode protocol the QML button goes through.
+        .toggleMaximize = [this] { toggleMaximized(); },
+    };
+}
+
+void WindowController::refreshCaptionAttachment()
+{
+    QWindow* const wanted =
+        _osWindow != nullptr && framePolicy().shadow == platform::FrameShadowStrategy::NativeFrameKept
+            ? _osWindow
+            : nullptr;
+    if (_captionWindow.data() == wanted)
+        return;
+    detachCaption();
+    if (wanted == nullptr)
+        return;
+    _captionWindow = wanted;
+    _manager.app().captionButtons().attach(*wanted, captionBinding());
+}
+
+void WindowController::detachCaption()
+{
+    auto* const window = _captionWindow.data();
+    if (window == nullptr)
+        return;
+    _captionWindow.clear();
+    _manager.app().captionButtons().detach(*window);
+    // Nothing drives the button any more, so it rests.
+    setNativeMaximizeVisual(platform::CaptionButtonVisual::Rest);
+}
+
+void WindowController::setNativeMaximizeVisual(platform::CaptionButtonVisual visual)
+{
+    if (visual == _nativeMaximizeVisual)
+        return;
+    _nativeMaximizeVisual = visual;
+    emit nativeMaximizeVisualChanged();
+}
+
+int WindowController::windowCornerRadius() const
+{
+    auto const presentation = _osWindow != nullptr ? platform::presentationFor(_osWindow->visibility())
+                                                   : platform::WindowPresentation::Windowed;
+    return platform::windowCornerRadius(_manager.app().windowRadius(), presentation, decoration());
+}
+
+void WindowController::refreshWindowCornerRadius()
+{
+    auto const radius = windowCornerRadius();
+    if (_publishedCornerRadius == radius)
+        return;
+    _publishedCornerRadius = radius;
+    emit windowCornerRadiusChanged();
 }
 
 void WindowController::refreshWindowShadow()
 {
+    // The corners share the shadow's inputs; decided first, since they need no platform window.
+    refreshWindowCornerRadius();
+
     if (_osWindow == nullptr)
         return;
 
@@ -1106,6 +2082,148 @@ void WindowController::onWindowVisibilityChanged()
 void WindowController::onWindowStateChanged()
 {
     _manager.windowStateChanged(_windowId);
+    // Full screen rests the band elsewhere, and moves the traffic lights into AppKit's revealed strip.
+    refreshTitleBand();
+    emit nativeControlsInsetChanged();
+}
+
+Qt::ColorScheme WindowController::effectiveColorScheme() const
+{
+    return _manager.app().effectiveColorScheme();
+}
+
+bool WindowController::dressesTitleBand() const noexcept
+{
+    return platform::hostsTitleBandMaterial(framePolicy().shadow);
+}
+
+QString WindowController::toastHost(QString const& band,
+                                    QString const& edge,
+                                    int bandHeight,
+                                    int toastHeight) const
+{
+    auto const* const session = activeSession();
+    return QString::fromUtf8(placeToastNamed(
+        band.toStdString(),
+        edge.toStdString(),
+        bandHeight,
+        toastHeight,
+        session != nullptr ? session->cursorLine() : 0,
+        session != nullptr && session->paneFooter() != PaneFooterKind::None ? PaneFooter::Shown
+                                                                            : PaneFooter::Hidden));
+}
+
+TitleBand WindowController::titleBand() const
+{
+    auto const& app = _manager.app();
+    return app.titleBandOf(TitleBandInputs {
+        .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
+        .mode = windowMode(),
+        .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
+        .position = _tabBarPosition,
+        .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
+                               hostChipStateOf(_manager.hostConnection())),
+    });
+}
+
+TitleBandSurface WindowController::titleBandSurface() const
+{
+    auto const centre = titleBand().centre;
+    auto const tokens = _manager.app().titleBandTokens(centre);
+    // Nothing draws a material behind the band on a frame that hosts none, nor after it failed (R-g).
+    auto const hosted = dressesTitleBand() && _bandMaterialHealth == platform::BandMaterialHealth::Working;
+    return resolveTitleBandSurface(TitleBandSurfaceInputs {
+        .style = tokens.style,
+        .material = hosted ? tokens.material : config::opaqueMaterialOf(tokens.material),
+        .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
+        .mode = windowMode(),
+        .centre = centre,
+        .density = tokens.density,
+    });
+}
+
+platform::TitleBandRequest WindowController::titleBandRequest() const
+{
+    auto const surface = titleBandSurface();
+    return platform::TitleBandRequest { .backdrop = surface.backdrop,
+                                        .kind = config::BackdropKind::Tabbed,
+                                        .growth = surface.growth,
+                                        .scheme = effectiveColorScheme() };
+}
+
+WindowMode WindowController::windowMode() const noexcept
+{
+    return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen)
+               ? WindowMode::FullScreen
+               : WindowMode::Windowed;
+}
+
+TitleBandGeometry WindowController::titleBandGeometry() const
+{
+    // Only the full-size content view has a native title bar under the band to make room for.
+    auto const native = _osWindow != nullptr && dressesTitleBand()
+                            ? _manager.app().titleBandMaterial().metrics(*_osWindow)
+                            : platform::NativeTitleBarMetrics {};
+    return resolveTitleBandGeometry(TitleBandGeometryInputs {
+        .tokens = _manager.app().titleBandTokens(titleBand().centre),
+        .mode = windowMode(),
+        .devicePixelRatio = _osWindow != nullptr ? _osWindow->devicePixelRatio() : 1.0,
+        .nativeHeight = native.height,
+        .fullScreenTop = native.fullScreenTop,
+    });
+}
+
+void WindowController::refreshTitleBand()
+{
+    // A chrome-row change (refreshChromeDependents) reaches the window here: the row's radius may differ.
+    refreshWindowCornerRadius();
+
+    if (_osWindow == nullptr)
+        return;
+
+    auto const request = titleBandRequest();
+    // Applied only to a platform window that exists: the material leaves one without a handle alone, and
+    // recording such a request as applied would skip the first real apply at expose.
+    if (dressesTitleBand() && _osWindow->handle() != nullptr && request != _appliedTitleBand)
+    {
+        auto const growthChanged = !_appliedTitleBand || _appliedTitleBand->growth != request.growth;
+        // Recorded before the apply: attaching the toolbar changes Qt's safe area, and Qt may report that
+        // (safeAreaMarginsChanged -> here) before apply() returns; the nested refresh must find it applied.
+        _appliedTitleBand = request;
+        if (auto const applied = _manager.app().titleBandMaterial().apply(*_osWindow, request); !applied)
+        {
+            display::displayLog()("The title band's material failed ({}); this window paints a solid band.",
+                                  platform::titleBandMaterialErrorName(applied.error()));
+            // Once: the window asks again for the opaque band, which it keeps for its lifetime (R-g).
+            if (_bandMaterialHealth == platform::BandMaterialHealth::Working)
+            {
+                _bandMaterialHealth = platform::BandMaterialHealth::Failed;
+                _appliedTitleBand.reset();
+                refreshTitleBand();
+                return;
+            }
+        }
+        // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2), and Minimal's bare band
+        // detaching it moves them back: the band's leading slot reads the inset again.
+        if (growthChanged)
+            emit nativeControlsInsetChanged();
+    }
+
+    // Measured after the apply: the title bar reaches its grown height only once the toolbar exists.
+    auto const geometry = titleBandGeometry();
+    auto const fill = titleBandFill();
+    if (geometry == _titleBandGeometry && request == _publishedTitleBand && fill == _publishedTitleBandFill)
+        return;
+    _titleBandGeometry = geometry;
+    _publishedTitleBand = request;
+    _publishedTitleBandFill = fill;
+    emit titleBandChanged();
+}
+
+bool WindowController::clearsTitleBarBackground() const noexcept
+{
+    return needsExpandedClientArea() && _publishedTitleBand
+           && _publishedTitleBand->backdrop == config::BandBackdrop::Client;
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -1119,7 +2237,60 @@ void WindowController::onOSWindowActiveChanged()
     if (osWindow->isActive())
         _manager.setFocusedWindow(_windowId);
     else
+    {
         _manager.clearFocusedWindow(_windowId);
+        // The release of a modifier held while the window lost focus goes to another window.
+        _heldModifier.modifierReleased();
+        refreshHeaderReveal();
+    }
+}
+
+void WindowController::followHeldModifier(QEvent const& event)
+{
+    switch (event.type())
+    {
+        case QEvent::KeyPress: {
+            auto const& key = static_cast<QKeyEvent const&>(event);
+            if (key.isAutoRepeat())
+                return;
+            // The modifier's own press carries its modifier, so "alone" is "nothing else held".
+            if (key.key() == Qt::Key_Alt && (key.modifiers() & ~Qt::AltModifier) == Qt::NoModifier)
+                _heldModifier.modifierPressed(_clock.now());
+            else
+                _heldModifier.otherInput();
+            break;
+        }
+        case QEvent::KeyRelease: {
+            auto const& key = static_cast<QKeyEvent const&>(event);
+            if (key.isAutoRepeat() || key.key() != Qt::Key_Alt)
+                return;
+            _heldModifier.modifierReleased();
+            break;
+        }
+        // A click on a revealed header's button must reach it, so a press hides nothing already shown.
+        case QEvent::MouseButtonPress: _heldModifier.pointerPressed(_clock.now()); break;
+        // Alt+wheel is a gesture of its own (a scroll, a zoom), not a hold.
+        case QEvent::Wheel: _heldModifier.otherInput(); break;
+        default: return;
+    }
+    refreshHeaderReveal();
+}
+
+void WindowController::refreshHeaderReveal()
+{
+    auto const now = _clock.now();
+    auto const reveal = _heldModifier.at(now);
+    if (auto const due = _heldModifier.dueAt(); due && reveal == HeaderReveal::None)
+        _headerRevealTimer.start(std::chrono::ceil<std::chrono::milliseconds>(*due - now));
+    else
+        _headerRevealTimer.stop();
+
+    if (reveal == _headerReveal)
+        return;
+    _headerReveal = reveal;
+    emit headerRevealChanged();
+    // A header the reveal shows names its program at once.
+    refreshHeaderFollowers();
 }
 
 void WindowController::rememberWindowPosition()
@@ -1206,7 +2377,8 @@ void WindowController::showInitial()
         marginsDevice,
         scale,
         chrome(),
-        session::configuredGutterWidth(session->config(), display->cellSize(), scale));
+        session::configuredGutterWidth(
+            session->config(), display->cellSize(), scale, session->gutterChrome()));
 
     if (auto const grid = rowResizeGrid())
         size.height = geometry::snapLogicalHeightToRows(size.height, scale, *grid);
@@ -1238,7 +2410,11 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
     {
         switch (event->type())
         {
-            case QEvent::DevicePixelRatioChange: onWindowScaleMaybeChanged(); break;
+            case QEvent::DevicePixelRatioChange:
+                // Measured first: the scale handler may return early (no session, an unchanged scale).
+                refreshTitleBand();
+                onWindowScaleMaybeChanged();
+                break;
 
             case QEvent::PlatformSurface:
                 // The shadow attachment holds the platform window's identity — an X11 window id, or a
@@ -1247,7 +2423,13 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // publish the next shadow against a dead handle. Expose below rebuilds it.
                 if (static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType()
                     == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+                {
                     _windowShadow.reset();
+                    // The next platform window wears nothing yet: its first expose dresses it again.
+                    _appliedTitleBand.reset();
+                    // Nor answers for its caption buttons: the adapter looks a window up by its handle.
+                    detachCaption();
+                }
                 break;
 
             case QEvent::Expose:
@@ -1268,11 +2450,33 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                     platform::applyRowResizeHints(*_osWindow, rowResizeGrid());
                 }
                 refreshWindowShadow();
+                refreshCaptionAttachment();
+                // After the frame, so the material's settings win; before the inset's emit, which the
+                // toolbar it may attach moves.
+                refreshTitleBand();
                 // The OS's own window controls exist only once the window is realized, so the inset
                 // measured from them is only answerable now -- long after titleBarVisibleChanged,
                 // which the other frame gates ride on, has been and gone.
                 emit nativeControlsInsetChanged();
+                // The state change of a restore comes before the platform exposes the surface, so the
+                // running times were decided while it was still hidden; decide them again now.
+                _manager.windowExposed(_windowId);
                 break;
+
+            case QEvent::ApplicationPaletteChange:
+                // Every chrome recolor lands here -- applyGuiTheme() forces the palette on a reload and
+                // on an OSC 11 that crosses the light/dark threshold, and the OS's own theme switch
+                // regenerates it -- so the frame re-reads the scheme it tints the OS border for. Cheap:
+                // the adapter only touches what the new scheme actually changed.
+                _nativeFrame->apply(*_osWindow, decoration());
+                // The band's appearance follows the scheme the palette now carries.
+                refreshTitleBand();
+                break;
+
+            case QEvent::KeyPress:
+            case QEvent::KeyRelease:
+            case QEvent::MouseButtonPress:
+            case QEvent::Wheel: followHeldModifier(*event); break;
 
             default: break;
         }
@@ -1372,7 +2576,8 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     // Handed over in DEVICE pixels, the unit it is decided in: sizeHintsFor converts it once, where
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
-    auto const gutterDevicePx = session::configuredGutterWidth(requester.session().config(), cellSize, scale);
+    auto const gutterDevicePx = session::configuredGutterWidth(
+        requester.session().config(), cellSize, scale, requester.session().gutterChrome());
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
@@ -1512,6 +2717,11 @@ bool WindowController::isMinimized() const noexcept
     return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowMinimized);
 }
 
+QScreen* WindowController::screen() const noexcept
+{
+    return _osWindow != nullptr ? _osWindow->screen() : nullptr;
+}
+
 void WindowController::requestNotification(QString const& title,
                                            QString const& body,
                                            std::function<void()> onClicked)
@@ -1530,16 +2740,8 @@ void WindowController::trayMessageClicked()
 
 void WindowController::raiseAndActivate()
 {
-    if (_osWindow == nullptr)
-        return;
-
-    // Cleared from the state set rather than via showNormal(): a window minimised from maximised must
-    // come back maximised.
-    auto states = _osWindow->windowStates();
-    states.setFlag(Qt::WindowMinimized, false);
-    _osWindow->setWindowStates(states);
-    _osWindow->raise();
-    _osWindow->requestActivate();
+    if (_osWindow != nullptr)
+        window::raiseAndActivate(*_osWindow);
 }
 
 bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
@@ -1558,7 +2760,8 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
         marginsDevice,
         scale,
         geometry::Chrome {},
-        session::configuredGutterWidth(requester.session().config(), requester.cellSize(), scale));
+        session::configuredGutterWidth(
+            requester.session().config(), requester.cellSize(), scale, requester.session().gutterChrome()));
     return applyContentDrivenResize(requester, leafLogical);
 }
 
@@ -1615,14 +2818,14 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
         return false;
     }
 
-    // PaneNode.qml's explicit `handle:` binds its thickness to the same constant (via the session
-    // manager's splitHandleThickness property), so solver and rendered handle cannot diverge. The
-    // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole
-    // content area and no split ratio above it applies.
+    // The gap, header and inset come from the same chrome tokens PaneNode.qml draws with, so solver and
+    // canvas cannot diverge -- counted on this window's device-pixel grid, as the QML snaps them. The
+    // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole content
+    // area edge to edge and no split ratio, card or inset applies.
     auto const content = vtworkspace::contentSizeForLeaf(
         *leaf,
         vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
-        vtworkspace::DefaultSplitHandleThickness,
+        _manager.app().splitChrome(osWindow->devicePixelRatio()),
         *layoutRoot);
 
     display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",
@@ -1730,6 +2933,31 @@ void WindowController::rebuildActiveTabPaneProxies()
     refreshActiveTabLayoutRoot();
 }
 
+void WindowController::notifyPaneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf)
+{
+    // The proxies are the active tab's alone: another tab's leaf is read afresh when that tab is shown.
+    auto const* active = activeModelTab();
+    if (active != nullptr && active->id() == tab)
+    {
+        if (auto const it = _paneProxies.find(leaf.value); it != _paneProxies.end())
+            it->second->notifyChanged();
+        if (active->activePane() != nullptr && active->activePane()->id() == leaf)
+            emit activeSessionChanged();
+        // The new session is followed as the one it replaced was.
+        refreshHeaderFollowers();
+    }
+    // Every role read through the tab's active session: the new one starts with no progress and no
+    // records, and the ended one's must not linger in the strip.
+    notifyTabRowChanged(tab,
+                        { Roles::SessionIdRole,
+                          Roles::TitleRole,
+                          Roles::ProgressStateRole,
+                          Roles::ProgressPercentageRole,
+                          Roles::BadgeRole,
+                          Roles::BadgeTextRole,
+                          Roles::BadgeProgressRole });
+}
+
 void WindowController::refreshActiveTabLayoutRoot()
 {
     // Render the tab's LAYOUT root, which is the tree root normally and the zoomed leaf while zoomed.
@@ -1746,6 +2974,54 @@ void WindowController::refreshActiveTabLayoutRoot()
         _activeTabRootProxy = newRoot;
         emit activeTabRootPaneChanged();
         emit activeSessionChanged();
+    }
+
+    // Recounted here rather than with the root: a split under an unchanged root adds a pane too.
+    auto const visible = tab != nullptr ? tab->layoutRoot()->leafCount() : 0;
+    if (visible != _visiblePaneCount)
+    {
+        _visiblePaneCount = visible;
+        emit visiblePaneCountChanged();
+    }
+
+    // Every caller -- the active tab, a split or close, a zoom -- may have changed whose header shows.
+    refreshHeaderFollowers();
+}
+
+void WindowController::refreshHeaderFollowers()
+{
+    auto const* win = window();
+    if (win == nullptr)
+        return;
+
+    // Whether a header shows at all is the same for every visible leaf: what is left of the decision is the
+    // pane's geometry, which is QML's. A width that shows the directory and room for any height ask for
+    // nothing the rule could refuse a header for.
+    auto const header = resolvePaneHeader({
+        .density = _manager.app().config().chromeDensity.value(),
+        .reveal = _headerReveal,
+        .visiblePanes = _visiblePaneCount,
+        .width = CwdMinPaneWidth,
+        .height = std::numeric_limits<double>::max(),
+    });
+    auto const* active = activeModelTab();
+    auto const* shown =
+        active != nullptr && header.content != PaneHeaderContent::Hidden ? active->layoutRoot() : nullptr;
+
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto* const tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            auto* const session = pane.isLeaf() ? _manager.sessionForId(pane.session()) : nullptr;
+            if (session == nullptr)
+                return;
+            if (shown != nullptr && shown->contains(&pane))
+                session->startFollowingForegroundProcess(session::ProcessNameFollower::Header);
+            else
+                session->stopFollowingForegroundProcess(session::ProcessNameFollower::Header);
+        });
     }
 }
 
@@ -1771,6 +3047,8 @@ void WindowController::onTabAboutToBeAdded(int index)
 void WindowController::onTabAdded(int)
 {
     endInsertRows();
+    if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged(); // the focused tab may have moved down a row
     emit countChanged();
     // The resolved tab-strip gate depends on the live tab count (Multiple mode): re-notify QML so the
     // strip re-shows when the count crosses 1.
@@ -1780,6 +3058,11 @@ void WindowController::onTabAdded(int)
 
 void WindowController::onTabAboutToBeRemoved(int index)
 {
+    if (auto const* tab = tabAtRow(index); tab != nullptr)
+        emit closeTabConfirmationWithdrawn(tab->id().value);
+    // The tab well's focus belongs to a tab, not to a row: the tab itself going ends it.
+    if (_chromeArea == window::ChromeArea::Tabs && _focusedTab && tabIdAtRow(index) == _focusedTab)
+        _focusedTabRemoval = FocusedTabRemoval::Pending;
     beginRemoveRows(QModelIndex(), index, index);
 }
 
@@ -1787,6 +3070,10 @@ void WindowController::onTabClosed()
 {
     endRemoveRows();
     _badges.clear(); // Its badge goes with it.
+    if (std::exchange(_focusedTabRemoval, FocusedTabRemoval::None) == FocusedTabRemoval::Pending)
+        static_cast<void>(dropChromeFocus()); // Main.qml gives the terminal the keyboard on the signal below.
+    else if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged(); // the focused tab may have moved up a row
     emit countChanged();
     // See onTabAdded: re-notify so the strip re-hides in Multiple mode when the count falls back to 1.
     emit tabBarShouldShowChanged();
@@ -1807,12 +3094,23 @@ void WindowController::onTabMoved()
         endMoveRows();
         _tabMoveInProgress = false;
     }
+    if (_chromeArea == window::ChromeArea::Tabs)
+        emit chromeFocusChanged();
     emit activeTabIndexChanged();
     refreshAllTabTitles();
 }
 
 void WindowController::onActiveTabChanged()
 {
+    // A real activation (the native menu, the palette, the daemon) takes the keyboard in the tab well with
+    // it. A reorder or a background close never reaches here: they announce the active row through
+    // activeTabIndexChanged() alone. The tab being closed under the focus is on its way out, not a target.
+    if (_chromeArea == window::ChromeArea::Tabs && _focusedTabRemoval == FocusedTabRemoval::None)
+        if (auto const active = tabIdAtRow(activeTabIndex()); active && active != _focusedTab)
+        {
+            _focusedTab = active;
+            emit chromeFocusChanged();
+        }
     emit activeTabIndexChanged();
     refreshActiveTabHighlight();
     rebuildActiveTabPaneProxies();
@@ -1822,6 +3120,9 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
 {
     // Whatever changed -- its records, its panes -- may change its badge.
     _badges.drop(tab);
+    // And a relabel asks the process in front afresh.
+    if (roles.contains(Roles::TitleRole))
+        _processNames.clear();
     auto const row = rowOfTab(tab);
     if (row < 0)
         return;
@@ -1841,13 +3142,26 @@ void WindowController::refreshActiveTabHighlight()
         emit dataChanged(index(0),
                          index(rows - 1),
                          { static_cast<int>(Roles::IsActiveRole),
-                           static_cast<int>(Roles::ProgramStatusRole),
-                           static_cast<int>(Roles::ProgramStatusTextRole),
-                           static_cast<int>(Roles::ProgramStatusProgressRole) });
+                           static_cast<int>(Roles::BadgeRole),
+                           static_cast<int>(Roles::BadgeTextRole),
+                           static_cast<int>(Roles::BadgeProgressRole) });
+}
+
+void WindowController::notifyAllTabRowsChanged(QList<Roles> const& roles)
+{
+    auto const rows = rowCount();
+    if (rows <= 0)
+        return;
+    auto roleIds = QList<int> {};
+    roleIds.reserve(roles.size());
+    for (auto const role: roles)
+        roleIds.append(static_cast<int>(role));
+    emit dataChanged(index(0), index(rows - 1), roleIds);
 }
 
 void WindowController::refreshAllTabTitles()
 {
+    _processNames.clear();
     if (auto const rows = rowCount(); rows > 0)
         emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
 }
@@ -1897,5 +3211,28 @@ void WindowController::updateStatusLine()
     }
 }
 // }}}
+
+QVariantMap WindowController::activeStickyHeader() const
+{
+    auto const* const session = activeSession();
+    return session != nullptr ? session->stickyHeader() : QVariantMap {};
+}
+
+void WindowController::jumpToActiveStickyHeader() const
+{
+    if (auto* const session = activeSession())
+        session->jumpToStickyHeader();
+}
+
+void WindowController::followActiveStickyHeader()
+{
+    disconnect(_activeStickyHeaderConnection);
+    if (auto* const session = activeSession())
+        _activeStickyHeaderConnection = connect(session,
+                                                &session::TerminalSession::stickyHeaderChanged,
+                                                this,
+                                                &WindowController::activeStickyHeaderChanged);
+    emit activeStickyHeaderChanged();
+}
 
 } // namespace contour::window

@@ -1,13 +1,14 @@
 // vim:syntax=qml
 // A single terminal pane: one ContourTerminal display bound to a leaf's session, plus the
-// per-pane chrome (background, scrollbar) and an active-pane focus border.
+// per-pane chrome (background, scrollbar) and the unfocused dim.
 //
-// This is instantiated once per leaf of the split tree (by PaneNode.qml). Clicking the pane makes
-// it the active pane of its tab (emitted via `activated`).
+// This is instantiated once per leaf of the split tree (by PaneCard.qml, which draws the card and the
+// header around it). Pressing on the pane makes it the active pane of its tab (emitted via `activated`).
+// Focus is told by the header's emphasis and the dim, never by an outline.
 //
 // The per-session wiring (permission-wall dialogs, bell, window alert, the session's notices, and the
 // bidirectional scrollbar binding) is shared with the single-pane Terminal.qml via SessionChrome.qml;
-// this file only adds the pane-specific background and active-pane focus border. Without SessionChrome,
+// this file only adds the pane-specific background and the unfocused dim. Without SessionChrome,
 // terminals in a split pane would silently lose all of those (permission requests never shown, mute
 // bell, no urgency, dropped notifications, inert scrollbar).
 import QtQuick
@@ -35,13 +36,41 @@ ContourTerminal {
     // The TerminalSession this pane renders.
     // (Set by the caller: `session: node.session`.)
 
-    // Whether this pane is the active pane of its tab (drives the focus border).
+    // Whether this pane is the active pane of its tab (drives the unfocused dim).
     property bool paneActive: false
+
+    // The panes the tab shows (set by PaneCard): Minimal's dim floor applies only between two or more.
+    property int visiblePanes: 1
+
+    // The card's corner radius, which the pane's background and dim follow (0 outside a card).
+    property real cornerRadius: 0
+
+    // How far the rounded background reaches above the pane, clipped: the card's radius under an inline
+    // header, whose own bottom edge is square, so the pane's top corners are square to meet it.
+    property real squareTop: 0
+
+    // The same below: the card's radius above an ended pane's footer, which the pane meets edge to edge.
+    // The background and dim then stop square at the pane's bottom, reaching no backgroundOutset below it.
+    property real squareBottom: 0
+
+    // How far the pane's background and dim reach beyond it on every side: a rounded card keeps the grid
+    // in from its corners (window::cardContentInset), and its colour fills the card up to the edge.
+    property real backgroundOutset: 0
+
+    // The pane header's find slot, and whether the pane has an inline header (a PaneHeaderPresence's value),
+    // for the find bar (SessionChrome's SearchBar); and whether the bar sits in that header row now.
+    property Item headerFindSlot: null
+    property int headerPresent: 0
+    /// Whether this pane draws its lock in a pill over its grid (PaneCard.lockInPane).
+    property bool lockInPane: false
+    // A bool by the QML-facing carve-out: it relays SearchBar.occupiesHeaderRow, a predicate derived from
+    // the placement's named anchor, up to PaneCard's header; it decides nothing itself.
+    readonly property bool findInHeaderRow: chrome.findInHeaderRow
 
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which
     // flips node.active via the model's activePaneChanged), grab Qt keyboard focus so keystrokes go
-    // to this terminal — not just the focus border. Without this, keyboard pane navigation moved the
-    // highlight but left typing routed to the previously focused pane.
+    // to this terminal — not just the focus cue. Without this, keyboard pane navigation moved the
+    // cue but left typing routed to the previously focused pane.
     onPaneActiveChanged: if (paneActive) forceActiveFocus()
 
     // A split creates the NEW pane already active (paneActive bound to node.active, which the model sets
@@ -50,7 +79,7 @@ ContourTerminal {
     // on completion when created active, covering the split-creation case that onPaneActiveChanged misses.
     Component.onCompleted: if (paneActive) forceActiveFocus()
 
-    // Raised when the user clicks this pane, so the owner can make it active.
+    // Raised when the user presses on this pane, so the owner can make it active.
     signal activated()
 
     // Lifecycle traces below are diagnostics, not user-facing events: they fire on the perfectly
@@ -87,12 +116,23 @@ ContourTerminal {
     // 1 - opacityBackground under a blurred image), the image at opacityBackground, the blur pass, and
     // the color wash that restores text contrast over a blurred image. All session reads are
     // null-guarded (the session is transiently null during split rebinds).
+    //
+    // The two colour layers fill the card (backgroundOutset beyond the grid) and take its corners
+    // (cornerRadius, squared at the top by squareTop and at the bottom by squareBottom); the image and its
+    // blur keep to the grid, which a card keeps clear of its corners.
     Item {
+        objectName: "paneBackground"
         anchors.fill: parent
+        anchors.margins: -pane.backgroundOutset
+        anchors.bottomMargin: pane.squareBottom > 0 ? 0 : -pane.backgroundOutset
         z: -1
+        clip: pane.squareTop > 0 || pane.squareBottom > 0
 
         Rectangle {
             anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
+            radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
                 ? 1.0 - pane.session.opacityBackground
@@ -102,6 +142,8 @@ ContourTerminal {
         Image {
             id: backgroundImage
             anchors.fill: parent
+            anchors.margins: pane.backgroundOutset
+            anchors.bottomMargin: pane.squareBottom > 0 ? 0 : pane.backgroundOutset
             opacity: pane.session ? pane.session.opacityBackground : 1.0
             focus: false
             visible: pane.session ? pane.session.isImageBackground : false
@@ -117,6 +159,9 @@ ContourTerminal {
 
         Rectangle {
             anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
+            radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
                 ? 1.0 - pane.session.opacityBackground
@@ -124,44 +169,71 @@ ContourTerminal {
         }
     }
 
-    // Cell-dimensions popup shown briefly on resize (mirrors the former single-pane Terminal.qml popup).
-    // It is inherently per-pane: each pane resizes independently, driven by its own session's
-    // line/column-count signals wired in onSessionChanged below.
-    Rectangle {
-        id: sizeWidget
-        anchors.centerIn: parent
-        border.width: 1
-        border.color: "black"
-        property int margin: 10
-        color: "white"
-        visible: false
-        focus: false
+    // The size indicator: "100 × 30" after a resize, "13 pt" after a zoom, as a Toast pill centred on this
+    // pane -- each pane of a split its own. The session decides when it is raised and what it says
+    // (requestSizeIndicator); the pane holds it for motion.linger after the last request, then tells the
+    // session it settled, which announces it for the active pane alone. Above the unfocused dim, so a resized
+    // inactive pane still reads its size; a pane too narrow for the pill shows none.
+    property bool sizeIndicatorHeld: false
+
+    /// Where the pane's own overlays (the size indicator, the link pill) are drawn: an item its host lays
+    /// exactly over this pane but outside any fade the host applies to it (PaneCard's inactive-card fade on the
+    /// Terminal row), so the pills read at full strength. Null: the pane's own overlay layer, above its dim.
+    property Item overlayHost: null
+    /// The pane header's link pill slot, where the pane shows an inline header (PaneCard); null where none.
+    property Item headerLinkSlot: null
+    /// Whether the link pill sits in the pane header (QML-facing): the header hides what the pill covers.
+    readonly property bool linkPillInHeader: chrome.linkPillInHeader
+
+    // The pane's own overlay layer, above the unfocused dim, where its pills sit when no host gives them one.
+    Item {
+        id: paneOverlay
+        objectName: "paneOverlay"
+        anchors.fill: parent
         z: 20
-        Timer {
-            id: sizeWidgetTimer
-            interval: 1000
-            running: false
-            onTriggered: sizeWidget.visible = false
-        }
-        Text {
-            id: sizeWidgetText
-            anchors.centerIn: parent
-            text: pane.session
-                ? "Size: " + pane.session.pageColumnsCount.toString() + " x " + pane.session.pageLineCount.toString()
-                : ""
-        }
     }
 
-    function updateSizeWidget() {
-        if (!pane.session)
-            return;
-        if (pane.session.upTime > 1.0 && pane.session.showResizeIndicator) {
-            sizeWidgetText.text = "Size: " + pane.session.pageColumnsCount.toString()
-                + " x " + pane.session.pageLineCount.toString();
-            sizeWidget.width = sizeWidgetText.contentWidth + sizeWidget.margin;
-            sizeWidget.height = sizeWidgetText.contentHeight;
-            sizeWidget.visible = true;
-            sizeWidgetTimer.running = true;
+    Toast {
+        id: sizeIndicator
+        objectName: "sizeIndicator"
+        parent: pane.overlayHost ? pane.overlayHost : paneOverlay
+        anchors.centerIn: parent
+        // Only once its row has laid out does the pill know its width; until then it does not fit anywhere.
+        readonly property bool fits: implicitContentWidth > 0 && implicitWidth <= pane.width - 2 * chromeStyle.space.s4
+        shown: pane.sizeIndicatorHeld && fits
+        text: pane.session && pane.session.sizeIndicatorText !== undefined ? pane.session.sizeIndicatorText : ""
+        // Tabular digits, so "99 × 30" and "100 × 30" keep their digits in place as a drag goes by.
+        textFont: {
+            var body = chromeStyle.type.body
+            var spec = { family: body.family, weight: Font.DemiBold, features: { "tnum": 1 } }
+            if (body.pixelSize > 0)
+                spec.pixelSize = body.pixelSize
+            else
+                spec.pointSize = body.pointSize
+            return Qt.font(spec)
+        }
+        // An in-pane pill casts no hard shadow on the Terminal row: only a real popover does.
+        elevation: chromeStyle.elevation.inPane
+        // Opaque on a translucent profile too (ruling A5): it sits outside the pane's opacity, and its
+        // legibility comes before matching the pane's translucency.
+        // The session announces the settled size itself, once.
+        Accessible.ignored: true
+    }
+
+    // A pill held for the session that leaves would never settle for the one that comes: neither is shown.
+    onSessionChanged: {
+        pane.sizeIndicatorHeld = false
+        sizeIndicatorHold.stop()
+    }
+
+    Timer {
+        id: sizeIndicatorHold
+        objectName: "sizeIndicatorHold"
+        interval: chromeStyle.motion.linger
+        onTriggered: {
+            pane.sizeIndicatorHeld = false
+            if (pane.session && pane.session.sizeIndicatorSettled !== undefined)
+                pane.session.sizeIndicatorSettled(pane.paneActive)
         }
     }
 
@@ -173,6 +245,11 @@ ContourTerminal {
         id: chrome
         session: pane.session
         displayItem: pane
+        overlayHost: pane.overlayHost ? pane.overlayHost : paneOverlay
+        headerFindSlot: pane.headerFindSlot
+        headerLinkSlot: pane.headerLinkSlot
+        headerPresent: pane.headerPresent
+        lockInPane: pane.lockInPane
     }
 
     // Policy for the unfocused-dim overlay, kept a pure function (like PaneNode.clampRatio) so every
@@ -184,64 +261,72 @@ ContourTerminal {
         return Qt.alpha(base, dim)
     }
 
-    // Unfocused-pane dimming (dim_unfocused profile option, default off): blends the pane toward its
-    // own background color while it is not the focused pane — an inactive pane of a split, or any
-    // pane of an unfocused window. Composited above the terminal content but below the focus border;
-    // the renderer itself is untouched.
-    Rectangle {
-        objectName: "dimOverlay"
-        anchors.fill: parent
-        z: 5
-        color: pane.dimOverlayColor(pane.session ? pane.session.dimUnfocused : 0.0,
-                                    pane.paneActive,
-                                    Window.active,
-                                    pane.session ? pane.session.backgroundColor : "#000000")
-        visible: color.a > 0
+    // How strongly this pane dims while unfocused: the provider's unfocusedDim, which under Minimal floors
+    // the profile's dim_unfocused because dimming is the only focus cue between panes there -- so only
+    // between two or more. A lone pane dims only with its window, by the profile's own value (with the
+    // Increased Contrast cap unfocusedDim applies either way: min() keeps it and drops the floor).
+    // Reads the palette, hence the paletteRevision read.
+    function unfocusedDim(profileDim, panes) {
+        if (chromeStyle.paletteRevision < 0)
+            return 0.0
+        var dim = chromeStyle.unfocusedDim(profileDim)
+        return panes >= 2 ? dim : Math.min(profileDim, dim)
     }
 
-    // While the connection to the daemon this pane mirrors is sought again, the pane says so instead of
-    // showing a grid that merely stopped: the grid dimmed, and the word centred on it. Above the unfocused
-    // dimming, below the focus border.
-    Rectangle {
-        objectName: "reconnectingOverlay"
+    // Unfocused-pane dimming (dim_unfocused profile option, default off; at least the kit's dim under
+    // Minimal): blends the pane toward its own background color while it is not the focused pane — an
+    // inactive pane of a split, or any pane of an unfocused window. Composited above the terminal
+    // content; the renderer itself is untouched. Clipped like the background, so it follows the card's
+    // corners and stops square at an inline header and at an ended pane's footer.
+    Item {
+        objectName: "dimOverlay"
         anchors.fill: parent
-        z: 6
-        visible: pane.session ? pane.session.isReconnecting === true : false
-        color: Qt.rgba(0, 0, 0, 0.6)
-        property alias text: reconnectingLabel.text
+        anchors.margins: -pane.backgroundOutset
+        anchors.bottomMargin: pane.squareBottom > 0 ? 0 : -pane.backgroundOutset
+        z: 5
+        clip: pane.squareTop > 0 || pane.squareBottom > 0
+        property color color: pane.dimOverlayColor(
+            pane.unfocusedDim(pane.session ? pane.session.dimUnfocused : 0.0, pane.visiblePanes),
+            pane.paneActive,
+            Window.active,
+            pane.session ? pane.session.backgroundColor : "black")
+        visible: color.a > 0
 
-        Text {
-            id: reconnectingLabel
-            anchors.centerIn: parent
-            text: qsTr("Reconnecting\u2026")
-            color: "white"
-            font.pixelSize: 18
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
+            radius: pane.cornerRadius
+            color: parent.color
         }
     }
 
-    // Active-pane focus border.
-    Rectangle {
-        anchors.fill: parent
-        color: "transparent"
-        border.width: pane.paneActive ? 1 : 0
-        border.color: "#3daee9"
-        z: 10
-    }
-
+    // The press itself makes the pane the active one and hands it the keyboard, as soon as it lands. A tap
+    // would come only on a quick release within the drag threshold, so a press held a moment or one that
+    // starts a selection activated nothing. And the keyboard always, the pane already active included: the
+    // model then moves nothing, and typing would stay wherever the focus went meanwhile. The grab stays
+    // passive, so the grid still takes the press, the drag and the release as its own.
     TapHandler {
-        onTapped: pane.activated()
+        gesturePolicy: TapHandler.DragThreshold
+        onPressedChanged: {
+            if (!pressed)
+                return
+            pane.activated()
+            pane.forceActiveFocus()
+        }
     }
 
-    // Show the cell-dimensions popup on page-size changes (resize). Use a Connections object rather than
-    // imperative session.lineCountChanged.connect(updateSizeWidget) in onSessionChanged: the imperative
-    // form re-connects on every session rebind (a split rebinds this pane's session repeatedly) WITHOUT
-    // disconnecting the old one, so stale handlers accumulate and fire on a torn-down pane during teardown
-    // — where even `pane` (the root id) resolves to null, throwing "Cannot read property 'session' of null".
-    // Connections re-targets atomically and is torn down with the pane, so no stale handler survives.
+    // Every request the session lets through shows the pill and restarts its hold. A Connections object
+    // rather than an imperative connect() in onSessionChanged: the imperative form re-connects on every
+    // session rebind (a split rebinds this pane's session repeatedly) WITHOUT disconnecting the old one, so
+    // stale handlers accumulate and fire on a torn-down pane during teardown. Connections re-targets
+    // atomically and is torn down with the pane.
     Connections {
         target: pane.session
         ignoreUnknownSignals: true
-        function onLineCountChanged() { pane.updateSizeWidget(); }
-        function onColumnsCountChanged() { pane.updateSizeWidget(); }
+        function onSizeIndicatorRequested() {
+            pane.sizeIndicatorHeld = true
+            sizeIndicatorHold.restart()
+        }
     }
 }

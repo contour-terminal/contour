@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import QtQuick.Window
 import Qt.labs.platform
 
-ApplicationWindow
+ThemedWindow
 {
     id: appWindow
     // NOT visible at declaration: the window is sized BEFORE its first map (win.showInitial() below)
@@ -33,51 +33,35 @@ ApplicationWindow
     // and comes from the frame policy the controller applies (platform/NativeWindowFrame.hpp).
     // Qt.FramelessWindowHint is exactly what costs a window its system drop shadow and its rounded
     // corners, so Windows and macOS withhold it and keep a real frame instead -- Windows zeroes that
-    // frame in WM_NCCALCSIZE, macOS lets the content fill a transparent title bar. Only the
+    // frame in WM_NCCALCSIZE, macOS lets the content fill the title bar. Only the
     // Linux/BSD desktops go genuinely frameless, and there the shadow comes from the compositor
-    // (platform/WindowShadow.hpp) rather than from the frame.
-    flags: Qt.Window | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
+    // (platform/WindowShadow.hpp) rather than from the frame. On macOS, Qt.ExpandedClientAreaHint is what
+    // lets the content fill that title bar: Qt owns the full-size content view and its safe area, the
+    // frame adapter does not (needsExpandedClientArea is true there alone, so other platforms never
+    // evaluate the hint). The band is the client's own paint (ruling S6: under AppKit's title-bar material
+    // the title bar would take the band's clicks), so Qt.NoTitleBarBackgroundHint clears the title bar's
+    // background behind it (clearsTitleBarBackground, true only under the hint above).
+    // The window's role adds its own flags on top (WindowController::roleFlags): none for a normal window, a
+    // frameless tool window for the quick terminal. Composed into the same OR, never replacing it.
+    flags: Qt.Window | (win ? win.roleFlags : 0)
+                     | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
+                     | ((win && win.needsExpandedClientArea) ? Qt.ExpandedClientAreaHint : 0)
+                     | ((win && win.clearsTitleBarBackground) ? Qt.NoTitleBarBackgroundHint : 0)
+    // Under that hint the title bar becomes the window's safe area, and an ApplicationWindow (Qt >= 6.9) pads
+    // its content by the safe area -- which would push the band below the very title bar it fills. Zeroed
+    // while the hint is set alone; a Binding rather than `topPadding: 0`, because before Qt 6.9 (still
+    // supported off macOS) the property does not exist, and an inactive Binding never names it.
+    Binding
+    {
+        target: appWindow
+        property: "topPadding"
+        value: 0
+        when: !!(win && win.needsExpandedClientArea)
+    }
 
     // Application window's background must be transparent in order to support transparent/semi-transparent
     // background in the terminal widgets.
-    // color: "transparent"
-    color: Qt.rgba(0, 0, 0, 0.0)
-
-    // Force the window's Qt Quick Controls palette to follow the application palette (which
-    // ContourGuiApp::applyGuiTheme drives for the theme: dark|light|system setting).
-    //
-    // Why this is needed: the pinned Fusion Quick Controls style derives an editable control's colors
-    // (TextField/ComboBox/SpinBox `base`, `text`, …) from QStyleHints::colorScheme(), NOT from the
-    // application QPalette. On desktops whose platform theme owns the color scheme (KDE Plasma, GNOME),
-    // QStyleHints::setColorScheme() is inert, so those controls render in the OS scheme (e.g. dark input
-    // fields) even when the forced GUI theme — and every SystemPalette-bound chrome element — is light.
-    // Binding the window palette to a SystemPalette (which DOES follow the application palette) makes the
-    // controls inherit an explicit palette that wins over the style default, so the whole window,
-    // including the on-demand settings pane, is themed consistently from first render. In `theme: system`
-    // this simply mirrors the OS palette, i.e. a no-op.
-    SystemPalette
-    {
-        id: appPalette
-        colorGroup: SystemPalette.Active
-    }
-    palette.window: appPalette.window
-    palette.windowText: appPalette.windowText
-    palette.base: appPalette.base
-    palette.alternateBase: appPalette.alternateBase
-    palette.text: appPalette.text
-    palette.button: appPalette.button
-    palette.buttonText: appPalette.buttonText
-    palette.brightText: appPalette.brightText
-    palette.highlight: appPalette.highlight
-    palette.highlightedText: appPalette.highlightedText
-    palette.toolTipBase: appPalette.toolTipBase
-    palette.toolTipText: appPalette.toolTipText
-    palette.placeholderText: appPalette.placeholderText
-    palette.light: appPalette.light
-    palette.midlight: appPalette.midlight
-    palette.mid: appPalette.mid
-    palette.dark: appPalette.dark
-    palette.shadow: appPalette.shadow
+    color: "transparent"
 
     // The custom tab strip is shown regardless of the decoration mode — only the window controls inside
     // it are dropped when the native frame provides them (see TitleBar.useCustomWindowControls). Tabs
@@ -92,6 +76,90 @@ ApplicationWindow
     //     defaults to shown before `win` resolves.
     property int tabBarPosition: win ? win.tabBarPosition : 0
     property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
+    // Where a sheet hangs from (KitDialog): the top of the content, below the band and the banners.
+    readonly property real sheetTop: content.y
+
+    // What is on screen now for the secure-input lock (window::SecureIndicatorRules), not what the gates
+    // allow: a band that only appears while the pointer is on its edge (full screen) holds nothing.
+    // Whether a title band rests on screen:
+    readonly property bool bandOnScreen: appWindow.band.band === "shown" || appWindow.band.band === "pinned"
+    // Whether tabs that can show the lock are on screen: in their own strip, or in the centre of a band that
+    // is. Icon-only tabs (a narrow well) have no room for it, so they hold nothing.
+    readonly property bool tabsOnScreen: (appWindow.band.tabBar === "shown" && tabsBar.tabsHostLock)
+                                         || (appWindow.band.centre === "tabs" && appWindow.bandOnScreen
+                                             && titleBar.tabsHostLock)
+
+    // Whether the title band is on screen with the active tab's title in its middle: where a single pane's sticky
+    // header lives (window::StickyHeaderHost), handed down by PaneNode like visiblePanes, as a
+    // window::TitleBandPresence value.
+    readonly property int titleBandPresence: appWindow.bandOnScreen && appWindow.band.centre === "title"
+                                             ? chromeStyle.blocks.bandShown : chromeStyle.blocks.bandAbsent
+
+    // Whether a pane without a header draws the lock in itself (window::SecureIndicatorRules): neither the
+    // tabs nor a band are on screen to hold it. Each pane adds its own header's presence (PaneCard); handed
+    // down by PaneNode like visiblePanes; a bool by the QML-facing carve-out, the rule's answer.
+    readonly property bool secureLockInPane: chromeStyle.secureIndicatorSpots(
+        chromeStyle.secureInputs.spotHidden,
+        appWindow.tabsOnScreen ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden,
+        appWindow.bandOnScreen ? chromeStyle.secureInputs.spotShown : chromeStyle.secureInputs.spotHidden).pane === true
+
+    // Whether a full-screen band rests below the menu bar AppKit reveals over the window's top, as a native
+    // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar
+    // too), a pinned one (an interrupted remote connection) only while the pointer rests on the edge --
+    // otherwise the menu bar is hidden, and a band below its place would float over live rows.
+    readonly property bool bandBelowMenuBar: appWindow.band.band === "reveal" || appWindow.pinnedBandBelowMenuBar
+    readonly property bool pinnedBandBelowMenuBar: appWindow.band.band === "pinned" && revealEdgeHover.hovered
+
+    // The band's WindowFrame and WindowMode, as the ints titleBand() and bandFill() take.
+    readonly property int bandFrame: appWindow.win && appWindow.win.titleBarVisible ? 1 : 0
+    readonly property int bandMode: appWindow.visibility === Window.FullScreen ? 1 : 0
+
+    // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
+    // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
+    // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
+    // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
+    // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
+    // Shown }, TabBarPosition { Top, Bottom } and HostChipState. Main.qml is the only caller.
+    readonly property var band: chromeStyle.titleBand(appWindow.bandFrame,
+                                                      appWindow.bandMode,
+                                                      appWindow.tabBarShouldShow ? 1 : 0,
+                                                      appWindow.tabBarPosition,
+                                                      (appWindow.win && appWindow.win.hostLabel) || "",
+                                                      (appWindow.win && appWindow.win.hostChipState) || 0)
+
+    // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
+    // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a
+    // pointer moving down onto it -- or on the band, while the band has a popup or an editor of its own
+    // open, which live in the overlay where no hover reaches, and while keyboard focus is on one of its
+    // controls.
+    function bandRevealWanted() {
+        return appWindow.band.band === "reveal"
+               && (revealEdgeHover.hovered
+                   || (titleBar.revealed && (titleBar.hovered || titleBar.engaged || titleBar.holdsFocus
+                                             || titleBarContextMenu.visible)));
+    }
+
+    // Reveals the band at once, and conceals it only after a short grace, which forgives a pointer that
+    // overshoots the band's edge. Imperative rather than a binding: whether the band's own hover counts
+    // depends on whether it is revealed, and a binding reading its own result would be a loop.
+    function updateBandReveal() {
+        if (appWindow.bandRevealWanted()) {
+            bandHideDelay.stop();
+            titleBar.revealed = true;
+        } else if (appWindow.band.band !== "reveal") {
+            bandHideDelay.stop();
+            titleBar.revealed = false;
+        } else if (titleBar.revealed && !bandHideDelay.running) {
+            bandHideDelay.start();
+        }
+    }
+    onBandChanged: appWindow.updateBandReveal()
+
+    Timer {
+        id: bandHideDelay
+        interval: chromeStyle.motion.standard
+        onTriggered: if (!appWindow.bandRevealWanted()) titleBar.revealed = false
+    }
 
     // Diagnostic lifecycle/notification traces below are routed through a category that is off by
     // default (Warning floor), so they stay silent during normal use (closing a window and firing a
@@ -127,7 +195,12 @@ ApplicationWindow
         // programmatic window sizing, the initial size) uses this DECLARED value; measuring
         // window-minus-item instead is transiently wrong during relayout and structurally wrong in
         // splits.
-        win.chromeHeight = Qt.binding(function() { return titleBar.effectiveHeight })
+        // The banner stack counts too: it takes rows from the terminal just as the strip does. A change
+        // only refreshes the size hints -- it resizes no window, and no banner's height depends on the
+        // window's -- so a banner coming or going cannot feed back into its own height.
+        win.chromeHeight = Qt.binding(function() {
+            return titleBar.effectiveHeight + tabsBar.effectiveHeight + bannerStack.height
+        })
         // If this window was spawned to receive a torn-off tab (drag a tab onto the desktop),
         // adopt that tab as our sole tab instead of creating a fresh one — the dragged terminal
         // keeps running, no placeholder flash. Otherwise create the usual first tab. Either path
@@ -149,19 +222,59 @@ ApplicationWindow
         // bar to the window's height and overriding the `height` binding below for good. See the scrollbar
         // in SessionChrome.qml for the full mechanism; it shipped that bug as a full-pane-wide bar.
         // left/right stay anchored: that pair is unconditional, so sizing the width is intended.
+        // A full-screen band slides from above its resting place by its slideOffset.
         anchors.left: parent.left
         anchors.right: parent.right
-        y: appWindow.tabBarPosition === 0 ? 0 : parent.height - titleBar.height
-        // Shown per the profile's tab_bar_visibility, resolved against the live tab count by the
-        // controller (Always / Never / Multiple). When hidden, height/effectiveHeight collapse to 0 so
-        // the content area (and the declared chrome height feeding the geometry authority) reclaim it.
-        visible: appWindow.tabBarShouldShow
-        height: visible ? implicitHeight : 0
-        property real effectiveHeight: visible ? implicitHeight : 0
+        y: titleBar.restingTop + titleBar.slideOffset
+        // At the bottom edge, or at the top -- where a full-screen band rests below the menu bar AppKit
+        // reveals over the window (bandBelowMenuBar), as the controller measured it; 0 off macOS.
+        restingTop: appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height
+                  : appWindow.bandBelowMenuBar ? ((appWindow.win && appWindow.win.titleBandRevealTop) || 0) : 0
+        // A revealed band slides in and out; a pinned one slides between the top and its place below the
+        // menu bar. Under Reduce Motion neither slides: the revealed band fades, the pinned one moves at once.
+        Behavior on y {
+            enabled: (titleBar.presence === "reveal" || titleBar.presence === "pinned")
+                     && chromeStyle.motion.animates
+            NumberAnimation {
+                id: bandSlide // so offscreen tests can tell a slide from a jump without sampling y
+                duration: chromeStyle.motion.standard
+            }
+        }
+        // Shown per the band table: on macOS always (it carries the traffic lights), elsewhere per the
+        // profile's tab_bar_visibility resolved against the live tab count (Always / Never / Multiple). When
+        // hidden, height/effectiveHeight collapse to 0 so the content area (and the declared chrome height
+        // feeding the geometry authority) reclaim it. A full-screen band overlays the top rows instead, so
+        // it never takes room from the content (effectiveHeight 0) and is visible only while it reveals,
+        // or still fading out.
+        presence: appWindow.band.band
+        centre: appWindow.band.centre
+        // A concealed "reveal" band leaves the screen and the accessibility tree once it has slid away (or,
+        // under Reduce Motion, faded out). A "pinned" one overlays the top rows like a revealed one, held there
+        // while the remote connection is interrupted.
+        visible: presence === "shown" || presence === "pinned"
+                 || (presence === "reveal"
+                     && (revealed || (chromeStyle.motion.animates ? y > -height : opacity > 0)))
+        height: presence === "hidden" ? 0 : implicitHeight
+        // The band's height as the window measured it, grown to the native title bar it covers (macOS);
+        // `|| 0` (no measurement) keeps the token. The tabs bar below carries no traffic lights: it keeps
+        // the token.
+        measuredHeight: (appWindow.win && appWindow.win.titleBandHeight) || 0
+        // The band's surface: this window's own (WindowController.titleBandFill), which is the row's for the
+        // frame and mode it is drawn in and the centre titleBand() answered -- unless the window's frame hosts
+        // no material or its material failed. A controller that publishes none (a lightweight mock) takes the
+        // row's. Reads paletteRevision first, since the fill reads the palette.
+        fill: chromeStyle.paletteRevision < 0 ? "transparent"
+              : chromeStyle.bandFillColor(appWindow.win?.titleBandFill
+                                          ?? chromeStyle.bandSurfaceFill(appWindow.bandFrame, appWindow.bandMode,
+                                                                         appWindow.band.centre || ""))
+        readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
+        onHoveredChanged: appWindow.updateBandReveal()
+        onEngagedChanged: appWindow.updateBandReveal()
+        onHoldsFocusChanged: appWindow.updateBandReveal()
         // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
         // renders through a scene-graph node (TerminalRenderNode) and composites in z-order like any item,
         // so this is ordinary stacking — no longer a workaround for the terminal painting over siblings.
-        z: 1
+        z: 2
         controller: appWindow.win
         window: appWindow
         // Draw our own min/max/close controls only in frameless (CSD) mode. When the native frame is
@@ -171,8 +284,119 @@ ApplicationWindow
         // sets appear. The policy decides; this only asks.
         useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientFrameAffordances)
         // `|| 0` for the same reason the gates above use `!!`: a controller that predates this
-        // property answers undefined, and assigning that to a real is a QML error.
-        nativeControlsInset: (appWindow.win && appWindow.win.nativeControlsInset) || 0
+        // property answers undefined, and assigning that to a real is a QML error. In full screen AppKit
+        // draws the traffic lights in the strip it reveals below the menu bar, a window of its own that
+        // takes the clicks over it -- so the band rests below that strip while it is revealed
+        // (titleBandRevealTop), and no light is over it there.
+        nativeControlsInset: appWindow.bandMode === 1 ? 0
+                             : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
+        // The window's top corners, rounded only while the band is its top edge. The window itself is
+        // transparent, so nothing is painted outside them. `|| 0` as above, for a controller without it.
+        cornerRadius: appWindow.band.bandEdge === "bottom" ? 0
+                      : ((appWindow.win && appWindow.win.windowCornerRadius) || 0)
+    }
+
+    // The bar that holds only the tabs, at the bottom, while the band stays at the top with the title (the
+    // Pill shape with the tabs configured at the bottom). No controls, chips or toolbar: those are the band's.
+    TitleBar {
+        id: tabsBar
+        objectName: "tabsBar" // so offscreen layout tests can findChild() this item
+        role: "tabs"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: parent.height - tabsBar.height
+        presence: appWindow.band.tabBar
+        // Its tabs exist only while it is shown, so a hidden one holds no second strip or tab menu.
+        centre: presence === "shown" ? "tabs" : "empty"
+        visible: presence === "shown"
+        height: visible ? implicitHeight : 0
+        readonly property real effectiveHeight: height
+        z: 2
+        controller: appWindow.win
+        window: appWindow
+        useCustomWindowControls: false
+    }
+
+    // The strip along the top edge that reveals a full-screen band while the pointer rests on it, and moves a
+    // pinned one below the menu bar the pointer reveals there.
+    Item {
+        id: bandRevealEdge
+        objectName: "bandRevealEdge" // so offscreen tests can findChild() it
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: 0
+        // Down to the band's resting rectangle while it is revealed, so the pointer keeps it however far it
+        // has slid, and on its way down from the menu bar above it; passive, so every click still reaches
+        // the band beneath.
+        height: titleBar.revealed || appWindow.pinnedBandBelowMenuBar
+                ? titleBar.restingTop + titleBar.implicitHeight : chromeStyle.space.revealEdge
+        // A pinned band is shown already; its edge only moves it below the menu bar (bandBelowMenuBar).
+        visible: appWindow.band.band === "reveal" || appWindow.band.band === "pinned"
+        z: 3
+
+        HoverHandler {
+            id: revealEdgeHover
+            onHoveredChanged: appWindow.updateBandReveal()
+        }
+    }
+
+    // The banners, in a stack above the content: the content starts below them, so a banner pushes the
+    // terminal down (and back up when it goes) instead of covering its first line. With the tab strip
+    // at the top the stack sits below it; at the bottom it is the window's topmost row. A banner with no
+    // text collapses to zero height, so an empty stack takes no room.
+    Column {
+        id: bannerStack
+        objectName: "bannerStack" // so offscreen tests can findChild() it
+        anchors.left: parent.left
+        anchors.right: parent.right
+        // Below the band's effective height: a full-screen band overlays the content and pushes nothing.
+        y: appWindow.band.bandEdge === "top" ? titleBar.effectiveHeight : 0
+        // The banners' own extent, taken at once: the Column's implicit height follows only when the
+        // window next polishes, and the content below is anchored to this edge. Summed rather than
+        // childrenRect, which keeps a collapsed banner's stale y -- dismiss the lower banner first and
+        // the upper one second, and the stack would keep the upper one's height.
+        height: hostingNoticeBar.height + newDefaultsBanner.height + noticeBanner.height
+        z: 1
+
+        // Shown while this window runs its shells itself because the daemon the launch wanted could not be
+        // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
+        // window's do not.
+        Banner {
+            id: hostingNoticeBar
+            objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
+            width: parent.width
+            // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.
+            text: (appWindow.win && appWindow.win.hostingNotice) || ""
+            onDismissed: appWindow.win.dismissHostingNotice()
+        }
+
+        // Offers the newest defaults to a configuration that predates them (window::NewDefaultsNotice).
+        // Guarded with typeof, as DaemonDriftBadge is: the test harnesses set no such context property.
+        Banner {
+            id: newDefaultsBanner
+            objectName: "newDefaultsBanner" // so offscreen tests can findChild() it
+            readonly property var notice: typeof newDefaults !== "undefined" ? newDefaults : null
+            width: parent.width
+            text: notice !== null && notice.offered ? qsTr("Contour has new defaults") : ""
+            actionText: qsTr("Use New")
+            dismissText: qsTr("Keep Mine")
+            onActionTriggered: newDefaultsBanner.notice.useNew()
+            onDismissed: newDefaultsBanner.notice.keepMine()
+        }
+
+        // This window's notice banner (window::NoticeModel): a configuration that failed to reload, until a
+        // reload succeeds or the user dismisses it. Guarded as the hosting notice is: a mock `win` may lack it.
+        Banner {
+            id: noticeBanner
+            objectName: "noticeBanner" // so offscreen tests can findChild() it
+            readonly property var notices: appWindow.win && appWindow.win.notices ? appWindow.win.notices : null
+            width: parent.width
+            text: notices !== null ? notices.bannerText : ""
+            glyph: notices !== null ? notices.bannerGlyph : ""
+            actionText: notices !== null ? notices.bannerActionText : ""
+            onActionTriggered: noticeBanner.notices.triggerBannerAction()
+            onDismissed: noticeBanner.notices.dismissBanner()
+        }
     }
 
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit
@@ -183,12 +407,11 @@ ApplicationWindow
     Item {
         id: content
         objectName: "content" // so offscreen layout tests can findChild() this item
-        // Fills the window edge-to-edge on the axis the tab strip does NOT occupy: with the strip at
-        // the top, content runs from titleBar.bottom to the window bottom; with the strip at the bottom,
-        // content runs from the window top to titleBar.top. When the strip is hidden, titleBar's height
-        // is 0, so content reclaims the full window either way.
-        anchors.top: appWindow.tabBarPosition === 0 ? titleBar.bottom : parent.top
-        anchors.bottom: appWindow.tabBarPosition === 1 ? titleBar.top : parent.bottom
+        // Fills the window edge-to-edge on the axis the bars do NOT occupy: below the band and the banners
+        // at the top, and down to the band, or to the tabs bar, at the bottom. A hidden bar's height is 0,
+        // so content reclaims the full window either way.
+        anchors.top: bannerStack.bottom
+        anchors.bottom: appWindow.band.bandEdge === "bottom" ? titleBar.top : tabsBar.top
         anchors.left: parent.left
         anchors.right: parent.right
 
@@ -198,90 +421,198 @@ ApplicationWindow
         // `<img src=...>` fetched on hover. Set here, on an Item, as the attached property requires.
         Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
 
-        // The terminal content. Kept ACTIVE (so the pane tree and its PTYs keep running) even while the
-        // settings page is shown, just hidden — flipping back is instant and nothing is torn down.
+        // The terminal content: the active tab's pane tree. Settings is a window of its own
+        // (SettingsWindow.qml), so nothing else ever takes this area's place.
         Loader {
             id: paneContentLoader
             anchors.fill: parent
             active: appWindow.win !== null && appWindow.win.activeTabRootPane !== null
-            // `=== true` coerces a missing/undefined property (lightweight mock `win` in tests) to a bool.
-            visible: !(appWindow.win !== null && appWindow.win.settingsActive === true)
             sourceComponent: PaneNode {
                 node: appWindow.win ? appWindow.win.activeTabRootPane : null
+                visiblePanes: appWindow.win ? appWindow.win.visiblePaneCount : 1
+                headerReveal: appWindow.win ? appWindow.win.headerReveal : 0
+                lockInPane: appWindow.secureLockInPane
+                titleBand: appWindow.titleBandPresence
             }
         }
 
-        // The in-app settings page, shown in place of the terminal when the WindowController's
-        // settingsActive flag is set (the tab-strip gear, or the OpenConfiguration action). A peer of the
-        // pane-tree Loader, honoring the "single renderer" architecture — settings is not a pane.
-        Loader {
-            id: settingsPageLoader
-            anchors.fill: parent
-            active: appWindow.win !== null && appWindow.win.settingsActive === true
-            visible: active
-            sourceComponent: SettingsPage {
-                controller: appWindow.win ? appWindow.win.settingsController : null
-                windowController: appWindow.win
-            }
+    }
+
+    // This window's toast (window::NoticeModel): centred, in the title band while a band at the top can hold
+    // it, else at the content's top -- or its bottom, while the cursor is in the rows the top one would
+    // cover, or at the top again over an ended pane's footer. Where it goes is decided as it shows
+    // (WindowController.toastHost: "titleBand", "contentTop" or "contentBottom"); a hovered toast stays. Not an
+    // alert to a screen reader: the window's NoticeModel says each notice once, and an AlertMessage would
+    // have it said twice.
+    Toast {
+        id: noticeToast
+        objectName: "noticeToast" // so offscreen tests can findChild() it
+        readonly property var notices: appWindow.win && appWindow.win.notices ? appWindow.win.notices : null
+        property string host: "titleBand"
+        text: notices !== null ? notices.toastText : ""
+        glyph: notices !== null ? notices.toastGlyph : ""
+        shown: notices !== null && notices.toastShown
+        x: (parent.width - width) / 2
+        y: host === "titleBand" ? titleBar.y + (titleBar.height - height) / 2
+                                : host === "contentTop" ? content.y + chromeStyle.space.s4
+                                                        : content.y + content.height - height - chromeStyle.space.s4
+        Accessible.role: Accessible.StaticText
+        z: 20
+
+        function placeHost() {
+            if (noticeToast.shown && appWindow.win && appWindow.win.toastHost)
+                noticeToast.host = appWindow.win.toastHost(appWindow.band.band, appWindow.band.bandEdge,
+                                                           titleBar.height, chromeStyle.size.toast);
         }
 
-        // Shown while this window runs its shells itself because the daemon the launch wanted could not be
-        // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
-        // window's do not. Over the top of the content rather than beside it, so the terminal is not
-        // resized for a line the user dismisses.
-        Rectangle {
-            id: hostingNoticeBar
-            objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
-            // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.
-            readonly property string text: (appWindow.win && appWindow.win.hostingNotice) || ""
-            visible: text.length > 0
-            z: 11
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
-            implicitHeight: Math.max(hostingNoticeLabel.implicitHeight, hostingNoticeDismiss.implicitHeight) + 8
-            height: visible ? implicitHeight : 0
-            color: Qt.rgba(noticePalette.window.r, noticePalette.window.g, noticePalette.window.b, 0.92)
-            border.color: Qt.rgba(noticePalette.windowText.r, noticePalette.windowText.g, noticePalette.windowText.b, 0.25)
-            border.width: 1
+        onShownChanged: placeHost()
+        onTextChanged: placeHost()
 
-            SystemPalette {
-                id: noticePalette
-                colorGroup: SystemPalette.Active
-            }
-
-            Label {
-                id: hostingNoticeLabel
-                objectName: "hostingNoticeText"
-                anchors.left: parent.left
-                anchors.right: hostingNoticeDismiss.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                text: hostingNoticeBar.text
-                wrapMode: Text.WordWrap
-                color: noticePalette.windowText
-            }
-
-            ToolButton {
-                id: hostingNoticeDismiss
-                objectName: "hostingNoticeDismiss"
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.rightMargin: 4
-                text: qsTr("Dismiss")
-                onClicked: appWindow.win.dismissHostingNotice()
-            }
-        }
-
-        // Shown only while the daemon runs another release than this client (see DaemonDriftModel).
-        DaemonDriftBadge {
-            z: 10
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: 8
+        HoverHandler {
+            // Only while it shows: a faded toast is still there, and would hold the next one's time.
+            enabled: noticeToast.shown
+            onHoveredChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastHovered(hovered)
         }
     }
+
+    // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the
+    // band's trailing area while the band is there -- shown, or revealing with it in full screen, never over
+    // the cells -- and at the content's corner while it is not, so the drift is never unsaid. Positioned by
+    // x/y, since its parent changes.
+    DaemonDriftBadge {
+        id: driftChip
+        readonly property bool inBand: titleBar.presence !== "hidden"
+        controller: appWindow.win
+        focusRingShown: activeFocus && appWindow.toolbarHasFocus
+        parent: inBand ? titleBar.driftSlot : content
+        x: inBand ? 0 : parent.width - width - chromeStyle.space.s4
+        y: inBand ? (parent.height - height) / 2 : parent.height - height - chromeStyle.space.s4
+        z: 10
+    }
+
+    // {{{ Keyboard focus in the chrome (WindowController's chrome focus: Ctrl+F6 and its arrow keys)
+    // The controller decides where focus is; this is where it lands. The tab well and the toolbar's items take
+    // real active focus (their rings and keys are theirs), and the controller is told what there is to visit.
+
+    // The tab strip that holds the tabs: the band's while its middle shows them, else the tabs-only bar's.
+    readonly property Item tabStrip: titleBar.tabStrip ?? tabsBar.tabStrip
+    // Whether the tab well is on screen: a strip in a bar that is itself shown.
+    readonly property bool tabWellShown: (titleBar.visible && titleBar.tabStrip !== null)
+                                         || (tabsBar.visible && tabsBar.tabStrip !== null)
+    // The toolbar's items that are on screen, in visual order: the band's, then the drift chip where it sits
+    // at the content's corner for want of a band. Their order is the controller's focusedToolbarIndex.
+    readonly property var toolbarItems: {
+        const items = titleBar.toolbarItems.slice()
+        if (driftChip.visible && !driftChip.inBand)
+            items.push(driftChip)
+        return items
+    }
+    // Whether keyboard focus is in the toolbar, which an item that also holds active focus rings by.
+    readonly property bool toolbarHasFocus: !!appWindow.win && (appWindow.win.focusedToolbarIndex ?? -1) >= 0
+    // Whether keyboard focus is anywhere in the chrome.
+    readonly property bool chromeHasFocus: !!appWindow.win
+                                           && ((appWindow.win.focusedTabIndex ?? -1) >= 0
+                                               || (appWindow.win.focusedToolbarIndex ?? -1) >= 0)
+
+    // Tells the controller what the chrome shows, so its cycle skips what is not there and gives focus back
+    // to the terminal when the area it is in goes (the tab well closing under it).
+    function reportChromePresence() {
+        if (appWindow.win && appWindow.win.setChromePresence)
+            appWindow.win.setChromePresence(appWindow.tabWellShown, appWindow.toolbarItems.length)
+    }
+    onTabWellShownChanged: appWindow.reportChromePresence()
+    onToolbarItemsChanged: appWindow.reportChromePresence()
+    onWinChanged: appWindow.reportChromePresence()
+
+    // Moves the real active focus to where the controller says the chrome focus is.
+    function applyChromeFocus() {
+        if (!appWindow.win)
+            return
+        const tab = appWindow.win.focusedTabIndex ?? -1
+        const item = appWindow.win.focusedToolbarIndex ?? -1
+        if (tab >= 0 && appWindow.tabStrip)
+            appWindow.tabStrip.focusTab(tab)
+        else if (item >= 0 && item < appWindow.toolbarItems.length)
+            appWindow.toolbarItems[item].forceActiveFocus()
+        else if (appWindow.isInside(appWindow.activeFocusItem, appWindow.contentItem)
+                 && !appWindow.inTerminal(appWindow.activeFocusItem))
+            appWindow.restoreTerminalFocus() // the chrome let go while an item of it held the keyboard
+    }
+
+    Connections {
+        target: appWindow.win
+        ignoreUnknownSignals: true // a lightweight mock controller may not carry the chrome focus
+        function onChromeFocusChanged() { appWindow.applyChromeFocus() }
+    }
+
+    // Whether @p item is @p ancestor or lies beneath it.
+    function isInside(item, ancestor) {
+        while (item) {
+            if (item === ancestor)
+                return true
+            item = item.parent
+        }
+        return false
+    }
+
+    // Whether @p item is inside the terminal content.
+    function inTerminal(item) {
+        return !!paneContentLoader.item && appWindow.isInside(item, paneContentLoader.item)
+    }
+
+    // The terminal taking active focus ends the chrome's: it is where keys go again, so no ring stays up.
+    onActiveFocusItemChanged: {
+        if (appWindow.chromeHasFocus && appWindow.inTerminal(appWindow.activeFocusItem))
+            appWindow.win.leaveChrome()
+    }
+
+    // Any pointer press ends it too: the ring shows keyboard focus only, so a click never leaves one behind.
+    // Passive: it sees every press in the window and takes none, so the press still does what it was for.
+    PointHandler {
+        objectName: "chromePressHandler" // so offscreen tests can findChild() it
+        acceptedButtons: Qt.AllButtons
+        onActiveChanged: {
+            if (active && appWindow.chromeHasFocus)
+                appWindow.win.leaveChrome()
+        }
+    }
+
+    // Closing a tab that runs a program asks first (WindowController.closeTabConfirmationRequested): Cancel is
+    // the default and keeps the tab, and the focus on it; Close is destructive.
+    KitDialog {
+        id: closeTabDialog
+        objectName: "closeTabConfirmation"
+        property var tab: 0 // the TabId value; a 64-bit id, so not an int
+        property string tabLabel
+        property string program
+        heading: qsTr("Close “%1”?").arg(closeTabDialog.tabLabel)
+        // A pane whose program cannot be known (a daemon-hosted one) names none: it may be running anything.
+        message: closeTabDialog.program !== ""
+                 ? qsTr("“%1” is still running in this tab.").arg(closeTabDialog.program)
+                 : qsTr("A program may still be running in this tab.")
+        acceptText: qsTr("Close")
+        rejectText: qsTr("Cancel")
+        acceptRole: chromeStyle.statusDanger
+        defaultButton: KitDialog.Reject
+        onAccepted: if (appWindow.win) appWindow.win.confirmCloseTab(closeTabDialog.tab)
+    }
+
+    Connections {
+        target: appWindow.win
+        ignoreUnknownSignals: true
+        function onCloseTabConfirmationRequested(tab, tabLabel, program) {
+            closeTabDialog.tab = tab
+            closeTabDialog.tabLabel = tabLabel
+            closeTabDialog.program = program
+            closeTabDialog.open()
+        }
+        // The tab asked about is gone: the question has no subject, and Close must not reach another tab.
+        function onCloseTabConfirmationWithdrawn(tab) {
+            if (closeTabDialog.opened && closeTabDialog.tab === tab)
+                closeTabDialog.reject()
+        }
+    }
+    // }}}
 
     // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes
     // through the session manager to THIS window's controller — so the popup appears over the window
@@ -289,13 +620,14 @@ ApplicationWindow
     // overlay layer and sits above the terminal content and the resize border without needing a z.
     CommandPalette {
         id: commandPalette
+        objectName: "commandPalette" // so offscreen tests can findChild() it
         controller: appWindow.win
         window: appWindow
     }
 
-    // The "save layout as" name prompt. Opened by a nameless SaveLayout action (the command-palette row
-    // or a key bound to bare SaveLayout), routed per-window exactly like the command palette above, so
-    // the prompt appears over the window the action fired in.
+    // Save Layout. Opened by a nameless SaveLayout action (the command-palette row or a key bound to bare
+    // SaveLayout), routed per-window exactly like the command palette above, so the dialog appears over the
+    // window the action fired in.
     SaveLayoutDialog {
         id: saveLayoutDialog
         controller: appWindow.win
@@ -309,8 +641,23 @@ ApplicationWindow
     // whole chain runs synchronously inside the mouse-press handler.
     ActionContextMenu {
         id: terminalContextMenu
+        objectName: "terminalContextMenu"
         entries: appWindow.win ? appWindow.win.contextMenuModel : []
         onPicked: (actionId) => { if (appWindow.win) appWindow.win.triggerContextMenuAction(actionId); }
+    }
+
+    // Opens the terminal's menu where the controller says (a block menu opened from the keyboard or the ⋯
+    // button is anchored at its block), and at the pointer when it names no place (a right-click). A block
+    // at the pane's top is anchored under a band that rests above the content, whose centred title the menu
+    // would cover: it opens below the band, at the block's column.
+    function popTerminalContextMenu() {
+        const anchor = appWindow.win.contextMenuAnchor();
+        if (anchor.x === 0 && anchor.y === 0) {
+            terminalContextMenu.popup();
+            return;
+        }
+        const bandBottom = titleBar.visible && appWindow.band.bandEdge !== "bottom" ? titleBar.y + titleBar.height : 0;
+        terminalContextMenu.popup(anchor.x, Math.max(anchor.y, bandBottom));
     }
 
     // The title bar's own menu: a second instance of the same component, differing only in which model
@@ -318,16 +665,30 @@ ApplicationWindow
     ActionContextMenu {
         id: titleBarContextMenu
         entries: appWindow.win ? appWindow.win.titleBarContextMenuModel : []
+        // A full-screen band stays while its own menu is open (see bandRevealWanted).
+        onVisibleChanged: appWindow.updateBandReveal()
         onPicked: (actionId) => {
             if (appWindow.win) appWindow.win.triggerTitleBarContextMenuAction(actionId);
         }
     }
 
+    // The About dialog: an in-scene KitDialog, not AppKit's panel, so it carries the chrome row's look.
+    // Opened by the ShowAbout action; one button, since there is nothing to decline.
+    KitDialog {
+        id: aboutDialog
+        objectName: "aboutDialog"
+        heading: qsTr("Contour")
+        message: qsTr("Version %1").arg(appWindow.win ? appWindow.win.applicationVersion : "")
+        acceptText: qsTr("OK")
+        rejectText: ""
+    }
+
     Connections {
         target: appWindow.win
         function onCommandPaletteRequested() { commandPalette.open(); }
+        function onAboutRequested() { aboutDialog.open(); }
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
-        function onContextMenuRequested() { terminalContextMenu.popup(); }
+        function onContextMenuRequested() { appWindow.popTerminalContextMenu(); }
         function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }
         // Attention on behalf of a session that may have no pane on screen -- a command finishing in a
         // background tab. Such a session has no SessionChrome, so the window carries the request.
@@ -366,10 +727,15 @@ ApplicationWindow
             paneContentLoader.item.forceActiveFocus();
     }
 
-    // Restore focus to the terminal whenever the active tab changes (tab click / switch).
+    // Restore focus to the terminal whenever the active tab changes (tab click / switch). The model announces
+    // the active row after a reorder or a background close as well, and those must not take the keyboard
+    // from a chrome that holds it: the controller ends the chrome focus before it activates a tab.
     Connections {
         target: appWindow.win
-        function onActiveTabIndexChanged() { appWindow.restoreTerminalFocus(); }
+        function onActiveTabIndexChanged() {
+            if (!appWindow.chromeHasFocus)
+                appWindow.restoreTerminalFocus()
+        }
     }
 
     onClosing: {

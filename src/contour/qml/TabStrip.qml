@@ -1,10 +1,19 @@
 // vim:syntax=qml
-// The horizontal tab strip plus the new-tab split button ("+" and a "▾" profile dropdown).
+// The horizontal tab strip, plus on the Flat shape the new-tab split button ("+" and a "▾" profile dropdown).
+//
+// Under the Pill shape (chromeStyle.layout.tabShape) the tabs sit in a rounded well, every pill as wide
+// as chromeStyle.tabWellLayout() says for the width the title bar leaves it: equal widths up to the
+// maximum, icon-only pills below the minimum, and a well that scrolls, keeping the active tab in view,
+// once even those do not fit. The Flat shape is today's strip, each tab as wide as its title, which scrolls
+// the same way once its tabs outgrow the width it is left. Under Pill the new-tab button is the title
+// band's (TitleBar's ToolbarButton), so the strip draws neither "+" nor "▾" there. The Joined shape is the
+// Flat strip as the title bar: its tabs stand on the band's floor, and its "+" and "▾" are rounded buttons
+// just above it.
 //
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
-// the strip hosts a Qt-layer settings "tab" (shown while the settings page is open) and the new-tab
-// dropdown (NewTabMenu) — neither is a row of the tab model.
+// the strip hosts the tabs' one context menu — not a row of the tab model. The new-tab menu is the title
+// bar's, which pops it at `newTabMenuAnchor`.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -21,12 +30,83 @@ Row {
     // The ApplicationWindow, so a delegate can call restoreTerminalFocus() when a rename closes.
     required property var window
 
+    // The width the title bar leaves the tabs: its own width less the window controls, its chips, the drag
+    // reserve and this strip's fixed parts (fixedWidth). Assigned by TitleBar.
+    property real availableWidth: 0
+    // The strip's parts that are not the tabs, which the title bar subtracts from the tabs' width.
+    readonly property real fixedWidth: newTabLoader.width + newTabMenuLoader.width
+    // The "▾" the title bar pops the new-tab menu at, or null where the strip draws none.
+    readonly property Item newTabMenuAnchor: newTabMenuLoader.item
+    // How many tabs have their flyout or a rename open; kept by the delegates.
+    property int engagedTabs: 0
+    /// Whether the strip has a popup or an editor of its own open: the tab menu, or a tab's.
+    readonly property bool engaged: tabContextMenu.visible || root.engagedTabs > 0
+
+    // The QML-facing carve-out of the shape token: whether the tabs are pills in a well, or join the content.
+    readonly property bool pill: chromeStyle.layout.isPill
+    readonly property bool joined: chromeStyle.layout.isJoined
+    // Whether the pills sit in a drawn well: not on a row whose well has no height.
+    readonly property bool inWell: root.pill && chromeStyle.hasTabWell
+    // Where a joined strip's "+" and "▾" stand: the kit's s1 above the band's floor.
+    readonly property real joinedButtonY: root.height - chromeStyle.size.stripButton - chromeStyle.space.s1
+    // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
+    readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
+
+    /// Whether the tabs would have room for the lock: not while the well shows icons alone (TabItem.lockShown).
+    /// @param available What the tabs may take, as availableWidth.
+    function hostsLockWithin(available) {
+        return !root.pill || chromeStyle.tabWellLayout(available, list.count).label !== "iconOnly";
+    }
+
     spacing: 0
 
-    // Maps a cursor x (in list content coordinates) to the tab slot the dragged tab would drop into:
-    // slot i means "before tab i" (so dropping past the midpoint of tab i lands after it). Returns a
-    // value in [0, count]. Kept a pure function so the drop math is obvious and reviewable.
-    function dropIndexFor(x) {
+    // The keys of the tab well, offered to the controller while a tab holds keyboard focus (TabItem takes it
+    // from focusTab()): a key the controller handles is accepted here, so it never reaches the shell. The
+    // focused tab's own editor, when one is open, takes its keys first and never lets them up.
+    Keys.onPressed: (event) => {
+        if (root.controller && root.controller.chromeKey)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+    }
+
+    /// Gives keyboard focus to the tab at @p index, bringing it into view: how the controller's chrome focus
+    /// reaches a real active-focus item. Does nothing for a row that has no delegate.
+    function focusTab(index) {
+        list.positionViewAtIndex(index, ListView.Contain)
+        const tab = list.itemAtIndex(index)
+        if (tab)
+            tab.forceActiveFocus()
+    }
+
+    // Brings the active tab into view, should the tabs have scrolled it out: the well's, or a Flat strip
+    // that outgrew its width. Deferred, because it runs on changes the list has not laid out yet.
+    //
+    // positionViewAtIndex ends in Flickable's fixup, which settles a fractional contentX onto a whole pixel
+    // in either direction -- and a tab's edges are fractional wherever a cell or a text width is, so the
+    // tab could be left up to a pixel outside the strip. The scroll is rounded outward here instead: far
+    // enough that the whole tab is in view, onto a whole pixel the fixup then leaves alone.
+    function revealActiveTab() {
+        if (!root.controller)
+            return
+        const index = root.controller.activeTabIndex
+        list.positionViewAtIndex(index, ListView.Contain)
+        const tab = list.itemAtIndex(index)
+        if (!tab)
+            return
+        if (tab.x + tab.width > list.contentX + list.width)
+            list.contentX = Math.ceil(tab.x + tab.width - list.width)
+        if (tab.x < list.contentX)
+            list.contentX = Math.floor(tab.x)
+    }
+    onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
+    onAvailableWidthChanged: Qt.callLater(root.revealActiveTab)
+
+    // Maps a cursor x (in the drop area's coordinates, what a DropArea's drag reports) to the tab slot
+    // the dragged tab would drop into: slot i means "before tab i" (so dropping past the midpoint of tab
+    // i lands after it). Returns a value in [0, count]. A scrolled well's tabs sit at their CONTENT
+    // positions, so the visible x is shifted by how far the list has scrolled before it is compared.
+    // Kept a pure function so the drop math is obvious and reviewable.
+    function dropIndexFor(areaX) {
+        var x = areaX - listClip.x + list.contentX
         var count = list.count
         for (var i = 0; i < count; ++i) {
             var item = list.itemAtIndex(i)
@@ -38,7 +118,7 @@ Row {
         return count
     }
 
-    // The x position of the insertion caret for a given drop slot: the left edge of the tab at that
+    // The content x of the insertion caret for a given drop slot: the left edge of the tab at that
     // slot, or the right edge of the last tab when the slot is past the end.
     function dropIndexToX(index) {
         var count = list.count
@@ -52,91 +132,123 @@ Row {
         return item ? item.x : 0
     }
 
-    // The remote host this window's sessions run on (`contour client --host`), at the strip's leading edge,
-    // so a remote window is never mistaken for a local one. Not interactive, and in the inactive tab text's
-    // font and colour: it names where the tabs are, it is not one of them. Absent for a local window.
-    Item {
-        id: hostBadge
-        objectName: "hostBadge"
-        // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
-        readonly property string hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
-        visible: hostLabel !== ""
-        width: visible ? hostBadgeText.implicitWidth + (2 * chromeStyle.labelPadding) : 0
-        height: root.height
-        Accessible.role: Accessible.StaticText
-        Accessible.name: qsTr("Attached to %1").arg(hostLabel)
-
-        SystemPalette {
-            id: hostBadgePalette
-            colorGroup: SystemPalette.Active
-        }
-
-        Text {
-            id: hostBadgeText
-            objectName: "hostBadgeText"
-            anchors.centerIn: parent
-            font: chromeStyle.font
-            text: hostBadge.hostLabel
-            color: hostBadgePalette.windowText
-        }
+    // Where the caret for drop slot @p index stands, in the drop area's coordinates: the slot's content
+    // position, moved back by the scroll, so the caret is on the visible tab edge it names.
+    function caretX(index) {
+        return root.dropIndexToX(index) - list.contentX + listClip.x
     }
 
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
     Item {
-        width: list.contentWidth
+        objectName: root.joined ? "tabShapeJoined" : ""
+        // A Flat strip is as wide as its tabs until they outgrow what the bar leaves them; then it clips
+        // and scrolls, so the active tab and the "+" beside it stay in view.
+        // A strip on its own, whose width no bar assigns, is as wide as its tabs.
+        width: root.pill ? root.wellLayout.wellWidth
+             : root.availableWidth > 0 ? Math.min(list.contentWidth, root.availableWidth)
+             : list.contentWidth
         height: root.height
 
-        ListView {
-            id: list
-            anchors.fill: parent
-            // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
-            // parent layout caps the Row, and clip keeps overflow tidy.
-            orientation: ListView.Horizontal
-            interactive: false
+        // The well the pills sit in, centred in the bar. Only the Pill shape has one, and only on a row whose
+        // well has a height: ContourLinux's header bar sets its pills on the bar itself.
+        Rectangle {
+            id: well
+            objectName: "tabWell"   // findChild() handle for the GUI test
+            visible: root.inWell
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: chromeStyle.size.tabWell
+            radius: chromeStyle.radii.tabWell
+            color: chromeStyle.colors.tabWellFill
+        }
+
+        // What the tabs are clipped to: the well, or the strip. A pill's focus ring reaches past the pill, into
+        // the well's own margin and a little beyond it, so the clip overhangs the well by the ring, or it
+        // would cut the ring's top and bottom. The list inside it is clipped by this, not by itself.
+        Item {
+            id: listClip
+            anchors.fill: root.inWell ? well : parent
+            anchors.topMargin: root.pill ? -chromeStyle.size.focusRing : 0
+            anchors.bottomMargin: root.pill ? -chromeStyle.size.focusRing : 0
             clip: true
-            model: root.controller
-            // Null-guarded: when the window closes, the C++ WindowController is destroyed while this
-            // QML tree is still alive, so `controller` resets to null and this binding re-evaluates
-            // once more before teardown finishes (previously a TypeError in the shutdown log).
-            currentIndex: root.controller ? root.controller.activeTabIndex : -1
 
-            delegate: TabItem {
-                // Role values injected for this row. Declared as required properties (the modern
-                // delegate model); their names differ from this TabItem's own properties so there is
-                // no shadowing.
-                required property int index
-                required property string title
-                required property string rawTitle
-                required property color accentColor
-                required property bool isActive
-                required property int paneCount
-                required property bool zoomed
-                required property int progressState
-                required property int progressPercentage
-                required property int programStatus
-                required property string programStatusText
-                required property int programStatusProgress
+            ListView {
+                id: list
+                objectName: "tabList" // so offscreen tests can findChild() it
+                // As tall as a tab wherever a tab is shorter than the strip: a horizontal ListView puts every
+                // delegate it positions back at y 0, so a tab cannot centre itself in a taller list -- the list
+                // is placed instead. Pills are centred in the clip (and so in the well); joined tabs stand on
+                // the band's floor, at the strip's bottom; a Flat tab is the strip's height.
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: root.pill || root.joined ? chromeStyle.size.tab : parent.height
+                y: root.joined ? parent.height - height : (parent.height - height) / 2
+                // The well's padding at either end and between the pills (chromeStyle.wellPadding, wellGap -- the
+                // same the well's widths are laid out with); the Flat strip sets tabs flush.
+                leftMargin: root.pill ? chromeStyle.wellPadding : 0
+                rightMargin: root.pill ? chromeStyle.wellPadding : 0
+                spacing: root.pill ? chromeStyle.wellGap : 0
+                // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
+                // parent layout caps the Row, and listClip keeps overflow tidy.
+                orientation: ListView.Horizontal
+                interactive: false
+                model: root.controller
+                // Null-guarded: when the window closes, the C++ WindowController is destroyed while this
+                // QML tree is still alive, so `controller` resets to null and this binding re-evaluates
+                // once more before teardown finishes (previously a TypeError in the shutdown log).
+                currentIndex: root.controller ? root.controller.activeTabIndex : -1
+                onCurrentIndexChanged: Qt.callLater(root.revealActiveTab)
+                onCountChanged: Qt.callLater(root.revealActiveTab)
 
-                height: list.height
-                controller: root.controller
-                window: root.window
-                tabIndex: index
-                tabTitle: title
-                tabRawTitle: rawTitle
-                tabColor: accentColor
-                tabActive: isActive
-                tabPaneCount: paneCount
-                tabZoomed: zoomed
-                tabProgressState: progressState
-                tabProgressPercentage: progressPercentage
-                tabProgramStatus: programStatus
-                tabProgramStatusText: programStatusText
-                tabProgramStatusProgress: programStatusProgress
-            }
+                delegate: TabItem {
+                    // Role values injected for this row. Declared as required properties (the modern
+                    // delegate model); their names differ from this TabItem's own properties so there is
+                    // no shadowing.
+                    required property int index
+                    required property string title
+                    required property string rawTitle
+                    required property color accentColor
+                    required property bool isActive
+                    required property int paneCount
+                    required property bool zoomed
+                    required property int progressState
+                    required property int progressPercentage
+                    required property int badge
+                    required property string badgeText
+                    required property int badgeProgress
+                    // Read through the model object, not as a required role: a model without the tabSecure role
+                    // (WindowController's SecureRole) shows no lock rather than failing the delegate.
+                    required property var model
 
-            // Animate reordering when a tab is moved.
-            moveDisplaced: Transition {
-                NumberAnimation { properties: "x"; duration: 120 }
+                    // A pill is the well's width, a Flat or joined tab as wide as its title; each is as tall as
+                    // the list, which is placed where the tabs stand.
+                    height: list.height
+                    width: root.pill ? root.wellLayout.tabWidth : implicitWidth
+                    labelMode: root.pill ? root.wellLayout.label : "full"
+                    controller: root.controller
+                    window: root.window
+                    tabIndex: index
+                    tabTitle: title
+                    tabRawTitle: rawTitle
+                    tabColor: accentColor
+                    tabActive: isActive
+                    tabPaneCount: paneCount
+                    tabZoomed: zoomed
+                    tabProgressState: progressState
+                    tabProgressPercentage: progressPercentage
+                    tabBadge: badge
+                    tabBadgeText: badgeText
+                    tabBadgeProgress: badgeProgress
+                    locked: (model.tabSecure ?? 0) !== 0
+                    secureState: model.tabSecure ?? 0
+                    onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
+                    Component.onDestruction: if (engaged) root.engagedTabs -= 1
+                }
+
+                // Animate reordering when a tab is moved.
+                moveDisplaced: Transition {
+                    NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
+                }
             }
         }
 
@@ -150,8 +262,8 @@ Row {
             height: parent.height
             color: palette.highlight
             visible: dropArea.containsDrag
-            // Center the bar on the slot boundary (dropIndexToX gives the boundary x).
-            x: root.dropIndexToX(dropArea.hoverIndex) - width / 2
+            // Center the bar on the slot boundary (caretX gives the boundary x).
+            x: root.caretX(dropArea.hoverIndex) - width / 2
             z: 2
         }
 
@@ -197,6 +309,9 @@ Row {
                 if (!raw)
                     return
                 var payload = JSON.parse(raw)
+                // Written by another process (or forged): its window ids and rows are not this model's.
+                if (payload.token !== root.controller.processToken())
+                    return
                 var target = hoverIndex
                 if (payload.windowId === root.controller.windowIdValue())
                     root.controller.moveTab(payload.tabIndex, target)  // same window: reorder
@@ -207,109 +322,93 @@ Row {
         }
     }
 
-    // The settings "tab": shown in the strip while the settings page is open (settingsActive), reading
-    // and behaving like a tab — highlighted as the active view, with a close button that leaves settings.
-    // It is a Qt-layer affordance (vtworkspace untouched), so it is a pinned item here rather than a model row.
-    Item {
-        id: settingsTab
-        objectName: "settingsTab"
-        height: root.height
-        // `=== true` coerces a missing/undefined property (a lightweight mock controller in the offscreen
-        // tests) to a real bool, so the binding never assigns undefined.
-        visible: root.controller !== null && root.controller.settingsActive === true
-        width: visible ? settingsTabRow.implicitWidth + (2 * chromeStyle.labelPadding) : 0
-
-        SystemPalette {
-            id: settingsTabPalette
-            colorGroup: SystemPalette.Active
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            // It exists only while active, so it always wears the active (OS highlight) fill.
-            color: settingsTabPalette.highlight
-        }
-
-        Row {
-            id: settingsTabRow
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: chromeStyle.labelPadding
-            spacing: chromeStyle.labelGap
-
-            Label {
-                text: qsTr("⚙ Settings")
-                font: chromeStyle.font
-                color: settingsTabPalette.highlightedText
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            ToolButton {
-                id: settingsTabClose
-                objectName: "settingsTabClose"
-                width: chromeStyle.controlWidth
-                height: chromeStyle.controlHeight
-                anchors.verticalCenter: parent.verticalCenter
-                focusPolicy: Qt.NoFocus
-                onClicked: if (root.controller) root.controller.closeSettings()
-                contentItem: Label {
-                    text: chromeStyle.closeGlyph
-                    font: chromeStyle.closeFont
-                    Accessible.name: qsTr("Close settings")
-                    color: settingsTabPalette.highlightedText
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    radius: chromeStyle.radius
-                    color: settingsTabClose.hovered ? chromeStyle.wash(settingsTabPalette.highlightedText)
-                                                    : "transparent"
-                }
-            }
-        }
-    }
-
-    ToolButton {
-        id: newTabButton
-        objectName: "newTabButton"
-        height: root.height
-        text: chromeStyle.newTabGlyph
-        Accessible.name: qsTr("New tab")
-        // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
-        // beside it are permanent, frequently used targets, so the style pads them out.
-        width: chromeStyle.stripButtonWidth
-        font: chromeStyle.newTabFont
-        focusPolicy: Qt.NoFocus
-        onClicked: root.controller.createNewTab()
-        // Flat, transparent chrome so the button blends into the strip background instead of showing
-        // an opaque style button panel; a subtle highlight wash gives hover feedback.
-        background: Rectangle {
-            color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
-                                        : "transparent"
-        }
-    }
-
-    // The new-tab profile dropdown: the "▾" beside "+". Opens NewTabMenu — one entry per configured
-    // profile (open a new tab with it) plus a "Settings" entry — the Windows-Terminal split-button idiom.
-    ToolButton {
-        id: newTabMenuButton
-        objectName: "newTabMenuButton"
-        height: root.height
-        text: chromeStyle.menuGlyph
-        Accessible.name: qsTr("New tab with profile")
-        width: chromeStyle.stripButtonWidth
-        font: chromeStyle.menuFont
-        focusPolicy: Qt.NoFocus
-        ToolTip.visible: hovered
-        ToolTip.text: qsTr("New tab with profile…")
-        onClicked: newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
-        background: Rectangle {
-            color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
+    // The new-tab button: on the Flat shape only, since the Pill band draws its own (TitleBar's
+    // ToolbarButton). A Loader, so the shape without it has no second "newTabButton" for a test to find.
+    Loader {
+        id: newTabLoader
+        active: !root.pill
+        y: root.joined ? root.joinedButtonY : 0
+        height: root.joined ? chromeStyle.size.stripButton : root.height
+        sourceComponent: ToolButton {
+            id: newTabButton
+            objectName: "newTabButton"
+            height: newTabLoader.height
+            text: chromeStyle.newTabGlyph
+            Accessible.name: qsTr("New tab")
+            // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
+            // beside it are permanent, frequently used targets, so the style pads them out.
+            width: chromeStyle.stripButtonWidth
+            font: chromeStyle.newTabFont
+            focusPolicy: Qt.NoFocus
+            onClicked: root.controller.createNewTab()
+            // Flat, transparent chrome so the button blends into the strip background instead of showing
+            // an opaque style button panel; a subtle highlight wash gives hover feedback.
+            background: Rectangle {
+                radius: root.joined ? chromeStyle.radii.control : 0
+                color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
                                             : "transparent"
+            }
         }
+    }
 
-        NewTabMenu {
-            id: newTabMenu
-            controller: root.controller
+    // The new-tab profile dropdown: the "▾" beside "+", where the row reaches the profiles by a caret
+    // (layout.profileMenu). Asks the controller, which publishes one entry per configured profile (open a new
+    // tab with it) and asks for the menu, which the title bar pops below this button — the Windows-Terminal
+    // split-button idiom.
+    Loader {
+        id: newTabMenuLoader
+        active: !root.pill && chromeStyle.layout.profileMenu === chromeStyle.layout.caret
+        y: root.joined ? root.joinedButtonY : 0
+        height: root.joined ? chromeStyle.size.stripButton : root.height
+        sourceComponent: ToolButton {
+            id: newTabMenuButton
+            objectName: "newTabMenuButton"
+            height: newTabMenuLoader.height
+            text: chromeStyle.menuGlyph
+            Accessible.name: qsTr("New tab with profile")
+            // The joined strip's profile button is narrower than its "+" (the win board's 28 beside 36).
+            width: root.joined ? chromeStyle.size.profileButton : chromeStyle.stripButtonWidth
+            font: chromeStyle.menuFont
+            focusPolicy: Qt.NoFocus
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("New tab with profile…")
+            onClicked: {
+                if (root.controller)
+                    root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))
+            }
+            background: Rectangle {
+                radius: root.joined ? chromeStyle.radii.control : 0
+                color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
+                                                : "transparent"
+            }
+        }
+    }
+
+    // The context menu of every tab: ONE menu for the strip, not one per delegate, rebuilt once per
+    // publish. The controller publishes the right-clicked tab's rows, then asks for the menu with that
+    // tab's index; it opens below that tab's delegate rather than at the live pointer, so where it opens
+    // does not depend on where the mouse happens to be.
+    ActionContextMenu {
+        id: tabContextMenu
+        objectName: "tabContextMenu"
+        entries: root.controller ? root.controller.tabContextMenuModel : []
+        onPicked: (actionId) => { if (root.controller) root.controller.triggerTabContextMenuAction(actionId) }
+    }
+
+    Connections {
+        target: root.controller
+        function onTabContextMenuRequested(index) {
+            // A delegate exists only once the list is laid out, and only while it is in view: lay it out
+            // first, and bring a tab scrolled out of the strip back into view, so the menu still opens
+            // under the tab it names.
+            list.forceLayout()
+            if (!list.itemAtIndex(index))
+                list.positionViewAtIndex(index, ListView.Contain)
+            const item = list.itemAtIndex(index)
+            if (item)
+                tabContextMenu.popup(item, 0, item.height)
+            else
+                tabContextMenu.popup(list, 0, list.height)
         }
     }
 }
