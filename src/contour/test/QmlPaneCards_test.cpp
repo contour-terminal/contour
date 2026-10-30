@@ -254,9 +254,20 @@ struct DragSource
 
     static constexpr auto Actions = Qt::CopyAction | Qt::MoveAction;
 
+    /// Qt 6.12 gave the drag events QPointF constructors and deprecated the QPoint ones.
+    /// @return @p scene in the type the installed Qt's drag-event constructors take.
+    [[nodiscard]] static auto dragPosition(QPointF scene)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        return scene;
+#else
+        return scene.toPoint();
+#endif
+    }
+
     void enter(QPointF scene)
     {
-        auto event = QDragEnterEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        auto event = QDragEnterEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
         event.ignore();
         QCoreApplication::sendEvent(&window, &event);
         accepted = event.isAccepted();
@@ -264,7 +275,7 @@ struct DragSource
 
     void move(QPointF scene)
     {
-        auto event = QDragMoveEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        auto event = QDragMoveEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
         event.ignore();
         QCoreApplication::sendEvent(&window, &event);
         accepted = event.isAccepted();
@@ -279,7 +290,7 @@ struct DragSource
     /// @return What the drop resolved to: IgnoreAction when no DropArea accepted it.
     [[nodiscard]] Qt::DropAction drop(QPointF scene)
     {
-        auto event = QDropEvent { scene.toPoint(), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        auto event = QDropEvent { scene, Actions, &mime, Qt::LeftButton, Qt::NoModifier };
         event.ignore();
         QCoreApplication::sendEvent(&window, &event);
         return event.isAccepted() ? event.dropAction() : Qt::IgnoreAction;
