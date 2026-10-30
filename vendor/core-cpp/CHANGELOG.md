@@ -7,6 +7,54 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.11.2] - 2026-10-30
+
+### Fixed
+
+- **`core::net_tls` builds against OpenSSL 4.** OpenSSL 4 returns a certificate's subject name as const, so the
+  self-signed certificate's common name could no longer be written through `X509_get_subject_name()` (Homebrew's
+  `openssl@4` 4.1.0 broke every macOS build). The name is built as its own `X509_NAME` and copied in as both
+  subject and issuer, which every supported OpenSSL allows.
+
+## [0.11.1] - 2026-10-29
+
+### Fixed
+
+- **A `WriteQueue` drain on a stopping loop starts no write** (#83). The drain is spawned onto the loop, so on a
+  loop whose stop was requested the queue's owner could unwind -- its every wait throwing -- and destroy the socket
+  in the turn that also held the drain its last `enqueue` spawned; the drain then called `write()` on the freed
+  socket. Over TLS that write drove the handshake on the freed `TlsSocket`, which is how it surfaced, as a crash in
+  `TlsSocket::handshake` when a client was stopped while it connected. The owner cannot let the loop settle first,
+  as the queue's lifetime note asks, once the loop is stopping, so the drain now reads its own stop token and ends
+  without touching the socket once it is requested. Frames still queued at that point are not written.
+
+## [0.11.0] - 2026-10-28
+
+### Added
+
+- **`ISocket::armKeepAlive(KeepAliveSettings const&)`**: a server arms TCP keepalive, with explicit intervals, on a
+  socket its listener accepted, once it decides the connection is long-lived. Until now keepalive could be armed
+  only on a socket core-cpp DIALLED (`DialOptions::keepAlive`), so a server holding a connection for the length of
+  a long job could not notice that the peer's host had vanished (no FIN, no RST) until TCP retransmission gave up.
+  It is a per-socket call rather than a listener option because most accepted connections are short. The dial and
+  the accept share one helper (`detail::armKeepAlive`), so the intervals-first order and the Windows note on
+  `KeepAliveSettings::count` (fixed at 10 by the OS) hold on both. `PosixSocket`, `IocpSocket`, `BlockingSocket`,
+  `SocketDecorator`, `SplitSocket` (its read half) and the TLS socket (its inner transport) implement or forward it;
+  a closed socket answers `BadHandle`, and the interface default answers `Unsupported`. `testing::InMemorySocket`
+  records each request (`keepAliveRequests()`) and succeeds, so a consumer can assert its server armed it. An expiry
+  surfaces as the OS's error on the next read (`ConnReset` or `Timeout`, with the OS code in `systemCode`), classified like any
+  broken socket; no separate "keepalive expired" cause is recorded, on an accepted socket or a dialled one.
+
+## [0.10.0] - 2026-10-28
+
+### Added
+
+- **`core::ranges::Stride`**: `std::views::stride` where the standard library ships it
+  (`__cpp_lib_ranges_stride`), a forward-range fallback view elsewhere, usable as `Stride(range, n)` and
+  `range | Stride(n)`. No libc++ has `std::views::stride` -- `clang++ -std=c++23 -stdlib=libc++` answers
+  `no member named 'stride' in namespace 'std::ranges::views'`, Apple's included -- so a consumer building on
+  macOS needs the seam. `CORE_RANGES_FORCE_FALLBACK` selects the fallback everywhere, as for `Iota` and `FoldLeft`.
+
 ## [0.9.0] - 2026-10-24
 
 ### Breaking

@@ -3,6 +3,7 @@
 
 #include <core/net/SocketContract.hpp>
 #include <core/net/detail/SocketErrors.hpp>
+#include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/net/detail/WouldBlock.hpp>
 #include <core/net/posix/FdUtils.hpp> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
 
@@ -160,6 +161,13 @@ void PosixSocket::setReceiveDeadline(std::chrono::milliseconds deadline) noexcep
     // it is the whole of the removal -- `armRead` arms a timer only for a positive value -- and a
     // read already parked keeps the timer it armed, which is what the interface says.
     _receiveDeadline = std::max(deadline, std::chrono::milliseconds::zero());
+}
+
+std::expected<void, NetError> PosixSocket::armKeepAlive(KeepAliveSettings const& settings)
+{
+    if (_closed || _fd < 0)
+        return std::unexpected(closedSocket("armKeepAlive"));
+    return detail::armKeepAlive(_fd, settings);
 }
 
 // ---- The read side ----------------------------------------------------------------------------

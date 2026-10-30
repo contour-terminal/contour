@@ -20,18 +20,23 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/SocketBuffers.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/net/SplitSocket.hpp>
 #include <core/net/ThreadedAddressResolver.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/net/testing/BackendMatrix.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/RawSockets.hpp>
+#include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Types.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 using core::async::Task;
 using core::net::DialOptions;
@@ -214,6 +219,156 @@ TEST_CASE("Buffer sizes asked of a listener are on the listening socket, before 
             auto const report = reportStreamSocketOptions(listening);
             CHECK(report.sendBuffer >= RequestedBuffer);
             CHECK(report.receiveBuffer >= RequestedBuffer);
+        }
+    }
+}
+
+namespace
+{
+
+/// Intervals that differ from every platform's default (2 h idle on Linux) and from
+/// `KeepAliveSettings {}`, so a read-back that matches them was set by the call under test.
+constexpr auto ServerSettings = core::net::KeepAliveSettings { .idle = std::chrono::seconds { 7 },
+                                                               .interval = std::chrono::seconds { 3 },
+                                                               .count = 4 };
+
+} // namespace
+
+TEST_CASE("A server arms keepalive on an accepted socket, with the intervals it names",
+          "[net][socket-options][keepalive]")
+{
+    for (auto const& backend: BackendMatrix)
+    {
+        auto source = core::net::makeBackend(backend.kind);
+        if (!source)
+            continue; // not available on this platform
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto const connection = connectOnce(loop, ListenOptions { .host = "127.0.0.1" }, DialOptions {});
+            auto const handle = nativeHandleOf(*connection.accepted);
+            REQUIRE(handle != core::platform::InvalidHandle);
+
+            // A listener's accepted socket is NOT armed until the server asks: most are short.
+            CHECK_FALSE(reportStreamSocketOptions(handle).keepAlive);
+
+            auto const armed = connection.accepted->armKeepAlive(ServerSettings);
+            REQUIRE(armed.has_value());
+
+            auto const report = reportStreamSocketOptions(handle);
+            CHECK(report.keepAlive);
+#ifndef _WIN32
+            // Windows takes the intervals through SIO_KEEPALIVE_VALS and offers no read-back for
+            // them (and fixes the count at 10); the flag is all it can be asked.
+            CHECK(report.keepAliveIdleSeconds == 7);
+            CHECK(report.keepAliveIntervalSeconds == 3);
+            CHECK(report.keepAliveCount == 4);
+#endif
+
+            // The dialled end of the same connection was never asked.
+            CHECK_FALSE(reportStreamSocketOptions(nativeHandleOf(*connection.dialled)).keepAlive);
+        }
+    }
+}
+
+TEST_CASE("Arming keepalive on a closed socket is BadHandle, and arms nothing",
+          "[net][socket-options][keepalive]")
+{
+    for (auto const& backend: BackendMatrix)
+    {
+        auto source = core::net::makeBackend(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto const connection = connectOnce(loop, ListenOptions { .host = "127.0.0.1" }, DialOptions {});
+            connection.accepted->close();
+
+            auto const armed = connection.accepted->armKeepAlive(ServerSettings);
+            REQUIRE_FALSE(armed.has_value());
+            CHECK(armed.error().code == core::net::NetErrorCode::BadHandle);
+        }
+    }
+}
+
+TEST_CASE("A decorator forwards armKeepAlive, and so does a split socket",
+          "[net][socket-options][keepalive][decorator]")
+{
+    auto pair = core::net::testing::InMemorySocketPair::create();
+
+    SECTION("SocketDecorator reaches the decorated socket")
+    {
+        auto decorator = core::net::testing::SocketDecorator { *pair.server };
+        REQUIRE(decorator.armKeepAlive(ServerSettings).has_value());
+        REQUIRE(pair.server->keepAliveRequests().size() == 1);
+        CHECK(pair.server->keepAliveRequests().front().idle == ServerSettings.idle);
+        CHECK(pair.server->keepAliveRequests().front().interval == ServerSettings.interval);
+        CHECK(pair.server->keepAliveRequests().front().count == ServerSettings.count);
+    }
+    SECTION("SplitSocket arms its read half and leaves the write half alone")
+    {
+        auto other = core::net::testing::InMemorySocketPair::create();
+        auto* const readHalf = pair.server.get();
+        auto* const writeHalf = other.server.get();
+        auto split = core::net::combineHalves(std::move(pair.server), std::move(other.server));
+        REQUIRE(split->armKeepAlive(ServerSettings).has_value());
+        CHECK(readHalf->keepAliveRequests().size() == 1);
+        CHECK(writeHalf->keepAliveRequests().empty());
+    }
+}
+
+TEST_CASE("The in-memory fake records keepalive requests and refuses once closed",
+          "[net][socket-options][keepalive][inmemory]")
+{
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    CHECK(pair.server->keepAliveRequests().empty());
+
+    REQUIRE(pair.server->armKeepAlive(ServerSettings).has_value());
+    REQUIRE(pair.server->armKeepAlive(core::net::KeepAliveSettings {}).has_value());
+    REQUIRE(pair.server->keepAliveRequests().size() == 2);
+    CHECK(pair.server->keepAliveRequests().back().count == core::net::KeepAliveSettings {}.count);
+    CHECK(pair.client->keepAliveRequests().empty());
+
+    pair.server->close();
+    auto const refused = pair.server->armKeepAlive(ServerSettings);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().code == core::net::NetErrorCode::BadHandle);
+    CHECK(pair.server->keepAliveRequests().size() == 2);
+}
+
+TEST_CASE("A dial with KeepAlive::Yes arms keepalive on the dialled socket, with the default intervals",
+          "[net][socket-options][keepalive]")
+{
+    for (auto const& backend: BackendMatrix)
+    {
+        auto source = core::net::makeBackend(backend.kind);
+        if (!source)
+            continue; // not available on this platform
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto const connection = connectOnce(
+                loop, ListenOptions { .host = "127.0.0.1" }, DialOptions { .keepAlive = KeepAlive::Yes });
+            auto const dialled = nativeHandleOf(*connection.dialled);
+            REQUIRE(dialled != core::platform::InvalidHandle);
+
+            auto const report = reportStreamSocketOptions(dialled);
+            CHECK(report.keepAlive);
+#ifndef _WIN32
+            auto const defaults = core::net::KeepAliveSettings {};
+            CHECK(report.keepAliveIdleSeconds
+                  == std::chrono::ceil<std::chrono::seconds>(defaults.idle).count());
+            CHECK(report.keepAliveIntervalSeconds
+                  == std::chrono::ceil<std::chrono::seconds>(defaults.interval).count());
+            CHECK(std::cmp_equal(report.keepAliveCount, defaults.count));
+#endif
+
+            // The accepted end of the same dial was not asked.
+            CHECK_FALSE(reportStreamSocketOptions(nativeHandleOf(*connection.accepted)).keepAlive);
         }
     }
 }

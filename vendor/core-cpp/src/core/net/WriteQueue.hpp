@@ -52,7 +52,9 @@ namespace core::net
 /// finishes against the shared state). The SOCKET must outlive any in-flight
 /// drain: owners close() the queue and the socket, then let the loop settle
 /// (the drain resumes, observes the closed socket, and stops) before destroying
-/// the socket object.
+/// the socket object. On a stopping loop that settling cannot happen -- every
+/// wait throws -- so a drain whose stop token is requested starts no further
+/// write, and the owner may drop the socket as it unwinds.
 class WriteQueue
 {
   public:

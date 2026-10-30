@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/async/Cancellation.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
@@ -7,6 +8,7 @@
 #include <core/net/WriteQueue.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
+#include <core/net/testing/SocketDecorator.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,6 +20,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using core::async::Task;
@@ -45,6 +48,38 @@ Task<void> collectBytes(core::net::ISocket* sock, std::size_t expectedSize, std:
 Task<void> settle(EventLoop* loop)
 {
     co_await loop->delay(std::chrono::milliseconds { 0 });
+}
+
+/// Counts the writes that reach the socket it decorates.
+class CountingSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    /// @param inner The socket written to; must outlive this.
+    /// @param writes Raised by every write.
+    CountingSocket(core::net::ISocket& inner, std::size_t* writes) noexcept:
+        SocketDecorator { inner }, _writes { writes }
+    {
+    }
+
+    [[nodiscard]] core::net::IoAwaitable write(std::span<std::byte const> buffer) override
+    {
+        ++*_writes;
+        return SocketDecorator::write(buffer);
+    }
+
+  private:
+    std::size_t* _writes;
+};
+
+/// Queues a frame on a loop whose stop it has just requested, then waits: the wait throws, so the flow
+/// unwinds, dropping its queue, in the turn that also holds the drain the frame spawned.
+Task<void> queueOnAStoppingLoop(EventLoop* loop, core::net::ISocket* socket)
+{
+    co_await core::net::testing::sleepFor(loop, 1ms); // resumed by a turn, as a connect's completion is
+    loop->requestStop();
+    auto queue = WriteQueue { *loop, socket, 1024 };
+    std::ignore = queue.enqueue("hello");
+    co_await core::net::testing::sleepFor(loop, 10s);
 }
 
 /// An @c ISocket whose writes park until the test releases them.
@@ -541,4 +576,22 @@ TEST_CASE("A WriteQueue refuses a null socket at construction", "[net][writequeu
     auto loop = EventLoop { *source };
 
     REQUIRE_THROWS_AS((WriteQueue { loop, nullptr, 1024 }), std::invalid_argument);
+}
+
+TEST_CASE("A WriteQueue drain on a stopping loop starts no write", "[net][writequeue]")
+{
+    // On a stopping loop the queue's owner cannot let the loop settle before dropping the socket -- its
+    // every wait throws -- so it unwinds ahead of the drain it spawned, and that drain then wrote into the
+    // socket the owner had already destroyed (contour-terminal/core-cpp#83). Here the socket outlives
+    // both, so what the drain does is counted rather than freed.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto pair = core::net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+    auto writes = std::size_t { 0 };
+    auto socket = CountingSocket { *pair->first, &writes };
+
+    CHECK_THROWS_AS(loop.blockOn(queueOnAStoppingLoop(&loop, &socket)), core::async::OperationCancelled);
+
+    CHECK(writes == 0);
 }

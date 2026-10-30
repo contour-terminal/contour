@@ -75,7 +75,11 @@ async::Task<void> WriteQueue::waitUntilBacklogBelow(std::size_t watermark, std::
 
 async::Task<void> WriteQueue::drain(std::shared_ptr<State> state)
 {
-    while (!state->queue.empty() && !state->failure.has_value() && !state->closed)
+    // A stopped flow starts no write: on a stopping loop the owner cannot let the loop settle -- its every
+    // wait throws -- so it unwinds, and may drop the socket, ahead of this drain's next turn. The drain is
+    // spawned onto the loop, so that turn can come after the socket has gone even for the first frame.
+    auto const token = co_await async::thisCoroStopToken();
+    while (!state->queue.empty() && !state->failure.has_value() && !state->closed && !token.stop_requested())
     {
         // Keep the frame alive across the (possibly parking) write, and move it from the
         // backlog into inFlightBytes rather than out of the accounting: the bound must stop

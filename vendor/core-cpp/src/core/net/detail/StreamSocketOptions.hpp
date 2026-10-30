@@ -6,10 +6,12 @@
 /// socket gets its options, dialled or accepted, on every platform.
 
 #include <core/net/KeepAlive.hpp>
+#include <core/net/NetError.hpp>
 #include <core/net/SocketBuffers.hpp>
 #include <core/platform/Types.hpp>
 
 #include <cstddef>
+#include <expected>
 
 namespace core::net::detail
 {
@@ -45,6 +47,19 @@ struct StreamSocketOptions
 /// @param keepAlive Whether this socket probes a silent peer.
 void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive) noexcept;
 
+/// Arms TCP keepalive on a connected stream socket, with the intervals @p settings names.
+///
+/// **The one place keepalive is armed, for a dialled socket and an accepted one alike**:
+/// @c applyStreamSocketOptions calls it for a dial's @c KeepAlive::Yes, and
+/// @c ISocket::armKeepAlive calls it for a server that decides a connection is long-lived. The
+/// order is the point and is documented at the platform's definition (intervals first, flag last on
+/// POSIX; one ioctl on Windows), so no caller can leave a socket flagged but on the system default.
+/// @param socket The connected socket.
+/// @param settings The intervals to apply; @c KeepAliveSettings::count is ignored on Windows.
+/// @return Nothing on success, or the classified OS error of the option that was refused.
+[[nodiscard]] std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket,
+                                                         KeepAliveSettings const& settings);
+
 /// Asks the kernel for the send and receive buffers @p sizes names, on a socket that is NOT
 /// connected yet: a dialled one before `connect`, and a listening one before `listen` -- the
 /// sockets it accepts inherit them, an `AcceptEx` one included, whatever it was created with.
@@ -65,9 +80,13 @@ void applySocketBufferSizes(platform::NativeHandle socket, SocketBufferSizes con
 /// diagnostics: asked of the socket rather than trusted from the call.
 struct StreamSocketReport
 {
-    bool noDelay = false;          ///< `TCP_NODELAY`.
-    std::size_t sendBuffer = 0;    ///< `SO_SNDBUF`, as reported (Linux reports twice the value set).
-    std::size_t receiveBuffer = 0; ///< `SO_RCVBUF`, likewise.
+    bool noDelay = false;             ///< `TCP_NODELAY`.
+    std::size_t sendBuffer = 0;       ///< `SO_SNDBUF`, as reported (Linux reports twice the value set).
+    std::size_t receiveBuffer = 0;    ///< `SO_RCVBUF`, likewise.
+    bool keepAlive = false;           ///< `SO_KEEPALIVE`.
+    int keepAliveIdleSeconds = 0;     ///< `TCP_KEEPIDLE`/`TCP_KEEPALIVE`; 0 on Windows, which cannot read it.
+    int keepAliveIntervalSeconds = 0; ///< `TCP_KEEPINTVL`; 0 on Windows.
+    int keepAliveCount = 0;           ///< `TCP_KEEPCNT`; 0 on Windows.
 };
 
 /// @param socket A stream socket.

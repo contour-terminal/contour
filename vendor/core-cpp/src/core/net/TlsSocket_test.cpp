@@ -21,6 +21,7 @@
 #include <core/net/Tls.hpp>
 #include <core/net/WithTimeout.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 #include <core/net/testing/StrictTlsPeer.hpp>
 
@@ -575,4 +576,24 @@ TEST_CASE("A read beside a parked write never puts a second write into the inner
     REQUIRE(c->run(c->peer->write(c->wire.get(), "pong")) == std::optional<bool> { true });
     REQUIRE(c->pumpUntil([&] { return read.has_value(); }));
     CHECK(*read == "pong");
+}
+
+TEST_CASE("A TLS socket forwards armKeepAlive to its inner transport", "[net][tls][keepalive]")
+{
+    auto loopBackend = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *loopBackend };
+    auto context = core::net::makeSelfSignedServerContext();
+    REQUIRE(context.has_value());
+
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto* const inner = pair.server.get();
+    auto tls = (*context)->wrap(std::move(pair.server), loop);
+    REQUIRE(tls != nullptr);
+
+    auto const settings = core::net::KeepAliveSettings { .idle = 7s, .interval = 3s, .count = 4 };
+    REQUIRE(tls->armKeepAlive(settings).has_value());
+    REQUIRE(inner->keepAliveRequests().size() == 1);
+    CHECK(inner->keepAliveRequests().front().idle == settings.idle);
+    CHECK(inner->keepAliveRequests().front().interval == settings.interval);
+    CHECK(inner->keepAliveRequests().front().count == settings.count);
 }

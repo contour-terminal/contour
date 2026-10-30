@@ -11,50 +11,48 @@
 
 #include <core/net/detail/StreamSocketOptions.hpp>
 
+#include <core/net/detail/SocketErrors.hpp>
+
 #include <algorithm>
 #include <climits>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <tuple>
 
 namespace core::net::detail
 {
 
-namespace
+/// Arms TCP keepalive with @p settings.
+///
+/// One ioctl sets the flag and both intervals together, so there is no partially-armed state
+/// to unwind. The probe COUNT is absent on purpose: Windows fixes it at 10 and offers no way
+/// to set it -- @c KeepAliveSettings states what that does to the detection time rather than
+/// pretending the parameter was applied.
+std::expected<void, NetError> armKeepAlive(platform::NativeHandle socket, KeepAliveSettings const& settings)
 {
-    /// Arms TCP keepalive with @p settings. Best-effort by contract; see the header.
-    ///
-    /// One ioctl sets the flag and both intervals together, so there is no partially-armed state
-    /// to unwind. The probe COUNT is absent on purpose: Windows fixes it at 10 and offers no way
-    /// to set it — @c KeepAliveSettings states what that does to the detection time rather than
-    /// pretending the parameter was applied.
-    /// @param socket The connected socket.
-    /// @param settings The intervals to apply.
-    /// @return True when the ioctl succeeded.
-    [[nodiscard]] bool armKeepAlive(SOCKET socket, KeepAliveSettings const& settings) noexcept
-    {
-        std::ignore = settings.count;
+    std::ignore = settings.count;
 
-        auto request = tcp_keepalive {};
-        request.onoff = 1;
-        // Milliseconds here, unlike every other platform.
-        request.keepalivetime = static_cast<ULONG>(settings.idle.count());
-        request.keepaliveinterval = static_cast<ULONG>(settings.interval.count());
+    auto request = tcp_keepalive {};
+    request.onoff = 1;
+    // Milliseconds here, unlike every other platform.
+    request.keepalivetime = static_cast<ULONG>(settings.idle.count());
+    request.keepaliveinterval = static_cast<ULONG>(settings.interval.count());
 
-        DWORD returned = 0;
-        return ::WSAIoctl(socket,
-                          SIO_KEEPALIVE_VALS,
-                          &request,
-                          sizeof(request),
-                          nullptr,
-                          0,
-                          &returned,
-                          nullptr,
-                          nullptr)
-               == 0;
-    }
-
-} // namespace
+    DWORD returned = 0;
+    if (::WSAIoctl(reinterpret_cast<SOCKET>(socket),
+                   SIO_KEEPALIVE_VALS,
+                   &request,
+                   sizeof(request),
+                   nullptr,
+                   0,
+                   &returned,
+                   nullptr,
+                   nullptr)
+        != 0)
+        return std::unexpected(socketError(lastSocketError(), "WSAIoctl(SIO_KEEPALIVE_VALS)"));
+    return {};
+}
 
 namespace
 {
@@ -103,7 +101,10 @@ void applyStreamSocketOptions(platform::NativeHandle socket, KeepAlive keepAlive
         ::setsockopt(winSocket, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<char const*>(&one), sizeof(one));
 
     if (keepAlive == KeepAlive::Yes)
-        std::ignore = armKeepAlive(winSocket, KeepAliveSettings {});
+        // Best-effort: a dial does not fail over it. A failure builds a `NetError` (an allocated string)
+        // inside this `noexcept` function, so `bad_alloc` here terminates -- accepted: an allocation
+        // failure that small is the process's end on every other path too.
+        std::ignore = armKeepAlive(socket, KeepAliveSettings {});
 }
 
 void applySocketBufferSizes(platform::NativeHandle socket, SocketBufferSizes const& sizes) noexcept
@@ -123,6 +124,7 @@ StreamSocketReport reportStreamSocketOptions(platform::NativeHandle socket) noex
         .noDelay = readOption(winSocket, IPPROTO_TCP, TCP_NODELAY) != 0,
         .sendBuffer = clampedSize(readOption(winSocket, SOL_SOCKET, SO_SNDBUF)),
         .receiveBuffer = clampedSize(readOption(winSocket, SOL_SOCKET, SO_RCVBUF)),
+        .keepAlive = readOption(winSocket, SOL_SOCKET, SO_KEEPALIVE) != 0,
     };
 }
 
