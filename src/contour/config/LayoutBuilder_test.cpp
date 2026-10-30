@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/test/CoreFixtures.hpp>
 

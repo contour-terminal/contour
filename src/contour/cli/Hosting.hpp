@@ -6,7 +6,7 @@
 /// `daemon.mode` and the outcome of the attach decide it. Pure, so every launch path is decided by one
 /// table and tested without a window or a daemon.
 
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 
 #include <core/Utils.hpp>
 

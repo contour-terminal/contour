@@ -860,7 +860,8 @@ int ContourApp::captureAction()
 {
     // clang-format off
     auto captureSettings = contour::cli::CaptureSettings {};
-    captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
+    captureSettings.lineMode = parameters().get<bool>("contour.capture.logical") ? vtbackend::CaptureLineMode::Logical
+                                                                                : vtbackend::CaptureLineMode::Physical;
     captureSettings.words = parameters().get<bool>("contour.capture.words");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
     captureSettings.lineCount = vtbackend::LineCount::cast_from(parameters().get<unsigned>("contour.capture.lines"));
@@ -1185,7 +1186,7 @@ int ContourApp::daemonAction()
     else
         errorLog()("the label '{}' names no snapshot file; this daemon keeps no workspace", daemonLabel);
     auto profiles = std::make_shared<ConfigProfileCatalog const>(
-        *std::move(hostConfig), daemonProfile, vtbackend::ColorPreference::Light);
+        *std::move(hostConfig), daemonProfile, vthost::HostedColorPreference);
     // Edits of the configuration reach the sessions spawned afterwards, and the scrollback of those
     // running, without a restart; a load that fails keeps the running configuration.
     auto reloads = std::make_shared<ConfigReloadPoller>(
@@ -1199,7 +1200,7 @@ int ContourApp::daemonAction()
                     return config::resolvedSessionConfigFor(loaded, daemonProfile)
                         .transform([&](auto const&) {
                             return std::make_shared<ConfigProfileCatalog const>(
-                                std::move(loaded), daemonProfile, vtbackend::ColorPreference::Light);
+                                std::move(loaded), daemonProfile, vthost::HostedColorPreference);
                         });
                 })
                 .transform(
@@ -1435,9 +1436,10 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
     auto const placement = vtpty::makeDefaultProcessPlacement();
     // The registered user service when there is one, so a stopped service is started rather than an
     // on-demand daemon beside it.
+    auto const label = parameters().get<string>("contour.daemon.label");
     auto starter = vthost::chooseDaemonStarter(
-        vthost::findRegisteredService(parameters().get<string>("contour.daemon.label"),
-                                      vthost::nativeServiceBackendFactory(services)),
+        vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+        vthost::labelSocketPath(label, services.environment),
         vthost::OnDemandSpawn { .endpoint = vthost::UnixEndpoint { .socketPath = socketPath },
                                 .spawner = *spawner,
                                 .binary = *binary,

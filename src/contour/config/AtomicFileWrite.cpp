@@ -5,6 +5,7 @@
 
 #include <format>
 #include <fstream>
+#include <tuple>
 
 namespace contour::config
 {
@@ -49,6 +50,31 @@ std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& pa
     }
 
     return {};
+}
+
+std::expected<void, std::string> writeFileDurably(core::platform::FileSystem const& fileSystem,
+                                                  std::filesystem::path const& path,
+                                                  std::string_view content)
+{
+    auto const directory = path.parent_path();
+    auto temporaryName = std::filesystem::path { "." };
+    temporaryName += path.filename();
+    temporaryName += ".tmp";
+    auto const temporary = directory / temporaryName;
+
+    if (auto const created = fileSystem.createDirectories(directory); !created)
+        return created;
+
+    // What a crash left there would make the exclusive create below fail on every later save.
+    std::ignore = fileSystem.remove(temporary);
+    auto const written = fileSystem.createNewFile(temporary)
+                             .and_then([&] { return fileSystem.writeFile(temporary, content); })
+                             .and_then([&] { return fileSystem.syncFile(temporary); })
+                             .and_then([&] { return fileSystem.replaceFile(temporary, path); })
+                             .and_then([&] { return fileSystem.syncDirectory(directory); });
+    if (!written)
+        std::ignore = fileSystem.remove(temporary);
+    return written;
 }
 
 } // namespace contour::config

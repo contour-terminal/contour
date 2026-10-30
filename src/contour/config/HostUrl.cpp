@@ -3,6 +3,8 @@
 
 #include <crispy/ASCII.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
 #include <charconv>
 #include <format>
@@ -31,6 +33,12 @@ namespace
     };
     static_assert(HostUrlErrorText.size() == std::to_underlying(HostUrlError::UserNotAllowed) + 1);
 
+    /// What the loader logs, and Settings shows, for each HostEntryError, in enumerator order.
+    constexpr auto HostEntryErrorText = std::array<std::string_view, 1> {
+        "a tls:// host needs a token_file", // TokenRequired
+    };
+    static_assert(HostEntryErrorText.size() == std::to_underlying(HostEntryError::TokenRequired) + 1);
+
     /// What a host may not contain beyond control characters, as OpenSSH >= 9.6 refuses on its own command
     /// line: an older ssh hands the name to a user's `ProxyCommand` through `%h` unchecked.
     constexpr auto UnsafeHostCharacters = std::string_view { " '`\"$\\;&<>|(){}," };
@@ -57,6 +65,27 @@ namespace
         };
         auto const found = std::ranges::find_if(HostSchemes, sameSpelling);
         return found == HostSchemes.end() ? nullptr : &*found;
+    }
+
+    /// A URL split at its `://`: the scheme's row, and the authority after the separator.
+    struct SchemeSplit
+    {
+        HostSchemeInfo const* scheme;
+        std::string_view authority;
+    };
+
+    /// Splits @p url at its `://`, what a half-typed address and a whole one both begin with.
+    /// @return The scheme and the rest; MissingScheme or UnknownScheme when it names none of @ref
+    /// HostSchemes.
+    [[nodiscard]] std::expected<SchemeSplit, HostUrlError> splitScheme(std::string_view url) noexcept
+    {
+        auto const separator = url.find("://");
+        if (separator == std::string_view::npos)
+            return std::unexpected { HostUrlError::MissingScheme };
+        auto const* const scheme = findScheme(url.substr(0, separator));
+        if (!scheme)
+            return std::unexpected { HostUrlError::UnknownScheme };
+        return SchemeSplit { .scheme = scheme, .authority = url.substr(separator + 3) };
     }
 
     /// @return The row of @p scheme in @ref HostSchemes.
@@ -107,14 +136,12 @@ namespace
 
 std::expected<HostUrl, HostUrlError> parseHostUrl(std::string_view url)
 {
-    auto const separator = url.find("://");
-    if (separator == std::string_view::npos)
-        return std::unexpected { HostUrlError::MissingScheme };
-    auto const* const scheme = findScheme(url.substr(0, separator));
-    if (!scheme)
-        return std::unexpected { HostUrlError::UnknownScheme };
+    auto const split = splitScheme(url);
+    if (!split)
+        return std::unexpected { split.error() };
+    auto const* const scheme = split->scheme;
 
-    auto authority = url.substr(separator + 3);
+    auto authority = split->authority;
     if (authority.contains('/'))
         return std::unexpected { HostUrlError::UnexpectedPath };
 
@@ -159,6 +186,53 @@ std::expected<HostUrl, HostUrlError> parseHostUrl(std::string_view url)
 std::string_view describe(HostUrlError error) noexcept
 {
     return HostUrlErrorText.at(std::to_underlying(error));
+}
+
+std::string_view describe(HostEntryError error) noexcept
+{
+    return HostEntryErrorText.at(std::to_underlying(error));
+}
+
+std::expected<void, HostEntryError> checkHostToken(HostScheme scheme, std::string_view tokenFile) noexcept
+{
+    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    if (scheme == HostScheme::Tls && tokenFile.empty())
+        return std::unexpected { HostEntryError::TokenRequired };
+    return {};
+}
+
+std::optional<HostScheme> hostSchemeOf(std::string_view url) noexcept
+{
+    auto const split = splitScheme(url);
+    return split ? std::optional { split->scheme->scheme } : std::nullopt;
+}
+
+std::string_view hostSchemeName(HostScheme scheme) noexcept
+{
+    return schemeInfo(scheme).name;
+}
+
+std::vector<HostFieldProblem> checkHostDraft(HostDraft const& draft)
+{
+    auto problems = std::vector<HostFieldProblem> {};
+    if (auto const url = parseHostUrl(draft.url); !url)
+        problems.push_back({ .field = HostField::Url, .message = std::string { describe(url.error()) } });
+    if (auto const scheme = hostSchemeOf(draft.url))
+        if (auto const token = checkHostToken(*scheme, draft.tokenFile); !token)
+            problems.push_back(
+                { .field = HostField::TokenFile, .message = std::string { describe(token.error()) } });
+    return problems;
+}
+
+HostDraft hostDraftOf(HostEntry const& entry)
+{
+    return HostDraft {
+        .url = toString(entry.url),
+        .tokenFile = core::pathToUtf8(entry.tokenFile),
+        .tlsCa = core::pathToUtf8(entry.tlsCa),
+        .remoteCommand = entry.remoteCommand,
+        .profile = entry.profile,
+    };
 }
 
 std::string toString(HostUrl const& url)

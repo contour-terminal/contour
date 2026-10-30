@@ -631,6 +631,36 @@ TEST_CASE("WindowGeometry.gutterColumnAt.countsTheLeadInAsTheFirstColumn", "[con
     CHECK(gutterColumnAt(4, PageMarginLeft + 4, Extent, Cell) == 0);
 }
 
+TEST_CASE("gutterGeometry.railSitsAfterTheCells", "[contour][geometry][gutter]")
+{
+    // Lead-in, three 16 px cells, then the 44 px rail strip against column 0 at 200 px: Review Focus 5.
+    constexpr auto PageMarginLeft = 200;
+    constexpr auto Cell = 16;
+    constexpr auto Extent = GutterExtent { .leadIn = 12, .columns = 3 * Cell, .rail = 44 };
+    constexpr auto Rail = GutterPoint { .part = GutterPart::Rail, .column = 0 };
+    auto const cell = [](int column) {
+        return GutterPoint { .part = GutterPart::Cells, .column = column };
+    };
+
+    CHECK(gutterPointAt(PageMarginLeft - 1, PageMarginLeft, Extent, Cell) == Rail);
+    CHECK(gutterPointAt(PageMarginLeft - 44, PageMarginLeft, Extent, Cell) == Rail);
+    CHECK(gutterPointAt(PageMarginLeft - 45, PageMarginLeft, Extent, Cell) == cell(2));
+    CHECK(gutterPointAt(PageMarginLeft - 44 - 48, PageMarginLeft, Extent, Cell) == cell(0));
+    CHECK(gutterPointAt(PageMarginLeft - 44 - 48 - 12, PageMarginLeft, Extent, Cell) == cell(0)); // lead-in
+    CHECK(gutterPointAt(PageMarginLeft - 44 - 48 - 12 - 1, PageMarginLeft, Extent, Cell) == std::nullopt);
+    CHECK(gutterPointAt(PageMarginLeft, PageMarginLeft, Extent, Cell) == std::nullopt); // column 0
+
+    // The column hit-test names cells only: over the rail there is no gutter column.
+    CHECK(gutterColumnAt(PageMarginLeft - 1, PageMarginLeft, Extent, Cell) == std::nullopt);
+    CHECK(gutterColumnAt(PageMarginLeft - 45, PageMarginLeft, Extent, Cell) == 2);
+
+    // A rail with no cells before it: the lead-in is the rail's, and the strip is the gutter.
+    constexpr auto RailOnly = GutterExtent { .leadIn = 12, .columns = 0, .rail = 44 };
+    CHECK(isInGutter(PageMarginLeft - 56, PageMarginLeft, RailOnly));
+    CHECK(gutterPointAt(PageMarginLeft - 56, PageMarginLeft, RailOnly, Cell) == Rail);
+    CHECK(gutterPointAt(PageMarginLeft - 57, PageMarginLeft, RailOnly, Cell) == std::nullopt);
+}
+
 TEST_CASE("WindowGeometry.pageColumnAt.namesOnlyThePagesOwnColumns", "[contour][geometry]")
 {
     // Four 10 px columns, starting where a gutter ends at 35 px.
@@ -1009,7 +1039,7 @@ TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the split handle needs sn
     // that origin is `firstExtent + handleThickness`, and the default handle is 6 LOGICAL pixels, which
     // is 7.5 device pixels at the very common 125% scale and 10.5 at 175%. Panes on exactly those
     // scales would have kept the #2040 artifact while 100/150/200% were fixed.
-    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultSplitHandleThickness
+    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultPaneGap
 
     for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0, 2.5 })
     {

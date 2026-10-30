@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigDocumentation.hpp>
+#include <contour/config/ConfigReader.hpp>
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/HostUrl.hpp>
@@ -32,9 +34,14 @@
 #include <concepts>
 #include <cstdlib>
 #include <expected>
+#include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <ranges>
+#include <span>
+#include <string>
+#include <utility>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -78,6 +85,10 @@ namespace
 {
     /// The modes of a built-in row that acts on command blocks, which exist on the primary screen only.
     constexpr auto PrimaryScreenOnly = vtbackend::MatchModes { 0, vtbackend::MatchModes::AlternateScreen };
+
+    /// The modes of a built-in row that acts on the focused command block, so that without one the key
+    /// reaches the application.
+    constexpr auto RequiresBlockFocus = vtbackend::MatchModes { vtbackend::MatchModes::BlockFocus, 0 };
 } // namespace
 
 std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
@@ -149,45 +160,609 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
     // first and therefore wins. Should that trade ever need softening, the cheap retreat is a `.modes`
     // with AlternateScreen DISABLED on the two Tab rows: full-screen applications would keep Ctrl+Tab
     // while the shell still switched tabs, using only data that already exists.
-    static auto const mappings = std::vector<FallbackKeyMapping> {
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::PageUp,
-                         .binding = { { actions::SwitchToTabLeft {} } } } },
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::PageDown,
-                         .binding = { { actions::SwitchToTabRight {} } } } },
-        FallbackKeyMapping {
-            .mapping = { .modes { vtbackend::MatchModes {} },
-                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                         .input = vtbackend::Key::Tab,
-                         .binding = { { actions::SwitchToTabRight {} } } } },
-        // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
-        // Key_Backtab, which helper.cpp rewrites (see makeKey).
-        FallbackKeyMapping { .mapping = { .modes { vtbackend::MatchModes {} },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::Tab,
-                                          .binding = { { actions::SwitchToTabLeft {} } } } },
-        // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in the
-        // defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane, Ctrl+Alt swaps
-        // one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts are; an
-        // alternate-screen application keeps the chord.
-        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::UpArrow,
-                                          .binding = { { actions::ScrollMarkUp {} } } } },
-        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                              vtbackend::Modifier::Shift } },
-                                          .input = vtbackend::Key::DownArrow,
-                                          .binding = { { actions::ScrollMarkDown {} } } } },
-    };
+    static auto const mappings = [] {
+        auto rows = std::vector<FallbackKeyMapping> {
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::PageUp,
+                             .binding = { { actions::SwitchToTabLeft {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::PageDown,
+                             .binding = { { actions::SwitchToTabRight {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                             .input = vtbackend::Key::Tab,
+                             .binding = { { actions::SwitchToTabRight {} } } } },
+            // Ctrl+Shift+Tab arrives as Key::Tab with Shift re-added: Qt reports the shifted press as
+            // Key_Backtab, which helper.cpp rewrites (see makeKey).
+            FallbackKeyMapping {
+                .mapping = { .modes { vtbackend::MatchModes {} },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::Tab,
+                             .binding = { { actions::SwitchToTabLeft {} } } } },
+            // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in
+            // the defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane,
+            // Ctrl+Alt swaps one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts
+            // are; an alternate-screen application keeps the chord.
+            FallbackKeyMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::UpArrow,
+                             .binding = { { actions::ScrollMarkUp {} } } } },
+            FallbackKeyMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = vtbackend::Key::DownArrow,
+                             .binding = { { actions::ScrollMarkDown {} } } } },
+        };
+        // The block chords, for a contour.yml that predates them; one of its own claiming a chord wins.
+        for (auto const& chord: blockFocusChords())
+            rows.push_back(FallbackKeyMapping { .mapping = chord });
+#ifdef __APPLE__
+        std::ranges::copy(macBlockChords(), std::back_inserter(rows));
+#endif
+        std::ranges::copy(paneKeyChords(BuildPaneChordHost), std::back_inserter(rows));
+        return rows;
+    }();
     return mappings;
+}
+
+std::array<KeyInputMapping, 4> const& blockFocusChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers,
+                          vtbackend::Key key,
+                          actions::Action action,
+                          vtbackend::MatchModes modes = RequiresBlockFocus) {
+        return KeyInputMapping {
+            .modes { modes }, .modifiers { modifiers }, .input = key, .binding = { { std::move(action) } }
+        };
+    };
+    // Escape in vi's select mode is CancelSelection's (the default mapping): the block's own Escape stands
+    // aside there, so that no key press can fire both.
+    auto constexpr EscapeLetsGo =
+        vtbackend::MatchModes { vtbackend::MatchModes::BlockFocus, vtbackend::MatchModes::Select };
+    static auto const rows = std::array {
+        chord(vtbackend::Modifiers { vtbackend::Modifier::Control },
+              vtbackend::Key::Enter,
+              actions::OpenBlockMenu {}),
+        chord(vtbackend::Modifiers { vtbackend::Modifier::Shift },
+              vtbackend::Key::F10,
+              actions::OpenBlockMenu {}),
+        chord(vtbackend::Modifiers {}, vtbackend::Key::Enter, actions::ToggleFold {}),
+        chord(vtbackend::Modifiers {},
+              vtbackend::Key::Escape,
+              actions::ClearCommandBlockFocus {},
+              EscapeLetsGo),
+    };
+    return rows;
+}
+
+std::array<FallbackKeyMapping, 4> const& macBlockChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, vtbackend::Key key, actions::Action action) {
+        return FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                                 .modifiers { modifiers },
+                                                 .input = key,
+                                                 .binding = { { std::move(action) } } } };
+    };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const shiftSuper = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const rows = std::array {
+        chord(super, vtbackend::Key::UpArrow, actions::FocusPreviousCommand {}),
+        chord(super, vtbackend::Key::DownArrow, actions::FocusNextCommand {}),
+        chord(shiftSuper, vtbackend::Key::UpArrow, actions::SelectPreviousCommandOutput {}),
+        chord(shiftSuper, vtbackend::Key::DownArrow, actions::SelectNextCommandOutput {}),
+    };
+    return rows;
+}
+
+std::span<FallbackKeyMapping const> paneKeyChords(PaneChordHost host)
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, vtbackend::Key key, actions::Action action) {
+        return FallbackKeyMapping { .mapping = { .modes { vtbackend::MatchModes {} },
+                                                 .modifiers { modifiers },
+                                                 .input = key,
+                                                 .binding = { { std::move(action) } } } };
+    };
+    // Alt+Shift+Arrow, not a bare Alt+Arrow: that one is the shell's word motion. Some desktops and layout
+    // switchers grab Alt+Shift; a binding of the chord in input_mapping: wins over this row.
+    auto const altShift = vtbackend::Modifiers { vtbackend::Modifier::Alt, vtbackend::Modifier::Shift };
+    auto const superAlt = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Alt };
+    auto const superShift = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    // Moving the active tab, as browsers do: Ctrl+Shift+PageUp/PageDown, and Command+PageUp/PageDown on a
+    // Mac, beside Ctrl+PageUp/PageDown switching tabs (builtinFallbackKeyMappings()).
+    auto const controlShift =
+        vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+    auto const superOnly = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    static auto const tables = std::array {
+        std::vector {
+            chord(altShift, vtbackend::Key::LeftArrow, actions::FocusPaneLeft {}),
+            chord(altShift, vtbackend::Key::RightArrow, actions::FocusPaneRight {}),
+            chord(altShift, vtbackend::Key::UpArrow, actions::FocusPaneUp {}),
+            chord(altShift, vtbackend::Key::DownArrow, actions::FocusPaneDown {}),
+            chord(controlShift, vtbackend::Key::PageUp, actions::MoveTabToLeft {}),
+            chord(controlShift, vtbackend::Key::PageDown, actions::MoveTabToRight {}),
+        },
+        std::vector {
+            chord(superAlt, vtbackend::Key::LeftArrow, actions::FocusPaneLeft {}),
+            chord(superAlt, vtbackend::Key::RightArrow, actions::FocusPaneRight {}),
+            chord(superAlt, vtbackend::Key::UpArrow, actions::FocusPaneUp {}),
+            chord(superAlt, vtbackend::Key::DownArrow, actions::FocusPaneDown {}),
+            chord(superShift, vtbackend::Key::Enter, actions::TogglePaneZoom {}),
+            chord(superOnly, vtbackend::Key::PageUp, actions::MoveTabToLeft {}),
+            chord(superOnly, vtbackend::Key::PageDown, actions::MoveTabToRight {}),
+        },
+    };
+    static_assert(std::tuple_size_v<decltype(tables)> == std::to_underlying(PaneChordHost::Count),
+                  "every PaneChordHost needs its key chords");
+    return tables[std::to_underlying(host)];
+}
+
+std::span<FallbackCharMapping const> paneCharChords(PaneChordHost host)
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, char32_t input, actions::Action action) {
+        return FallbackCharMapping { .mapping = { .modes { vtbackend::MatchModes {} },
+                                                  .modifiers { modifiers },
+                                                  .input = input,
+                                                  .binding = { { std::move(action) } } } };
+    };
+    auto const ctrlShift = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const superShift = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const tables = std::array {
+        std::vector {
+            chord(ctrlShift, U'E', actions::SplitVertical {}),
+            chord(ctrlShift, U'O', actions::SplitHorizontal {}),
+            // File > New Window to…: the Connect picker as a sheet. Ctrl+Shift+K is unbound elsewhere, and
+            // the BindingCollisions test checks it against every edition and host.
+            chord(ctrlShift, U'K', actions::NewWindowTo {}),
+        },
+        std::vector {
+            chord(super, U'D', actions::SplitVertical {}),
+            chord(superShift, U'D', actions::SplitHorizontal {}),
+            chord(superShift, U'K', actions::NewWindowTo {}),
+        },
+    };
+    static_assert(std::tuple_size_v<decltype(tables)> == std::to_underlying(PaneChordHost::Count),
+                  "every PaneChordHost needs its character chords");
+    return tables[std::to_underlying(host)];
+}
+
+std::vector<ChromeFocusChord> native2026ChromeFocusChords()
+{
+    return {
+        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
+          .key = vtbackend::Key::F6,
+          .action = actions::FocusNextArea {} },
+        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+          .key = vtbackend::Key::F6,
+          .action = actions::FocusPreviousArea {} },
+#ifdef __APPLE__
+        { .modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control },
+          .key = vtbackend::Key::F5,
+          .action = actions::FocusToolbar {} },
+#endif
+    };
+}
+
+InputMappings makeDefaultInputMappings(DefaultsEdition edition, PaneChordHost paneHost)
+{
+    auto mappings = InputMappings {
+        .keyMappings {
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                              .input = vtbackend::Key::Enter,
+                              .binding = { { actions::ToggleFullscreen {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Select);
+                                 mods.enable(vtbackend::MatchModes::Insert);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers {} },
+                              .input = vtbackend::Key::Escape,
+                              .binding = { { actions::CancelSelection {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::DownArrow,
+                              .binding = { { actions::ScrollOneDown {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::End,
+                              .binding = { { actions::ScrollToBottom {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::Home,
+                              .binding = { { actions::ScrollToTop {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::PageDown,
+                              .binding = { { actions::ScrollPageDown {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::PageUp,
+                              .binding = { { actions::ScrollPageUp {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::UpArrow,
+                              .binding = { { actions::ScrollOneUp {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Search);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers {} },
+                              .input = vtbackend::Key::F3,
+                              .binding = { { actions::FocusNextSearchMatch {} } } },
+            KeyInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                 auto mods = vtbackend::MatchModes();
+                                 mods.enable(vtbackend::MatchModes::Search);
+                                 return mods;
+                             }(),
+                              .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                              .input = vtbackend::Key::F3,
+                              .binding = { { actions::FocusPreviousSearchMatch {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::LeftArrow,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which
+            // is what carries them to anyone whose contour.yml predates them; listing them here is what
+            // puts them in a freshly generated one, where they can be seen and rebound.
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::PageUp,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::PageDown,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control },
+                              .input = vtbackend::Key::Tab,
+                              .binding = { { actions::SwitchToTabRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                              .input = vtbackend::Key::Tab,
+                              .binding = { { actions::SwitchToTabLeft {} } } },
+            // Ctrl+Alt+Arrow: swap the active pane with its neighbor (the two terminals trade slots).
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::LeftArrow,
+                              .binding = { { actions::SwapPaneLeft {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::RightArrow,
+                              .binding = { { actions::SwapPaneRight {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::UpArrow,
+                              .binding = { { actions::SwapPaneUp {} } } },
+            KeyInputMapping { .modes { vtbackend::MatchModes {} },
+                              .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt },
+                              .input = vtbackend::Key::DownArrow,
+                              .binding = { { actions::SwapPaneDown {} } } },
+            // Ctrl+Shift+Alt+Arrow: grow/shrink the active pane by moving the divider in that direction.
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::LeftArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Left } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::RightArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Right } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::UpArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Up } } } },
+            KeyInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers {
+                    vtbackend::Modifier::Control, vtbackend::Modifier::Shift, vtbackend::Modifier::Alt },
+                .input = vtbackend::Key::DownArrow,
+                .binding = { { actions::ResizePane { .direction = actions::Direction::Down } } } },
+            //     KeyInputMapping { .modes { vtbackend::MatchModes {} },
+            //                       .modifiers { vtbackend::Modifiers {  vtbackend::Modifier {
+            //                       vtbackend::Modifier::Shift }
+            //                                    | vtbackend::Modifiers { vtbackend::Modifier::Control }
+            //                                    }
+            //                                    },
+            //                       .input { vtbackend::Key::Plus },
+            //                       .binding = { { actions::IncreaseFontSize {} } } },
+        },
+        .charMappings {
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = ',',
+                               .binding = { { actions::ToggleInputMethodHandling {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = '-',
+                               .binding = { { actions::DecreaseFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = '_',
+                               .binding = { { actions::DecreaseFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'N',
+                               .binding = { actions::NewTerminal {} } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = true } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers {
+                                   vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                   | vtbackend::Modifiers { vtbackend::Modifier::Control } } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = false } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'S',
+                               .binding = { { actions::ScreenshotVT {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = '0',
+                               .binding = { { actions::ResetFontSize {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'T',
+                               .binding = { { actions::CreateNewTab {} } } },
+            // Reads the selection aloud. Does nothing where no speech engine is installed, and the
+            // context menu hides its row there, so the binding is harmless on a machine without a voice.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'S',
+                               .binding = { { actions::SpeakSelection {} } } },
+            // Split: paneCharChords(), per host.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'X',
+                               .binding = { { actions::ClosePane {} } } },
+            // Ctrl+Shift+P: the command palette. A CharInputMapping (not a KeyInputMapping) because
+            // Qt::Key_P is not in helper.cpp's KeyMappings table: any Ctrl+printable is routed through
+            // sendCharEvent, so the chord arrives as the character 'P' — exactly like Ctrl+Shift+T above.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'P',
+                               .binding = { { actions::OpenCommandPalette {} } } },
+            // Ctrl+Shift+Backslash: flip the active pane's split orientation (horizontal <-> vertical).
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = '\\',
+                               .binding = { { actions::ToggleSplitOrientation {} } } },
+            // Ctrl+Shift+Z: zoom the active pane to fill the tab, and back. Deliberately NOT Alt+F (which
+            // issue #91 floated): Alt+F is readline/emacs forward-word, and a default binding here would
+            // swallow it before it ever reached the shell.
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
+                               .input = 'Z',
+                               .binding = { { actions::TogglePaneZoom {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '1',
+                               .binding = { { actions::SwitchToTab { .position = 1 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '2',
+                               .binding = { { actions::SwitchToTab { .position = 2 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '3',
+                               .binding = { { actions::SwitchToTab { .position = 3 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '4',
+                               .binding = { { actions::SwitchToTab { .position = 4 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '5',
+                               .binding = { { actions::SwitchToTab { .position = 5 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '6',
+                               .binding = { { actions::SwitchToTab { .position = 6 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '7',
+                               .binding = { { actions::SwitchToTab { .position = 7 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '8',
+                               .binding = { { actions::SwitchToTab { .position = 8 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '9',
+                               .binding = { { actions::SwitchToTab { .position = 9 } } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifier::Alt },
+                               .input = '0',
+                               .binding = { { actions::SwitchToTab { .position = 10 } } } },
+            CharInputMapping {
+                .modes = []() -> vtbackend::MatchModes {
+                    auto mods = vtbackend::MatchModes();
+                    mods.enable(vtbackend::MatchModes::Select);
+                    mods.enable(vtbackend::MatchModes::Insert);
+                    return mods;
+                }(),
+                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                .input = 'C',
+                .binding = { { actions::CopySelection {} }, { actions::CancelSelection {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Select);
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'V',
+                               .binding = { { actions::PasteClipboard { .strip = false } },
+                                            { actions::CancelSelection {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.enable(vtbackend::MatchModes::Insert);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = ' ', // SPACE
+                               .binding = { { actions::ViNormalMode {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = ',',
+                               .binding = { { actions::OpenConfiguration {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'Q',
+                               .binding = { { actions::Quit {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.disable(vtbackend::MatchModes::AlternateScreen);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'K',
+                               .binding = { { actions::ScrollMarkUp {} } } },
+            CharInputMapping { .modes = []() -> vtbackend::MatchModes {
+                                  auto mods = vtbackend::MatchModes();
+                                  mods.disable(vtbackend::MatchModes::AlternateScreen);
+                                  return mods;
+                              }(),
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'J',
+                               .binding = { { actions::ScrollMarkDown {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'O',
+                               .binding = { { actions::OpenFileManager {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = '.',
+                               .binding = { { actions::ToggleStatusLine {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'F',
+                               .binding = { { actions::SearchReverse {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'H',
+                               .binding = { { actions::NoSearchHighlight {} } } },
+            CharInputMapping { .modes { vtbackend::MatchModes {} },
+                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift }
+                                            | vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                               .input = 'U',
+                               .binding = { { actions::HintMode {
+                                   .patterns = "url", .hintAction = vtbackend::HintAction::Open } } } },
+        },
+        .mouseMappings {
+            MouseInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers { vtbackend::Modifiers { editionDefaults(edition).followHyperlinkModifier } },
+                .input = vtbackend::MouseButton::Left,
+                .binding = { { actions::FollowHyperlink {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::Middle,
+                                .binding = { { actions::PasteSelection {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::ScrollDown {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::ScrollUp {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::DecreaseOpacity {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::IncreaseOpacity {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::DecreaseFontSize {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::IncreaseFontSize {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                                .input = vtbackend::MouseButton::WheelDown,
+                                .binding = { { actions::ScrollPageDown {} } } },
+            MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Shift } },
+                                .input = vtbackend::MouseButton::WheelUp,
+                                .binding = { { actions::ScrollPageUp {} } } },
+        }
+    };
+
+    if (edition == DefaultsEdition::Native2026)
+        for (auto const& row: native2026ChromeFocusChords())
+            mappings.keyMappings.push_back(KeyInputMapping {
+                .modes {}, .modifiers = row.modifiers, .input = row.key, .binding = { row.action } });
+    std::ranges::copy(blockFocusChords(), std::back_inserter(mappings.keyMappings));
+    // The pane chords of this host, a table of their own so that both hosts' rows are testable anywhere.
+    for (auto const& row: paneKeyChords(paneHost))
+        mappings.keyMappings.push_back(row.mapping);
+    for (auto const& row: paneCharChords(paneHost))
+        mappings.charMappings.push_back(row.mapping);
+    return mappings;
+}
+
+InputMappings const& defaultInputMappings(DefaultsEdition edition)
+{
+    static auto const values = std::array {
+        makeDefaultInputMappings(DefaultsEdition::Classic),
+        makeDefaultInputMappings(DefaultsEdition::Native2026),
+    };
+    static_assert(std::tuple_size_v<decltype(values)> == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs its bindings");
+    return values[static_cast<size_t>(edition)];
+}
+
+InputMappings const& defaultInputMappings()
+{
+    return defaultInputMappings(DefaultsEdition::Native2026);
 }
 
 std::vector<FallbackCharMapping> const& builtinFallbackCharMappings()
@@ -199,15 +774,69 @@ std::vector<FallbackCharMapping> const& builtinFallbackCharMappings()
     // Consumed when it declines (nothing finished, blank output, an attached session), as kitty does: the
     // shell would read it as ^G, which makes readline drop the line being typed. On the primary screen
     // only, where the blocks are; an alternate-screen application keeps the chord.
-    static auto const mappings = std::vector<FallbackCharMapping> {
-        FallbackCharMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                               vtbackend::Modifier::Shift } },
-                                           .input = U'G',
-                                           .binding = { { actions::OpenCommandOutput {} } } },
-                              .declined = DeclinedInput::Consume },
-    };
+    static auto const mappings = [] {
+        auto rows = std::vector<FallbackCharMapping> {
+            FallbackCharMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = U'G',
+                             .binding = { { actions::OpenCommandOutput {} } } },
+                .declined = DeclinedInput::Consume },
+        };
+#ifdef __APPLE__
+        std::ranges::copy(macFindChords(), std::back_inserter(rows));
+        std::ranges::copy(macTabChords(), std::back_inserter(rows));
+#endif
+        std::ranges::copy(paneCharChords(BuildPaneChordHost), std::back_inserter(rows));
+        return rows;
+    }();
     return mappings;
+}
+
+std::array<FallbackCharMapping, 4> const& macFindChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, char32_t input, actions::Action action) {
+        return FallbackCharMapping { .mapping = { .modes {},
+                                                  .modifiers { modifiers },
+                                                  .input = input,
+                                                  .binding = { { std::move(action) } } } };
+    };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const shiftSuper = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const rows = std::array {
+        chord(super, U'F', actions::SearchReverse {}),
+        chord(super, U'G', actions::FocusNextSearchMatch {}),
+        chord(shiftSuper, U'G', actions::FocusPreviousSearchMatch {}),
+        chord(super, U'E', actions::SearchSelection {}),
+    };
+    return rows;
+}
+
+std::array<FallbackCharMapping, MacTabChordCount> const& macTabChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, char32_t input, actions::Action action) {
+        return FallbackCharMapping { .mapping = { .modes {},
+                                                  .modifiers { modifiers },
+                                                  .input = input,
+                                                  .binding = { { std::move(action) } } } };
+    };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const shiftSuper = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const rows = [&] {
+        auto result = std::array<FallbackCharMapping, MacTabChordCount> {};
+        auto next = result.begin();
+        *next++ = chord(super, U'T', actions::CreateNewTab {});
+        *next++ = chord(super, U'W', actions::CloseTab {});
+        // Shift+[ arrives as '{': TerminalSession retries a Shift chord under its unshifted base.
+        *next++ = chord(shiftSuper, U'[', actions::SwitchToTabLeft {});
+        *next++ = chord(shiftSuper, U']', actions::SwitchToTabRight {});
+        for (auto const position: std::views::iota(1, MacTabPositionCount + 1))
+            *next++ = chord(
+                super, static_cast<char32_t>(U'0' + position), actions::SwitchToTab { .position = position });
+        return result;
+    }();
+    return rows;
 }
 
 namespace
@@ -548,6 +1177,94 @@ static std::string createString(Config const& c)
     return createString<YAMLConfigWriter>(c);
 }
 
+namespace
+{
+    /// The font configuration @p edition ships.
+    /// @param edition The edition whose font to describe.
+    /// @return Every face in the edition's family, at its size.
+    [[nodiscard]] vtrasterizer::FontDescriptions makeDefaultFont(DefaultsEdition edition)
+    {
+        auto const& defaults = editionDefaults(edition);
+        auto const face = [&](text::FontWeight weight, text::FontSlant slant) {
+            return text::FontDescription { .familyName = std::string { defaults.fontFamily },
+                                           .weight = weight,
+                                           .slant = slant,
+                                           .spacing = text::FontSpacing::Mono,
+                                           .strictSpacing = false,
+                                           .features = {} };
+        };
+        return vtrasterizer::FontDescriptions {
+            .dpiScale = 1.0,
+            .dpi = { 0, 0 },
+            .size = { defaults.fontSize },
+            .regular = face(text::FontWeight::Normal, text::FontSlant::Normal),
+            .bold = face(text::FontWeight::Bold, text::FontSlant::Normal),
+            .italic = face(text::FontWeight::Normal, text::FontSlant::Italic),
+            .boldItalic = face(text::FontWeight::Bold, text::FontSlant::Italic),
+            .emoji = text::FontDescription { .familyName = { "emoji" } },
+            .renderMode = text::RenderMode::Gray,
+            .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
+            .fontLocator = vtrasterizer::FontLocatorEngine::Native,
+            .builtinBoxDrawing = true,
+            .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
+            .textOutline = {},
+        };
+    }
+
+    /// The palette a built-in scheme name stands for, resolved as the loader resolves a name that no
+    /// `color_schemes:` entry or side file overrides.
+    /// @param name A built-in scheme name, or "default".
+    /// @return The scheme's palette; the default palette for a name no built-in scheme answers to.
+    [[nodiscard]] vtbackend::ColorPalette builtinPalette(std::string_view name)
+    {
+        auto palette = vtbackend::ColorPalette {};
+        (void) vtbackend::defaultColorPalettes(name, palette);
+        return palette;
+    }
+} // namespace
+
+vtrasterizer::FontDescriptions const& defaultFont(DefaultsEdition edition)
+{
+    static auto const values = std::array {
+        makeDefaultFont(DefaultsEdition::Classic),
+        makeDefaultFont(DefaultsEdition::Native2026),
+    };
+    static_assert(std::tuple_size_v<decltype(values)> == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs its font");
+    return values[static_cast<size_t>(edition)];
+}
+
+ColorConfig defaultColors(DefaultsEdition edition)
+{
+    auto const& defaults = editionDefaults(edition);
+    if (defaults.darkColorScheme == defaults.lightColorScheme)
+        return SimpleColorConfig { .colorScheme = std::string { defaults.darkColorScheme },
+                                   .colors = builtinPalette(defaults.darkColorScheme) };
+    return DualColorConfig { .colorSchemeLight = std::string { defaults.lightColorScheme },
+                             .colorSchemeDark = std::string { defaults.darkColorScheme },
+                             .darkMode = builtinPalette(defaults.darkColorScheme),
+                             .lightMode = builtinPalette(defaults.lightColorScheme) };
+}
+
+ColorConfig pairedColors(DefaultsEdition edition, ColorConfig loaded)
+{
+    constexpr auto StockScheme = std::string_view { "default" };
+    // The slots past the 256 indexed colors are the dim variants, which a file that spells out the normal
+    // colors derives (0.5x) while the built-in scheme carries its own: a difference, but no customization.
+    constexpr auto IndexedColorCount = std::ptrdiff_t { 256 };
+    auto const* simple = std::get_if<SimpleColorConfig>(&loaded);
+    if (simple == nullptr || simple->colorScheme != StockScheme)
+        return loaded;
+    auto const stock = builtinPalette(StockScheme);
+    auto untouched = simple->colors;
+    std::ranges::copy(stock.palette | std::views::drop(IndexedColorCount),
+                      std::ranges::begin(untouched.palette | std::views::drop(IndexedColorCount)));
+    if (untouched != stock)
+        return loaded;
+    auto paired = defaultColors(edition);
+    return std::holds_alternative<DualColorConfig>(paired) ? std::move(paired) : std::move(loaded);
+}
+
 std::string defaultConfigString()
 {
     Config const config {};
@@ -592,9 +1309,57 @@ Config loadConfig()
     return loadConfigFromFile(configHome() / "contour.yml");
 }
 
+namespace
+{
+    /// The `defaults_edition` one configuration document states.
+    /// @param path The document: contour.yml or settings.yml.
+    /// @return The edition it names; nothing when the file is absent, unreadable or names none. A
+    ///         value no edition answers to is reported and is the same as none.
+    [[nodiscard]] std::optional<DefaultsEdition> statedDefaultsEdition(fs::path const& path)
+    {
+        std::error_code ec;
+        if (!fs::exists(path, ec) || ec)
+            return std::nullopt;
+        auto const document = YAMLConfigReader::parseSideFile(path);
+        if (!document)
+            return std::nullopt; // The full load reports a broken file; the scan only looks for its key.
+        auto const node = (*document)[std::string { DefaultsEditionKey }];
+        if (!node || !node.IsScalar())
+            return std::nullopt;
+        auto const token = node.as<std::string>();
+        auto const edition = configEnumFromToken<DefaultsEdition>(token);
+        if (!edition)
+            errorLog()("{}: {} '{}' names no edition; ignoring it.",
+                       core::pathToUtf8(path),
+                       DefaultsEditionKey,
+                       token);
+        return edition;
+    }
+} // namespace
+
+DefaultsEditionSources scanDefaultsEditionSources(fs::path const& configFile)
+{
+    return DefaultsEditionSources {
+        .mainFile = statedDefaultsEdition(configFile),
+        .settingsFile = statedDefaultsEdition(configFile.parent_path() / "settings.yml"),
+    };
+}
+
+DefaultsEdition scanDefaultsEdition(fs::path const& configFile)
+{
+    // settings.yml wins (see effectiveEdition): it is where the GUI records a switch to new defaults, and
+    // the hand-maintained contour.yml is never rewritten for it.
+    return effectiveEdition(scanDefaultsEditionSources(configFile));
+}
+
 Config loadConfigFromFile(fs::path const& fileName)
 {
-    Config config {};
+    // Created first, so the scan always finds a file: a fresh install's is the generated one, which
+    // states the newest edition, and a file that predates the key states none and so stays Classic.
+    createFileIfNotExists(fileName);
+
+    auto const sources = scanDefaultsEditionSources(fileName);
+    auto config = Config { .defaultsEdition = effectiveEdition(sources), .defaultsEditionSources = sources };
 
     loadConfigFromFile(config, fileName);
 
@@ -649,8 +1414,10 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     settings.pageSize = profile.terminalSize.value();
     settings.historyLimits = profile.history.value().limits();
     auto const& folding = config.folding.value();
-    // Through the one conversion the window geometry reserves the strip's width from.
-    settings.gutter = gutterSettingsFor(config);
+    // Through the one conversion the window geometry reserves the strip's width from. The emulation half
+    // is what a daemon hosts, and no chrome of the daemon's draws a rail: the glyph cells, which a client
+    // presenting the session replaces with its own chrome's form (sessionSettings()).
+    settings.gutter = gutterSettingsFor(config, vtbackend::BlockColumnForm::Glyphs);
     settings.autoCollapseFoldOnNewCommand = folding.autoCollapseOnNewCommand;
     settings.foldJumpBehavior = folding.onJumpIntoFold;
     settings.foldingAvailability = folding.availability();
@@ -679,7 +1446,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     return settings;
 }
 
-vtbackend::GutterSettings gutterSettingsFor(Config const& config)
+vtbackend::GutterSettings gutterSettingsFor(Config const& config, vtbackend::BlockColumnForm form)
 {
     auto const& gutter = config.gutter.value();
     return vtbackend::GutterSettings {
@@ -693,6 +1460,7 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config)
         .timestampFormat = gutter.timestampFormat,
         .hoverStroke =
             gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
+        .blockColumnForm = form,
     };
 }
 
@@ -832,9 +1600,23 @@ std::optional<vtbackend::Modifiers> followHyperlinkModifiers(Config const& confi
     return std::nullopt;
 }
 
+vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreference motion)
+{
+    switch (motion)
+    {
+        case MotionPreference::Full: break;
+        case MotionPreference::Reduced:
+            for (auto const setting: MotionSettings)
+                settings.*setting = std::chrono::milliseconds { 0 };
+            break;
+    }
+    return settings;
+}
+
 vtbackend::Settings sessionSettings(Config const& config,
                                     TerminalProfile const& profile,
                                     vtbackend::ColorPreference colorPreference,
+                                    vtbackend::BlockColumnForm blockColumnForm,
                                     std::optional<vtbackend::PageSize> initialPageSize)
 {
     // The emulation half comes from the shared table, so a GUI-hosted session and a
@@ -849,6 +1631,9 @@ vtbackend::Settings sessionSettings(Config const& config,
     // (which never happens for a background tab).
     if (initialPageSize)
         settings.pageSize = *initialPageSize;
+
+    // The presenting chrome decides whether the block column is cells or the rail's strip.
+    settings.gutter.blockColumnForm = blockColumnForm;
 
     // Focus is granted, never assumed: a session born focused (a background tab, a non-active
     // split pane, a daemon-hosted session before any client attaches) would otherwise render an
@@ -876,6 +1661,7 @@ vtbackend::Settings sessionSettings(Config const& config,
     settings.linkPatterns = linkPatternsFor(profile);
     settings.linkDetection = linkDetectionPolicyOf(profile.linkDetection.value());
     settings.linkDecorationMode = profile.hyperlinkDecoration.value().mode;
+    settings.preeditStyle = profile.inputMethodEditorStyle.value();
     settings.linkFollowModifiers = followHyperlinkModifiers(config);
     settings.statusDisplayType = profile.statusLine.value().initialType;
     settings.statusDisplayPosition = profile.statusLine.value().position;
@@ -924,7 +1710,9 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
                                             vtbackend::ColorPreference colorPreference,
                                             std::optional<vtbackend::PageSize> initialPageSize)
 {
-    auto settings = sessionSettings(config, profile, colorPreference, initialPageSize);
+    // Hosted by a daemon, whose terminal no chrome of its own draws: the glyph cells.
+    auto settings = sessionSettings(
+        config, profile, colorPreference, vtbackend::BlockColumnForm::Glyphs, initialPageSize);
 
     // The shell: a copy of the profile's configured ExecInfo (program/arguments/workingDirectory
     // already carry the profile's `shell:` block), with CONTOUR_PROFILE added exactly as a local
@@ -996,6 +1784,8 @@ void compareEntries(Config& config, auto const& output)
     // compare entries in config and default config and log differences
     auto defaultConfig = YAML::Load(defaultConfigString());
     auto userConfig = YAML::Load(readFile(config.configFile).value_or(std::string {}));
+    // A file that predates the key is the Classic edition by its absence, not a file missing a setting.
+    defaultConfig.remove(std::string { DefaultsEditionKey });
 
     std::vector<std::string> existingEntries;
     std::vector<std::string> userEntries;
@@ -1032,6 +1822,8 @@ static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& read
 {
     for (auto const& [name, _]: config.profiles.value())
         config.profileOrigins.emplace(name, SettingsOrigin::MainConfig);
+    for (auto const& [name, _]: config.hosts.value())
+        config.hostOrigins.emplace(name, SettingsOrigin::MainConfig);
     for (auto const& [name, _]: config.colorschemes.value())
         config.colorSchemeOrigins.emplace(
             name, name == "default" ? SettingsOrigin::Builtin : SettingsOrigin::MainConfig);
@@ -1053,12 +1845,43 @@ static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& read
 /// settings.yml's document. Nothing saved yet is no error: that is an empty document.
 /// @param path The `settings.yml` path, beside contour.yml.
 /// @return The document, or why there is none.
-[[nodiscard]] static std::expected<YAML::Node, std::string> parseGuiSettingsFile(fs::path const& path)
+[[nodiscard]] static std::expected<YAML::Node, std::string> parseGuiSettingsFile(
+    fs::path const& path, std::optional<std::string> const& bytes)
+{
+    if (!bytes)
+        return YAML::Node {};
+    return YAMLConfigReader::parseSideFileText(path, *bytes);
+}
+
+/// The bytes of side file @p path as they are on disk, CRs included, as the Settings store reads them.
+/// @return The bytes, or nullopt when there is no such file or it cannot be read.
+[[nodiscard]] static std::optional<std::string> sideFileBytes(fs::path const& path)
 {
     std::error_code ec;
-    if (!fs::exists(path, ec) || ec)
-        return YAML::Node {};
-    return YAMLConfigReader::parseSideFile(path);
+    if (!fs::is_regular_file(path, ec) || ec)
+        return std::nullopt;
+    auto in = std::ifstream(path, std::ios::binary);
+    if (!in)
+        return std::nullopt;
+    return std::string { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+}
+
+/// The key of side file @p path, under @p dir, in Config::loadedSideFiles.
+[[nodiscard]] static std::string loadedSideFileKey(fs::path const& dir, fs::path const& path)
+{
+    auto const relative = path.lexically_relative(dir).generic_u8string();
+    return std::string { relative.begin(), relative.end() };
+}
+
+/// @param node A YAML node.
+/// @return It as YAML flow text, on one line.
+[[nodiscard]] static std::string flowYamlOf(YAML::Node const& node)
+{
+    auto out = YAML::Emitter {};
+    out.SetMapFormat(YAML::Flow);
+    out.SetSeqFormat(YAML::Flow);
+    out << node;
+    return std::string { out.c_str() };
 }
 
 /// The GUI-owned settings a parsed settings.yml holds.
@@ -1084,19 +1907,70 @@ static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& read
                 settings.globalOverrides[key] = entry.second.as<std::string>();
             else if (entry.second.IsMap())
                 for (auto const& child: entry.second)
-                    if (child.first.IsScalar() && child.second.IsScalar())
-                        settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
-                            child.second.as<std::string>();
+                {
+                    if (!child.first.IsScalar())
+                        continue;
+                    auto const leaf = key + '.' + child.first.as<std::string>();
+                    if (child.second.IsScalar())
+                        settings.globalOverrides[leaf] = child.second.as<std::string>();
+                    else if (child.second.IsMap() || child.second.IsSequence())
+                    {
+                        // A leaf that is itself a collection (`quick_terminal.hotkey`), kept as its YAML
+                        // flow text for the same re-emission, and marked as one: the text alone could not
+                        // be told from a string that looks the same.
+                        settings.globalOverrides[leaf] = flowYamlOf(child.second);
+                        settings.collectionOverrides.insert(leaf);
+                    }
+                }
         }
 
     return settings;
 }
 
+/// Hands each `<directory>/<name>.yml` side file beside contour.yml to @p merge, in name order (deterministic
+/// across file systems), and records its bytes in Config::loadedSideFiles. A file that cannot be read or
+/// parsed is logged and skipped rather than taking the configuration down.
+/// @param config    The configuration being loaded (its @c configFile locates the side files).
+/// @param directory The kind's directory: `profiles`, `hosts`.
+/// @param what      What a file holds, for the log.
+/// @param merge     Called with each file's path, its name (the file's stem) and its parsed document.
+template <typename Merge>
+static void mergeSideFilesIn(Config& config,
+                             std::string_view directory,
+                             std::string_view what,
+                             Merge const& merge)
+{
+    auto const dir = config.configFile.parent_path();
+    auto const kindDir = dir / directory;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(kindDir, ec))
+        return;
+    auto files = std::vector<std::filesystem::path> {};
+    for (auto const& entry: std::filesystem::directory_iterator(kindDir, ec))
+        if (entry.is_regular_file() && entry.path().extension() == ".yml")
+            files.push_back(entry.path());
+    std::ranges::sort(files);
+
+    for (auto const& path: files)
+    {
+        auto bytes = sideFileBytes(path);
+        auto const root = bytes ? YAMLConfigReader::parseSideFileText(path, *bytes)
+                                : YAMLConfigReader::parseSideFile(path); // says why it cannot be read
+        config.loadedSideFiles.insert_or_assign(loadedSideFileKey(dir, path), std::move(bytes));
+        if (!root)
+        {
+            configLog()("Skipping the {} side file {}", what, root.error());
+            continue;
+        }
+        merge(path, core::pathToUtf8(path.stem()), *root);
+    }
+}
+
 /// Merges the GUI-managed side files over the just-parsed configuration, mirroring the layouts.yml
 /// merge: the freshest (GUI) content wins, and a broken file is logged and skipped rather than taking
 /// the whole configuration down. Color scheme side files (colorschemes/<name>.yml) are already
-/// resolved lazily by the reader when a profile references them, so only the per-profile files and the
-/// global settings.yml are handled here.
+/// resolved lazily by the reader when a profile references them, so only the per-profile files, the saved
+/// hosts and the global settings.yml are handled here.
 /// @param config The configuration to augment in place (its @c configFile locates the side files).
 /// @param reader The reader used for the main config; reused to parse profile bodies (it carries the
 ///               logger and ${VAR} replacer, and loadProfileBody takes its node explicitly).
@@ -1106,43 +1980,42 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 
     // Inheritance base for GUI profiles: the resolved default profile, captured BEFORE any side file
     // can replace it in the map, so a GUI profile inherits the same defaults an inline one would.
-    auto base = TerminalProfile {};
+    auto base = TerminalProfile { .defaultsEdition = config.defaultsEdition };
     if (auto const* def = config.findProfile(config.defaultProfileName.value()))
         base = *def;
 
-    auto const profilesDir = dir / "profiles";
-    std::error_code ec;
-    if (std::filesystem::is_directory(profilesDir, ec))
-    {
-        auto files = std::vector<std::filesystem::path> {};
-        for (auto const& entry: std::filesystem::directory_iterator(profilesDir, ec))
-            if (entry.is_regular_file() && entry.path().extension() == ".yml")
-                files.push_back(entry.path());
-        std::ranges::sort(files); // deterministic load order across filesystems
-
-        for (auto const& path: files)
-        {
-            auto const name = core::pathToUtf8(path.stem());
-            auto const root = YAMLConfigReader::parseSideFile(path);
-            if (!root)
-            {
-                configLog()("Skipping the profile side file {}", root.error());
-                continue;
-            }
+    mergeSideFilesIn(
+        config,
+        "profiles",
+        "profile",
+        [&](fs::path const& path, std::string const& name, YAML::Node const& root) {
             auto profile = base; // inherit the default profile's values, then overlay the file's keys
-            // The file's root is the profile's body, so a malformed entry is reported as `<file>: <key>`;
-            // the key alone would name neither the file nor the profile.
-            reader.readSideFile(path, *root, [&]() { reader.loadProfileBody(*root, profile, name); });
+            // The file's root is the profile's body, so a malformed entry is reported as `<file>: <key>`; the
+            // key alone would name neither the file nor the profile.
+            reader.readSideFile(path, root, [&]() { reader.loadProfileBody(root, profile, name); });
             config.profiles.value()[name] = std::move(profile);
             config.profileOrigins[name] = SettingsOrigin::SideFile;
-        }
-    }
+        });
+
+    // hosts/<name>.yml: a saved host Settings wrote, read as an entry of `hosts:` is. One that cannot be used
+    // is reported and skipped, as there.
+    mergeSideFilesIn(
+        config, "hosts", "host", [&](fs::path const& path, std::string const& name, YAML::Node const& root) {
+            auto host = std::optional<HostEntry> {};
+            reader.readSideFile(path, root, [&]() { host = reader.parseHostNode(root, name); });
+            if (!host)
+                return;
+            config.hosts.value().insert_or_assign(name, std::move(*host));
+            config.hostOrigins[name] = SettingsOrigin::SideFile;
+        });
 
     // settings.yml — GUI-owned globals. Applied last so a default_profile can name a profile the scan
     // above just introduced. Read and parsed once: the overrides applied are the ones listed, even when
     // the settings page saves the file in between.
     auto const settingsPath = dir / "settings.yml";
-    auto const settingsDocument = parseGuiSettingsFile(settingsPath);
+    auto settingsBytes = sideFileBytes(settingsPath);
+    auto const settingsDocument = parseGuiSettingsFile(settingsPath, settingsBytes);
+    config.loadedSideFiles.insert_or_assign(loadedSideFileKey(dir, settingsPath), std::move(settingsBytes));
     if (auto loaded = settingsDocument.transform(guiSettingsFrom))
     {
         config.guiManagedSettings = *loaded;
@@ -1185,7 +2058,42 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         }
     }
     else
+    {
+        config.guiSettingsFileHealth = GuiSettingsFileHealth::Unparsable;
         configLog()("Failed to load settings.yml: {}", loaded.error());
+    }
+}
+
+IndicatorConfig indicatorForEdition(IndicatorConfig spelled, DefaultsEdition writtenFor, DefaultsEdition now)
+{
+    if (writtenFor == now)
+        return spelled;
+    auto const& before = editionDefaults(writtenFor).statusLine;
+    auto const& after = editionDefaults(now).statusLine;
+    for (auto const& segment: IndicatorSegments)
+        if (spelled.*segment.spelled == before.*segment.shipped)
+            spelled.*segment.spelled = std::string { after.*segment.shipped };
+    return spelled;
+}
+
+/// Reads contour.yml's profiles as the edition in effect rather than the one the file was written under,
+/// once settings.yml switches it ("Use New"): contour.yml is never rewritten, so what it spells as its own
+/// edition's default would otherwise keep that default (@see indicatorForEdition). Runs before the side
+/// files merge, so a side-file profile inherits the default profile's template as adopted.
+/// @param config The configuration just read from contour.yml, its origins recorded.
+static void adoptSwitchedEdition(Config& config)
+{
+    auto const writtenFor = config.defaultsEditionSources.mainFile.value_or(DefaultsEdition::Classic);
+    if (!config.defaultsEditionSources.settingsFile || writtenFor == config.defaultsEdition)
+        return;
+    for (auto& [name, profile]: config.profiles.value())
+        if (config.profileOrigins[name] == SettingsOrigin::MainConfig)
+        {
+            auto statusLine = profile.statusLine.value();
+            statusLine.indicator =
+                indicatorForEdition(statusLine.indicator, writtenFor, config.defaultsEdition);
+            profile.statusLine = statusLine;
+        }
 }
 
 /**
@@ -1205,10 +2113,13 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     // stale provenance would keep the settings page treating a contour.yml entry as GUI-owned. The loaders
     // assume the built-in seeds exist (the "main" profile is the inheritance base; the "default" color
     // palette is the fallback), so restore those — exactly a first load's initial Config state.
-    config.profiles.value() = { { "main", TerminalProfile {} } };
+    config.profiles.value() = { { "main", TerminalProfile { .defaultsEdition = config.defaultsEdition } } };
     config.colorschemes.value() = { { "default", vtbackend::ColorPalette {} } };
+    config.hosts.value().clear();
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
+    config.hostOrigins.clear();
+    config.loadedSideFiles.clear();
 
     auto yamlVisitor = YAMLConfigReader(config.configFile, logger, configEnvironment());
     yamlVisitor.load(config);
@@ -1228,6 +2139,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     // Provenance first, then the GUI side files (profiles/*.yml, settings.yml) on top — the same
     // freshest-wins, broken-file-tolerant merge philosophy the layouts.yml merge above uses.
     recordMainConfigOrigins(config, yamlVisitor);
+    adoptSwitchedEdition(config);
     mergeGuiManagedSideFiles(config, yamlVisitor);
 
     compareEntries(config, logger);
@@ -1440,6 +2352,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
         loadFromEntry("daemon", c.daemon);
+        loadFromEntry("quick_terminal", c.quickTerminal);
         loadFromEntry("folding", c.folding);
         loadFromEntry("gutter", c.gutter);
         loadFromEntry("osc_context", c.oscContext);
@@ -1449,6 +2362,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("snap_to_rows", c.snapToRows);
+        loadFromEntry("connect_picker_on_start", c.connectPickerOnStart);
         loadFromEntry("remember_window_position", c.rememberWindowPosition);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
         loadFromEntry("accessibility_announcements", c.accessibilityAnnouncements);
@@ -1464,13 +2378,15 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("theme", c.theme);
         loadFromEntry("ui_style", c.uiStyle);
         loadFromEntry("window_control_style", c.windowControlStyle);
+        loadFromEntry("chrome_density", c.chromeDensity);
+        loadFromEntry("secure_input", c.secureInput);
         loadFromEntry("ui_font_family", c.uiFontFamily);
         loadFromEntry("ui_font_size", c.uiFontSize);
         loadFromEntry("experimental", c.experimentalFeatures);
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
-        loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
+        loadFromEntry("profiles", c.profiles, c.defaultProfileName.value(), c.defaultsEdition);
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
@@ -1510,15 +2426,21 @@ std::expected<YAML::Node, std::string> YAMLConfigReader::parseSideFile(fs::path 
 {
     // Through readFile, which reads in binary and drops each CR, so a file saved with Windows line endings
     // parses as it does everywhere else: YAML::LoadFile would keep the CR on every scalar off Windows.
-    auto const contents = readFile(file);
+    auto contents = readFile(file);
     if (!contents)
         return std::unexpected(std::format("{}: the file cannot be read", core::pathToUtf8(file)));
+    return parseSideFileText(file, std::move(*contents));
+}
 
+std::expected<YAML::Node, std::string> YAMLConfigReader::parseSideFileText(fs::path const& file,
+                                                                           std::string contents)
+{
+    std::erase(contents, '\r'); // as readFile() does
     try
     {
         // A side file holds a map of settings, or nothing yet. A bare word or a list parses too, but names
         // no setting, and subscripting a bare word throws.
-        auto document = YAML::Load(*contents);
+        auto document = YAML::Load(contents);
         if (!document.IsMap() && !document.IsNull())
             return std::unexpected(
                 std::format("{}: the document is not a map of settings", core::pathToUtf8(file)));
@@ -1620,7 +2542,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "tab_color", where.tabColor);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
-        loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
+        loadFromEntry(child, "option_as_alt", where.optionAsAlt);
         loadFromEntry(child, "margins", where.margins);
         loadFromEntry(child, "terminal_id", where.terminalId);
         loadFromEntry(child, "frozen_dec_modes", where.frozenModes);
@@ -1634,6 +2556,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "mouse", where.mouse);
         loadFromEntry(child, "permissions", where.permissions);
         loadFromEntry(child, "input_method_editor", where.inputMethodEditor);
+        loadFromEntry(child, "input_method_editor_style", where.inputMethodEditorStyle);
         loadFromEntry(child, "highlight_word_and_matches_on_double_click", where.highlightDoubleClickedWord);
         loadFromEntry(child, "font", where.fonts);
         loadFromEntry(child, "draw_bold_text_with_bright_colors", where.drawBoldTextWithBrightColors);
@@ -1653,6 +2576,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         // clang-format on
 
         loadFromEntry(child, "colors", where.colors);
+        where.colors.value() = pairedColors(where.defaultsEdition, std::move(where.colors.value()));
 
         if (auto* simple = get_if<SimpleColorConfig>(&(where.colors.value())))
             simple->colors.useBrightColors = where.drawBoldTextWithBrightColors.value();
@@ -1868,9 +2792,8 @@ std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostN
         .remoteCommand = scalar("remote_command").value_or(std::string {}),
         .profile = scalar("profile").value_or(std::string {}),
     };
-    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
-    if (host.url.scheme == HostScheme::Tls && host.tokenFile.empty())
-        return skip("a tls:// host needs a token_file");
+    if (auto const token = checkHostToken(host.url.scheme, core::pathToUtf8(host.tokenFile)); !token)
+        return skip(describe(token.error()));
     if (host.url.scheme == HostScheme::Tls && host.tlsCa.empty())
         errorLog()("Host '{}' has no tls_ca: the daemon's certificate is not verified", name);
     return host;
@@ -1986,6 +2909,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
     loadEntry("word_highlight_current", where.wordHighlightCurrent);
     loadEntry("word_highlight_other", where.wordHighlight);
     loadEntry("hint_label", where.hintLabel);
+    // Left unset unless the scheme says otherwise: an unset pair keeps the typed characters mixed halfway to
+    // the background. A key it leaves out is hint_label's.
+    loadMap("hint_label_typed", [&](YAML::Node const&) {
+        auto typed = where.hintLabelTyped.value_or(where.hintLabel);
+        loadFromEntry(node, "hint_label_typed", typed);
+        where.hintLabelTyped = typed;
+    });
     loadEntry("hint_match", where.hintMatch);
     loadEntry("input_method_editor", where.inputMethodEditor);
 
@@ -2653,6 +3583,28 @@ namespace
     }
 } // namespace
 
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, SecureInputMode& where)
+{
+    // The table's tokens and the aliases that read as `off`; a miss is reported, naming both, and keeps
+    // the edition's default.
+    static auto const accepted = [] {
+        auto names = std::string {};
+        for (auto const& rows:
+             { std::span { detail::SecureInputModeTable }, std::span { detail::SecureInputModeAliases } })
+            for (auto const& row: rows)
+                names += names.empty() ? std::string { row.token } : std::format(", {}", row.token);
+        return names;
+    }();
+    (void) detail::loadConfigEnum(
+        node,
+        entry,
+        keyPathTo(node, entry),
+        where,
+        logger,
+        [](std::string const& token) { return secureInputModeFrom(token); },
+        accepted);
+}
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where)
 {
     auto const child = node[entry];
@@ -2686,6 +3638,37 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 
     loadFromEntry(child, "restore", where.restore);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     QuickTerminalConfig& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    // Absent or null (`~`) leaves the quick terminal unbound.
+    if (auto const hotkey = child["hotkey"]; hotkey && !hotkey.IsNull())
+    {
+        auto const mods = parseModifier(hotkey);
+        auto const key = hotkey["key"] && hotkey["key"].IsScalar()
+                             ? parseKeyOrChar(hotkey["key"].as<std::string>())
+                             : std::nullopt;
+        if (!mods || !key)
+            errorLog()("Ignoring {}.hotkey: it needs `mods` and a `key`, as an input mapping spells them.",
+                       keyPathTo(child, "hotkey"));
+        else if (auto const chord = validateHotkeyChord(HotkeyChord { .modifiers = *mods, .key = *key });
+                 chord)
+            where.hotkey = *chord;
+        else
+            errorLog()("Ignoring {}.hotkey: a global hotkey needs at least one of Control, Alt and Super.",
+                       keyPathTo(child, "hotkey"));
+    }
+
+    auto hideOnFocusLoss = where.focusLoss == QuickTerminalFocusLoss::Hide;
+    loadFromEntry(child, "hide_on_focus_loss", hideOnFocusLoss);
+    where.focusLoss = hideOnFocusLoss ? QuickTerminalFocusLoss::Hide : QuickTerminalFocusLoss::Stay;
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where)
@@ -2826,6 +3809,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     if (child)
     {
         loadFromEntry(child, "position", where.position);
+        loadFromEntry(child, "mode", where.mode);
         loadFromEntry(child, "hide_in_alt_screen", where.hideScrollbarInAltScreen);
         loadFromEntry(child, "marks", where.marks);
     }
@@ -2866,7 +3850,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         logger()("Loading entry: {}, value {}", entry, token);
         // Through the token table the writer spells the list from, so what it writes reads back.
         if (auto const source = configEnumFromToken<vtbackend::ScrollbarMarkSource>(token))
+        {
+            // Each token is its own source: `running` left out of a list stays off, so what the settings
+            // page writes reads back.
             sources.enable(*source);
+        }
         else
             errorLog()("Unknown value in {} ({}): '{}'; ignored.",
                        keyPathTo(node, entry),
@@ -3431,12 +4419,20 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, OptionAsAlt& where)
+{
+    // The tokens, then the booleans the setting was before it named sides: an old file keeps working, and an
+    // unrecognized word is reported and leaves the value as it was.
+    (void) detail::loadConfigEnum(
+        node, entry, keyPathTo(node, entry), where, logger, parseOptionAsAlt, "off, left, right, both");
+}
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::GlyphScalingMethod& where)
 {
     // Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
-    // in a visible rendering setting should not pass unnoticed. Mirrors the GuiTheme reader.
+    // in a visible rendering setting should not pass unnoticed.
     if (auto const child = node[entry])
     {
         auto const rawValue = child.as<std::string>();
@@ -3444,32 +4440,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             where = *method;
         else
             errorLog()("Invalid value for {}: '{}'. Expected 'stretch' or 'rerasterize'.", entry, rawValue);
-    }
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where)
-{
-    // Case-insensitive. An unrecognized value is reported and leaves @p where at its (default)
-    // value: a typo in a visible appearance setting should not silently pass unnoticed.
-    auto parseTheme = [&](std::string const& key) -> std::optional<GuiTheme> {
-        auto const literal = core::toLower(key);
-        logger()("Loading entry: {}, value {}", entry, literal);
-        if (literal == "system")
-            return GuiTheme::System;
-        if (literal == "dark")
-            return GuiTheme::Dark;
-        if (literal == "light")
-            return GuiTheme::Light;
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto const rawValue = child.as<std::string>();
-        if (auto const opt = parseTheme(rawValue))
-            where = opt.value();
-        else
-            errorLog()("Unknown theme value '{}'; keeping {}.", rawValue, where);
     }
 }
 
@@ -4133,6 +5103,8 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
             flag = MatchModes::Search;
         else if (upperArg == "TRACE")
             flag = MatchModes::Trace;
+        else if (upperArg == "BLOCKFOCUS")
+            flag = MatchModes::BlockFocus;
         else
         {
             errorLog()("Unknown input_mapping mode: {}", arg);
@@ -4507,9 +5479,12 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::OpenConfiguration>(action))
         {
-            // Default opens the in-app settings page; `in_editor: true` opens the config file instead.
+            // Default opens the Settings window; `in_editor: true` opens the config file instead.
             if (auto inEditor = node["in_editor"]; inEditor && inEditor.IsScalar())
-                return actions::OpenConfiguration { inEditor.as<bool>() };
+                return actions::OpenConfiguration { .target =
+                                                        inEditor.as<bool>()
+                                                            ? actions::ConfigurationTarget::Editor
+                                                            : actions::ConfigurationTarget::SettingsWindow };
             return action;
         }
 
@@ -4820,26 +5795,25 @@ static std::string createForGlobal(Config const& c)
     };
 
     auto const processConfigEntry =
-        [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto const& name,
-            contour::config::ConfigEntry<
-                T,
-                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+        [&]<typename T, typename Doc>(auto const& name, contour::config::ConfigEntry<T, Doc> const& v) {
             doc.append(writer.processEntry(writer.whichDoc(v), name, v.value()));
         };
 
     auto const processConfigEntryWithEscape =
-        [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto const& name,
-            contour::config::ConfigEntry<
-                std::string,
-                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+        [&]<typename Doc>(auto const& name, contour::config::ConfigEntry<std::string, Doc> const& v) {
             doc.append(writer.processEntry(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
+
+    // Not a ConfigEntry: the edition is fixed before the file is read, so no loader assigns it. It is
+    // written all the same, so that a generated file names the defaults it was generated with.
+    auto const processDefaultsEdition = [&](auto const& name, DefaultsEdition const& edition) {
+        doc.append(writer.processEntry(writer.whichDoc(documentation::DefaultsEdition {}), name, edition));
+    };
 
     auto completeOverload = core::Overloaded {
         processConfigEntry,
         processConfigEntryWithEscape,
+        processDefaultsEdition,
         // Ignored entries
         [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,
@@ -4855,8 +5829,12 @@ static std::string createForGlobal(Config const& c)
         [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
                                          documentation::Layouts> const& v) {},
+        // The saved hosts are written by hand; a generated file carries their documentation and a commented
+        // example, so that "Attach to Host" can be found from the file alone.
         [&]([[maybe_unused]] auto const& name,
-            [[maybe_unused]] ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> const& v) {},
+            ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> const& v) {
+            doc.append(writer.format(writer.whichDoc(v)));
+        },
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 
@@ -4877,22 +5855,15 @@ template <typename Writer>
 static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile const& profile)
 {
     auto const processConfigEntry =
-        [&]<typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto const& name,
-            contour::config::ConfigEntry<
-                T,
-                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
+        [&]<typename T, typename Doc>(auto const& name, contour::config::ConfigEntry<T, Doc> const& v) {
             doc.append(writer.processEntry(writer.whichDoc(v), name, v.value()));
         };
 
     // Something is wrong for vtpty::Process::ExecInfo formatting for static build
     // we add this lambda to handle it in overload set for now
     auto const processConfigEntryWithExecInfo =
-        [&]<documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>(
-            auto const& name,
-            contour::config::ConfigEntry<
-                vtpty::Process::ExecInfo,
-                contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
+        [&]<typename Doc>(auto const& name,
+                          contour::config::ConfigEntry<vtpty::Process::ExecInfo, Doc> const& vEntry) {
             auto v = vEntry.value();
             auto args = std::string { "[" };
             args.append(v.arguments | core::views::joinWith(", "sv));
@@ -5015,6 +5986,14 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                    entry.hintLabel.foregroundAlpha,
                    entry.hintLabel.background,
                    entry.hintLabel.backgroundAlpha);
+
+    // Only where the scheme sets it: written out, an unset pair would pin the colours it leaves to the label.
+    if (entry.hintLabelTyped)
+        processWithDoc(documentation::HintLabelTyped {},
+                       entry.hintLabelTyped->foreground,
+                       entry.hintLabelTyped->foregroundAlpha,
+                       entry.hintLabelTyped->background,
+                       entry.hintLabelTyped->backgroundAlpha);
 
     processWithDoc(documentation::HintMatch {},
                    entry.hintMatch.foreground,
@@ -5144,7 +6123,8 @@ static std::string createForColorScheme(Config const& c)
     auto doc = std::string {};
     Writer writer;
 
-    doc.append(writer.replaceCommentPlaceholder(c.colorschemes.documentation));
+    doc.append(writer.replaceCommentPlaceholder(
+        std::string { documentation::Text<documentation::ColorSchemes>::Config }));
     writer.scoped([&]() {
         for (auto&& [name, entry]: c.colorschemes.value())
         {
@@ -5165,7 +6145,8 @@ static std::string createKeyMapping(Config const& c)
     auto doc = std::string {};
     Writer writer;
 
-    doc.append(writer.replaceCommentPlaceholder(c.inputMappings.documentation));
+    doc.append(writer.replaceCommentPlaceholder(
+        std::string { documentation::Text<documentation::InputMappings>::Config }));
     {
         auto const _ = typename Writer::Offset {};
         for (auto&& entry: c.inputMappings.value().keyMappings)
@@ -5210,6 +6191,63 @@ std::string emitColorSchemeYaml(vtbackend::ColorPalette const& palette)
     return createForSingleColorScheme<YAMLConfigWriter>(palette);
 }
 
+std::string hotkeyYaml(HotkeyChord const& chord)
+{
+    auto mods = std::string {};
+    for (auto const& row: vtbackend::ChordModifierTable)
+        if (chord.modifiers.contains(row.modifier))
+        {
+            if (!mods.empty())
+                mods += ',';
+            mods += row.name;
+        }
+    auto const key = std::visit(core::Overloaded {
+                                    [](vtbackend::Key named) { return std::format("{}", named); },
+                                    [](char32_t character) { return unicode::convert_to<char>(character); },
+                                },
+                                chord.key);
+    return std::format("{{ mods: [{}], key: {} }}", mods, SingleQuoted { key });
+}
+
+std::optional<HotkeyChord> parseHotkeyYaml(std::string const& text)
+{
+    try
+    {
+        auto document = YAML::Node {};
+        document["quick_terminal"]["hotkey"] = YAML::Load(text);
+        auto reader = YAMLConfigReader(std::filesystem::path {}, document, configLog, configEnvironment());
+        auto parsed = QuickTerminalConfig {};
+        reader.loadFromEntry(document, "quick_terminal", parsed);
+        return parsed.hotkey;
+    }
+    catch (YAML::Exception const&)
+    {
+        return std::nullopt;
+    }
+}
+
+namespace
+{
+    /// @param text The YAML flow text of a collection override, as GuiManagedSettings::globalOverrides
+    ///             keeps it.
+    /// @return The node it spells, which must be written as a mapping or sequence and not as a quoted
+    ///         string; nothing when the text does not spell one after all.
+    [[nodiscard]] std::optional<YAML::Node> flowCollectionOf(std::string const& text)
+    {
+        try
+        {
+            auto node = YAML::Load(text);
+            if (node.IsMap() || node.IsSequence())
+                return node;
+        }
+        catch (YAML::Exception const&)
+        {
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+} // namespace
+
 std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
 {
     YAML::Emitter out;
@@ -5232,39 +6270,68 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     {
         out << YAML::Key << section << YAML::Value << YAML::BeginMap;
         for (auto const& [name, value]: entries)
-            out << YAML::Key << name << YAML::Value << value;
+        {
+            out << YAML::Key << name << YAML::Value;
+            // Only what the override is marked as is written as a collection; a scalar is a scalar
+            // whatever its text looks like.
+            auto const collection = settings.collectionOverrides.contains(std::format("{}.{}", section, name))
+                                        ? flowCollectionOf(value)
+                                        : std::nullopt;
+            if (collection)
+                out << *collection;
+            else
+                out << value;
+        }
         out << YAML::EndMap;
     }
     out << YAML::EndMap;
     return std::string { out.c_str() } + '\n';
 }
 
+namespace
+{
+    /// The palette a parsed `colorschemes/<name>.yml` document holds.
+    /// @param path     The file the document is of, for messages.
+    /// @param document The parsed document, or why there is none.
+    /// @return The palette, or nullopt when there is no document or it does not read as one.
+    [[nodiscard]] std::optional<vtbackend::ColorPalette> paletteFrom(
+        std::filesystem::path const& path, std::expected<YAML::Node, std::string> const& document)
+    {
+        if (!document)
+        {
+            configLog()("Could not read color scheme {}", document.error());
+            return std::nullopt;
+        }
+
+        try
+        {
+            auto reader = YAMLConfigReader(path, *document, configLog, configEnvironment());
+            auto palette = vtbackend::ColorPalette {};
+            reader.loadFromEntry(*document, palette);
+            return palette;
+        }
+        catch (std::exception const& e)
+        {
+            configLog()("Could not read color scheme {}: {}", core::pathToUtf8(path), e.what());
+            return std::nullopt;
+        }
+    }
+} // namespace
+
 std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path)
 {
-    auto const document = YAMLConfigReader::parseSideFile(path);
-    if (!document)
-    {
-        configLog()("Could not read color scheme {}", document.error());
-        return std::nullopt;
-    }
+    return paletteFrom(path, YAMLConfigReader::parseSideFile(path));
+}
 
-    try
-    {
-        auto reader = YAMLConfigReader(path, *document, configLog, configEnvironment());
-        auto palette = vtbackend::ColorPalette {};
-        reader.loadFromEntry(*document, palette);
-        return palette;
-    }
-    catch (std::exception const& e)
-    {
-        configLog()("Could not read color scheme {}: {}", core::pathToUtf8(path), e.what());
-        return std::nullopt;
-    }
+std::optional<vtbackend::ColorPalette> parseColorSchemeYaml(std::filesystem::path const& path,
+                                                            std::string contents)
+{
+    return paletteFrom(path, YAMLConfigReader::parseSideFileText(path, std::move(contents)));
 }
 
 std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)
 {
-    return parseGuiSettingsFile(path).transform(guiSettingsFrom);
+    return parseGuiSettingsFile(path, sideFileBytes(path)).transform(guiSettingsFrom);
 }
 
 } // namespace contour::config

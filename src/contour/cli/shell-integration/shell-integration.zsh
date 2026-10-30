@@ -17,6 +17,12 @@ autoload -Uz add-zsh-hook
 # The longest command line sent, in bytes: a little more than vtbackend::MaxRecordedCommandLineBytes.
 typeset -g _contour_cmdline_max_bytes=4100
 
+# The machine OSC 7 names: gethostname(2), as the terminal names itself when it judges a directory local.
+# Not $HOST, which zsh takes from the environment when one is inherited, however stale (a login carried
+# over from another machine, a container's image), and which %M reads too; uname -n, once, as the file
+# is sourced.
+typeset -g _contour_hostname=${$(uname -n 2>/dev/null):-$HOST}
+
 # OSC 133;B as it sits at the end of PROMPT. %{ %} tell zsh it takes no room on the line; BEL ends
 # it, so that no backslash has to survive prompt expansion.
 typeset -g _contour_prompt_end_mark=$'%{\e]133;B\a%}'
@@ -70,7 +76,7 @@ precmd_hook_contour()
         # works: a file:// URL, its path encoded as a command line is, so that no ESC or BEL in a
         # directory name ends the sequence early.
         _contour_percent_encode "$PWD"
-        printf '\e]7;file://%s%s\e\\' "$HOST" "$REPLY"
+        printf '\e]7;file://%s%s\e\\' "$_contour_hostname" "$REPLY"
     } >$TTY
 
     # Keep the prompt-end mark the LAST precmd hook: a theme that rebuilds PROMPT in a precmd hook of its

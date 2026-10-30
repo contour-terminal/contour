@@ -41,6 +41,8 @@ add_library(contour_cli STATIC
     AgentSkill.cpp AgentSkill.hpp
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
+    ConnectList.cpp ConnectList.hpp
+    ConnectProbe.cpp ConnectProbe.hpp
     ConfigProfileCatalog.cpp ConfigProfileCatalog.hpp
     ConfigReloadPoller.cpp ConfigReloadPoller.hpp
     ContourApp.cpp ContourApp.hpp

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigReader.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 
 #include <algorithm>
@@ -49,6 +50,7 @@ namespace
         scalar<&Config::spawnNewProcess>("spawn_new_process"),
         scalar<&Config::reflowOnResize>("reflow_on_resize"),
         scalar<&Config::snapToRows>("snap_to_rows"),
+        scalar<&Config::connectPickerOnStart>("connect_picker_on_start"),
         scalar<&Config::rememberWindowPosition>("remember_window_position"),
         scalar<&Config::tabSwitchOnHorizontalWheel>("tab_switch_on_horizontal_wheel"),
         scalar<&Config::accessibilityAnnouncements>("accessibility_announcements"),
@@ -61,6 +63,8 @@ namespace
         scalar<&Config::theme>("theme"),
         scalar<&Config::uiStyle>("ui_style"),
         scalar<&Config::windowControlStyle>("window_control_style"),
+        scalar<&Config::chromeDensity>("chrome_density"),
+        scalar<&Config::secureInput>("secure_input"),
         scalar<&Config::uiFontFamily>("ui_font_family"),
         scalar<&Config::uiFontSize>("ui_font_size"),
         scalar<&Config::earlyExitThreshold>("early_exit_threshold"),
@@ -70,6 +74,7 @@ namespace
         section<&Config::folding>("folding"),
         section<&Config::gutter>("gutter"),
         section<&Config::commandBlocks>("command_blocks"),
+        section<&Config::quickTerminal>("quick_terminal"),
     };
 } // namespace
 

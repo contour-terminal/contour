@@ -5,34 +5,64 @@
 # lets a CONTOUR_FRONTEND_GUI=OFF build read the very configuration whose point is not to render.
 # Anything here that needs a QObject, a QML property or a widget belongs a layer up.
 add_library(contour_config STATIC
+    AccessibilityPreferences.hpp
     Actions.cpp Actions.hpp
     AtomicFileWrite.cpp AtomicFileWrite.hpp
     BlockActionEnums.hpp
+    ChromeTokenGroups.hpp
+    ChromeTokenRows.hpp
+    HighlightPair.hpp
     Config.cpp Config.hpp
+    ConfigFwd.hpp
     ConfigDocumentation.hpp
+    ConfigDocumentationTags.hpp
     ConfigEnum.hpp
     ConfigEnumInfo.hpp
     ConfigEnumReader.hpp
+    ConfigReader.hpp
+    DefaultsEdition.hpp
+    DesktopButtonLayout.cpp DesktopButtonLayout.hpp
     FileOpenerTemplate.cpp FileOpenerTemplate.hpp
     FinishNotificationConfig.hpp
     GlobalOverrides.cpp GlobalOverrides.hpp
     GpuSelector.cpp GpuSelector.hpp
     GuiConfigStore.cpp GuiConfigStore.hpp
+    GuiStateStore.cpp GuiStateStore.hpp
+    HostSideFile.cpp HostSideFile.hpp
     HostUrl.cpp HostUrl.hpp
+    HotkeyChord.hpp
+    LaunchTarget.cpp LaunchTarget.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp
+    MaterialSupport.hpp
     ModifierNames.hpp
+    NewDefaultsOffer.hpp
+    OptionAsAlt.hpp
+    QuickTerminalConfig.hpp
+    ScrollBarMode.hpp
+    SecureInputMode.hpp
+    SettingsEditSession.cpp SettingsEditSession.hpp
+    ShellKind.hpp
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
+    WindowControlLook.hpp
     WindowControlStyle.cpp WindowControlStyle.hpp
 )
+
+# Config.cpp's writers walk every Config member through Reflection::CallOnMembers, which unrolls one call per
+# member into a single function per writer. At the Debug build's -Og, clang's inliner and InstCombine spend
+# minutes on those two functions (over 7 minutes for the file, 14 under ASan); at -O0 the file compiles in
+# under a minute. The code only runs while a configuration is loaded or written, so nothing measurable is lost.
+set_source_files_properties(Config.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:Clang,GNU>>:-O0>")
 
 # yaml-cpp is PUBLIC because Config.hpp exposes it in its own interface, so every consumer of the
 # configuration model compiles against yaml-cpp's headers whether it names them or not.
 target_link_libraries(contour_config PUBLIC
     core::base
     core::log
+    core::platform
     crispy::core
     reflection-cpp::reflection-cpp
     vtbackend
