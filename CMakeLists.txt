@@ -288,6 +288,11 @@ if(CONTOUR_TESTING)
         # Source event shapes Clang emits; the measurement itself is run by hand (docs/internals/build-times.md).
         contour_add_lint_gate(measure_compile_times_selftest measure-compile-times.py --self-test)
 
+        # The planner behind scripts/clang-tidy-diff.sh (clang-tidy on a PR's changed lines): which TU lints
+        # which changed header line. Fixture-only, no compiler; a header that no TU includes must fail the
+        # plan rather than be skipped.
+        contour_add_lint_gate(tidy_diff_plan_selftest tidy-diff-plan.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)

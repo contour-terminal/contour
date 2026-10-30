@@ -88,8 +88,12 @@ jobs:
     - name: "Check the vendored core-cpp copy is verbatim"
       run: cmake -DMODE=check -DDEST=vendor/core-cpp -P vendor/core-cpp/cmake/CoreCppVendor.cmake
 
+  # The whole tree, on every push to master and every merge-queue run. Pull requests run
+  # check_clang_tidy_diff below instead: the same checks on the lines the PR changed, without
+  # compiling the tree.
   check_clang_tidy:
     name: "Check clang-tidy"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -167,6 +171,91 @@ jobs:
               -D CLANG_TIDY_EXE=/usr/bin/clang-tidy-${LLVM_VERSION}
     - name: "build"
       run: cmake --build build
+
+  # clang-tidy on the lines a pull request changed, and nothing else. scripts/tidy-diff-plan.py maps
+  # each changed line to a translation unit (a changed header goes through one TU that includes it)
+  # and fails on a header no TU includes, so a change is linted or the job is red -- never skipped.
+  # Only the generated headers are built, not the tree, which is what makes this fast.
+  check_clang_tidy_diff:
+    name: "Check clang-tidy (diff)"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: "ccache-ubuntu2404-clang-tidy"
+        max-size: 256M
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: sudo env QTVER=6 ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    # Ubuntu 24.04's distro Qt (6.4.2) lacks the Qt6::GuiPrivate CMake package the RHI renderer needs;
+    # install a modern Qt6 over it (see the build matrix job for the same rationale).
+    #
+    # Pinned to 6.11.1 rather than tracking 6.11.*: 6.11.2's Linux AARCH64 qttools archive is
+    # corrupt where it is published, so unpacking it dies with
+    # `zipfile.BadZipFile: Bad offset for central directory` and takes the whole install with it.
+    # Every arm64 job started failing the moment 6.11.2 appeared, while yesterday's runs on 6.11.1
+    # were green and today's x86_64 runs on 6.11.2 still are -- only the AARCH64 archive is bad.
+    # Raise this once a later 6.11 publishes an archive that unpacks. See the retry below for why
+    # re-running does not help here.
+    #
+    # Attempted twice all the same: aqtinstall pulls each archive from whichever mirror
+    # download.qt.io redirects it to, so a mirror that serves a truncated file is a verdict on the
+    # mirror, not on the commit under test, and re-resolving the redirect usually lands elsewhere.
+    # It buys nothing against a corrupt *upstream* archive -- both attempts fetched the bad qttools
+    # from two different mirrors -- which is what the pin above is for. Only a repeated failure
+    # fails the job.
+    - name: "Install Qt (GuiPrivate-capable)"
+      id: install_qt
+      continue-on-error: true
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${LLVM_VERSION}
+        sudo apt-get install clang-tidy-${LLVM_VERSION}
+    - name: "install Rust (wasm32-wasip1)"
+      run: ./scripts/install-rust-wasm.sh
+    - name: "cmake"
+      run: |
+        cmake \
+              --preset clang-debug \
+              -B build \
+              -G Ninja \
+              -D CONTOUR_WAYLAND=OFF \
+              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+              -D ENABLE_TIDY=OFF
+    - name: "build generated headers only"
+      run: ./scripts/ci-build-tidy-prerequisites.sh build
+    - name: "clang-tidy on the changed lines"
+      run: |
+        CLANG_TIDY=clang-tidy-${LLVM_VERSION} ./scripts/clang-tidy-diff.sh \
+              --base origin/${{ github.base_ref }} \
+              --build-dir build
 
   # Builds the GUI-less configuration, whose product is `contour daemon` -- a session host for a
   # server or a container. Being unbuilt is exactly how this configuration rotted before; one job
