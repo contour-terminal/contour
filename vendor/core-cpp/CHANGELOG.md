@@ -7,6 +7,27 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.11.4] - 2026-10-30
+
+### Fixed
+
+- **A subcommand's usage line continues under its parent verb's options.** After 0.11.3 a subcommand's name was
+  still appended to its parent's last wrapped line however long that line already was, and the subcommand's own
+  options wrapped to one column past its name -- some 80 columns in, under contour's `daemon` verb. Once a verb has
+  printed options, its subcommands' name and options now wrap to the column those options started at, so a usage
+  entry keeps one left edge and stays inside the margin.
+
+## [0.11.3] - 2026-10-30
+
+### Fixed
+
+- **`core::cli::usageText` wraps a verb with subcommands inside the margin.** The wrap indent was the byte
+  length of the whole prefix, which for a subcommand is every line of its parent's usage, so a subcommand's
+  options were pushed hundreds of columns right. The parent verb's own options were indented as though its name
+  were absent, the space before each option was not counted against the margin, and a wrapped line kept that
+  space before its line feed. The indent is now the visible width of the prefix's last line, ignoring SGR
+  sequences, and the separator is printed only when the option stays on the line.
+
 ## [0.11.2] - 2026-10-30
 
 ### Fixed

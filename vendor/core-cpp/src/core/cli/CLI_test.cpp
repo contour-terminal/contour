@@ -4,9 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <format>
+#include <initializer_list>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // TODO API / impl:
 //
@@ -220,6 +223,95 @@ TEST_CASE("CLI.helpText.non-ascii-help-text")
     style.hyperlink = true;
     auto const text = cli::helpText(cmd, style, 80);
     CHECK(text.contains("https://contour-terminal.org/"));
+}
+
+namespace
+{
+/// Splits @p text into its lines, dropping the final line feed's empty remainder.
+std::vector<std::string_view> linesOf(std::string_view text)
+{
+    auto lines = std::vector<std::string_view> {};
+    for (auto const line: std::views::split(text, '\n'))
+        lines.emplace_back(line.begin(), line.end());
+    if (!lines.empty() && lines.back().empty())
+        lines.pop_back();
+    return lines;
+}
+
+/// A verb whose own options wrap, with subcommands that carry options of their own -- the shape of
+/// contour's `daemon` verb, whose usage lines broke all three rules checked below.
+cli::Command verbWithOptionsAndSubcommands()
+{
+    auto const stringOptions = [](std::initializer_list<char const*> names) {
+        auto options = cli::OptionList {};
+        for (auto const* name: names)
+            options.emplace_back(
+                cli::Option { .name = name, .v = cli::Value { ""s }, .helpText = "An option."sv });
+        return options;
+    };
+    auto options =
+        stringOptions({ "socket", "label", "config", "profile", "lifecycle", "size-policy", "token-file" });
+    return cli::Command {
+        .name = "contour",
+        .helpText = "Terminal emulator."sv,
+        .children =
+            cli::CommandList {
+                cli::Command {
+                    .name = "daemon",
+                    .helpText = "Runs the daemon."sv,
+                    .options = std::move(options),
+                    .children =
+                        cli::CommandList {
+                            cli::Command { .name = "status",
+                                           .helpText = "Reports the daemon's state."sv,
+                                           .options =
+                                               cli::OptionList { cli::Option { .name = "json"sv,
+                                                                               .v = cli::Value { false },
+                                                                               .helpText = "As JSON."sv } } },
+                            cli::Command { .name = "stop", .helpText = "Stops the daemon."sv },
+                            // Its name no longer fits after the parent's last option line, and its own
+                            // options wrap: both continue under the parent verb's first option.
+                            cli::Command {
+                                .name = "write-diagnostics-bundle",
+                                .helpText = "Writes a diagnostics bundle."sv,
+                                .options =
+                                    stringOptions({ "output", "since", "include-logs", "max-size" }) },
+                        } } },
+    };
+}
+} // namespace
+
+// A verb with subcommands measured its wrap indent with the byte length of the whole multi-line
+// prefix, so its subcommands' options were indented by hundreds of spaces; its own options were
+// indented as though the verb's name were absent; the separating space was not counted against
+// the margin, and was left dangling before each line feed.
+TEST_CASE("CLI.usageText.subcommands-wrap-within-the-margin")
+{
+    auto constexpr Margin = 60u;
+    auto const text = cli::usageText(verbWithOptionsAndSubcommands(), plainStyle(), Margin, "    ");
+    INFO(text);
+
+    auto const lines = linesOf(text);
+    REQUIRE(lines.size() >= 4);
+    for (auto const line: lines)
+    {
+        INFO("line: [" << line << "]");
+        CHECK(line.size() <= Margin);
+        CHECK_FALSE(line.ends_with(' '));
+    }
+
+    // Continuation lines start under the first option, one column past "    contour daemon".
+    auto constexpr OptionColumn = std::string_view("    contour daemon ").size();
+    for (auto const line: lines)
+    {
+        if (line.starts_with("    contour"))
+            continue;
+        INFO("line: [" << line << "]");
+        CHECK(line.find_first_not_of(' ') == OptionColumn);
+    }
+
+    CHECK(text.contains(" status [json]\n"));
+    CHECK(text.contains(" stop\n"));
 }
 
 // Every way a command line can be refused is a value -- core-cpp#13 -- and says which, and where.

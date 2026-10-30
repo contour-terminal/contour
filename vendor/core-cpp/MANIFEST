@@ -1,17 +1,17 @@
 # core-cpp vendored copy -- verify it with:
 #   cmake -DMODE=check -DDEST=<this directory> -P <this directory>/cmake/CoreCppVendor.cmake
 # repository https://github.com/contour-terminal/core-cpp
-# ref v0.11.2
-# commit 5bff9081c6b8d572edfd6a0d7e17e8ce4d55c2e1
+# ref v0.11.4
+# commit 9a59f99418b1c12e61db8dfb8d18f93b1863c36e
 # modules base;log;cli;platform;async;net;testing
 # files 459
 d4f644033cc91b1a12f83b37021ba829c9d9514ee3865a51b1631c0710476f27  .clang-format
 b634fc32da54837e70863aa8c4d96edef8cd608750fd9ec612b7f40d2876e1ba  .clang-tidy
-ef1023b7e50ae58fecf26190674322413356bf75914148de5db5eb790177ffbe  CHANGELOG.md
-faa954a1a1727ac46371875739e92d00fc8122c1b1f3be474ece445d05f8c0fe  CMakeLists.txt
+5f23ffbcc41373634d5e695740ee1760af2ee22e086769fbb945f635a13d6c14  CHANGELOG.md
+64869bc90e7e3a3babeb6ba7e036f55533d5bc176f4c93a447db3d5a07cf694e  CMakeLists.txt
 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4  LICENSE
 6787547b268a03c5e1c7d2fae2656afc0853322957054643f02ff92b318ce9c9  NOTICE
-05c5eee1edb7a3a034b74226c1766763304af85f4b4205cc0bbe4b01b0bcd049  README.md
+74a58937b5ca7e2f73c96eff241afe05242bd55d782db2d29585a43652a962fc  README.md
 d6edb3f2ca5cb0ca677d237cb5692526cc2bae5294bee906d4c94be45b957547  cmake/CPM.cmake
 90b06d36b9aed193ff75c7831df7696876d5fc2ee09c291451888b2d3c86f45c  cmake/CoreCppDependencies.cmake
 88f5da57d776a3900245f5d7233b04b19707fa2722e55a2ddf191ed00a2fb950  cmake/CoreCppHeaderSelfCheck.cmake
@@ -105,9 +105,9 @@ b830d4cbc9948fca92ad1bd1d11884bff85122c3c6b4a87178be0f31621519ba  src/core/async
 068162e13721849907a1c05ff9de039b2728467500682afd14e735fe0cb2e8ce  src/core/cli/App.cpp
 b80dffa9cfe3e279e130783d1a2e1544d75ce7d0775227cf94e38a80c0a5f833  src/core/cli/App.hpp
 251d58489faf3eac1e4a03b5ac26ae34bd15a8e9cad5493e322ec66b64844523  src/core/cli/App_test.cpp
-8bf4fc4c1264f0f7ce6a297bfee851bbe64942c7e58e7eac60df3939e5f562a1  src/core/cli/CLI.cpp
+459893f549ce134073ace4787c402f2f200c26821f71ca2fab04e818796fc347  src/core/cli/CLI.cpp
 4e51dd2a44cba66e13fb562da5cc721dd98b54a05805d330b5c9af89404edd16  src/core/cli/CLI.hpp
-237a6e1fb471ce5d935d93f6e9bd63a62b8ded26a7b63089c0370445a96d4edf  src/core/cli/CLI_test.cpp
+769bc77fcf56ce23e01b29aba8bc162e481ce88de346d229d570a1d573589c0a  src/core/cli/CLI_test.cpp
 6637ded7326354d128630e75b5c80116aeadea1dce2d67be9f6dcce2a0a85652  src/core/cli/CMakeLists.txt
 d28ec926fc6a00e25989833d1307534952f299f8a89294b36f9471e6c4beb4f4  src/core/log/Assert.hpp
 d4b44b5d35154ef6736f8ef19e285c41370759031c7b496b67e44f33385165c3  src/core/log/CMakeLists.txt
