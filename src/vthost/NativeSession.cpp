@@ -834,6 +834,21 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         follow.lastTitle = title;
     }
 
+    // Live tab name (OSC 30): pulled and diffed like the title -- as a string_view, so an unchanged name
+    // allocates nothing -- and stated in SessionState on a snapshot. Empty stands for "none set" on the wire;
+    // Terminal::setTabName() folds an empty name into none, so the two are one state on both ends.
+    auto const& tabName = terminal.tabName();
+    if (auto const current = tabName ? std::string_view { *tabName } : std::string_view {};
+        current != follow.lastTabName)
+    {
+        follow.lastTabName = current;
+        if (!snapshot)
+        {
+            delta.tabNameChanged = 1;
+            delta.tabName = follow.lastTabName;
+        }
+    }
+
     // Live cursor shape (DECSCUSR): pull+diff like the title; the snapshot
     // carries it in SessionState below.
     auto const cursorPs = decscusrPs(terminal.cursorShape(), terminal.cursorDisplay());
@@ -1014,6 +1029,7 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         snap.cursorLine = delta.cursorLine;
         snap.cursorColumn = delta.cursorColumn;
         snap.title = terminal.windowTitle();
+        snap.tabName = terminal.tabName().value_or(std::string {});
         snap.cursorShape = cursorPs;
         snap.cwd = terminal.currentWorkingDirectory();
         // Stated outright, including when EMPTY: a snapshot routes this through SessionState rather

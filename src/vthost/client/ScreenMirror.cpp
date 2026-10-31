@@ -547,6 +547,8 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
         syncInputEncoding(screen);
         if (delta.titleChanged != 0)
             _terminal->setWindowTitle(delta.title);
+        if (delta.tabNameChanged != 0)
+            _terminal->setTabName(delta.tabName);
         if (delta.cursorShapeChanged != 0)
             applyCursorStyle(delta.cursorShape);
         if (delta.cwdChanged != 0)
@@ -765,6 +767,8 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     // definition — so nothing about what a snapshot can deliver is lost.
     if (_terminal->windowTitle() != screen.title)
         _terminal->setWindowTitle(screen.title);
+    if (_terminal->tabName().value_or(std::string {}) != screen.tabName)
+        _terminal->setTabName(screen.tabName);
     if (decscusrPs(_terminal->cursorShape(), _terminal->cursorDisplay()) != screen.cursorShape)
         applyCursorStyle(screen.cursorShape);
     applyDefaultColors(screen.defaultForeground, screen.defaultBackground);

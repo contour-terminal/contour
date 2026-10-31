@@ -350,7 +350,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .commandBlockIdEpoch = 3,
                            .commandBlocksFloor = 0xFFFFFFFF,
                            .commandBlocks = { sampleBlock() },
-                           .interruptedCommand = "make test" },
+                           .interruptedCommand = "make test",
+                           .tabName = "build" },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
@@ -397,7 +398,9 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                     .commandBlockIdEpoch = 4,
                     .stableIdGeneration = 0x1'0000'0002,
                     .commandBlocks = { sampleBlock() },
-                    .retiredCommandBlocks = { 3, 0xFFFFFFFF } },
+                    .retiredCommandBlocks = { 3, 0xFFFFFFFF },
+                    .tabNameChanged = 1,
+                    .tabName = "build" },
         SessionBell { .session = 4 },
         SessionNotify { .session = 4, .title = "Build finished", .body = "3 warnings, 0 errors" },
         SessionClipboard { .session = 4, .selection = "c", .data = "copied text" },
@@ -1538,7 +1541,7 @@ TEST_CASE("Delta::hasChanges answers for every gated field", "[vthost][proto]")
         &Delta::snapshot,           &Delta::titleChanged,         &Delta::cursorShapeChanged,
         &Delta::cwdChanged,         &Delta::colorsChanged,        &Delta::statusChanged,
         &Delta::statusLinesChanged, &Delta::kittyKeyboardChanged, &Delta::modifyOtherKeysChanged,
-        &Delta::mouseChanged,       &Delta::progressChanged,
+        &Delta::mouseChanged,       &Delta::progressChanged,      &Delta::tabNameChanged,
     };
     for (auto const gate: gates)
     {
@@ -2118,4 +2121,32 @@ TEST_CASE("the TabEditAcks capability is pinned", "[vthost][proto][tab-edit-acks
     CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
         return row.capability == Capability::TabEditAcks && row.name == "tab-edit-acks";
     }));
+}
+
+TEST_CASE("an older sender's Delta and SessionState decode without the OSC 30 tab name", "[vthost][proto]")
+{
+    // Appended to Delta and SessionState (issue #2170): a peer from before the field sends neither its gate
+    // nor its string, and must still decode -- as "unchanged" and "no name". (The catalog round-trip covers a
+    // set name.)
+    auto delta = Delta {};
+    delta.session = 3;
+    delta.titleChanged = 1;
+    delta.title = "vim";
+    auto state = SessionState {};
+    state.session = 3;
+    state.columns = 80;
+    state.lines = 24;
+    state.title = "vim";
+
+    SECTION("a Delta that ends before the tab name")
+    {
+        // The gate byte and the empty string's length are what the older sender did not send.
+        CHECK(decodeAs<Delta>(encodeWithoutTrailingField(DecodedPdu { delta }, /*bytesToDrop=*/2)) == delta);
+    }
+
+    SECTION("a SessionState that ends before the tab name")
+    {
+        CHECK(decodeAs<SessionState>(encodeWithoutTrailingField(DecodedPdu { state }, /*bytesToDrop=*/1))
+              == state);
+    }
 }

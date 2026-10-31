@@ -343,6 +343,8 @@ class NativeSession final: public SessionStreamEvents
         /// The window title last sent to this connection, so an incremental delta
         /// carries the title (and forces a send) only when it actually changed.
         std::string lastTitle;
+        /// The OSC 30 tab name last sent to this connection (empty: none), diffed like the title.
+        std::string lastTabName;
         /// The DECSCUSR Ps last sent (-1 until the first snapshot), so a cursor-shape
         /// change carries (and forces) a delta only when it actually changed.
         int lastCursorShape = -1;

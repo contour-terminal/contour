@@ -132,6 +132,7 @@ void RemoteScreen::apply(proto::SessionState const& state)
     cursorLine = state.cursorLine;
     cursorColumn = state.cursorColumn;
     title = state.title;
+    tabName = state.tabName;
     cursorShape = state.cursorShape;
     cwd = state.cwd;
     defaultForeground = state.defaultForeground;
@@ -223,6 +224,8 @@ void RemoteScreen::apply(proto::Delta const& delta)
     setAnsiModes = delta.setAnsiModes;
     if (delta.titleChanged != 0)
         title = delta.title; // keep it current so a later fullReplay re-titles correctly
+    if (delta.tabNameChanged != 0)
+        tabName = delta.tabName; // likewise for the tab name
     if (delta.cursorShapeChanged != 0)
         cursorShape = delta.cursorShape;
     if (delta.cwdChanged != 0)

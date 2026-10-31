@@ -7447,7 +7447,7 @@ void Terminal::setTabName(string_view title)
     _eventListener.setTabName(title);
 }
 
-std::optional<std::string> Terminal::tabName() const noexcept
+std::optional<std::string> const& Terminal::tabName() const noexcept
 {
     return _tabName;
 }

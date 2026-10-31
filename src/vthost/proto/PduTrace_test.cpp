@@ -112,6 +112,15 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
         CHECK(summaryOf(PduType::SessionClipboard).contains("data=17ch"));
     }
 
+    SECTION("SessionState sizes the tab name, never transcribing it")
+    {
+        auto state = SessionState {};
+        state.tabName = "secret";
+        auto const text = summarize(DecodedPdu { state });
+        CHECK(text.contains("tabname=6ch"));
+        CHECK_FALSE(text.contains("secret"));
+    }
+
     SECTION("Invalid carries the peer's raw ident")
     {
         CHECK(summaryOf(PduType::Invalid).contains("ident=250"));
