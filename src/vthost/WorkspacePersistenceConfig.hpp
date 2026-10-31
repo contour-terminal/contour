@@ -3,8 +3,8 @@
 
 /// @file
 /// How a daemon keeps its workspace, and what its last snapshot keeps as it ends. Light on purpose:
-/// DaemonConfig carries it, and Daemon.hpp reaches every `contour` translation unit that starts or talks to
-/// a daemon, none of which should compile the session host for it (WorkspacePersistence.hpp is the rest).
+/// DaemonConfig carries it, and DaemonSpawn.hpp reaches every `contour` translation unit that starts or talks
+/// to a daemon, none of which should compile the session host for it (WorkspacePersistence.hpp is the rest).
 
 #include <chrono>
 #include <cstddef>

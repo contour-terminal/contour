@@ -158,6 +158,8 @@ class Action;
 class ActionList
 {
   public:
+    // Naming std::vector<Action>::iterator while Action is incomplete is fine: every ActionList member
+    // is defined out of line in Actions.cpp, where Action is complete.
     using value_type = Action;                                  // NOLINT(readability-identifier-naming)
     using iterator = std::vector<Action>::iterator;             // NOLINT(readability-identifier-naming)
     using const_iterator = std::vector<Action>::const_iterator; // NOLINT(readability-identifier-naming)
@@ -188,7 +190,7 @@ class ActionList
     void push_back(Action action); // NOLINT(readability-identifier-naming)
 
     /// Removes every action.
-    void clear() noexcept; // NOLINT(readability-identifier-naming)
+    void clear() noexcept;
 
   private:
     std::vector<Action> _actions;

@@ -72,6 +72,10 @@ REQUIRED_CONTEXTS = frozenset(
         "tests matrix",
         "Check C++ style",
         "Check editorconfig",
+        # PR-only by design (its full-tree sibling, "Check clang-tidy", is skipped on pull requests).
+        "Check clang-tidy (diff)",
+        # Lives in changelog.yml; every workflow file is checked, so it is covered too.
+        "Check Changelog Action",
         "Ubuntu Linux 24.04 post-check",
         "macOSArm",
     }

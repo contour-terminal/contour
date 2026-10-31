@@ -97,8 +97,8 @@ namespace contour::config
 {
 
 // TabBarPosition and TabBarVisibility live in contour/TabBarMode.h, together with the table that
-// describes them: an action carrying one of these modes is declared in Actions.h, which cannot
-// include this header (this header includes Actions.h).
+// describes them: an action carrying one of these modes is declared in Actions.hpp, which cannot
+// include this header (this header includes ActionsFwd.hpp).
 
 using ActionList = actions::ActionList;
 using KeyInputMapping = vtbackend::InputBinding<vtbackend::Key, ActionList>;

@@ -53,9 +53,12 @@ env:
 
 # What runs where. A pull request runs the platform builds and tests (Windows, macOSArm, one Linux
 # leg) plus the guard builds, the lint jobs and clang-tidy on the changed lines. Everything else --
-# the other compiler legs, packaging, valgrind, conformance, bench, notcurses, FreeBSD, the full-tree
-# clang-tidy -- runs on master pushes, in the merge queue and on the `release` branch's pull request.
-# Those jobs say so with `if: github.event_name != 'pull_request' || github.head_ref == 'release'`.
+# the other compiler legs, packaging, valgrind, conformance, bench, notcurses -- runs on master
+# pushes and in the merge queue, and on the `release` branch's pull request, through
+# `if: github.event_name != 'pull_request' || github.head_ref == 'release'`. Exceptions: FreeBSD and
+# the full-tree clang-tidy use `github.event_name != 'pull_request'` and skip even the `release`
+# pull request, and the static build (`github.ref == 'refs/heads/master' || head_ref == 'release'`)
+# never runs in the merge queue.
 # A required status check is never gated that way: it always runs and judges a skipped job as passed
 # (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 

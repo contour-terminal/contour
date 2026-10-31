@@ -167,9 +167,11 @@ The dead `sccache` steps and `SCCACHE_*` environment are gone.
 
 A pull request runs the platform builds and tests -- `Windows`, `macOSArm` (build and tests, no
 signing, no packaging) and one Linux leg (Clang 22 on x86, built with `-Werror`) -- plus the guard
-builds, the lint jobs and clang-tidy on the changed lines. Master pushes, the merge queue and the
-`release` branch's pull request run everything: the other three compiler legs, packaging,
-valgrind, conformance, bench-headless, notcurses, FreeBSD, the full-tree clang-tidy.
+builds, the lint jobs and clang-tidy on the changed lines. Master pushes and the merge queue run
+the rest: the other three compiler legs, packaging, valgrind, conformance, bench-headless,
+notcurses, FreeBSD and the full-tree clang-tidy. The `release` branch's pull request runs all of
+those except FreeBSD and the full-tree clang-tidy (both are `github.event_name != 'pull_request'`);
+the static build runs on master pushes and the `release` pull request, never in the merge queue.
 
 A required status check is never gated off pull requests. `tests matrix` and
 `Ubuntu Linux 24.04 post-check` always run and treat a skipped dependency as passed (a failed or

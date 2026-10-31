@@ -314,9 +314,8 @@ if(CONTOUR_TESTING)
     else()
         # A warning, not a status line: losing both lint gates is exactly the silent gap this
         # change set out to close, and it must not scroll past in a wall of configure output.
-        message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows, "
-                        "check_wasm_runtime_containment, check_qml_colors, check_qml_sizes) "
-                        "are not registered.")
+        message(WARNING "Python 3 not found: the lint gates (every contour_add_lint_gate "
+                        "entry above) are not registered.")
     endif()
 endif()
 # ----------------------------------------------------------------------------

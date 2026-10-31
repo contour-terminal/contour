@@ -14,7 +14,7 @@
 # into a vacuous pass.
 #
 # Rows are added by the tasks that earn them: a header-dependency cut lands together with the row
-# that stops it from growing back. This file starts empty on purpose.
+# that stops it from growing back.
 src/contour/display/TerminalDisplay.hpp !src/contour/config/Actions.hpp
 src/contour/config/ActionsFwd.hpp !src/contour/config/Actions.hpp
 src/contour/config/Actions.hpp !src/vtbackend/input/vi/HintModeHandler.hpp
