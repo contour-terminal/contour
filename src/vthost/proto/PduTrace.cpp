@@ -202,10 +202,10 @@ namespace
                        // Context records carry user, hostname, cwd and cmdline: a COUNT is the
                        // diagnostic, and the fields themselves must never reach a trace log.
                        // Command-block records carry command lines and directories: counted, never
-                       // shown; so is the interrupted command's length.
+                       // shown; so is the interrupted command's length. The tab name is sized, as the title.
                        return std::format(
                            "session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{} contexts={} "
-                           "chain={} blocks={} interrupted={}ch",
+                           "chain={} blocks={} interrupted={}ch tabname={}ch",
                            value.session,
                            value.columns,
                            value.lines,
@@ -217,7 +217,8 @@ namespace
                            value.contexts.size(),
                            value.contextChain.size(),
                            value.commandBlocks.size(),
-                           value.interruptedCommand.size());
+                           value.interruptedCommand.size(),
+                           value.tabName.size());
                    } },
         TraceRow { PduType::Delta,
                    "Delta",

@@ -591,6 +591,9 @@ struct SessionState
     /// shell (the host keeps it until the session's next command starts); empty means none. Untrusted text:
     /// it came from a snapshot's OSC 133 command line, and a receiver bounds it before use.
     std::string interruptedCommand = {};
+    /// The application's tab name (OSC 30) as the host's terminal holds it; empty means none set. Appended by
+    /// a later version, so an older sender's body ends before it.
+    std::string tabName = {};
     bool operator==(SessionState const&) const = default;
 };
 
@@ -838,6 +841,11 @@ struct Delta
     /// Host ids this connection was told about that the host no longer holds — a prompt discarded by
     /// the next one, the oldest evicted by the bound, a reset — ascending.
     std::vector<uint32_t> retiredCommandBlocks = {};
+    /// Set (1) when the application's tab name (OSC 30) changed in this batch; `tabName` then holds it, and
+    /// empty means the application cleared it. Appended by a later version, so an older sender's body ends
+    /// before both, which reads as unchanged.
+    uint8_t tabNameChanged = 0;
+    std::string tabName = {};
 
     /// Whether this delta says anything about the SESSION at all — a snapshot, changed rows, or any
     /// of the gated fields above.
@@ -857,7 +865,7 @@ struct Delta
                || cwdChanged != 0 || colorsChanged != 0 || statusChanged != 0 || statusLinesChanged != 0
                || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0
                || progressChanged != 0 || contextChanged != 0 || !contexts.empty() || !commandBlocks.empty()
-               || !retiredCommandBlocks.empty();
+               || !retiredCommandBlocks.empty() || tabNameChanged != 0;
     }
 
     /// @return Where this PDU sits in its snapshot, or `Whole` for anything that is not part of a

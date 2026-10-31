@@ -2007,6 +2007,39 @@ TEST_CASE("a window-title change is carried in the following incremental delta",
     CHECK(delta->title == "my-title");
 }
 
+TEST_CASE("an OSC 30 tab-name change is carried in the following incremental delta", "[vthost][native]")
+{
+    // Issue #2170: a client's tab bar shows the application's tab name, so the host must send it as it
+    // sends the window title -- gated on the diff, so an unchanged name costs two bytes, not the string.
+    auto h = NativeHarness {};
+    auto const sessionId = newSession(h.host);
+    h.host.terminal(sessionId)->writeToScreen("first");
+
+    auto const received = h.attach(
+        5, writeOnce(&h, sessionId, "\033]30;my-tab\033\\", holdsFrames(&h.received, AttachSnapshotFrames)));
+    REQUIRE(received.size() == 5);
+
+    auto const* delta = std::get_if<proto::Delta>(&received[4].pdu);
+    REQUIRE(delta != nullptr);
+    CHECK(delta->snapshot == 0);
+    CHECK(delta->tabNameChanged == 1);
+    CHECK(delta->tabName == "my-tab");
+    CHECK(delta->titleChanged == 0); // the window title did not move
+}
+
+TEST_CASE("an attach snapshot states the session's OSC 30 tab name", "[vthost][native]")
+{
+    auto h = NativeHarness {};
+    auto const sessionId = newSession(h.host);
+    h.host.terminal(sessionId)->writeToScreen("\033]30;my-tab\033\\");
+
+    auto const received = h.attach(AttachSnapshotFrames);
+    REQUIRE(received.size() == AttachSnapshotFrames);
+    auto const* state = std::get_if<proto::SessionState>(&received[2].pdu);
+    REQUIRE(state != nullptr);
+    CHECK(state->tabName == "my-tab");
+}
+
 namespace
 {
 /// The ProgramStatus frames among @p frames.

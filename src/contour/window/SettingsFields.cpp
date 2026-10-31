@@ -656,7 +656,7 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                 [](TerminalProfile& p, QVariant const& v) { p.wmClass = v.toString().toStdString(); } },
               { "tab_label",
                 "Tab label",
-                "Template for the tab title (e.g. {WindowTitle}).",
+                "Template for the tab title (e.g. {TabName}).",
                 SettingsValueType::String,
                 [](TerminalProfile const& p) { return QVariant(QString::fromStdString(p.tabLabel.value())); },
                 [](TerminalProfile& p, QVariant const& v) { p.tabLabel = v.toString().toStdString(); } },

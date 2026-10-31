@@ -560,6 +560,7 @@ namespace
         for (auto const& block: pdu.commandBlocks)
             encodeCommandBlock(out, block);
         out.string(pdu.interruptedCommand);
+        out.string(pdu.tabName);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -681,6 +682,8 @@ namespace
         out.varint(pdu.retiredCommandBlocks.size());
         for (auto const id: pdu.retiredCommandBlocks)
             out.varint(id);
+        out.u8(pdu.tabNameChanged);
+        out.string(pdu.tabName);
     }
 
     void encodeBody(Writer& out, SessionBell const& pdu)
@@ -1338,6 +1341,8 @@ namespace
         // Appended by a later version; an older sender's body ends before it.
         if (in.remaining() != 0 && !assign(in.string(), pdu.interruptedCommand, error))
             return std::unexpected(error);
+        if (in.remaining() != 0 && !assign(in.string(), pdu.tabName, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -1467,6 +1472,10 @@ namespace
             return std::unexpected(decoded.error());
         if (auto const decoded = decodeVector(in, pdu.retiredCommandBlocks, decodeBlockId); !decoded)
             return std::unexpected(decoded.error());
+        // Appended by a later version; an older sender's body ends before them, which reads as unchanged.
+        if (in.remaining() != 0
+            && (!assign(in.u8(), pdu.tabNameChanged, error) || !assign(in.string(), pdu.tabName, error)))
+            return std::unexpected(error);
         return pdu;
     }
 

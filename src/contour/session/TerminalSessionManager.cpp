@@ -1852,7 +1852,7 @@ void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
 
 void TerminalSessionManager::refreshAllTabTitles()
 {
-    // Every window's tab strip may show {TabPosition}/{WindowTitle}-derived labels; let each
+    // Every window's tab strip may show {TabPosition}-derived labels; let each
     // controller re-emit for its own rows. (The manager itself no longer owns a list model.)
     for (auto* controller: _controllersByWindow | std::views::values)
         controller->refreshAllTabTitles();

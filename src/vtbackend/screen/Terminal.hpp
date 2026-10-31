@@ -3618,7 +3618,11 @@ class Terminal: public IStatusLinePublishTarget
     /// @return The progress indicator state.
     [[nodiscard]] Progress resolvedProgress() const;
 
-    [[nodiscard]] std::optional<std::string> tabName() const noexcept;
+    /// The application-set tab name (OSC 30), WITHOUT taking the lock -- for callers that hold it or run on
+    /// the thread that writes it, as windowTitle() is. Never read it from another thread: the reference is
+    /// into state the parser thread rewrites. The GUI thread uses resolvedTabName().
+    /// @return The tab name, or nullopt when the application has set none.
+    [[nodiscard]] std::optional<std::string> const& tabName() const noexcept;
 
     /// Resolves the indicator status-line tab label for this terminal under a single _stateMutex hold.
     ///

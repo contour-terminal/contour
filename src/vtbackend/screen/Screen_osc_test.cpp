@@ -954,4 +954,19 @@ TEST_CASE("OSC.105 resets the special colors", "[screen]")
     }
 }
 
+TEST_CASE("SETTABNAME: OSC 30 names the tab, and an empty name clears it", "[screen]")
+{
+    // An empty OSC 30 means "no name": the tab goes back to what it shows without one, rather than an
+    // empty name that blanks it. That also makes "empty" and "none" one state, which the daemon wire relies
+    // on to carry the name losslessly (issue #2170).
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    CHECK_FALSE(mock.terminal.tabName().has_value());
+
+    mock.writeToScreen("\033]30;build\033\\");
+    CHECK(mock.terminal.tabName() == std::optional<std::string> { "build" });
+
+    mock.writeToScreen("\033]30;\033\\");
+    CHECK_FALSE(mock.terminal.tabName().has_value());
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

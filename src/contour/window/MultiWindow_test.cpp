@@ -783,6 +783,53 @@ TEST_CASE("a tab whose label comes out empty is named after the program in front
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("the default tab label shows the tab name an application sets, else the window title",
+          "[contour][multiwindow][model][tablabel]")
+{
+    // Issue #2170: OSC 30 named the tab in the indicator status line, while the tab bar kept showing the
+    // OSC 2 window title. Under the default template the tab bar now agrees with the status line.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    auto const titleAt = [&](int row) {
+        return window
+            ->data(window->index(row), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString();
+    };
+    auto* session =
+        manager.sessionForId(manager.model().window(window.id)->tabAt(0)->activePane()->session());
+    REQUIRE(session != nullptr);
+
+    session->terminal().writeToScreen("\033]2;Window Title\033\\");
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("Window Title")); // no tab name yet: the window title
+
+    session->terminal().writeToScreen("\033]30;Tab Title\033\\");
+    session->terminal().writeToScreen("\033]2;Another Window Title\033\\");
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("Tab Title")); // the tab name wins over a later window title
+
+    // An explicit {WindowTitle} template keeps showing the window title despite the tab name.
+    auto* tab = manager.model().window(window.id)->tabAt(0);
+    manager.model().setTabTitle(tab->id(), "{TabPosition}: {WindowTitle}");
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("1: Another Window Title"));
+    manager.model().setTabTitle(tab->id(), "{TabPosition}: {TabName}");
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("1: Tab Title"));
+    manager.model().setTabTitle(tab->id(), ""); // back to the default template
+
+    // An empty OSC 30 clears the name: the tab falls back to its window title, not blank.
+    session->terminal().writeToScreen("\033]30;\033\\");
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("Another Window Title"));
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab",
           "[contour][multiwindow][model]")
 {

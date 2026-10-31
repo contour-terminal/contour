@@ -747,6 +747,10 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
         return session != nullptr ? QString::fromStdString(session->name().value_or("")) : QString {};
 
     auto const windowTitle = session != nullptr ? session->resolvedWindowTitle() : std::string {};
+    // {TabName} resolves as the indicator status line does (an OSC 30 tab name first), so the two agree;
+    // where that names nothing — no name, or an empty OSC 30 that cleared it — the tab shows its window
+    // title.
+    auto const tabName = session != nullptr ? session->name().value_or(windowTitle) : windowTitle;
 
     // Same precedence as vtworkspace::Tab::title(), templated rather than resolved (the strip expands
     // {index}/{title} placeholders, so it needs the raw template). The "is this tab named after one of
@@ -762,8 +766,8 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     else
         return QString::fromStdString(windowTitle);
 
-    auto expanded =
-        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle });
+    auto expanded = expandTabLabel(
+        templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle, .tabName = tabName });
     // A blank tab names nothing: a label that came out empty falls back to the process's name. Asked only
     // then, since the name costs a query of the process table.
     if (expanded.empty() && session != nullptr)
