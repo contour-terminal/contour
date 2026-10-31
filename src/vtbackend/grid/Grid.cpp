@@ -1350,6 +1350,8 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
     // at-capacity path in its tail, so one call can both fill the last free slot and start
     // recycling. Trimming first is also what hands that path a correctly positioned free region --
     // at capacity the free slots begin at exactly _pageSize.lines, which is where it appends.
+    if (ringExceedsCapacity()) [[unlikely]]
+        settleHeldHistory();
     if (historyLineCount() + linesCountToScrollUp > maxHistoryLineCount())
         clampHistory();
 
@@ -1849,7 +1851,8 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
             // evicted, though the ring still holds every one.
             _pageSize.lines -= numLinesToPushUp;
             rotateBuffersLeft(numLinesToPushUp);
-            clampHistory();
+            // No clampHistory() here: a resize evicts nothing. The rows pushed up stay held until the
+            // next scroll settles them, so growing the page again brings them back. @see settleHeldHistory
             verifyState();
             return CellLocation { .line = -boxed_cast<LineOffset>(numLinesToPushUp), .column = {} };
         }
@@ -2312,31 +2315,6 @@ void Grid::resize(PageSize newSize, std::span<CellLocation> cursors, std::option
     }
 
     Ensures(_pageSize == newSize);
-    // Reflow can create more physical rows than the finite history capacity allows. Enforce the
-    // bound after BOTH dimensions change: a taller page may still need rows reflow pushed into
-    // history. Cursor placement is already complete, and dropping the oldest history cannot move it.
-    if (auto const* capacity = std::get_if<LineCount>(&_historyLimits.capacity);
-        capacity && columnsChanged && _reflowOnResize)
-    {
-        auto const maxRows = unbox<size_t>(_pageSize.lines + *capacity);
-        if (_lines.size() > maxRows)
-        {
-            // At zero, the ring reads [page][free][history], with the newest history last. Remove
-            // excess slots just after the page, consuming free slots before the oldest history.
-            // Rebuild rather than just lowering _linesUsed: scrolling must not refill excess slots,
-            // and the discarded rows' cell storage and the oversized slot allocation must be released.
-            rezeroBuffers();
-            auto const excess = _lines.size() - maxRows;
-            auto retained = Lines {};
-            retained.reserve(maxRows);
-            for (auto const i: std::views::iota(size_t { 0 }, maxRows))
-                retained.emplace_back(
-                    std::move(_lines.storage()[i < unbox<size_t>(_pageSize.lines) ? i : i + excess]));
-            _lines = std::move(retained);
-            _linesUsed = std::min(_linesUsed, LineCount::cast_from(maxRows));
-            syncStableFloor();
-        }
-    }
     // Any page-size change makes a mirror resync, so the generation bumps either way. Stable ids are
     // the narrower question: growLines/shrinkLines rotate through the ring primitives that carry the
     // id accounting, so a pure LINE-count change leaves every row naming what it named -- which is
@@ -2439,6 +2417,22 @@ void Grid::clampHistory()
     // generation bump -- every surviving row keeps the id it had, and the rising floor is the
     // signal consumers already watch for an eviction (@see FoldState::prune).
     _linesUsed -= dropCount;
+    syncStableFloor();
+    verifyState();
+}
+
+void Grid::settleHeldHistory() noexcept
+{
+    Require(ringExceedsCapacity());
+    auto const maxRows = unbox<size_t>(_pageSize.lines + std::get<LineCount>(_historyLimits.capacity));
+
+    // Line-wise, to exactly the capacity: the caller's own clampHistory() runs next, as the history then
+    // sits at the capacity, and snaps the cut to a command boundary where the scrollback has one. The
+    // free slots go first, then the oldest history; every surviving row keeps its offset, so no id changes
+    // and no generation bumps -- the rising floor reports the eviction. Erased, not merely uncounted, or
+    // scrolling would refill the surplus slots for good.
+    eraseSlotsAfterPage(_lines.size() - maxRows);
+    _linesUsed = std::min(_linesUsed, LineCount::cast_from(maxRows));
     syncStableFloor();
     verifyState();
 }

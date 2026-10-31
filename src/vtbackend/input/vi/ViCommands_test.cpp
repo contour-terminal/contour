@@ -1123,7 +1123,9 @@ TEST_CASE("vi.link: repeated [x reach a link beyond one keypress's scan", "[vi][
 
 TEST_CASE("vi.link: [x lands on a wrapped link's first row", "[vi][links]")
 {
-    auto term = DetectingTerm { LinkPage };
+    // Scrollback for the second section's rows -4 to -1. It used to pass with none, on rows a status line's
+    // shrink had left above a zero capacity for good -- which the next scroll now settles.
+    auto term = DetectingTerm { LinkPage, {}, vtbackend::HistoryLimits::plain(vtbackend::LineCount(10)) };
     auto const url = "https://example.com/" + std::string(40, 'a');
 
     SECTION("from its continuation row")

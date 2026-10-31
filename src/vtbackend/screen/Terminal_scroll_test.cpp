@@ -1977,3 +1977,25 @@ TEST_CASE("Terminal.the layout a frame is drawn at is read without racing its wr
 }
 
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("Terminal.viewport.aSettledHoldClampsAViewScrolledIntoIt", "[terminal][history][resize]")
+{
+    // A plain scrollback of ten, full of twenty-column lines. Narrowing to ten columns holds every line's
+    // second half beyond the capacity, and the view is scrolled back to the oldest held row.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    mc.following = vtbackend::OutputFollowing::Stay;
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("{:020}\r\n", i));
+    mc.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(10) });
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    REQUIRE(grid.historyLineCount() > LineCount(10));
+    REQUIRE(mc.terminal.viewport().scrollUp(grid.historyLineCount()));
+
+    // A top-anchored region's line leaves the view where it is, but the settle it triggers drops the
+    // rows that view showed: the view must follow the history down to what is still there.
+    mc.writeToScreen("\033[1;4r\033[4;1Hmore\n");
+
+    CHECK(grid.historyLineCount() == LineCount(10));
+    CHECK(unbox(mc.terminal.viewport().scrollOffset()) <= unbox(grid.historyLineCount()));
+    (void) mc.terminal.refreshRenderBuffer();
+}
