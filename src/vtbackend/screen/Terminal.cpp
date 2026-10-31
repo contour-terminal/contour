@@ -7437,8 +7437,13 @@ std::string Terminal::encodeTitleForReport(std::string_view title) const
 void Terminal::setTabName(string_view title)
 {
     // Parser-thread path (SETTABNAME escape sequence, OSC 30): writeToScreen() already holds _stateMutex
-    // across the whole parse, so _tabName is written under the lock here.
-    _tabName = title;
+    // across the whole parse, so _tabName is written under the lock here. An empty name clears it: "no
+    // name" and "an empty name" are one state, so the tab shows what it shows without one rather than going
+    // blank, and a daemon client mirroring it as a plain string loses nothing.
+    if (title.empty())
+        _tabName.reset();
+    else
+        _tabName = title;
     _eventListener.setTabName(title);
 }
 
