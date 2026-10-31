@@ -12,6 +12,7 @@
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>

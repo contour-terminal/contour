@@ -15,6 +15,7 @@
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/ObjectRegistry.hpp>
+#include <vthost/SessionHost.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>

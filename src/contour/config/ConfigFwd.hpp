@@ -18,6 +18,7 @@ namespace contour::config
 {
 
 struct Config;
+struct TerminalProfile;
 
 /// The unit Contour reports pixel sizes to applications in.
 ///

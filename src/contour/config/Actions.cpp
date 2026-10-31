@@ -14,6 +14,36 @@ using core::toLower;
 namespace contour::actions
 {
 
+// The special members of Action and ActionList live here, and only here: the variant's and the vector's
+// copy, move and destruction over the 129 alternatives are instantiated in this translation unit, not in
+// every includer.
+Action::Action() = default;
+Action::Action(Action const& other) = default;
+Action::Action(Action&& other) noexcept = default;
+Action& Action::operator=(Action const& other) = default;
+Action& Action::operator=(Action&& other) noexcept = default;
+Action::~Action() = default;
+
+ActionList::ActionList() = default;
+ActionList::ActionList(std::initializer_list<Action> actions): _actions(actions)
+{
+}
+ActionList::ActionList(ActionList const& other) = default;
+ActionList::ActionList(ActionList&& other) noexcept = default;
+ActionList& ActionList::operator=(ActionList const& other) = default;
+ActionList& ActionList::operator=(ActionList&& other) noexcept = default;
+ActionList::~ActionList() = default;
+
+void ActionList::push_back(Action action)
+{
+    _actions.push_back(std::move(action));
+}
+
+void ActionList::clear() noexcept
+{
+    _actions.clear();
+}
+
 optional<Action> fromString(string const& name)
 {
     // Case-insensitive, so `input_mapping:` may spell an action however it reads best.
@@ -161,10 +191,9 @@ bool isNonRepeatable(Action const& action) noexcept
                       action);
 }
 
-std::vector<Action> filterRepeatableActions(std::vector<Action> const& actions)
+ActionList filterRepeatableActions(ActionList const& actions)
 {
-    std::vector<Action> result;
-    result.reserve(actions.size());
+    ActionList result;
     for (auto const& action: actions)
         if (!isNonRepeatable(action))
             result.push_back(action);
@@ -374,7 +403,8 @@ span<ActionCatalogEntry const> actionCatalog()
             "FocusPreviousArea", Action { FocusPreviousArea {} }, documentation::FocusPreviousArea },
         ActionCatalogEntry { "FocusToolbar", Action { FocusToolbar {} }, documentation::FocusToolbar },
     };
-    static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(catalog)>> == std::variant_size_v<Action>,
+    static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(catalog)>>
+                      == std::variant_size_v<Action::Variant>,
                   "every Action alternative must have exactly one actionCatalog() row: without it the "
                   "action cannot be named in input_mapping, is missing from the generated docs, and never "
                   "shows up in the command palette");

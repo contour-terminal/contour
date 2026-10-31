@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
 

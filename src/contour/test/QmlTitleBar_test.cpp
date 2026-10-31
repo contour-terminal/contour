@@ -2278,7 +2278,15 @@ TEST_CASE("pane end: the footer's buttons answer hover and press as the kit's bu
         INFO("button: " << name);
         auto const& button = PaneTreeHost::partOf(card, name);
         auto const& layer = PaneTreeHost::partOf(button, (std::string { name } + "State").c_str());
-        auto const centre = button.mapToScene(QPointF { button.width() / 2, button.height() / 2 }).toPoint();
+        // The footer may still be sliding in after the cards settle: take the pointer's spot only once the
+        // button's centre lies inside the window, or the move lands outside it and hovers nothing.
+        auto const centreOf = [&button] {
+            return button.mapToScene(QPointF { button.width() / 2, button.height() / 2 }).toPoint();
+        };
+        auto const windowRect = QRect { QPoint {}, host.window.size() };
+        REQUIRE(
+            QTest::qWaitFor([&] { return windowRect.contains(centreOf()); }, PaneTreeHost::SettleTimeoutMs));
+        auto const centre = centreOf();
         CHECK(colorOf(layer).alpha() == 0); // at rest, the button is its fill alone
 
         // Under the pointer, the footer's wash once more -- on the native rows; the Terminal row's opaque
@@ -2286,25 +2294,34 @@ TEST_CASE("pane end: the footer's buttons answer hover and press as the kit's bu
         QTest::mouseMove(&host.window, centre);
         QCoreApplication::processEvents();
         if (PaneTreeHost::partOf(card, "exitedFooter").property("bracketed").toBool())
+        {
             CHECK(colorOf(layer).alpha() == 0);
+        }
         else
-            CHECK(colorOf(layer) == roleOn(contour::config::ChromeColorRole::PaneFooterFill));
+        {
+            auto const hovered = roleOn(contour::config::ChromeColorRole::PaneFooterFill);
+            (void) QTest::qWaitFor([&] { return colorOf(layer) == hovered; }, PaneTreeHost::SettleTimeoutMs);
+            CHECK(colorOf(layer) == hovered);
+        }
 
         // Pressed, the hover layer goes and the button shows its pressed fill: Close the strongest fill in
         // place of its wash, Restart its accent.
         auto const restFill = colorOf(button);
+        auto const pressedFill = std::string_view { name } == "exitedFooterClose"
+                                     ? roleOn(contour::config::ChromeColorRole::PaneHeaderActionHover)
+                                     : restFill;
         QTest::mousePress(&host.window, Qt::LeftButton, {}, centre);
         QCoreApplication::processEvents();
+        (void) QTest::qWaitFor([&] { return colorOf(layer).alpha() == 0 && colorOf(button) == pressedFill; },
+                               PaneTreeHost::SettleTimeoutMs);
         CHECK(colorOf(layer).alpha() == 0);
-        CHECK(colorOf(button)
-              == (std::string_view { name } == "exitedFooterClose"
-                      ? roleOn(contour::config::ChromeColorRole::PaneHeaderActionHover)
-                      : restFill));
+        CHECK(colorOf(button) == pressedFill);
         QTest::mouseRelease(&host.window, Qt::LeftButton, {}, centre);
         QCoreApplication::processEvents();
 
         QTest::mouseMove(&host.window, QPoint { 2, 2 });
         QCoreApplication::processEvents();
+        (void) QTest::qWaitFor([&] { return colorOf(layer).alpha() == 0; }, PaneTreeHost::SettleTimeoutMs);
         CHECK(colorOf(layer).alpha() == 0);
     }
 }

@@ -2,7 +2,7 @@
 #pragma once
 
 #include <contour/config/AccessibilityPreferences.hpp>
-#include <contour/config/Actions.hpp>
+#include <contour/config/ActionsFwd.hpp>
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ConfigDocumentationTags.hpp>
@@ -51,7 +51,6 @@
 #include <vtrasterizer/GlyphScaling.hpp>
 
 #include <text_shaper/Font.hpp>
-#include <text_shaper/MockFontLocator.hpp>
 
 #include <crispy/ASCII.hpp>
 #include <crispy/Size.hpp>
@@ -63,8 +62,6 @@
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/log/LogStore.hpp>
-
-#include <libunicode/convert.h>
 
 #include <algorithm>
 #include <array>
@@ -100,10 +97,10 @@ namespace contour::config
 {
 
 // TabBarPosition and TabBarVisibility live in contour/TabBarMode.h, together with the table that
-// describes them: an action carrying one of these modes is declared in Actions.h, which cannot
-// include this header (this header includes Actions.h).
+// describes them: an action carrying one of these modes is declared in Actions.hpp, which cannot
+// include this header (this header includes ActionsFwd.hpp).
 
-using ActionList = std::vector<actions::Action>;
+using ActionList = actions::ActionList;
 using KeyInputMapping = vtbackend::InputBinding<vtbackend::Key, ActionList>;
 using CharInputMapping = vtbackend::InputBinding<char32_t, ActionList>;
 using MouseInputMapping = vtbackend::InputBinding<vtbackend::MouseButton, ActionList>;
@@ -309,11 +306,11 @@ namespace helper
 /// @param clickCount The press's multi-click count for a click-count lookup; nullopt for an ordinary one.
 template <typename Input, std::ranges::input_range Mappings>
     requires std::same_as<std::ranges::range_value_t<Mappings>, vtbackend::InputBinding<Input, ActionList>>
-std::vector<actions::Action> const* apply(Mappings&& mappings,
-                                          Input input,
-                                          vtbackend::Modifiers modifiers,
-                                          uint8_t actualModeFlags,
-                                          std::optional<uint8_t> clickCount = std::nullopt)
+actions::ActionList const* apply(Mappings&& mappings,
+                                 Input input,
+                                 vtbackend::Modifiers modifiers,
+                                 uint8_t actualModeFlags,
+                                 std::optional<uint8_t> clickCount = std::nullopt)
 {
     // Forwarded rather than taken by const&: std::views::filter is not const-iterable, so a filtered
     // view over the gated fallback table could not be walked through a const reference.
@@ -576,13 +573,8 @@ struct CommandBlocksConfig
 /// @param action The action.
 /// @param commandBlocks The configured pager and its format.
 /// @return The format.
-[[nodiscard]] constexpr actions::OutputFormat outputFormatFor(
-    actions::OpenCommandOutput const& action, CommandBlocksConfig const& commandBlocks) noexcept
-{
-    if (action.format)
-        return *action.format;
-    return action.program.empty() ? commandBlocks.pagerFormat : actions::OutputFormat::Sgr;
-}
+[[nodiscard]] actions::OutputFormat outputFormatFor(actions::OpenCommandOutput const& action,
+                                                    CommandBlocksConfig const& commandBlocks) noexcept;
 
 /// The largest `command_blocks.max_records` the reader accepts; a larger value is clamped to it.
 constexpr inline int64_t MaxCommandBlockRecords = 1'000'000;
@@ -668,24 +660,6 @@ inline constexpr auto ClassicIndicatorTemplate = IndicatorTemplate {
     .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}",
 };
 
-/// The 2026 redesign's indicator status line (DefaultsEdition::Native2026): where you are and how the
-/// last command went.
-///
-/// Left: the vi mode as a chip, hidden in Insert mode, then the privilege/machine context, the working
-/// directory and the Git branch. Middle: the last command's outcome, the selection's size and the search
-/// prompt. Right: progress, the scroll position and a faint clock. No {Tabs} and no {Title}, because the
-/// chrome already shows both. Every colour is a role (`success`, `warning`, `accent`) or the scheme's
-/// `indicatorStatusLine*` pairs, so the line follows a light or dark scheme; {Git} takes the plain
-/// foreground, as no role names the canvas's magenta. Each segment is written in the serializer's
-/// canonical form, so saving it from the settings page leaves it byte for byte as it is. 0.9.0 is
-/// unreleased, so this replaces the interim template in place rather than adding an edition.
-inline constexpr auto Native2026IndicatorTemplate = IndicatorTemplate {
-    .left = "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }"
-            "{Git:Left=  }",
-    .middle = "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }",
-    .right = "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }",
-};
-
 struct IndicatorConfig
 {
     std::string left { ClassicIndicatorTemplate.left };
@@ -711,11 +685,8 @@ struct IndicatorSegment
 };
 
 /// The indicator template's segments, so that a rule over them is one loop.
-inline constexpr auto IndicatorSegments = std::array {
-    IndicatorSegment { .spelled = &IndicatorConfig::left, .shipped = &IndicatorTemplate::left },
-    IndicatorSegment { .spelled = &IndicatorConfig::middle, .shipped = &IndicatorTemplate::middle },
-    IndicatorSegment { .spelled = &IndicatorConfig::right, .shipped = &IndicatorTemplate::right },
-};
+/// @return The segments, in the order left, middle, right; valid for the program's lifetime.
+[[nodiscard]] std::span<IndicatorSegment const> indicatorSegments() noexcept;
 
 struct StatusLineConfig
 {
@@ -1025,107 +996,10 @@ struct EditionDefaults
     vtbackend::ScrollbarMarkSources scrollBarMarks; ///< The profile's `scrollbar.marks`.
 };
 
-namespace detail
-{
-#ifdef __APPLE__
-    inline constexpr std::string_view ClassicFontFamily = "Monaco";
-#else
-    inline constexpr std::string_view ClassicFontFamily = "monospace";
-#endif
-
-#ifdef _WIN32
-    inline constexpr std::string_view Native2026FontFamily = "Cascadia Mono";
-#else
-    // Bundled with Contour on macOS and Linux and registered before the first font lookup, so the
-    // name resolves on a machine that never installed it.
-    inline constexpr std::string_view Native2026FontFamily = "JetBrains Mono";
-#endif
-
-#ifdef __APPLE__
-    // macOS sets type a point larger at the same legibility, and opens links with Command (which
-    // Contour spells Super: Qt's Control/Meta swap is turned off, @see AA_MacDontSwapCtrlAndMeta).
-    inline constexpr double Native2026FontSize = 13.0;
-    inline constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Super;
-#else
-    inline constexpr double Native2026FontSize = 12.0;
-    inline constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Control;
-#endif
-
-    /// The rows of EditionDefaults, in enumerator order.
-    inline constexpr auto EditionDefaultsTable = std::array {
-        EditionDefaults {
-            .edition = DefaultsEdition::Classic,
-            .fontFamily = ClassicFontFamily,
-            .fontSize = 12.0,
-            .terminalSize = { .lines = vtbackend::LineCount(25), .columns = vtbackend::ColumnCount(80) },
-            .margins = { .horizontal = HorizontalMargin { 0u }, .vertical = VerticalMargin { 0u } },
-            .statusLine = ClassicIndicatorTemplate,
-            .linkDecoration = vtbackend::LinkDecorationMode::Always,
-            .dimUnfocused = 0.0,
-            .bellSound = "default",
-            .scrollback = vtbackend::LineCount(1000),
-            .insertCursorShape = vtbackend::CursorShape::Bar,
-            .screenTransitionDuration = std::chrono::milliseconds { 250 },
-            .darkColorScheme = "default",
-            .lightColorScheme = "default",
-            .tabBarVisibility = TabBarVisibility::Always,
-            .followHyperlinkModifier = vtbackend::Modifier::Control,
-            .theme = GuiTheme::System,
-            .chromeDensity = ChromeDensity::Comfortable,
-            .hyperlinkHoverTooltip = true,
-            .scrollBarMode = ScrollBarModePreference::Always,
-            .preeditStyle = vtbackend::PreeditStyle::Highlighted,
-            .secureInput = SecureInputMode::Off,
-            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
-                                vtbackend::ScrollbarMarkSource::Commands,
-                                vtbackend::ScrollbarMarkSource::Running,
-                                vtbackend::ScrollbarMarkSource::UserMarks },
-        },
-        EditionDefaults {
-            .edition = DefaultsEdition::Native2026,
-            .fontFamily = Native2026FontFamily,
-            .fontSize = Native2026FontSize,
-            .terminalSize = { .lines = vtbackend::LineCount(30), .columns = vtbackend::ColumnCount(100) },
-            .margins = { .horizontal = HorizontalMargin { 8u }, .vertical = VerticalMargin { 6u } },
-            .statusLine = Native2026IndicatorTemplate,
-            .linkDecoration = vtbackend::LinkDecorationMode::Modifier,
-            .dimUnfocused = 0.15,
-            .bellSound = "off",
-            .scrollback = vtbackend::LineCount(10000),
-            .insertCursorShape = vtbackend::CursorShape::Bar,
-            .screenTransitionDuration = std::chrono::milliseconds { 150 },
-            .darkColorScheme = "contour-dark",
-            .lightColorScheme = "contour-light",
-            .tabBarVisibility = TabBarVisibility::Always,
-            .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
-            .theme = GuiTheme::Terminal,
-            .chromeDensity = ChromeDensity::Comfortable,
-            .hyperlinkHoverTooltip = false,
-            .scrollBarMode = ScrollBarModePreference::System,
-            .preeditStyle = vtbackend::PreeditStyle::Inline,
-            .secureInput = SecureInputMode::Auto,
-            .scrollBarMarks = { vtbackend::ScrollbarMarkSource::Failures,
-                                vtbackend::ScrollbarMarkSource::Running,
-                                vtbackend::ScrollbarMarkSource::SearchMatches },
-        },
-    };
-
-    static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, EditionDefaultsTable.size()),
-                                      [](size_t i) {
-                                          return static_cast<size_t>(EditionDefaultsTable[i].edition) == i;
-                                      }),
-                  "EditionDefaultsTable must list one row per DefaultsEdition, in enumerator order");
-    static_assert(EditionDefaultsTable.size() == configEnumValues<DefaultsEdition>().size(),
-                  "every DefaultsEdition needs a row of defaults");
-} // namespace detail
-
 /// The defaults @p edition ships.
 /// @param edition The edition to look up.
 /// @return Its row of the default table.
-[[nodiscard]] constexpr EditionDefaults const& editionDefaults(DefaultsEdition edition) noexcept
-{
-    return detail::EditionDefaultsTable[static_cast<size_t>(edition)];
-}
+[[nodiscard]] EditionDefaults const& editionDefaults(DefaultsEdition edition) noexcept;
 
 /// The indicator status line @p spelled means once the defaults switch from @p writtenFor to @p now.
 ///
@@ -1293,23 +1167,6 @@ struct TerminalProfile
     ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
     ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
-
-/// One chrome-focus chord of the Native2026 defaults.
-struct ChromeFocusChord
-{
-    vtbackend::Modifiers modifiers; ///< The chord's modifiers.
-    vtbackend::Key key;             ///< The chord's key.
-    actions::Action action;         ///< What the chord does.
-};
-
-/// The chords that move keyboard focus through a window's chrome (Native2026 only, so a Classic user's
-/// Ctrl+F6 still reaches the shell). A bare F6 is never bound: mc, vim and htop use it.
-///
-/// macOS: Control+F6 between areas (Shift reversed) and Control+F5 for the toolbar -- the chords AppKit's
-/// own "move focus to the toolbar" and "next window" use; our toolbar is drawn by QML, so the app answers
-/// them. Elsewhere the canvas names Ctrl+F6 alone, so there is no toolbar chord.
-/// @return The rows, built afresh.
-[[nodiscard]] std::vector<ChromeFocusChord> native2026ChromeFocusChords();
 
 /// The built-in key/mouse bindings of @p edition, built afresh.
 /// @param edition The edition whose bindings to build; only the FollowHyperlink modifier differs.
@@ -1722,16 +1579,14 @@ struct ResolvedSessionConfig
     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
 
 /// The animation durations Reduce Motion zeroes: the cursor glide and the screen transition. A duration
-/// that should follow Reduce Motion too is a new entry here, and nothing else changes.
-inline constexpr auto MotionSettings = std::array {
-    &vtbackend::Settings::screenTransitionDuration,
-    &vtbackend::Settings::cursorMotionAnimationDuration,
-};
+/// that should follow Reduce Motion too is a new entry in the table behind this, and nothing else changes.
+/// @return The settings members, valid for the program's lifetime.
+[[nodiscard]] std::span<std::chrono::milliseconds vtbackend::Settings::* const> motionSettings() noexcept;
 
 /// The settings a terminal runs with under the OS motion preference, leaving the configured ones intact.
 /// @param settings The settings as configured, e.g. from @ref sessionSettings.
 /// @param motion The OS motion preference.
-/// @return @p settings with every @ref MotionSettings duration at zero under
+/// @return @p settings with every @ref motionSettings duration at zero under
 ///         MotionPreference::Reduced, or @p settings unchanged under MotionPreference::Full.
 [[nodiscard]] vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreference motion);
 
@@ -1880,6 +1735,26 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
 [[nodiscard]] std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(
     std::filesystem::path const& path);
 
+/// The name a StatusDisplayPosition is formatted as.
+/// @param value The position.
+/// @return Its name.
+[[nodiscard]] std::string_view nameOf(vtbackend::StatusDisplayPosition value) noexcept;
+
+/// The name a StatusDisplayType is formatted as.
+/// @param value The type.
+/// @return Its name.
+[[nodiscard]] std::string_view nameOf(vtbackend::StatusDisplayType value) noexcept;
+
+/// The name a ScrollBarPosition is formatted as.
+/// @param value The position.
+/// @return Its name.
+[[nodiscard]] std::string_view nameOf(ScrollBarPosition value) noexcept;
+
+/// The text a background image is formatted as.
+/// @param value The image.
+/// @return The image's file path, or "Image" for one that is not a file.
+[[nodiscard]] std::string formatBackgroundImage(vtbackend::BackgroundImage const& value);
+
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();
@@ -1914,13 +1789,7 @@ struct std::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_v
 {
     auto format(vtbackend::StatusDisplayPosition value, auto& ctx) const
     {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::StatusDisplayPosition::Bottom: name = "Bottom"; break;
-            case vtbackend::StatusDisplayPosition::Top: name = "Top"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string_view>::format(contour::config::nameOf(value), ctx);
     }
 };
 
@@ -1929,9 +1798,7 @@ struct std::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 {
     auto format(vtbackend::BackgroundImage value, auto& ctx) const
     {
-        if (auto* loc = std::get_if<std::filesystem::path>(&value.location))
-            return formatter<string_view>::format(core::pathToUtf8(*loc), ctx);
-        return formatter<string_view>::format("Image", ctx);
+        return formatter<string_view>::format(contour::config::formatBackgroundImage(value), ctx);
     }
 };
 
@@ -1940,14 +1807,7 @@ struct std::formatter<vtbackend::StatusDisplayType>: formatter<std::string_view>
 {
     auto format(vtbackend::StatusDisplayType value, auto& ctx) const
     {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::StatusDisplayType::None: name = "none"; break;
-            case vtbackend::StatusDisplayType::Indicator: name = "indicator"; break;
-            case vtbackend::StatusDisplayType::HostWritable: name = "host writable"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string_view>::format(contour::config::nameOf(value), ctx);
     }
 };
 
@@ -1976,14 +1836,7 @@ struct std::formatter<contour::config::ScrollBarPosition>: formatter<std::string
 {
     auto format(contour::config::ScrollBarPosition value, auto& ctx) const
     {
-        std::string_view name;
-        switch (value)
-        {
-            case contour::config::ScrollBarPosition::Hidden: name = "Hidden"; break;
-            case contour::config::ScrollBarPosition::Left: name = "Left"; break;
-            case contour::config::ScrollBarPosition::Right: name = "Right"; break;
-        }
-        return formatter<std::string_view>::format(name, ctx);
+        return formatter<std::string_view>::format(contour::config::nameOf(value), ctx);
     }
 };
 

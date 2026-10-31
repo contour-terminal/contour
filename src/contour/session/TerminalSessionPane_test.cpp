@@ -14,6 +14,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/session/TerminalSessionTestSupport.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>

@@ -16,8 +16,8 @@
 #include <string>
 #include <string_view>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/ServiceControl.hpp>
 
 namespace vthost

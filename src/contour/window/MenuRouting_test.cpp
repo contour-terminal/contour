@@ -108,7 +108,7 @@ TEST_CASE("a native pick runs the action of the menu that was shown, not of a ne
     // Menu A is published and shown natively.
     auto const menuA = sampleTree();
     published.publish(menuA);
-    auto ran = std::vector<contour::actions::Action> {};
+    auto ran = contour::actions::ActionList {};
     auto const route = presentMenu(
         MenuPresentation::Native,
         presenter,
@@ -122,8 +122,8 @@ TEST_CASE("a native pick runs the action of the menu that was shown, not of a ne
     auto menuB = sampleTree();
     // A vector moved in, not a list assigned element-wise: the Action variant's copy assignment would cost
     // GCC at -O2 -g some 7 GB more memory and seven times the time.
-    menuB.actions = std::vector<contour::actions::Action> { contour::actions::Quit {},
-                                                            contour::actions::PasteClipboard {} };
+    menuB.actions =
+        contour::actions::ActionList { contour::actions::Quit {}, contour::actions::PasteClipboard {} };
     published.publish(menuB);
 
     presenter.pick(1);

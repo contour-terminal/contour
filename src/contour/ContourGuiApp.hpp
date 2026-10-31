@@ -7,40 +7,28 @@
 #include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DesktopButtonLayout.hpp>
-#include <contour/config/GuiStateStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
-#include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
-#include <contour/platform/LauncherMenu.hpp>
-#include <contour/platform/MenuBarIntegration.hpp>
-#include <contour/platform/NativeMenuPresenter.hpp>
-#include <contour/platform/PlatformAppearance.hpp>
-#include <contour/platform/SecureInput.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/RestoreSummaryPolicy.hpp>
+#include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
-#include <contour/window/AppMenuBar.hpp>
-#include <contour/window/ChromeStyleHost.hpp>
-#include <contour/window/ConnectPickerController.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HotkeyRefusals.hpp>
-#include <contour/window/NewDefaultsNotice.hpp>
-#include <contour/window/QuickTerminalController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/UiStyleProvider.hpp>
-#include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
@@ -59,12 +47,8 @@
 #include <core/platform/FileSystem.hpp>
 
 #include <QtCore/QPointer>
-#include <QtDBus/QDBusVariant>
 #include <QtGui/QPalette>
-#include <QtGui/QScreen>
-#include <QtGui/QWindow>
 #include <QtQml/QQmlApplicationEngine>
-#include <QtQml/QQmlContext>
 
 #include <atomic>
 #include <chrono>
@@ -82,11 +66,14 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
 
+class QQmlContext;
 class QQuickWindow;
+class QScreen;
+class QWindow;
 
 namespace vtextension
 {
@@ -102,10 +89,17 @@ class IWasmBackend;
 namespace contour
 {
 
+namespace cli
+{
+    struct LocalDaemonState;
+}
+
 namespace config
 {
     struct Config;
-}
+    class GuiStateStore;
+    struct LaunchTarget;
+} // namespace config
 
 namespace display
 {
@@ -119,6 +113,12 @@ namespace display
 
 namespace platform
 {
+    class IAccessibilityPreferenceSource;
+    class IMenuBarIntegration;
+    class INativeMenuPresenter;
+    class IPlatformAppearance;
+    class ISecureInput;
+    class LauncherMenu;
     class Notifier;
 } // namespace platform
 
@@ -136,7 +136,15 @@ namespace session
 
 namespace window
 {
+    class AppMenuBar;
+    struct AppMenuBarSources;
+    class ChromeStyleHost;
+    class ConnectPickerController;
+    struct ConnectPickerServices;
+    class NewDefaultsNotice;
+    class QuickTerminalController;
     class SettingsController;
+    class WindowControlStyleProvider;
     class WindowController;
 } // namespace window
 

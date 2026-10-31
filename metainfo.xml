@@ -231,6 +231,7 @@
           <li>Adds a quick terminal: a global hotkey, set in Settings › General and unbound by default, slides a terminal down from the top of the screen and hides it again, and hides it when it loses focus unless turned off; on macOS the app you came from stays in front. Adds <code>quick_terminal</code> (<code>hotkey</code>, <code>hide_on_focus_loss</code>)</li>
           <li>Shows a bell badge on a tab whose program rang the bell while out of sight, until the tab is seen; the Dock icon, the Windows taskbar button and the Linux launcher count the tabs waiting for you (OSC 7501 blocked), so a question asked in a terminal is visible from another app</li>
           <li>On macOS, a command that ran ten seconds or more in a pane you were not looking at raises a Notification Center notification when Contour runs from its app bundle; clicking it brings the pane forward with the command's block in view, and it chimes only while the bell sound is on</li>
+          <li>Fixes <code>contour help</code> for commands with subcommands such as <code>contour daemon</code>: their usage lines now wrap inside the terminal width, under the command's first option, instead of running past it or indenting a subcommand's options by hundreds of columns</li>
         </ul>
       </description>
     </release>

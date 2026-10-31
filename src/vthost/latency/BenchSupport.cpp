@@ -2,6 +2,7 @@
 
 #include <vthost/latency/BenchSupport.hpp>
 
+#include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
 #include <algorithm>
@@ -14,7 +15,6 @@
 #include <thread>
 #include <utility>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/latency/Report.hpp>

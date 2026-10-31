@@ -3,7 +3,7 @@
 // The quick terminal's window as the app builds it: its role, flags, density, and what is never remembered.
 // Headless: tabs are minted straight through the model, windows are bare QQuickWindows.
 
-#include <contour/ContourGuiApp.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/NoticeQueue.hpp>

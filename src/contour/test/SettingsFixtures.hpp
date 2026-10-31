@@ -53,7 +53,7 @@ struct ControllerFixture
     /// before it lists the rows.
     window::BinaryReach binaryReach = window::BinaryReach::Reachable;
     config::HostPlatform shellHost = config::HostPlatform::Other;
-    std::vector<actions::Action> ranActions;         ///< What Settings ran as the app's own commands.
+    actions::ActionList ranActions;                  ///< What Settings ran as the app's own commands.
     std::optional<std::filesystem::path> chosenFile; ///< What the file dialog answers; nullopt cancels.
     std::unique_ptr<window::SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.

@@ -2,6 +2,7 @@
 #include <vthost/tmux/ImsgServer.hpp>
 
 #include <vthost/Logging.hpp>
+#include <vthost/SessionHost.hpp>
 
 #ifndef _WIN32
 

@@ -106,7 +106,7 @@ struct BarFixture
 {
     config::Config config {};
     command::MenuBarState state = windowWithTabs({ "one" });
-    std::vector<actions::Action> ran {};
+    actions::ActionList ran {};
     std::vector<command::ActionScope> scopes {}; ///< The scope each run of @ref ran was handed.
     test::RecordingMenuBarIntegration integration {};
     window::AppMenuBar bar {

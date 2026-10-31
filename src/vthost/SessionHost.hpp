@@ -49,7 +49,6 @@
 #include <variant>
 #include <vector>
 
-#include <vtcontrol/ControlApi.hpp>
 #include <vtcontrol/Uuid.hpp>
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
@@ -68,6 +67,12 @@
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/SessionModel.hpp>
+
+// Only named by reference and pointer here; vtcontrol/ControlApi.hpp defines it.
+namespace vtcontrol
+{
+class ControlApi;
+}
 
 namespace vthost
 {
@@ -1442,7 +1447,7 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// The client whose launch took every window; null while none is attached. @see claimPrimaryViewer
     SessionStreamEvents const* _primaryViewer = nullptr;
     /// What serves the extensions' control calls. @see attachExtensionControl
-    std::reference_wrapper<vtcontrol::ControlApi> _extensionControl { vtcontrol::nullControlApi() };
+    std::reference_wrapper<vtcontrol::ControlApi> _extensionControl;
     /// Every window created for a client, by window id: that client while it is attached, null once it
     /// left. A window absent here is unclaimed. @see windowClaim
     std::unordered_map<uint64_t, SessionStreamEvents const*> _windowCreators;

@@ -11,12 +11,13 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshot.hpp>
 #include <vthost/WorkspacePersistenceConfig.hpp>
 
 namespace vthost
 {
+
+class SessionHost;
 
 /// What a capture keeps.
 struct CaptureOptions

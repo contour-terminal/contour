@@ -57,6 +57,7 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/DaemonRuntime.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/IdleExitWatcher.hpp>

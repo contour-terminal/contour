@@ -3,7 +3,6 @@
 // TerminalSession tests, continued: what a session asks of its view, the gutter, the sticky header,
 // an ended pane and the anchoring of a hovered block.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/session/EndReason.hpp>
@@ -13,6 +12,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/session/TerminalSessionTestSupport.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/PermissionFixtures.hpp>

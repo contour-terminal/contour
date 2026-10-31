@@ -3,7 +3,6 @@
 
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/MenuBarTable.hpp>
-#include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/Announcer.hpp>
@@ -40,8 +39,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
+#include <QtCore/QVariant>
 #include <QtGui/QColor>
-#include <QtQml/QtQml>
+#include <QtQml/qqmlregistration.h>
 
 #include <array>
 #include <chrono>
@@ -64,6 +64,11 @@ namespace vtworkspace
 class Tab;
 class Window;
 } // namespace vtworkspace
+
+namespace contour::display
+{
+class TerminalDisplay;
+} // namespace contour::display
 
 namespace contour::session
 {
@@ -1461,8 +1466,8 @@ class WindowController:
     [[nodiscard]] bool runChromeCommand(window::ChromeCommand command);
     /// The actions the active session's key bindings give a key press while the chrome has focus.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
-    [[nodiscard]] std::vector<actions::Action> const* boundActionsFor(int qtKey,
-                                                                      Qt::KeyboardModifiers modifiers) const;
+    [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
+                                                             Qt::KeyboardModifiers modifiers) const;
     /// Closes the tab at @p row, asking first unless every pane is known to be idle (a pane whose program
     /// cannot be known asks too: window::closeConfirmationFor).
     void closeTabAskingIfBusy(int row);

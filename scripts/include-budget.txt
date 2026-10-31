@@ -1,0 +1,41 @@
+# Include budget: headers that must stay light, and what they must not pull in.
+#
+# One row per forbidden include:
+#
+#     <header> !<forbidden>
+#
+# <header> is a repository-relative path (src/contour/window/WindowController.hpp). <forbidden> is
+# either a repository-relative header path, or a spelling in angle brackets (!<QtDBus/QDBusVariant>)
+# for a header outside the first-party roots, matched by the spelling the #include uses. The check
+# is transitive. Blank lines and lines starting with # are ignored.
+#
+# scripts/check-include-budget.py fails a row when the forbidden header is reachable (printing the
+# include chain), and also when either named header does not exist, so a rename cannot turn a row
+# into a vacuous pass.
+#
+# Rows are added by the tasks that earn them: a header-dependency cut lands together with the row
+# that stops it from growing back.
+src/contour/display/TerminalDisplay.hpp !src/contour/config/Actions.hpp
+src/contour/config/ActionsFwd.hpp !src/contour/config/Actions.hpp
+src/contour/config/Actions.hpp !src/vtbackend/input/vi/HintModeHandler.hpp
+src/contour/config/Config.hpp !<text_shaper/MockFontLocator.hpp>
+src/contour/cli/ConnectList.hpp !src/contour/config/Config.hpp
+src/contour/command/LauncherEntries.hpp !src/contour/config/Config.hpp
+src/contour/window/ConnectPickerController.hpp !src/contour/config/Config.hpp
+src/contour/window/NewDefaultsNotice.hpp !src/contour/config/Config.hpp
+src/contour/window/WindowController.hpp !src/contour/display/TerminalDisplay.hpp
+src/contour/display/TerminalDisplay.hpp !src/contour/session/TerminalSession.hpp
+src/contour/session/TerminalSessionManager.hpp !src/contour/display/TerminalDisplay.hpp
+src/contour/session/TerminalSessionManager.hpp !src/contour/session/TerminalSession.hpp
+src/contour/test/GuiTestFixtures.hpp !src/contour/ContourGuiApp.hpp
+src/contour/ContourGuiApp.hpp !<QtDBus/QDBusVariant>
+src/contour/window/WindowController.hpp !<QtQml/QtQml>
+src/contour/display/TerminalDisplay.hpp !<QtQml/QtQml>
+src/contour/session/PaneProxy.hpp !<QtQml/QtQml>
+src/vthost/ConfigReload.hpp !src/vthost/SessionHost.hpp
+src/vthost/WorkspaceCapture.hpp !src/vthost/SessionHost.hpp
+src/vthost/tmux/ImsgServer.hpp !src/vthost/SessionHost.hpp
+src/vthost/Transport.hpp !src/vthost/Daemon.hpp
+src/vthost/DaemonStarter.hpp !src/vthost/Daemon.hpp
+src/vthost/DaemonSpawn.hpp !src/vthost/Daemon.hpp
+src/vthost/SessionHost.hpp !src/vtcontrol/ControlApi.hpp

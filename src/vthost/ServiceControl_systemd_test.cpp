@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/ServiceControl_systemd.hpp>
 #include <vthost/testing/FakeCommandRunner.hpp>
 

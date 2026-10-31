@@ -15,10 +15,11 @@
 #include <utility>
 
 #include <vthost/ProfileCatalog.hpp>
-#include <vthost/SessionHost.hpp>
 
 namespace vthost
 {
+
+class SessionHost;
 
 /// How a daemon learns that its configuration changed.
 struct ConfigReloadHook
@@ -39,11 +40,7 @@ class ConfigReloadWatcher
     /// @param loop The loop the polls run on (not owned; outlives this).
     /// @param host The host the catalogs go to (not owned; outlives this).
     /// @param hook What is polled; a null @c poll polls nothing.
-    ConfigReloadWatcher(core::net::EventLoop& loop, SessionHost& host, ConfigReloadHook hook):
-        _loop { loop }, _host { host }, _hook { std::move(hook) }
-    {
-        arm();
-    }
+    ConfigReloadWatcher(core::net::EventLoop& loop, SessionHost& host, ConfigReloadHook hook);
 
     ConfigReloadWatcher(ConfigReloadWatcher const&) = delete;
     ConfigReloadWatcher(ConfigReloadWatcher&&) = delete;
@@ -52,23 +49,9 @@ class ConfigReloadWatcher
     ~ConfigReloadWatcher() = default;
 
   private:
-    void arm()
-    {
-        if (!_hook.poll)
-            return;
-        _timer.reset();
-        _timer.emplace(_loop, _loop.clock().now() + _hook.interval, &ConfigReloadWatcher::fire, this);
-    }
+    void arm();
 
-    static void fire(void* self)
-    {
-        auto& watcher = *static_cast<ConfigReloadWatcher*>(self);
-        if (auto catalog = watcher._hook.poll())
-            watcher._host.replaceProfiles(std::move(catalog));
-        // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is
-        // called.
-        watcher.arm();
-    }
+    static void fire(void* self);
 
     core::net::EventLoop& _loop;
     SessionHost& _host;

@@ -8,6 +8,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/DisplayPixels.hpp>
 #include <contour/test/GuiTestFixtures.hpp>

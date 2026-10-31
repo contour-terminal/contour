@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/Actions.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/ImeQueryRect.hpp>
@@ -12,21 +11,18 @@
 #include <contour/input/MouseMapping.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/SessionInput.hpp>
-#include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
-
-#include <vtrasterizer/ReGISFontRasterizer.hpp>
-#include <vtrasterizer/Renderer.hpp>
 
 #include <core/Deferred.hpp>
 
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
 #include <QtCore/QTimer>
+#include <QtCore/QVariant>
 #include <QtGui/QVector4D>
-#include <QtQml/QtQml>
+#include <QtQml/qqmlregistration.h>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRenderNode>
@@ -45,10 +41,17 @@ class QRhiRenderPassDescriptor;
 class QScreen;
 QT_END_NAMESPACE
 
+namespace vtrasterizer
+{
+class ReGISFontRasterizer;
+class Renderer;
+} // namespace vtrasterizer
+
 namespace contour::session
 {
+class TerminalSession;
 class TerminalSessionManager;
-}
+} // namespace contour::session
 
 namespace contour::display
 {
@@ -87,6 +90,8 @@ class DrawnCursorColumn
 class TerminalDisplay: public QQuickItem, public session::DisplaySurface
 {
     Q_OBJECT
+    Q_MOC_INCLUDE("contour/session/TerminalSession.hpp")
+    Q_MOC_INCLUDE("vtrasterizer/Renderer.hpp")
     Q_PROPERTY(session::TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
     Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
@@ -102,13 +107,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     ~TerminalDisplay() override;
 
     // {{{ QML property helper
-    [[nodiscard]] QString title() const
-    {
-        if (_session)
-            return _session->title();
-        else
-            return "No session";
-    }
+    [[nodiscard]] QString title() const;
 
     // NB: The title-bar visibility is WINDOW state and lives on the WindowController (the window
     // authority), not per display: storing it per pane made a ToggleTitleBar silently revert on the
@@ -116,23 +115,11 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     // initial value from the profile (first-write-wins) via WindowController::seedTitleBarVisible().
     // }}}
 
-    [[nodiscard]] config::TerminalProfile const& profile() const noexcept
-    {
-        assert(_session != nullptr);
-        return _session->profile();
-    }
+    [[nodiscard]] config::TerminalProfile const& profile() const noexcept;
 
-    [[nodiscard]] vtbackend::Terminal const& terminal() const noexcept
-    {
-        assert(_session != nullptr);
-        return _session->terminal();
-    }
+    [[nodiscard]] vtbackend::Terminal const& terminal() const noexcept;
 
-    [[nodiscard]] vtbackend::Terminal& terminal() noexcept
-    {
-        assert(_session != nullptr);
-        return _session->terminal();
-    }
+    [[nodiscard]] vtbackend::Terminal& terminal() noexcept;
 
     [[nodiscard]] bool hasSession() const noexcept override { return _session != nullptr; }
 
@@ -161,11 +148,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// the session from posting into this display after it is destroyed.
     void releaseSession() final;
 
-    [[nodiscard]] session::TerminalSession& session() noexcept final
-    {
-        assert(_session != nullptr);
-        return *_session;
-    }
+    [[nodiscard]] session::TerminalSession& session() noexcept final;
 
 #if QT_CONFIG(im)
     [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
@@ -307,7 +290,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
 
     /// The font size the renderer has actually loaded (its published font descriptions), which may differ
     /// from a just-requested size while a staged change is pending or after a swallowed font-load failure.
-    [[nodiscard]] text::FontSize fontSize() const { return _renderer->fontDescriptions().size; }
+    [[nodiscard]] text::FontSize fontSize() const;
 
     void setMouseCursorShape(input::MouseCursorShape newCursorShape) final;
     void setWindowFullScreen();
@@ -437,12 +420,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// Forwarded rather than re-derived, so a QML caller reaching either this or the session's own
     /// accessor is told the same thing about the same viewport -- and the reason it is the scrollable
     /// count rather than the raw history depth is stated once, there.
-    Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept
-    {
-        if (!_session)
-            return 0;
-        return _session->historyLineCount();
-    }
+    Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept;
 
     /// The band viewport rows @p first to @p last take in this item: where the find bar asks whether the
     /// current match lies under it (window::placeFindBar).
@@ -578,10 +556,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// Public so the accessibility interface can map cells to screen rectangles. Returned BY VALUE, and
     /// callers should take one copy per query: two separate reads could straddle a concurrent font apply
     /// and mix a new cell size with an old margin.
-    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept final
-    {
-        return _renderer->gridMetrics();
-    }
+    [[nodiscard]] vtrasterizer::GridMetrics gridMetrics() const noexcept final;
 
   private:
     /// Flags the screen as dirty.

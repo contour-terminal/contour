@@ -7,7 +7,6 @@
 // elsewhere, where nothing is ever applied -- which is how they prove those hosts unaffected. The Windows
 // cases at the end follow the kept Windows frame and the Fluent row on every OS (ruling Q2).
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/ConfigFwd.hpp>
@@ -15,6 +14,7 @@
 #include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/TitleBandGeometry.hpp>

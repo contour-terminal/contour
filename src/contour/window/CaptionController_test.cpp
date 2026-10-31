@@ -4,12 +4,12 @@
 // to the caption adapter, and what the binding it lends answers and does. The adapter is a recording one,
 // and the frame platform is injected, so the kept Windows frame's decisions run on every OS.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>

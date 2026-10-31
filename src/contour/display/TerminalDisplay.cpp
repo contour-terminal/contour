@@ -17,11 +17,15 @@
 #include <contour/platform/QtPath.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/window/FindBarPlacement.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
 #include <vtpty/Pty.hpp>
+
+#include <vtrasterizer/ReGISFontRasterizer.hpp>
+#include <vtrasterizer/Renderer.hpp>
 
 #include <crispy/ScopedTimer.hpp>
 
@@ -154,6 +158,55 @@ TerminalDisplay::TerminalDisplay(QQuickItem* parent):
     _autoScrollTimer.setInterval(50);
     connect(
         &_autoScrollTimer, &QTimer::timeout, this, &TerminalDisplay::onAutoScrollTick, Qt::QueuedConnection);
+}
+
+session::TerminalSession& TerminalDisplay::session() noexcept
+{
+    assert(_session != nullptr);
+    return *_session;
+}
+
+QString TerminalDisplay::title() const
+{
+    if (_session)
+        return _session->title();
+    else
+        return "No session";
+}
+
+config::TerminalProfile const& TerminalDisplay::profile() const noexcept
+{
+    assert(_session != nullptr);
+    return _session->profile();
+}
+
+vtbackend::Terminal const& TerminalDisplay::terminal() const noexcept
+{
+    assert(_session != nullptr);
+    return _session->terminal();
+}
+
+vtbackend::Terminal& TerminalDisplay::terminal() noexcept
+{
+    assert(_session != nullptr);
+    return _session->terminal();
+}
+
+text::FontSize TerminalDisplay::fontSize() const
+{
+    return _renderer->fontDescriptions().size;
+}
+
+int TerminalDisplay::historyLineCount() const noexcept
+{
+    if (!_session)
+        return 0;
+    return _session->historyLineCount();
+}
+
+vtrasterizer::GridMetrics TerminalDisplay::gridMetrics() const noexcept
+{
+    return _renderer->gridMetrics();
 }
 
 TerminalDisplay::~TerminalDisplay()

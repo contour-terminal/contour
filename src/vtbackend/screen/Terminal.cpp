@@ -9936,4 +9936,42 @@ std::string toString(DECMode mode)
     return std::format("({})", static_cast<unsigned>(mode));
 }
 
+string toString(TraceHandler::PendingSequence const& pendingSequence)
+{
+    if (auto const* sequence = std::get_if<Sequence>(&pendingSequence))
+        return std::format("{}", sequence->text());
+    if (auto const* codepoints = std::get_if<TraceHandler::CodepointSequence>(&pendingSequence))
+        return std::format("\"{}\"", core::escape(codepoints->text));
+    if (auto const* codepoint = std::get_if<char32_t>(&pendingSequence))
+        return std::format("'{}'", unicode::convert_to<char>(*codepoint));
+    core::unreachable();
+}
+
+string_view toString(DynamicColorName name) noexcept
+{
+    switch (name)
+    {
+        case DynamicColorName::DefaultForegroundColor: return "DefaultForegroundColor";
+        case DynamicColorName::DefaultBackgroundColor: return "DefaultBackgroundColor";
+        case DynamicColorName::TextCursorColor: return "TextCursorColor";
+        case DynamicColorName::MouseForegroundColor: return "MouseForegroundColor";
+        case DynamicColorName::MouseBackgroundColor: return "MouseBackgroundColor";
+        case DynamicColorName::HighlightForegroundColor: return "HighlightForegroundColor";
+        case DynamicColorName::HighlightBackgroundColor: return "HighlightBackgroundColor";
+    }
+    return {};
+}
+
+string_view toString(ExecutionMode mode) noexcept
+{
+    switch (mode)
+    {
+        case ExecutionMode::Normal: return "NORMAL";
+        case ExecutionMode::Waiting: return "WAITING";
+        case ExecutionMode::SingleStep: return "SINGLE STEP";
+        case ExecutionMode::BreakAtEmptyQueue: return "BREAK AT EMPTY";
+    }
+    return {};
+}
+
 } // namespace vtbackend

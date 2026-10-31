@@ -254,6 +254,15 @@ if(CONTOUR_TESTING)
         # pushed.
         contour_add_lint_gate(check_workflows check-workflows.py)
 
+        # The rule that keeps every required status check runnable on a pull request, tested against
+        # inline fixtures; it needs neither the network nor actionlint.
+        contour_add_lint_gate(check_workflows_selftest check-workflows.py --self-test)
+
+        # The Windows installer's WiX patch file fails only at `cpack` time on a Windows runner, after a
+        # full build; the rule CPack enforces (each fragment Id once) is checked here on every platform.
+        contour_add_lint_gate(check_wix_patch check-wix-patch.py)
+        contour_add_lint_gate(check_wix_patch_selftest check-wix-patch.py --self-test)
+
         # Spell-check the tree. CI runs this very script, so a local `ctest` run and the CI gate
         # cannot disagree — that is what stops a spelling failure from costing an extra push. CI
         # sets CHECK_SPELLING_REQUIRE_TOOL so the skip cannot turn into a false green there.
@@ -284,15 +293,29 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_qml_sizes check-qml-sizes.py)
         contour_add_lint_gate(check_qml_sizes_selftest check-qml-sizes.py --self-test)
 
+        # The compile-time measurement script's aggregator, checked on embedded fixture traces in both
+        # Source event shapes Clang emits; the measurement itself is run by hand (docs/internals/build-times.md).
+        contour_add_lint_gate(measure_compile_times_selftest measure-compile-times.py --self-test)
+
+        # The planner behind scripts/clang-tidy-diff.sh (clang-tidy on a PR's changed lines): which TU lints
+        # which changed header line. Fixture-only, no compiler; a header that no TU includes must fail the
+        # plan rather than be skipped.
+        contour_add_lint_gate(tidy_diff_plan_selftest tidy-diff-plan.py --self-test)
+
+        # The headers kept light stay light: scripts/include-budget.txt rows say which header must not
+        # transitively include which, and a failure prints the include chain. A row naming a header that
+        # no longer exists fails too, so a rename cannot make a row pass vacuously.
+        contour_add_lint_gate(check_include_budget check-include-budget.py)
+        contour_add_lint_gate(check_include_budget_selftest check-include-budget.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
     else()
         # A warning, not a status line: losing both lint gates is exactly the silent gap this
         # change set out to close, and it must not scroll past in a wall of configure output.
-        message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows, "
-                        "check_wasm_runtime_containment, check_qml_colors, check_qml_sizes) "
-                        "are not registered.")
+        message(WARNING "Python 3 not found: the lint gates (every contour_add_lint_gate "
+                        "entry above) are not registered.")
     endif()
 endif()
 # ----------------------------------------------------------------------------

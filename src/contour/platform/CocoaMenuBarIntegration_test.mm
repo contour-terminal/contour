@@ -302,7 +302,7 @@ TEST_CASE("the application menu fires its rows and keys with no window, and afte
     auto const config = contour::config::Config {};
     auto state = contour::command::MenuBarState {}; // as at startup: no window yet
     auto integration = contour::platform::NullMenuBarIntegration {};
-    auto ran = std::vector<contour::actions::Action> {};
+    auto ran = contour::actions::ActionList {};
     auto bar = contour::window::AppMenuBar {
         contour::window::AppMenuBarSources {
             .state = [&] { return state; },

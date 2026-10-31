@@ -1885,7 +1885,7 @@ void TerminalSession::applyMotionPreference(config::MotionPreference motion)
     // Locked: the render thread reads both durations as it animates. The factory settings follow too, so a
     // RIS returns to the durations the preference allows, as configureTerminal() hands them over.
     auto const _ = std::scoped_lock { _terminal };
-    for (auto const setting: config::MotionSettings)
+    for (auto const setting: config::motionSettings())
     {
         _terminal.settings().*setting = adjusted.*setting;
         _terminal.factorySettings().*setting = adjusted.*setting;
@@ -7550,7 +7550,7 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
     return true;
 }
 
-int TerminalSession::executeAllActions(std::vector<actions::Action> const& actions)
+int TerminalSession::executeAllActions(actions::ActionList const& actions)
 {
     if (_allowKeyMappings)
     {
@@ -7583,7 +7583,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
 bool TerminalSession::executeAction(actions::Action const& action)
 {
     sessionLog()("executeAction: {}", action);
-    return visit(*this, action);
+    return std::visit(*this, action);
 }
 
 std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorkingDirectory(

@@ -7,7 +7,7 @@
 #include <format>
 #include <utility>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/SshTransport.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>

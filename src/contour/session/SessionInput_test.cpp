@@ -11,6 +11,7 @@
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
 #include <vtbackend/input/InputGenerator.hpp>

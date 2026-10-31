@@ -2478,7 +2478,7 @@ std::vector<config::StagedFile> SettingsController::profilesAdoptingEdition(conf
         auto adopted = isOpen ? _draft : profile;
         auto statusLine = adopted.statusLine.value();
         auto const indicator = config::indicatorForEdition(statusLine.indicator, before, now);
-        if (std::ranges::all_of(config::IndicatorSegments, [&](config::IndicatorSegment const& segment) {
+        if (std::ranges::all_of(config::indicatorSegments(), [&](config::IndicatorSegment const& segment) {
                 return indicator.*segment.spelled == statusLine.indicator.*segment.spelled;
             }))
             continue;

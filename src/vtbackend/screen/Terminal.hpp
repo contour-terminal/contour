@@ -6056,22 +6056,29 @@ class Terminal: public IStatusLinePublishTarget
 } // namespace vtbackend
 
 // {{{ fmt formatter specializations
+namespace vtbackend
+{
+
+/// @param pendingSequence A sequence, text run or codepoint the trace handler holds back.
+/// @return Its trace spelling: the sequence's text, a quoted escaped text run, or a quoted codepoint.
+[[nodiscard]] std::string toString(TraceHandler::PendingSequence const& pendingSequence);
+
+/// @param name A dynamic color a program may set or query.
+/// @return The enumerator's name.
+[[nodiscard]] std::string_view toString(DynamicColorName name) noexcept;
+
+/// @param mode The terminal's execution mode.
+/// @return Its debugger-facing spelling ("NORMAL", "WAITING", ...).
+[[nodiscard]] std::string_view toString(ExecutionMode mode) noexcept;
+
+} // namespace vtbackend
+
 template <>
 struct std::formatter<vtbackend::TraceHandler::PendingSequence>: std::formatter<std::string>
 {
     auto format(vtbackend::TraceHandler::PendingSequence const& pendingSequence, auto& ctx) const
     {
-        std::string value;
-        if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
-            value = std::format("{}", p->text());
-        else if (auto const* p = std::get_if<vtbackend::TraceHandler::CodepointSequence>(&pendingSequence))
-            value = std::format("\"{}\"", core::escape(p->text));
-        else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
-            value = std::format("'{}'", unicode::convert_to<char>(*p));
-        else
-            core::unreachable();
-
-        return formatter<std::string>::format(value, ctx);
+        return formatter<std::string>::format(vtbackend::toString(pendingSequence), ctx);
     }
 };
 
@@ -6096,22 +6103,9 @@ struct std::formatter<vtbackend::DECMode>: std::formatter<std::string>
 template <>
 struct std::formatter<vtbackend::DynamicColorName>: formatter<std::string_view>
 {
-    template <typename FormatContext>
-    auto format(vtbackend::DynamicColorName value, FormatContext& ctx) const
+    auto format(vtbackend::DynamicColorName value, auto& ctx) const
     {
-        using vtbackend::DynamicColorName;
-        string_view name;
-        switch (value)
-        {
-            case DynamicColorName::DefaultForegroundColor: name = "DefaultForegroundColor"; break;
-            case DynamicColorName::DefaultBackgroundColor: name = "DefaultBackgroundColor"; break;
-            case DynamicColorName::TextCursorColor: name = "TextCursorColor"; break;
-            case DynamicColorName::MouseForegroundColor: name = "MouseForegroundColor"; break;
-            case DynamicColorName::MouseBackgroundColor: name = "MouseBackgroundColor"; break;
-            case DynamicColorName::HighlightForegroundColor: name = "HighlightForegroundColor"; break;
-            case DynamicColorName::HighlightBackgroundColor: name = "HighlightBackgroundColor"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string_view>::format(vtbackend::toString(value), ctx);
     }
 };
 
@@ -6120,15 +6114,7 @@ struct std::formatter<vtbackend::ExecutionMode>: formatter<std::string_view>
 {
     auto format(vtbackend::ExecutionMode value, auto& ctx) const
     {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::ExecutionMode::Normal: name = "NORMAL"; break;
-            case vtbackend::ExecutionMode::Waiting: name = "WAITING"; break;
-            case vtbackend::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
-            case vtbackend::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string_view>::format(vtbackend::toString(value), ctx);
     }
 };
 

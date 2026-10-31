@@ -9,7 +9,7 @@
 
 #include <vtpty/WindowsCommandLine.hpp>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/ServiceControl.hpp>
 
 #ifdef _WIN32

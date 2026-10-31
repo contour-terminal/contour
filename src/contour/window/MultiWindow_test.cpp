@@ -10,10 +10,10 @@
 // FIRST window's model. Each pin drives the operation through window B's controller and asserts A is
 // untouched.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/DropZonePolicy.hpp>

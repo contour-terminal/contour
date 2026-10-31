@@ -10,6 +10,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/MenuFixtures.hpp>
 #include <contour/window/HeaderBarLayout.hpp>

@@ -5,7 +5,7 @@
 
 #include <filesystem>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 
 using contour::cli::checkHostReachable;

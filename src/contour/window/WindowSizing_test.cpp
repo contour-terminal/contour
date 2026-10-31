@@ -8,12 +8,12 @@
 // chrome property, the fullscreen/maximize increment-zeroing (WMs must not cell-snap a fullscreen
 // window), the displayless early-outs, and that tab switching never touches window geometry.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>

@@ -27,6 +27,7 @@
 #include <contour/session/FontControl.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/PermissionFixtures.hpp>

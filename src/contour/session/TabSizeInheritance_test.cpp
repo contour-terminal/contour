@@ -14,9 +14,9 @@
 // The pure decision itself is unit-tested in WindowGeometry_test; the end-to-end grid refit on a live
 // display is pinned by the [display] case in DisplayRendering_test.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 

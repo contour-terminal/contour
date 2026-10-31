@@ -2,6 +2,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/LayoutBuilder.hpp>
+#include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtPath.hpp>
@@ -122,6 +123,36 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                 return *name;
         return {};
     });
+}
+
+TerminalSessionManager::~TerminalSessionManager() = default;
+
+bool TerminalSessionManager::consumeAttachWindow(contour::window::WindowController* controller)
+{
+    // A panel is no daemon window: it never adopts one, and its own first tab is made here.
+    return _attachWindowBinder && controller != nullptr && !isPanelWindow(controller->windowId())
+               ? _attachWindowBinder(controller)
+               : false;
+}
+
+void TerminalSessionManager::noteTransportLost() noexcept
+{
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr)
+            session->noteTransportLost();
+}
+
+vtworkspace::Tab* TerminalSessionManager::tabHostingSession(TerminalSession const* session) const noexcept
+{
+    if (session == nullptr)
+        return nullptr;
+    return findTabHostingSession(session->modelSessionId());
+}
+
+vtworkspace::Pane* TerminalSessionManager::leafOfSession(vtworkspace::Tab const& tab,
+                                                         TerminalSession const& session)
+{
+    return tab.rootPane() != nullptr ? tab.rootPane()->findLeaf(session.modelSessionId()) : nullptr;
 }
 
 TerminalSession* TerminalSessionManager::sessionForId(vtworkspace::SessionId id) const noexcept

@@ -9,6 +9,7 @@
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/ShellIntegration.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 
 #include <vtbackend/screen/LocalTime.hpp>
@@ -75,6 +76,7 @@
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/PlatformStreams.hpp>

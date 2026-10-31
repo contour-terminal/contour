@@ -48,6 +48,7 @@
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshotStore.hpp>

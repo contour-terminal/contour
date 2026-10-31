@@ -2,7 +2,7 @@
 #pragma once
 
 #include <contour/cli/ConnectList.hpp>
-#include <contour/config/Config.hpp>
+#include <contour/config/ConfigFwd.hpp>
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/LaunchTarget.hpp>
 

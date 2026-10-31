@@ -15,6 +15,7 @@
 
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/latency/BenchSupport.hpp>
 #include <vthost/latency/E2eBench.hpp>
 #include <vthost/latency/EchoChild.hpp>

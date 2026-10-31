@@ -20,7 +20,11 @@
 #include <memory>
 
 #include <vthost/ConnectionAcceptor.hpp>
-#include <vthost/SessionHost.hpp>
+
+namespace vthost
+{
+class SessionHost;
+}
 
 namespace vthost::tmux
 {
