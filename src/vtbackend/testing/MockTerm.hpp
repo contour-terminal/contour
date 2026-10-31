@@ -353,7 +353,7 @@ class MockTerm: public Terminal::NullEvents
 
     /// The most recent default background announced, or std::nullopt if none was. @see
     /// defaultBackgroundColorChanged.
-    std::optional<RGBColor> defaultBackground;
+    std::optional<DefaultBackground> defaultBackground;
     /// Number of defaultBackgroundColorChanged() notifications received.
     int defaultBackgroundChangeCount = 0;
 
@@ -397,9 +397,9 @@ class MockTerm: public Terminal::NullEvents
         ++windowFrameColorChangeCount;
     }
 
-    void defaultBackgroundColorChanged(RGBColor color) override
+    void defaultBackgroundColorChanged(DefaultBackground const& background) override
     {
-        defaultBackground = color;
+        defaultBackground = background;
         ++defaultBackgroundChangeCount;
     }
 

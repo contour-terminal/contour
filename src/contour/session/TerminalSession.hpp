@@ -664,11 +664,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     QColor getBackgroundColor() const noexcept
     {
-        auto color = terminal().isModeEnabled(vtbackend::DECMode::ReverseVideo)
-                         ? _terminal.colorPalette().defaultForeground
-                         : _terminal.colorPalette().defaultBackground;
         auto alpha = static_cast<uint8_t>(_profile.background.value().opacity);
-        return platform::toQColor(color, alpha);
+        return platform::toQColor(_terminal.effectiveDefaultBackground(), alpha);
     }
     float getOpacityBackground() const noexcept
     {
@@ -1501,10 +1498,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void resetWindowFrameColor() override;
     /// Runs on whichever thread holds the terminal lock (the parser thread, or the GUI thread for a
     /// re-seed); posts the change to the manager on the GUI thread either way.
-    void defaultBackgroundColorChanged(vtbackend::RGBColor color) override;
+    void defaultBackgroundColorChanged(vtbackend::DefaultBackground const& background) override;
 
-    /// The terminal's current default background, OSC 11 included. Takes the terminal lock, so it
-    /// must not be called while holding it.
+    /// The terminal's current default background, OSC 11 included: what the chrome follows, so DECSCNM is
+    /// not (@see vtbackend::DefaultBackground::palette). Takes the terminal lock, so it must not be called
+    /// while holding it.
     /// @return The live default background.
     [[nodiscard]] vtbackend::RGBColor liveBackground() const;
     void progressChanged(vtbackend::Progress progress) override;

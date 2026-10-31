@@ -581,13 +581,11 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
 void ScreenMirror::applyDefaultColors(uint32_t foreground, uint32_t background)
 {
     auto& palette = _terminal->colorPalette();
-    auto const backgroundChanged = palette.defaultBackground != vtbackend::RGBColor { background };
     palette.defaultForeground = vtbackend::RGBColor { foreground };
     palette.defaultBackground = vtbackend::RGBColor { background };
     // As the terminal tells its frontend of an OSC 11: whatever paints with the background learns of it,
     // which the palette alone does not do.
-    if (backgroundChanged)
-        _terminal->notifyDefaultBackgroundColorChanged();
+    _terminal->refreshDefaultBackground();
 }
 
 void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)

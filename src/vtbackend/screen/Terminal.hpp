@@ -549,6 +549,19 @@ struct LinkLookup
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) // TODO
+/// The terminal's default background, as each of the two things a frontend paints from it sees it.
+struct DefaultBackground
+{
+    /// The palette's default background (OSC 11): what the application's chrome follows. DECSCNM leaves it
+    /// alone, so a visual bell (terminfo `flash`) does not flip the chrome between light and dark.
+    RGBColor palette;
+    /// The background a cell of default color is seen in -- the palette's default foreground under DECSCNM:
+    /// what the window behind the cells is painted with.
+    RGBColor effective;
+
+    [[nodiscard]] constexpr bool operator==(DefaultBackground const&) const noexcept = default;
+};
+
 /// The terminal is the IStatusLinePublishTarget its extensions' StatusLinePublishSink delivers to.
 class Terminal: public IStatusLinePublishTarget
 {
@@ -789,13 +802,14 @@ class Terminal: public IStatusLinePublishTarget
         /// hard reset). The frontend falls back to a user-chosen color, if any, else its own default.
         /// It never clears a color the user picked.
         virtual void resetWindowFrameColor() {}
-        /// The palette's default background changed: by OSC 11 or 111, DECAC item 1, a reset (DECSTR, RIS),
-        /// XTPOPCOLORS, or the frontend re-seeding the palette. Reported only on an actual change.
+        /// Either half of the default background changed: by OSC 11 or 111, DECAC item 1, a reset (DECSTR,
+        /// RIS), XTPOPCOLORS, the frontend re-seeding the palette, or -- the effective half alone -- DECSCNM,
+        /// its restore by XTRESTORE, and OSC 10 or 110 under it. Reported only on an actual change.
         ///
         /// Invoked by whichever thread holds the terminal lock -- the parser thread, or the GUI thread for a
         /// re-seed -- so an implementation must not touch GUI state here: defer to the GUI thread instead.
-        /// @param color The new default background.
-        virtual void defaultBackgroundColorChanged(RGBColor /*color*/) {}
+        /// @param background The new default background.
+        virtual void defaultBackgroundColorChanged(DefaultBackground const& /*background*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
@@ -874,7 +888,7 @@ class Terminal: public IStatusLinePublishTarget
         void setTabName(std::string_view /*title*/) override {}
         void setWindowFrameColor(RGBColor /*color*/) override {}
         void resetWindowFrameColor() override {}
-        void defaultBackgroundColorChanged(RGBColor /*color*/) override {}
+        void defaultBackgroundColorChanged(DefaultBackground const& /*background*/) override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
         void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
@@ -1289,7 +1303,11 @@ class Terminal: public IStatusLinePublishTarget
     void setMode(AnsiMode mode, bool enable);
     void setMode(DECMode mode, bool enable);
     void saveModes(std::vector<DECMode> const& modes) { _modes.save(modes); }
-    void restoreModes(std::vector<DECMode> const& modes) { _modes.restore(modes); }
+    void restoreModes(std::vector<DECMode> const& modes)
+    {
+        _modes.restore(modes);
+        refreshDefaultBackground(); // XTRESTORE may bring DECSCNM back, bypassing setMode()
+    }
     void freezeMode(DECMode mode, bool enable)
     {
         setMode(mode, enable);
@@ -1778,12 +1796,16 @@ class Terminal: public IStatusLinePublishTarget
     void setWindowFrameColor(RGBColor color) { _eventListener.setWindowFrameColor(color); }
     /// Notifies the frontend that the window-frame (tab) color was reset to the host default.
     void resetWindowFrameColor() { _eventListener.resetWindowFrameColor(); }
-    /// Notifies the frontend of the palette's current default background.
-    /// The caller holds the terminal lock and calls this only when the default background changed.
-    void notifyDefaultBackgroundColorChanged()
-    {
-        _eventListener.defaultBackgroundColorChanged(_colorPalette.defaultBackground);
-    }
+    /// The background a cell of default color is seen in: the palette's default foreground under reverse
+    /// video (DECSCNM), its default background otherwise.
+    /// @return The effective default background.
+    [[nodiscard]] RGBColor effectiveDefaultBackground() const noexcept;
+
+    /// Notifies the frontend of the default background if either half differs from the one last announced.
+    ///
+    /// Called after anything that may change it -- a palette edit, a reset, DECSCNM -- by the thread holding
+    /// the terminal lock. Cheap enough to call whenever in doubt: it compares two colors.
+    void refreshDefaultBackground();
 
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
@@ -5285,6 +5307,8 @@ class Terminal: public IStatusLinePublishTarget
 
     ColorPalette _defaultColorPalette;
     ColorPalette _colorPalette;
+    /// The default background last announced to the frontend. @see refreshDefaultBackground.
+    DefaultBackground _announcedBackground;
     std::vector<ColorPalette> _savedColorPalettes;
     size_t _lastSavedColorPalette = 0;
 

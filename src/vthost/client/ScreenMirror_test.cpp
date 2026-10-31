@@ -120,9 +120,9 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
     void bell() override { ++bells; }
     /// Every default background the terminal announced, in order.
     std::vector<vtbackend::RGBColor> announcedBackgrounds;
-    void defaultBackgroundColorChanged(vtbackend::RGBColor color) override
+    void defaultBackgroundColorChanged(vtbackend::DefaultBackground const& background) override
     {
-        announcedBackgrounds.push_back(color);
+        announcedBackgrounds.push_back(background.palette);
     }
     void notify(std::string_view title, std::string_view body) override
     {

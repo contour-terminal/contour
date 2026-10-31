@@ -3424,8 +3424,7 @@ void Screen::resetDynamicColor(DynamicColorName name)
             _terminal->colorPalette().defaultForeground = _terminal->defaultColorPalette().defaultForeground;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            // Through setDynamicColor(), which announces the background when it actually changes.
-            setDynamicColor(name, _terminal->defaultColorPalette().defaultBackground);
+            _terminal->colorPalette().defaultBackground = _terminal->defaultColorPalette().defaultBackground;
             break;
         case DynamicColorName::TextCursorColor:
             _terminal->colorPalette().cursor = _terminal->defaultColorPalette().cursor;
@@ -3445,6 +3444,7 @@ void Screen::resetDynamicColor(DynamicColorName name)
                 _terminal->defaultColorPalette().selection.background;
             break;
     }
+    _terminal->refreshDefaultBackground(); // as setDynamicColor() says
 }
 
 void Screen::setDynamicColor(DynamicColorName name, RGBColor color)
@@ -3455,11 +3455,7 @@ void Screen::setDynamicColor(DynamicColorName name, RGBColor color)
             _terminal->colorPalette().defaultForeground = color;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            if (_terminal->colorPalette().defaultBackground != color)
-            {
-                _terminal->colorPalette().defaultBackground = color;
-                _terminal->notifyDefaultBackgroundColorChanged();
-            }
+            _terminal->colorPalette().defaultBackground = color;
             break;
         case DynamicColorName::TextCursorColor: _terminal->colorPalette().cursor.color = color; break;
         case DynamicColorName::MouseForegroundColor: _terminal->colorPalette().mouseForeground = color; break;
@@ -3471,6 +3467,8 @@ void Screen::setDynamicColor(DynamicColorName name, RGBColor color)
             _terminal->colorPalette().selection.background = color;
             break;
     }
+    // OSC 10 matters as much as OSC 11: under DECSCNM the foreground is the background the window shows.
+    _terminal->refreshDefaultBackground();
 }
 
 void Screen::inspect()

@@ -733,11 +733,35 @@ TEST_CASE("TerminalSession: a default background the terminal changes reaches th
     auto spy = QSignalSpy(session.get(), &contour::session::TerminalSession::backgroundColorChanged);
     REQUIRE(spy.isValid());
 
-    session->terminal().writeToScreen("\033]11;rgb:12/34/56\033\\");
-    QCoreApplication::processEvents();
+    auto const& palette = session->terminal().colorPalette();
+    auto const defaultPalette = session->terminal().defaultColorPalette();
+    // Writes @p sequence and runs the queued signal, as the GUI thread would; returns what the pane shows.
+    auto const send = [&](std::string_view sequence) {
+        spy.clear();
+        session->terminal().writeToScreen(sequence);
+        QCoreApplication::processEvents();
+        CHECK(spy.count() == 1);
+        auto const shown = session->getBackgroundColor();
+        return vtbackend::RGBColor { static_cast<uint8_t>(shown.red()),
+                                     static_cast<uint8_t>(shown.green()),
+                                     static_cast<uint8_t>(shown.blue()) };
+    };
 
-    CHECK(session->terminal().colorPalette().defaultBackground == vtbackend::RGBColor { 0x123456 });
-    CHECK(spy.count() >= 1);
+    CHECK(send("\033]11;rgb:12/34/56\033\\") == vtbackend::RGBColor { 0x123456 });
+    CHECK(palette.defaultBackground == vtbackend::RGBColor { 0x123456 });
+
+    SECTION("a reset hands the window back the profile's color (contour#2182)")
+    {
+        CHECK(send("\033c") == defaultPalette.defaultBackground);
+    }
+
+    SECTION("DECSCNM swaps the window's color, both ways (contour#2182)")
+    {
+        CHECK(send("\033[?5h") == palette.defaultForeground);
+        // The chrome stays on the palette's background: a visual bell must not flip the app's theme.
+        CHECK(session->liveBackground() == vtbackend::RGBColor { 0x123456 });
+        CHECK(send("\033[?5l") == vtbackend::RGBColor { 0x123456 });
+    }
 }
 
 TEST_CASE("TerminalSession: a mirrored session states the preference it shows to its host",
