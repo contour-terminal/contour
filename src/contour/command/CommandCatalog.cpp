@@ -149,7 +149,7 @@ namespace
     };
 
     // A missing row would make commandCategory() read past the end; a misplaced one is the test's to catch.
-    static_assert(ActionCategories.size() == std::variant_size_v<actions::Action>,
+    static_assert(ActionCategories.size() == std::variant_size_v<actions::Action::Variant>,
                   "every catalogue action needs exactly one ActionCategories row");
 
     /// The argument part of a command title's suffix: @p titleSuffix without one leading ": " or " ".

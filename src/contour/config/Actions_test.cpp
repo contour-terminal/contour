@@ -17,6 +17,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -487,4 +489,29 @@ TEST_CASE("actions::ActionList copies, moves and appends like the vector it wrap
     auto const moved = std::move(copy);
     CHECK(moved.size() == 3);
     CHECK(std::ranges::distance(moved) == 3);
+}
+
+TEST_CASE("actions::Action is a value type of its own", "[actions]")
+{
+    static_assert(std::is_copy_constructible_v<actions::Action>);
+    static_assert(std::is_nothrow_move_constructible_v<actions::Action>);
+    static_assert(std::is_copy_assignable_v<actions::Action>);
+    static_assert(std::is_nothrow_move_assignable_v<actions::Action>);
+
+    auto action = actions::Action { actions::ToggleFullscreen {} };
+    CHECK(std::holds_alternative<actions::ToggleFullscreen>(action));
+    CHECK(std::get_if<actions::ToggleFullscreen>(&action) != nullptr);
+
+    auto const name =
+        std::visit([](auto const& alternative) { return std::string(typeid(alternative).name()); }, action);
+    CHECK(name.contains("ToggleFullscreen"));
+
+    action = actions::ShowAbout {};
+    CHECK(std::holds_alternative<actions::ShowAbout>(action));
+
+    auto original = std::optional<actions::Action> { actions::CreateNewTab {} };
+    auto copy = std::optional<actions::Action> {};
+    copy = original;
+    REQUIRE(copy.has_value());
+    CHECK(std::holds_alternative<actions::CreateNewTab>(*copy));
 }

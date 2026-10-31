@@ -7583,7 +7583,7 @@ int TerminalSession::executeAllActions(actions::ActionList const& actions)
 bool TerminalSession::executeAction(actions::Action const& action)
 {
     sessionLog()("executeAction: {}", action);
-    return visit(*this, action);
+    return std::visit(*this, action);
 }
 
 std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorkingDirectory(

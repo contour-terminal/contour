@@ -188,6 +188,166 @@ struct FocusPreviousArea{};   // move keyboard focus to the previous of terminal
 struct FocusToolbar{};        // move keyboard focus to the window's toolbar
 // clang-format on
 
+/// The variant of every action alternative, listed once; Action is a class over it.
+using ActionVariant = std::variant<CancelSelection,
+                                   ChangeProfile,
+                                   ClearHistoryAndReset,
+                                   CopyPreviousMarkRange,
+                                   CopySelection,
+                                   CreateDebugDump,
+                                   CreateSelection,
+                                   DecreaseFontSize,
+                                   DecreaseOpacity,
+                                   FocusNextSearchMatch,
+                                   FocusPreviousSearchMatch,
+                                   FollowHyperlink,
+                                   HintMode,
+                                   IncreaseFontSize,
+                                   IncreaseOpacity,
+                                   NewTerminal,
+                                   NewWindowTo,
+                                   NoSearchHighlight,
+                                   OpenCommandPalette,
+                                   OpenConfiguration,
+                                   OpenFileManager,
+                                   OpenSelection,
+                                   PasteClipboard,
+                                   PasteSelection,
+                                   Quit,
+                                   ReloadConfig,
+                                   ResetConfig,
+                                   ResetFontSize,
+                                   ScreenshotVT,
+                                   SaveScreenshot,
+                                   CopyScreenshot,
+                                   CollapseAllFolds,
+                                   CollapseLastFold,
+                                   ExpandAllFolds,
+                                   ScrollDown,
+                                   ScrollMarkDown,
+                                   ScrollMarkUp,
+                                   ScrollOneDown,
+                                   ScrollOneUp,
+                                   ScrollPageDown,
+                                   ScrollPageUp,
+                                   ScrollToBottom,
+                                   ScrollToTop,
+                                   ToggleFold,
+                                   ToggleFoldAt,
+                                   ToggleLastFold,
+                                   FocusPreviousCommand,
+                                   FocusNextCommand,
+                                   SelectPreviousCommandOutput,
+                                   SelectNextCommandOutput,
+                                   OpenBlockMenu,
+                                   ClearCommandBlockFocus,
+                                   ScrollUp,
+                                   SearchReverse,
+                                   SearchSelection,
+                                   SendChars,
+                                   ToggleAllKeyMaps,
+                                   ToggleFullscreen,
+                                   ToggleInputMethodHandling,
+                                   ToggleInputProtection,
+                                   ToggleStatusLine,
+                                   ToggleTitleBar,
+                                   TraceBreakAtEmptyQueue,
+                                   TraceEnter,
+                                   TraceLeave,
+                                   TraceStep,
+                                   ViNormalMode,
+                                   WriteScreen,
+                                   CreateNewTab,
+                                   CloseTab,
+                                   MoveTabTo,
+                                   MoveTabToLeft,
+                                   MoveTabToRight,
+                                   SwitchToTab,
+                                   SwitchToPreviousTab,
+                                   SwitchToTabLeft,
+                                   SwitchToTabRight,
+                                   SetTabTitle,
+                                   SplitVertical,
+                                   SplitHorizontal,
+                                   ClosePane,
+                                   FocusPaneLeft,
+                                   FocusPaneRight,
+                                   FocusPaneUp,
+                                   FocusPaneDown,
+                                   SwapPaneLeft,
+                                   SwapPaneRight,
+                                   SwapPaneUp,
+                                   SwapPaneDown,
+                                   MovePaneLeft,
+                                   MovePaneRight,
+                                   MovePaneUp,
+                                   MovePaneDown,
+                                   ToggleSplitOrientation,
+                                   TogglePaneZoom,
+                                   ResizePane,
+                                   LaunchLayout,
+                                   SaveLayout,
+                                   AttachToHost,
+                                   OpenContextMenu,
+                                   SelectAll,
+                                   SoftReset,
+                                   CopyLastCommandPrompt,
+                                   CopyLastCommandOutput,
+                                   CopyLastCommandBlock,
+                                   CopyHyperlink,
+                                   SetTabColor,
+                                   ResetTabColor,
+                                   CloseAllTabs,
+                                   SetTabBarVisibility,
+                                   SetTabBarPosition,
+                                   SpeakSelection,
+                                   StopSpeaking,
+                                   SelectCommandBlock,
+                                   CopyCommandBlock,
+                                   CopyCommandLine,
+                                   RerunCommand,
+                                   ToggleCommandFold,
+                                   ClearToPrompt,
+                                   OpenCommandOutput,
+                                   CloseOtherTabs,
+                                   CloseTabsToRight,
+                                   MoveTabToNewWindow,
+                                   ShowAbout,
+                                   MinimizeWindow,
+                                   ZoomWindow,
+                                   FocusNextArea,
+                                   FocusPreviousArea,
+                                   FocusToolbar>;
+
+/// What a key, a character or a mouse button is bound to; the user's actions, one command's worth.
+///
+/// A class of its own over the variant of all alternatives, rather than an alias of it, so that the
+/// variant's copy, move and destruction (each a visit table over every alternative) are instantiated once,
+/// in Actions.cpp, instead of in every translation unit that copies or destroys an Action or a struct
+/// holding one. Use it with std::get_if, std::holds_alternative, std::get and std::visit like the variant.
+class Action: public ActionVariant
+{
+  public:
+    /// The variant this class is made of; use it where the variant itself is named (variant_size, ...).
+    using Variant = ActionVariant;
+
+    using Variant::Variant;
+    using Variant::operator=;
+
+    /// Constructs an Action holding the first alternative.
+    Action();
+    /// Copies another action.
+    Action(Action const& other);
+    /// Moves another action.
+    Action(Action&& other) noexcept;
+    /// Assigns a copy of another action.
+    Action& operator=(Action const& other);
+    /// Moves another action into this one.
+    Action& operator=(Action&& other) noexcept;
+    /// Destroys the held alternative.
+    ~Action();
+};
+
 inline ActionList::iterator ActionList::begin() noexcept
 {
     return _actions.begin();
