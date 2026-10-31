@@ -2095,6 +2095,111 @@ TEST_CASE("Terminal.DECSASD.margins_received_on_the_status_line_are_ignored", "[
     CHECK(e(mc.replyData()) == e(reply));
 }
 
+namespace
+{
+/// The primary screen's main page as text, right-trimmed -- read from the grid, not the render buffer, which
+/// these tests never refresh.
+[[nodiscard]] std::string mainPageText(MockTerm<vtpty::MockPty> const& mock)
+{
+    return trimRight(mock.terminal.primaryScreen().renderMainPageText());
+}
+} // namespace
+
+TEST_CASE("Terminal.DECSR.resets_to_the_power_up_state", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // VT510 DECSR: the terminal returns to its power-up state -- the screen cleared, the cursor home, the
+    // margins, DECOM, the rendition, DECSCA and the user-defined keys reset -- as RIS does, minus the
+    // disconnect from the host.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 10 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033P1;1|17/41\033\\"); // DECUDK: F6 sends "A"
+    REQUIRE(terminal.udkString(17).has_value());
+    mc.writeToScreen("Hello\r\n");
+    mc.writeToScreen("\033[2;4r\033[?6h");         // DECSTBM 2..4, DECOM
+    mc.writeToScreen("\033[1m\033[1\"q\033[2;3H"); // SGR bold, DECSCA protected, CUP
+
+    mc.writeToScreen("\033[+p"); // DECSR
+
+    auto const& screen = terminal.primaryScreen();
+    CHECK(mainPageText(mc).empty());
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    CHECK_FALSE(screen.cursor().originMode);
+    CHECK(screen.margin().vertical.from == LineOffset(0));
+    CHECK(screen.margin().vertical.to == LineOffset(4));
+    CHECK_FALSE(screen.cursor().graphicsRendition.flags.contains(CellFlag::Bold));
+    CHECK_FALSE(screen.cursor().graphicsRendition.flags.contains(CellFlag::CharacterProtected));
+    CHECK_FALSE(terminal.udkString(17).has_value());
+}
+
+TEST_CASE("Terminal.DECSR.confirms_with_DECSRC", "[terminal]")
+{
+    // VT510 DECSRC: "CSI Pr * q", echoing the Pr of the DECSR it confirms -- only when Pr was given. The
+    // manual defines Pr as 0..16383 and says nothing about other values; echoing a number the spec rules
+    // out would confirm a request that was never valid, so such a reset happens silently.
+    auto const [request, expectedReply] = GENERATE(table<std::string_view, std::string_view>({
+        { "\033[1234+p", "\033[1234*q" },
+        { "\033[0+p", "\033[0*q" }, // a lone 0 is a number like any other, not an omitted Pr
+        { "\033[16383+p", "\033[16383*q" },
+        { "\033[+p", "" },
+        { "\033[16384+p", "" },
+    }));
+    CAPTURE(e(request));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 10 } } };
+    mc.writeToScreen("Hello");
+
+    mc.writeToScreen(request);
+    mc.terminal.flushInput();
+
+    CHECK(e(mc.replyData()) == e(expectedReply));
+    CHECK(mainPageText(mc).empty()); // the reset happens either way
+}
+
+TEST_CASE("Terminal.DECSR.received_on_the_alternate_screen_confirms_after_returning_to_the_primary",
+          "[terminal]")
+{
+    // The reset switches to the primary screen before DECSRC is phrased; the confirmation must still go out.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 10 } } };
+    mc.writeToScreen("\033[?1049h"); // alternate screen
+    REQUIRE(mc.terminal.isAlternateScreen());
+
+    mc.writeToScreen("\033[42+p");
+    mc.terminal.flushInput();
+
+    CHECK_FALSE(mc.terminal.isAlternateScreen());
+    CHECK(e(mc.replyData()) == e("\033[42*q"));
+}
+
+TEST_CASE("Terminal.DECSR.with_too_many_parameters_is_ignored", "[terminal]")
+{
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 10 } } };
+    mc.writeToScreen("Hello");
+
+    mc.writeToScreen("\033[1;2+p");
+    mc.terminal.flushInput();
+
+    CHECK(mc.replyData().empty());
+    CHECK(mainPageText(mc) == "Hello");
+}
+
+TEST_CASE("Terminal.DECSR.works_at_every_conformance_level", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // VT510: "DECSR works in all conformance levels (level 1 or higher)." @see SupportedSequences::reset.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 10 } } };
+    mc.writeToScreen("\033[61\"p"); // DECSCL: VT100 operating level
+    REQUIRE(mc.terminal.operatingLevel() == VTType::VT100);
+    mc.writeToScreen("Hello");
+
+    mc.writeToScreen("\033[7+p");
+    mc.terminal.flushInput();
+
+    CHECK(e(mc.replyData()) == e("\033[7*q"));
+    CHECK(mainPageText(mc).empty());
+}
+
 TEST_CASE("Terminal.DECSTR.received_on_the_status_line_resets_the_main_display", "[terminal]")
 {
     // DEC STD 070 ch. 4 DECSTR, soft_terminal_reset(): "active_display = MAIN_DISPLAY;" comes before the

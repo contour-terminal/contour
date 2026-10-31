@@ -425,6 +425,7 @@
         <p>New VT sequences and protocols</p>
         <ul>
           <li>Removes the deprecated SETMARK sequence (CSI &gt; M); use OSC 133 ; A instead</li>
+          <li>Adds DECSR (Secure Reset, CSI Pr + p), the VT420 sequence that returns the terminal to its power-up state as RIS does, at every conformance level; given a Pr from 0 to 16383, Contour confirms the reset with DECSRC (CSI Pr * q) echoing it back (#2133)</li>
           <li>Adds DECSWBV (CSI Ps SP t), the VT520 sequence for setting the warning-bell volume: Ps 1 silences the bell, 2 to 4 halves it, 0, an omitted Ps or 5 to 8 keeps it at the profile's configured volume. An application can only mute or halve that volume, never raise it, and RIS restores the default (#732)</li>
           <li>Adds DECSMBV (CSI Ps SP u), the VT520 sequence for setting the margin-bell volume: Ps 0, 1 or an omitted Ps silences it (the default, per the VT510 manual), 2 to 4 halves it, 5 to 8 sets it to high, and RIS restores the default. Contour does not yet ring the margin bell itself — DEC private mode 44 remains unimplemented — so for now this only stores the value for when it does (#733)</li>
         </ul>

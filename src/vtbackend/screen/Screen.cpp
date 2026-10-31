@@ -7985,6 +7985,19 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                                           decr(seq.paramOpt<LineOffset>(1)));
             moveCursorTo({}, {});
             break;
+        case DECSR: {
+            // DECSRC is sent after the reset, so nothing the reset clears can swallow it. Pr 0 is a valid
+            // id, hence isGiven() rather than paramOpt(), which folds a lone 0 into "omitted".
+            constexpr auto MaxSecureResetId = 16383;
+            auto const& parameters = seq.parameters();
+            auto const confirmationId = parameters.isGiven(0) && parameters.at(0) <= MaxSecureResetId
+                                            ? std::optional { parameters.at(0) }
+                                            : std::nullopt;
+            _terminal->hardReset();
+            if (confirmationId)
+                reply("\033[{}*q", *confirmationId);
+            break;
+        }
         case DECSTR:
             // For VTType VT100 and VT52 ignore this sequence
             if (_terminal->operatingLevel() == VTType::VT100)

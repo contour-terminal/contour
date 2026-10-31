@@ -28,6 +28,9 @@ int main()
             markdown += std::format("### Conformance Level\n\n");
             if (fn.extension != VTExtension::None)
                 markdown += std::format("{} extension\n\n", fn.extension);
+            else if (fn.availability == LevelAvailability::AtEveryLevel)
+                markdown +=
+                    std::format("{}, and available at every operating level\n\n", fn.conformanceLevel);
             else
                 markdown += std::format("{}\n\n", fn.conformanceLevel);
 
