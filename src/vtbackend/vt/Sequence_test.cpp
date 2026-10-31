@@ -26,6 +26,46 @@ TEST_CASE("SequenceParameterBuilder.0")
     CHECK(parameters.str().empty());
 }
 
+TEST_CASE("SequenceParameters.isGiven tells a lone 0 from an omitted parameter")
+{
+    // count() hides a lone 0 by VT convention; isGiven() is what still sees it.
+    SECTION("omitted")
+    {
+        auto parameters = SequenceParameters {};
+        auto builder = SequenceParameterBuilder { parameters };
+        builder.fixiate();
+        CHECK_FALSE(parameters.isGiven(0));
+    }
+
+    SECTION("a lone 0")
+    {
+        auto parameters = SequenceParameters {};
+        auto builder = SequenceParameterBuilder { parameters };
+        builder.multiplyBy10AndAdd(0);
+        builder.fixiate();
+        CHECK(parameters.count() == 0);
+        CHECK(parameters.isGiven(0));
+    }
+
+    SECTION("empty first, given second")
+    {
+        auto parameters = SequenceParameters {};
+        auto builder = SequenceParameterBuilder { parameters };
+        builder.nextParameter();
+        builder.multiplyBy10AndAdd(5);
+        builder.fixiate();
+        CHECK_FALSE(parameters.isGiven(0));
+        CHECK(parameters.isGiven(1));
+        CHECK_FALSE(parameters.isGiven(2));
+    }
+
+    SECTION("out of range")
+    {
+        auto parameters = SequenceParameters {};
+        CHECK_FALSE(parameters.isGiven(16));
+    }
+}
+
 TEST_CASE("SequenceParameterBuilder.1")
 {
     auto parameters = SequenceParameters {};

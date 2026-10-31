@@ -63,9 +63,22 @@ class SequenceParameters
     /// An omitted parameter is stored as the value zero, so without this the two cannot be told apart.
     /// Most sequences do not care, because zero *is* their default; XTWINOPS is the one that does, where
     /// an omitted dimension keeps the window's current size and a zero one grows it to the display's.
+    ///
+    /// Only parameters within count() are considered, and a lone 0 is not one of them; see isGiven().
     [[nodiscard]] constexpr bool isOmitted(size_t index) const noexcept
     {
         return index < _count && (_omittedTest & (1 << index)) != 0;
+    }
+
+    /// @return Whether a digit was received for parameter @p index -- even where count() does not show it.
+    ///
+    /// count() follows the VT convention that a lone zero is no parameter at all, so `CSI 0 X` and `CSI X`
+    /// read alike and a sequence whose default is not zero still gets its default. The few sequences for
+    /// which an explicit zero means something of its own -- DECSR echoes it back in DECSRC -- ask this.
+    /// It is not `!isOmitted(index)`: that holds for every index past count(), the lone 0 included.
+    [[nodiscard]] constexpr bool isGiven(size_t index) const noexcept
+    {
+        return index < std::tuple_size_v<Storage> && (_omittedTest & (1u << index)) == 0;
     }
 
     /// Returns the number of sub-params for a given non-sub param.

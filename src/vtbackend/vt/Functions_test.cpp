@@ -102,6 +102,27 @@ TEST_CASE("Functions.VTLevelConstrain", "[Functions]")
     CHECK(*f == DECSLRM);
 }
 
+TEST_CASE("Functions.VTLevelConstrain.exemptions", "[Functions]")
+{
+    // DECSCL, DECRQCRA and DECSR stay available below their conformance level; an ordinary VT420 sequence
+    // such as DECSNLS does not. @see LevelAvailability.
+    auto availableSequences = SupportedSequences {};
+    availableSequences.reset(VTType::VT100);
+    auto const active = availableSequences.activeSequences();
+
+    auto const* decscl = vtbackend::selectControl(0, 1, '"', 'p', active);
+    REQUIRE(decscl);
+    CHECK(*decscl == DECSCL);
+    auto const* decrqcra = vtbackend::selectControl(0, 6, '*', 'y', active);
+    REQUIRE(decrqcra);
+    CHECK(*decrqcra == DECRQCRA);
+    auto const* decsr = vtbackend::selectControl(0, 1, '+', 'p', active);
+    REQUIRE(decsr);
+    CHECK(*decsr == DECSR);
+    CHECK_FALSE(vtbackend::selectControl(0, 1, '*', '|', active)); // DECSNLS
+    CHECK(DECSR.conformanceLevel == VTType::VT420); // exempt, yet still documented at its own level
+}
+
 TEST_CASE("Functions.DCS_GIP", "[Functions]")
 {
     // GIP is DCS with intermediate='!' and final='g' (0 args).
