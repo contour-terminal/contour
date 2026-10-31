@@ -34,7 +34,8 @@ PaneView::PaneView(int columns, int lines, vtbackend::LineCount history)
 {
     auto const pageSize =
         vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
-    auto settings = vtbackend::Settings {};
+    // Parentheses avoid GCC 14's -Wmaybe-uninitialized diagnostic for aggregate initialization.
+    auto settings = vtbackend::Settings();
     settings.pageSize = pageSize;
     settings.historyLimits = vtbackend::HistoryLimits::plain(history);
     // The process's own environment: this terminal only mirrors what a remote pane already
