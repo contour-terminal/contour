@@ -8,6 +8,7 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/SettingsController.hpp>

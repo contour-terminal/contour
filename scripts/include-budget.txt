@@ -27,3 +27,5 @@ src/contour/window/WindowController.hpp !src/contour/display/TerminalDisplay.hpp
 src/contour/display/TerminalDisplay.hpp !src/contour/session/TerminalSession.hpp
 src/contour/session/TerminalSessionManager.hpp !src/contour/display/TerminalDisplay.hpp
 src/contour/session/TerminalSessionManager.hpp !src/contour/session/TerminalSession.hpp
+src/contour/test/GuiTestFixtures.hpp !src/contour/ContourGuiApp.hpp
+src/contour/ContourGuiApp.hpp !<QtDBus/QDBusVariant>

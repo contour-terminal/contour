@@ -16,9 +16,9 @@
 // and the path was untestable. Ownership is now a modelled vtworkspace::WindowId, so the production path
 // is the tested path. All cases here run headless: no [display] tag, nothing skips offscreen.
 
-#include <contour/ContourGuiApp.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 

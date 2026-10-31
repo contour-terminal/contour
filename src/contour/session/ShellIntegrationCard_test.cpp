@@ -8,6 +8,7 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/WindowController.hpp>

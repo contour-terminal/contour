@@ -15,6 +15,7 @@
 #include <contour/display/GpuInventory.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>

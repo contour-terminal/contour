@@ -6,6 +6,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/PermissionFixtures.hpp>

@@ -7,6 +7,7 @@
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/WindowController.hpp>

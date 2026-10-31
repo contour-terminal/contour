@@ -13,6 +13,7 @@
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionTestSupport.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/PermissionFixtures.hpp>

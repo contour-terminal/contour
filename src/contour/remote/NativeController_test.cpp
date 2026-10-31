@@ -2,6 +2,7 @@
 #include <contour/cli/HostTransport.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
+#include <contour/test/AppFixture.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
 #include <vtbackend/testing/TestHelpers.hpp>
