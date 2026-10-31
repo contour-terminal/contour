@@ -154,6 +154,7 @@
           <li>Moves the daemon version notice from over the terminal into the title bar</li>
           <li>Reveals the tab bar in full screen when the pointer reaches the top edge, as a cross-fade under Reduce Motion</li>
           <li>Shows the foreground process's name on a tab whose title is empty</li>
+          <li>Fixes the tab bar showing the window title where the indicator status line showed the tab name an application set with OSC 30: the new <code>{TabName}</code> placeholder shows that name, or the window title when none is set, and is the default <code>tab_label</code>. A configuration that sets <code>tab_label: "{WindowTitle}"</code> keeps the window title (#2170)</li>
           <li>Fixes a background remote tab showing new output when it reconnects or resyncs; a program's own screen switch or clear in it still marks it</li>
           <li>Adds a native macOS menu bar of six menus: Contour, Shell, Edit, View, Window and Help. The Window menu lists the open windows, and Help carries the system's search field</li>
           <li>Adds native context menus on macOS: with the default <code>ui_style: native</code>, the terminal, title bar, tab and new-tab menus open as system menus; <code>ui_style: terminal</code> keeps the in-window menus</li>
