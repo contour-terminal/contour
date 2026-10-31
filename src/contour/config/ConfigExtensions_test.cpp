@@ -231,7 +231,7 @@ void checkProfileDefaults(contour::config::TerminalProfile const& profile,
     CHECK(profile.modeInsert.value().cursor.cursorDisplay == vtbackend::CursorDisplay::Steady);
     CHECK(profile.screenTransitionDuration.value() == expected.screenTransitionDuration);
     CHECK(profile.inputMethodEditorStyle.value() == expected.preeditStyle);
-    CHECK(profile.tabLabel.value() == "{WindowTitle}");
+    CHECK(profile.tabLabel.value() == "{TabName}");
     CHECK(profile.scrollbar.value().mode == expected.scrollBarMode);
 
     auto const& colors = profile.colors.value();

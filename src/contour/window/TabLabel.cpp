@@ -28,6 +28,8 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
         auto const& interpolation = std::get<crispy::StringInterpolation>(fragment);
         if (interpolation.name == "WindowTitle")
             result += ctx.windowTitle;
+        else if (interpolation.name == "TabName")
+            result += ctx.tabName;
         else if (interpolation.name == "TabPosition")
             result += std::format("{}", ctx.position);
         else
