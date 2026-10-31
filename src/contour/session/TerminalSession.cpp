@@ -3031,11 +3031,13 @@ void TerminalSession::resetWindowFrameColor()
         [id = modelSessionId()](TerminalSessionManager& manager) { manager.resetTabColorForSession(id); });
 }
 
-void TerminalSession::defaultBackgroundColorChanged(vtbackend::RGBColor color)
+void TerminalSession::defaultBackgroundColorChanged(vtbackend::DefaultBackground const& background)
 {
     // OSC 11 and its kin. Same threading constraint as setWindowFrameColor() above: the caller holds the
     // terminal lock, so applying the chrome theme happens on the GUI thread, through the manager.
-    postToManager([color, id = modelSessionId()](TerminalSessionManager& manager) {
+    // The chrome follows the palette's half, which DECSCNM -- a visual bell -- leaves alone; an unchanged
+    // color re-applies nothing.
+    postToManager([color = background.palette, id = modelSessionId()](TerminalSessionManager& manager) {
         manager.sessionBackgroundChanged(id, color);
     });
     // The pane's card, header and background bind backgroundColor: told here, queued for the GUI thread, or

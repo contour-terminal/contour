@@ -538,42 +538,70 @@ TEST_CASE("OSC 110/111 reset dynamic colors to the default palette", "[screen]")
     }
 }
 
-TEST_CASE("OSC 11, OSC 111, DECAC 1, DECSTR and RIS announce the default background",
+TEST_CASE("OSC 11, OSC 111, DECAC 1, DECSTR, RIS, XTPOPCOLORS and DECSCNM announce the default background",
           "[screen][osc][background-event]")
 {
-    // Each row is applied in order; an event fires only on a real change, so RIS follows a fresh OSC 11.
+    // The frontend paints the window behind the cells from the effective half (contour#2182): the default
+    // foreground under DECSCNM. Its chrome follows the palette half, which DECSCNM leaves alone, so a visual
+    // bell does not flip it between light and dark. Each row is applied in order; an event fires only when
+    // either half really changes, so RIS follows a fresh OSC 11.
     struct Row
     {
         std::string_view input {};
-        int count = 0;
-        RGBColor colour {};
+        int announcements = 0; ///< How many events the row raises: 0 or 1.
+        RGBColor palette {};   ///< The palette half after it.
+        RGBColor effective {}; ///< The effective half after it.
     };
 
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    auto const defaultBackground = mock.terminal.defaultColorPalette().defaultBackground;
-    auto const decacBackground = mock.terminal.colorPalette().indexedColor(4);
+    auto const bg = mock.terminal.defaultColorPalette().defaultBackground;
+    auto const fg = mock.terminal.defaultColorPalette().defaultForeground;
+    auto const decac = mock.terminal.colorPalette().indexedColor(4);
+    REQUIRE(bg != fg);
 
+    // clang-format off
     auto const rows = std::array {
-        Row { .input = "\033]11;rgb:1010/1010/1010\033\\", .count = 1, .colour = 0x101010_rgb },
-        Row { .input = "\033]111\033\\", .count = 2, .colour = defaultBackground },
-        Row { .input = "\033[1;7;4,|", .count = 3, .colour = decacBackground },
-        Row { .input = "\033[!p", .count = 4, .colour = defaultBackground },
-        Row { .input = "\033]11;rgb:2020/2020/2020\033\\", .count = 5, .colour = 0x202020_rgb },
-        Row { .input = "\033c", .count = 6, .colour = defaultBackground },
+        Row { "\033]11;rgb:1010/1010/1010\033\\", 1, 0x101010_rgb, 0x101010_rgb },
+        Row { "\033]11;rgb:1010/1010/1010\033\\", 0, 0x101010_rgb, 0x101010_rgb }, // the color in effect
+        Row { "\033]11;?\033\\",                  0, 0x101010_rgb, 0x101010_rgb }, // a query
+        Row { "\033]111\033\\",                   1, bg,           bg },
+        Row { "\033[1;7;4,|",                       1, decac,        decac },
+        Row { "\033[!p",                            1, bg,           bg },
+        Row { "\033]11;rgb:2020/2020/2020\033\\", 1, 0x202020_rgb, 0x202020_rgb },
+        Row { "\033c",                              1, bg,           bg },
+        Row { "\033[#P",                            0, bg,           bg },            // XTPUSHCOLORS
+        Row { "\033]11;rgb:3030/3030/3030\033\\", 1, 0x303030_rgb, 0x303030_rgb },
+        Row { "\033[#Q",                            1, bg,           bg },            // XTPOPCOLORS
+        Row { "\033[?5h",                           1, bg,           fg },            // DECSCNM
+        Row { "\033[?5h",                           0, bg,           fg },
+        Row { "\033]11;rgb:4040/4040/4040\033\\", 1, 0x404040_rgb, fg },            // hidden by DECSCNM
+        Row { "\033]10;rgb:5050/5050/5050\033\\", 1, 0x404040_rgb, 0x505050_rgb }, // shown by it
+        Row { "\033[?5l",                           1, 0x404040_rgb, 0x404040_rgb },
+        Row { "\033[?5s",                           0, 0x404040_rgb, 0x404040_rgb }, // XTSAVE, reset
+        Row { "\033[?5h",                           1, 0x404040_rgb, 0x505050_rgb },
+        Row { "\033[?5r",                           1, 0x404040_rgb, 0x404040_rgb }, // XTRESTORE
+        Row { "\033[?5h",                           1, 0x404040_rgb, 0x505050_rgb },
+        Row { "\033c",                              1, bg,           bg },            // clears DECSCNM too
     };
+    // clang-format on
 
+    auto expectedCount = 0;
     for (auto const& row: rows)
     {
         INFO(core::escape(row.input));
         mock.writeToScreen(row.input);
-        CHECK(mock.defaultBackgroundChangeCount == row.count);
-        CHECK(mock.defaultBackground == row.colour);
+        expectedCount += row.announcements;
+        CHECK(mock.defaultBackgroundChangeCount == expectedCount);
+        CHECK(mock.defaultBackground
+              == DefaultBackground { .palette = row.palette, .effective = row.effective });
     }
+    REQUIRE(!mock.terminal.isModeEnabled(DECMode::ReverseVideo));
+    auto const baseline = mock.defaultBackgroundChangeCount;
 
     SECTION("a foreground change is not announced")
     {
         mock.writeToScreen("\033]10;rgb:3030/3030/3030\033\\");
-        CHECK(mock.defaultBackgroundChangeCount == 6);
+        CHECK(mock.defaultBackgroundChangeCount == baseline);
     }
 
     SECTION("a reset whose background is already the default is not announced")
@@ -581,7 +609,20 @@ TEST_CASE("OSC 11, OSC 111, DECAC 1, DECSTR and RIS announce the default backgro
         mock.writeToScreen("\033]111\033\\");
         mock.writeToScreen("\033[!p");
         mock.writeToScreen("\033c");
-        CHECK(mock.defaultBackgroundChangeCount == 6);
+        CHECK(mock.defaultBackgroundChangeCount == baseline);
+    }
+
+    SECTION("a re-seed announces only a background that changed")
+    {
+        auto reseeded = mock.terminal.defaultColorPalette();
+        mock.terminal.resetColorPalette(reseeded);
+        CHECK(mock.defaultBackgroundChangeCount == baseline);
+
+        reseeded.defaultBackground = 0x606060_rgb;
+        mock.terminal.resetColorPalette(reseeded);
+        CHECK(mock.defaultBackgroundChangeCount == baseline + 1);
+        CHECK(mock.defaultBackground
+              == DefaultBackground { .palette = 0x606060_rgb, .effective = 0x606060_rgb });
     }
 }
 

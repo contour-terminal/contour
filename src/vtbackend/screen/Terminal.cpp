@@ -345,6 +345,8 @@ Terminal::Terminal(Events& eventListener,
     _cellPixelSize {},
     _defaultColorPalette { _settings.colorPalette },
     _colorPalette { _settings.colorPalette },
+    _announcedBackground { .palette = _settings.colorPalette.defaultBackground,
+                           .effective = _settings.colorPalette.defaultBackground },
     _focused { _settings.focused },
     _terminalId { _settings.terminalId },
     _operatingLevel { _settings.terminalId },
@@ -1685,6 +1687,8 @@ void Terminal::updateIndicatorStatusLine()
 
     auto const colors = indicatorStatusLineColors();
 
+    // Swapped in and back out under the lock, deliberately without refreshDefaultBackground(): the window
+    // must never be told of the status line's colors.
     auto const backupForeground = _colorPalette.defaultForeground;
     auto const backupBackground = _colorPalette.defaultBackground;
     _colorPalette.defaultForeground = colors.foreground;
@@ -7763,6 +7767,9 @@ void Terminal::setMode(DECMode mode, bool enable)
     }
 
     _modes.set(mode, enable);
+
+    if (mode == DECMode::ReverseVideo)
+        refreshDefaultBackground(); // DECSCNM swaps the background the window is painted in
 }
 
 void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset> bottom)
@@ -9649,12 +9656,26 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
 
 constexpr auto MagicStackTopId = size_t { 0 };
 
+RGBColor Terminal::effectiveDefaultBackground() const noexcept
+{
+    return isModeEnabled(DECMode::ReverseVideo) ? _colorPalette.defaultForeground
+                                                : _colorPalette.defaultBackground;
+}
+
+void Terminal::refreshDefaultBackground()
+{
+    auto const background = DefaultBackground { .palette = _colorPalette.defaultBackground,
+                                                .effective = effectiveDefaultBackground() };
+    if (background == _announcedBackground)
+        return;
+    _announcedBackground = background;
+    _eventListener.defaultBackgroundColorChanged(background);
+}
+
 void Terminal::setColorPalette(ColorPalette const& palette)
 {
-    auto const previousBackground = _colorPalette.defaultBackground;
     _colorPalette = palette;
-    if (_colorPalette.defaultBackground != previousBackground)
-        notifyDefaultBackgroundColorChanged();
+    refreshDefaultBackground();
 }
 
 void Terminal::resetColorPalette(ColorPalette const& colors)
@@ -9663,7 +9684,6 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
     // subscribed to the report has seen. It answers each report by querying its colours again and redrawing,
     // so a re-seed that changes nothing -- every reload re-seeds -- must not send one.
     auto const changed = _colorPalette != colors;
-    auto const backgroundChanged = _colorPalette.defaultBackground != colors.defaultBackground;
 
     _colorPalette = colors;
     _defaultColorPalette = colors;
@@ -9672,8 +9692,7 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
 
     if (changed && isModeEnabled(DECMode::ReportColorPaletteUpdated))
         _currentScreen->reportColorPaletteUpdate();
-    if (backgroundChanged)
-        notifyDefaultBackgroundColorChanged();
+    refreshDefaultBackground();
 }
 
 void Terminal::reconfigureFactorySettings(Settings configured)
