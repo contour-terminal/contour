@@ -4,7 +4,7 @@
 #include <contour/session/TerminalSession.hpp>
 
 #include <QtCore/QObject>
-#include <QtQml/QtQml>
+#include <QtQml/qqmlregistration.h>
 
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>

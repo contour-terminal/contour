@@ -39,8 +39,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
+#include <QtCore/QVariant>
 #include <QtGui/QColor>
-#include <QtQml/QtQml>
+#include <QtQml/qqmlregistration.h>
 
 #include <array>
 #include <chrono>

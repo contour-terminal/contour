@@ -12,7 +12,7 @@
 #include <variant>
 
 #include <vtcontrol/Json.hpp>
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Negotiation.hpp>

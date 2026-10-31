@@ -27,8 +27,8 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/Transport.hpp>

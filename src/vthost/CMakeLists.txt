@@ -7,6 +7,7 @@ add_library(vthost STATIC
     ByteStream.hpp
     ClientCensus.hpp
     ClientSizePolicy.hpp
+    ConfigReload.cpp
     ConfigReload.hpp
     FlushPolicy.hpp
     IdleExitWatcher.hpp
@@ -42,6 +43,7 @@ add_library(vthost STATIC
     WireEnum.hpp
     Daemon.cpp
     Daemon.hpp
+    DaemonSpawn.hpp
     GracefulClose.hpp
     HistorySeed.cpp
     HistorySeed.hpp

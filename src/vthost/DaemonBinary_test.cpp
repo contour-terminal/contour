@@ -25,9 +25,9 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/testing/FakeImageLeases.hpp>
 #include <vthost/testing/StagingFileSystem.hpp>

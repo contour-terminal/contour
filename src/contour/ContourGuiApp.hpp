@@ -66,7 +66,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/latency/KeystrokeProbe.hpp>
 #include <vthost/latency/StartupTimeline.hpp>
 

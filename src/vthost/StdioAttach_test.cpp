@@ -28,7 +28,7 @@
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>

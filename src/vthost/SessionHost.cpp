@@ -17,6 +17,7 @@
 #include <utility>
 #include <variant>
 
+#include <vtcontrol/ControlApi.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/Logging.hpp>
@@ -320,6 +321,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _git(config.git, config.fileSystem.get()),
     _profiles(std::move(config.profiles)),
     _extensions(std::move(config.extensions)),
+    _extensionControl(vtcontrol::nullControlApi()),
     _objects(std::move(config.uuids)),
     _model(*this,
            [this]() -> SessionId {

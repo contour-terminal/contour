@@ -9,7 +9,7 @@
 #include <tuple>
 #include <utility>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/SocketPath.hpp>

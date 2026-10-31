@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 
 namespace core::net
 {

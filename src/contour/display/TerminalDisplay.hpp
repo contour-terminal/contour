@@ -20,8 +20,9 @@
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
 #include <QtCore/QTimer>
+#include <QtCore/QVariant>
 #include <QtGui/QVector4D>
-#include <QtQml/QtQml>
+#include <QtQml/qqmlregistration.h>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRenderNode>

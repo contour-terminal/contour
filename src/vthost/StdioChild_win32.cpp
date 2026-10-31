@@ -16,7 +16,7 @@
     #include <vector>
 
     #include <vthost/ByteStream.hpp>
-    #include <vthost/Daemon.hpp>
+    #include <vthost/DaemonSpawn.hpp>
     #include <vthost/PlatformStreams.hpp>
     #include <vthost/StderrTail.hpp>
 

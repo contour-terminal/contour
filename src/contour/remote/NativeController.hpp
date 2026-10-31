@@ -49,7 +49,6 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>

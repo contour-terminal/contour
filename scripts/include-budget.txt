@@ -29,3 +29,13 @@ src/contour/session/TerminalSessionManager.hpp !src/contour/display/TerminalDisp
 src/contour/session/TerminalSessionManager.hpp !src/contour/session/TerminalSession.hpp
 src/contour/test/GuiTestFixtures.hpp !src/contour/ContourGuiApp.hpp
 src/contour/ContourGuiApp.hpp !<QtDBus/QDBusVariant>
+src/contour/window/WindowController.hpp !<QtQml/QtQml>
+src/contour/display/TerminalDisplay.hpp !<QtQml/QtQml>
+src/contour/session/PaneProxy.hpp !<QtQml/QtQml>
+src/vthost/ConfigReload.hpp !src/vthost/SessionHost.hpp
+src/vthost/WorkspaceCapture.hpp !src/vthost/SessionHost.hpp
+src/vthost/tmux/ImsgServer.hpp !src/vthost/SessionHost.hpp
+src/vthost/Transport.hpp !src/vthost/Daemon.hpp
+src/vthost/DaemonStarter.hpp !src/vthost/Daemon.hpp
+src/vthost/DaemonSpawn.hpp !src/vthost/Daemon.hpp
+src/vthost/SessionHost.hpp !src/vtcontrol/ControlApi.hpp

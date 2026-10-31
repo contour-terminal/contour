@@ -42,7 +42,7 @@
 #include <core/net/testing/InMemoryTransport.hpp>
 
 #include <vthost/ConnectionAcceptor.hpp>
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/HostIdentity.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>

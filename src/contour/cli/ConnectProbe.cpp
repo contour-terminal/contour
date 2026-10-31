@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/ConnectProbe.hpp>
 
-#include <vthost/Daemon.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 

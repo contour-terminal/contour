@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/latency/BenchSupport.hpp>

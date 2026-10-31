@@ -103,6 +103,7 @@
 #include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/StdioChild.hpp>

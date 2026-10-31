@@ -76,6 +76,7 @@
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
+#include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/PlatformStreams.hpp>

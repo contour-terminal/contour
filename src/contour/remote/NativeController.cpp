@@ -13,6 +13,7 @@
 
 #include <vthost/HostIdentity.hpp>
 #include <vthost/InputEchoWire.hpp>
+#include <vthost/SessionSettings.hpp>
 
 namespace contour::remote
 {
