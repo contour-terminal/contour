@@ -1365,7 +1365,10 @@ jobs:
             exit 1
           }
           if ($status -ne 0) { exit 1 }
+      # Pull requests build and test; packaging (WiX, zip, their checks and uploads) runs on master, the merge
+      # queue and the `release` branch.
       - name: "Install Wix Toolset"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         run: |
           # Use this to list all available versions
           # dotnet tool search --global wix --detail
@@ -1373,6 +1376,7 @@ jobs:
           dotnet tool install --global wix --version 4.0.6
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
       - name: "Create Package(s)"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         shell: powershell
         run: |
           cpack --preset ${{ env.CMAKE_PRESET }} -V
@@ -1382,10 +1386,12 @@ jobs:
             exit $LASTEXITCODE
           }
       - name: "Rename package(s)"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - name: "Check that the package ships no benchmark tool"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         # bench-headless and bench-latency are built into bin/, beside the staged conpty.dll they must run
         # with. Two things keep each out of the MSI and the zip, which cpack fills from the same install: its PATTERN
         # exclusion in src/contour/CMakeLists.txt, against the GUI's wholesale copy of bin/, and
@@ -1421,6 +1427,7 @@ jobs:
             }
           }
       - name: "Check that the package ships the FluentWinUI3 style"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         # The Fluent row's controls style is named at run time (QQuickStyle::setStyle, from the row's
         # quickControlsStyle token), which windeployqt's --qmldir scan cannot see. Assert the style module
         # is in the zip: without it Qt falls back silently and the Fluent row's controls lose their look.
@@ -1443,6 +1450,7 @@ jobs:
             exit 1
           }
       - name: "Uploading MSI to artifact store"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
@@ -1450,6 +1458,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading ZIP to artifact store"
+        if: github.event_name != 'pull_request' || github.head_ref == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
