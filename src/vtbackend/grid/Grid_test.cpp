@@ -3401,3 +3401,23 @@ TEST_CASE("Grid.dropRowsAbove.thePageTopDropsTheHistoryOnly", "[grid][semanticbl
     CHECK(grid.evictedRowCount() == evictedBefore + 2);
 }
 // }}}
+
+TEST_CASE("Grid.historyEviction.theFirstTrimSeesTheBoundariesAlreadyInTheWindow", "[grid][history-eviction]")
+{
+    // Guaranteed two, capacity eight. The scrollback reaches the capacity before any trim has run, so the
+    // first one finds both prompts already inside the window it may cut from. Cutting line-wise instead
+    // would leave `x` -- no prompt -- at the top.
+    auto grid = makeGrid(LineCount(1), LineCount(2), LineCount(8));
+    appendLine(grid, "x"sv);
+    appendLine(grid, "P0"sv, BlockStart::Yes);
+    appendLine(grid, "o0"sv);
+    appendLine(grid, "o0"sv);
+    appendLine(grid, "P1"sv, BlockStart::Yes);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+        appendLine(grid, "o1"sv);
+    REQUIRE(grid.historyLineCount() == LineCount(8)); // the page's blank row, x, P0 o0 o0, P1 o1 o1
+
+    appendLine(grid, "o1"sv);
+    CHECK(grid.lineAt(grid.addressableTop()).marked());
+    CHECK(historyText(grid).front().starts_with("P1"));
+}

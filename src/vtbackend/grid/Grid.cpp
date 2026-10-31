@@ -2352,9 +2352,12 @@ void Grid::clampHistory()
     // thousands of rows per line forever. Measured at 12x the scroll cost before this.
     //
     // A row becomes eligible exactly when `bound` reaches its id, so watching the rows that cross
-    // `bound` observes every one of them, once. The first call has nothing remembered and sweeps the
-    // window whole; after that the work is proportional to the lines scrolled, not to the depth.
-    auto& scan = _evictionScan.has_value() ? *_evictionScan : _evictionScan.emplace(boundId, std::nullopt);
+    // `bound` observes every one of them, once. The first call has examined nothing and sweeps the window
+    // whole -- from the top, not from `bound`, or the rows already eligible when the scan starts (after
+    // every resize, and on first reaching the capacity) are never looked at. After that the work is
+    // proportional to the lines scrolled, not to the depth.
+    auto& scan = _evictionScan.has_value() ? *_evictionScan
+                                           : _evictionScan.emplace(stableLineIdOf(top) - 1, std::nullopt);
     auto const scanFrom = std::max(top, LineOffset::cast_from(scan.examinedThrough + 1 - _stableBase));
     for (auto y = scanFrom; y <= bound; ++y)
         if (lineAt(y).marked())
