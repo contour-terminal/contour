@@ -1796,7 +1796,7 @@ struct std::formatter<vtbackend::StatusDisplayPosition>: formatter<std::string_v
 template <>
 struct std::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
 {
-    auto format(vtbackend::BackgroundImage value, auto& ctx) const
+    auto format(vtbackend::BackgroundImage const& value, auto& ctx) const
     {
         return formatter<string_view>::format(contour::config::formatBackgroundImage(value), ctx);
     }

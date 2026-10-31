@@ -99,7 +99,7 @@ namespace
     /// only has column 1; a line or column that was printed but does not fit an int is no location at all.
     [[nodiscard]] std::optional<LinkLocation> locationOf(std::cmatch const& match)
     {
-        for (auto const [lineGroup, columnGroup]: std::array { std::pair { 2, 3 }, std::pair { 4, 5 } })
+        for (auto const& [lineGroup, columnGroup]: std::array { std::pair { 2, 3 }, std::pair { 4, 5 } })
         {
             if (!match[lineGroup].matched)
                 continue;
