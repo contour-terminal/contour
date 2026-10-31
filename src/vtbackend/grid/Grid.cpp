@@ -930,37 +930,65 @@ void Grid::setHistoryLimits(HistoryLimits historyLimits)
         return;
 
     verifyState();
-    rezeroBuffers();
     _historyLimits = historyLimits;
 
-    // Slots appear and vanish at the boundary between the page and the scrollback, NOT at the
-    // ring's end.
-    //
-    // After rezeroBuffers() the ring reads [page][free][history] with the history newest-last, so
-    // the ring's end is where the NEWEST history row lives. Resizing there gets both directions
-    // exactly backwards: growing splices blanks between that row and the page, blanking the top of
-    // the scrollback and sliding the real rows out of the addressable range, and shrinking drops
-    // the newest rows while keeping the oldest. The free region at `_pageSize.lines` is the one
-    // place where slots may come and go without moving a row relative to offset 0, and erasing
-    // past it consumes the OLDEST history rows first -- precisely the end a shrunken scrollback
-    // has to forget.
-    auto const newTotalLineCount = _pageSize.lines + this->maxHistoryLineCount();
+    auto const newSlotCount = unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount());
     auto const oldSlotCount = _lines.size();
-    auto const newSlotCount = unbox<size_t>(newTotalLineCount);
-    auto& slots = _lines.storage();
-    auto const freeRegion = std::next(slots.begin(), static_cast<ptrdiff_t>(unbox(_pageSize.lines)));
     if (newSlotCount > oldSlotCount)
-        // The prototype rather than a default-constructed Line: a cols=0 line would violate the
-        // "every slot is at least pageSize.columns wide" invariant the other paths rely on.
-        slots.insert(freeRegion,
-                     newSlotCount - oldSlotCount,
-                     Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
+        insertSlotsAfterPage(newSlotCount - oldSlotCount, defaultLineFlags());
     else
-        slots.erase(freeRegion, std::next(freeRegion, static_cast<ptrdiff_t>(oldSlotCount - newSlotCount)));
+        eraseSlotsAfterPage(oldSlotCount - newSlotCount);
 
+    auto const newTotalLineCount = LineCount::cast_from(newSlotCount);
     _linesUsed = min(_linesUsed, newTotalLineCount);
     bumpGeneration(RowIdentity::Destroyed);
     verifyState();
+}
+
+size_t Grid::slotAfterPage() const noexcept
+{
+    return (_lines.zeroIndex() + unbox<size_t>(_pageSize.lines)) % _lines.size();
+}
+
+void Grid::insertSlotsAfterPage(size_t count, LineFlags flags)
+{
+    // Where the page ends in storage. Zero means the page ends at storage's end: append there, where
+    // inserting at 0 would put the new slots after the oldest history instead.
+    auto const boundary = slotAfterPage();
+    auto& slots = _lines.storage();
+    auto const at = boundary == 0 ? slots.size() : boundary;
+    // The prototype rather than a default-constructed Line: a cols=0 line would violate the "every slot is
+    // at least pageSize.columns wide" invariant the other paths rely on.
+    slots.insert(std::next(slots.begin(), static_cast<ptrdiff_t>(at)),
+                 count,
+                 Line(_pageSize.columns, flags, GraphicsAttributes {}));
+    // Inserted ahead of offset 0's slot -- the page wraps around storage's end -- so that slot moved up.
+    if (at <= _lines.zeroIndex())
+        _lines.rotateLeft(count);
+}
+
+void Grid::eraseSlotsAfterPage(size_t count) noexcept
+{
+    Require(count <= _lines.size() - unbox<size_t>(_pageSize.lines));
+    auto const boundary = slotAfterPage();
+    auto& slots = _lines.storage();
+    auto const size = slots.size();
+    auto const begin = slots.begin();
+    if (boundary + count <= size)
+    {
+        slots.erase(std::next(begin, static_cast<ptrdiff_t>(boundary)),
+                    std::next(begin, static_cast<ptrdiff_t>(boundary + count)));
+        // Erased ahead of offset 0's slot, which therefore moved down.
+        if (boundary < _lines.zeroIndex())
+            _lines.rotateRight(count);
+        return;
+    }
+    // The run wraps around storage's end. It then starts after offset 0's slot (it holds no page row,
+    // and the page ends where it starts), and its wrapped head lies before that slot.
+    auto const head = boundary + count - size;
+    slots.erase(std::next(begin, static_cast<ptrdiff_t>(boundary)), slots.end());
+    slots.erase(slots.begin(), std::next(slots.begin(), static_cast<ptrdiff_t>(head)));
+    _lines.rotateRight(head);
 }
 
 void Grid::finalizeRevisions() noexcept
@@ -1328,10 +1356,9 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
     auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
     if (std::holds_alternative<Infinite>(_historyLimits.capacity) && linesAvailable < linesCountToScrollUp)
     {
-        auto const linesToAllocate = unbox(linesCountToScrollUp - linesAvailable);
-
-        for ([[maybe_unused]] auto const _: std::views::iota(0, linesToAllocate))
-            _lines.emplace_back(_pageSize.columns, defaultLineFlags(), GraphicsAttributes());
+        // At the page boundary, where the recursion's below-capacity branch writes them: storage's end is
+        // that boundary only while the ring has not been rotated or resized since it filled.
+        insertSlotsAfterPage(unbox<size_t>(linesCountToScrollUp - linesAvailable), defaultLineFlags());
 
         return scrollUp(linesCountToScrollUp, defaultAttributes);
     }
@@ -1722,10 +1749,18 @@ CellLocation Grid::growLines(LineCount newHeight, CellLocation cursor)
 
     auto const newTotalLineCount = maxHistoryLineCount() + newHeight;
     auto const currentTotalLineCount = LineCount::cast_from(_lines.size());
-    auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
+    // Enough slots for the configured capacity, and in any case one for every new page row the free
+    // region cannot supply: a ring holding rows above its capacity has no free slots at all, and growing
+    // into its oldest history slots would show held rows on the page and count them as evicted.
+    auto const freeSlots = *currentTotalLineCount - *_linesUsed;
+    auto const linesToFill =
+        std::max({ 0, *newTotalLineCount - *currentTotalLineCount, *totalLinesToExtend - freeSlots });
 
-    for ([[maybe_unused]] auto const _: std::views::iota(0, linesToFill))
-        _lines.emplace_back(_pageSize.columns, wrappableFlag, GraphicsAttributes {});
+    // At the page boundary, never at storage's end: on a ring that has scrolled, that end lies among the
+    // rows, and a blank appended there was spliced into the page or the history while the oldest history
+    // rows slid onto the page. @see insertSlotsAfterPage
+    if (linesToFill > 0)
+        insertSlotsAfterPage(static_cast<size_t>(linesToFill), wrappableFlag);
 
     // The lines entering the page come from the ring's unused tail, which a column change leaves at
     // its old width (see growColumns/shrinkColumns) on the promise that it is re-widthed when

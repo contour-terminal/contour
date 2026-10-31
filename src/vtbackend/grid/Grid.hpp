@@ -1004,6 +1004,25 @@ class Grid
 
     void rezeroBuffers() noexcept { _lines.rezero(); }
 
+    /// The storage index of the slot just after the page: where the page meets the free region.
+    [[nodiscard]] size_t slotAfterPage() const noexcept;
+
+    /// Adds @p count blank slots where the page meets the free region, without moving any row.
+    ///
+    /// Slots appear and vanish at that boundary, NOT at storage's end. In logical order the ring reads
+    /// [page][free][history], the history newest-last, so storage's end -- once the ring has scrolled -- lies
+    /// anywhere among the rows. The boundary is the one place where slots come and go without moving a row
+    /// relative to offset 0, so every stable id stays put. In place: no rotation, no reallocation beyond
+    /// the insert's own.
+    /// @param count How many slots to add.
+    /// @param flags The new slots' line flags.
+    void insertSlotsAfterPage(size_t count, LineFlags flags);
+
+    /// Removes @p count slots where the page meets the free region: the free slots first, then the OLDEST
+    /// history rows -- precisely the end a shrunken scrollback has to forget. No surviving row moves.
+    /// @param count How many slots to remove; at most the ring's non-page slots.
+    void eraseSlotsAfterPage(size_t count) noexcept;
+
     // The ONLY ring-rotation entry points: stable-id accounting lives here so every
     // scroll/unscroll/grow path keeps row identity by construction. (The former
     // uncentralized rotateBuffers(int)/appendNewLines paths were dead and are gone —

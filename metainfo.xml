@@ -238,6 +238,7 @@
           <li>On macOS, a command that ran ten seconds or more in a pane you were not looking at raises a Notification Center notification when Contour runs from its app bundle; clicking it brings the pane forward with the command's block in view, and it chimes only while the bell sound is on</li>
           <li>Fixes <code>contour help</code> for commands with subcommands such as <code>contour daemon</code>: their usage lines now wrap inside the terminal width, under the command's first option, instead of running past it or indenting a subcommand's options by hundreds of columns</li>
           <li>Resizing with text reflow now respects a finite scrollback limit and releases excess history storage; infinite scrollback remains unlimited.</li>
+          <li>Fixes a taller window scrambling the screen when a finite scrollback was full: blank lines appeared mid-page and old scrollback lines showed on the page.</li>
           <li>Fixes the first scrollback trim after a resize, or on first reaching the limit, cutting through a command instead of at a prompt.</li>
         </ul>
       </description>

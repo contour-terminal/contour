@@ -3421,3 +3421,45 @@ TEST_CASE("Grid.historyEviction.theFirstTrimSeesTheBoundariesAlreadyInTheWindow"
     CHECK(grid.lineAt(grid.addressableTop()).marked());
     CHECK(historyText(grid).front().starts_with("P1"));
 }
+
+namespace
+{
+/// Every row the grid holds, oldest first: the scrollback, then the page.
+[[nodiscard]] std::vector<std::string> allRowsText(Grid const& grid)
+{
+    auto rows = std::vector<std::string> {};
+    grid.forEachValidLine([&](LineOffset, Line const& line) { rows.push_back(line.toUtf8()); });
+    return rows;
+}
+} // namespace
+
+TEST_CASE("Grid.resize.growingLinesOnAScrolledRingKeepsEveryRowInOrder", "[grid][history][resize]")
+{
+    // A finite ring that has scrolled -- at capacity from six scrolls on -- and an unbounded one. Growing
+    // the page must keep every row where it was and add blank rows only: below the page when the cursor
+    // is above the bottom, and once the history is pulled onto the page when it is at the bottom.
+    auto const scrolls = GENERATE(0, 1, 2, 3, 5, 6, 7, 8, 11, 33, 100, 1025);
+    auto const capacity = GENERATE(as<MaxHistoryLineCount> {}, LineCount(5), Infinite {});
+    auto const cursorLine = GENERATE(0, 2);
+    CAPTURE(scrolls, std::holds_alternative<Infinite>(capacity), cursorLine);
+
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(3) }, true, capacity);
+    auto counter = 0;
+    for (auto const y: std::views::iota(0, 3))
+        grid.setLineText(LineOffset(y), std::format("{:03}", counter++ % 1000));
+    for ([[maybe_unused]] auto const _: std::views::iota(0, scrolls))
+        appendLine(grid, std::format("{:03}", counter++ % 1000));
+    auto const before = allRowsText(grid);
+    auto const historyBefore = grid.historyLineCount();
+
+    (void) grid.resize(PageSize { LineCount(5), ColumnCount(3) },
+                       CellLocation { .line = LineOffset(cursorLine), .column = ColumnOffset(0) },
+                       WrapPending::No);
+
+    // At the bottom, history rows come down first and only the rest of the growth is blank.
+    auto const pulledDown = cursorLine == 2 ? std::min(historyBefore, LineCount(2)) : LineCount(0);
+    auto expected = before;
+    expected.resize(before.size() + 2 - unbox<size_t>(pulledDown), "   ");
+    CHECK(allRowsText(grid) == expected);
+    CHECK(grid.historyLineCount() == historyBefore - pulledDown);
+}
