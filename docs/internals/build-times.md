@@ -176,3 +176,50 @@ A required status check is never gated off pull requests. `tests matrix` and
 cancelled one still fails them). `scripts/check-workflows.py` enforces both rules, and its
 `--self-test` pins them against fixtures. A master run is never cancelled by the next push
 (`cancel-in-progress` is off on master), so it finishes and saves the compiler cache.
+
+## Results
+
+Measured on 2026-10-31 with `scripts/measure-compile-times.py --jobs 16`, the merge base and this
+branch built back to back on the same idle machine (Clang 22, RelWithDebInfo), so contention is
+equal on both sides:
+
+| | Base (`4de2e780a`) | This branch | Change |
+|---|---:|---:|---:|
+| Total CPU-s, 1220 TUs | 4832 | 4218 | −12.7 % |
+| Frontend CPU-s | 3388 | 2947 | −13.0 % |
+| Backend CPU-s | 1360 | 1203 | −11.5 % |
+
+The slowest translation units fall by a quarter to a third: `SettingsController_test.cpp` 34.7 →
+23.6 s, `TerminalSessionManager_test.cpp` 30.3 → 22.2 s, `TerminalSessionPermissions_test.cpp`
+29.7 → 21.9 s, `Config.cpp` 42.2 → 33.1 s.
+
+What a change to a central header rebuilds (translation units depending on it, `ninja -t deps`):
+
+| Header | Base | This branch |
+|---|---:|---:|
+| `vthost/SessionHost.hpp` | 115 | 37 |
+| `contour/config/Actions.hpp` | 172 | 113 |
+| `vtbackend/screen/Terminal.hpp` | 234 | 202 |
+| `contour/config/Config.hpp` | 158 | 138 |
+| `contour/session/TerminalSession.hpp` | 79 | 67 |
+| `contour/window/WindowController.hpp` | 65 | 53 |
+
+The single largest gain is `Action`: a `std::variant` of 129 alternatives whose copy, move and
+destruction every translation unit holding an `Action` used to instantiate. It is now a class
+deriving from that variant with its special members defined once, in `Actions.cpp`; the variant's
+instantiation cost fell by 88 %. Forward declarations alone moved cost between headers more than
+they removed it, because the slowest translation units — the GUI tests — genuinely need the
+application they drive. `scripts/include-budget.txt` keeps the cuts that were made from coming back.
+
+Pull-request CI, warm cache, a change that touches no central header (wall clock per job):
+
+| Job | Before | After |
+|---|---:|---:|
+| Linux Clang 22 | 92–107 min | 23.5 min |
+| Windows | ~134 min | 31 min |
+| macOS | ~125 min | 19–23 min |
+| Guard builds (GUI off, no extensions) | 25–60 min | 3–6 min |
+| clang-tidy | 160+ min (full tree) | 14 min (changed lines) |
+
+A change that touches a header half the tree includes still rebuilds what depends on it: with this
+branch's own header churn the platform jobs took 40–58 min. A cold cache costs what it did before.
