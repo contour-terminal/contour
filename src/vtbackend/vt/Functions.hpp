@@ -119,6 +119,7 @@ constexpr inline auto DECSM = FunctionDocumentation { .mnemonic = "DECSM", .comm
 constexpr inline auto DECSMBV = FunctionDocumentation { .mnemonic = "DECSMBV", .comment = "Set Margin Bell Volume" };
 constexpr inline auto DECSNLS = FunctionDocumentation { .mnemonic = "DECSNLS", .comment = "Select number of lines per screen." };
 constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .comment = "Set port parameter" };
+constexpr inline auto DECSR = FunctionDocumentation { .mnemonic = "DECSR", .comment = "Secure Reset", .parameters = "Pr", .description = "Returns the terminal to its power-up state, exactly as a hard reset (RIS) does -- Contour's RIS never disconnects from the host, which is the one difference the VT510 manual draws between the two. If Pr is given and lies within 0..16383, the terminal then confirms with DECSRC, `CSI Pr * q`, echoing Pr back. An omitted or out-of-range Pr resets without a confirmation.", .notes = "VT420. Unlike most sequences it is honoured at every operating level, as the VT510 manual requires.", .examples = "CSI 1234 + p" };
 constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
 constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
@@ -274,6 +275,15 @@ constexpr inline auto SBQUERY = FunctionDocumentation { .mnemonic = "SBQUERY", .
 // clang-format on
 // }}}
 
+/// At which operating levels -- the level DECSCL selects -- a sequence is available.
+enum class LevelAvailability : uint8_t
+{
+    /// Only while the operating level is at least the sequence's conformance level.
+    FromConformanceLevel,
+    /// At every operating level; its conformance level remains the one it was introduced at.
+    AtEveryLevel,
+};
+
 /// Defines a function with all its syntax requirements plus some additional meta information.
 struct Function
 {
@@ -289,6 +299,8 @@ struct Function
     // So keep it the classic way (for now).
     VTType conformanceLevel;
     VTExtension extension = VTExtension::None;
+    /// Policy, not identity: id() and compare() ignore it.
+    LevelAvailability availability = LevelAvailability::FromConformanceLevel;
 
     FunctionDocumentation documentation;
 
@@ -578,6 +590,13 @@ namespace detail // {{{
                           .extension = ext,
                           .documentation = documentation };
     }
+
+    /// @return @p function, kept available at every operating level. @see SupportedSequences::reset.
+    constexpr Function atEveryLevel(Function function) noexcept
+    {
+        function.availability = LevelAvailability::AtEveryLevel;
+        return function;
+    }
 } // namespace detail
 // }}}
 
@@ -757,7 +776,12 @@ constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', V
 constexpr inline auto DECINVM     = detail::CSI(std::nullopt, 0, 1, '*', 'z', VTType::VT420, documentation::DECINVM);
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
 constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
-constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 0, 6, '*', 'y', VTType::VT420, documentation::DECRQCRA);
+// DECRQCRA merely *reports* a checksum of the screen; xterm answers it at any operating level (its checksum
+// handler is not level-gated), and conformance tools rely on it to read the screen back even after dropping
+// to VT100. Unlike a feature-enabling sequence, answering a read request at a lower level corrupts no state
+// -- and unlike DECRQM (which stays gated, as esctest's Level2DoesntSupportDECRQM requires), it is a pure
+// measurement.
+constexpr inline auto DECRQCRA    = detail::atEveryLevel(detail::CSI(std::nullopt, 0, 6, '*', 'y', VTType::VT420, documentation::DECRQCRA));
 constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
 constexpr inline auto DECELF      = detail::CSI(std::nullopt, 0, 1, '+', 'q', VTType::VT420, documentation::DECELF);
 constexpr inline auto DECLFKC     = detail::CSI(std::nullopt, 0, 1, '*', '}', VTType::VT420, documentation::DECLFKC);
@@ -770,7 +794,10 @@ constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VT
 constexpr inline auto DECRQUPSS   = detail::CSI(std::nullopt, 0, 0, '&', 'u', VTType::VT320, documentation::DECRQUPSS);
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
 constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VTType::VT240, documentation::DECSCA);
-constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
+// DECSCL is the very sequence that *sets* the operating level, so gating it by the level it controls would
+// be a trap -- `DECSCL 61` (drop to VT100) would deactivate DECSCL itself, leaving no way to ever raise the
+// level again. xterm likewise keys DECSCL off terminal_id.
+constexpr inline auto DECSCL      = detail::atEveryLevel(detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL));
 constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VTType::VT100, documentation::DECSCPP);
 constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, documentation::DECSCUSR);
 constexpr inline auto DECSED      = detail::CSI('?', 0, 1, std::nullopt, 'J', VTType::VT240, documentation::DECSED);
@@ -780,6 +807,9 @@ constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 0, 2, std::nullopt
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::DECSM);
 constexpr inline auto DECSMBV     = detail::CSI(std::nullopt, 0, 1, ' ', 'u', VTType::VT520, documentation::DECSMBV);
 constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VTType::VT420, documentation::DECSNLS);
+// VT510: DECSR "works in all conformance levels (level 1 or higher)" -- the host's guaranteed way back to
+// the power-up state, the operating level included.
+constexpr inline auto DECSR       = detail::atEveryLevel(detail::CSI(std::nullopt, 0, 1, '+', 'p', VTType::VT420, documentation::DECSR));
 constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
@@ -1065,6 +1095,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSM,
         DECSMBV,
         DECSNLS,
+        DECSR,
         DECSSDT,
         DECSTBM,
         DECSTGLT,
@@ -1215,24 +1246,14 @@ class SupportedSequences
     CORE_CONSTEXPR void reset(VTType vt) noexcept
     {
         // Partition the array so the first half holds every sequence available at the given operating
-        // level (conformanceLevel <= vt). Two sequences are always kept available regardless of level:
-        //
-        //  * DECSCL is the very sequence that *sets* the operating level, so gating it by the level it
-        //    controls would be a trap -- `DECSCL 61` (drop to VT100) would deactivate DECSCL itself,
-        //    leaving no way to ever raise the level again. xterm likewise keys DECSCL off terminal_id.
-        //
-        //  * DECRQCRA merely *reports* a checksum of the screen; xterm answers it at any operating level
-        //    (its checksum handler is not level-gated), and conformance tools rely on it to read the
-        //    screen back even after dropping to VT100. Unlike a feature-enabling sequence, answering a
-        //    read request at a lower level corrupts no state -- and unlike DECRQM (which stays gated, as
-        //    esctest's Level2DoesntSupportDECRQM requires), it is a pure measurement.
-        //
-        // Contour's hardware identity is VT525, so both are genuine capabilities at every level.
+        // level: those at or below it, plus those exempt from level gating (each says why at its
+        // definition). Contour's hardware identity is VT525, so the exempt ones are genuine capabilities
+        // at every level.
         auto* itr = std::partition(begin(),
                                    _supportedSequences.data() + _supportedSequences.size(),
                                    [vt](Function const& value) noexcept {
-                                       return value.conformanceLevel <= vt || value.id() == DECSCL.id()
-                                              || value.id() == DECRQCRA.id();
+                                       return value.conformanceLevel <= vt
+                                              || value.availability == LevelAvailability::AtEveryLevel;
                                    });
 
         _lastIndex = std::distance(begin(), itr);
