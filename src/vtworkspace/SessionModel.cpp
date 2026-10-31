@@ -637,7 +637,7 @@ void SessionModel::setTabTitle(TabId tabId, std::string title)
     if (tab == nullptr)
         return;
     // An empty (or all-whitespace) rename means "reset to the default template", never "blank the
-    // label": an empty runtime override takes precedence over the '{WindowTitle}' default and would
+    // label": an empty runtime override takes precedence over the default template and would
     // leave the tab permanently unlabeled — the GUI's inline rename editor opens pre-filled with the
     // raw override (empty for a never-renamed tab) and commits verbatim on click-away. Normalizing
     // here keeps the invariant "no blank runtime titles" for every adapter.

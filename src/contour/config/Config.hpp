@@ -1163,7 +1163,7 @@ struct TerminalProfile
     };
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
-    ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
+    ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{TabName}" };
     ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
     ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
