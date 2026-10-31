@@ -7,6 +7,7 @@
 #include <contour/command/TitleBarContextMenu.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/MouseMapping.hpp>

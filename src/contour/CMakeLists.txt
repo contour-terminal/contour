@@ -327,6 +327,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/WindowControlStyleProvider.hpp
         window/WindowLivenessQt.hpp
         session/SessionInput.hpp
+        session/SessionRole.hpp
         session/FontControl.hpp
         session/GutterChrome.hpp
         session/SpawnCommand.hpp

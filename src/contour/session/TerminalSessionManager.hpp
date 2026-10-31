@@ -2,10 +2,10 @@
 
 #include <contour/command/CommandHistory.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/config/ShellKind.hpp>
-#include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/platform/SecureInputGate.hpp>
 #include <contour/platform/SessionVisibility.hpp>
@@ -13,13 +13,15 @@
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
-#include <contour/session/TerminalSession.hpp>
+#include <contour/session/SessionRole.hpp>
 #include <contour/window/ChromeFocus.hpp>
+#include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
-#include <contour/window/WindowController.hpp>
+#include <contour/window/WindowRole.hpp>
 
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QObject>
@@ -50,6 +52,12 @@
 
 class QScreen;
 
+namespace contour::display
+{
+class TerminalDisplay;
+class WindowHost;
+} // namespace contour::display
+
 namespace contour::window
 {
 class WindowController;
@@ -57,6 +65,8 @@ class WindowController;
 
 namespace contour::session
 {
+
+class TerminalSession;
 
 class PaneProxy;
 
@@ -161,6 +171,8 @@ enum class RestartError : uint8_t
 class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 {
     Q_OBJECT
+    Q_MOC_INCLUDE("contour/session/TerminalSession.hpp")
+    Q_MOC_INCLUDE("contour/window/WindowController.hpp")
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     QML_ELEMENT
 
@@ -187,6 +199,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                            std::string homeDirectory,
                            platform::TaskbarProgressSink& taskbarProgressSink,
                            platform::ISecureInput& secureInput);
+
+    /// Out of line: the members' destructors need the complete TerminalSession and WindowController,
+    /// which this header only forward-declares.
+    ~TerminalSessionManager() override;
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -1059,13 +1075,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// create its own first tab — its tabs come from reconciling the daemon window's layout instead.
     /// @param controller The freshly-created controller of the just-spawned window.
     /// @return true if the window was bound to a pending daemon window; false otherwise.
-    Q_INVOKABLE bool consumeAttachWindow(contour::window::WindowController* controller)
-    {
-        // A panel is no daemon window: it never adopts one, and its own first tab is made here.
-        return _attachWindowBinder && controller != nullptr && !isPanelWindow(controller->windowId())
-                   ? _attachWindowBinder(controller)
-                   : false;
-    }
+    Q_INVOKABLE bool consumeAttachWindow(contour::window::WindowController* controller);
 
     /// The controller adapting @p window, or nullptr. Used by the ModelEvents router to forward each Qt
     /// row/signal emission to the owning window's controller.
@@ -1117,12 +1127,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///
     /// Every session in an attached GUI is fed by that one connection, so losing it ends all of
     /// them at once. @see TerminalSession::noteTransportLost
-    void noteTransportLost() noexcept
-    {
-        for (auto* session: _sessionsById | std::views::values)
-            if (session != nullptr)
-                session->noteTransportLost();
-    }
+    void noteTransportLost() noexcept;
 
     /// Tells every session where the connection to the daemon (or tmux server) its pane mirrors stands: each
     /// whose factory hosts it remotely shows that it is reconnecting while the connection is sought again;
@@ -1379,12 +1384,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// session is unknown to the registries or has no model tab.
     /// @param session The backing session whose hosting tab to locate.
     /// @return The hosting tab, or nullptr.
-    [[nodiscard]] vtworkspace::Tab* tabHostingSession(TerminalSession const* session) const noexcept
-    {
-        if (session == nullptr)
-            return nullptr;
-        return findTabHostingSession(session->modelSessionId());
-    }
+    [[nodiscard]] vtworkspace::Tab* tabHostingSession(TerminalSession const* session) const noexcept;
 
     /// Where a session sits: its tab, that tab's window, and the window's controller. Each link is
     /// nullptr when the one before it is, or when it does not resolve.
@@ -1413,10 +1413,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The backing session to find.
     /// @return The leaf, or nullptr when @p session is not one of @p tab's panes.
     [[nodiscard]] static vtworkspace::Pane* leafOfSession(vtworkspace::Tab const& tab,
-                                                          TerminalSession const& session)
-    {
-        return tab.rootPane() != nullptr ? tab.rootPane()->findLeaf(session.modelSessionId()) : nullptr;
-    }
+                                                          TerminalSession const& session);
 
     /// Makes @p session's pane the active pane of @p tab; a no-op when it is not one of @p tab's panes.
     /// @param tab     The tab hosting @p session.

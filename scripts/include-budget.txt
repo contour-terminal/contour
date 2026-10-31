@@ -23,3 +23,7 @@ src/contour/cli/ConnectList.hpp !src/contour/config/Config.hpp
 src/contour/command/LauncherEntries.hpp !src/contour/config/Config.hpp
 src/contour/window/ConnectPickerController.hpp !src/contour/config/Config.hpp
 src/contour/window/NewDefaultsNotice.hpp !src/contour/config/Config.hpp
+src/contour/window/WindowController.hpp !src/contour/display/TerminalDisplay.hpp
+src/contour/display/TerminalDisplay.hpp !src/contour/session/TerminalSession.hpp
+src/contour/session/TerminalSessionManager.hpp !src/contour/display/TerminalDisplay.hpp
+src/contour/session/TerminalSessionManager.hpp !src/contour/session/TerminalSession.hpp

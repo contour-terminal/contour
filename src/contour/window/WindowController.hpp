@@ -3,7 +3,6 @@
 
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/MenuBarTable.hpp>
-#include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/Announcer.hpp>
@@ -64,6 +63,11 @@ namespace vtworkspace
 class Tab;
 class Window;
 } // namespace vtworkspace
+
+namespace contour::display
+{
+class TerminalDisplay;
+} // namespace contour::display
 
 namespace contour::session
 {
