@@ -294,6 +294,8 @@ class TabListModel: public QAbstractListModel, public ModelEvents
 
     // Mirror of WindowController::resolvedTabLabel: pick a template by precedence (rename >
     // multi-pane sentinel > profile template), then expand it once with the tab's 1-based position.
+    // The stand-in has no OSC 30 source, so {TabName} resolves to the title, as it does for a tab whose
+    // application never named it.
     [[nodiscard]] QString resolvedTabLabel(Tab* tab, int row) const
     {
         if (tab == nullptr)
@@ -307,7 +309,9 @@ class TabListModel: public QAbstractListModel, public ModelEvents
         else
             templ = _tabLabelTemplate;
         return QString::fromStdString(contour::window::expandTabLabel(
-            templ, contour::window::TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+            templ,
+            contour::window::TabLabelContext {
+                .position = row + 1, .windowTitle = windowTitle, .tabName = windowTitle }));
     }
 
     [[nodiscard]] contour::window::TabBadge tabBadge(Tab const& tab, int row) const
@@ -334,7 +338,7 @@ class TabListModel: public QAbstractListModel, public ModelEvents
     std::map<uint64_t, vtbackend::ProgramStatusSet> _programStatus; ///< Each session's records, by id.
     SessionModel _model;
     Window* _window;
-    std::string _tabLabelTemplate = "{WindowTitle}";
+    std::string _tabLabelTemplate = "{TabName}"; // the shipped default
     std::map<uint64_t, std::string> _sessionTitles;
     bool _tabMoveInProgress = false; // carries beginMoveRows()'s result to tabMoved(), as in the manager
 };

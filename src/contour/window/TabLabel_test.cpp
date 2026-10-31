@@ -14,19 +14,19 @@ using contour::window::TabLabelContext;
 
 TEST_CASE("expandTabLabel: default template yields the window title verbatim", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim", .tabName = "vim" };
     CHECK(expandTabLabel("{WindowTitle}", ctx) == "vim");
 }
 
 TEST_CASE("expandTabLabel: position and title combine with literal text", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 2, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 2, .windowTitle = "vim", .tabName = "vim" };
     CHECK(expandTabLabel("{TabPosition}: {WindowTitle}", ctx) == "2: vim");
 }
 
 TEST_CASE("expandTabLabel: an unknown placeholder is echoed verbatim", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 3, .windowTitle = "bash" };
+    auto const ctx = TabLabelContext { .position = 3, .windowTitle = "bash", .tabName = "bash" };
     // "before" and "after" are literal; "{Nope}" is unrecognized and is echoed exactly as typed rather
     // than dropped, so the user sees what they wrote (matching the status line's handling).
     CHECK(expandTabLabel("before{Nope}after", ctx) == "before{Nope}after");
@@ -34,26 +34,26 @@ TEST_CASE("expandTabLabel: an unknown placeholder is echoed verbatim", "[contour
 
 TEST_CASE("expandTabLabel: a template with no placeholders is returned verbatim", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "ignored" };
+    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "ignored", .tabName = "ignored" };
     CHECK(expandTabLabel("plain label", ctx) == "plain label");
 }
 
 TEST_CASE("expandTabLabel: an empty template yields an empty string", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim", .tabName = "vim" };
     CHECK(expandTabLabel("", ctx).empty());
 }
 
 TEST_CASE("expandTabLabel: a repeated placeholder is substituted each time", "[contour][tablabel]")
 {
-    auto const ctx = TabLabelContext { .position = 7, .windowTitle = "x" };
+    auto const ctx = TabLabelContext { .position = 7, .windowTitle = "x", .tabName = "x" };
     CHECK(expandTabLabel("{TabPosition}-{TabPosition}", ctx) == "7-7");
 }
 
 TEST_CASE("expandTabLabel: placeholder flags/attributes are accepted but ignored", "[contour][tablabel]")
 {
     // Tab labels are plain text; styling flags carried by a placeholder must not change the value.
-    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim", .tabName = "vim" };
     CHECK(expandTabLabel("{WindowTitle:Bold,Color=#FF0000}", ctx) == "vim");
 }
 
@@ -63,7 +63,7 @@ TEST_CASE("expandTabLabel: an unterminated brace is echoed verbatim", "[contour]
     // keeps the leading '{' in the parsed name (unlike a properly closed "{Name}"). So "{WindowTitle"
     // parses to a placeholder literally named "{WindowTitle", which matches nothing and is echoed verbatim
     // (its `whole` slice runs to end-of-input), so the unterminated text survives instead of vanishing.
-    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 1, .windowTitle = "vim", .tabName = "vim" };
     CHECK(expandTabLabel("{WindowTitle", ctx) == "{WindowTitle");
 }
 
@@ -71,7 +71,8 @@ TEST_CASE("expandTabLabel: a zero/negative position is rendered as-is", "[contou
 {
     // The caller always passes a 1-based position, but the expander must not assume it: it formats
     // whatever integer it is given.
-    CHECK(expandTabLabel("{TabPosition}", TabLabelContext { .position = 0, .windowTitle = "" }) == "0");
+    CHECK(expandTabLabel("{TabPosition}", TabLabelContext { .position = 0, .windowTitle = "", .tabName = "" })
+          == "0");
 }
 
 TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tablabel]")
@@ -79,7 +80,7 @@ TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tabla
     // There is no brace escaping (dropped for backward compatibility). Instead, an unrecognized placeholder
     // is echoed verbatim — the user sees exactly what they typed — matching the status line's handling so
     // both surfaces behave identically. Known placeholders still expand.
-    auto const ctx = TabLabelContext { .position = 5, .windowTitle = "vim" };
+    auto const ctx = TabLabelContext { .position = 5, .windowTitle = "vim", .tabName = "vim" };
 
     SECTION("a doubled-brace token round-trips verbatim (unknown placeholder + trailing brace)")
     {
@@ -105,4 +106,14 @@ TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tabla
         CHECK(expandTabLabel("{WindowTitle}", ctx) == "vim");
         CHECK(expandTabLabel("[{TabPosition}]", ctx) == "[5]");
     }
+}
+
+TEST_CASE("expandTabLabel: {TabName} is substituted beside the other placeholders", "[contour][tablabel]")
+{
+    // Issue #2170: the caller resolves the tab name (OSC 30, else the title) as the status line does;
+    // the expander substitutes it, and {WindowTitle} keeps meaning the window title.
+    auto const ctx = TabLabelContext { .position = 2, .windowTitle = "Window Title", .tabName = "Tab Title" };
+    CHECK(expandTabLabel("{TabName}", ctx) == "Tab Title");
+    CHECK(expandTabLabel("{TabPosition}: {TabName}", ctx) == "2: Tab Title");
+    CHECK(expandTabLabel("{WindowTitle}", ctx) == "Window Title");
 }

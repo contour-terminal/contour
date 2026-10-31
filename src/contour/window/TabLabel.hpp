@@ -10,12 +10,13 @@ namespace contour::window
 /// Values available to a tab-label template when it is expanded.
 ///
 /// Kept in its own dependency-free header (no Qt, no app types) so the template-expansion logic in
-/// expandTabLabel() is unit-testable without the full Qt/app manager. The set is intentionally small
-/// for v1; new members map one-to-one onto new placeholders in expandTabLabel().
+/// expandTabLabel() is unit-testable without the full Qt/app manager. Members map one-to-one onto
+/// placeholders in expandTabLabel(), and none has a default, so a caller cannot forget one.
 struct TabLabelContext
 {
     int position = 1;        ///< The tab's 1-based position, exposed as the {TabPosition} placeholder.
     std::string windowTitle; ///< The active pane's resolved title, exposed as {WindowTitle}.
+    std::string tabName;     ///< The tab's resolved name (OSC 30, else the title), exposed as {TabName}.
 };
 
 /// Expands a tab-label template into the string shown on a GUI tab.
@@ -24,6 +25,7 @@ struct TabLabelContext
 /// crispy::parseInterpolatedString (the same syntax the status line uses). Literal text passes
 /// through unchanged. Recognized placeholders (case-sensitive) are substituted from @p ctx:
 ///   - `{WindowTitle}` → @p ctx.windowTitle
+///   - `{TabName}`     → @p ctx.tabName
 ///   - `{TabPosition}` → @p ctx.position (1-based)
 /// An unrecognized placeholder is echoed verbatim — its exact original `{...}` slice — matching
 /// parseStatusLineSegment so both surfaces show the user what they typed rather than dropping it.
