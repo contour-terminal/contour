@@ -715,7 +715,13 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsOutputShowsThePlaceholder",
     auto const head = headOffsetOf(grid, *record);
     if (!keepHead)
     {
-        CHECK_FALSE(head.has_value());
+        // The resize holds the head above the capacity; the next line of output settles it.
+        CHECK(head.has_value());
+        CHECK(grid.historyLineCount() == LineCount(11));
+        printLines(mc, "more", 1);
+        auto const* const settled = mc.terminal.commandBlocks().find(id);
+        REQUIRE(settled != nullptr);
+        CHECK_FALSE(headOffsetOf(grid, *settled).has_value());
         CHECK(grid.historyLineCount() == LineCount(10));
         header = drawFrame(mc.terminal).stickyHeader;
         REQUIRE(header.has_value());
@@ -811,7 +817,13 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsInputRowStillCopiesIt", "[stic
     auto const head = headOffsetOf(grid, *record);
     if (!keepHead)
     {
-        CHECK_FALSE(head.has_value());
+        // The resize holds the head above the capacity; the next line of output settles it.
+        CHECK(head.has_value());
+        CHECK(grid.historyLineCount() == LineCount(11));
+        printLines(mc, "more", 1);
+        auto const* const settled = mc.terminal.commandBlocks().find(id);
+        REQUIRE(settled != nullptr);
+        CHECK_FALSE(headOffsetOf(grid, *settled).has_value());
         CHECK(grid.historyLineCount() == LineCount(10));
         auto const header = renderOf(mc.terminal).stickyHeader;
         REQUIRE(header.has_value());

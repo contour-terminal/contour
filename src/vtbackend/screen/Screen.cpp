@@ -1265,6 +1265,7 @@ void Screen::followScrollUp(LineCount n, Margin margin)
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     ZoneScoped;
+    auto const historyBefore = _grid.historyLineCount();
     auto const isFullPageMargin =
         margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
@@ -1298,11 +1299,12 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     // partial region, where the branch above deliberately shifts nothing. Clamping is not shifting --
     // it only refuses to name a row that is gone.
     //
-    // Gated on the headroom for cost, not for correctness: without it the history cannot shrink here
-    // at all (@see Grid::clampHistory, which returns on the same test), and this is the linefeed
-    // path. Reaching Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with
-    // it, which with one collapsed fold rebuilds the whole fold projection on every scrolled line.
-    if (_grid.historyLimits().hasHeadroom())
+    // Gated for cost, not for correctness: this is the linefeed path, and reaching
+    // Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with it, which with one
+    // collapsed fold rebuilds the whole fold projection on every scrolled line. Without headroom the
+    // history shrinks here only when the scroll settles rows a resize held (@see
+    // Grid::settleHeldHistory), and then it is seen to shrink.
+    if (_grid.historyLimits().hasHeadroom() || _grid.historyLineCount() < historyBefore)
         _terminal->clampToHistory();
 }
 
