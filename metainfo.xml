@@ -232,6 +232,7 @@
           <li>Shows a bell badge on a tab whose program rang the bell while out of sight, until the tab is seen; the Dock icon, the Windows taskbar button and the Linux launcher count the tabs waiting for you (OSC 7501 blocked), so a question asked in a terminal is visible from another app</li>
           <li>On macOS, a command that ran ten seconds or more in a pane you were not looking at raises a Notification Center notification when Contour runs from its app bundle; clicking it brings the pane forward with the command's block in view, and it chimes only while the bell sound is on</li>
           <li>Fixes <code>contour help</code> for commands with subcommands such as <code>contour daemon</code>: their usage lines now wrap inside the terminal width, under the command's first option, instead of running past it or indenting a subcommand's options by hundreds of columns</li>
+          <li>Resizing with text reflow now respects a finite scrollback limit and releases excess history storage; infinite scrollback remains unlimited.</li>
         </ul>
       </description>
     </release>

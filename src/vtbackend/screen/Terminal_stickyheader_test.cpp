@@ -698,6 +698,11 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsOutputShowsThePlaceholder",
     printLines(mc, "out", 12);
     auto const id = runningBlock(mc);
 
+    // Narrowing adds a physical row. The former head survives only if the history has room for it.
+    auto const keepHead = GENERATE(false, true);
+    if (keepHead)
+        mc.terminal.setHistoryLimits(HistoryLimits::plain(LineCount(11)));
+
     auto const& grid = mc.terminal.primaryScreen().grid();
     REQUIRE(grid.lineText(grid.addressableTop()).starts_with("first output"));
     auto header = renderOf(mc.terminal).stickyHeader;
@@ -708,6 +713,16 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsOutputShowsThePlaceholder",
     auto const* const record = mc.terminal.commandBlocks().find(id);
     REQUIRE(record != nullptr);
     auto const head = headOffsetOf(grid, *record);
+    if (!keepHead)
+    {
+        CHECK_FALSE(head.has_value());
+        CHECK(grid.historyLineCount() == LineCount(10));
+        header = drawFrame(mc.terminal).stickyHeader;
+        REQUIRE(header.has_value());
+        CHECK(header->kind == StickyHeaderKind::Evicted);
+        CHECK(header->block == id);
+        return;
+    }
     REQUIRE(head.has_value());
     REQUIRE(*head == grid.addressableTop());
     REQUIRE(grid.lineText(*head).starts_with("first output"));
@@ -783,6 +798,10 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsInputRowStillCopiesIt", "[stic
     printLines(mc, "out", 12);
     auto const id = runningBlock(mc);
 
+    auto const keepHead = GENERATE(false, true);
+    if (keepHead)
+        mc.terminal.setHistoryLimits(HistoryLimits::plain(LineCount(11)));
+
     auto const& grid = mc.terminal.primaryScreen().grid();
     REQUIRE(grid.lineText(grid.addressableTop()).starts_with("> make"));
 
@@ -790,6 +809,16 @@ TEST_CASE("StickyHeader.terminal.aBlockHeadedAtItsInputRowStillCopiesIt", "[stic
     auto const* const record = mc.terminal.commandBlocks().find(id);
     REQUIRE(record != nullptr);
     auto const head = headOffsetOf(grid, *record);
+    if (!keepHead)
+    {
+        CHECK_FALSE(head.has_value());
+        CHECK(grid.historyLineCount() == LineCount(10));
+        auto const header = renderOf(mc.terminal).stickyHeader;
+        REQUIRE(header.has_value());
+        CHECK(header->kind == StickyHeaderKind::Evicted);
+        CHECK(header->block == id);
+        return;
+    }
     REQUIRE(head.has_value());
     REQUIRE(grid.lineText(*head).starts_with("> make"));
 

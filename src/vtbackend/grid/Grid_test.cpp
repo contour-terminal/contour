@@ -1202,11 +1202,13 @@ TEST_CASE("Grid resize with wrap", "[grid]")
     REQUIRE(grid.lineText(LineOffset(0)) == "2  ");
     REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
     REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
+    REQUIRE(grid.historyLineCount() == LineCount(0));
     (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
     REQUIRE(unbox(grid.historyLineCount()) == 0);
-    REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
-    REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
+    // With zero history, narrowing evicted "1"; widening cannot restore that row.
+    REQUIRE(grid.lineText(LineOffset(0)) == "2    ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "ABCDE");
+    REQUIRE(grid.lineText(LineOffset(2)) == "     ");
 }
 
 TEST_CASE("Grid resize", "[grid]")
@@ -2616,6 +2618,83 @@ TEST_CASE("Grid.render_rows.empty_list_is_the_linear_walk", "[grid]")
     CHECK(withDefault.renderedTexts == withEmptyRows.renderedTexts);
 }
 
+TEST_CASE("Grid.resize.enforcesFiniteHistoryCapacity", "[grid][history][reflow]")
+{
+    auto const capacity = LineCount(GENERATE(0, 1, 100));
+    auto const guaranteed = GENERATE(0, 1) == 0 ? capacity : capacity / 2;
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(80) },
+                     true,
+                     HistoryLimits { .guaranteed = guaranteed, .capacity = capacity });
+    for (auto const i: std::views::iota(0, 200))
+    {
+        grid.setLineText(LineOffset(2), std::string(80, static_cast<char>('A' + (i % 26))));
+        grid.scrollUp(LineCount(1));
+    }
+    REQUIRE(grid.historyLineCount() == capacity);
+
+    auto cursors = std::array { CellLocation { LineOffset(2), ColumnOffset(0) },
+                                CellLocation { LineOffset(1), ColumnOffset(60) } };
+    for (auto const [rows, columns]: { std::pair { 3, 20 }, { 3, 80 }, { 5, 10 }, { 5, 80 }, { 2, 20 } })
+    {
+        CAPTURE(capacity, guaranteed, rows, columns);
+        // Start each resize with identical content: previously evicted text cannot be recovered.
+        // The unlimited copy supplies the expected newest rows and cursor positions after reflow.
+        auto reference = grid;
+        reference.setHistoryLimits(HistoryLimits::plain(Infinite {}));
+        auto referenceCursors = cursors;
+        auto const pageSize = PageSize { LineCount(rows), ColumnCount(columns) };
+        grid.resize(pageSize, cursors, std::nullopt);
+        reference.resize(pageSize, referenceCursors, std::nullopt);
+        REQUIRE(grid.historyLineCount() <= capacity);
+        CHECK(cursors == referenceCursors);
+        for (auto const row: std::views::iota(-unbox<int>(grid.historyLineCount()), rows))
+        {
+            auto const offset = LineOffset(row);
+            CHECK(grid.lineText(offset) == reference.lineText(offset));
+            CHECK(grid.lineOffsetOf(grid.stableLineIdOf(offset)) == offset);
+        }
+        CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(grid.addressableTop()));
+        auto rowsVisited = 0;
+        grid.forEachValidLine([&](LineOffset, Line const&) { ++rowsVisited; });
+        CHECK(rowsVisited == unbox<int>(grid.historyLineCount()) + rows);
+
+        // Further scrolling must recycle a bounded ring, not fill slots left behind by reflow.
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 200))
+        {
+            grid.setLineText(LineOffset(rows - 1), std::string(static_cast<size_t>(columns), 'Z'));
+            reference.setLineText(LineOffset(rows - 1), std::string(static_cast<size_t>(columns), 'Z'));
+            grid.scrollUp(LineCount(1));
+            reference.scrollUp(LineCount(1));
+        }
+        CHECK(grid.historyLineCount() <= capacity);
+    }
+}
+
+TEST_CASE("Grid.resize.infiniteHistoryPreservesEveryReflowedRow", "[grid][history][reflow]")
+{
+    auto const guaranteed =
+        GENERATE(0, 1) == 0 ? MaxHistoryLineCount { Infinite {} } : MaxHistoryLineCount { LineCount(2) };
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(4) },
+                     true,
+                     HistoryLimits { .guaranteed = guaranteed, .capacity = Infinite {} });
+    grid.setLineText(LineOffset(0), "AAAA");
+    grid.setLineText(LineOffset(1), "BBBB");
+    grid.scrollUp(LineCount(2));
+    grid.setLineText(LineOffset(0), "CCCC");
+    grid.setLineText(LineOffset(1), "DDDD");
+    auto cursor = CellLocation { LineOffset(1), ColumnOffset(3) };
+
+    for (auto const columns: { 2, 4, 1, 4 })
+    {
+        cursor = grid.resize(PageSize { LineCount(2), ColumnCount(columns) }, cursor, WrapPending::No);
+        CHECK(grid.historyLineCount() == LineCount((16 / columns) - 2));
+        CHECK(grid.evictedRowCount() == 0);
+        auto text = std::string {};
+        grid.forEachValidLine([&](LineOffset, Line const& line) { text += line.toUtf8(); });
+        CHECK(text == "AAAABBBBCCCCDDDD");
+    }
+}
+
 TEST_CASE("Grid.setHistoryLimits.growingKeepsTheScrollback", "[grid][history]")
 {
     // Ring capacity: 2 page + 2 history = 4 slots, all of them used.
@@ -3090,7 +3169,7 @@ TEST_CASE("Grid.evictedRowCount.aShrinkAndGrowWithLessHistoryThanTheShrinkKeepsR
     CHECK(grid.lineTextTrimmed(LineOffset(0)) == "P0");
 }
 
-TEST_CASE("Grid.evictedRowCount.aReflowEvictsNothing", "[grid][evicted]")
+TEST_CASE("Grid.evictedRowCount.aReflowCountsRowsBeyondCapacity", "[grid][evicted]")
 {
     // Ring capacity: 2 page + 2 history. Four full-width lines, so the two blank rows the page started
     // with are what filling it evicts.
@@ -3099,22 +3178,23 @@ TEST_CASE("Grid.evictedRowCount.aReflowEvictsNothing", "[grid][evicted]")
         appendLine(grid, text);
     REQUIRE(grid.evictedRowCount() == 2);
 
-    // Narrowing re-chops every line in two -- eight rows, more than the ring holds. A reflow renames
-    // rows and drops none (the overflow stays until scrolling pushes it out), so nothing is counted.
+    // Narrowing re-chops every line in two: eight rows must fit two page plus two history rows.
+    // The four oldest physical rows are evicted; rekeying the survivors is not itself an eviction.
     (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) },
                        CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
                        WrapPending::No);
-    CHECK(grid.evictedRowCount() == 2);
+    CHECK(grid.evictedRowCount() == 6);
+    CHECK(grid.historyLineCount() == LineCount(2));
 
     // ...and the next scroll counts exactly the row it pushes out.
     grid.scrollUp(LineCount(1));
-    CHECK(grid.evictedRowCount() == 3);
+    CHECK(grid.evictedRowCount() == 7);
 
     // Widening rejoins them, which renames rows again and drops none.
     (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) },
                        CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
                        WrapPending::No);
-    CHECK(grid.evictedRowCount() == 3);
+    CHECK(grid.evictedRowCount() == 7);
 }
 
 TEST_CASE("Grid.evictedRowCount.aReverseScrollEvictsNothing", "[grid][evicted]")
