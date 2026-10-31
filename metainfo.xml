@@ -162,6 +162,7 @@
           <li>Adds the actions <code>CloseOtherTabs</code>, <code>CloseTabsToRight</code>, <code>MoveTabToNewWindow</code>, <code>ShowAbout</code>, <code>MinimizeWindow</code> and <code>ZoomWindow</code></li>
           <li>Changes key handling under the macOS menu bar: the terminal now receives every key chord except the menu's own (⌘Q, ⌘,, ⌘H, ⌥⌘H and ⌘M), including chords a menu item shows</li>
           <li>Fixes a configuration with separate light and dark color schemes being saved as YAML that did not load back</li>
+          <li>Fixes the window background not following reverse screen mode (DECSCNM, as a visual bell uses), its restore by XTRESTORE, or a foreground color set while it is on (#2182)</li>
           <li>Changes the notice shown while a window runs its shells itself, because the daemon could not be reached, into a banner that pushes the terminal down instead of covering its first line</li>
           <li>Changes the window chrome under <code>theme: terminal</code> with a single color scheme to follow the focused terminal's background, including one a program sets with OSC 11</li>
           <li>Adds Reduce Motion support on macOS: with it on, the cursor glide and the screen transition are skipped, and turning it off restores the configured durations</li>
