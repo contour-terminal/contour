@@ -501,6 +501,7 @@ struct SizeTokens
     int tooltipPadX = 0;       ///< A tooltip's leading and trailing padding (horizontal units).
     int tooltipPadTop = 0;     ///< A tooltip's top padding (vertical units).
     int tooltipPadBottom = 0;  ///< A tooltip's bottom padding (vertical units).
+    int tooltipEdge = 0;       ///< A tooltip's edge in whole pixels; 0 draws one device pixel.
     int tooltipGap = 0;        ///< The gap between a tooltip's label and its shortcut (horizontal units).
     int dialogWidth = 0;       ///< Width of a dialog.
     int swatchWidth = 0;       ///< Width of a menu's colour swatch.

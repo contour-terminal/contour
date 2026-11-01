@@ -409,11 +409,11 @@ namespace detail
     inline constexpr std::array<ChromeColorSource, ChromeColorRoleCount> LinuxColors = [] {
         auto colors = NativeColors;
         colors[static_cast<size_t>(ChromeColorRole::TabActiveFill)] = fill(3);
-        // A tooltip is the kit's elevated surface under its own labels, edged by the kit's separator.
-        colors[static_cast<size_t>(ChromeColorRole::TooltipFill)] = surface(1);
-        colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = label(1);
-        colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = label(3);
-        colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = separator();
+        // The Linux board's tooltip: white / #38383D, the label at 87 / 92 %, the shortcut at 55 %.
+        colors[static_cast<size_t>(ChromeColorRole::TooltipFill)] = tone(0xFFFFFF, 100, 0x38383D, 100);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = tone(0x000000, 87, 0xFFFFFF, 92);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = tone(0x000000, 55, 0xFFFFFF, 55);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = tone(0x000000, 12, 0xFFFFFF, 10);
         return colors;
     }();
 
@@ -583,7 +583,8 @@ namespace detail
                   .tooltipPadX = 8,
                   .tooltipPadTop = 3,
                   .tooltipPadBottom = 3,
-                  .tooltipGap = 12,
+                  .tooltipEdge = 0,
+                  .tooltipGap = 14,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -715,9 +716,10 @@ namespace detail
                   .paneHeader = 28,
                   .toast = 36,
                   .tooltipPadX = 9,
-                  .tooltipPadTop = 6,
-                  .tooltipPadBottom = 8,
-                  .tooltipGap = 12,
+                  .tooltipPadTop = 5,
+                  .tooltipPadBottom = 7,
+                  .tooltipEdge = 1,
+                  .tooltipGap = 14,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -848,10 +850,11 @@ namespace detail
                   .control = 34,
                   .paneHeader = 28,
                   .toast = 36,
-                  .tooltipPadX = 8,
-                  .tooltipPadTop = 4,
-                  .tooltipPadBottom = 4,
-                  .tooltipGap = 12,
+                  .tooltipPadX = 10,
+                  .tooltipPadTop = 5,
+                  .tooltipPadBottom = 5,
+                  .tooltipEdge = 1,
+                  .tooltipGap = 16,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -990,6 +993,7 @@ namespace detail
                   .tooltipPadX = 1,
                   .tooltipPadTop = 0,
                   .tooltipPadBottom = 0,
+                  .tooltipEdge = 1,
                   .tooltipGap = 2,
                   .dialogWidth = 32,
                   .swatchWidth = 2,

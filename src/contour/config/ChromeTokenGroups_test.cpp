@@ -2525,9 +2525,9 @@ TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
         int gap;
         int radius;
     };
-    for (auto const& expected: { Row { ChromeStyle::MacOS, 8, 3, 3, 12, 6 },
-                                 Row { ChromeStyle::Fluent, 9, 6, 8, 12, 8 },
-                                 Row { ChromeStyle::ContourLinux, 8, 4, 4, 12, 8 },
+    for (auto const& expected: { Row { ChromeStyle::MacOS, 8, 3, 3, 14, 6 },
+                                 Row { ChromeStyle::Fluent, 9, 5, 7, 14, 8 },
+                                 Row { ChromeStyle::ContourLinux, 10, 5, 5, 16, 8 },
                                  Row { ChromeStyle::Terminal, 1, 0, 0, 2, 0 } })
     {
         CAPTURE(static_cast<int>(expected.style));
@@ -2582,13 +2582,16 @@ TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
         CHECK((edge.alphaPercent == 6 && edge.darkAlphaPercent == 8));
     }
 
-    SECTION("ContourLinux: the kit's elevated surface under its labels, edged by its separator")
+    SECTION("ContourLinux: white / #38383D, label 87 / 92 %, shortcut 55 %, edge 12 / 10 %")
     {
-        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipFill).kind == ColorSourceKind::Surface);
-        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipText).kind == ColorSourceKind::Label);
-        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipTextSecondary).level == 3);
-        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipEdge).kind
-              == ColorSourceKind::Separator);
+        auto const fill = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipFill);
+        CHECK((fill.rgb == 0xFFFFFF && fill.darkRgb == 0x38383D));
+        auto const text = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipText);
+        CHECK((text.alphaPercent == 87 && text.darkAlphaPercent == 92));
+        auto const shortcut = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipTextSecondary);
+        CHECK((shortcut.alphaPercent == 55 && shortcut.darkAlphaPercent == 55));
+        auto const edge = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 12 && edge.darkAlphaPercent == 10));
     }
 
     SECTION("Terminal: the bar's cells, in the scheme's colours")

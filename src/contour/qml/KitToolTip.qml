@@ -176,7 +176,9 @@ T.ToolTip {
         objectName: "kitToolTipBackground"
         radius: chromeStyle.radii.tooltip
         color: chromeStyle.colors.tooltipFill
-        border.width: chromeStyle.colors.tooltipEdge.a > 0 ? chromeStyle.hairline(Screen.devicePixelRatio) : 0
+        border.width: chromeStyle.colors.tooltipEdge.a === 0 ? 0
+                      : chromeStyle.size.tooltipEdge > 0 ? chromeStyle.size.tooltipEdge
+                      : chromeStyle.hairline(Screen.devicePixelRatio)
         border.color: chromeStyle.colors.tooltipEdge
 
         ElevationShadow {
