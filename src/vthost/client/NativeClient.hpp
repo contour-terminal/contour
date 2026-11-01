@@ -291,6 +291,13 @@ class NativeClient final
     using PermissionHandler = std::function<void(proto::PermissionRequest const&)>;
     /// Handler invoked when the daemon answers a mergeTabIntoSplit() with a refusal: it changed nothing.
     using TabMergeRefusedHandler = std::function<void(proto::TabMergeRefused const&)>;
+    /// Handler invoked when the daemon answers a moveNode() with a refusal: it changed nothing. Told the
+    /// serial the refusal came under, which is the one moveNode() returned for the request it refuses.
+    using MoveNodeRefusedHandler = std::function<void(proto::MoveNodeRefused const&, uint64_t serial)>;
+    /// Handler invoked when the daemon ends a layout push (proto::LayoutBatchEnd, Capability::LayoutBatch):
+    /// every window's layout of the change was handed to the LayoutHandler before it, and the PDU names the
+    /// MoveNode request whose effects the push completes, if one did.
+    using LayoutBatchEndHandler = std::function<void(proto::LayoutBatchEnd const&)>;
     /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
     using HandshakeHandler = std::function<void()>;
 
@@ -343,6 +350,8 @@ class NativeClient final
     ///        only when both ends share Capability::Heartbeat, save for its handshake deadline, which
     ///        applies to every daemon.
     /// @param onTabMergeRefused Told when the daemon refuses a mergeTabIntoSplit(), so the user can be.
+    /// @param onMoveNodeRefused Told when the daemon refuses a moveNode(), so the user can be.
+    /// @param onLayoutBatchEnd Told when a daemon sharing Capability::LayoutBatch ends a layout push.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -353,7 +362,9 @@ class NativeClient final
                  LayoutHandler onLayout,
                  PermissionHandler onPermissionRequest = {},
                  LivenessPolicy liveness = {},
-                 TabMergeRefusedHandler onTabMergeRefused = {});
+                 TabMergeRefusedHandler onTabMergeRefused = {},
+                 MoveNodeRefusedHandler onMoveNodeRefused = {},
+                 LayoutBatchEndHandler onLayoutBatchEnd = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -435,6 +446,22 @@ class NativeClient final
     Delivery mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
                                uint64_t targetSession,
                                vtworkspace::SplitSide side);
+
+    /// Asks the daemon to move a pane or a whole tab: beside a pane, onto one (a swap), into a window's tab
+    /// well or into a new window. Nothing is spawned or closed; the daemon answers with the layout pushes
+    /// alone, or with a MoveNodeRefused that reaches the MoveNodeRefusedHandler.
+    /// @param move The source and target, named by daemon session (@see proto::MoveNode).
+    /// @return The serial it went out under, which the daemon's answer names -- the refusal's, or the
+    ///         LayoutBatchEnd::causeSerial of the push it made; std::nullopt when nothing was written,
+    ///         unless the daemon shares Capability::MoveNode.
+    [[nodiscard]] std::optional<uint64_t> moveNode(proto::MoveNode const& move);
+
+    /// Asks the daemon to set the axis of the split above a pane. The daemon answers with the layout push
+    /// alone; a stale session is ignored there.
+    /// @param anchorSession The session of a leaf inside the split to change.
+    /// @param state The axis to set.
+    /// @return Sent, or Unsupported -- nothing written -- unless the daemon shares Capability::MoveNode.
+    Delivery setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state);
 
     /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
     ///         what the sessions run and how they emulate, and this client names profiles instead.
@@ -545,6 +572,10 @@ class NativeClient final
 
     void handlePdu(proto::DecodedFrame const& frame);
 
+    /// Hands a PDU that only reaches a handler -- a push's end, a permission request, a refusal -- to it.
+    /// @return Whether @p frame was one.
+    bool handleNotice(proto::DecodedFrame const& frame);
+
     /// Arms the next liveness tick, a second from now on the loop's clock.
     void armLivenessTick();
 
@@ -597,6 +628,8 @@ class NativeClient final
     LayoutHandler _onLayout;
     PermissionHandler _onPermissionRequest;
     TabMergeRefusedHandler _onTabMergeRefused;
+    MoveNodeRefusedHandler _onMoveNodeRefused;
+    LayoutBatchEndHandler _onLayoutBatchEnd;
     HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply

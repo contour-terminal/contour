@@ -390,7 +390,9 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            LayoutHandler onLayout,
                            PermissionHandler onPermissionRequest,
                            LivenessPolicy liveness,
-                           TabMergeRefusedHandler onTabMergeRefused):
+                           TabMergeRefusedHandler onTabMergeRefused,
+                           MoveNodeRefusedHandler onMoveNodeRefused,
+                           LayoutBatchEndHandler onLayoutBatchEnd):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -403,6 +405,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onLayout(std::move(onLayout)),
     _onPermissionRequest(std::move(onPermissionRequest)),
     _onTabMergeRefused(std::move(onTabMergeRefused)),
+    _onMoveNodeRefused(std::move(onMoveNodeRefused)),
+    _onLayoutBatchEnd(std::move(onLayoutBatchEnd)),
     _liveness(liveness)
 {
 }
@@ -569,6 +573,25 @@ Delivery NativeClient::mergeTabIntoSplit(std::span<uint64_t const> tabSessions,
                                                     .targetSession = targetSession,
                                                     .side = std::to_underlying(side) };
     if (!shares(proto::Capability::TabMerge) || send(proto::DecodedPdu { request }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
+}
+
+std::optional<uint64_t> NativeClient::moveNode(proto::MoveNode const& move)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::MoveNode))
+        return std::nullopt;
+    auto const serial = send(proto::DecodedPdu { move });
+    return serial != 0 ? std::optional { serial } : std::nullopt;
+}
+
+Delivery NativeClient::setSplitOrientation(uint64_t anchorSession, vtworkspace::SplitState state)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    auto const request =
+        proto::SetSplitOrientation { .anchorSession = anchorSession, .state = std::to_underlying(state) };
+    if (!shares(proto::Capability::MoveNode) || send(proto::DecodedPdu { request }) == 0)
         return Delivery::Unsupported;
     return Delivery::Sent;
 }
@@ -764,18 +787,8 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         _onLayout(shown);
         return;
     }
-    if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
-    {
-        if (_onPermissionRequest)
-            _onPermissionRequest(*request);
+    if (handleNotice(frame))
         return;
-    }
-    if (auto const* refused = std::get_if<proto::TabMergeRefused>(&pdu))
-    {
-        if (_onTabMergeRefused)
-            _onTabMergeRefused(*refused);
-        return;
-    }
     // A probe's echo: noted as life above, which is all it is for.
     if (std::holds_alternative<proto::Heartbeat>(pdu))
         return;
@@ -783,6 +796,36 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     // quietly missing an update is distinguishable from one that never received it.
     errorLog()(
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
+}
+
+bool NativeClient::handleNotice(proto::DecodedFrame const& frame)
+{
+    auto const& pdu = frame.pdu;
+    if (auto const* end = std::get_if<proto::LayoutBatchEnd>(&pdu))
+    {
+        if (_onLayoutBatchEnd)
+            _onLayoutBatchEnd(*end);
+        return true;
+    }
+    if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
+    {
+        if (_onPermissionRequest)
+            _onPermissionRequest(*request);
+        return true;
+    }
+    if (auto const* refused = std::get_if<proto::TabMergeRefused>(&pdu))
+    {
+        if (_onTabMergeRefused)
+            _onTabMergeRefused(*refused);
+        return true;
+    }
+    if (auto const* refused = std::get_if<proto::MoveNodeRefused>(&pdu))
+    {
+        if (_onMoveNodeRefused)
+            _onMoveNodeRefused(*refused, frame.serial);
+        return true;
+    }
+    return false;
 }
 
 std::expected<proto::Negotiated, proto::HandshakeRefusal> judgeServerHello(
