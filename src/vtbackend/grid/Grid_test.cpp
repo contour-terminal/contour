@@ -1202,13 +1202,14 @@ TEST_CASE("Grid resize with wrap", "[grid]")
     REQUIRE(grid.lineText(LineOffset(0)) == "2  ");
     REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
     REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
-    REQUIRE(grid.historyLineCount() == LineCount(0));
+    REQUIRE(grid.historyLineCount() == LineCount(1));
+    REQUIRE(grid.lineText(LineOffset(-1)) == "1  ");
     (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
+    // Narrowing held "1" above the zero capacity rather than evicting it, so widening gives it back.
     REQUIRE(unbox(grid.historyLineCount()) == 0);
-    // With zero history, narrowing evicted "1"; widening cannot restore that row.
-    REQUIRE(grid.lineText(LineOffset(0)) == "2    ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "ABCDE");
-    REQUIRE(grid.lineText(LineOffset(2)) == "     ");
+    REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
 }
 
 TEST_CASE("Grid resize", "[grid]")
@@ -2645,7 +2646,9 @@ TEST_CASE("Grid.resize.enforcesFiniteHistoryCapacity", "[grid][history][reflow]"
         auto const pageSize = PageSize { LineCount(rows), ColumnCount(columns) };
         grid.resize(pageSize, cursors, std::nullopt);
         reference.resize(pageSize, referenceCursors, std::nullopt);
-        REQUIRE(grid.historyLineCount() <= capacity);
+        // A resize evicts nothing: whatever reflow pushed beyond the capacity is held, as the unlimited
+        // copy keeps it.
+        REQUIRE(grid.historyLineCount() == reference.historyLineCount());
         CHECK(cursors == referenceCursors);
         for (auto const row: std::views::iota(-unbox<int>(grid.historyLineCount()), rows))
         {
@@ -2658,15 +2661,18 @@ TEST_CASE("Grid.resize.enforcesFiniteHistoryCapacity", "[grid][history][reflow]"
         grid.forEachValidLine([&](LineOffset, Line const&) { ++rowsVisited; });
         CHECK(rowsVisited == unbox<int>(grid.historyLineCount()) + rows);
 
-        // Further scrolling must recycle a bounded ring, not fill slots left behind by reflow.
+        // The first scroll settles the held rows; further scrolling recycles a bounded ring rather than
+        // refilling slots the reflow left behind.
         for ([[maybe_unused]] auto const i: std::views::iota(0, 200))
         {
             grid.setLineText(LineOffset(rows - 1), std::string(static_cast<size_t>(columns), 'Z'));
             reference.setLineText(LineOffset(rows - 1), std::string(static_cast<size_t>(columns), 'Z'));
             grid.scrollUp(LineCount(1));
             reference.scrollUp(LineCount(1));
+            REQUIRE(grid.historyLineCount() <= capacity);
         }
-        CHECK(grid.historyLineCount() <= capacity);
+        for (auto const row: std::views::iota(-unbox<int>(grid.historyLineCount()), rows))
+            CHECK(grid.lineText(LineOffset(row)) == reference.lineText(LineOffset(row)));
     }
 }
 
@@ -3178,17 +3184,18 @@ TEST_CASE("Grid.evictedRowCount.aReflowCountsRowsBeyondCapacity", "[grid][evicte
         appendLine(grid, text);
     REQUIRE(grid.evictedRowCount() == 2);
 
-    // Narrowing re-chops every line in two: eight rows must fit two page plus two history rows.
-    // The four oldest physical rows are evicted; rekeying the survivors is not itself an eviction.
+    // Narrowing re-chops every line in two: eight rows for two page plus two history rows. The resize
+    // holds the four beyond the capacity, and rekeying the rows is not itself an eviction.
     (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) },
                        CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
                        WrapPending::No);
-    CHECK(grid.evictedRowCount() == 6);
-    CHECK(grid.historyLineCount() == LineCount(2));
+    CHECK(grid.evictedRowCount() == 2);
+    CHECK(grid.historyLineCount() == LineCount(6));
 
-    // ...and the next scroll counts exactly the row it pushes out.
+    // ...and the next scroll settles them, counting those four and the one row it pushes out.
     grid.scrollUp(LineCount(1));
     CHECK(grid.evictedRowCount() == 7);
+    CHECK(grid.historyLineCount() == LineCount(2));
 
     // Widening rejoins them, which renames rows again and drops none.
     (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) },
@@ -3401,3 +3408,201 @@ TEST_CASE("Grid.dropRowsAbove.thePageTopDropsTheHistoryOnly", "[grid][semanticbl
     CHECK(grid.evictedRowCount() == evictedBefore + 2);
 }
 // }}}
+
+namespace
+{
+/// Every row the grid holds, oldest first: the scrollback, then the page.
+[[nodiscard]] std::vector<std::string> allRowsText(Grid const& grid)
+{
+    auto rows = std::vector<std::string> {};
+    grid.forEachValidLine([&](LineOffset, Line const& line) { rows.push_back(line.toUtf8()); });
+    return rows;
+}
+} // namespace
+
+TEST_CASE("Grid.resize.aHeightRoundTripGivesBackTheHeldRows", "[grid][history][resize]")
+{
+    // Page 4, capacity 4, full: twelve lines written, the oldest four evicted line by line.
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(5) }, true, LineCount(4));
+    for (auto const i: std::views::iota(0, 12))
+        appendLine(grid, 'L', i);
+    REQUIRE(grid.historyLineCount() == LineCount(4));
+    auto const before = allRowsText(grid);
+    auto const evictedBefore = grid.evictedRowCount();
+
+    // Shrinking pushes two page rows beyond the capacity. The resize evicts neither.
+    resizeLinesWithCursorAtBottom(grid, LineCount(2));
+    CHECK(grid.historyLineCount() == LineCount(6));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+    CHECK(allRowsText(grid) == before);
+
+    SECTION("growing again brings them back onto the page")
+    {
+        resizeLinesWithCursorAtBottom(grid, LineCount(4));
+        CHECK(grid.historyLineCount() == LineCount(4));
+        CHECK(grid.evictedRowCount() == evictedBefore);
+        CHECK(allRowsText(grid) == before);
+    }
+
+    SECTION("the next line of output settles them")
+    {
+        appendLine(grid, 'N', 0);
+        CHECK(grid.historyLineCount() == LineCount(4));
+        CHECK(grid.evictedRowCount() == evictedBefore + 3);
+        auto expected = std::vector<std::string>(std::next(before.begin(), 3), before.end());
+        expected.emplace_back("N0   ");
+        CHECK(allRowsText(grid) == expected);
+
+        // Settled for good: further output keeps the ring at its capacity.
+        for (auto const i: std::views::iota(1, 20))
+            appendLine(grid, 'N', i);
+        CHECK(grid.historyLineCount() == LineCount(4));
+    }
+}
+
+TEST_CASE("Grid.resize.aWidthRoundTripGivesBackTheHeldRows", "[grid][history][reflow]")
+{
+    // Page 2, capacity 2, full of full-width lines.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(4) }, true, LineCount(2));
+    for (auto const text: { "AAAA"sv, "BBBB"sv, "CCCC"sv, "DDDD"sv })
+        appendLine(grid, text);
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+    auto const before = allRowsText(grid);
+    auto const evictedBefore = grid.evictedRowCount();
+    auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) };
+
+    // Narrowing chops every line in two: four history rows beyond the capacity of two, all held.
+    auto const narrowed = grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cursor, WrapPending::No);
+    CHECK(grid.historyLineCount() == LineCount(6));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+
+    SECTION("a taller page keeps every held row off the page")
+    {
+        // The held ring has no free slot: the two new page rows must be new blank slots, not its oldest
+        // history rows.
+        auto const held = allRowsText(grid);
+        (void) grid.resize(PageSize { LineCount(4), ColumnCount(2) },
+                           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                           WrapPending::No);
+        auto expected = held;
+        expected.resize(held.size() + 2, "  ");
+        CHECK(allRowsText(grid) == expected);
+        CHECK(grid.historyLineCount() == LineCount(6));
+        CHECK(grid.evictedRowCount() == evictedBefore);
+    }
+
+    SECTION("widening again rejoins every one of them")
+    {
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, narrowed, WrapPending::No);
+        CHECK(grid.historyLineCount() == LineCount(2));
+        CHECK(grid.evictedRowCount() == evictedBefore);
+        CHECK(allRowsText(grid) == before);
+    }
+
+    SECTION("the next line of output settles them")
+    {
+        appendLine(grid, "EE"sv);
+        CHECK(grid.historyLineCount() == LineCount(2));
+        CHECK(grid.evictedRowCount() == evictedBefore + 5);
+        // The settle keeps the newest two history rows, CC and CC; the line's scroll then pushes one out.
+        CHECK(allRowsText(grid) == std::vector<std::string> { "CC", "DD", "DD", "EE" });
+    }
+}
+
+TEST_CASE("Grid.resize.aHeightShrinkWithHeadroomEvictsNothing", "[grid][history][resize][history-eviction]")
+{
+    // Room for eight, guaranteed two, six in the scrollback (the page's four blank rows, then P0 o0):
+    // below the capacity, above the guarantee, with a block boundary in between.
+    auto grid = makeGrid(LineCount(4), LineCount(2), LineCount(8));
+    for (auto const block: std::views::iota(0, 2))
+    {
+        appendLine(grid, 'P', block, BlockStart::Yes);
+        appendLine(grid, 'o', block);
+        appendLine(grid, 'o', block);
+    }
+    REQUIRE(grid.historyLineCount() == LineCount(6));
+    auto const before = allRowsText(grid);
+    auto const evictedBefore = grid.evictedRowCount();
+
+    // Two rows pushed up. A block-atomic trim here would cut to P0 and drop the four rows above it; only
+    // output may trade that headroom away.
+    resizeLinesWithCursorAtBottom(grid, LineCount(2));
+    CHECK(grid.historyLineCount() == LineCount(8));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+    CHECK(allRowsText(grid) == before);
+}
+
+TEST_CASE("Grid.resize.settlingHeldRowsCutsAtACommandBoundary", "[grid][history][resize][history-eviction]")
+{
+    // Guaranteed four, capacity eight, filled with blocks of a prompt and two output rows. At capacity the
+    // block-atomic trim keeps a prompt at the top.
+    auto grid = makeGrid(LineCount(4), LineCount(4), LineCount(8));
+    for (auto const block: std::views::iota(0, 8))
+    {
+        appendLine(grid, 'P', block, BlockStart::Yes);
+        appendLine(grid, 'o', block);
+        appendLine(grid, 'o', block);
+    }
+    REQUIRE(grid.lineAt(grid.addressableTop()).marked());
+
+    // Two page rows held beyond the capacity -- not a whole block -- then one line of output settles them.
+    resizeLinesWithCursorAtBottom(grid, LineCount(2));
+    REQUIRE(grid.historyLineCount() > LineCount(8));
+    REQUIRE(historyText(grid).front() == "P4   ");
+
+    // Settled line-wise to the capacity, which cuts P4's block in half, the same scroll's block-atomic
+    // trim then drops back to P6: a whole command at the top, never half of one.
+    appendLine(grid, 'N', 0);
+    CHECK(historyText(grid) == std::vector<std::string> { "P6   ", "o6   ", "o6   ", "P7   ", "o7   " });
+}
+
+TEST_CASE("Grid.historyEviction.theFirstTrimSeesTheBoundariesAlreadyInTheWindow", "[grid][history-eviction]")
+{
+    // Guaranteed two, capacity eight. The scrollback reaches the capacity before any trim has run, so the
+    // first one finds both prompts already inside the window it may cut from. Cutting line-wise instead
+    // would leave `x` -- no prompt -- at the top.
+    auto grid = makeGrid(LineCount(1), LineCount(2), LineCount(8));
+    appendLine(grid, "x"sv);
+    appendLine(grid, "P0"sv, BlockStart::Yes);
+    appendLine(grid, "o0"sv);
+    appendLine(grid, "o0"sv);
+    appendLine(grid, "P1"sv, BlockStart::Yes);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+        appendLine(grid, "o1"sv);
+    REQUIRE(grid.historyLineCount() == LineCount(8)); // the page's blank row, x, P0 o0 o0, P1 o1 o1
+
+    appendLine(grid, "o1"sv);
+    CHECK(grid.lineAt(grid.addressableTop()).marked());
+    CHECK(historyText(grid).front().starts_with("P1"));
+}
+
+TEST_CASE("Grid.resize.growingLinesOnAScrolledRingKeepsEveryRowInOrder", "[grid][history][resize]")
+{
+    // A finite ring that has scrolled -- at capacity from six scrolls on -- and an unbounded one. Growing
+    // the page must keep every row where it was and add blank rows only: below the page when the cursor
+    // is above the bottom, and once the history is pulled onto the page when it is at the bottom.
+    auto const scrolls = GENERATE(0, 1, 2, 3, 5, 6, 7, 8, 11, 33, 100, 1025);
+    auto const capacity = GENERATE(as<MaxHistoryLineCount> {}, LineCount(5), Infinite {});
+    auto const cursorLine = GENERATE(0, 2);
+    CAPTURE(scrolls, std::holds_alternative<Infinite>(capacity), cursorLine);
+
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(3) }, true, capacity);
+    auto counter = 0;
+    for (auto const y: std::views::iota(0, 3))
+        grid.setLineText(LineOffset(y), std::format("{:03}", counter++ % 1000));
+    for ([[maybe_unused]] auto const _: std::views::iota(0, scrolls))
+        appendLine(grid, std::format("{:03}", counter++ % 1000));
+    auto const before = allRowsText(grid);
+    auto const historyBefore = grid.historyLineCount();
+
+    (void) grid.resize(PageSize { LineCount(5), ColumnCount(3) },
+                       CellLocation { .line = LineOffset(cursorLine), .column = ColumnOffset(0) },
+                       WrapPending::No);
+
+    // At the bottom, history rows come down first and only the rest of the growth is blank.
+    auto const pulledDown = cursorLine == 2 ? std::min(historyBefore, LineCount(2)) : LineCount(0);
+    auto expected = before;
+    expected.resize(before.size() + 2 - unbox<size_t>(pulledDown), "   ");
+    CHECK(allRowsText(grid) == expected);
+    CHECK(grid.historyLineCount() == historyBefore - pulledDown);
+}

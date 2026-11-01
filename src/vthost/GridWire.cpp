@@ -195,7 +195,13 @@ void applyWireLine(vtbackend::Line& line,
                    ContextIdMap const& contexts,
                    vtbackend::ColumnOffset firstColumn)
 {
-    auto const flags = vtbackend::LineFlags::fromValue(wire.flags);
+    // A continuation carries none of the marks that name a logical line, nor the borders they place
+    // (@see vtbackend::HeadOnlyLineFlags). This host's grid holds none, but an older or a broken peer may
+    // send one, and this side's reflow would abort on the first narrowing resize rather than merely
+    // misplace a mark.
+    auto const received = vtbackend::LineFlags::fromValue(wire.flags);
+    auto const isContinuation = received.contains(vtbackend::LineFlag::Wrapped);
+    auto const flags = isContinuation ? received.without(vtbackend::HeadOnlyLineFlags) : received;
     // A negative shift is no window into anything: it is read as none.
     auto const skipped = static_cast<std::size_t>(std::max(unbox<int>(firstColumn), 0));
     auto const shifted = [skipped](int32_t offset) {
@@ -207,8 +213,11 @@ void applyWireLine(vtbackend::Line& line,
     // is what makes a uniformly-filled row as cheap on this side as it was on the wire.
     line.reset(flags, fillAttrsOf(wire));
     // After the reset, never before: Line::reset() clears an offset whose flag it does not keep.
-    line.setPromptEndOffset(shifted(wire.promptEndOffset));
-    line.setCommandEndOffset(shifted(wire.commandEndOffset));
+    if (!isContinuation)
+    {
+        line.setPromptEndOffset(shifted(wire.promptEndOffset));
+        line.setCommandEndOffset(shifted(wire.commandEndOffset));
+    }
     // Translated, never copied: the id is the SENDER's, and this terminal mints its own. An id with
     // no mapping resolves to none, exactly as an unmapped hyperlink id does. The zero test first,
     // because a session that never sees OSC 3008 stamps every line with it and would otherwise pay a

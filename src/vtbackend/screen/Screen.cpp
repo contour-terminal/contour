@@ -768,10 +768,38 @@ void Screen::crlfIfWrapPending()
         && _terminal->isModeEnabled(DECMode::AutoWrap)) // && !_terminal->isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
-        crlf();
-        if (lineWrappable)
-            currentLine().setFlag(LineFlags { LineFlag::Wrappable, LineFlag::Wrapped }, true);
+        // Asked before the line feed, which may scroll the band. Within left and right margins narrower
+        // than the page a wrap only ever reaches the band of the row below: around the band that row holds
+        // its own line still, cells and marks alike, and so is no continuation of the row above.
+        auto const wrapsWithinBand =
+            margin().horizontal.from != ColumnOffset(0) || !isFullHorizontalMargins();
+        // A line feed that went nowhere -- the cursor below the scrolling region, or outside its left and
+        // right margins -- leaves the text wrapping over its own row, which is no continuation either.
+        if (crlf() == LineFeedOutcome::SameRow || !lineWrappable || wrapsWithinBand)
+            return;
+
+        // A wrap that does not scroll lands on a row already holding a line of its own, and makes it a
+        // continuation of the line above. Whatever marks it carried named the line just being written
+        // over, and a continuation carries none (@see HeadOnlyLineFlags): moved to the head above they
+        // would name output that is not theirs, and left in place reflow finds a head's border in the
+        // middle of a logical line.
+        if (!currentLine().wrapped() && currentLine().isFlagEnabled(HeadOnlyLineFlags))
+            shedHeadOnlyMarks();
+        currentLine().setFlag(LineFlags { LineFlag::Wrappable, LineFlag::Wrapped }, true);
     }
+}
+
+void Screen::shedHeadOnlyMarks() noexcept
+{
+    auto const line = _cursor.position.line;
+    auto const before = std::as_const(_grid).lineAt(line).flags();
+    setLogicalLineFlags(line, HeadOnlyLineFlags, false);
+    auto& row = _grid.changingLineAt(line);
+    row.setCommandEndOffset({});
+    row.setPromptEndOffset({});
+    // setLogicalLineFlags() only ever stamped a head before, so it tells the block store nothing; a block
+    // whose head this was is headed afresh, where its other rows lie.
+    noteBlockRowChange(row.blockId(), before, row);
 }
 
 void Screen::writeText(char32_t codepoint)
@@ -1184,7 +1212,7 @@ void Screen::moveCursorTo(LineOffset line, ColumnOffset column)
     updateCursorIterator();
 }
 
-void Screen::linefeed(ColumnOffset newColumn)
+LineFeedOutcome Screen::linefeed(ColumnOffset newColumn)
 {
     // Where the cursor *is* decides whether this scrolls -- asked before the carriage-return half of the
     // line feed moves it. Under LNM (and on the stdout fast pipe) newColumn is the left margin, which would
@@ -1211,9 +1239,11 @@ void Screen::linefeed(ColumnOffset newColumn)
             // possibly also reset remaining grid cells in that line
             // if the incoming text did not write to the full line
             scrollUp(LineCount(1), _cursor.graphicsRendition, margin());
+            return LineFeedOutcome::NextRow;
         }
+        return LineFeedOutcome::SameRow;
     }
-    else if (*realCursorPosition().line + 1 < *pageSize().lines)
+    if (*realCursorPosition().line + 1 < *pageSize().lines)
     {
         // using moveCursorTo() would embrace code reusage,
         // but due to the fact that it's fully recalculating iterators,
@@ -1221,6 +1251,7 @@ void Screen::linefeed(ColumnOffset newColumn)
         // moveCursorTo({logicalCursorPosition().line + 1, margin().horizontal.from});
         _cursor.position.line++;
         updateCursorIterator();
+        return LineFeedOutcome::NextRow;
     }
     // Otherwise the cursor is on the last line of the page but *outside* the scrolling region, so
     // there is neither anything to scroll nor anywhere to move: a line feed there does nothing.
@@ -1230,6 +1261,7 @@ void Screen::linefeed(ColumnOffset newColumn)
     // feed walked it further off the end of the page. That is reachable from any application: set a
     // scrolling region, put the cursor below it, and hold down Return. verifyState() catches it in a
     // debug build; in a release build it is simply a cursor pointing outside the grid.
+    return LineFeedOutcome::SameRow;
 }
 
 void Screen::followRowMove(std::optional<RowMove> const& move)
@@ -1265,6 +1297,7 @@ void Screen::followScrollUp(LineCount n, Margin margin)
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     ZoneScoped;
+    auto const historyBefore = _grid.historyLineCount();
     auto const isFullPageMargin =
         margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
@@ -1298,11 +1331,12 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     // partial region, where the branch above deliberately shifts nothing. Clamping is not shifting --
     // it only refuses to name a row that is gone.
     //
-    // Gated on the headroom for cost, not for correctness: without it the history cannot shrink here
-    // at all (@see Grid::clampHistory, which returns on the same test), and this is the linefeed
-    // path. Reaching Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with
-    // it, which with one collapsed fold rebuilds the whole fold projection on every scrolled line.
-    if (_grid.historyLimits().hasHeadroom())
+    // Gated for cost, not for correctness: this is the linefeed path, and reaching
+    // Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with it, which with one
+    // collapsed fold rebuilds the whole fold projection on every scrolled line. Without headroom the
+    // history shrinks here only when the scroll settles rows a resize held (@see
+    // Grid::settleHeldHistory), and then it is seen to shrink.
+    if (_grid.historyLimits().hasHeadroom() || _grid.historyLineCount() < historyBefore)
         _terminal->clampToHistory();
 }
 
@@ -6958,6 +6992,11 @@ void Screen::setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) 
 {
     auto const head = _grid.logicalLineHead(line);
     auto const before = _grid.lineAt(head).flags();
+    // A head still wrapped is a continuation whose own head has left the scrollback. Marked as it is, it
+    // would be a continuation carrying a head's marks (@see HeadOnlyLineFlags), which reflow refuses -- so
+    // it becomes the head it is now standing in for. logicalColumnOf() already counts from this row.
+    if (enable && (flags & HeadOnlyLineFlags).any() && _grid.lineAt(head).wrapped())
+        _grid.changingLineAt(head).setFlag(LineFlag::Wrapped, false);
     enableLineFlags(head, flags, enable);
 
     // The grid's own identity cannot stand in for this: a mark arriving on a page that has not scrolled

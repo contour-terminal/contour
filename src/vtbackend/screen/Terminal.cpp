@@ -8401,6 +8401,12 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     }
     // clang-format on
 
+    // Widening reflows wrapped rows back into one, so the scrollback can come out shorter than the depth a
+    // scrolled-back view sits at, and render() would read that offset past the oldest row. Here rather than
+    // in resizeScreen(): a page off the cursor is reflowed only once setPage() brings the cursor to it, and
+    // with DECPCCM reset that page may have been on display, scrolled back, all along.
+    clampToHistory();
+
     // Through the screens, as every page above: resizing a grid behind its screen's back left that screen's
     // cursor past a narrowed right margin and its cached cursor line un-re-pointed.
     auto const statusLinePageSize = PageSize { StatusLineHeight, _settings.pageSize.columns };

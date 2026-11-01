@@ -93,6 +93,13 @@ namespace XtSmGraphics
     using Value = std::variant<std::monostate, unsigned, ImageSize>;
 } // namespace XtSmGraphics
 
+/// Whether a line feed brought the cursor onto another row: moved down to it, or scrolled it in.
+enum class LineFeedOutcome : uint8_t
+{
+    SameRow, ///< Below the scrolling region, or outside its left and right margins: nowhere to go.
+    NextRow, ///< Onto the row below, or onto a row scrolled in at the bottom margin.
+};
+
 /// TBC - Tab Clear
 ///
 /// This control function clears tab stops.
@@ -475,7 +482,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///          without scrolling it.
     [[nodiscard]] std::string screenshot(std::function<std::string(LineOffset)> const& postLine = {}) const;
 
-    void crlf() { linefeed(margin().horizontal.from); }
+    /// Carriage return and line feed: to the left margin of the next row.
+    /// @return Whether the cursor reached another row (@see linefeed()).
+    LineFeedOutcome crlf() { return linefeed(margin().horizontal.from); }
     void crlfIfWrapPending();
 
     // {{{ VT API
@@ -1538,7 +1547,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void setTabUnderCursor();
 
     /// Applies LF but also moves cursor to given column @p column.
-    void linefeed(ColumnOffset column);
+    /// @return Whether the cursor reached another row, by moving down or by scrolling one in.
+    LineFeedOutcome linefeed(ColumnOffset column);
+
+    /// Clears the head-only marks, and the borders they name, of the cursor's row as it becomes a
+    /// continuation, keeping the fold ranges, the user-mark index and the command blocks in step.
+    void shedHeadOnlyMarks() noexcept;
 
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
 
