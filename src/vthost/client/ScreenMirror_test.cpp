@@ -2225,6 +2225,26 @@ TEST_CASE("a render-only cell flag never comes off the wire", "[vthost][mirror]"
     }
 }
 
+TEST_CASE("a continuation off the wire carries no head's marks", "[vthost][mirror]")
+{
+    // What only a broken or an older peer sends: a row continuing the one above, yet carrying a ;D and
+    // its column. Kept, the mirror's next narrowing reflow would abort on it.
+    auto wire = rowAt(1, "abc");
+    wire.flags = (vtbackend::LineFlags { vtbackend::LineFlag::Wrappable, vtbackend::LineFlag::Wrapped }
+                  | vtbackend::LineFlag::CommandEnd)
+                     .value();
+    wire.commandEndOffset = 2;
+    wire.promptEndOffset = 1;
+
+    auto line = vtbackend::Line { vtbackend::ColumnCount(5) };
+    vthost::applyWireLine(line, wire, {}, {});
+
+    CHECK(line.wrapped());
+    CHECK_FALSE(line.isFlagEnabled(vtbackend::HeadOnlyLineFlags));
+    CHECK(line.commandEndOffset() == vtbackend::ColumnOffset(0));
+    CHECK(line.promptEndOffset() == vtbackend::ColumnOffset(0));
+}
+
 TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[vthost][mirror]")
 {
     auto h = MirrorHarness {};
