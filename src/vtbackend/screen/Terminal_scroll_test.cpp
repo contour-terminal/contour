@@ -19,6 +19,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1996,6 +1997,55 @@ TEST_CASE("Terminal.viewport.aSettledHoldClampsAViewScrolledIntoIt", "[terminal]
     mc.writeToScreen("\033[1;4r\033[4;1Hmore\n");
 
     CHECK(grid.historyLineCount() == LineCount(10));
+    CHECK(unbox(mc.terminal.viewport().scrollOffset()) <= unbox(grid.historyLineCount()));
+    (void) mc.terminal.refreshRenderBuffer();
+}
+
+TEST_CASE("Terminal.viewport.aResizeThatShrinksTheHistoryClampsTheView", "[terminal][history][resize]")
+{
+    // Twenty-column lines written into a ten-column page wrap onto two rows each, so widening joins
+    // every pair back into one row and halves the scrollback underneath a view parked at its top.
+    // Infinite, because that is where long sessions keep the deepest scrollback to be scrolled into.
+    auto const limits = GENERATE(vtbackend::HistoryLimits::plain(vtbackend::Infinite {}),
+                                 vtbackend::HistoryLimits::plain(LineCount(1000)));
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) }, limits, 1024 };
+    mc.following = vtbackend::OutputFollowing::Stay;
+    for (auto const i: std::views::iota(0, 30))
+        mc.writeToScreen(std::format("{:020}\r\n", i));
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const historyBefore = grid.historyLineCount();
+    REQUIRE(mc.terminal.viewport().scrollToTop());
+
+    mc.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(20) });
+
+    REQUIRE(grid.historyLineCount() < historyBefore);
+    CHECK(unbox(mc.terminal.viewport().scrollOffset()) == unbox(grid.historyLineCount()));
+    (void) mc.terminal.refreshRenderBuffer();
+}
+
+TEST_CASE("Terminal.viewport.aPageReflowedOnlyWhenTheCursorReturnsClampsTheView",
+          "[terminal][history][resize]")
+{
+    // DECPCCM reset: the cursor leaves for page 3 while the primary page stays on display, scrolled back.
+    // The resize reflows only the cursor's page; the primary page is reflowed when the cursor comes back.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) },
+                         vtbackend::HistoryLimits::plain(vtbackend::Infinite {}),
+                         1024 };
+    mc.following = vtbackend::OutputFollowing::Stay;
+    mc.terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Classic;
+    for (auto const i: std::views::iota(0, 30))
+        mc.writeToScreen(std::format("{:020}\r\n", i));
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const historyBefore = grid.historyLineCount();
+    mc.writeToScreen("\033[?64l\033[3 P");
+    REQUIRE(mc.terminal.displayedPageIndex() == vtbackend::PageIndex(0));
+    REQUIRE(mc.terminal.viewport().scrollToTop());
+
+    mc.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(20) });
+    REQUIRE(grid.historyLineCount() == historyBefore);
+    mc.writeToScreen("\033[1 P");
+
+    REQUIRE(grid.historyLineCount() < historyBefore);
     CHECK(unbox(mc.terminal.viewport().scrollOffset()) <= unbox(grid.historyLineCount()));
     (void) mc.terminal.refreshRenderBuffer();
 }

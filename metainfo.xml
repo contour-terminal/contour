@@ -240,6 +240,7 @@
           <li>Resizing no longer discards scrollback: rows a narrower or shorter window pushes past a finite scrollback limit are kept, so resizing back restores them, and the next line of output trims the scrollback back to its limit and releases the extra storage. Previously a resize either dropped them at once or let the scrollback stay above its limit for good.</li>
           <li>Fixes a taller window scrambling the screen when a finite scrollback was full: blank lines appeared mid-page and old scrollback lines showed on the page.</li>
           <li>Fixes the first scrollback trim after a resize, or on first reaching the limit, cutting through a command instead of at a prompt.</li>
+          <li>Fixes a crash when widening the window while scrolled back into a long scrollback.</li>
         </ul>
       </description>
     </release>
