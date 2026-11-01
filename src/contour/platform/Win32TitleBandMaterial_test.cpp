@@ -312,4 +312,27 @@ TEST_CASE("the Settings window keeps the OS's title bar, dark with the chrome an
     CHECK(backdropOf(hwnd) == dword(DwmBackdrop::MainWindow));
 }
 
+TEST_CASE("the kept frame leaves DWM no system buttons to draw under our own", "[native][win32][frame]")
+{
+    if (!contour::platform::onNativeWindowsPlatform())
+        SKIP("Requires the native Windows platform.");
+    auto fixture = MaterialWindow {};
+    auto const style = [&] {
+        return static_cast<DWORD>(GetWindowLongPtrW(fixture.hwnd(), GWL_STYLE));
+    };
+
+    // What DWM keys its shadow, rounded corners and Snap Layouts off stays; what makes it paint its own
+    // minimize/maximize/close buttons next to ours -- every button twice -- goes.
+    CHECK((style() & WS_CAPTION) == WS_CAPTION);
+    CHECK((style() & WS_THICKFRAME) != 0);
+    CHECK((style() & WS_MAXIMIZEBOX) != 0);
+    CHECK((style() & WS_SYSMENU) == 0);
+
+    SECTION("handing the window back to the OS's title bar restores its buttons")
+    {
+        fixture.frame->apply(fixture.window, contour::platform::WindowDecoration::Server);
+        CHECK((style() & WS_SYSMENU) != 0);
+    }
+}
+
 #endif

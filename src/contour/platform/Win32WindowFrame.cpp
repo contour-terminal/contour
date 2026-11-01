@@ -219,6 +219,25 @@ namespace
                 // The native title bar: Qt's own frame is exactly right, so stop intercepting, and take
                 // back the margins the kept frame extended -- the OS's frame never had them (F32).
                 frameEventFilter().forget(hwnd);
+                // And hand back the OS's own buttons and menu, which the kept frame took off below: the
+                // OS's title bar draws them. Qt gives a window its system menu by default, and withholds
+                // it only from one that customizes its hints without asking for it.
+                auto const flags = window.flags();
+                auto const wantsSystemMenu =
+                    !flags.testFlag(Qt::CustomizeWindowHint) || flags.testFlag(Qt::WindowSystemMenuHint);
+                if (auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                    (style & WS_SYSMENU) == 0 && wantsSystemMenu)
+                {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_SYSMENU);
+                    SetWindowPos(hwnd,
+                                 nullptr,
+                                 0,
+                                 0,
+                                 0,
+                                 0,
+                                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                                     | SWP_NOOWNERZORDER);
+                }
                 reapplySystemBackdrop(window, hwnd, api);
                 // The OS's title bar still follows the chrome's light or dark (R-m): the dark-mode
                 // attribute is what turns it, and the Mica in it, dark.
@@ -234,8 +253,16 @@ namespace
             bool const preserveClientSize = window.windowState() == Qt::WindowNoState && !IsZoomed(hwnd)
                                             && !IsIconic(hwnd) && GetClientRect(hwnd, &clientBefore);
 
+            // No WS_SYSMENU, though: with the glass extended over the client area, it is what makes DWM
+            // paint its own minimize/maximize/close buttons there, on top of the ones our title bar
+            // draws, so every button showed twice -- two glyphs a few pixels apart, the OS's in
+            // grayscale and ours in ClearType. The window loses only the OS's own menu and buttons;
+            // Snap Layouts answer through WM_NCHITTEST, and the taskbar and Alt+F4 need neither.
             auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-            SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX);
+            SetWindowLongPtrW(hwnd,
+                              GWL_STYLE,
+                              (style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX)
+                                  & ~static_cast<LONG_PTR>(WS_SYSMENU));
 
             frameEventFilter().watch(hwnd, window, api);
 
