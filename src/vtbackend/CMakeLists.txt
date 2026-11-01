@@ -470,15 +470,17 @@ if(LIBTERMINAL_TESTING)
             add_test(NAME bench_headless_memory_smoke COMMAND bench-headless memory panes 2 seconds 0)
         endif()
         # The benchmarks with an application on a real PTY: a script under /bin/sh on POSIX, and
-        # `bench-headless pty-child` through ConPTY on Windows.
+        # `bench-headless pty-child` through ConPTY on Windows. 16 MiB rather than 1: each run is measured
+        # less the writer's startup, the fastest of several empty runs, and through ConPTY one MiB takes
+        # less than that startup varies by -- the run then reports "too little to measure" and fails.
         add_test(NAME bench_headless_throughput_pty_smoke
-                 COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
+                 COMMAND bench-headless throughput size 16 runs 1 kinds ascii screens primary pty)
         # Link detection on, as the GUI runs it: the row reports the match jobs inside the run and after it, and
         # the links indexed. How many, and whether the run was too short for detection to scan inside it, is
         # the machine's speed to say; only the warning's wording is checked, where it appears. Through ConPTY
         # the row also says how much of the output arrived, and the lines may end in CRLF.
         add_test(NAME bench_headless_throughput_links_smoke
-                 COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty refresh-hz 60 links)
+                 COMMAND bench-headless throughput size 16 runs 1 kinds ascii screens primary pty refresh-hz 60 links)
         set_tests_properties(bench_headless_throughput_links_smoke PROPERTIES PASS_REGULAR_EXPRESSION
                              "link detection: on\r?\nascii +primary +[0-9.]+ MiB/s +[0-9]+ bytes/read( +[0-9.]+% arrived)? +[0-9]+ match jobs in the run, +[0-9]+ after it, +[0-9]+ links(  \\(under [0-9]+ ms, detection's longest wait: it could not scan inside the measurement\\))?\r?\n")
         add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
