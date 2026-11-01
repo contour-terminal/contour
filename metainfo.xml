@@ -241,6 +241,7 @@
           <li>Fixes a taller window scrambling the screen when a finite scrollback was full: blank lines appeared mid-page and old scrollback lines showed on the page.</li>
           <li>Fixes the first scrollback trim after a resize, or on first reaching the limit, cutting through a command instead of at a prompt.</li>
           <li>Fixes a crash when widening the window while scrolled back into a long scrollback.</li>
+          <li>Fixes a crash when narrowing the window after a full-screen program, such as a coding agent, redrew over a finished command's output.</li>
         </ul>
       </description>
     </release>
