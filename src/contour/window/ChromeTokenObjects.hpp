@@ -55,6 +55,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal tooltipPadTop READ tooltipPadTop CONSTANT)
     Q_PROPERTY(qreal tooltipPadBottom READ tooltipPadBottom CONSTANT)
     Q_PROPERTY(qreal tooltipEdge READ tooltipEdge CONSTANT)
+    Q_PROPERTY(qreal tooltipMaxWidth READ tooltipMaxWidth CONSTANT)
     Q_PROPERTY(qreal tooltipGap READ tooltipGap CONSTANT)
     Q_PROPERTY(qreal dialogWidth READ dialogWidth CONSTANT)
     Q_PROPERTY(qreal swatchWidth READ swatchWidth CONSTANT)
@@ -136,6 +137,11 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal tooltipPadBottom() const noexcept
     {
         return _tokens.tooltipPadBottom * _units.vertical;
+    }
+    /// @return The widest a tooltip's text grows before it wraps, in logical pixels.
+    [[nodiscard]] qreal tooltipMaxWidth() const noexcept
+    {
+        return _tokens.tooltipMaxWidth * _units.horizontal;
     }
     /// @return A tooltip's edge in whole logical pixels; 0 asks for one device pixel.
     [[nodiscard]] qreal tooltipEdge() const noexcept { return _tokens.tooltipEdge; }

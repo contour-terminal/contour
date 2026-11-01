@@ -249,6 +249,14 @@ Item {
                      : "transparent"
             }
 
+            KitToolTip {
+                objectName: headerButton.modelData.objectName + "ToolTip"
+                text: headerButton.modelData.accessibleName
+                shortcutCommand: headerButton.modelData.command
+                shortcutSource: root.controller
+                wanted: headerButton.hovered && !headerButton.down
+            }
+
             // The new-tab item opens the profiles on a secondary click, as the band's "+" does.
             readonly property bool isNewTab: headerButton.modelData.menu === "newTab"
             TapHandler {

@@ -436,6 +436,13 @@ Row {
             font: chromeStyle.newTabFont
             focusPolicy: Qt.NoFocus
             onClicked: root.controller.createNewTab()
+            KitToolTip {
+                objectName: "newTabToolTip"
+                text: qsTr("New tab")
+                shortcutCommand: "CreateNewTab"
+                shortcutSource: root.controller
+                wanted: newTabButton.hovered
+            }
             // Flat, transparent chrome so the button blends into the strip background instead of showing
             // an opaque style button panel; a subtle highlight wash gives hover feedback.
             background: Rectangle {

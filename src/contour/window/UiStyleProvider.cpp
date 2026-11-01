@@ -442,7 +442,8 @@ QVariantList UiStyleProvider::headerBarItems() const
                                    { QStringLiteral("accessibleName"), nameOf(row.accessibleName) },
                                    { QStringLiteral("iconName"), nameOf(row.iconName) },
                                    { QStringLiteral("bundledIcon"), nameOf(row.bundledIcon) },
-                                   { QStringLiteral("menu"), nameOf(headerBarMenuName(row.menu)) } });
+                                   { QStringLiteral("menu"), nameOf(headerBarMenuName(row.menu)) },
+                                   { QStringLiteral("command"), nameOf(row.commandName) } });
     return items;
 }
 

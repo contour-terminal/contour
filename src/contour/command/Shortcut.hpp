@@ -192,9 +192,9 @@ struct ShortcutChord
 /// A chord a control answers to whatever the configuration binds, and the name a view asks for it by.
 struct FixedShortcutRow
 {
-    std::string_view name;          ///< What a view asks for it by.
-    vtbackend::Modifiers modifiers; ///< The modifiers held.
-    ShortcutInput input;            ///< The key it ends on.
+    std::string_view name {};          ///< What a view asks for it by.
+    vtbackend::Modifiers modifiers {}; ///< The modifiers held.
+    ShortcutInput input {};            ///< The key it ends on.
 };
 
 /// The find bar's fixed keys (they are the bar's, not input_mapping's): adding a control's key is adding a

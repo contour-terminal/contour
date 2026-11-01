@@ -393,6 +393,8 @@ class ChromeSnapshotScene
                 break;
             case ScriptAction::DeactivateWindow: deactivateWindow(); break;
             case ScriptAction::OpenMainMenu: openMainMenu(); break;
+            case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
+            case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -462,6 +464,8 @@ class ChromeSnapshotScene
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
 
+    /// The tab hover tooltip's two lines.
+    static constexpr auto ToolTipTabHover = "Build finished · 2 warnings\n~/repo/contour/src/contour";
     /// The toast's message.
     [[nodiscard]] static QString toastText() { return QStringLiteral("Copied 3 lines"); }
     /// The windows and tabs the restore-summary script's daemon brought back.
@@ -1351,6 +1355,57 @@ class ChromeSnapshotScene
         // Triggering a sub-menu's row is what a click on it does: the menu opens the sub-menu beside it.
         REQUIRE(QMetaObject::invokeMethod(colorRow, "triggered"));
         REQUIRE(QTest::qWaitFor([&] { return colors->property("opened").toBool(); }, 2000));
+    }
+
+    /// Which control's tooltip a tooltip script opens.
+    enum class ToolTipOf : uint8_t
+    {
+        NewTab, //!< The new-tab control's, with the shortcut the mock binds.
+        Tab,    //!< The first tab's two-line hover tooltip.
+    };
+
+    /// Opens one tooltip of the board under its control and waits for it. The two are separate scripts: on
+    /// the Linux and Terminal rows the controls sit side by side, and their tooltips would cover each other.
+    /// @param which The control whose tooltip to open.
+    void showToolTips(ToolTipOf which)
+    {
+        // The tabs may still be incubating: the tooltips belong to the delegates that stay.
+        _incubation.settle();
+        QCoreApplication::processEvents();
+        QObject* toolTip = nullptr;
+        if (which == ToolTipOf::NewTab)
+        {
+            // The band's button, the strip's, or the header bar's item: whichever this row draws.
+            for (auto const* name: { "newTabButton", "headerNewTab" })
+            {
+                auto const buttons = itemsNamed(*window().contentItem(), QString::fromLatin1(name));
+                if (buttons.empty())
+                    continue;
+                REQUIRE(buttons.size() == 1);
+                for (auto const& candidate: { QStringLiteral("toolbarButtonToolTip"),
+                                              QStringLiteral("newTabToolTip"),
+                                              QString::fromLatin1(name) + QStringLiteral("ToolTip") })
+                    if (toolTip == nullptr)
+                        toolTip = buttons.front()->findChild<QObject*>(candidate);
+                break;
+            }
+        }
+        else
+        {
+            auto const tabs = itemsNamed(*window().contentItem(), QStringLiteral("tabBackground"));
+            REQUIRE_FALSE(tabs.empty());
+            toolTip = tabs.front()->parentItem()->findChild<QObject*>(QStringLiteral("tabHoverToolTip"));
+            REQUIRE(toolTip != nullptr);
+            // The tab the tooltip belongs to: its visual parent, whatever wraps the background.
+            auto* tab = toolTip->property("parent").value<QObject*>();
+            REQUIRE(tab != nullptr);
+            tab->setProperty("hoverTooltip", QString::fromUtf8(ToolTipTabHover));
+            toolTip->setProperty("pointerX", 24.0);
+        }
+        REQUIRE(toolTip != nullptr);
+        REQUIRE(QMetaObject::invokeMethod(toolTip, "refreshShortcut"));
+        REQUIRE(QMetaObject::invokeMethod(toolTip, "open"));
+        REQUIRE(QTest::qWaitFor([&] { return toolTip->property("opened").toBool(); }, PopupSettleMs));
     }
 
     /// Asks for the main menu as the header bar's button does, and waits for it where the row has one: the

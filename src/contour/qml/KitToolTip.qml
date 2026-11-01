@@ -53,6 +53,12 @@ T.ToolTip {
         id: ownClock
     }
 
+    // A template popup sizes itself by nothing: the box is its content and its padding.
+    implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
+                            implicitContentWidth + leftPadding + rightPadding)
+    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                             implicitContentHeight + topPadding + bottomPadding)
+
     padding: 0
     leftPadding: chromeStyle.size.tooltipPadX
     rightPadding: chromeStyle.size.tooltipPadX
@@ -122,10 +128,8 @@ T.ToolTip {
     contentItem: Item {
         id: content
         objectName: "kitToolTipContent"
-        // The widest the text may grow before it wraps: the window, less the margins and the padding.
-        readonly property real maxTextWidth: Math.max(160, (root.parent && root.parent.Window.window
-                                                              ? root.parent.Window.window.width : 640)
-                                                       - 2 * root.windowMargin - root.leftPadding - root.rightPadding)
+        // The widest the text may grow before it wraps: the token's, less the padding.
+        readonly property real maxTextWidth: chromeStyle.size.tooltipMaxWidth - root.leftPadding - root.rightPadding
         readonly property real shortcutBlock: root.shortcutShown ? chromeStyle.size.tooltipGap + Math.ceil(shortcutLabel.implicitWidth) : 0
         readonly property real textWidth: Math.min(Math.ceil(Math.max(firstLabel.implicitWidth, restLabel.implicitWidth)),
                                                    maxTextWidth - shortcutBlock)

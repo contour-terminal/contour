@@ -110,6 +110,8 @@ enum class SnapshotScript : uint8_t
     TabBadgesLabelled, //!< tab-badges at four tabs: few enough that the header bar's tabs keep their labels.
     QuickTerminal,     //!< The quick terminal: one tab and one pane under Minimal, in the panel's frame.
     SettingsHost,      //!< The Settings window on a saved host's page, `starfive`.
+    ToolTipNewTab,     //!< two tabs: the new-tab control's tooltip, with the shortcut the mock binds.
+    ToolTipTab,        //!< two tabs: the first tab's two-line hover tooltip.
 };
 
 /// How a script's active tab is divided into panes.
@@ -164,8 +166,10 @@ enum class ScriptAction : uint8_t
     HoverBlock,         //!< The pointer on the sample block's strip: the session publishes its ⋯ anchor.
     ShowRestoreSummary, //!< The window's notices post the restore summary, as the first restored window does.
     HoverMaximize, //!< The OS reports the pointer over the maximise button, as Windows' WM_NCMOUSEMOVE does.
-    DeactivateWindow, //!< Another window takes the focus.
-    OpenMainMenu,     //!< The header bar's main menu, as its button opens it.
+    DeactivateWindow,  //!< Another window takes the focus.
+    ShowNewTabToolTip, //!< The new-tab control's tooltip, opened under it.
+    ShowTabToolTip,    //!< The first tab's two-line hover tooltip, opened under it.
+    OpenMainMenu,      //!< The header bar's main menu, as its button opens it.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -2194,6 +2198,48 @@ inline constexpr auto SnapshotScripts = std::array {
                         .settingsPage = SnapshotSettingsPage::Host,
                         .shellCard = SnapshotShellCard::None,
                         .buttons = SnapshotButtons::Desktop },
+    SnapshotScriptRow { .script = SnapshotScript::ToolTipNewTab,
+                        .name = "tooltip-new-tab",
+                        .tabCount = 2,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::ShowNewTabToolTip,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .buttons = SnapshotButtons::Desktop },
+    SnapshotScriptRow { .script = SnapshotScript::ToolTipTab,
+                        .name = "tooltip-tab",
+                        .tabCount = 2,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::ShowTabToolTip,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None,
+                        .find = SnapshotFind::None,
+                        .permission = SnapshotPermission::None,
+                        .buttons = SnapshotButtons::Desktop },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -2405,6 +2451,19 @@ inline constexpr std::string_view SnapshotDirectoryVariable = "CONTOUR_SNAPSHOT_
 {
     if (auto value = env.get(SnapshotDirectoryVariable); value && !value->empty())
         return std::filesystem::path(*value);
+    return std::nullopt;
+}
+
+/// The variable that narrows a snapshot run to the scripts whose table name starts with it (`tooltip`).
+inline constexpr std::string_view SnapshotScriptVariable = "CONTOUR_SNAPSHOT_SCRIPT";
+
+/// The one script a run renders.
+/// @param env The environment to read.
+/// @return The variable's value, or std::nullopt when it is unset or empty: every script.
+[[nodiscard]] inline std::optional<std::string> snapshotScriptFilter(core::Environment const& env)
+{
+    if (auto value = env.get(SnapshotScriptVariable); value && !value->empty())
+        return std::string(*value);
     return std::nullopt;
 }
 

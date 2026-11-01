@@ -37,7 +37,7 @@ namespace
 /// A window with a control-sized item at @p controlY and one KitToolTip beneath it, as a control hosts it.
 struct ToolTipHost
 {
-    QmlHost window;
+    QmlHost window {};
     QQuickItem* control = nullptr;
     QObject* toolTip = nullptr;
     QObject* clock = nullptr;
@@ -206,8 +206,8 @@ TEST_CASE("KitToolTipClock: warm for the token's span after a tooltip (offscreen
     CHECK(host.clock->property("warmMs").toInt() == 1500);
 
     auto const isWarm = [&] {
-        QVariant answer;
-        REQUIRE(QMetaObject::invokeMethod(host.clock, "isWarm", Q_RETURN_ARG(QVariant, answer)));
+        QVariant answer {};
+        REQUIRE(QMetaObject::invokeMethod(host.clock, "isWarm", qReturnArg(answer)));
         return answer.toBool();
     };
     CHECK_FALSE(isWarm());
@@ -248,6 +248,8 @@ TEST_CASE("KitToolTip: the first tooltip waits the token's delay, a warm one sho
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+namespace
+{
 /// Shows @p host's tooltip at once (its clock warm) and waits until it is open.
 void showToolTip(ToolTipHost& host)
 {
@@ -257,6 +259,7 @@ void showToolTip(ToolTipHost& host)
     host.toolTip->setProperty("wanted", true);
     REQUIRE(QTest::qWaitFor([&] { return host.toolTip->property("opened").toBool(); }, 3000));
 }
+} // namespace
 
 TEST_CASE("KitToolTip: opens below its control at the pointer, never covering it (offscreen)",
           "[contour][gui][qml][kit][tooltip]")
@@ -270,6 +273,11 @@ TEST_CASE("KitToolTip: opens below its control at the pointer, never covering it
     {
         tip->setProperty("pointerX", 10.0);
         showToolTip(host);
+        // The box is its content and its padding, which a template popup does not size itself by.
+        CHECK(tip->property("width").toReal()
+              == partOf(tip, "kitToolTipContent")->implicitWidth()
+                     + (2 * chromeToken(engine, "size", "tooltipPadX")));
+        CHECK(tip->property("height").toReal() > 0);
         CHECK(tip->property("y").toReal() >= host.control->height());
         CHECK(tip->property("x").toReal() == 10.0 - tip->property("pointerInset").toReal());
     }

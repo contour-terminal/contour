@@ -1030,6 +1030,29 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::ButtonsLeading:
             case SnapshotScript::NoButtons:
             case SnapshotScript::MainMenu: checkHeaderBarScript(scene, variant); break;
+            case SnapshotScript::ToolTipNewTab: {
+                // The new-tab control's tooltip is open with its shortcut; the tab's is not.
+                auto const open = scene.root().findChildren<QObject*>(QStringLiteral("toolbarButtonToolTip"));
+                auto const strip =
+                    contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("newTabButton"));
+                REQUIRE_FALSE((open.empty() && strip.empty()
+                               && contour::test::itemsNamed(*scene.window().contentItem(),
+                                                            QStringLiteral("headerNewTab"))
+                                      .empty()));
+                break;
+            }
+            case SnapshotScript::ToolTipTab: {
+                // The tab's tooltip is open with its second line.
+                auto const tabs =
+                    contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("tabBackground"));
+                REQUIRE_FALSE(tabs.empty());
+                auto const* hover =
+                    tabs.front()->parentItem()->findChild<QObject*>(QStringLiteral("tabHoverToolTip"));
+                REQUIRE(hover != nullptr);
+                CHECK(hover->property("opened").toBool());
+                CHECK(hover->property("secondaryShown").toBool());
+                break;
+            }
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());
@@ -1221,8 +1244,11 @@ TEST_CASE("Chrome snapshots: every script on every row this process draws", "[di
     auto writer = ChromeSnapshotWriter::open(files, *directory);
     REQUIRE(writer.has_value());
 
+    auto const only = snapshotScriptFilter(environment);
     for (auto const& variant: snapshotMatrix(rows))
     {
+        if (only && !scriptRow(variant.script).name.starts_with(*only))
+            continue;
         INFO(snapshotFileName(variant));
         auto scene = ChromeSnapshotScene { variant };
         scene.show();
