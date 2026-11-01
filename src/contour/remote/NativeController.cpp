@@ -124,7 +124,10 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // so that a tab dropped on a pane's edge is merged into the split by the daemon
             // (requestRemoteTabMerge) instead of torn off. TabEditAcks so that a pane or tab the user
             // activates stays active over a layout the daemon pushed before it read the change, rather than
-            // flipping back until the echo arrives.
+            // flipping back until the echo arrives. MoveNode so that a pane or tab dragged in a daemon-hosted
+            // window is moved by the daemon (requestRemoteMove), whose layout pushes are then realized here.
+            // LayoutBatch so that the daemon says where each push ends, and the GUI reconciles each push
+            // whole: a pane a move took out of one window is then always seen in the window it went to.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -136,6 +139,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::ProgramStatus,
                                                    vthost::proto::Capability::InputEcho,
                                                    vthost::proto::Capability::TabMerge,
+                                                   vthost::proto::Capability::MoveNode,
+                                                   vthost::proto::Capability::LayoutBatch,
                                                    vthost::proto::Capability::TabEditAcks,
                                                    vthost::proto::Capability::ColorPreference }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
@@ -167,7 +172,13 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } },
         vthost::client::LivenessPolicy {},
         NativeClient::TabMergeRefusedHandler {
-            [this](vthost::proto::TabMergeRefused const&) { emit tabMergeRefused(); } });
+            [this](vthost::proto::TabMergeRefused const&) { emit tabMergeRefused(); } },
+        NativeClient::MoveNodeRefusedHandler {
+            [this](vthost::proto::MoveNodeRefused const& refused, uint64_t serial) {
+                onMoveNodeRefused(refused, serial);
+            } },
+        NativeClient::LayoutBatchEndHandler {
+            [this](vthost::proto::LayoutBatchEnd const& end) { onLayoutBatchEnd(end); } });
 }
 
 core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
@@ -246,7 +257,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 if (_client != nullptr)
                     restored = _client->restoredCounts();
                 if (_acceptedConnections != 0)
-                    adoptReconnect();
+                    adoptReconnect(lock);
                 else if (_client != nullptr)
                 {
                     _daemonInstance = _client->daemonInstance();
@@ -329,7 +340,7 @@ void NativeController::forgetInputEchoes()
             binding.pty->setInputEcho(vtpty::InputEcho::Unknown);
 }
 
-void NativeController::adoptReconnect()
+void NativeController::adoptReconnect(std::lock_guard<std::mutex> const& /*held*/)
 {
     auto* client = _client;
     if (client == nullptr)
@@ -350,6 +361,8 @@ void NativeController::adoptReconnect()
         // The new run's sessions count from 1 again: an old Hidden is no pane's of this run.
         _inputEchoes.clear();
         _closedSessions.clear();
+        // The new run's tab ids count from 1 again: an old pairing would name another tab of this run.
+        _wireTabOf.clear();
         _pending.clear();
         // Closes of the old run's sessions: the ids name the new run's, if anything.
         _pendingCloses.clear();
@@ -381,6 +394,10 @@ void NativeController::adoptReconnect()
     // Replaced by what the new connection pushes; what was reported against them was told another daemon,
     // or a connection that may not have delivered it.
     _layouts.clear();
+    _settledLayouts.clear();
+    // A move asked of the lost connection is answered on it or not at all.
+    _moveRequests.clear();
+    _landedMoves.clear();
     _reportedPresentations.clear();
     {
         auto const geometryLock = std::lock_guard { _geometryMutex };
@@ -483,13 +500,20 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
 {
     _timeline.mark(vthost::latency::StartupMark::LayoutReceived);
     auto lost = std::vector<uint64_t> {};
+    auto batched = false;
     {
         auto const lock = std::lock_guard { _mutex };
         // Announced with the first window that came instead, so the GUI has a window to show before it
         // closes the lost ones -- closing the last one first would end the application.
         lost = std::exchange(_lostWindows, {});
         captureHandshake();
-        _layouts[layout.window] = layout;
+        auto held = std::make_shared<vthost::proto::LayoutState const>(layout);
+        // A daemon that ends its pushes settles them itself (onLayoutBatchEnd); one that does not settles
+        // each frame as it comes, as before there were batches.
+        batched = layoutBatchShared();
+        if (!batched)
+            _settledLayouts[layout.window] = held;
+        _layouts[layout.window] = std::move(held);
         // The daemon's word on these tabs is newer than what was reported for them.
         for (auto const& tab: layout.tabs)
             _reportedPresentations.erase(tab.tabId);
@@ -512,8 +536,76 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
     // The GUI (on its own thread, via a queued connection) reconciles each daemon
     // window's tab/split tree against wireLayout(window) — the authoritative
     // structure — mapping one OS window to each (B4). (The per-session snapshot
-    // deltas that follow set State::Ready via onUpdate.)
+    // deltas that follow set State::Ready via onUpdate.) A push the daemon ends is reconciled at its end
+    // only: until then the layouts held mix this push's windows with the last one's.
+    if (!batched)
+        emit layoutChanged();
+}
+
+void NativeController::onMoveNodeRefused(vthost::proto::MoveNodeRefused const& refused, uint64_t serial)
+{
+    auto request = uint64_t { 0 };
+    if (auto const found = _moveRequests.find(serial); found != _moveRequests.end())
+    {
+        request = found->second;
+        _moveRequests.erase(found);
+    }
+    emit moveRefused(refused.reason, refused.modelReason, request);
+}
+
+std::vector<uint64_t> NativeController::takeLandedMoves()
+{
+    auto const lock = std::lock_guard { _mutex };
+    return std::exchange(_landedMoves, {});
+}
+
+std::vector<uint64_t> NativeController::takeCompletedMoves(MovesInFlight& inFlight, uint64_t causeSerial)
+{
+    auto completed = std::vector<uint64_t> {};
+    if (causeSerial == 0)
+        return completed;
+    auto const end = inFlight.upper_bound(causeSerial);
+    for (auto const& [serial, request]: std::ranges::subrange(inFlight.begin(), end))
+        completed.push_back(request);
+    inFlight.erase(inFlight.begin(), end);
+    return completed;
+}
+
+void NativeController::onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end)
+{
+    // The moves whose effects this push completes, if this client asked for any: named with the layouts it
+    // settles, so a reconcile that takes them reads them.
+    auto const landed = takeCompletedMoves(_moveRequests, end.causeSerial);
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _landedMoves.insert(_landedMoves.end(), landed.begin(), landed.end());
+        _settledLayouts = _layouts; // pointers: the layouts themselves are shared, never changed
+    }
     emit layoutChanged();
+}
+
+bool NativeController::layoutBatchShared() const
+{
+    return _negotiated && _negotiated->shared.contains(vthost::proto::Capability::LayoutBatch);
+}
+
+LayoutSnapshot NativeController::settledLayouts() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _settledLayouts;
+}
+
+std::shared_ptr<vthost::proto::LayoutState const> NativeController::settledLayout(uint64_t daemonWindow) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const it = _settledLayouts.find(daemonWindow);
+    return it != _settledLayouts.end() ? it->second : nullptr;
+}
+
+std::shared_ptr<vthost::proto::LayoutState const> NativeController::settledLayout() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _settledLayouts.empty() ? nullptr : _settledLayouts.begin()->second;
 }
 
 std::vector<uint64_t> NativeController::windowIds() const
@@ -527,7 +619,7 @@ std::optional<vthost::proto::LayoutState> NativeController::layout(uint64_t daem
 {
     auto const lock = std::lock_guard { _mutex };
     auto const it = _layouts.find(daemonWindow);
-    return it != _layouts.end() ? std::optional { it->second } : std::nullopt;
+    return it != _layouts.end() ? std::optional { *it->second } : std::nullopt;
 }
 
 std::optional<vthost::proto::LayoutState> NativeController::layout() const
@@ -535,14 +627,14 @@ std::optional<vthost::proto::LayoutState> NativeController::layout() const
     auto const lock = std::lock_guard { _mutex };
     if (_layouts.empty())
         return std::nullopt;
-    return _layouts.begin()->second; // the primary (lowest-id) window
+    return *_layouts.begin()->second; // the primary (lowest-id) window
 }
 
 vthost::client::WireLayout NativeController::wireLayout() const
 {
     auto const lock = std::lock_guard { _mutex };
     return _layouts.empty() ? vthost::client::WireLayout {}
-                            : vthost::client::wireToLayout(_layouts.begin()->second);
+                            : vthost::client::wireToLayout(*_layouts.begin()->second);
 }
 
 std::expected<void, contour::session::ReconnectError> NativeController::reconnect()
@@ -594,7 +686,7 @@ contour::session::ReconnectBinding NativeController::bindForReconnect(vtpty::Pty
         return ReconnectBinding::Gone;
     auto const lock = std::lock_guard { _mutex };
     auto const named = std::ranges::any_of(_layouts | std::views::values, [&](auto const& layout) {
-        return std::ranges::any_of(layout.tabs,
+        return std::ranges::any_of(layout->tabs,
                                    [&](auto const& tab) { return paneNames(tab.root, *session); });
     });
     if (!named)
@@ -631,6 +723,33 @@ bool NativeController::isBound(uint64_t session) const
 {
     auto const lock = std::lock_guard { _mutex };
     return _bindings.contains(session);
+}
+
+void NativeController::pairTab(vtworkspace::TabId tab, uint64_t wireTab)
+{
+    auto const lock = std::lock_guard { _mutex };
+    std::erase_if(_wireTabOf, [wireTab](auto const& entry) { return entry.second == wireTab; });
+    _wireTabOf.insert_or_assign(tab.value, wireTab);
+}
+
+std::optional<vtworkspace::TabId> NativeController::tabPairedWith(uint64_t wireTab) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const it = std::ranges::find(_wireTabOf, wireTab, [](auto const& entry) { return entry.second; });
+    return it != _wireTabOf.end() ? std::optional { vtworkspace::TabId { it->first } } : std::nullopt;
+}
+
+void NativeController::forgetClosedTabs(std::unordered_set<uint64_t> const& liveTabs)
+{
+    auto const lock = std::lock_guard { _mutex };
+    std::erase_if(_wireTabOf, [&liveTabs](auto const& entry) { return !liveTabs.contains(entry.first); });
+}
+
+std::optional<uint64_t> NativeController::pairedWireTab(vtworkspace::TabId tab) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const it = _wireTabOf.find(tab.value);
+    return it != _wireTabOf.end() ? std::optional { it->second } : std::nullopt;
 }
 
 bool NativeController::isClaimed(uint64_t session) const
@@ -724,6 +843,72 @@ contour::session::RemoteRouting NativeController::requestRemoteTabMerge(
     return contour::session::RemoteRouting::Routed;
 }
 
+contour::session::MoveSupport NativeController::moveSupport() const noexcept
+{
+    auto const agreed = negotiated();
+    return agreed && agreed->shared.contains(vthost::proto::Capability::MoveNode)
+                   && agreed->shared.contains(vthost::proto::Capability::LayoutBatch)
+               ? contour::session::MoveSupport::Supported
+               : contour::session::MoveSupport::Unsupported;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteMove(contour::session::RemoteMove const& move)
+{
+    // A move the reconciler itself applies came FROM the daemon; asking for it again would loop.
+    if (isRealizingLayout())
+        return contour::session::RemoteRouting::Local;
+    // The daemon owns this layout: a move it cannot take is no move, not one made here that it never hears
+    // of.
+    auto const namesSource = move.source == vtworkspace::MoveSourceKind::Pane
+                                 ? move.sourceSessions.size() == 1
+                                 : !move.sourceSessions.empty();
+    if (!namesSource || moveSupport() == contour::session::MoveSupport::Unsupported)
+        return contour::session::RemoteRouting::Refused;
+    auto pdu = vthost::proto::MoveNode {
+        .sourceKind = std::to_underlying(move.source),
+        .sourceSessions = move.sourceSessions,
+        .targetKind = std::to_underlying(move.target),
+        .targetSession = move.target == vtworkspace::MoveTargetKind::NewWindow ? 0 : move.targetSession,
+        .side = std::to_underlying(move.side),
+        .index = static_cast<uint64_t>(std::max(move.index, 0)),
+    };
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, pdu = std::move(pdu), request = move.request] {
+        if (auto const serial = _client != nullptr ? _client->moveNode(pdu) : std::nullopt)
+        {
+            _moveRequests.insert_or_assign(*serial, request);
+            return;
+        }
+        // Routed, so the manager waits for it: told now, it waits no longer, and the user learns why nothing
+        // moved.
+        emit moveRefused(MoveNotSent, 0, request);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+contour::session::RemoteRouting NativeController::requestRemoteSplitOrientation(vtpty::Pty const* anchorPty,
+                                                                                vtworkspace::SplitState axis)
+{
+    // An axis the reconciler itself applies came FROM the daemon; asking for it again would loop.
+    if (isRealizingLayout() || moveSupport() == contour::session::MoveSupport::Unsupported)
+        return contour::session::RemoteRouting::Local;
+    auto const anchor = sessionForPty(anchorPty);
+    if (!anchor)
+        return contour::session::RemoteRouting::Refused;
+    // The client's send verbs must run on the reactor thread that owns it.
+    _reactor.post([this, session = *anchor, axis] {
+        if (_client != nullptr)
+            std::ignore = _client->setSplitOrientation(session, axis);
+    });
+    return contour::session::RemoteRouting::Routed;
+}
+
+std::optional<uint64_t> NativeController::daemonInstance() const noexcept
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _daemonInstance != 0 ? std::optional { _daemonInstance } : std::nullopt;
+}
+
 void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio)
 {
     // A ratio the reconciler itself applied came FROM the daemon; sending it back would make every
@@ -760,13 +945,13 @@ void NativeController::reportTabPresentation(contour::session::LocalTabPresentat
     auto edits = [&] {
         auto const lock = std::lock_guard { _mutex };
         for (auto const& layout: _layouts | std::views::values)
-            for (auto const [index, tab]: core::views::enumerate(layout.tabs))
+            for (auto const [index, tab]: core::views::enumerate(layout->tabs))
                 if (vthost::client::paneTreeHosts(tab.root, *active))
                 {
                     auto const [reported, fresh] = _reportedPresentations.try_emplace(
                         tab.tabId,
                         vthost::client::presentationOf(tab,
-                                                       std::cmp_equal(index, layout.activeTab)
+                                                       std::cmp_equal(index, layout->activeTab)
                                                            ? vthost::client::TabActivity::Active
                                                            : vthost::client::TabActivity::Inactive));
                     std::ignore = fresh;
@@ -948,7 +1133,7 @@ std::optional<vtpty::PageSize> NativeController::composedClientArea() const
     // composer picks is deterministic rather than a hash-order accident.
     auto const roots =
         _layouts | std::views::values
-        | std::views::transform([](auto const& layout) -> auto const& { return layout.tabs; })
+        | std::views::transform([](auto const& layout) -> auto const& { return layout->tabs; })
         | std::views::join
         | std::views::transform([](auto const& tab) -> vthost::proto::WirePane const& { return tab.root; });
     return vthost::client::composeAnchoredClientArea(roots, _geometryAnchor, resolve);

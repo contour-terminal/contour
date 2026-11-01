@@ -172,6 +172,12 @@ class TmuxController final:
         return contour::session::SessionHosting::Remote;
     }
 
+    /// SessionFactory: the remote end is a tmux server.
+    [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
+    {
+        return contour::session::SessionHostKind::Tmux;
+    }
+
     /// SessionFactory: a GUI split of the pane backed by @p actingPty is authored on tmux
     /// (`split-window`) rather than split locally — tmux's %layout-change re-realizes the new pane
     /// through the mirror. A split issued BY the reconciler itself (while realizing an existing tmux

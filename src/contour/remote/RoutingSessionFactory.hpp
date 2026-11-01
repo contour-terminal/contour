@@ -9,7 +9,9 @@
 
 #include <contour/session/SessionFactory.hpp>
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace contour::remote
@@ -62,6 +64,26 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().tabMergeSupport();
     }
 
+    [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override
+    {
+        return active().moveSupport();
+    }
+
+    [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
+    {
+        return active().hostKind();
+    }
+
+    [[nodiscard]] std::optional<uint64_t> daemonInstance() const noexcept override
+    {
+        return active().daemonInstance();
+    }
+
+    [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& pty) const noexcept override
+    {
+        return active().hostSessionIdOf(pty);
+    }
+
     [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
     {
         return active().createNotifier();
@@ -86,6 +108,18 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         vtworkspace::SplitSide side) override
     {
         return active().requestRemoteTabMerge(tabPtys, targetPty, side);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
+        contour::session::RemoteMove const& move) override
+    {
+        return active().requestRemoteMove(move);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteSplitOrientation(
+        vtpty::Pty const* anchorPty, vtworkspace::SplitState axis) override
+    {
+        return active().requestRemoteSplitOrientation(anchorPty, axis);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override
