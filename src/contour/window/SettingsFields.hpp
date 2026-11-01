@@ -8,6 +8,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/SettingsControls.hpp>
 #include <contour/window/SettingsSections.hpp>
 
@@ -137,9 +138,5 @@ struct GlobalFieldGroupRow
 /// The editable global settings, each with its group.
 /// @return The rows, in page order; built once.
 [[nodiscard]] std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors();
-
-/// @param text UTF-8 text.
-/// @return It as a QString.
-[[nodiscard]] QString toQString(std::string_view text);
 
 } // namespace contour::window::fields

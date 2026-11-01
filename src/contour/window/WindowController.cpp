@@ -24,6 +24,7 @@
 #include <contour/window/HeaderBarLayout.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
@@ -44,11 +45,13 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QUuid>
 #include <QtGui/QCursor>
+#include <QtGui/QDropEvent>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtQml/QQmlEngine>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -79,11 +82,9 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    std::optional<WindowPosition> initialPosition,
                                    core::platform::IClock const& clock,
                                    NoticeAnnouncerFactory const& noticeAnnouncer,
-                                   QString processToken,
                                    WindowRole role):
     _manager { manager },
     _windowId { windowId },
-    _processToken { std::move(processToken) },
     _role { role },
     _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
@@ -131,6 +132,11 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::countChanged, this, &WindowController::clampChromeFocus);
+    // The drag is the manager's, as QDrag::exec is process-wide; this window only says whose pane it carries.
+    connect(&_manager,
+            &session::TerminalSessionManager::nodeDragChanged,
+            this,
+            &WindowController::carriedPaneChanged);
 
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
@@ -149,6 +155,7 @@ NoticeAnnouncerFactory qtNoticeAnnouncer()
 
 WindowController::~WindowController()
 {
+    abandonNodeDrag();
     detachCaption();
 }
 
@@ -854,64 +861,32 @@ void WindowController::moveTab(int fromIndex, int toIndex)
     _manager.moveTab(_windowId, fromIndex, toIndex);
 }
 
-void WindowController::moveTabIntoThisWindow(quint64 sourceWindowId, int fromIndex, int toIndex)
+QString WindowController::paneDragPayload(session::TerminalSession const* pane) const
 {
-    _manager.moveTabToWindow(vtworkspace::WindowId { sourceWindowId }, fromIndex, _windowId, toIndex);
+    auto const drag = pane != nullptr ? _manager.paneDragOf(*pane) : std::nullopt;
+    return drag ? writeNodeDrag(*drag) : QString {};
 }
 
-void WindowController::tearOffTab(int index)
+QString WindowController::tabDragPayload(int tabIndex) const
 {
-    // Open the new window on this window's current screen (the best pre-show DPR predictor), matching
-    // how spawning a new terminal picks the spawning window's screen.
-    _manager.tearOffTabToNewWindow(_windowId, index, _osWindow != nullptr ? _osWindow->screen() : nullptr);
+    auto const drag = _manager.tabDragOf(_windowId, tabIndex);
+    return drag ? writeNodeDrag(*drag) : QString {};
 }
 
-namespace
+int WindowController::dropPayloadOf(QString const& nodePayload) const
 {
-    /// A tab drag's payload, as `TabItem.qml` writes it: the window the tab is in and its row.
-    struct TabDrag
-    {
-        vtworkspace::WindowId window;
-        int row = 0;
-    };
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    return static_cast<int>(drag != nullptr ? drag->drag.payload : DropPayload::None);
+}
 
-    /// Reads the `application/x-contour-tab` JSON of a drag. It is data from whichever process started the
-    /// drag, so nothing is assumed: a missing, non-integral or out-of-range field, or a `token` that is not
-    /// @p ownToken, reads as no drag.
-    [[nodiscard]] std::optional<TabDrag> parseTabDrag(QString const& json, QString const& ownToken)
-    {
-        auto const document = QJsonDocument::fromJson(json.toUtf8());
-        if (!document.isObject())
-            return std::nullopt;
-        auto const object = document.object();
-        auto const windowId = object.value("windowId");
-        auto const tabIndex = object.value("tabIndex");
-        // Ids and rows are only meaningful in the model of the process that wrote them.
-        if (auto const token = object.value("token"); !token.isString() || token.toString() != ownToken)
-            return std::nullopt;
-        auto const isWhole = [](QJsonValue const& value, double max) {
-            return value.isDouble() && value.toDouble() >= 0.0 && value.toDouble() <= max
-                   && value.toDouble() == std::floor(value.toDouble());
-        };
-        // A window id is a small sequential integer, exact in a double up to 2^53.
-        constexpr auto MaxExactInteger = 9007199254740992.0;
-        if (!isWhole(windowId, MaxExactInteger) || !isWhole(tabIndex, std::numeric_limits<int>::max()))
-            return std::nullopt;
-        return TabDrag { .window = vtworkspace::WindowId { static_cast<uint64_t>(windowId.toDouble()) },
-                         .row = tabIndex.toInt() };
-    }
-
-    /// Whether a tab can be merged into a split, as the window's session factory reports it.
-    [[nodiscard]] constexpr SplitSupport splitSupportFor(session::TabMergeSupport support) noexcept
-    {
-        switch (support)
-        {
-            case session::TabMergeSupport::Supported: return SplitSupport::Supported;
-            case session::TabMergeSupport::Unsupported: return SplitSupport::Unsupported;
-        }
-        return SplitSupport::Unsupported;
-    }
-} // namespace
+QString WindowController::dragTitle(QString const& nodePayload) const
+{
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    if (drag == nullptr || drag->drag.host != _manager.hostIdentity())
+        return {};
+    auto const* const session = _manager.sessionForHostId(drag->drag.sessions.front());
+    return session != nullptr ? session->title() : QString {};
+}
 
 int WindowController::dropZoneAt(session::TerminalSession const* pane,
                                  int payload,
@@ -919,7 +894,7 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
                                  qreal y,
                                  qreal width,
                                  qreal height,
-                                 QString const& tabPayload) const
+                                 QString const& nodePayload) const
 {
     auto const none = static_cast<int>(DropZone::None);
     if (pane == nullptr || payload < 0 || std::cmp_greater_equal(payload, DropPayloadCount))
@@ -939,52 +914,192 @@ int WindowController::dropZoneAt(session::TerminalSession const* pane,
             if (pane->paneState() == PaneState::Ended)
                 return none;
             break;
-        case DropPayload::Tab: {
-            auto const drag = parseTabDrag(tabPayload, _processToken);
-            auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
-            auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
-            if (source == nullptr)
+        case DropPayload::Tab:
+        case DropPayload::Pane: {
+            // Resolved once per drag; only the geometry is this hover's.
+            auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+            if (drag == nullptr)
                 return none;
-            inputs.split = splitSupportFor(_manager.tabMergeSupport(drag->window, _windowId));
-            if (std::get<1>(_manager.model().findSessionLeaf(pane->modelSessionId())) == source)
-                inputs.origin = DropOrigin::OwnTab;
+            // What the drag says it is, not what the card guessed: a tab of one pane drags as that pane.
+            inputs.payload = drag->drag.payload;
+            inputs.refusal = drag->refusalAt(drag->edgePlaceIn(_windowId));
+            if (inputs.refusal != MoveRefusal::None)
+                break;
+            // A drag of this process naming what is gone since (its shell exited) is taken, and moves
+            // nothing.
+            if (!drag->tab && drag->drag.host.kind == HostKind::Process)
+                return static_cast<int>(DropZone::NoOp);
+            auto const hovered = _manager.hostSessionIdOf(*pane);
+            if (hovered && std::ranges::contains(drag->drag.sessions, *hovered))
+                inputs.origin =
+                    drag->drag.payload == DropPayload::Pane ? DropOrigin::OwnPane : DropOrigin::OwnTab;
+            // A swap is a place of its own: a daemon that serves the edges may not trade two.
+            if (auto const zone = resolveDropZone(inputs);
+                zone == DropZone::Swap && drag->refusalAt(MovePlace::Swap) != MoveRefusal::None)
+                return static_cast<int>(DropZone::Refused);
             break;
         }
     }
     return static_cast<int>(resolveDropZone(inputs));
 }
 
-void WindowController::dropTabOnPane(session::TerminalSession const* pane,
-                                     int zone,
-                                     QString const& tabPayload)
+QString WindowController::dropGhostLabel(int zone, int payload, session::TerminalSession const* target) const
+{
+    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount) || payload < 0
+        || std::cmp_greater_equal(payload, DropPayloadCount))
+        return {};
+    auto const label =
+        toQString(dropGhostLabelOf(static_cast<DropZone>(zone), static_cast<DropPayload>(payload)));
+    // A swap names the pane it trades places with.
+    return label.contains(QStringLiteral("%1")) ? label.arg(target != nullptr ? target->title() : QString {})
+                                                : label;
+}
+
+QString WindowController::refusalText(QString const& nodePayload) const
+{
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    if (drag == nullptr)
+        return {};
+    // What a pane card that shows DropZone::Refused is refused for: its edges, else its middle.
+    auto refusal = drag->refusalAt(drag->edgePlaceIn(_windowId));
+    if (refusal == MoveRefusal::None)
+        refusal = drag->refusalAt(MovePlace::Swap);
+    return toQString(refusalTextOf(refusal));
+}
+
+void WindowController::dropNodeOnPane(session::TerminalSession const* pane,
+                                      int zone,
+                                      QString const& nodePayload)
 {
     if (pane == nullptr || zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
         return;
-    auto const side = dropZoneRowOf(static_cast<DropZone>(zone)).side;
-    if (!side)
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    if (drag == nullptr)
         return;
-
-    // Re-resolved here, not trusted from the caller: the payload names a window and a row, which may be
-    // anything by now.
-    auto const drag = parseTabDrag(tabPayload, _processToken);
-    auto const* const sourceWindow = drag ? _manager.model().window(drag->window) : nullptr;
-    auto const* const source = sourceWindow != nullptr ? sourceWindow->tabAt(drag->row) : nullptr;
-    auto const [targetWindow, targetTab, leaf] = _manager.model().findSessionLeaf(pane->modelSessionId());
-    if (source == nullptr || targetWindow == nullptr || targetTab == nullptr || leaf == nullptr
-        || targetTab == source
-        || splitSupportFor(_manager.tabMergeSupport(drag->window, targetWindow->id()))
-               != SplitSupport::Supported)
+    auto const dropZone = static_cast<DropZone>(zone);
+    auto target = std::optional<vtworkspace::MoveTarget> {};
+    if (auto const side = dropZoneRowOf(dropZone).side)
+        target = vtworkspace::EdgeTarget { .pane = pane->modelSessionId(), .side = *side };
+    else if (dropZone == DropZone::Swap && drag->drag.payload == DropPayload::Pane)
+        target = vtworkspace::SwapTarget { .pane = pane->modelSessionId() };
+    if (!target)
         return;
-    _manager.mergeTabIntoSplit(
-        drag->window, drag->row, targetWindow->id(), targetTab->id(), leaf->id(), *side);
+    // A move the model or the daemon refuses changes nothing, which is all there is to do about it.
+    placeNode(*drag, *target);
 }
 
-QString WindowController::dropGhostLabel(int zone) const
+void WindowController::dropNodeOnTab(int tabIndex, QString const& nodePayload)
 {
-    if (zone < 0 || std::cmp_greater_equal(zone, DropZoneCount))
-        return {};
-    return QString::fromUtf8(dropZoneRowOf(static_cast<DropZone>(zone)).label.data(),
-                             static_cast<qsizetype>(dropZoneRowOf(static_cast<DropZone>(zone)).label.size()));
+    auto const* const window = _manager.model().window(_windowId);
+    auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    // Beside the tab's active pane, but a place of its own: one an older daemon serves no route to.
+    if (tab == nullptr || drag == nullptr || drag->refusalAt(MovePlace::OnTab) != MoveRefusal::None)
+        return;
+    placeNode(*drag,
+              vtworkspace::EdgeTarget { .pane = tab->activePane()->session(),
+                                        .side = vtworkspace::SplitSide::Right });
+}
+
+void WindowController::dropNodeInGap(int index, QString const& nodePayload)
+{
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    if (index < 0 || drag == nullptr)
+        return;
+    // A gap is between two tabs as they are now; a tab of this window taken out of the strip first lands
+    // one row left of a gap to its right.
+    if (drag->tab && drag->window == _windowId && drag->movesWholeTab())
+        if (auto const row = _manager.model().window(_windowId)->indexOf(*drag->tab); index > row)
+            --index;
+    placeNode(*drag, vtworkspace::TabWellTarget { .window = _windowId, .index = index });
+}
+
+void WindowController::setTabSpans(QList<QRectF> const& tabs)
+{
+    // The call form: clang with libstdc++ 14 cannot pipe a view into ranges::to.
+    _tabSpans =
+        std::ranges::to<std::vector<TabSpan>>(tabs | std::views::transform([](QRectF const& tab) {
+                                                  return TabSpan { .left = tab.left(), .right = tab.right() };
+                                              }));
+}
+
+TabBarHitValue WindowController::tabBarHit(qreal x) const
+{
+    return TabBarHitValue { resolveTabBarHit(_tabSpans, x) };
+}
+
+bool WindowController::springOpens(int tabIndex, QString const& nodePayload) const
+{
+    auto const* const window = _manager.model().window(_windowId);
+    auto const* const tab = window != nullptr ? window->tabAt(tabIndex) : nullptr;
+    auto const* const drag = _manager.resolveNodeDrag(nodePayload);
+    if (tab == nullptr || drag == nullptr)
+        return false;
+    auto subject = DwellSubject::OtherTab;
+    if (drag->tab == tab->id())
+        subject = drag->movesWholeTab() ? DwellSubject::DraggedTab : DwellSubject::SourceTab;
+    // Opened so the drag can be dropped beside one of that tab's panes.
+    return shouldSpringOpen(subject, drag->refusalAt(drag->edgePlaceIn(_windowId))) == DwellOpens::Yes;
+}
+
+void WindowController::placeNode(session::ResolvedDrag drag, vtworkspace::MoveTarget target)
+{
+    // A move the model or the daemon refuses changes nothing, which is all there is to do about it. The
+    // manager outlives every window, so the closure may run after this one is gone.
+    _manager.afterNodeDrag([manager = &_manager, drag = std::move(drag), target] {
+        std::ignore = manager->moveNode(drag, target, nullptr, {});
+    });
+}
+
+QString WindowController::beginNodeDrag(std::optional<NodeDrag> drag, session::TerminalSession* carried)
+{
+    return drag ? _manager.beginNodeDrag(*this, std::move(*drag), carried) : QString {};
+}
+
+QString WindowController::beginPaneDrag(session::TerminalSession* pane)
+{
+    return beginNodeDrag(pane != nullptr ? _manager.paneDragOf(*pane) : std::nullopt, pane);
+}
+
+QString WindowController::beginTabDrag(int tabIndex)
+{
+    return beginNodeDrag(_manager.tabDragOf(_windowId, tabIndex), nullptr);
+}
+
+QObject* WindowController::carriedPane() const
+{
+    return _manager.carriedPane(this);
+}
+
+void WindowController::abandonNodeDrag()
+{
+    std::ignore = _manager.endNodeDrag(this);
+}
+
+void WindowController::finishNodeDrag(int dropAction)
+{
+    // The drops of this drag are made now that its delegate is back from the OS loop; the drag is
+    // forgotten as `ended` goes, whatever the end.
+    auto const ended = _manager.endNodeDrag(this);
+    // A window that recognised the drop took it, refusals and no-ops included.
+    if (!ended || dropAction != Qt::IgnoreAction)
+        return;
+    // Qt ends an Escape-cancelled drag as it ends a drop no window took, so whether the user cancelled is
+    // told apart by where the pointer is: Escape over a Contour window was offered to that window, which
+    // takes every drag.
+    auto const& probe = ended->probe();
+    if (probe.pointerOverContourAtEnd() == PointerOverContour::Yes)
+        return;
+    auto const spot = probe.dropSpot();
+    std::ignore = _manager.moveNode(ended->drag(),
+                                    vtworkspace::NewWindowTarget {},
+                                    spot.screen != nullptr ? spot.screen : screen(),
+                                    spot.at);
+}
+
+void WindowController::announceMove(QString const& announcement)
+{
+    _noticeAnnouncer->announce(announcement);
 }
 
 QRectF WindowController::dropGhostRect(int zone, qreal width, qreal height, qreal inset) const
@@ -1007,7 +1122,9 @@ void WindowController::runTabAction(int row, actions::Action const& action)
                            emit tabColorPickRequested(row);
                    },
                    [&](actions::ResetTabColor const&) { resetTabColor(row); },
-                   [&](actions::MoveTabToNewWindow const&) { tearOffTab(row); },
+                   [&](actions::MoveTabToNewWindow const&) {
+                       _manager.tearOffTabToNewWindow(_windowId, row, screen());
+                   },
                    [&](actions::CloseTab const&) { closeTabAtIndex(row); },
                    [&](actions::CloseOtherTabs const&) { closeOtherTabs(row); },
                    [&](actions::CloseTabsToRight const&) { closeTabsToRight(row); },
@@ -1527,6 +1644,7 @@ void WindowController::closeWindow()
         return;
     _closing = true;
 
+    abandonNodeDrag();
     rememberWindowPosition();
     // A placed window (the quick terminal) is opened where its opener puts it, so what it last was is no
     // one's business.
@@ -2314,7 +2432,9 @@ void WindowController::rememberWindowPosition()
 
 void WindowController::restoreWindowPosition()
 {
-    if (!_manager.app().config().rememberWindowPosition.value() || _osWindow == nullptr
+    // A position this window was opened at -- where a dragged pane was dropped -- is placed whatever is
+    // remembered; a remembered one is only loaded while positions are remembered.
+    if ((!_manager.app().config().rememberWindowPosition.value() && !_initialPosition) || _osWindow == nullptr
         || QGuiApplication::platformName() == QStringLiteral("wayland"))
         return;
 
@@ -2480,6 +2600,19 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
             case QEvent::KeyRelease:
             case QEvent::MouseButtonPress:
             case QEvent::Wheel: followHeldModifier(*event); break;
+
+            // Seen by the window before any of its drop areas, whichever of them takes the drag: where a
+            // drag no window took ended may have to be read from these (DragEndProbe).
+            case QEvent::DragEnter:
+                // A drag of another process is resolved afresh as it enters (@see resolveNodeDrag).
+                _manager.forgetHoveredDrag();
+                [[fallthrough]];
+            case QEvent::DragMove:
+            case QEvent::Drop:
+                _manager.app().dragEndProbe().noteDragOver(*_osWindow,
+                                                           static_cast<QDropEvent*>(event)->position());
+                break;
+            case QEvent::DragLeave: _manager.app().dragEndProbe().noteDragLeft(*_osWindow); break;
 
             default: break;
         }

@@ -11,10 +11,16 @@
 #include <QtCore/QTimer>
 
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace contour::window
 {
+
+/// Builds the announcer a window's notices speak through.
+/// @param anchor What the announcements are made against: the window while it is shown, null otherwise.
+using NoticeAnnouncerFactory =
+    std::function<std::unique_ptr<platform::Announcer>(std::function<QObject*()> anchor)>;
 
 /// A window's notices, for QML: the toast and the banner its NoticeQueue shows, the timer that ends a toast,
 /// and the announcement that tells a screen reader. GUI thread.

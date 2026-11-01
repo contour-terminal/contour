@@ -245,8 +245,9 @@ TEST_CASE("focus: moving a tab to another window does not carry VT focus into th
     REQUIRE(stayed != nullptr);
 
     // The transplant routes through activeTabChanged on the DESTINATION window, which does not own
-    // focus — so the moved tab must not steal it.
-    windowB->moveTabIntoThisWindow(windowA.id.value, 0, 0);
+    // focus — so the moved tab must not steal it. The model's move, not a drop: a drop raises and focuses
+    // the window it landed in on purpose.
+    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
     CHECK_FALSE(moved->terminal().focused());
     CHECK(stayed->terminal().focused());
 

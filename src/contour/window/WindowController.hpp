@@ -12,6 +12,7 @@
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
+#include <contour/session/NodeDragSession.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/ChromeFocus.hpp>
 #include <contour/window/ChromeKeys.hpp>
@@ -19,12 +20,15 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
 #include <contour/window/MenuRouting.hpp>
+#include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/SecureInputPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TabBarDropPolicy.hpp>
+#include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -38,6 +42,7 @@
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QPointer>
+#include <QtCore/QRectF>
 #include <QtCore/QTimer>
 #include <QtCore/QVariant>
 #include <QtGui/QColor>
@@ -79,9 +84,10 @@ class TerminalSession;
 namespace contour::window
 {
 
-/// The random token that tells this process's tab drags from any other's: generated once, on first use, and
-/// the same for the rest of the process's life.
-/// @return The token, which a tab drag's payload carries as `token`.
+/// The random token that tells this process's drags from any other's: generated once, on first use, and the
+/// same for the rest of the process's life.
+/// @return The token, which a node drag's payload carries as its host's id
+/// (TerminalSessionManager::hostIdentity).
 [[nodiscard]] QString const& processToken();
 
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
@@ -97,11 +103,6 @@ enum class MenuSurface : uint8_t
 
 /// How many MenuSurface values there are.
 inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSurface::MainMenu) + 1;
-
-/// Builds the announcer a window's notices speak through.
-/// @param anchor What the announcements are made against: the window while it is shown, null otherwise.
-using NoticeAnnouncerFactory =
-    std::function<std::unique_ptr<platform::Announcer>(std::function<QObject*()> anchor)>;
 
 /// @return The production NoticeAnnouncerFactory: Qt's accessibility announcements (platform::QtAnnouncer).
 [[nodiscard]] NoticeAnnouncerFactory qtNoticeAnnouncer();
@@ -138,6 +139,9 @@ class WindowController:
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    /// The pane whose header carries the node drag this window owns: it shows the placeholder where its card
+    /// was. Null while no pane of this window is carried (a tab's drag carries none).
+    Q_PROPERTY(QObject* carriedPane READ carriedPane NOTIFY carriedPaneChanged)
     /// This window's command palette list. Per-window (not per-app) because the filter text and the
     /// selection are things the user is doing IN this window; the recently-used list behind it is
     /// app-wide and lives on the manager.
@@ -251,12 +255,11 @@ class WindowController:
     /// @param windowId The backing vtworkspace::Window this controller adapts.
     /// @param menuPresentation Whether this window's menus open natively or in the scene: the app's
     ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
-    /// @param initialPosition The first window's remembered location, absent for additional windows.
+    /// @param initialPosition The first window's remembered location, or where a window opened for a dropped
+    ///                 pane or tab goes; absent for other windows.
     /// @param clock    What the held-modifier reveal measures its hold against.
     /// @param noticeAnnouncer Builds what the window's notices are said through; the window says them only
     ///                 while `accessibility_announcements` allows.
-    /// @param processToken The token this process stamps into a tab drag's payload (processToken()); a drag
-    ///                 that carries another is refused. The application's own in production.
     /// @param role     What the window is for; fixed for its life.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
@@ -264,7 +267,6 @@ class WindowController:
                      std::optional<WindowPosition> initialPosition = std::nullopt,
                      core::platform::IClock const& clock = core::platform::defaultSteadyClock(),
                      NoticeAnnouncerFactory const& noticeAnnouncer = qtNoticeAnnouncer(),
-                     QString processToken = window::processToken(),
                      WindowRole role = WindowRole::Normal);
     ~WindowController() override;
 
@@ -274,6 +276,12 @@ class WindowController:
     WindowController& operator=(WindowController&&) = delete;
 
     [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _windowId; }
+    /// @return Where this window is placed as it is first shown -- its remembered place, or where a pane
+    ///         dropped outside every window opened it -- until that first expose places it.
+    [[nodiscard]] std::optional<WindowPosition> const& initialPosition() const noexcept
+    {
+        return _initialPosition;
+    }
 
     // {{{ QAbstractListModel (tab strip)
     [[nodiscard]] QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
@@ -328,41 +336,41 @@ class WindowController:
     Q_INVOKABLE void dispatchTabStripWheel(
         int pixelDeltaX, int pixelDeltaY, int angleDeltaX, int angleDeltaY, int phase, bool inverted);
     Q_INVOKABLE void moveTab(int fromIndex, int toIndex);
-    /// The raw id of the window this controller adapts, so a QML drag payload can name its source
-    /// window and a DropArea can target the destination window across the shared engine.
-    Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return _windowId.value; }
-    /// The random token of this process, which a tab drag's payload carries (`token`). The payload rides in
-    /// an OS-level drag, so a drop reads it back from whatever process started the drag: one that carries
-    /// another token (a second Contour, also one in its own PID namespace as under Flatpak) names a window
-    /// and a row of ITS model, and is refused. Another application that forges the mime type is refused
-    /// unless it learns the token, which is not published anywhere but in this process's own drags; it is a
-    /// guard against mix-ups between instances, not against a hostile process of the same user.
-    Q_INVOKABLE [[nodiscard]] QString processToken() const { return _processToken; }
-    /// Moves the tab at @p fromIndex of the window identified by @p sourceWindowId into THIS window at
-    /// @p toIndex — the drop of a tab dragged from another window's strip onto this one.
-    /// @param sourceWindowId The dragged tab's source window id (from windowIdValue()).
-    /// @param fromIndex      The tab's row in the source window.
-    /// @param toIndex        The destination row in this window.
-    Q_INVOKABLE void moveTabIntoThisWindow(quint64 sourceWindowId, int fromIndex, int toIndex);
-    /// Tears the tab at @p index of THIS window out into a brand-new OS window (drop on empty desktop).
-    /// @param index The tab's row in this window.
-    Q_INVOKABLE void tearOffTab(int index);
+    /// The `application/x-contour-node` payload of a drag of the pane showing @p pane.
+    /// @param pane The pane's TerminalSession.
+    /// @return The JSON; empty for a pane that cannot be dragged (none, or one its host has no id for yet).
+    [[nodiscard]] QString paneDragPayload(session::TerminalSession const* pane) const;
+    /// The `application/x-contour-node` payload of a drag of the tab at @p tabIndex: a tab of one pane
+    /// drags as that pane.
+    /// @param tabIndex The tab's row in this window.
+    /// @return The JSON; empty for no such tab, or one its host has no id for yet.
+    [[nodiscard]] QString tabDragPayload(int tabIndex) const;
+    /// What kind of node @p nodePayload drags, for the DropArea that has only the JSON in hand.
+    /// @param nodePayload The drag's `application/x-contour-node` JSON.
+    /// @return A DropPayload, as its value: Pane or Tab; None for JSON that is no node drag.
+    Q_INVOKABLE [[nodiscard]] int dropPayloadOf(QString const& nodePayload) const;
+    /// The name of what @p nodePayload drags, for the slot a tab strip shows where it would land: the title
+    /// of the dragged pane, or of the first pane of the dragged tab.
+    /// @param nodePayload The drag's JSON.
+    /// @return The title; empty for a drag this process does not show, or JSON that is no node drag.
+    Q_INVOKABLE [[nodiscard]] QString dragTitle(QString const& nodePayload) const;
     /// What dropping something over a pane would do, for the DropArea of a pane card to show and to act on.
     /// Decided by resolveDropZone() from what this window can do and what is dragged.
     ///
     /// Files and text insert into the pane unless its session has ended (typed text would be swallowed, or
-    /// worse, restart it); a tab splits the pane only from another tab, only on a pane's outer edges, and
-    /// only where the window's sessions are hosted here; anywhere else a tab is left alone (PassThrough:
-    /// not accepted, so the drag ends as it does today).
+    /// worse, restart it). A pane or tab is refused where it cannot move into this window
+    /// (TerminalSessionManager::refusalFor), is a no-op over itself or when it has gone since the drag
+    /// began; otherwise a pane splits in an edge band and swaps in the middle, and a tab splits only from
+    /// another tab and only in an edge band (PassThrough elsewhere: not accepted).
     /// @param pane         The pane's TerminalSession; null resolves to DropZone::None.
     /// @param payload     What is dragged, as a DropPayload; out of range resolves to DropZone::None.
     /// @param x           The pointer's distance from the pane's left edge.
     /// @param y           The pointer's distance from the pane's top edge.
     /// @param width       The pane card's width.
     /// @param height      The pane card's height.
-    /// @param tabPayload  The drag's `application/x-contour-tab` JSON (`windowId`, `tabIndex`); read only
-    ///                    for a tab. It comes from whatever started the drag, so it is resolved against
-    ///                    the model and an unknown window or row resolves to DropZone::None.
+    /// @param nodePayload The drag's `application/x-contour-node` JSON; read only for a pane or tab. It comes
+    /// from
+    ///                    whatever started the drag, so one that does not parse resolves to DropZone::None.
     /// @return A DropZone, as its value.
     Q_INVOKABLE [[nodiscard]] int dropZoneAt(session::TerminalSession const* pane,
                                              int payload,
@@ -370,18 +378,82 @@ class WindowController:
                                              qreal y,
                                              qreal width,
                                              qreal height,
-                                             QString const& tabPayload) const;
-    /// Performs the drop of a tab on a pane: for a split zone, merges the dragged tab into the pane's tab on
-    /// that side. Anything else changes nothing. Everything is decided again here, not taken from the QML
-    /// caller: the tab is re-resolved from @p tabPayload, and it must come from another tab and the window
-    /// must be able to split.
-    /// @param pane         The pane's TerminalSession.
+                                             QString const& nodePayload) const;
+    /// The label of the ghost shown for @p zone when @p payload is dragged over @p target ("Pane → split
+    /// right", "Swap with <pane>"); empty for a zone with no ghost.
+    /// @param zone    A DropZone, as its value.
+    /// @param payload A DropPayload, as its value.
+    /// @param target  The pane hovered, whose title a swap names.
+    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int zone,
+                                                     int payload,
+                                                     session::TerminalSession const* target) const;
+    /// The body of the refusal shown when @p nodePayload cannot move into this window (refusalTextOf()).
+    /// @param nodePayload The drag's JSON.
+    /// @return The text; empty when nothing refuses it, or it does not parse.
+    Q_INVOKABLE [[nodiscard]] QString refusalText(QString const& nodePayload) const;
+    /// Drops @p nodePayload on @p pane in @p zone: beside it in a split zone, onto it (trading places) in the
+    /// swap zone. Any other zone changes nothing. Everything is decided again here, not taken from the QML
+    /// caller: the zone must be one the drag can have here, and a refused drag moves nothing.
+    /// @param pane        The pane's TerminalSession.
     /// @param zone        The zone dropZoneAt() answered, as its value.
-    /// @param tabPayload  The drag's `application/x-contour-tab` JSON.
-    Q_INVOKABLE void dropTabOnPane(session::TerminalSession const* pane, int zone, QString const& tabPayload);
-    /// The label of the ghost shown for @p zone ("Tab → split right"); empty for a zone with no ghost.
-    /// @param zone A DropZone, as its value.
-    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int zone) const;
+    /// @param nodePayload The drag's JSON.
+    Q_INVOKABLE void dropNodeOnPane(session::TerminalSession const* pane,
+                                    int zone,
+                                    QString const& nodePayload);
+    /// Drops @p nodePayload on the tab at @p tabIndex: to the right of that tab's active pane.
+    /// @param tabIndex    The tab's row in this window.
+    /// @param nodePayload The drag's JSON.
+    Q_INVOKABLE void dropNodeOnTab(int tabIndex, QString const& nodePayload);
+    /// Drops @p nodePayload in the gap before the tab at @p index (@p index of the tab count: after the
+    /// last): a tab of its own there; a tab of this window's is reordered to it.
+    /// @param index       The gap, as resolveTabBarHit() names it.
+    /// @param nodePayload The drag's JSON.
+    Q_INVOKABLE void dropNodeInGap(int index, QString const& nodePayload);
+    /// Records where the tab strip's tabs are, for tabBarHit(). The window lays the strip out, not this
+    /// controller: externally-driven geometry, reported by the strip as a drag enters it and whenever it
+    /// lays out while the drag is over it.
+    /// @param tabs Each tab's rectangle in the strip, left to right; only the horizontal extent is read.
+    Q_INVOKABLE void setTabSpans(QList<QRectF> const& tabs);
+    /// Hit-tests the tab strip (resolveTabBarHit()) against the spans setTabSpans() last reported.
+    /// @param x The pointer's position along the strip.
+    /// @return What the pointer is on (`hit.spot`, a TabBarSpot) and which tab or gap (`hit.index`).
+    Q_INVOKABLE [[nodiscard]] TabBarHitValue tabBarHit(qreal x) const;
+    /// Whether resting a drag of @p nodePayload on the tab at @p tabIndex opens that tab
+    /// (shouldSpringOpen()): never the tab dragged, nor the one the drag came from, nor in a window that
+    /// refuses the drag.
+    /// @param tabIndex    The hovered tab's row.
+    /// @param nodePayload The drag's JSON.
+    /// @return Whether it opens. A `bool` because this is the Qt boundary: QML reads it in a condition; the
+    ///         decision itself is DwellOpens.
+    Q_INVOKABLE [[nodiscard]] bool springOpens(int tabIndex, QString const& nodePayload) const;
+    /// Starts the drag of @p pane by its header: from here until finishNodeDrag(), the window closing or the
+    /// next drag beginning, the session manager holds the drag for this window -- a delegate only forwards
+    /// -- and the moves its drops ask for wait until it has returned (the delegate the OS drag loop runs on
+    /// must outlive the loop). The pane is carried (carriedPane()) for as long. A drag still running is
+    /// ended first, in its own window.
+    /// @param pane The pane's TerminalSession.
+    /// @return The `application/x-contour-node` JSON the drag carries; empty for a pane that cannot be
+    ///         dragged, which starts no drag.
+    Q_INVOKABLE [[nodiscard]] QString beginPaneDrag(session::TerminalSession* pane);
+    /// Starts the drag of the tab at @p tabIndex, as beginPaneDrag() does a pane's; no pane is carried.
+    /// @param tabIndex The tab's row in this window.
+    /// @return The JSON; empty for a tab that cannot be dragged, which starts no drag.
+    Q_INVOKABLE [[nodiscard]] QString beginTabDrag(int tabIndex);
+    /// Ends the drag this window began, exactly once; with none running it does nothing. A drop some
+    /// Contour window took (@p dropAction is not Qt::IgnoreAction) did its work there -- every window takes
+    /// every pane and tab dropped on it, as a no-op where nothing else did -- so one no window took was
+    /// dropped outside or cancelled. The app's DragEndProbe tells which, as Qt reports Escape like a drop
+    /// outside; a drop outside opens a window of its own where the probe says it ended.
+    /// @param dropAction The Qt::DropAction the drag ended with, as its value.
+    Q_INVOKABLE void finishNodeDrag(int dropAction);
+    /// @return The pane whose header carries the drag this window began; null for none.
+    [[nodiscard]] QObject* carriedPane() const;
+
+    /// Says @p announcement through this window's screen reader. Public because it is the session
+    /// manager's seam: the manager composes the text and calls the receiving window, which for a move into
+    /// a new window does not exist yet when the drop is handled.
+    /// @param announcement What to say.
+    void announceMove(QString const& announcement);
     /// The ghost's rectangle for @p zone: the half of the pane on the zone's side (dropGhostOf()), in the
     /// pane's coordinates.
     /// @param zone   A DropZone, as its value.
@@ -1159,6 +1231,8 @@ class WindowController:
 
   signals:
     void countChanged();
+    /// carriedPane() changed: a node drag began or ended.
+    void carriedPaneChanged();
     void activeTabIndexChanged();
     /// Requests that the tab at @p index open its inline title editor. Per-window (this controller
     /// is the tab-strip model), so it only reaches this window's TabItems; the delegate whose row
@@ -1383,10 +1457,17 @@ class WindowController:
 
     /// Stores @p visual and emits nativeMaximizeVisualChanged() when it differs. GUI thread.
     void setNativeMaximizeVisual(platform::CaptionButtonVisual visual);
+    /// Makes a drop's move now, or once the node drag in flight has returned
+    /// (TerminalSessionManager::afterNodeDrag).
+    void placeNode(session::ResolvedDrag drag, vtworkspace::MoveTarget target);
+    /// Starts the drag of @p drag (@see beginPaneDrag).
+    [[nodiscard]] QString beginNodeDrag(std::optional<NodeDrag> drag, session::TerminalSession* carried);
+    /// Ends the node drag this window owns, if any, without acting on how it ended.
+    void abandonNodeDrag();
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
-    QString _processToken; ///< What processToken() answers.
+    std::vector<TabSpan> _tabSpans; ///< Where the strip's tabs are, as setTabSpans() last reported.
     // Retained until the first normal expose so late native frame margins can be clamped too.
     WindowRole _role; ///< @see role
     std::optional<WindowPosition> _initialPosition;

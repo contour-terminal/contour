@@ -233,3 +233,33 @@ TEST_CASE("NoticeQueue: an unavailable hotkey is a long toast with a mark and a 
     for (auto const index: std::views::iota(size_t { 0 }, contour::window::HotkeyErrorSentences.size()))
         CHECK_FALSE(hotkeyUnavailableNoticeText(static_cast<HotkeyError>(index)).empty());
 }
+
+TEST_CASE("moveRefusedText: a stale drag says so, a drop with nothing to tell says nothing", "[notices]")
+{
+    using contour::window::moveRefusedText;
+    using vthost::NodeMoveError;
+    using vtworkspace::MoveError;
+    auto const host = [](NodeMoveError error) {
+        return static_cast<int>(std::to_underlying(error));
+    };
+    auto const model = [](MoveError error) {
+        return static_cast<int>(std::to_underlying(error));
+    };
+
+    CHECK(moveRefusedText(host(NodeMoveError::StaleTab), 0) == contour::window::MoveStaleText);
+    CHECK(moveRefusedText(host(NodeMoveError::UnknownSession), 0) == contour::window::MoveStaleText);
+    CHECK(moveRefusedText(host(NodeMoveError::Model), model(MoveError::SelfTarget)).empty());
+    CHECK(moveRefusedText(host(NodeMoveError::Model), model(MoveError::NoOp)).empty());
+    // Everything else is the daemon's to explain: a refusal of the model's own, a request it could not read,
+    // a reason this build does not know, and a move no connection could send.
+    for (auto const error: { MoveError::UnknownSource, MoveError::UnknownTarget, MoveError::TabIntoSwap })
+        CHECK(moveRefusedText(host(NodeMoveError::Model), model(error)) == contour::window::MoveRefusedText);
+    CHECK(moveRefusedText(host(NodeMoveError::UnknownKind), 0) == contour::window::MoveRefusedText);
+    CHECK(moveRefusedText(host(NodeMoveError::UnknownSide), 0) == contour::window::MoveRefusedText);
+    CHECK(moveRefusedText(0xEE, 0) == contour::window::MoveRefusedText);
+    CHECK(moveRefusedText(-1, 0) == contour::window::MoveRefusedText);
+    // A model reason beside a host reason that is not Model is not read.
+    CHECK(moveRefusedText(host(NodeMoveError::StaleTab), model(MoveError::NoOp))
+          == contour::window::MoveStaleText);
+    STATIC_CHECK(moveRefusedText(host(NodeMoveError::Model), model(MoveError::NoOp)).empty());
+}

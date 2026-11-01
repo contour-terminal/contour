@@ -23,6 +23,9 @@
 #include <string_view>
 #include <utility>
 
+#include <vthost/NodeMoveError.hpp>
+#include <vtworkspace/Move.hpp>
+
 namespace contour::window
 {
 
@@ -273,6 +276,49 @@ inline constexpr std::string_view DropTextLineBreakText =
 /// owns the layout, and it did not take the request (or no longer can).
 inline constexpr std::string_view TabMergeRefusedText =
     "Not merged: the daemon could not take the tab into that pane.";
+
+/// What the toast says when a pane or tab dropped in a daemon-hosted window cannot be moved: the daemon owns
+/// the layout, and it refused the move, or the move never reached it.
+inline constexpr std::string_view MoveRefusedText = "Not moved: the daemon could not move that pane.";
+
+/// What the toast says when the daemon refused a move because what was dragged changed meanwhile: another
+/// client closed, moved or added to it.
+inline constexpr std::string_view MoveStaleText = "Not moved: the pane changed while it was dragged.";
+
+/// One refusal of a move the toast names: the host's reason, the model's when the host's is
+/// vthost::NodeMoveError::Model, and what the toast says -- nothing, for a drop with nothing to tell.
+struct MoveRefusalRow
+{
+    vthost::NodeMoveError error;                 ///< The host's reason.
+    std::optional<vtworkspace::MoveError> model; ///< The model's, for NodeMoveError::Model only.
+    std::string_view text;                       ///< The toast; empty for none.
+};
+
+/// The refusals of a move with a toast other than MoveRefusedText.
+inline constexpr auto MoveRefusalRows = std::array {
+    MoveRefusalRow { .error = vthost::NodeMoveError::StaleTab, .model = std::nullopt, .text = MoveStaleText },
+    MoveRefusalRow {
+        .error = vthost::NodeMoveError::UnknownSession, .model = std::nullopt, .text = MoveStaleText },
+    // A drop onto itself, or one that leaves everything where it is: the user sees nothing moved, as asked.
+    MoveRefusalRow {
+        .error = vthost::NodeMoveError::Model, .model = vtworkspace::MoveError::SelfTarget, .text = "" },
+    MoveRefusalRow {
+        .error = vthost::NodeMoveError::Model, .model = vtworkspace::MoveError::NoOp, .text = "" },
+};
+
+/// What the toast for a refused move says.
+/// @param reason The host's reason, as NativeController::moveRefused carries it: a vthost::NodeMoveError's
+///               value, or one no row names (a move never sent, a reason this build does not know).
+/// @param modelReason The model's reason, as a vtworkspace::MoveError's value, for NodeMoveError::Model.
+/// @return The text; empty when the refusal needs no toast.
+[[nodiscard]] constexpr std::string_view moveRefusedText(int reason, int modelReason) noexcept
+{
+    auto const row = std::ranges::find_if(MoveRefusalRows, [&](MoveRefusalRow const& candidate) {
+        return std::cmp_equal(std::to_underlying(candidate.error), reason)
+               && (!candidate.model || std::cmp_equal(std::to_underlying(*candidate.model), modelReason));
+    });
+    return row != MoveRefusalRows.end() ? row->text : MoveRefusedText;
+}
 
 /// What the toast for a refused drop says.
 /// @param error Why the drop was refused.

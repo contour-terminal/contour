@@ -17,12 +17,15 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/DropZonePolicy.hpp>
+#include <contour/window/NodeDrag.hpp>
+#include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtpty/MockPty.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
+#include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtQml/QQmlComponent>
@@ -34,14 +37,22 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
+#include <vthost/client/ConnectionState.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -1721,33 +1732,1022 @@ namespace
 {
 using contour::window::DropPayload;
 using contour::window::DropZone;
+using contour::window::HostKind;
+using contour::window::MoveRefusal;
+using contour::window::NodeDrag;
 
 /// A pane card's extent in the tests below.
 constexpr auto PaneWidth = 1000.0;
 constexpr auto PaneHeight = 500.0;
 
-/// The `application/x-contour-tab` payload TabItem.qml writes for the tab at @p row of window @p window,
-/// from the process that holds @p token (this one unless a test says another started the drag).
-[[nodiscard]] QString tabPayload(vtworkspace::WindowId window,
-                                 int row,
-                                 QString const& token = contour::window::processToken())
+/// @p json as another host wrote it: the same ids, which in that host name other sessions.
+[[nodiscard]] QString fromAnotherHost(QString const& json)
 {
-    return QString::fromStdString(std::format(
-        R"({{"windowId":{},"tabIndex":{},"token":"{}"}})", window.value, row, token.toStdString()));
+    auto drag = contour::window::parseNodeDrag(json);
+    REQUIRE(drag.has_value());
+    drag->host.id += QStringLiteral("x");
+    return contour::window::writeNodeDrag(*drag);
 }
 
 /// What @p controller says a drop of @p payload at (@p x, @p y) over @p session's pane does.
 [[nodiscard]] DropZone zoneAt(contour::window::WindowController const& controller,
-                              contour::session::TerminalSession* session,
+                              contour::session::TerminalSession const* session,
                               DropPayload payload,
                               double x,
                               double y,
-                              QString const& tab = {})
+                              QString const& node = {})
 {
     return static_cast<DropZone>(
-        controller.dropZoneAt(session, static_cast<int>(payload), x, y, PaneWidth, PaneHeight, tab));
+        controller.dropZoneAt(session, static_cast<int>(payload), x, y, PaneWidth, PaneHeight, node));
+}
+
+/// The window and tab showing @p session, as the model has them.
+[[nodiscard]] std::pair<vtworkspace::WindowId, vtworkspace::Tab*> placeOf(
+    contour::session::TerminalSessionManager const& manager, contour::session::TerminalSession const* session)
+{
+    auto const [window, tab, leaf] = manager.model().findSessionLeaf(session->modelSessionId());
+    return { window != nullptr ? window->id() : vtworkspace::WindowId {}, tab };
+}
+
+/// A session alive where it was: the same pty, open, and what is written to it after a move shows.
+void requireAlive(contour::session::TerminalSession* session, vtpty::Pty const* pty, std::string const& text)
+{
+    CHECK(&session->terminal().device() == pty);
+    CHECK_FALSE(pty->isClosed());
+    session->terminal().writeToScreen(text);
+    CHECK(session->terminal().primaryScreen().grid().renderMainPageText().contains(text));
+}
+
+/// Two in-process windows whose announcements are recorded.
+///
+/// Window A holds tab 0 of two panes (`left`, `right`, `right` active) and tab 1 of one (`lone`); window B
+/// holds one tab of one pane (`other`).
+struct TwoWindows
+{
+    contour::test::MockPtySessionFactory* factory = nullptr;
+    TestApp app;
+    contour::session::TerminalSessionManager& manager;
+    contour::test::RecordingAnnouncer* saidA = nullptr;
+    contour::test::RecordingAnnouncer* saidB = nullptr;
+    ScopedController a;
+    ScopedController b;
+    contour::session::TerminalSession* left;
+    contour::session::TerminalSession* right;
+    contour::session::TerminalSession* lone;
+    contour::session::TerminalSession* other;
+    std::size_t ptysBefore;
+
+    TwoWindows():
+        app(makeFactory()),
+        manager(app.manager()),
+        a(manager, recordInto(saidA)),
+        b(manager, recordInto(saidB)),
+        left(openTab(*a)),
+        right(splitOff(manager, left)),
+        lone(openTab(*a)),
+        other(openTab(*b)),
+        ptysBefore(factory->createdPtys.size())
+    {
+        app.app().config().accessibilityAnnouncements = true;
+        REQUIRE((left != nullptr && right != nullptr && lone != nullptr && other != nullptr));
+        REQUIRE(left != right);
+    }
+
+    ~TwoWindows()
+    {
+        factory->reportedHosting = contour::session::SessionHosting::Local;
+        // A move may have closed either window.
+        for (auto const id: { a.id, b.id })
+            if (auto* const window = manager.controllerFor(id))
+                contour::test::closeAllTabs(*window);
+    }
+
+    TwoWindows(TwoWindows const&) = delete;
+    TwoWindows& operator=(TwoWindows const&) = delete;
+    TwoWindows(TwoWindows&&) = delete;
+    TwoWindows& operator=(TwoWindows&&) = delete;
+
+    /// The pane drag of @p session, as its card writes it.
+    [[nodiscard]] QString paneOf(contour::session::TerminalSession const* session) const
+    {
+        auto const [window, tab] = placeOf(manager, session);
+        auto* const controller = manager.controllerFor(window);
+        REQUIRE(controller != nullptr);
+        auto const json = controller->paneDragPayload(session);
+        REQUIRE_FALSE(json.isEmpty());
+        return json;
+    }
+
+    /// Window A's tab of two panes, as its strip writes it.
+    [[nodiscard]] QString splitTab() const
+    {
+        auto const json = a->tabDragPayload(0);
+        REQUIRE(contour::window::parseNodeDrag(json)->payload == DropPayload::Tab);
+        return json;
+    }
+
+    /// Every session the windows started with is the same object, alive, and nothing was spawned.
+    void requireNothingRespawned() const
+    {
+        CHECK(factory->createdPtys.size() == ptysBefore);
+        for (auto* session: { left, right, lone, other })
+            CHECK_FALSE(session->terminal().device().isClosed());
+    }
+
+    /// What window @p said was told last.
+    [[nodiscard]] static QString lastSaid(contour::test::RecordingAnnouncer const* said)
+    {
+        return said->said.empty() ? QString {} : said->said.back().message;
+    }
+
+  private:
+    /// Opens a tab in @p window. @return Its pane's session.
+    [[nodiscard]] static contour::session::TerminalSession* openTab(contour::window::WindowController& window)
+    {
+        window.createNewTab();
+        return window.activeSession();
+    }
+
+    /// Splits @p session's pane. @return The new pane's session.
+    [[nodiscard]] static contour::session::TerminalSession* splitOff(
+        contour::session::TerminalSessionManager& manager, contour::session::TerminalSession* session)
+    {
+        manager.splitActivePane(/*vertical*/ true, session);
+        return manager.controllerFor(placeOf(manager, session).first)->activeSession();
+    }
+
+    [[nodiscard]] std::unique_ptr<contour::session::SessionFactory> makeFactory()
+    {
+        auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+        factory = owned.get();
+        return owned;
+    }
+
+    [[nodiscard]] static contour::window::NoticeAnnouncerFactory recordInto(
+        contour::test::RecordingAnnouncer*& said)
+    {
+        return [&said](std::function<QObject*()> const& /*anchor*/)
+                   -> std::unique_ptr<contour::platform::Announcer> {
+            auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+            said = announcer.get();
+            return announcer;
+        };
+    }
+};
+} // namespace
+
+TEST_CASE("parseNodeDrag reads what writeNodeDrag writes, and nothing else", "[contour][multiwindow][drop]")
+{
+    auto const drag = NodeDrag { .payload = DropPayload::Tab,
+                                 .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
+                                 .window = vtworkspace::WindowId { 3 },
+                                 .tabIndex = 1,
+                                 .sessions = { 7, 9 } };
+    CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(drag)) == drag);
+    auto pane = drag;
+    pane.payload = DropPayload::Pane;
+    pane.host = { .kind = HostKind::Process, .id = QStringLiteral("token") };
+    pane.sessions = { 5 };
+    CHECK(contour::window::parseNodeDrag(contour::window::writeNodeDrag(pane)) == pane);
+
+    auto const valid = std::string {
+        R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})"
+    };
+    REQUIRE(contour::window::parseNodeDrag(QString::fromStdString(valid)).has_value());
+    for (
+        auto const* const json: {
+            "",
+            "not json",
+            "[]",
+            R"({"host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4],"x":1})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t","x":1},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"window","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"server","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":""},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":7},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":1,"host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":"t","windowId":1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":"1","tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1.5,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":-1,"tabIndex":0,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":-1,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":3000000000,"sessions":[4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":4})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[-4]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":["4"]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4.5]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[]})",
+            R"({"kind":"pane","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4,5]})",
+            R"({"kind":"tab","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4]})",
+            // A session named twice: a forged tab.
+            R"({"kind":"tab","host":{"kind":"process","id":"t"},"windowId":1,"tabIndex":0,"sessions":[4,4]})",
+        })
+    {
+        INFO(json);
+        CHECK_FALSE(contour::window::parseNodeDrag(QString::fromUtf8(json)).has_value());
+    }
+}
+
+// A forged payload may name any number of sessions: one naming more than a tab can hold is refused unread,
+// and one naming a session twice is refused however long it is.
+TEST_CASE("parseNodeDrag refuses an oversized or duplicated session list", "[contour][multiwindow][drop]")
+{
+    auto const tabOf = [](std::vector<uint64_t> sessions) {
+        return contour::window::writeNodeDrag(
+            NodeDrag { .payload = DropPayload::Tab,
+                       .host = { .kind = HostKind::Daemon, .id = QStringLiteral("42") },
+                       .window = vtworkspace::WindowId { 3 },
+                       .tabIndex = 1,
+                       .sessions = std::move(sessions) });
+    };
+    auto const distinct = [](std::size_t count) {
+        return std::ranges::to<std::vector>(std::views::iota(uint64_t { 1 }, uint64_t { count } + 1));
+    };
+    auto const largest = distinct(contour::window::MaxDragSessions);
+    CHECK(contour::window::parseNodeDrag(tabOf(largest)).has_value());
+    CHECK_FALSE(contour::window::parseNodeDrag(tabOf(distinct(contour::window::MaxDragSessions + 1))));
+    CHECK_FALSE(contour::window::parseNodeDrag(tabOf(distinct(100'000))));
+
+    // The repeated session last and far from the first: a scan of neighbours alone would not find it.
+    auto repeated = largest;
+    repeated.back() = repeated.front();
+    CHECK_FALSE(contour::window::parseNodeDrag(tabOf(repeated)));
+}
+
+TEST_CASE("a pane dropped on another window's pane edge moves there alive", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const* const pty = &f.left->terminal().device();
+    auto const json = f.paneOf(f.left);
+    REQUIRE(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::SplitRight);
+
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), json);
+
+    auto const [window, tab] = placeOf(f.manager, f.left);
+    CHECK(window == f.b.id);
+    REQUIRE(tab != nullptr);
+    CHECK(f.manager.sessionsOfTab(tab) == std::vector { f.other, f.left });
+    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    requireAlive(f.left, pty, "after the move");
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Pane moved to window %1").arg(f.b.id.value));
+    CHECK(f.manager.focusedWindow() == f.b.id);
+}
+
+TEST_CASE("a pane dropped beside a pane of its own window says it moved", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.paneOf(f.left);
+    REQUIRE(zoneAt(*f.a, f.lone, DropPayload::Pane, 500, 20, json) == DropZone::SplitTop);
+
+    f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitTop), json);
+
+    auto const [window, tab] = placeOf(f.manager, f.left);
+    CHECK(window == f.a.id);
+    CHECK(f.manager.sessionsOfTab(tab) == std::vector { f.left, f.lone });
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidA) == QStringLiteral("Pane moved"));
+}
+
+TEST_CASE("a pane dropped on an edge band of its only sibling re-splits the tab along that edge",
+          "[contour][multiwindow][drop]")
+{
+    // Window A's first tab is [left | right]. Each drop is at the point the policy resolves to the band.
+    struct Row
+    {
+        std::string_view name;
+        bool dragsRight; ///< Whether the right pane is dragged onto the left one, or the other way round.
+        double x;
+        double y;
+        DropZone zone;
+        vtworkspace::SplitState split;
+        bool rightFirst; ///< Whether the right pane is the split's first child after the drop.
+    };
+    auto const rows = std::array {
+        Row { "right onto left's top",
+              true,
+              500,
+              20,
+              DropZone::SplitTop,
+              vtworkspace::SplitState::Horizontal,
+              true },
+        Row { "right onto left's bottom",
+              true,
+              500,
+              480,
+              DropZone::SplitBottom,
+              vtworkspace::SplitState::Horizontal,
+              false },
+        Row { "right onto left's left",
+              true,
+              20,
+              250,
+              DropZone::SplitLeft,
+              vtworkspace::SplitState::Vertical,
+              true },
+        Row { "left onto right's left",
+              false,
+              20,
+              250,
+              DropZone::SplitLeft,
+              vtworkspace::SplitState::Vertical,
+              false },
+        Row { "left onto right's right",
+              false,
+              980,
+              250,
+              DropZone::SplitRight,
+              vtworkspace::SplitState::Vertical,
+              true },
+        Row { "left onto right's top",
+              false,
+              500,
+              20,
+              DropZone::SplitTop,
+              vtworkspace::SplitState::Horizontal,
+              false },
+        Row { "left onto right's bottom",
+              false,
+              500,
+              480,
+              DropZone::SplitBottom,
+              vtworkspace::SplitState::Horizontal,
+              true },
+    };
+    for (auto const& row: rows)
+        DYNAMIC_SECTION(row.name)
+        {
+            auto f = TwoWindows {};
+            auto* const dragged = row.dragsRight ? f.right : f.left;
+            auto* const onto = row.dragsRight ? f.left : f.right;
+            auto const json = f.paneOf(dragged);
+            REQUIRE(zoneAt(*f.a, onto, DropPayload::Pane, row.x, row.y, json) == row.zone);
+
+            f.a->dropNodeOnPane(onto, static_cast<int>(row.zone), json);
+
+            auto const [window, tab] = placeOf(f.manager, dragged);
+            CHECK(window == f.a.id);
+            REQUIRE(tab != nullptr);
+            CHECK(tab->rootPane()->splitState() == row.split);
+            CHECK(f.manager.sessionsOfTab(tab)
+                  == (row.rightFirst ? std::vector { f.right, f.left } : std::vector { f.left, f.right }));
+            CHECK(tab->activePane()->session() == dragged->modelSessionId());
+            f.requireNothingRespawned();
+        }
+}
+
+TEST_CASE("a pane dropped on another pane's middle swaps with it", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.paneOf(f.left);
+    REQUIRE(zoneAt(*f.b, f.other, DropPayload::Pane, 500, 250, json) == DropZone::Swap);
+    CHECK(f.b->dropGhostLabel(static_cast<int>(DropZone::Swap), static_cast<int>(DropPayload::Pane), f.other)
+          == QStringLiteral("Swap with %1").arg(f.other->title()));
+    auto const [otherWindowBefore, otherTabBefore] = placeOf(f.manager, f.other);
+    auto const [leftWindowBefore, leftTabBefore] = placeOf(f.manager, f.left);
+
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::Swap), json);
+
+    CHECK(placeOf(f.manager, f.left).first == otherWindowBefore);
+    CHECK(placeOf(f.manager, f.left).second == otherTabBefore);
+    CHECK(placeOf(f.manager, f.other).first == leftWindowBefore);
+    CHECK(placeOf(f.manager, f.other).second == leftTabBefore);
+    requireAlive(f.left, &f.left->terminal().device(), "swapped in");
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Panes swapped"));
+}
+
+TEST_CASE("a pane released on a tab splits right of that tab's active pane", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    f.b->dropNodeOnTab(0, f.paneOf(f.left));
+
+    auto const* const tab = f.manager.model().window(f.b.id)->tabAt(0);
+    REQUIRE(tab->paneCount() == 2);
+    CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+    CHECK(f.manager.sessionsOfTab(placeOf(f.manager, f.left).second) == std::vector { f.other, f.left });
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Pane moved to window %1").arg(f.b.id.value));
+}
+
+TEST_CASE("a drop while the window's drag runs moves once the drag has returned, and the drag ends once",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto& probe = f.app.dragEndProbe();
+    auto const json = f.a->beginPaneDrag(f.left);
+    REQUIRE(json == f.paneOf(f.left));
+    // The pane is carried, in its own window only.
+    CHECK(f.a->carriedPane() == f.left);
+    CHECK(f.b->carriedPane() == nullptr);
+
+    SECTION("a drop in another window is held back, the layout stays whole under the source's delegate")
+    {
+        f.b->dropNodeInGap(1, json);
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 1);
+        CHECK(probe.forgotten == 0);
+
+        f.a->finishNodeDrag(Qt::MoveAction);
+        CHECK(probe.forgotten == 1);
+        // From the event loop, not from inside the delegate's signal.
+        CHECK(f.b->count() == 1);
+        QCoreApplication::processEvents();
+        CHECK(f.b->count() == 2);
+        CHECK(placeOf(f.manager, f.left).first == f.b.id);
+    }
+
+    SECTION("a drop in the source's own window waits too: the pane's header outlives the drag loop")
+    {
+        auto const* const tab = f.manager.model().window(f.a.id)->tabAt(0);
+        auto const before = tab->rootPane()->splitState();
+        f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitBottom), json);
+        QCoreApplication::processEvents();
+        CHECK(tab->rootPane()->splitState() == before);
+        f.a->finishNodeDrag(Qt::MoveAction);
+        CHECK(tab->rootPane()->splitState() == before);
+        QCoreApplication::processEvents();
+        CHECK(tab->rootPane()->splitState() != before);
+        CHECK(probe.forgotten == 1);
+    }
+
+    SECTION("the end is told once, however often it is told")
+    {
+        f.a->finishNodeDrag(Qt::MoveAction);
+        f.a->finishNodeDrag(Qt::MoveAction);
+        f.a->finishNodeDrag(Qt::IgnoreAction);
+        CHECK(probe.forgotten == 1);
+        CHECK(f.a->carriedPane() == nullptr);
+    }
+
+    SECTION("the next drag ends the one a lost delegate left behind, and is a drag of its own")
+    {
+        f.b->dropNodeInGap(1, json);
+        REQUIRE_FALSE(f.a->beginPaneDrag(f.right).isEmpty());
+        CHECK(probe.forgotten == 1);
+        CHECK(f.a->carriedPane() == f.right);
+        QCoreApplication::processEvents(); // the held drop is made when the stale drag ends
+        CHECK(f.b->count() == 2);
+        f.a->finishNodeDrag(Qt::MoveAction);
+        CHECK(probe.forgotten == 2);
+    }
+
+    SECTION("a window that closes with its drag running ends it")
+    {
+        f.a->closeWindow();
+        CHECK(probe.forgotten == 1);
+        CHECK(f.a->carriedPane() == nullptr);
+        f.a->finishNodeDrag(Qt::MoveAction);
+        CHECK(probe.forgotten == 1);
+    }
+}
+
+TEST_CASE("a pane dropped in a gap of a tab strip becomes a tab there", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    f.b->dropNodeInGap(1, f.paneOf(f.left));
+
+    REQUIRE(f.b->count() == 2);
+    auto* const tab = f.manager.model().window(f.b.id)->tabAt(1);
+    CHECK(f.manager.sessionsOfTab(tab) == std::vector { f.left });
+    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Pane moved to new tab"));
+}
+
+TEST_CASE("a pane dropped outside every window opens a window of its own, where it was dropped",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.paneOf(f.left);
+    auto* const screen = QGuiApplication::primaryScreen();
+    REQUIRE(screen != nullptr);
+    auto& probe = f.app.dragEndProbe();
+    probe.over = contour::window::PointerOverContour::No;
+    probe.spot =
+        contour::window::DropSpot { .screen = screen,
+                                    .at = screen->availableGeometry().topLeft() + QPoint { 300, 200 } };
+    REQUIRE(f.a->beginPaneDrag(f.left) == json);
+    f.a->finishNodeDrag(Qt::IgnoreAction);
+    CHECK(probe.forgotten == 1);
+    // Nothing moves until the window exists.
+    CHECK(placeOf(f.manager, f.left).first == f.a.id);
+    CHECK(f.app.app().takePendingSpawnScreen() == screen);
+
+    auto* said = static_cast<contour::test::RecordingAnnouncer*>(nullptr);
+    auto const recording =
+        [&said](std::function<QObject*()> const&) -> std::unique_ptr<contour::platform::Announcer> {
+        auto announcer = std::make_unique<contour::test::RecordingAnnouncer>();
+        said = announcer.get();
+        return announcer;
+    };
+    ScopedController c { f.manager, recording };
+    // It opens where the drag ended, on that screen.
+    REQUIRE(c->initialPosition().has_value());
+    CHECK(c->initialPosition()->position == QPoint { 300, 200 });
+    auto const monitor = static_cast<int>(QGuiApplication::screens().indexOf(screen));
+    CHECK(c->initialPosition()->monitor == monitor);
+    REQUIRE(f.manager.consumePendingTransplant(c.controller));
+
+    CHECK(placeOf(f.manager, f.left).first == c.id);
+    CHECK(c->count() == 1);
+    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 1);
+    requireAlive(f.left, &f.left->terminal().device(), "in its own window");
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(said) == QStringLiteral("Pane moved to new window"));
+    contour::test::closeAllTabs(*c);
+}
+
+TEST_CASE("a tab of several panes moves alive to an edge, a tab, a gap or a window of its own",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.splitTab();
+    auto const leftPty = &f.left->terminal().device();
+
+    SECTION("an edge grafts the whole tab beside the pane")
+    {
+        REQUIRE(zoneAt(*f.b, f.other, DropPayload::Tab, 50, 250, json) == DropZone::SplitLeft);
+        f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitLeft), json);
+        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 3);
+        CHECK(f.a->count() == 1);
+        CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
+    }
+
+    SECTION("the middle of a pane takes no tab")
+    {
+        CHECK(zoneAt(*f.b, f.other, DropPayload::Tab, 500, 250, json) == DropZone::PassThrough);
+        f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::Swap), json);
+        CHECK(f.a->count() == 2);
+        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+        CHECK(f.saidB->said.empty());
+    }
+
+    SECTION("released on a tab, it splits right of that tab's active pane")
+    {
+        f.b->dropNodeOnTab(0, json);
+        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 3);
+        CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
+    }
+
+    SECTION("a gap takes it as the tab it is")
+    {
+        f.b->dropNodeInGap(0, json);
+        REQUIRE(f.b->count() == 2);
+        CHECK(placeOf(f.manager, f.left).second == f.manager.model().window(f.b.id)->tabAt(0));
+        CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 2);
+        CHECK(TwoWindows::lastSaid(f.saidB) == QStringLiteral("Tab moved"));
+    }
+
+    SECTION("a gap of its own strip reorders it")
+    {
+        auto const tab = placeOf(f.manager, f.left).second;
+        f.a->dropNodeInGap(2, json);
+        CHECK(f.manager.model().window(f.a.id)->tabAt(1) == tab);
+        CHECK(TwoWindows::lastSaid(f.saidA) == QStringLiteral("Tab moved"));
+    }
+
+    SECTION("outside every window, a window of its own")
+    {
+        REQUIRE(f.a->beginTabDrag(0) == json);
+        // A tab carries no pane.
+        CHECK(f.a->carriedPane() == nullptr);
+        f.a->finishNodeDrag(Qt::IgnoreAction);
+        ScopedController c { f.manager };
+        REQUIRE(f.manager.consumePendingTransplant(c.controller));
+        CHECK(placeOf(f.manager, f.left).first == c.id);
+        CHECK(placeOf(f.manager, f.right).first == c.id);
+        CHECK(f.a->count() == 1);
+        requireAlive(f.left, leftPty, "the tab moved");
+        f.requireNothingRespawned();
+        contour::test::closeAllTabs(*c);
+        return;
+    }
+
+    requireAlive(f.left, leftPty, "the tab moved");
+    f.requireNothingRespawned();
+}
+
+TEST_CASE("a drag another process started is refused, and nothing moves", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const foreign = fromAnotherHost(f.paneOf(f.left));
+    for (auto const [x, y]: { std::pair { 950.0, 250.0 }, { 500.0, 250.0 } })
+        CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, x, y, foreign) == DropZone::Refused);
+    CHECK(f.b->refusalText(foreign).toStdString()
+          == contour::window::refusalTextOf(MoveRefusal::OtherProcess));
+    CHECK(f.b->refusalText(f.paneOf(f.left)).isEmpty());
+    CHECK_FALSE(f.b->springOpens(0, foreign));
+
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), foreign);
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::Swap), foreign);
+    f.b->dropNodeOnTab(0, foreign);
+    f.b->dropNodeInGap(0, foreign);
+    CHECK(placeOf(f.manager, f.left).first == f.a.id);
+    CHECK(f.b->count() == 1);
+    CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+    CHECK(f.saidB->said.empty());
+    f.requireNothingRespawned();
+}
+
+// The manager keeps why it moved nothing: a place's refusal is that refusal, not a model error it resembles,
+// both into a window and out of every window; and the model's own refusals stay the model's.
+TEST_CASE("a move nothing makes keeps the reason it was refused for", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const foreign = contour::window::parseNodeDrag(fromAnotherHost(f.paneOf(f.left)));
+    REQUIRE(foreign.has_value());
+    auto const refused = contour::session::MoveFailure { MoveRefusal::OtherProcess };
+
+    auto const beside = f.manager.moveNode(
+        *foreign,
+        vtworkspace::EdgeTarget { .pane = f.other->modelSessionId(), .side = vtworkspace::SplitSide::Right },
+        nullptr,
+        {});
+    REQUIRE_FALSE(beside.has_value());
+    CHECK(beside.error() == refused);
+    auto const outOfEvery = f.manager.moveNode(*foreign, vtworkspace::NewWindowTarget {}, nullptr, {});
+    REQUIRE_FALSE(outOfEvery.has_value());
+    CHECK(outOfEvery.error() == refused);
+
+    auto const own = contour::window::parseNodeDrag(f.paneOf(f.left));
+    REQUIRE(own.has_value());
+    auto const ontoItself =
+        f.manager.moveNode(*own, vtworkspace::SwapTarget { .pane = f.left->modelSessionId() }, nullptr, {});
+    REQUIRE_FALSE(ontoItself.has_value());
+    CHECK(ontoItself.error() == contour::session::MoveFailure { vtworkspace::MoveError::SelfTarget });
+    CHECK(placeOf(f.manager, f.left).first == f.a.id);
+    f.requireNothingRespawned();
+}
+TEST_CASE("a drag whose pane closed since it began is taken, and nothing moves",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.a->beginPaneDrag(f.lone);
+    REQUIRE_FALSE(json.isEmpty());
+    // Resolved as the drag began: a hover reads that back, until the layout changes under it.
+    CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::SplitRight);
+    f.manager.removeSession(*f.lone); // the shell exits while its card is dragged
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    REQUIRE(f.a->count() == 1);
+    CHECK(f.a->carriedPane() == nullptr);
+
+    CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::NoOp);
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), json);
+    f.b->dropNodeInGap(1, json);
+    f.a->finishNodeDrag(Qt::IgnoreAction);
+    QCoreApplication::processEvents();
+    CHECK(f.b->count() == 1);
+    CHECK(f.manager.model().window(f.b.id)->tabAt(0)->paneCount() == 1);
+    ScopedController c { f.manager };
+    CHECK_FALSE(f.manager.consumePendingTransplant(c.controller));
+    contour::test::closeAllTabs(*c);
+}
+
+TEST_CASE("moving out the last pane closes its window, and the app keeps running",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const pty = &f.other->terminal().device();
+    f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitBottom), f.paneOf(f.other));
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+
+    CHECK(f.manager.model().window(f.b.id) == nullptr);
+    CHECK(f.manager.controllerFor(f.b.id) == nullptr);
+    CHECK(f.manager.controllerFor(f.a.id) != nullptr);
+    CHECK(placeOf(f.manager, f.other).first == f.a.id);
+    requireAlive(f.other, pty, "still running");
+    f.requireNothingRespawned();
+    CHECK(TwoWindows::lastSaid(f.saidA) == QStringLiteral("Pane moved to window %1").arg(f.a.id.value));
+}
+
+TEST_CASE("a drag that ends cancelled, or taken by a window, opens nothing", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.paneOf(f.left);
+    // Escape inside a window: Qt says IgnoreAction, as for a drop outside, and QML cannot tell; the pointer
+    // being over a Contour window as it ended does.
+    f.app.dragEndProbe().over = contour::window::PointerOverContour::Yes;
+    REQUIRE(f.a->beginPaneDrag(f.left) == json);
+    f.a->finishNodeDrag(Qt::IgnoreAction);
+    f.app.dragEndProbe().over = contour::window::PointerOverContour::No;
+    // A drop some window recognised did its work there, refusals and no-ops included.
+    REQUIRE(f.a->beginPaneDrag(f.left) == json);
+    f.a->finishNodeDrag(Qt::MoveAction);
+    // The whole of a window torn off would only recreate itself.
+    REQUIRE_FALSE(f.b->beginPaneDrag(f.other).isEmpty());
+    f.b->finishNodeDrag(Qt::IgnoreAction);
+
+    ScopedController c { f.manager };
+    CHECK_FALSE(f.manager.consumePendingTransplant(c.controller));
+    CHECK(placeOf(f.manager, f.left).first == f.a.id);
+    CHECK(placeOf(f.manager, f.other).first == f.b.id);
+    contour::test::closeAllTabs(*c);
+}
+
+TEST_CASE("a pane over itself is a no-op, and its own tab never splits for its tab",
+          "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    CHECK(zoneAt(*f.a, f.left, DropPayload::Pane, 950, 250, f.paneOf(f.left)) == DropZone::NoOp);
+    CHECK(zoneAt(*f.a, f.right, DropPayload::Pane, 950, 250, f.paneOf(f.left)) == DropZone::SplitRight);
+    CHECK(zoneAt(*f.a, f.right, DropPayload::Tab, 950, 250, f.splitTab()) == DropZone::PassThrough);
+    f.a->dropNodeOnPane(f.left, static_cast<int>(DropZone::SplitRight), f.paneOf(f.left));
+    f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitRight), f.splitTab());
+    CHECK(f.a->count() == 2);
+    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 2);
+    CHECK(f.saidA->said.empty());
+}
+
+TEST_CASE("dwelling opens another tab, never the one the drag came from", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    CHECK_FALSE(f.a->springOpens(0, f.paneOf(f.left))); // the tab the pane came from
+    CHECK(f.a->springOpens(1, f.paneOf(f.left)));       // another tab
+    CHECK_FALSE(f.a->springOpens(0, f.splitTab()));     // the tab dragged
+    CHECK_FALSE(f.a->springOpens(1, f.a->tabDragPayload(1)));
+    CHECK(f.b->springOpens(0, f.splitTab()));
+    CHECK_FALSE(f.b->springOpens(5, f.splitTab()));
+    CHECK_FALSE(f.b->springOpens(0, QStringLiteral("{}")));
+}
+
+TEST_CASE("the tab strip is hit-tested against the spans it reports", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    using contour::window::TabBarSpot;
+    auto const hit = [&](qreal x) {
+        auto const answer = f.a->tabBarHit(x).hit();
+        return std::pair { answer.spot, answer.index };
+    };
+    CHECK(hit(50) == std::pair { TabBarSpot::Gap, 0 });
+    f.a->setTabSpans({ QRectF { 0, 0, 100, 30 }, QRectF { 100, 0, 100, 30 } });
+    CHECK(hit(2) == std::pair { TabBarSpot::Gap, 0 });
+    CHECK(hit(50) == std::pair { TabBarSpot::OnTab, 0 });
+    CHECK(hit(100) == std::pair { TabBarSpot::Gap, 1 });
+    CHECK(hit(150) == std::pair { TabBarSpot::OnTab, 1 });
+    CHECK(hit(300) == std::pair { TabBarSpot::Gap, 2 });
+}
+
+TEST_CASE("QML reads a tab-strip hit as a value with a named spot", "[contour][multiwindow][drop][qml]")
+{
+    contour::window::registerTabBarQmlTypes();
+    auto f = TwoWindows {};
+    f.a->setTabSpans({ QRectF { 0, 0, 100, 30 }, QRectF { 100, 0, 100, 30 } });
+    auto engine = QQmlEngine {};
+    engine.rootContext()->setContextProperty(QStringLiteral("win"), f.a.controller);
+    auto component = QQmlComponent { &engine };
+    component.setData(R"(
+        import QtQml
+        import Contour.Terminal
+        QtObject {
+            readonly property var onTab: win.tabBarHit(150)
+            readonly property var gap: win.tabBarHit(100)
+            readonly property bool onTabNamed: onTab.spot === TabBarSpot.OnTab
+            readonly property bool gapNamed: gap.spot === TabBarSpot.Gap
+            readonly property int onTabIndex: onTab.index
+            readonly property int gapIndex: gap.index
+        }
+    )",
+                      QUrl {});
+    auto const root = std::unique_ptr<QObject>(component.create());
+    INFO(component.errorString().toStdString());
+    REQUIRE(root != nullptr);
+    CHECK(root->property("onTabNamed").toBool());
+    CHECK(root->property("gapNamed").toBool());
+    CHECK(root->property("onTabIndex").toInt() == 1);
+    CHECK(root->property("gapIndex").toInt() == 1);
+}
+
+TEST_CASE("a tmux window or an old daemon refuses a move with its reason", "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const json = f.paneOf(f.left);
+    f.factory->reportedHosting = contour::session::SessionHosting::Remote;
+
+    SECTION("tmux")
+    {
+        f.factory->reportedHostKind = contour::session::SessionHostKind::Tmux;
+        CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::Refused);
+        CHECK(f.b->refusalText(json).toStdString() == contour::window::refusalTextOf(MoveRefusal::Tmux));
+    }
+
+    SECTION("a daemon that does not move panes")
+    {
+        f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
+        f.factory->reportedDaemonInstance = 7;
+        auto const daemonDrag = f.b->paneDragPayload(f.other);
+        REQUIRE(contour::window::parseNodeDrag(daemonDrag)->host
+                == contour::window::HostIdentity { .kind = HostKind::Daemon, .id = QStringLiteral("7") });
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Pane, 950, 250, daemonDrag) == DropZone::Refused);
+        CHECK(f.a->refusalText(daemonDrag).toStdString()
+              == contour::window::refusalTextOf(MoveRefusal::OldDaemon));
+        // The window's own process, hosted by a daemon now: the drag of before names another host.
+        CHECK(f.a->refusalText(json).toStdString()
+              == contour::window::refusalTextOf(MoveRefusal::OtherProcess));
+    }
+
+    f.a->dropNodeOnPane(f.right, static_cast<int>(DropZone::SplitRight), f.a->paneDragPayload(f.left));
+    CHECK(f.factory->requestedMoves.empty());
+    CHECK(f.manager.model().window(f.a.id)->tabAt(0)->paneCount() == 2);
+}
+
+namespace
+{
+/// TwoWindows hosted by a daemon older than MoveNode, as v0.8.0 is.
+void hostOnAnOldDaemon(TwoWindows& f)
+{
+    f.factory->reportedHosting = contour::session::SessionHosting::Remote;
+    f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
+    f.factory->reportedMoveSupport = contour::session::MoveSupport::Unsupported;
 }
 } // namespace
+
+TEST_CASE("a daemon older than MoveNode keeps the tab moves it served, and refuses the rest",
+          "[contour][multiwindow][drop][remote]")
+{
+    auto f = TwoWindows {};
+    hostOnAnOldDaemon(f);
+
+    SECTION("a tab dragged into another window's strip moves there")
+    {
+        f.b->dropNodeInGap(0, f.a->tabDragPayload(1));
+        CHECK(placeOf(f.manager, f.lone).first == f.b.id);
+        CHECK(f.b->count() == 2);
+    }
+
+    SECTION("a tab of several panes dragged into another window's strip moves there whole")
+    {
+        f.b->dropNodeInGap(1, f.splitTab());
+        CHECK(placeOf(f.manager, f.left).first == f.b.id);
+        CHECK(placeOf(f.manager, f.right).first == f.b.id);
+    }
+
+    SECTION("a tab reordered in its own strip")
+    {
+        f.a->dropNodeInGap(0, f.a->tabDragPayload(1));
+        CHECK(f.manager.model().window(f.a.id)->indexOf(placeOf(f.manager, f.lone).second->id()) == 0);
+    }
+
+    SECTION("a tab dropped outside every window tears off")
+    {
+        REQUIRE_FALSE(f.a->beginTabDrag(1).isEmpty());
+        f.a->finishNodeDrag(Qt::IgnoreAction);
+        ScopedController c { f.manager };
+        REQUIRE(f.manager.consumePendingTransplant(c.controller));
+        CHECK(placeOf(f.manager, f.lone).first == c.id);
+        f.requireNothingRespawned();
+        contour::test::closeAllTabs(*c);
+    }
+
+    SECTION("a pane of a tab of several is refused everywhere, as too old")
+    {
+        auto const json = f.paneOf(f.left);
+        CHECK(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::Refused);
+        CHECK(f.b->refusalText(json).toStdString() == contour::window::refusalTextOf(MoveRefusal::OldDaemon));
+        f.b->dropNodeInGap(0, json);
+        f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), json);
+        REQUIRE(f.a->beginPaneDrag(f.left) == json);
+        f.a->finishNodeDrag(Qt::IgnoreAction);
+        ScopedController c { f.manager };
+        CHECK_FALSE(f.manager.consumePendingTransplant(c.controller));
+        CHECK(placeOf(f.manager, f.left).first == f.a.id);
+        contour::test::closeAllTabs(*c);
+    }
+
+    SECTION("a whole tab is refused onto a tab, a pane's middle, and an edge")
+    {
+        auto const json = f.a->tabDragPayload(1);
+        f.a->dropNodeOnTab(0, json);
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Pane, 500, 250, json) == DropZone::Refused);
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Pane, 950, 250, json) == DropZone::Refused);
+        f.a->dropNodeOnPane(f.left, static_cast<int>(DropZone::SplitRight), json);
+        CHECK(f.a->count() == 2);
+    }
+
+    CHECK(f.factory->requestedMoves.empty());
+    CHECK(f.factory->createdPtys.size() == f.ptysBefore);
+}
+
+TEST_CASE("a daemon that moves panes is not asked to tear off the whole of a window",
+          "[contour][multiwindow][drop][remote]")
+{
+    auto f = TwoWindows {};
+    f.factory->reportedHosting = contour::session::SessionHosting::Remote;
+    f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
+    f.factory->reportedMoveSupport = contour::session::MoveSupport::Supported;
+    // Window B's only tab, of one pane: torn off, it would only recreate its window.
+    REQUIRE_FALSE(f.b->beginPaneDrag(f.other).isEmpty());
+    f.b->finishNodeDrag(Qt::IgnoreAction);
+    REQUIRE_FALSE(f.b->beginTabDrag(0).isEmpty());
+    f.b->finishNodeDrag(Qt::IgnoreAction);
+    CHECK(f.factory->requestedMoves.empty());
+    // A pane of a tab of several is asked for.
+    REQUIRE_FALSE(f.a->beginPaneDrag(f.left).isEmpty());
+    f.a->finishNodeDrag(Qt::IgnoreAction);
+    REQUIRE(f.factory->requestedMoves.size() == 1);
+    CHECK(f.factory->requestedMoves.front().target == vtworkspace::MoveTargetKind::NewWindow);
+}
+
+TEST_CASE("a daemon that moves panes is asked, by its ids, and nothing moves until it pushes",
+          "[contour][multiwindow][drop][remote]")
+{
+    auto f = TwoWindows {};
+    f.factory->reportedHosting = contour::session::SessionHosting::Remote;
+    f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
+    f.factory->reportedDaemonInstance = 7;
+    f.factory->reportedMoveSupport = contour::session::MoveSupport::Supported;
+    auto const json = f.paneOf(f.left);
+    auto const hostId = [&](contour::session::TerminalSession const* session) {
+        return f.factory->hostSessionIdOf(session->terminal().device()).value();
+    };
+    REQUIRE(contour::window::parseNodeDrag(json)->sessions == std::vector { hostId(f.left) });
+    REQUIRE(zoneAt(*f.b, f.other, DropPayload::Pane, 950, 250, json) == DropZone::SplitRight);
+
+    f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), json);
+    f.b->dropNodeInGap(1, json);
+    f.a->dropNodeOnTab(1, f.splitTab());
+
+    REQUIRE(f.factory->requestedMoves.size() == 3);
+    auto const& edge = f.factory->requestedMoves[0];
+    CHECK(edge.source == vtworkspace::MoveSourceKind::Pane);
+    CHECK(edge.sourceSessions == std::vector { hostId(f.left) });
+    CHECK(edge.target == vtworkspace::MoveTargetKind::Edge);
+    CHECK(edge.targetSession == hostId(f.other));
+    CHECK(edge.side == vtworkspace::SplitSide::Right);
+    auto const& gap = f.factory->requestedMoves[1];
+    CHECK(gap.target == vtworkspace::MoveTargetKind::TabWell);
+    CHECK(gap.targetSession == hostId(f.other));
+    CHECK(gap.index == 1);
+    auto const& tab = f.factory->requestedMoves[2];
+    CHECK(tab.source == vtworkspace::MoveSourceKind::Tab);
+    CHECK(tab.sourceSessions == std::vector { hostId(f.right), hostId(f.left) });
+    CHECK(tab.targetSession == hostId(f.lone));
+
+    CHECK(placeOf(f.manager, f.left).first == f.a.id);
+    CHECK(f.b->count() == 1);
+    CHECK(f.a->count() == 2);
+    f.requireNothingRespawned();
+}
+
+TEST_CASE("a move asked of the daemon is waited for until refused, timed out or the connection is lost",
+          "[contour][multiwindow][drop][remote]")
+{
+    auto f = TwoWindows {};
+    f.factory->reportedHosting = contour::session::SessionHosting::Remote;
+    f.factory->reportedHostKind = contour::session::SessionHostKind::Daemon;
+    f.factory->reportedMoveSupport = contour::session::MoveSupport::Supported;
+    auto const ask = [&] {
+        f.b->dropNodeOnPane(f.other, static_cast<int>(DropZone::SplitRight), f.paneOf(f.left));
+        REQUIRE((f.manager.livePendingRemoteMove() != nullptr));
+        return f.factory->requestedMoves.back().request;
+    };
+
+    SECTION("refused")
+    {
+        auto const request = ask();
+        CHECK(request != 0);
+        // Another request's refusal is not this one's.
+        f.manager.remoteMoveRefused(request + 1);
+        CHECK((f.manager.livePendingRemoteMove() != nullptr));
+        f.manager.remoteMoveRefused(request);
+        CHECK_FALSE((f.manager.livePendingRemoteMove() != nullptr));
+    }
+
+    SECTION("timed out")
+    {
+        std::ignore = ask();
+        f.app.steadyClock().advance(contour::session::TerminalSessionManager::RemoteMoveTimeout);
+        CHECK_FALSE((f.manager.livePendingRemoteMove() != nullptr));
+        // Its push landing late opens and announces nothing.
+        auto const late = std::array { f.factory->requestedMoves.back().request };
+        f.manager.noteRemoteMovesLanded(late);
+        f.manager.completeRemoteMoves(contour::session::TerminalSessionManager::ReconcileReach::Whole);
+        CHECK(TwoWindows::lastSaid(f.saidB).isEmpty());
+    }
+
+    SECTION("the connection lost")
+    {
+        std::ignore = ask();
+        f.manager.setHostConnection(vthost::client::ConnectionState::Reconnecting);
+        CHECK_FALSE((f.manager.livePendingRemoteMove() != nullptr));
+        f.manager.setHostConnection(vthost::client::ConnectionState::Connected);
+    }
+
+    SECTION("each request has a number of its own")
+    {
+        auto const first = ask();
+        auto const second = ask();
+        CHECK(second != first);
+    }
+}
 
 TEST_CASE("a drop onto a pane whose shell is not known refuses a name that could run, with a toast",
           "[contour][multiwindow][drop]")
@@ -1765,7 +2765,7 @@ TEST_CASE("a drop onto a pane whose shell is not known refuses a name that could
     CHECK(window->notices().toastText().contains(QStringLiteral("shell is not known")));
 }
 
-TEST_CASE("a QML call reaches the real dropZoneAt and dropTabOnPane with a session object",
+TEST_CASE("a QML call reaches the real dropZoneAt and dropNodeOnPane with a session object",
           "[contour][multiwindow][drop][qml]")
 {
     // Every other QML test runs against a controller mock that takes a QObject*. The real controller takes a
@@ -1785,16 +2785,23 @@ TEST_CASE("a QML call reaches the real dropZoneAt and dropTabOnPane with a sessi
     component.setData(R"(
         import QtQml
         QtObject {
-            function zone(payload, x, y, tab) {
-                return controller.dropZoneAt(pane, payload, x, y, 1000, 500, tab)
+            function zone(payload, x, y, node) {
+                return controller.dropZoneAt(pane, payload, x, y, 1000, 500, node)
             }
-            function drop(zone, tab) { controller.dropTabOnPane(pane, zone, tab) }
+            function label(zone, payload) { return controller.dropGhostLabel(zone, payload, pane) }
+            function drop(zone, node) { controller.dropNodeOnPane(pane, zone, node) }
+            function payload(row) {
+                // A drag, begun and taken, so the drop below is not held back for it.
+                const node = controller.beginTabDrag(row)
+                controller.finishNodeDrag(Qt.MoveAction)
+                return node
+            }
         })",
                       QUrl {});
     REQUIRE(component.isReady());
     auto const probe = std::unique_ptr<QObject> { component.create() };
     REQUIRE(probe != nullptr);
-    auto const zoneFromQml = [&](DropPayload payload, double x, double y, QString const& tab) {
+    auto const zoneFromQml = [&](DropPayload payload, double x, double y, QString const& node) {
         auto answer = QVariant {};
         REQUIRE(QMetaObject::invokeMethod(probe.get(),
                                           "zone",
@@ -1802,151 +2809,166 @@ TEST_CASE("a QML call reaches the real dropZoneAt and dropTabOnPane with a sessi
                                           Q_ARG(QVariant, static_cast<int>(payload)),
                                           Q_ARG(QVariant, x),
                                           Q_ARG(QVariant, y),
-                                          Q_ARG(QVariant, tab)));
+                                          Q_ARG(QVariant, node)));
         return answer;
     };
 
-    auto const fromOtherTab = tabPayload(window.id, 0);
+    auto fromQml = QVariant {};
+    REQUIRE(QMetaObject::invokeMethod(
+        probe.get(), "payload", Q_RETURN_ARG(QVariant, fromQml), Q_ARG(QVariant, 0)));
+    auto const node = fromQml.toString();
+    REQUIRE(contour::window::parseNodeDrag(node).has_value());
     // A number, not undefined: the call was made, and it is the C++ answer.
     auto const files = zoneFromQml(DropPayload::Files, 500, 250, {});
     REQUIRE(files.isValid());
     CHECK(files.toInt() == static_cast<int>(zoneAt(*window, pane, DropPayload::Files, 500, 250)));
     CHECK(files.toInt() == static_cast<int>(DropZone::InsertText));
-    auto const split = zoneFromQml(DropPayload::Tab, 950, 250, fromOtherTab);
+    auto const split = zoneFromQml(DropPayload::Pane, 950, 250, node);
     REQUIRE(split.isValid());
     CHECK(split.toInt() == static_cast<int>(DropZone::SplitRight));
+    auto label = QVariant {};
+    REQUIRE(QMetaObject::invokeMethod(probe.get(),
+                                      "label",
+                                      Q_RETURN_ARG(QVariant, label),
+                                      Q_ARG(QVariant, static_cast<int>(DropZone::SplitRight)),
+                                      Q_ARG(QVariant, static_cast<int>(DropPayload::Pane))));
+    CHECK(label.toString() == QStringLiteral("Pane → split right"));
 
-    // And the drop reaches the model: the dragged tab is merged beside the pane.
+    // And the drop reaches the model: the dragged pane is moved beside the hovered one.
     REQUIRE(window->count() == 2);
-    QMetaObject::invokeMethod(probe.get(),
-                              "drop",
-                              Q_ARG(QVariant, static_cast<int>(DropZone::SplitRight)),
-                              Q_ARG(QVariant, fromOtherTab));
+    QMetaObject::invokeMethod(
+        probe.get(), "drop", Q_ARG(QVariant, static_cast<int>(DropZone::SplitRight)), Q_ARG(QVariant, node));
     CHECK(window->count() == 1);
 
     window->closeTabAtIndex(0);
 }
 
+TEST_CASE(
+    "WindowController: dropPayloadOf and dragTitle read a node drag for a DropArea that has only its JSON",
+    "[contour][multiwindow][drop]")
+{
+    auto f = TwoWindows {};
+    auto const title = f.left->title();
+    REQUIRE_FALSE(title.isEmpty());
+
+    SECTION("the kind the JSON says it is")
+    {
+        CHECK(f.a->dropPayloadOf(f.paneOf(f.left)) == static_cast<int>(DropPayload::Pane));
+        CHECK(f.a->dropPayloadOf(f.splitTab()) == static_cast<int>(DropPayload::Tab));
+        // A tab of one pane drags as that pane.
+        CHECK(f.a->dropPayloadOf(f.a->tabDragPayload(1)) == static_cast<int>(DropPayload::Pane));
+    }
+
+    SECTION("JSON that is no node drag is none")
+    {
+        CHECK(f.a->dropPayloadOf(QStringLiteral("not json")) == static_cast<int>(DropPayload::None));
+        CHECK(f.a->dropPayloadOf({}) == static_cast<int>(DropPayload::None));
+    }
+
+    SECTION("a drag names what it moves: the pane, or the first pane of the tab")
+    {
+        CHECK(f.a->dragTitle(f.paneOf(f.left)) == title);
+        CHECK(f.a->dragTitle(f.paneOf(f.right)) == f.right->title());
+        CHECK((f.a->dragTitle(f.splitTab()) == title || f.a->dragTitle(f.splitTab()) == f.right->title()));
+        // Another window of this process names it as well.
+        CHECK(f.b->dragTitle(f.paneOf(f.left)) == title);
+    }
+
+    SECTION("a drag of another host, or none, names nothing")
+    {
+        CHECK(f.a->dragTitle(fromAnotherHost(f.paneOf(f.left))).isEmpty());
+        CHECK(f.a->dragTitle(QStringLiteral("not json")).isEmpty());
+    }
+}
+
 TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][multiwindow][drop]")
 {
-    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
-    auto& manager = app.manager();
-    ScopedController window { manager };
-    window->createNewTab();
-    auto* const dragged = window->activeSession();
-    window->createNewTab(); // [t0 (dragged), t1], t1 active
-    auto* const pane = window->activeSession();
-    REQUIRE(dragged != pane);
-    auto const fromOtherTab = tabPayload(window.id, 0);
-    auto const fromOwnTab = tabPayload(window.id, 1);
+    auto f = TwoWindows {};
+    auto const tab = f.splitTab();
 
     SECTION("a tab from another tab splits on the outer edges and is left alone elsewhere")
     {
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 50, 250, fromOtherTab) == DropZone::SplitLeft);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 20, fromOtherTab) == DropZone::SplitTop);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 480, fromOtherTab) == DropZone::SplitBottom);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 950, 250, tab) == DropZone::SplitRight);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 50, 250, tab) == DropZone::SplitLeft);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 500, 20, tab) == DropZone::SplitTop);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 500, 480, tab) == DropZone::SplitBottom);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 500, 250, tab) == DropZone::PassThrough);
+    }
+
+    SECTION("a tab of one pane drags as that pane, whatever the card guessed")
+    {
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Tab, 500, 250, f.a->tabDragPayload(1)) == DropZone::Swap);
     }
 
     SECTION("a tab from the pane's own tab is never split")
     {
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOwnTab) == DropZone::PassThrough);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOwnTab) == DropZone::PassThrough);
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Tab, 950, 250, tab) == DropZone::PassThrough);
+        CHECK(zoneAt(*f.a, f.left, DropPayload::Tab, 500, 250, tab) == DropZone::PassThrough);
     }
 
     SECTION("files and text insert anywhere over the pane")
     {
-        CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
-        CHECK(zoneAt(*window, pane, DropPayload::Files, 500, 250) == DropZone::InsertText);
-        CHECK(zoneAt(*window, pane, DropPayload::Text, 50, 20) == DropZone::InsertText);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Files, 950, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Files, 500, 250) == DropZone::InsertText);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Text, 50, 20) == DropZone::InsertText);
     }
 
-    SECTION("a payload that names no tab of this process is no drop")
+    SECTION("a payload that does not parse is no drop, and one naming nothing of ours is taken as a no-op")
     {
         // Review: the JSON comes from whatever started the drag.
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(vtworkspace::WindowId { 9999 }, 0))
-              == DropZone::None);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, 7)) == DropZone::None);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, tabPayload(window.id, -1)) == DropZone::None);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, QStringLiteral("not json"))
-              == DropZone::None);
-        CHECK(zoneAt(*window,
-                     pane,
-                     DropPayload::Tab,
-                     950,
-                     250,
-                     QStringLiteral(R"({"windowId":"1","tabIndex":0,"token":"%1"})")
-                         .arg(contour::window::processToken()))
-              == DropZone::None);
-        CHECK(zoneAt(*window,
-                     pane,
-                     DropPayload::Tab,
-                     950,
-                     250,
-                     QStringLiteral(R"({"windowId":1.5,"tabIndex":0,"token":"%1"})")
-                         .arg(contour::window::processToken()))
-              == DropZone::None);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250) == DropZone::None);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 950, 250, QStringLiteral("not json")) == DropZone::None);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 950, 250) == DropZone::None);
+        auto stale = contour::window::parseNodeDrag(tab).value();
+        stale.sessions = { 9998, 9999 };
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Tab, 950, 250, contour::window::writeNodeDrag(stale))
+              == DropZone::NoOp);
     }
 
-    SECTION("a drag that another process started, or that names no process, is not one of ours")
+    SECTION("the strip's old tab payload is no drag any more")
     {
-        // The same window and row, which in THAT process are some other tab.
-        auto const foreign = tabPayload(window.id, 0, contour::window::processToken() + QStringLiteral("x"));
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, foreign) == DropZone::None);
-        // The old payload named the process by its PID, which is public and, under Flatpak, shared by
-        // instances: it is no token.
-        CHECK(zoneAt(*window,
-                     pane,
+        // The strip drags the node now: what it used to write names a window and a row, and is taken for
+        // nothing.
+        CHECK(zoneAt(*f.a,
+                     f.lone,
                      DropPayload::Tab,
                      950,
                      250,
-                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"pid":%1})")
-                         .arg(QCoreApplication::applicationPid()))
+                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"token":"%1"})")
+                         .arg(contour::window::processToken()))
               == DropZone::None);
-        CHECK(zoneAt(
-                  *window, pane, DropPayload::Tab, 950, 250, QStringLiteral(R"({"windowId":1,"tabIndex":0})"))
-              == DropZone::None);
-        CHECK(zoneAt(*window,
-                     pane,
-                     DropPayload::Tab,
-                     950,
-                     250,
-                     QStringLiteral(R"({"windowId":1,"tabIndex":0,"token":%1})")
-                         .arg(QCoreApplication::applicationPid()))
-              == DropZone::None);
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
     }
 
     SECTION("no session, and nothing out of range, is a target")
     {
-        CHECK(window->dropZoneAt(
-                  nullptr, static_cast<int>(DropPayload::Files), 10, 10, PaneWidth, PaneHeight, {})
+        CHECK(
+            f.a->dropZoneAt(nullptr, static_cast<int>(DropPayload::Files), 10, 10, PaneWidth, PaneHeight, {})
+            == static_cast<int>(DropZone::None));
+        CHECK(f.a->dropZoneAt(f.lone, -1, 10, 10, PaneWidth, PaneHeight, {})
               == static_cast<int>(DropZone::None));
-        CHECK(window->dropZoneAt(pane, -1, 10, 10, PaneWidth, PaneHeight, {})
+        CHECK(f.a->dropZoneAt(f.lone, 99, 10, 10, PaneWidth, PaneHeight, {})
               == static_cast<int>(DropZone::None));
-        CHECK(window->dropZoneAt(pane, 99, 10, 10, PaneWidth, PaneHeight, {})
-              == static_cast<int>(DropZone::None));
-        CHECK(zoneAt(*window, pane, DropPayload::Files, 1500, 250) == DropZone::None);
+        CHECK(zoneAt(*f.a, f.lone, DropPayload::Files, 1500, 250) == DropZone::None);
     }
 
-    SECTION("the ghost's label is the zone's row")
+    SECTION("the ghost's label is the zone's row, for what is dragged")
     {
-        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitRight))
-              == QStringLiteral("Tab → split right"));
-        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::SplitTop))
-              == QStringLiteral("Tab → split up"));
-        CHECK(window->dropGhostLabel(static_cast<int>(DropZone::InsertText)).isEmpty());
-        CHECK(window->dropGhostLabel(-1).isEmpty());
-        CHECK(window->dropGhostLabel(99).isEmpty());
+        auto const label = [&](DropZone zone, DropPayload payload) {
+            return f.a->dropGhostLabel(static_cast<int>(zone), static_cast<int>(payload), f.lone);
+        };
+        CHECK(label(DropZone::SplitRight, DropPayload::Tab) == QStringLiteral("Tab → split right"));
+        CHECK(label(DropZone::SplitTop, DropPayload::Pane) == QStringLiteral("Pane → split up"));
+        CHECK(label(DropZone::Swap, DropPayload::Tab).isEmpty());
+        CHECK(label(DropZone::InsertText, DropPayload::Files).isEmpty());
+        CHECK(f.a->dropGhostLabel(-1, static_cast<int>(DropPayload::Pane), f.lone).isEmpty());
+        CHECK(f.a->dropGhostLabel(99, static_cast<int>(DropPayload::Pane), f.lone).isEmpty());
+        CHECK(f.a->dropGhostLabel(static_cast<int>(DropZone::SplitLeft), 99, f.lone).isEmpty());
     }
 
     SECTION("the ghost is the half on the zone's side, and a zone that is not a split has none")
     {
         constexpr auto Inset = 6.0;
         auto const rect = [&](DropZone zone) {
-            return window->dropGhostRect(static_cast<int>(zone), PaneWidth, PaneHeight, Inset);
+            return f.a->dropGhostRect(static_cast<int>(zone), PaneWidth, PaneHeight, Inset);
         };
         auto const half = contour::window::dropGhostOf(
             DropZone::SplitRight,
@@ -1959,133 +2981,54 @@ TEST_CASE("WindowController: dropZoneAt answers from the policy", "[contour][mul
             CHECK_FALSE(rect(zone).isNull());
         for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
             CHECK(rect(zone).isNull());
-        CHECK(window->dropGhostRect(-1, PaneWidth, PaneHeight, Inset).isNull());
-        CHECK(window->dropGhostRect(99, PaneWidth, PaneHeight, Inset).isNull());
+        CHECK(f.a->dropGhostRect(-1, PaneWidth, PaneHeight, Inset).isNull());
+        CHECK(f.a->dropGhostRect(99, PaneWidth, PaneHeight, Inset).isNull());
     }
-
-    contour::test::closeAllTabs(*window);
 }
 
-TEST_CASE("WindowController: a daemon-hosted window offers no split unless its daemon merges tabs",
+TEST_CASE("WindowController: dropNodeOnPane moves on a split or swap zone and changes nothing otherwise",
           "[contour][multiwindow][drop]")
 {
-    // Review Focus 4: a split made here would be undone by the daemon's next layout push, so a tab is
-    // left alone at every band; files still insert.
-    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
-    auto* const factory = factoryOwned.get();
-    TestApp app(std::move(factoryOwned));
-    auto& manager = app.manager();
-    ScopedController window { manager };
-    window->createNewTab();
-    window->createNewTab();
-    auto* const pane = window->activeSession();
-    factory->reportedHosting = contour::session::SessionHosting::Remote;
-    auto const fromOtherTab = tabPayload(window.id, 0);
-
-    for (auto const [x, y]:
-         { std::pair { 950.0, 250.0 }, { 50.0, 250.0 }, { 500.0, 20.0 }, { 500.0, 480.0 }, { 500.0, 250.0 } })
-        CHECK(zoneAt(*window, pane, DropPayload::Tab, x, y, fromOtherTab) == DropZone::PassThrough);
-    CHECK(zoneAt(*window, pane, DropPayload::Files, 950, 250) == DropZone::InsertText);
-
-    // And performing a split drop anyway changes nothing.
-    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
-    CHECK(window->count() == 2);
-    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
-
-    factory->reportedHosting = contour::session::SessionHosting::Local;
-    contour::test::closeAllTabs(*window);
-}
-
-TEST_CASE(
-    "WindowController: a daemon that merges tabs gets the drop, and the tab stays until its layout arrives",
-    "[contour][multiwindow][drop]")
-{
-    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
-    auto* const factory = factoryOwned.get();
-    TestApp app(std::move(factoryOwned));
-    auto& manager = app.manager();
-    ScopedController window { manager };
-    window->createNewTab();
-    window->createNewTab();
-    auto* const pane = window->activeSession();
-    factory->reportedHosting = contour::session::SessionHosting::Remote;
-    factory->reportedTabMergeSupport = contour::session::TabMergeSupport::Supported;
-    auto const fromOtherTab = tabPayload(window.id, 0);
-
-    CHECK(zoneAt(*window, pane, DropPayload::Tab, 950, 250, fromOtherTab) == DropZone::SplitRight);
-    CHECK(zoneAt(*window, pane, DropPayload::Tab, 500, 250, fromOtherTab) == DropZone::PassThrough);
-
-    window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
-    REQUIRE(factory->requestedTabMerges.size() == 1);
-    CHECK(factory->requestedTabMerges.front().side == vtworkspace::SplitSide::Right);
-    CHECK(window->count() == 2);
-    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
-
-    factory->reportedHosting = contour::session::SessionHosting::Local;
-    contour::test::closeAllTabs(*window);
-}
-
-TEST_CASE("WindowController: dropTabOnPane merges on a split zone and changes nothing otherwise",
-          "[contour][multiwindow][drop]")
-{
-    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
-    auto& manager = app.manager();
-    ScopedController window { manager };
-    window->createNewTab();
-    auto* const dragged = window->activeSession();
-    window->createNewTab(); // [t0 (dragged), t1], t1 active
-    auto* const pane = window->activeSession();
-    auto const draggedId = dragged->modelSessionId();
-    auto const paneId = pane->modelSessionId();
-    auto const fromOtherTab = tabPayload(window.id, 0);
+    auto f = TwoWindows {};
+    auto const tab = f.splitTab();
+    auto const loneId = f.lone->modelSessionId();
 
     SECTION("a split zone grafts the dragged tab on that side")
     {
-        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), fromOtherTab);
-        REQUIRE(window->count() == 1);
-        auto const* const tab = manager.model().window(window.id)->activeTab();
-        REQUIRE(tab != nullptr);
-        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
-        CHECK(tab->rootPane()->first()->session() == paneId);
-        CHECK(tab->rootPane()->second()->session() == draggedId);
+        f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitRight), tab);
+        REQUIRE(f.a->count() == 1);
+        auto const* const merged = f.manager.model().window(f.a.id)->activeTab();
+        REQUIRE(merged != nullptr);
+        REQUIRE(merged->rootPane()->splitState() == vtworkspace::SplitState::Vertical);
+        CHECK(merged->rootPane()->first()->session() == loneId);
     }
 
     SECTION("the zone names the side")
     {
-        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitTop), fromOtherTab);
-        auto const* const tab = manager.model().window(window.id)->activeTab();
-        REQUIRE(tab != nullptr);
-        CHECK(tab->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
-        CHECK(tab->rootPane()->first()->session() == draggedId);
+        f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitTop), tab);
+        auto const* const merged = f.manager.model().window(f.a.id)->activeTab();
+        REQUIRE(merged != nullptr);
+        REQUIRE(merged->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
+        CHECK(merged->rootPane()->second()->session() == loneId);
     }
 
-    SECTION("a zone that is not a split changes nothing")
+    SECTION("a zone that moves nothing changes nothing")
     {
-        for (auto const zone: { DropZone::None, DropZone::InsertText, DropZone::PassThrough })
-            window->dropTabOnPane(pane, static_cast<int>(zone), fromOtherTab);
-        window->dropTabOnPane(pane, -1, fromOtherTab);
-        window->dropTabOnPane(pane, 99, fromOtherTab);
-        CHECK(window->count() == 2);
+        for (auto const zone: { DropZone::None,
+                                DropZone::InsertText,
+                                DropZone::PassThrough,
+                                DropZone::NoOp,
+                                DropZone::Refused,
+                                DropZone::Swap })
+            f.a->dropNodeOnPane(f.lone, static_cast<int>(zone), tab);
+        f.a->dropNodeOnPane(f.lone, -1, tab);
+        f.a->dropNodeOnPane(f.lone, 99, tab);
+        f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitRight), QStringLiteral("{}"));
+        f.a->dropNodeOnPane(nullptr, static_cast<int>(DropZone::SplitRight), tab);
+        f.a->dropNodeOnPane(f.lone, static_cast<int>(DropZone::SplitRight), fromAnotherHost(tab));
+        CHECK(f.a->count() == 2);
+        CHECK(f.manager.model().window(f.a.id)->tabAt(1)->paneCount() == 1);
     }
-
-    SECTION("the pane's own tab, and a forged window or row, change nothing")
-    {
-        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 1));
-        window->dropTabOnPane(
-            pane, static_cast<int>(DropZone::SplitRight), tabPayload(vtworkspace::WindowId { 9999 }, 0));
-        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), tabPayload(window.id, 7));
-        window->dropTabOnPane(pane, static_cast<int>(DropZone::SplitRight), QStringLiteral("{}"));
-        window->dropTabOnPane(nullptr, static_cast<int>(DropZone::SplitRight), fromOtherTab);
-        // Another process's drag, naming the same window and row: its tab is not ours to merge.
-        window->dropTabOnPane(
-            pane,
-            static_cast<int>(DropZone::SplitRight),
-            tabPayload(window.id, 0, contour::window::processToken() + QStringLiteral("x")));
-        CHECK(window->count() == 2);
-        CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
-    }
-
-    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("WindowController: a pane that has ended takes no files", "[contour][multiwindow][drop]")
@@ -2112,8 +3055,8 @@ TEST_CASE("WindowController: a pane that has ended takes no files", "[contour][m
     CHECK(zoneAt(*window, live, DropPayload::Files, 500, 250) == DropZone::InsertText);
     CHECK(zoneAt(*window, ended, DropPayload::Files, 500, 250) == DropZone::None);
     CHECK(zoneAt(*window, ended, DropPayload::Text, 500, 250) == DropZone::None);
-    // A tab may still split an ended pane: nothing is typed to it.
-    CHECK(zoneAt(*window, ended, DropPayload::Tab, 950, 250, tabPayload(window.id, 0))
+    // A pane may still be moved beside an ended pane: nothing is typed to it.
+    CHECK(zoneAt(*window, ended, DropPayload::Pane, 950, 250, window->paneDragPayload(live))
           == DropZone::SplitRight);
 
     factory->makePty = nullptr;

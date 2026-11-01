@@ -808,6 +808,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param text What was dropped.
     Q_INVOKABLE void insertDroppedText(QString const& text);
 
+    /// The last rows with text of the page on display, oldest first: what the pane's drag card shows of its
+    /// content. Leading and trailing blanks of a row are dropped; blank rows are skipped. GUI thread.
+    /// @param maxRows How many rows at most.
+    /// @return The rows, at most @p maxRows of them; empty while the page is blank.
+    [[nodiscard]] Q_INVOKABLE QStringList visibleTextTail(int maxRows) const;
+
     /// Publishes the scrollbar's travel (announceScrollableLineCount()), and rebuilds the ticks if anything
     /// they depend on moved, and announces them.
     ///

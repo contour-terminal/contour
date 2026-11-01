@@ -88,7 +88,8 @@ class TestApp
              appearance,
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
-             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel), shellHost))
+             shellIntegrationServices(std::move(shellRcEditor), std::move(attachedHostLabel), shellHost),
+             scriptedDragEndProbe())
     {
         parseTerminalVerb();
     }
@@ -122,7 +123,8 @@ class TestApp
              contour::platform::nullAppearanceServices(),
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
-             shellIntegrationServices())
+             shellIntegrationServices(),
+             scriptedDragEndProbe())
     {
         parseTerminalVerb();
     }
@@ -173,7 +175,8 @@ class TestApp
              contour::platform::nullAppearanceServices(),
              core::platform::defaultSteadyClock().now(),
              settingsWindowFactory(),
-             shellIntegrationServices())
+             shellIntegrationServices(),
+             scriptedDragEndProbe())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -193,6 +196,8 @@ class TestApp
     {
         return _app.sessionsManager();
     }
+    /// The drag-end probe wired into this app: a test says through it where a drag no window took ended.
+    [[nodiscard]] ScriptedDragEndProbe& dragEndProbe() noexcept { return *_dragEndProbe; }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
     [[nodiscard]] RecordingExternalLauncher& launcher() noexcept
     {
@@ -350,6 +355,15 @@ class TestApp
                                                    .host = shellHost };
     }
 
+    /// The probe the app decides drag ends with. Runs in the member-initializer list, so the raw pointer is
+    /// set before _app is constructed.
+    [[nodiscard]] std::unique_ptr<contour::window::DragEndProbe> scriptedDragEndProbe()
+    {
+        auto probe = std::make_unique<ScriptedDragEndProbe>();
+        _dragEndProbe = probe.get();
+        return probe;
+    }
+
     /// Builds the app's Settings window offscreen, on an engine of the fixture's own: the app never builds
     /// its own engine in a test. The engine is made on the first show, with the chrome tokens installed.
     /// Runs in the member-initializer list; what it returns is called only once _app exists.
@@ -370,6 +384,7 @@ class TestApp
 
     RecordingExternalLauncher* _launcher = nullptr;
     RecordingShellRcEditor* _shellRcEditor = nullptr;
+    ScriptedDragEndProbe* _dragEndProbe = nullptr;
     std::shared_ptr<InMemoryGuiStateStore> _guiState = std::make_shared<InMemoryGuiStateStore>();
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,

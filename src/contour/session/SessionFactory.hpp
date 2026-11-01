@@ -4,6 +4,7 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
@@ -23,8 +24,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <vthost/client/TabPresentation.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 class QObject;
@@ -75,10 +78,26 @@ enum class SessionHosting : uint8_t
                ///< remote end hosts, and a command given for it is dropped.
 };
 
+/// What hosts the sessions a SessionFactory makes, as a drop and a move tell the hosts apart.
+enum class SessionHostKind : uint8_t
+{
+    Local = 0, ///< This process.
+    Daemon,    ///< A Contour daemon (attach mode).
+    Tmux,      ///< A tmux server in control mode.
+};
+
 /// Whether a whole tab can be merged into a split of a pane in a window this factory hosts.
 enum class TabMergeSupport : uint8_t
 {
     Unsupported = 0, ///< No: the tab is left to tear off. A remote end's model would undo a local merge.
+    Supported,       ///< Yes, here or on the remote end.
+};
+
+/// Whether a pane or a tab can be moved -- beside a pane, onto one, into a tab well or into a new window --
+/// in a window this factory hosts.
+enum class MoveSupport : uint8_t
+{
+    Unsupported = 0, ///< No: the remote end's model would undo a local move, and it serves none itself.
     Supported,       ///< Yes, here or on the remote end.
 };
 
@@ -89,6 +108,23 @@ enum class RemoteRouting : uint8_t
     Routed,    ///< Routed: the remote end's layout re-push reconciles the change in.
     Refused,   ///< The remote end owns the layout and cannot take it now: nobody performs the change, because
                ///< a local one would leave this window showing a layout the remote end does not have.
+};
+
+/// A move asked of the remote end (SessionFactory::requestRemoteMove): a pane or a whole tab, beside a pane,
+/// onto one, into a window's tab well or into a new window. Both ends are named by the HOST's session ids,
+/// not by pty: the drop is handled by the target window's process, which in a move between two processes
+/// attached to one daemon does not hold the source's ptys.
+struct RemoteMove
+{
+    vtworkspace::MoveSourceKind source = vtworkspace::MoveSourceKind::Pane; ///< A pane or a whole tab.
+    /// A pane: its session. A tab: every session of it, the first naming the tab.
+    std::vector<uint64_t> sourceSessions {};
+    vtworkspace::MoveTargetKind target = vtworkspace::MoveTargetKind::Edge; ///< Where it is dropped.
+    /// Edge or swap: the pane's session. Tab well: any session of the window. New window: ignored.
+    uint64_t targetSession = 0;
+    vtworkspace::SplitSide side = vtworkspace::SplitSide::Right; ///< Edge only: the side of the target pane.
+    int index = 0;        ///< Tab well only: the position among the window's tabs.
+    uint64_t request = 0; ///< The caller's number for it, which the remote end's answer is reported under.
 };
 
 /// What a session authored on the remote end runs, as this client asks for it (SessionFactory's
@@ -174,6 +210,14 @@ class SessionFactory
     /// @return Local for a factory that spawns here (the default); Remote for an attach-mode one.
     [[nodiscard]] virtual SessionHosting hosting() const noexcept { return SessionHosting::Local; }
 
+    /// What hosts this factory's sessions: what a drop that cannot move into its windows is refused for.
+    /// @return Local for a factory that spawns here; Daemon for any other by default; an attach-mode
+    ///         factory names its own kind.
+    [[nodiscard]] virtual SessionHostKind hostKind() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? SessionHostKind::Local : SessionHostKind::Daemon;
+    }
+
     /// The factory of sessions that run in this process whatever host the app is attached to. A window that
     /// is no part of the host's workspace -- the quick terminal -- makes its sessions through it, so the
     /// host neither authors nor remembers them.
@@ -187,6 +231,47 @@ class SessionFactory
     [[nodiscard]] virtual TabMergeSupport tabMergeSupport() const noexcept
     {
         return hosting() == SessionHosting::Local ? TabMergeSupport::Supported : TabMergeSupport::Unsupported;
+    }
+
+    /// Whether a pane or tab can be moved here: a local factory moves in-process, an attach factory only when
+    /// its remote end serves the move (a remote end's model would undo a local one).
+    /// @return Supported for a local factory (the default); Unsupported for a remote one that does not
+    ///         override this.
+    [[nodiscard]] virtual MoveSupport moveSupport() const noexcept
+    {
+        return hosting() == SessionHosting::Local ? MoveSupport::Supported : MoveSupport::Unsupported;
+    }
+
+    /// What can be moved into this factory's windows, as the move and refusal tables read it
+    /// (window::moveRouteOf(), window::moveRefusalOf()): one capability set, decided from the host's kind
+    /// and what it serves.
+    /// @return Nodes for this process or a daemon serving MoveNode; Tabs for an older daemon; Nothing for
+    ///         tmux.
+    [[nodiscard]] window::HostMoves hostMoves() const noexcept
+    {
+        switch (hostKind())
+        {
+            case SessionHostKind::Local: return window::HostMoves::Nodes;
+            case SessionHostKind::Tmux: return window::HostMoves::Nothing;
+            case SessionHostKind::Daemon: break;
+        }
+        return moveSupport() == MoveSupport::Supported ? window::HostMoves::Nodes : window::HostMoves::Tabs;
+    }
+
+    /// Which run of a daemon this factory's sessions are hosted by, so a drag can tell whether its drop
+    /// target is hosted by the same one.
+    /// @return The daemon instance; std::nullopt for a local factory (the default), and while the daemon
+    ///         stated none.
+    [[nodiscard]] virtual std::optional<uint64_t> daemonInstance() const noexcept { return std::nullopt; }
+
+    /// The id the host knows the session backed by @p pty by, for a drag payload a window of another process
+    /// can name it with.
+    /// @param pty A pty this factory handed out.
+    /// @return The daemon session id; std::nullopt for a local factory (the default), and for a pty not bound
+    ///         to a remote session.
+    [[nodiscard]] virtual std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& /*pty*/) const noexcept
+    {
+        return std::nullopt;
     }
 
     /// The notifier a new session raises its notifications through.
@@ -262,6 +347,34 @@ class SessionFactory
     [[nodiscard]] virtual RemoteRouting requestRemoteTabMerge(std::span<vtpty::Pty const* const> /*tabPtys*/,
                                                               vtpty::Pty const* /*targetPty*/,
                                                               vtworkspace::SplitSide /*side*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: sets the axis of the split above the pane backed by @p anchorPty on the DAEMON rather
+    /// than toggling locally, so a later layout push does not revert it. Its own routing verb rather than a
+    /// fold into requestRemoteMove(): it names one split by one pane and no source, target or request number.
+    /// The daemon's layout re-push brings the new axis in.
+    /// @param anchorPty The pty of a leaf inside the split to change.
+    /// @param axis      The axis to set: Horizontal or Vertical.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the layout and cannot take it (the
+    ///         pane is not bound to a session); Local for a local factory, for a daemon that does not serve
+    ///         it (the caller toggles itself, as it always has), and while the reconciler applies a push.
+    [[nodiscard]] virtual RemoteRouting requestRemoteSplitOrientation(vtpty::Pty const* /*anchorPty*/,
+                                                                      vtworkspace::SplitState /*axis*/)
+    {
+        return RemoteRouting::Local;
+    }
+
+    /// Attach mode: authors @p move on the DAEMON rather than moving locally. The daemon moves the sessions
+    /// (none is spawned or closed) and its layout re-push reconciles the result in. The ids come from the
+    /// drag payload (@see hostSessionIdOf).
+    /// @param move What moves, where, and the number its answer -- a refusal, and the end of the push that
+    ///             made it -- is reported under.
+    /// @return Routed if handed to the daemon; Refused if the daemon owns the layout and cannot take it (no
+    ///         session named, a pane source naming several, the capability not shared); Local for a local
+    ///         factory, which moves itself.
+    [[nodiscard]] virtual RemoteRouting requestRemoteMove(RemoteMove const& /*move*/)
     {
         return RemoteRouting::Local;
     }

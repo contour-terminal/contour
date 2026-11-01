@@ -71,7 +71,6 @@ using fields::GlobalFieldDescriptor;
 using fields::globalFieldDescriptors;
 using fields::OptionContext;
 using fields::profileFieldGroups;
-using fields::toQString;
 using fields::unboundedRange;
 
 namespace

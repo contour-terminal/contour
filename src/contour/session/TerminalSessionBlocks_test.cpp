@@ -2829,3 +2829,32 @@ TEST_CASE("TerminalSession: the modes a key binding matches on are read without 
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
 }
+
+TEST_CASE("TerminalSession: the visible text tail is the last non-empty rows, in order",
+          "[contour][session][drag]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    SECTION("an empty screen has no rows")
+    {
+        CHECK(session->visibleTextTail(3).isEmpty());
+    }
+
+    SECTION("the last rows with text, oldest first, blank rows after them skipped")
+    {
+        session->terminal().writeToScreen("one\r\ntwo\r\nthree\r\nfour\r\n");
+        auto const tail = session->visibleTextTail(3);
+        REQUIRE(tail.size() == 3);
+        CHECK(tail.at(0) == QStringLiteral("two"));
+        CHECK(tail.at(1) == QStringLiteral("three"));
+        CHECK(tail.at(2) == QStringLiteral("four"));
+    }
+
+    SECTION("fewer rows than asked for, and a count of zero")
+    {
+        session->terminal().writeToScreen("only");
+        CHECK(session->visibleTextTail(3) == QStringList { QStringLiteral("only") });
+        CHECK(session->visibleTextTail(0).isEmpty());
+    }
+}
