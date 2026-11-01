@@ -32,7 +32,8 @@ it feels native on Windows 11, macOS and Linux.
 - 🖥️ **Native chrome, light and dark.** Mica and Snap Layouts on Windows 11, native menus on macOS, a header bar on Linux —
   or a character-cell *Terminal* style — all following your OS theme, with a Settings window and a command palette.
 - ⚡ **Fast.** GPU-accelerated rendering, synchronized output, and a PTY-to-grid pipeline that is measured for key-press latency under load.
-- 🔤 **Text done right.** Font ligatures, full Unicode with grapheme clusters, emoji (ZWJ, VS15, VS16), bold and italic, High-DPI.
+- 🔤 **Text done right.** Font ligatures, full Unicode with grapheme clusters, emoji (ZWJ, VS15, VS16), bold and italic, High-DPI,
+  and Nerd Fonts glyphs with any font you choose — a symbols font is bundled.
 - 🖼️ **Graphics.** Sixel, the kitty graphics protocol (including animation) and ReGIS vector graphics.
 - 🎯 **Keyboard-driven.** Vi-like input modes, [hint mode](https://contour-terminal.org/demo/hint-mode/) for URLs, paths and git hashes,
   clickable links in any output, a GUI find bar and a quick-terminal hotkey.

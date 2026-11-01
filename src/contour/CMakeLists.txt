@@ -1798,8 +1798,25 @@ function(_qt_get_plugin_name_with_version target out_var)
 endfunction()
 # }}}
 
+# The Nerd Fonts symbols font (cmake/NerdFontSymbols.cmake) sits where bundledFontDirectories() looks for the
+# fonts shipped with the application: beside the executable, in the same relative place it will be installed to.
+# A build tree that was never installed is staged there too, so a developer build and the tests find it.
+if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+    if(CONTOUR_MACOS_APP_BUNDLE)
+        set(_contour_staged_fonts "$<TARGET_FILE_DIR:contour>/../Resources/fonts")
+    else()
+        set(_contour_staged_fonts "$<TARGET_FILE_DIR:contour>/../share/contour/fonts")
+    endif()
+    add_custom_command(TARGET contour POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CONTOUR_NERD_FONT_SYMBOLS_DIR}" "${_contour_staged_fonts}"
+        COMMENT "Staging the Nerd Fonts symbols font")
+endif()
+
 if(WIN32)
     install(TARGETS contour DESTINATION bin)
+    if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+        install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "share/contour/fonts")
+    endif()
     contour_install_bundled_extensions("share/contour/extensions")
     # windeployqt stages the Qt runtime beside the executable, and the directory install below exists
     # to pick that staging up. Both are gated, because a GUI-less build links no Qt: there would be
@@ -1843,6 +1860,9 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     # JetBrains Mono (SIL OFL 1.1), registered with CoreText at startup. The file names contain brackets,
     # which install(DIRECTORY ... FILES_MATCHING) would read as globs, so the directory is copied whole.
     install(DIRECTORY "res/fonts/" DESTINATION "${INSTALL_CMAKE_DIR}/fonts" PATTERN "README.md" EXCLUDE)
+    if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+        install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "${INSTALL_CMAKE_DIR}/fonts")
+    endif()
     # Before the deployment step below, which signs the bundle with them inside.
     contour_install_bundled_extensions("${INSTALL_CMAKE_DIR}/extensions")
 
@@ -1941,6 +1961,9 @@ else()
     install(TARGETS contour DESTINATION bin)
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
+    if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+        install(DIRECTORY "${CONTOUR_NERD_FONT_SYMBOLS_DIR}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts")
+    endif()
     contour_install_bundled_extensions("${CMAKE_INSTALL_DATADIR}/contour/extensions")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")

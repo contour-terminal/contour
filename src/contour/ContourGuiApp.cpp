@@ -80,6 +80,8 @@
 
 #include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/FontLocator.hpp>
+#include <text_shaper/NerdFontSymbolRanges.hpp>
+#include <text_shaper/NerdFontSymbolsLocator.hpp>
 
 #include <crispy/ScopedTimer.hpp>
 
@@ -1252,15 +1254,13 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
 namespace
 {
     /// Where the fonts shipped with the application live, relative to the running executable:
-    /// `Contents/Resources/fonts` in the macOS bundle, `<prefix>/share/contour/fonts` on Linux
-    /// (the executable being `<prefix>/bin/contour`). Windows ships none; it uses Cascadia Mono.
+    /// `Contents/Resources/fonts` in the macOS bundle, `<prefix>/share/contour/fonts` on Linux and Windows
+    /// (the executable being `<prefix>/bin/contour`). Windows ships no terminal font of its own, it uses
+    /// Cascadia Mono, but it ships the Nerd Fonts symbols font there like every other platform.
     [[nodiscard]] text::BundledFontDirectories bundledFontDirectories(fs::path const& executableDirectory)
     {
 #ifdef __APPLE__
         return { .paths = { (executableDirectory / ".." / "Resources" / "fonts").lexically_normal() } };
-#elifdef _WIN32
-        (void) executableDirectory;
-        return {};
 #else
         return { .paths = {
                      (executableDirectory / ".." / "share" / "contour" / "fonts").lexically_normal() } };
@@ -2527,6 +2527,29 @@ void ContourGuiApp::registerBundledFonts() const
     }
 }
 
+text::FontLocator& ContourGuiApp::fontLocator(vtrasterizer::FontLocatorEngine engine)
+{
+    auto& platformLocator = vtrasterizer::createFontLocator(engine);
+    if (engine == vtrasterizer::FontLocatorEngine::Mock)
+        return platformLocator;
+
+    std::call_once(_fontLocatorBuilt, [&] {
+        // Found beside the executable like the fonts registered above. Where there is none (a build tree that
+        // was never installed and has no staged copy, or one built without the symbols font), the locator
+        // wraps nothing and the platform's own is what is asked.
+        auto symbolsFont = fs::path {};
+        if (auto const executable = vthost::currentExecutablePath())
+            if (auto const directories = bundledFontDirectories(executable->parent_path());
+                !directories.paths.empty())
+                symbolsFont = directories.paths.front() / text::NerdFontSymbolsFileName;
+        _nativeFontLocator = std::make_unique<text::NerdFontSymbolsLocator>(platformLocator, symbolsFont);
+        startupLog()("Nerd Fonts symbols font {}: {}.",
+                     _nativeFontLocator->hasSymbolsFont() ? "bundled" : "not found",
+                     core::pathToUtf8(symbolsFont));
+    });
+    return *_nativeFontLocator;
+}
+
 int ContourGuiApp::fontConfigAction()
 {
     if (!loadConfig("font-locator"))
@@ -2537,7 +2560,7 @@ int ContourGuiApp::fontConfigAction()
     vtrasterizer::FontDescriptions const& fonts =
         _config.profile(_config.defaultProfileName.value())->fonts.value();
     text::FontDescription const& fontDescription = fonts.regular;
-    text::FontLocator& fontLocator = createFontLocator(fonts.fontLocator);
+    text::FontLocator& fontLocator = this->fontLocator(fonts.fontLocator);
     text::FontSourceList const fontSources = fontLocator.locate(fontDescription);
 
     std::cout << std::format("Matching fonts using  : {}\n", fonts.fontLocator);

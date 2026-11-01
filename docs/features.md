@@ -10,6 +10,7 @@
 :material-check-bold:{.check-mark}  Unicode: Emoji support (-: 🌈  💝  😛  👪  - including ZWJ, VS15, VS16 emoji :-) <br/>
 :material-check-bold:{.check-mark}  Unicode: Grapheme cluster support <br/>
 :material-check-bold:{.check-mark}  Bold and italic fonts <br/>
+:material-check-bold:{.check-mark}  Nerd Fonts glyphs (Powerline, Font Awesome, Material Design, Devicons, ...) with whichever font you choose: a symbols font is bundled <br/>
 :material-check-bold:{.check-mark}  High-DPI support. <br/>
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Hint mode](demo/hint-mode.md) for keyboard-driven selection of URLs, file paths, git hashes, and more <br/>

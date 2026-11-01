@@ -405,8 +405,9 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
             _session->config().renderer.value().textureAtlasHashtableSlots,
             _session->config().renderer.value().textureAtlasTileCount,
             _session->config().renderer.value().textureAtlasDirectMapping,
-            // The composition root picks the locator engine; the renderer just uses what it is given.
-            vtrasterizer::createFontLocator(profile().fonts.value().fontLocator),
+            // The composition root picks the locator engine and what backs it; the renderer just uses what it
+            // is given.
+            _session->app().fontLocator(profile().fonts.value().fontLocator),
             _session->profile().hyperlinkDecoration.value().normal,
             _session->profile().hyperlinkDecoration.value().hover,
             _session->config().textScalingMethod.value());

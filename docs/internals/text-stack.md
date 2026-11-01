@@ -203,6 +203,58 @@ standards that are partly even older than I am.
 What would we be without dreams. ;-)
 
 
+Nerd Fonts glyphs
+-----------------
+
+Nerd Fonts put thousands of icons -- Powerline, Font Awesome, Material Design, Devicons, Codicons -- into the
+Unicode private use areas. Only a patched font has them, and no font of the system is the right answer to
+"which font draws `U+E700`": on Windows the system fallback names Segoe Fluent Icons, whose icons at those
+code points are other icons altogether. So Contour ships the Nerd Fonts "Symbols Only" font and offers it for
+exactly those code points.
+
+The order in which a glyph the primary font lacks is looked for is:
+
+1. the fallback fonts the profile lists (`fallback:` of the font), in their order;
+2. `text::NerdFontSymbolsLocator`, for a run made up only of Nerd Fonts' code points
+   (`text/NerdFontSymbolRanges.hpp`): the bundled symbols font;
+3. the platform's own fallback (fontconfig, DirectWrite, CoreText).
+
+So a font the user chose, or a Nerd Font they patched themselves, always wins; `fallback: none` disables
+all of it. Step 2 is a decorator over the platform locator, which the shapers reach through `resolve()`, so
+the FreeType and the DirectWrite shaper behave alike, on every platform.
+
+### Where the font comes from
+
+The font is not in the repository. `cmake/NerdFontSymbols.cmake` takes it from the Nerd Fonts release
+archive, pinned by version and SHA-256, and stages it where the executable looks for bundled fonts
+(`<prefix>/share/contour/fonts`, `Contents/Resources/fonts` in the macOS bundle), in the build tree as well as
+in the installation. `CONTOUR_NERD_FONT_SYMBOLS` chooses how:
+
+| Value | Meaning |
+|-------|---------|
+| `FETCH` (default) | Download the archive at configure time. |
+| `ARCHIVE` | Use the local archive `CONTOUR_NERD_FONT_SYMBOLS_ARCHIVE` names, checked against the same hash. |
+| `OFF` | Bundle nothing. |
+
+A build with no network access, such as a Flatpak or a distribution's build root, fetches the archive as a
+checksummed source of its own and hands it in. For a Flatpak manifest:
+
+```yaml
+sources:
+  - type: file
+    url: https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/NerdFontsSymbolsOnly.zip
+    sha256: fdca3682534f6f65e1ccb2345b0362ccf67d9b8eca7c8025330946e93e2473bc
+    dest-filename: NerdFontsSymbolsOnly.zip
+config-opts:
+  - -DCONTOUR_NERD_FONT_SYMBOLS=ARCHIVE
+  - -DCONTOUR_NERD_FONT_SYMBOLS_ARCHIVE=NerdFontsSymbolsOnly.zip
+```
+
+To upgrade, set `CONTOUR_NERD_FONT_SYMBOLS_VERSION` and `CONTOUR_NERD_FONT_SYMBOLS_SHA256` in
+`cmake/NerdFontSymbols.cmake`, and paste what `scripts/generate-nerd-font-ranges.py` prints for the new font over
+the table in `src/text_shaper/NerdFontSymbolRanges.hpp`. The `text_shaper_test` case that checks the table
+against the staged font fails until the two agree.
+
 References
 ----------
 
@@ -211,4 +263,3 @@ References
 - [UTS 24](https://unicode.org/reports/tr24/) - script property
 - [UTS 29](https://unicode.org/reports/tr29/) - text segmentation (grapheme cluster, word boundary)
 - [UTS 51](https://unicode.org/reports/tr51/) - Emoji
-
