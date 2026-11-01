@@ -2,7 +2,9 @@
 
 :material-check-bold:{.check-mark}  Available on all 4 major platforms, Linux, macOS, FreeBSD, Windows. <br/>
 :material-check-bold:{.check-mark}  GPU-accelerated rendering. <br/>
-:material-check-bold:{.check-mark}  Terminal tabs <br/>
+:material-check-bold:{.check-mark}  Terminal tabs and split panes, with [colored tabs](configuration/layouts.md#tab-colors), tab badges and [drag-and-drop rearranging](demo/drag-and-drop.md) of panes and tabs <br/>
+:material-check-bold:{.check-mark}  [Layouts](configuration/layouts.md): named sets of tabs and panes that open together <br/>
+:material-check-bold:{.check-mark}  Native window chrome on Windows 11, macOS and Linux, in light and dark, with a Settings window, a command palette and a character-cell Terminal style <br/>
 :material-check-bold:{.check-mark}  [Persistent sessions](persistent-sessions.md) that survive the window (daemon mode) — reattach locally or over the network, and interoperate with tmux in both directions <br/>
 :material-check-bold:{.check-mark}  [Font ligatures](demo/font-ligatures.md) support (very useful for programming and scripting) <br/>
 :material-check-bold:{.check-mark}  Unicode: Emoji support (-: 🌈  💝  😛  👪  - including ZWJ, VS15, VS16 emoji :-) <br/>
@@ -12,6 +14,10 @@
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Hint mode](demo/hint-mode.md) for keyboard-driven selection of URLs, file paths, git hashes, and more <br/>
 :material-check-bold:{.check-mark}  [Drag and drop](demo/drag-and-drop.md): drop a tab on a pane edge to split it, or files to type their escaped paths <br/>
+:material-check-bold:{.check-mark}  [Clickable links](configuration/links.md): URLs, file paths and your own patterns in whatever a program prints, opened with <kbd>Ctrl</kbd>+click <br/>
+:material-check-bold:{.check-mark}  A find bar with a live match count, floating over the pane being searched <br/>
+:material-check-bold:{.check-mark}  [Control API](control-api.md) and the `contour ls`, `new`, `split`, `send`, `pane capture` and `block` commands to script the daemon's windows, tabs, panes and command blocks <br/>
+:material-check-bold:{.check-mark}  Sandboxed WebAssembly [status-line extensions](extensions.md) <br/>
 :material-check-bold:{.check-mark}  [Quick terminal](quick-terminal.md): a global hotkey slides a terminal down from the top of the screen <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
 :material-check-bold:{.check-mark}  [Command blocks](demo/command-blocks.md): an exit-status gutter, line numbers, per-line timestamps, folding, scrollbar marks and a sticky command header <br/>
