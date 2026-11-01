@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
@@ -666,6 +667,21 @@ QStringList UiStyleProvider::paneHeaderActionNames() const
     for (auto const& row: PaneHeaderActions)
         names.append(nameOf(row.accessibleName));
     return names;
+}
+
+QStringList UiStyleProvider::paneHeaderActionCommands() const
+{
+    auto commands = QStringList {};
+    commands.reserve(static_cast<qsizetype>(PaneHeaderActions.size()));
+    for (auto const& row: PaneHeaderActions)
+        commands.append(nameOf(row.commandName));
+    return commands;
+}
+
+QString UiStyleProvider::fixedShortcutText(QString const& name) const
+{
+    auto const text = command::fixedShortcutText(name.toStdString(), command::platformShortcutStyle());
+    return text ? QString::fromStdString(*text) : QString {};
 }
 
 QVariantMap UiStyleProvider::paneHeader(

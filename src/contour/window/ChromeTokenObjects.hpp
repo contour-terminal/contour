@@ -51,6 +51,10 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal control READ control CONSTANT)
     Q_PROPERTY(qreal paneHeader READ paneHeader CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
+    Q_PROPERTY(qreal tooltipPadX READ tooltipPadX CONSTANT)
+    Q_PROPERTY(qreal tooltipPadTop READ tooltipPadTop CONSTANT)
+    Q_PROPERTY(qreal tooltipPadBottom READ tooltipPadBottom CONSTANT)
+    Q_PROPERTY(qreal tooltipGap READ tooltipGap CONSTANT)
     Q_PROPERTY(qreal dialogWidth READ dialogWidth CONSTANT)
     Q_PROPERTY(qreal swatchWidth READ swatchWidth CONSTANT)
     Q_PROPERTY(qreal swatchHeight READ swatchHeight CONSTANT)
@@ -123,6 +127,17 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal paneHeader() const noexcept { return _tokens.paneHeader * _units.vertical; }
     /// @return The toast height in logical pixels.
     [[nodiscard]] qreal toast() const noexcept { return _tokens.toast * _units.vertical; }
+    /// @return A tooltip's leading and trailing padding in logical pixels.
+    [[nodiscard]] qreal tooltipPadX() const noexcept { return _tokens.tooltipPadX * _units.horizontal; }
+    /// @return A tooltip's top padding in logical pixels.
+    [[nodiscard]] qreal tooltipPadTop() const noexcept { return _tokens.tooltipPadTop * _units.vertical; }
+    /// @return A tooltip's bottom padding in logical pixels.
+    [[nodiscard]] qreal tooltipPadBottom() const noexcept
+    {
+        return _tokens.tooltipPadBottom * _units.vertical;
+    }
+    /// @return The gap between a tooltip's label and its shortcut in logical pixels.
+    [[nodiscard]] qreal tooltipGap() const noexcept { return _tokens.tooltipGap * _units.horizontal; }
     /// @return The dialog width in logical pixels.
     [[nodiscard]] qreal dialogWidth() const noexcept { return _tokens.dialogWidth * _units.horizontal; }
     /// @return The width of a menu's colour swatch in logical pixels.
@@ -409,6 +424,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal paneCard READ paneCard CONSTANT)
     Q_PROPERTY(qreal noticeCard READ noticeCard CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
+    Q_PROPERTY(qreal tooltip READ tooltip CONSTANT)
     Q_PROPERTY(qreal tab READ tab CONSTANT)
     Q_PROPERTY(qreal tabWell READ tabWell CONSTANT)
     Q_PROPERTY(qreal tabIcon READ tabIcon CONSTANT)
@@ -444,6 +460,8 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal noticeCard() const noexcept { return _tokens.noticeCard * _units.horizontal; }
     /// @return The radius of toasts.
     [[nodiscard]] qreal toast() const noexcept { return _tokens.toast * _units.horizontal; }
+    /// @return The radius of tooltips.
+    [[nodiscard]] qreal tooltip() const noexcept { return _tokens.tooltip * _units.horizontal; }
     /// @return The radius of a tab pill.
     [[nodiscard]] qreal tab() const noexcept { return _tokens.tab * _units.horizontal; }
     /// @return The radius of the tab well.
@@ -572,6 +590,8 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(int headerReveal READ headerReveal CONSTANT)
     Q_PROPERTY(qreal popoverScale READ popoverScale CONSTANT)
     Q_PROPERTY(int linger READ linger CONSTANT)
+    Q_PROPERTY(int tooltipDelay READ tooltipDelay CONSTANT)
+    Q_PROPERTY(int tooltipWarm READ tooltipWarm CONSTANT)
 
   public:
     /// @param tokens The resolved motion group.
@@ -599,6 +619,10 @@ class ChromeMotionTokens: public QObject
     [[nodiscard]] qreal popoverScale() const noexcept { return _tokens.popoverScalePercent / 100.0; }
     /// @return How long the size indicator stays after the last change, in milliseconds.
     [[nodiscard]] int linger() const noexcept { return _tokens.lingerMs; }
+    /// @return How long a pointer rests on a control before its first tooltip shows, in milliseconds.
+    [[nodiscard]] int tooltipDelay() const noexcept { return _tokens.tooltipDelayMs; }
+    /// @return How long after a tooltip the next one shows with no delay, in milliseconds.
+    [[nodiscard]] int tooltipWarm() const noexcept { return _tokens.tooltipWarmMs; }
 
     /// @return The QML names of config::MotionStyle's enumerators.
     [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
@@ -1214,6 +1238,10 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor windowButtonPressedFill READ windowButtonPressedFill NOTIFY changed)
     Q_PROPERTY(QColor windowButtonGlyph READ windowButtonGlyph NOTIFY changed)
     Q_PROPERTY(QColor headerSeparator READ headerSeparator NOTIFY changed)
+    Q_PROPERTY(QColor tooltipFill READ tooltipFill NOTIFY changed)
+    Q_PROPERTY(QColor tooltipText READ tooltipText NOTIFY changed)
+    Q_PROPERTY(QColor tooltipTextSecondary READ tooltipTextSecondary NOTIFY changed)
+    Q_PROPERTY(QColor tooltipEdge READ tooltipEdge NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -1344,6 +1372,15 @@ class ChromeColorTokens: public QObject
         return color(config::ChromeColorRole::WindowButtonGlyph);
     }
     [[nodiscard]] QColor headerSeparator() const { return color(config::ChromeColorRole::HeaderSeparator); }
+
+    /// The tooltips' roles, by the palette's tone.
+    [[nodiscard]] QColor tooltipFill() const { return color(config::ChromeColorRole::TooltipFill); }
+    [[nodiscard]] QColor tooltipText() const { return color(config::ChromeColorRole::TooltipText); }
+    [[nodiscard]] QColor tooltipTextSecondary() const
+    {
+        return color(config::ChromeColorRole::TooltipTextSecondary);
+    }
+    [[nodiscard]] QColor tooltipEdge() const { return color(config::ChromeColorRole::TooltipEdge); }
 
     /// The Settings window's roles, by the palette's tone.
     [[nodiscard]] QColor settingsSidebarFill() const

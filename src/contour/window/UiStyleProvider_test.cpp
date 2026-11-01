@@ -1511,6 +1511,16 @@ TEST_CASE("UiStyleProvider publishes the pane tokens", "[contour][uistyle]")
     REQUIRE(nameCount == contour::window::PaneHeaderActions.size());
     for (auto const& row: contour::window::PaneHeaderActions)
         CHECK(names[static_cast<qsizetype>(row.action)] == QString::fromUtf8(row.accessibleName));
+    // So do the commands a tooltip asks the controller for the bound chord of.
+    auto const commands = mac.property("paneHeaderActionCommands").toStringList();
+    REQUIRE(static_cast<size_t>(commands.size()) == contour::window::PaneHeaderActions.size());
+    for (auto const& row: contour::window::PaneHeaderActions)
+        CHECK(commands[static_cast<qsizetype>(row.action)] == QString::fromUtf8(row.commandName));
+    CHECK(commands == QStringList { "SplitVertical", "SplitHorizontal", "TogglePaneZoom", "ClosePane" });
+
+    // The find bar's fixed keys are spelled as the host spells shortcuts; an unknown name has none.
+    CHECK_FALSE(mac.fixedShortcutText(QStringLiteral("FindNext")).isEmpty());
+    CHECK(mac.fixedShortcutText(QStringLiteral("NoSuchKey")).isEmpty());
 
     auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
     // A vertical gap is one cell's height on the Terminal row, its horizontal twin one cell's width.
@@ -2976,4 +2986,32 @@ TEST_CASE("UiStyleProvider publishes the Settings window's tokens per row", "[co
         CAPTURE(role);
         CHECK(colors->property(role).isValid());
     }
+}
+
+TEST_CASE("UiStyleProvider resolves a tooltip's tone colours for either chrome",
+          "[contour][uistyle][tooltip]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    auto const font = QGuiApplication::font();
+    auto const check = [&](ChromeStyle style, ChromeColorRole role, QColor const& light, QColor const& dark) {
+        auto const provider = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
+        auto const* colors =
+            qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+        REQUIRE(colors != nullptr);
+        auto const& source =
+            contour::config::ChromeTokenRows[static_cast<size_t>(style)].colors[static_cast<size_t>(role)];
+        CHECK(colors->resolve(source, Qt::ColorScheme::Light).name(QColor::HexArgb)
+              == light.name(QColor::HexArgb));
+        CHECK(colors->resolve(source, Qt::ColorScheme::Dark).name(QColor::HexArgb)
+              == dark.name(QColor::HexArgb));
+    };
+    check(
+        ChromeStyle::MacOS, ChromeColorRole::TooltipFill, QColor(0xF6, 0xF6, 0xF6), QColor(0x2C, 0x2C, 0x2E));
+    check(ChromeStyle::Fluent,
+          ChromeColorRole::TooltipFill,
+          QColor(0xF9, 0xF9, 0xF9),
+          QColor(0x2C, 0x2C, 0x2C));
+    // Black at 85 %, white at 88 %.
+    check(ChromeStyle::MacOS, ChromeColorRole::TooltipText, QColor(0, 0, 0, 217), QColor(255, 255, 255, 224));
 }

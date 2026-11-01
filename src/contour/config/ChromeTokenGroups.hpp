@@ -271,6 +271,12 @@ enum class ChromeColorRole : uint8_t
     WindowButtonPressedFill, //!< A round window button's fill while pressed.
     WindowButtonGlyph,       //!< A round window button's icon, on each of its three fills.
     HeaderSeparator,         //!< The header bar's line between its items and the window buttons.
+
+    // The tooltips (KitToolTip.qml).
+    TooltipFill,          //!< A tooltip's fill.
+    TooltipText,          //!< A tooltip's label, and the first line of a multi-line one.
+    TooltipTextSecondary, //!< A tooltip's shortcut, and the lines after the first.
+    TooltipEdge,          //!< A tooltip's hairline edge; none where the box is drawn in cells.
 };
 
 /// Where a chrome colour comes from.
@@ -295,6 +301,9 @@ enum class ColorSourceKind : uint8_t
     /// A status hue's mark ink, picked by the source's @c status, where it reaches 3:1 on the OS palette's
     /// window colour, else the window's own ink (UiStyleProvider::statusMarkOn).
     StatusMarkOnWindow,
+    /// The source's @c rgb at @c alphaPercent on a light chrome, its @c darkRgb at @c darkAlphaPercent on a
+    /// dark one: a colour the kit's tables do not hold, such as a tooltip's own fill.
+    Tone,
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -370,7 +379,7 @@ inline constexpr std::array SchemeMarkChains {
 };
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1;
 
 // Each family of colour roles is counted by its own two ends, End - Begin, never from a neighbour's End: a
 // family added between two others then shifts no count.
@@ -418,6 +427,8 @@ struct ChromeColorSource
     /// The 1-based step of a @c Fill, @c Label or @c Surface source, the signed lightness shift of a
     /// @c SchemeShade one; 0 for other kinds.
     int level = 0;
+    uint32_t darkRgb = 0;       ///< @c 0xRRGGBB on a dark chrome, for @c Tone.
+    int darkAlphaPercent = 100; ///< Opacity on a dark chrome, for @c Tone.
 
     [[nodiscard]] bool operator==(ChromeColorSource const&) const = default;
 };
@@ -487,6 +498,10 @@ struct SizeTokens
     int control = 0;           ///< Height of a button or field.
     int paneHeader = 0;        ///< Height of a pane header.
     int toast = 0;             ///< Height of a toast.
+    int tooltipPadX = 0;       ///< A tooltip's leading and trailing padding (horizontal units).
+    int tooltipPadTop = 0;     ///< A tooltip's top padding (vertical units).
+    int tooltipPadBottom = 0;  ///< A tooltip's bottom padding (vertical units).
+    int tooltipGap = 0;        ///< The gap between a tooltip's label and its shortcut (horizontal units).
     int dialogWidth = 0;       ///< Width of a dialog.
     int swatchWidth = 0;       ///< Width of a menu's colour swatch.
     int swatchHeight = 0;      ///< Height of a menu's colour swatch.
@@ -626,6 +641,7 @@ struct RadiusTokens
     int paneCard = 0;   ///< Pane cards.
     int noticeCard = 0; ///< The shell-integration card.
     int toast = 0;      ///< Toasts.
+    int tooltip = 0;    ///< Tooltips.
 
     // The title band.
     int tab = 0;         ///< A tab pill.
@@ -695,6 +711,13 @@ struct MotionTokens
     /// How long the size indicator stays after the last change, in milliseconds. A hold rather than an
     /// animation, so Reduce Motion leaves it be.
     int lingerMs = 0;
+
+    /// How long a pointer rests on a control before its first tooltip shows, in milliseconds. A hold
+    /// rather than an animation, so Reduce Motion leaves it be.
+    int tooltipDelayMs = 0;
+
+    /// How long after a tooltip was last shown the next one shows with no delay, in milliseconds.
+    int tooltipWarmMs = 0;
 
     [[nodiscard]] bool operator==(MotionTokens const&) const = default;
 };

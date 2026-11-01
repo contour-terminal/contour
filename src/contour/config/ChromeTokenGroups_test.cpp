@@ -1868,7 +1868,9 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
     CHECK(FocusColorRoleEnd - FocusColorRoleBegin == 2);
     CHECK(FocusColorRoleEnd == SettingsColorRoleBegin);
     CHECK(SettingsColorRoleEnd == static_cast<size_t>(ChromeColorRole::WindowButtonFill));
-    CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1 == ChromeColorRoleCount);
+    CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1
+          == static_cast<size_t>(ChromeColorRole::TooltipFill));
+    CHECK(static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1 == ChromeColorRoleCount);
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
@@ -2510,3 +2512,90 @@ TEST_CASE("chromeTokens.settingsTextReadsOnTheTerminalRow", "[chrometokens]")
 }
 
 // }}}
+
+TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    struct Row
+    {
+        ChromeStyle style;
+        int padX;
+        int padTop;
+        int padBottom;
+        int gap;
+        int radius;
+    };
+    for (auto const& expected: { Row { ChromeStyle::MacOS, 8, 3, 3, 12, 6 },
+                                 Row { ChromeStyle::Fluent, 9, 6, 8, 12, 8 },
+                                 Row { ChromeStyle::ContourLinux, 8, 4, 4, 12, 8 },
+                                 Row { ChromeStyle::Terminal, 1, 0, 0, 2, 0 } })
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const& row = ChromeTokenRows[static_cast<size_t>(expected.style)];
+        CHECK(row.size.tooltipPadX == expected.padX);
+        CHECK(row.size.tooltipPadTop == expected.padTop);
+        CHECK(row.size.tooltipPadBottom == expected.padBottom);
+        CHECK(row.size.tooltipGap == expected.gap);
+        CHECK(row.radii.tooltip == expected.radius);
+        // Every row waits the same before the first tooltip and keeps the next warm for the same span.
+        CHECK(row.motion.tooltipDelayMs == 600);
+        CHECK(row.motion.tooltipWarmMs == 1500);
+    }
+    // Under Reduce Motion the delay is a hold, not an animation, and stays.
+    auto reduced = ChromeTokenRows[static_cast<size_t>(ChromeStyle::MacOS)];
+    reduced.motion.fastMs = 0;
+    CHECK(reduced.motion.tooltipDelayMs == 600);
+}
+
+TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const role = [](ChromeStyle style, ChromeColorRole colorRole) {
+        return ChromeTokenRows[static_cast<size_t>(style)].colors[static_cast<size_t>(colorRole)];
+    };
+
+    SECTION(
+        "macOS: the kit's near-white and elevated dark, label 85/88 %, shortcut 45/50 %, hairline 18/14 %")
+    {
+        auto const fill = role(ChromeStyle::MacOS, ChromeColorRole::TooltipFill);
+        CHECK(fill.kind == ColorSourceKind::Tone);
+        CHECK(fill.rgb == 0xF6F6F6);
+        CHECK(fill.darkRgb == 0x2C2C2E);
+        auto const text = role(ChromeStyle::MacOS, ChromeColorRole::TooltipText);
+        CHECK((text.rgb == 0x000000 && text.alphaPercent == 85));
+        CHECK((text.darkRgb == 0xFFFFFF && text.darkAlphaPercent == 88));
+        auto const shortcut = role(ChromeStyle::MacOS, ChromeColorRole::TooltipTextSecondary);
+        CHECK((shortcut.alphaPercent == 45 && shortcut.darkAlphaPercent == 50));
+        auto const edge = role(ChromeStyle::MacOS, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 18 && edge.darkAlphaPercent == 14));
+    }
+
+    SECTION("Windows 11: #F9F9F9 / #2C2C2C, label 90 % / white, shortcut 55 / 60 %, edge 6 / 8 %")
+    {
+        auto const fill = role(ChromeStyle::Fluent, ChromeColorRole::TooltipFill);
+        CHECK((fill.rgb == 0xF9F9F9 && fill.darkRgb == 0x2C2C2C));
+        auto const text = role(ChromeStyle::Fluent, ChromeColorRole::TooltipText);
+        CHECK((text.alphaPercent == 90 && text.darkAlphaPercent == 100));
+        auto const shortcut = role(ChromeStyle::Fluent, ChromeColorRole::TooltipTextSecondary);
+        CHECK((shortcut.alphaPercent == 55 && shortcut.darkAlphaPercent == 60));
+        auto const edge = role(ChromeStyle::Fluent, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 6 && edge.darkAlphaPercent == 8));
+    }
+
+    SECTION("ContourLinux: the kit's elevated surface under its labels, edged by its separator")
+    {
+        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipFill).kind == ColorSourceKind::Surface);
+        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipText).kind == ColorSourceKind::Label);
+        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipTextSecondary).level == 3);
+        CHECK(role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipEdge).kind
+              == ColorSourceKind::Separator);
+    }
+
+    SECTION("Terminal: the bar's cells, in the scheme's colours")
+    {
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipFill).kind == ColorSourceKind::Scheme);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipText).slot == SchemeSlot::BarInk);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipTextSecondary).kind
+              == ColorSourceKind::SchemeOnBar);
+    }
+}

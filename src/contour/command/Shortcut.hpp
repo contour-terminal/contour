@@ -189,8 +189,32 @@ struct ShortcutChord
     [[nodiscard]] bool operator==(ShortcutChord const&) const = default;
 };
 
+/// A chord a control answers to whatever the configuration binds, and the name a view asks for it by.
+struct FixedShortcutRow
+{
+    std::string_view name;          ///< What a view asks for it by.
+    vtbackend::Modifiers modifiers; ///< The modifiers held.
+    ShortcutInput input;            ///< The key it ends on.
+};
+
+/// The find bar's fixed keys (they are the bar's, not input_mapping's): adding a control's key is adding a
+/// row.
+inline constexpr auto FixedShortcutTable = std::array {
+    FixedShortcutRow { "FindPrevious",
+                       vtbackend::Modifiers { vtbackend::Modifier::Shift },
+                       ShortcutInput { vtbackend::Key::Enter } },
+    FixedShortcutRow { "FindNext", vtbackend::Modifiers {}, ShortcutInput { vtbackend::Key::Enter } },
+    FixedShortcutRow { "FindClose", vtbackend::Modifiers {}, ShortcutInput { vtbackend::Key::Escape } },
+};
+
 /// Command id (see commandId()) -> the chord that runs it.
 using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
+
+/// Renders one of FixedShortcutTable's chords.
+/// @param name  The row's name, e.g. "FindNext".
+/// @param style How to spell it.
+/// @return The rendered shortcut; nullopt when no row has that name.
+[[nodiscard]] std::optional<std::string> fixedShortcutText(std::string_view name, ShortcutStyle style);
 
 /// Renders @p chord the way shortcutText(modifiers, input, style) does.
 /// @param chord The chord.

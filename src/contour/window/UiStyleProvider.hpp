@@ -310,6 +310,9 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString colorWellGlyph READ colorWellGlyph CONSTANT)
     /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
     Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
+    /// The commands the header actions run, as the command catalog names them, indexed by
+    /// config::PaneHeaderAction: what a tooltip asks the controller for the bound chord of.
+    Q_PROPERTY(QStringList paneHeaderActionCommands READ paneHeaderActionCommands CONSTANT)
     /// The QML names of the pane colour roles, for colorOn().
     Q_PROPERTY(QObject* roles READ roles CONSTANT)
     /// The QML names of the tab badge kinds, for badgeLook().
@@ -411,6 +414,14 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& colorWellGlyph() const noexcept { return _glyphs.colorWell; }
     /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionNames() const;
+    /// @return The header actions' command names, indexed by config::PaneHeaderAction.
+    [[nodiscard]] QStringList paneHeaderActionCommands() const;
+
+    /// A chord a control answers to whatever the configuration binds (command::FixedShortcutTable), spelled
+    /// as this host spells shortcuts: glyphs on macOS, names elsewhere.
+    /// @param name The chord's name, such as "FindNext".
+    /// @return The shortcut; empty for a name no row has.
+    [[nodiscard]] Q_INVOKABLE QString fixedShortcutText(QString const& name) const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
