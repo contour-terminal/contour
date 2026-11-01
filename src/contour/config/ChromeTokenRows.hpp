@@ -586,6 +586,7 @@ namespace detail
                   .tooltipEdge = 0,
                   .tooltipGap = 14,
                   .tooltipMaxWidth = 360,
+                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -722,6 +723,7 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 14,
                   .tooltipMaxWidth = 360,
+                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -858,6 +860,7 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 16,
                   .tooltipMaxWidth = 360,
+                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -999,6 +1002,7 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 2,
                   .tooltipMaxWidth = 48,
+                  .tooltipElevation = 2,
                   .dialogWidth = 32,
                   .swatchWidth = 2,
                   .swatchHeight = 1,
@@ -1250,12 +1254,14 @@ namespace detail
                     schemeColor(SchemeSlot::BarInk), // WindowButtonGlyph
                     // The Terminal row draws no header bar.
                     detail::noColor(), // HeaderSeparator
-                    // A tooltip is a bar-coloured box in the bar's ink, its shortcut in ANSI 8 where that
-                    // reads on the bar, edged by a hairline in the same ANSI 8 where it reads.
-                    schemeColor(SchemeSlot::Bar),         // TooltipFill
-                    schemeColor(SchemeSlot::BarInk),      // TooltipText
-                    schemeOnBar(SchemeSlot::Secondary),   // TooltipTextSecondary
-                    schemeOnBar(SchemeSlot::Secondary) }, // TooltipEdge
+                    // A tooltip is the surface of the row's in-scene menus (ContourTui/Menu.qml): the
+                    // palette's window colour and ink, its mid colour as the border, and the row's e2 hard
+                    // shadow. The shortcut is the ink at 60 %.
+                    detail::sourceOf(ColorSourceKind::PaletteWindow),     // TooltipFill
+                    detail::sourceOf(ColorSourceKind::PaletteWindowText), // TooltipText
+                    ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
+                                        .alphaPercent = 60 },        // TooltipTextSecondary
+                    detail::sourceOf(ColorSourceKind::PaletteMid) }, // TooltipEdge
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

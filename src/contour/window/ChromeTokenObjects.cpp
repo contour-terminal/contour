@@ -193,6 +193,8 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
     {
         case config::ColorSourceKind::Fixed:
             return faded(platform::toQColor(vtbackend::RGBColor(source.rgb)));
+        case config::ColorSourceKind::PaletteMid:
+            return faded(QGuiApplication::palette().color(QPalette::Mid));
         case config::ColorSourceKind::PaletteWindow:
             return faded(QGuiApplication::palette().color(QPalette::Window));
         case config::ColorSourceKind::PaletteWindowText:

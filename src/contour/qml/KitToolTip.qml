@@ -188,7 +188,7 @@ T.ToolTip {
         ElevationShadow {
             anchors.fill: parent
             z: -1
-            level: chromeStyle.elevation.e2
+            level: [chromeStyle.elevation.e0, chromeStyle.elevation.e1, chromeStyle.elevation.e2, chromeStyle.elevation.e3][chromeStyle.size.tooltipElevation]
             radius: parent.radius
         }
     }

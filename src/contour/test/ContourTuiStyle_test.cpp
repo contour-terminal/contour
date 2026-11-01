@@ -7,9 +7,11 @@
 #include <QtCore/QIODevice>
 #include <QtCore/QString>
 #include <QtCore/QUrl>
+#include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -405,4 +407,42 @@ TEST_CASE("A ContourTui combo box fits its longest option, not just the one show
     auto const* popup = combo->property("popup").value<QObject*>();
     REQUIRE(popup != nullptr);
     CHECK(popup->property("width").toReal() >= longest);
+}
+
+TEST_CASE("A ContourTui tooltip is the surface of its menus and popups", "[contour][gui][style][tooltip]")
+{
+    // The menus and popups paint palette.window with a palette.mid border and cast the row's hard shadow; the
+    // tooltip's tokens resolve through the same palette colours, whichever tone the palette has.
+    for (auto const* control: std::array { "Menu", "Popup" })
+    {
+        auto file = QFile(QStringLiteral(":/qt/qml/ContourTui/%1.qml").arg(QLatin1StringView(control)));
+        INFO("control: " << control);
+        REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+        auto const source = QString::fromUtf8(file.readAll());
+        CHECK(source.contains(QStringLiteral("color: control.palette.window")));
+        CHECK(source.contains(QStringLiteral("border.color: control.palette.mid")));
+    }
+
+    auto const saved = QGuiApplication::palette();
+    for (auto const tone: { QColor(0xFA, 0xFA, 0xFA), QColor(0x1C, 0x1E, 0x24) })
+    {
+        auto palette = saved;
+        palette.setColor(QPalette::Window, tone);
+        palette.setColor(QPalette::WindowText,
+                         tone.lightness() > 128 ? QColor(0x20, 0x20, 0x20) : QColor(0xE0, 0xE0, 0xE0));
+        palette.setColor(QPalette::Mid, QColor(0x84, 0x8D, 0xA2));
+        QGuiApplication::setPalette(palette);
+
+        QQmlEngine engine;
+        contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
+        auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto* colors = style->property("colors").value<QObject*>();
+        REQUIRE(colors != nullptr);
+        CHECK(colors->property("tooltipFill").value<QColor>() == palette.color(QPalette::Window));
+        CHECK(colors->property("tooltipText").value<QColor>() == palette.color(QPalette::WindowText));
+        CHECK(colors->property("tooltipEdge").value<QColor>() == palette.color(QPalette::Mid));
+        CHECK(style->property("size").value<QObject*>()->property("tooltipElevation").toInt() == 2);
+    }
+    QGuiApplication::setPalette(saved);
 }

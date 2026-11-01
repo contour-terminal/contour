@@ -2536,6 +2536,8 @@ TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
         CHECK(row.size.tooltipPadTop == expected.padTop);
         CHECK(row.size.tooltipPadBottom == expected.padBottom);
         CHECK(row.size.tooltipGap == expected.gap);
+        // Every row lifts a tooltip by e2: the soft shadow, or the Terminal row's hard offset its menus cast.
+        CHECK(row.size.tooltipElevation == 2);
         CHECK(row.size.tooltipMaxWidth == (expected.style == ChromeStyle::Terminal ? 48 : 360));
         CHECK(row.radii.tooltip == expected.radius);
         // Every row waits the same before the first tooltip and keeps the next warm for the same span.
@@ -2595,11 +2597,15 @@ TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
         CHECK((edge.alphaPercent == 12 && edge.darkAlphaPercent == 10));
     }
 
-    SECTION("Terminal: the bar's cells, in the scheme's colours")
+    SECTION("Terminal: the surface of its in-scene menus, the palette's window, ink and mid colour")
     {
-        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipFill).kind == ColorSourceKind::Scheme);
-        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipText).slot == SchemeSlot::BarInk);
+        // ContourTui/Menu.qml paints palette.window with a palette.mid border: the tooltip agrees.
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipFill).kind
+              == ColorSourceKind::PaletteWindow);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipText).kind
+              == ColorSourceKind::PaletteWindowText);
         CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipTextSecondary).kind
-              == ColorSourceKind::SchemeOnBar);
+              == ColorSourceKind::PaletteWindowText);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipEdge).kind == ColorSourceKind::PaletteMid);
     }
 }
