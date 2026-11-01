@@ -22,6 +22,7 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/RecordingShellRcEditor.hpp>
+#include <contour/window/DragEndProbe.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -59,6 +60,7 @@
 #include <fstream>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -93,6 +95,29 @@ namespace contour::test
 {
     return std::make_unique<contour::platform::NullNotifier>();
 }
+
+/// A drag-end probe a test drives (@see window::DragEndProbe): it answers what the test set, and counts
+/// what it was told.
+class ScriptedDragEndProbe final: public contour::window::DragEndProbe
+{
+  public:
+    void noteDragOver(QWindow const& /*window*/, QPointF /*local*/) override { ++sightings; }
+    void noteDragLeft(QWindow const& /*window*/) override { ++exits; }
+    [[nodiscard]] contour::window::PointerOverContour pointerOverContourAtEnd() const override
+    {
+        return over;
+    }
+    [[nodiscard]] contour::window::DropSpot dropSpot() const override { return spot; }
+    void forgetDrag() override { ++forgotten; }
+
+    /// What pointerOverContourAtEnd() answers: over no window, so a drag no window took tears off.
+    contour::window::PointerOverContour over = contour::window::PointerOverContour::No;
+    /// What dropSpot() answers.
+    contour::window::DropSpot spot {};
+    int sightings = 0; ///< How often noteDragOver() was called.
+    int exits = 0;     ///< How often noteDragLeft() was called.
+    int forgotten = 0; ///< How often forgetDrag() was called.
+};
 
 /// In-memory SessionFactory: every created session is backed by a vtpty::MockPty, so the manager's
 /// session-creation paths (new tab, new split pane) run headlessly — no process is spawned, and a
@@ -156,6 +181,57 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     {
         return makeNotifier ? makeNotifier() : nullptr;
     }
+
+    [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
+    {
+        return reportedHostKind.value_or(SessionFactory::hostKind());
+    }
+
+    [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override
+    {
+        return reportedMoveSupport.value_or(SessionFactory::moveSupport());
+    }
+
+    [[nodiscard]] std::optional<uint64_t> daemonInstance() const noexcept override
+    {
+        return reportedDaemonInstance;
+    }
+
+    /// The pty's index among createdPtys, plus hostSessionIdBase, under Remote hosting: a daemon's id for it.
+    [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& pty) const noexcept override
+    {
+        if (reportedHosting != contour::session::SessionHosting::Remote)
+            return std::nullopt;
+        auto const found = std::ranges::find(createdPtys, &pty);
+        if (found == createdPtys.end())
+            return std::nullopt;
+        return hostSessionIdBase + static_cast<uint64_t>(std::distance(createdPtys.begin(), found));
+    }
+
+    /// Records the request; answers moveRouting, or Routed under Remote hosting and Local otherwise.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
+        contour::session::RemoteMove const& move) override
+    {
+        requestedMoves.push_back(move);
+        if (moveRouting)
+            return *moveRouting;
+        return reportedHosting == contour::session::SessionHosting::Remote
+                   ? contour::session::RemoteRouting::Routed
+                   : contour::session::RemoteRouting::Local;
+    }
+
+    /// What hostKind() answers; the base's (Daemon under Remote hosting) when empty.
+    std::optional<contour::session::SessionHostKind> reportedHostKind;
+    /// What moveSupport() answers; the base's (Supported iff Local) when empty.
+    std::optional<contour::session::MoveSupport> reportedMoveSupport;
+    /// What daemonInstance() answers.
+    std::optional<uint64_t> reportedDaemonInstance;
+    /// The daemon id hostSessionIdOf() gives the first created pty.
+    uint64_t hostSessionIdBase = 100;
+    /// What requestRemoteMove() answers; see there when empty.
+    std::optional<contour::session::RemoteRouting> moveRouting;
+    /// Every requestRemoteMove() call, in order.
+    std::vector<contour::session::RemoteMove> requestedMoves;
 
     [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
         vtpty::Pty const* /*pty*/, contour::session::HostedOperationRequest const& request) override
@@ -407,6 +483,32 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->requestRemoteTabMerge(tabPtys, targetPty, side);
     }
 
+    [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override
+    {
+        return _factory->moveSupport();
+    }
+
+    [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
+    {
+        return _factory->hostKind();
+    }
+
+    [[nodiscard]] std::optional<uint64_t> daemonInstance() const noexcept override
+    {
+        return _factory->daemonInstance();
+    }
+
+    [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& pty) const noexcept override
+    {
+        return _factory->hostSessionIdOf(pty);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
+        contour::session::RemoteMove const& move) override
+    {
+        return _factory->requestRemoteMove(move);
+    }
+
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,
                                         contour::session::RemoteSpawn const& spawn) override
     {
@@ -418,6 +520,12 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
                                           contour::session::RemoteSpawn const& spawn) override
     {
         return _factory->requestRemoteSplit(actingPty, vertical, spawn);
+    }
+
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteSplitOrientation(
+        vtpty::Pty const* anchorPty, vtworkspace::SplitState axis) override
+    {
+        return _factory->requestRemoteSplitOrientation(anchorPty, axis);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override
@@ -742,6 +850,14 @@ struct ScopedController
     ScopedController(contour::session::TerminalSessionManager& m,
                      contour::config::MenuPresentation menuPresentation):
         manager(m), controller(m.createWindowController(menuPresentation)), id(controller->windowId())
+    {
+    }
+    /// A controller whose notices are said through what @p noticeAnnouncer builds.
+    ScopedController(contour::session::TerminalSessionManager& m,
+                     contour::window::NoticeAnnouncerFactory const& noticeAnnouncer):
+        manager(m),
+        controller(m.createWindowController(contour::config::MenuPresentation::InScene, noticeAnnouncer)),
+        id(controller->windowId())
     {
     }
     ~ScopedController()

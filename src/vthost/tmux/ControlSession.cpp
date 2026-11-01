@@ -406,6 +406,19 @@ void ControlSession::tabMoved(WindowId /*window*/, TabId /*tab*/, int /*fromInde
     _output.enqueueNotification("%sessions-changed");
 }
 
+void ControlSession::tabMovedToWindow(
+    WindowId /*from*/, TabId tab, int /*fromIndex*/, WindowId /*to*/, int /*toIndex*/)
+{
+    // The tab changed windows: the client's session list and the tab's layout are both stale.
+    _output.enqueueNotification("%sessions-changed");
+    notifyLayoutChanged(tab);
+}
+
+void ControlSession::paneSwapped(TabId tab, PaneId /*a*/, PaneId /*b*/)
+{
+    notifyLayoutChanged(tab);
+}
+
 void ControlSession::activeTabChanged(WindowId /*window*/, TabId tab, int /*index*/)
 {
     _output.enqueueNotification(std::format("%session-window-changed $0 @{}", tab.value));

@@ -265,6 +265,22 @@ namespace
     {
         return std::to_underlying(PduType::TabMergeRefused);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(MoveNode const&) noexcept
+    {
+        return std::to_underlying(PduType::MoveNode);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(MoveNodeRefused const&) noexcept
+    {
+        return std::to_underlying(PduType::MoveNodeRefused);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(SetSplitOrientation const&) noexcept
+    {
+        return std::to_underlying(PduType::SetSplitOrientation);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(LayoutBatchEnd const&) noexcept
+    {
+        return std::to_underlying(PduType::LayoutBatchEnd);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -814,6 +830,35 @@ namespace
     void encodeBody(Writer& out, TabMergeRefused const& pdu)
     {
         out.u8(pdu.reason);
+    }
+
+    void encodeBody(Writer& out, MoveNode const& pdu)
+    {
+        out.u8(pdu.sourceKind);
+        out.varint(pdu.sourceSessions.size());
+        for (auto const session: pdu.sourceSessions)
+            out.varint(session);
+        out.u8(pdu.targetKind);
+        out.varint(pdu.targetSession);
+        out.u8(pdu.side);
+        out.varint(pdu.index);
+    }
+
+    void encodeBody(Writer& out, MoveNodeRefused const& pdu)
+    {
+        out.u8(pdu.reason);
+        out.u8(pdu.modelReason);
+    }
+
+    void encodeBody(Writer& out, SetSplitOrientation const& pdu)
+    {
+        out.varint(pdu.anchorSession);
+        out.u8(pdu.state);
+    }
+
+    void encodeBody(Writer& out, LayoutBatchEnd const& pdu)
+    {
+        out.varint(pdu.causeSerial);
     }
 
     void encodeBody(Writer& out, Heartbeat const& pdu)
@@ -1694,6 +1739,51 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeMoveNode(Reader& in)
+    {
+        auto pdu = MoveNode {};
+        auto error = DecodeError {};
+        // The kinds and the side are carried, not judged: the host refuses a byte it does not know.
+        if (!assign(in.u8(), pdu.sourceKind, error))
+            return std::unexpected(error);
+        if (auto const sessions =
+                decodeVector(in, pdu.sourceSessions, [](Reader& reader) { return reader.varint(); });
+            !sessions)
+            return std::unexpected(sessions.error());
+        if (!assign(in.u8(), pdu.targetKind, error) || !assign(in.varint(), pdu.targetSession, error)
+            || !assign(in.u8(), pdu.side, error) || !assign(in.varint(), pdu.index, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeMoveNodeRefused(Reader& in)
+    {
+        auto pdu = MoveNodeRefused {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), pdu.reason, error) || !assign(in.u8(), pdu.modelReason, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeSetSplitOrientation(Reader& in)
+    {
+        auto pdu = SetSplitOrientation {};
+        auto error = DecodeError {};
+        // The state is carried, not judged: the host refuses a byte no axis names.
+        if (!assign(in.varint(), pdu.anchorSession, error) || !assign(in.u8(), pdu.state, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeLayoutBatchEnd(Reader& in)
+    {
+        auto pdu = LayoutBatchEnd {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.causeSerial, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeHeartbeat(Reader& in)
     {
         auto pdu = Heartbeat {};
@@ -1896,6 +1986,10 @@ namespace
         DecodeRow { PduType::SessionInputEcho, decodeSessionInputEcho },
         DecodeRow { PduType::MergeTabIntoSplit, decodeMergeTabIntoSplit },
         DecodeRow { PduType::TabMergeRefused, decodeTabMergeRefused },
+        DecodeRow { PduType::MoveNode, decodeMoveNode },
+        DecodeRow { PduType::MoveNodeRefused, decodeMoveNodeRefused },
+        DecodeRow { PduType::LayoutBatchEnd, decodeLayoutBatchEnd },
+        DecodeRow { PduType::SetSplitOrientation, decodeSetSplitOrientation },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

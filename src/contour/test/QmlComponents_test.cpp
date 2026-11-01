@@ -21,6 +21,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/DisplayHarness.hpp>
+#include <contour/test/DisplayPixels.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlComponentsTestSupport.hpp>
@@ -74,6 +75,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <memory>
@@ -636,11 +638,10 @@ TEST_CASE("GUI tab strip instantiates and binds against a populated model (offsc
     CHECK(controller.rowCount() == 3);
 }
 
-TEST_CASE("A TabItem's drag names the window, the row and the process that started it (offscreen)",
-          "[contour][gui][qml][drop]")
+TEST_CASE("a tab drag carries the node payload (offscreen)", "[contour][gui][qml][drop]")
 {
-    // The payload rides an OS-level drag, so a drop in another process reads it too: the per-process token
-    // is what lets it refuse ids and rows that name this process's model.
+    // The tab drags as the node it is (`application/x-contour-node`), as a pane card does; the controller
+    // writes the JSON and reads it back, so nothing in the strip names a window or a row.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
@@ -663,21 +664,469 @@ TEST_CASE("A TabItem's drag names the window, the row and the process that start
     initial.insert("tabProgressPercentage", 0);
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
+    // In a shown window, as a drag needs one to run in.
+    auto window = QQuickWindow {};
+    auto* const tabItem = qobject_cast<QQuickItem*>(tab.get());
+    REQUIRE(tabItem != nullptr);
+    tabItem->setParentItem(window.contentItem());
+    tabItem->setSize(QSizeF { 120, 30 });
+    window.resize(200, 60);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
 
-    // The drag's attached object lives on the tab's drag proxy.
+    // Starting it asks the controller, which writes the payload, and puts exactly that payload on the drag.
+    // The offscreen platform's drag manager returns from QDrag::exec() at once, with nothing having taken the
+    // drop, so the whole drag runs inside carry().
     auto* const dragProxy = tab->findChild<QObject*>(QStringLiteral("dragProxy"));
     REQUIRE(dragProxy != nullptr);
+    // With the button held, as it is for a drag that starts by dragging.
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, QPoint { 60, 15 });
+    REQUIRE(QMetaObject::invokeMethod(dragProxy, "carry"));
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, QPoint { 60, 15 });
+    CHECK(controller.beganDrags == std::vector { controller.tabDragPayload(3) });
+    auto const drag = contour::window::parseNodeDrag(controller.tabDragPayload(3));
+    REQUIRE(drag.has_value());
+    CHECK(drag->payload == contour::window::DropPayload::Tab);
+    CHECK(drag->tabIndex == 3);
     auto mimeValue = QQmlProperty(dragProxy, QStringLiteral("Drag.mimeData"), qmlContext(dragProxy)).read();
     if (mimeValue.canConvert<QJSValue>())
         mimeValue = mimeValue.value<QJSValue>().toVariant();
-    INFO("mime data: " << mimeValue.typeName());
-    auto const mime = mimeValue.toMap();
-    auto const payload =
-        QJsonDocument::fromJson(mime.value(QStringLiteral("application/x-contour-tab")).toString().toUtf8());
-    REQUIRE(payload.isObject());
-    CHECK(payload.object().value("windowId").toInt() == 1);
-    CHECK(payload.object().value("tabIndex").toInt() == 3);
-    CHECK(payload.object().value("token").toString() == contour::test::mockProcessToken());
+    CHECK(mimeValue.toMap().value(QString::fromLatin1(contour::window::NodeDragMime)).toString()
+          == controller.tabDragPayload(3));
+    CHECK(mimeValue.toMap().size() == 1);
+
+    // And its end is the controller's to decide: what the OS drag returned, never "cancelled" from here.
+    REQUIRE(controller.finishedDrags.size() == 1);
+    CHECK(controller.finishedDrags.front().dropAction == static_cast<int>(Qt::IgnoreAction));
+    CHECK(controller.finishedDrags.front().payload == controller.tabDragPayload(3));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// A tab strip of @c count tabs in a window, laid out the way the title bar does, and a drag to send it.
+struct StripHost
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    QQuickWindow window;
+    std::unique_ptr<QObject> strip;
+    DragSource source;
+
+    static constexpr auto WindowWidth = 1400;
+    static constexpr auto WindowHeight = 60;
+
+    /// @param count How many tabs the strip has.
+    /// @param row   The chrome row the strip is drawn in; the default one when empty.
+    explicit StripHost(int count = 3, std::optional<contour::config::ChromeStyle> row = std::nullopt):
+        controller { count }, source { window }
+    {
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        auto setup = contour::test::defaultChromeSetup();
+        if (row)
+            setup.row = *row;
+        contour::test::installChromeStyle(engine, setup);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml")));
+        INFO("TabStrip.qml: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        auto const initial =
+            QVariantMap { { "controller", QVariant::fromValue(&controller) },
+                          { "window", QVariant::fromValue(static_cast<QObject*>(&controller)) },
+                          { "availableWidth", WindowWidth } };
+        strip.reset(component.createWithInitialProperties(initial));
+        REQUIRE(strip != nullptr);
+        auto& item = *qobject_cast<QQuickItem*>(strip.get());
+        item.setHeight(WindowHeight);
+        item.setParentItem(window.contentItem());
+        window.resize(WindowWidth, WindowHeight);
+        window.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window));
+        auto const* const list = findItemNamed(item, QStringLiteral("tabList"));
+        REQUIRE(list != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return list->property("count").toInt() == count; }));
+        // The strip tells the controller where its tabs stand only for a drag over it, which enters with
+        // the first move: none came yet.
+        QCoreApplication::processEvents();
+        CHECK(controller.tabSpans.empty());
+        source.mime.setData(contour::window::NodeDragMime, controller.tabDragPayload(2).toUtf8());
+    }
+
+    [[nodiscard]] QQuickItem& item(char const* name) const
+    {
+        auto* const found = findItemNamed(*qobject_cast<QQuickItem*>(strip.get()), QString::fromUtf8(name));
+        INFO("item: " << name);
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    [[nodiscard]] QQuickItem& tab(int index) const
+    {
+        auto* const list = &item("tabList");
+        QQuickItem* delegate = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(
+            list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, delegate), Q_ARG(int, index)));
+        REQUIRE(delegate != nullptr);
+        return *delegate;
+    }
+
+    /// @return The point of tab @p index at @p fraction of its width, in window coordinates.
+    [[nodiscard]] QPointF onTab(int index, qreal fraction) const
+    {
+        auto& delegate = tab(index);
+        return delegate.mapToScene(QPointF { delegate.width() * fraction, delegate.height() / 2 });
+    }
+
+    /// @return The left edge of tab @p index (the boundary before it) in window coordinates; for an index
+    /// past
+    ///         the last, the right edge of the last.
+    [[nodiscard]] QPointF boundary(int index) const
+    {
+        auto const count = controller.rowCount();
+        auto& delegate = tab(std::min(index, count - 1));
+        auto const x = index >= count ? delegate.width() : 0.0;
+        return delegate.mapToScene(QPointF { x, delegate.height() / 2 });
+    }
+
+    /// @return The chrome's accent, which every "lands here" cue is drawn in.
+    [[nodiscard]] QColor accent() const
+    {
+        auto* const style =
+            engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        return style->property("accentColor").value<QColor>();
+    }
+
+    [[nodiscard]] QQuickItem& dwellBar(int index) const
+    {
+        auto* const found = findItemNamed(tab(index), QStringLiteral("tabDwellBar"));
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+};
+} // namespace
+
+TEST_CASE("hovering another tab for the dwell opens it (offscreen)", "[contour][gui][qml][drop][tabdrag]")
+{
+    auto f = StripHost {};
+    f.source.enter(f.onTab(1, 0.5));
+    f.source.move(f.onTab(1, 0.5));
+    CHECK(f.source.accepted);
+    // The bar fills along the tab's foot meanwhile, and nothing has opened yet.
+    CHECK(f.dwellBar(1).isVisible());
+    // The tab is outlined 1.5 px in the accent, and the bar is the accent too.
+    CHECK(f.dwellBar(1).property("color").value<QColor>() == f.accent());
+    auto* const mark = findItemNamed(f.tab(1), QStringLiteral("tabDropMark"));
+    REQUIRE(mark != nullptr);
+    CHECK(QQmlProperty(mark, "border.color").read().value<QColor>() == f.accent());
+    CHECK(QQmlProperty(mark, "border.width").read().toDouble() == Catch::Approx(1.5));
+    CHECK(f.controller.activatedTabs.empty());
+
+    constexpr auto Slack = 2000;
+    REQUIRE(QTest::qWaitFor([&] { return !f.controller.activatedTabs.empty(); },
+                            contour::window::UiStyleProvider::tabDwellMs() + Slack));
+    CHECK(f.controller.activatedTabs == std::vector<int> { 1 });
+    f.source.leave();
+    CHECK(QTest::qWaitFor([&] { return !f.dwellBar(1).isVisible(); }));
+}
+
+TEST_CASE("leaving a tab before the dwell is up opens nothing (offscreen)",
+          "[contour][gui][qml][drop][tabdrag]")
+{
+    auto f = StripHost {};
+    f.source.enter(f.onTab(1, 0.5));
+    f.source.move(f.onTab(1, 0.5));
+    f.source.leave();
+    QTest::qWait(contour::window::UiStyleProvider::tabDwellMs() + 300);
+    CHECK(f.controller.activatedTabs.empty());
+}
+
+TEST_CASE("hovering the source tab never opens it (offscreen)", "[contour][gui][qml][drop][tabdrag]")
+{
+    auto f = StripHost {};
+    f.controller.springClosedTab = 1; // the controller refuses to open the tab the drag came from
+    f.source.enter(f.onTab(1, 0.5));
+    f.source.move(f.onTab(1, 0.5));
+    // Accepted all the same, as every recognised drop is, but no bar fills and nothing opens.
+    CHECK(f.source.accepted);
+    CHECK_FALSE(f.dwellBar(1).isVisible());
+    QTest::qWait(contour::window::UiStyleProvider::tabDwellMs() + 300);
+    CHECK(f.controller.activatedTabs.empty());
+    f.source.leave();
+}
+
+TEST_CASE("releasing on a tab calls dropNodeOnTab (offscreen)", "[contour][gui][qml][drop][tabdrag]")
+{
+    auto f = StripHost {};
+    f.source.enter(f.onTab(1, 0.5));
+    f.source.move(f.onTab(1, 0.5));
+    CHECK(f.source.drop(f.onTab(1, 0.5)) == Qt::MoveAction);
+    CHECK(f.controller.tabDrops
+          == std::vector<std::pair<int, QString>> { { 1, f.controller.tabDragPayload(2) } });
+    CHECK(f.controller.gapDrops.empty());
+    // Released before the dwell was up, so nothing opened under the drop.
+    QTest::qWait(contour::window::UiStyleProvider::tabDwellMs() + 300);
+    CHECK(f.controller.activatedTabs.empty());
+}
+
+TEST_CASE("a gap shows the insertion slot and calls dropNodeInGap (offscreen)",
+          "[contour][gui][qml][drop][tabdrag]")
+{
+    auto f = StripHost {};
+    auto& slot = f.item("tabInsertionSlot");
+    CHECK_FALSE(slot.isVisible());
+
+    SECTION("between two tabs")
+    {
+        f.source.enter(f.onTab(0, 0.5));
+        f.source.move(f.onTab(0, 0.5));
+        CHECK_FALSE(slot.isVisible()); // over a tab, not a gap
+        auto const resting = f.boundary(1).x();
+        auto const secondRests = f.tab(1).mapToScene(QPointF {}).x();
+        f.source.move(f.boundary(1));
+        CHECK(f.source.accepted);
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        // Named for what is dragged, standing where the tabs after it have moved away from.
+        CHECK(PaneTreeHost::partOf(slot, "tabInsertionSlotLabel").property("text").toString()
+              == f.controller.dragName);
+        CHECK(slot.mapToScene(QPointF {}).x() == Catch::Approx(resting).margin(1.0));
+
+        // The tabs from the gap on make room: the slot's width, and their spacing, to the right.
+        auto const room = slot.width() + f.item("tabList").property("spacing").toDouble();
+        REQUIRE(
+            QTest::qWaitFor([&] { return f.tab(1).mapToScene(QPointF {}).x() >= secondRests + room - 0.5; }));
+        CHECK(f.tab(1).mapToScene(QPointF {}).x() == Catch::Approx(secondRests + room).margin(1.0));
+
+        // Nothing overlaps a tab's title.
+        auto const slotRect = QRectF { slot.mapToScene(QPointF {}), QSizeF { slot.width(), slot.height() } };
+        for (auto const index: std::views::iota(0, 3))
+        {
+            auto* const label = findItemNamed(f.tab(index), QStringLiteral("tabLabel"));
+            REQUIRE(label != nullptr);
+            auto const titleRect =
+                QRectF { label->mapToScene(QPointF {}), QSizeF { label->width(), label->height() } };
+            INFO("tab " << index);
+            CHECK_FALSE(titleRect.intersects(slotRect));
+        }
+
+        // The hit test is made against the geometry the pointer sees: the strip reported the shifted spans,
+        // so the slot is the gap, and the tab after it starts after the slot.
+        REQUIRE(QTest::qWaitFor([&] {
+            return f.controller.tabSpans.size() == 3
+                   && f.controller.tabSpans[1].left >= secondRests + room - 1.0;
+        }));
+        CHECK(f.controller.tabBarHit(slotRect.center().x()).hit().spot == contour::window::TabBarSpot::Gap);
+        CHECK(f.controller.tabBarHit(slotRect.center().x()).hit().index == 1);
+        CHECK(f.controller.tabBarHit(f.onTab(1, 0.5).x()).hit().spot == contour::window::TabBarSpot::OnTab);
+
+        CHECK(f.source.drop(f.boundary(1)) == Qt::MoveAction);
+        CHECK(f.controller.gapDrops
+              == std::vector<std::pair<int, QString>> { { 1, f.controller.tabDragPayload(2) } });
+        CHECK(f.controller.tabDrops.empty());
+        CHECK(QTest::qWaitFor([&] { return !slot.isVisible(); }));
+    }
+
+    SECTION("in the empty bar after the last tab")
+    {
+        auto const beyond = f.boundary(3) + QPointF { 60, 0 };
+        f.source.enter(beyond);
+        f.source.move(beyond);
+        CHECK(f.source.accepted);
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        // It runs on from the last tab.
+        CHECK(slot.mapToScene(QPointF {}).x() >= f.boundary(3).x());
+        CHECK(f.source.drop(beyond) == Qt::MoveAction);
+        CHECK(f.controller.gapDrops
+              == std::vector<std::pair<int, QString>> { { 3, f.controller.tabDragPayload(2) } });
+    }
+}
+
+namespace
+{
+/// @return A frame of @p window once the scene has stopped changing by itself.
+[[nodiscard]] QImage settledFrame(QQuickWindow& window)
+{
+    constexpr auto FrameSettleMs = 50;
+    constexpr auto FrameSettleTimeoutMs = 10000;
+    auto image = QImage {};
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            QTest::qWait(FrameSettleMs);
+            auto const next = window.grabWindow();
+            auto const settled = !next.isNull() && next == image;
+            image = next;
+            return settled;
+        },
+        FrameSettleTimeoutMs));
+    return image;
+}
+
+/// @return Where @p item stands in the pixels of a frame of @p window, rounded outward.
+[[nodiscard]] QRect pixelsOf(QQuickWindow const& window, QQuickItem const& item)
+{
+    auto const dpr = window.devicePixelRatio();
+    auto const rect = item.mapRectToScene(QRectF { QPointF {}, item.size() });
+    return QRectF { rect.topLeft() * dpr, rect.size() * dpr }.toAlignedRect();
+}
+
+[[nodiscard]] vtbackend::RGBColor rgbOfColor(QColor const& color)
+{
+    return vtbackend::RGBColor { static_cast<uint8_t>(color.red()),
+                                 static_cast<uint8_t>(color.green()),
+                                 static_cast<uint8_t>(color.blue()) };
+}
+} // namespace
+
+TEST_CASE("display: the insertion slot is drawn where the gap is, in the accent, and moves no tab before it",
+          "[display][tabdrag][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto f = StripHost {};
+    auto const before = settledFrame(f.window);
+    auto& slot = f.item("tabInsertionSlot");
+    auto const accent = rgbOfColor(f.accent());
+    // Probes and slack are stated in device-independent pixels, so they hold at any device-pixel ratio.
+    auto const dpr = f.window.devicePixelRatio();
+
+    SECTION("between two tabs")
+    {
+        f.source.enter(f.onTab(0, 0.5));
+        f.source.move(f.onTab(0, 0.5));
+        f.source.move(f.boundary(1));
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        auto const during = settledFrame(f.window);
+        auto const slotPx = pixelsOf(f.window, slot);
+
+        // The tab before the gap has not moved or changed; the slot's edge is the accent, dashed.
+        auto const firstTab = pixelsOf(f.window, f.tab(0));
+        CHECK(changedBounds(before, during, firstTab.adjusted(0, 0, -slotPx.width(), 0)).isNull());
+        auto const band = probeAt({ slotPx.center().x(), slotPx.top() }, { -20, 0, 40, 3 }, dpr);
+        auto const dashes = regionColors(during, band);
+        INFO("dash ink " << hexOf(dashes.ink) << " accent " << hexOf(accent));
+        CHECK(nearlyEqual(dashes.ink, accent, 24));
+        CHECK(dashes.groundPixels < dashes.pixels);
+
+        // The slot's tint is the accent's, not the bar's: the same spot was not that colour.
+        auto const inside = probeAt({ slotPx.left(), slotPx.center().y() }, { 3, -2, 4, 4 }, dpr);
+        CHECK(distanceBetween(regionColors(during, inside).ground, regionColors(before, inside).ground) > 0);
+    }
+
+    SECTION("in the empty bar after the last tab")
+    {
+        auto const beyond = f.boundary(3) + QPointF { 60, 0 };
+        f.source.enter(beyond);
+        f.source.move(beyond);
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        auto const during = settledFrame(f.window);
+        auto const slotPx = pixelsOf(f.window, slot);
+
+        // Everything that changed is the slot's: the tabs and the rest of the bar are as they were.
+        auto const changed = changedBounds(before, during, QRect { QPoint {}, during.size() });
+        REQUIRE_FALSE(changed.isNull());
+        auto const slack = devicePixels(2, dpr);
+        CHECK(slotPx.adjusted(-slack, -slack, slack, slack).contains(changed));
+        CHECK(changed.width() >= slotPx.width() - devicePixels(6, dpr));
+
+        auto const dashes =
+            regionColors(during, probeAt({ slotPx.center().x(), slotPx.top() }, { -20, 0, 40, 3 }, dpr));
+        CHECK(nearlyEqual(dashes.ink, accent, 24));
+        CHECK(dashes.groundPixels < dashes.pixels);
+    }
+    f.source.leave();
+}
+
+TEST_CASE("display: the dwell bar fills along the hovered tab's foot in the accent, and the tab is outlined",
+          "[display][tabdrag][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto f = StripHost {};
+    auto const before = settledFrame(f.window);
+    auto const accent = rgbOfColor(f.accent());
+
+    f.source.enter(f.onTab(1, 0.5));
+    f.source.move(f.onTab(1, 0.5));
+    auto& bar = f.dwellBar(1);
+    constexpr auto Slack = 2000;
+    REQUIRE(QTest::qWaitFor([&] { return bar.isVisible() && bar.width() > 8; }, Slack));
+    auto const during = f.window.grabWindow();
+    auto const tabPx = pixelsOf(f.window, f.tab(1));
+    auto const barPx = pixelsOf(f.window, bar);
+    INFO("bar " << barPx.width() << " of tab " << tabPx.width());
+
+    // The bar is part of the way along the tab's foot, and drawn in the accent.
+    CHECK(barPx.width() < tabPx.width());
+    auto const dpr = f.window.devicePixelRatio();
+    auto const barProbe = QRect { barPx.left() + devicePixels(1, dpr),
+                                  barPx.center().y(),
+                                  std::max(1, barPx.width() / 2),
+                                  devicePixels(1, dpr) };
+    CHECK(nearlyEqual(regionColors(during, barProbe).ground, accent, 8));
+
+    // The tab is outlined in the accent, and no other tab changed.
+    auto const top = probeAt({ tabPx.center().x(), tabPx.top() }, { -2, 0, 5, 1 }, dpr);
+    CHECK(isBlendOf(accent, regionColors(before, top).ground, regionColors(during, top).ground));
+    for (auto const index: { 0, 2 })
+    {
+        INFO("tab " << index);
+        CHECK(changedBounds(before, during, pixelsOf(f.window, f.tab(index))).isNull());
+    }
+    f.source.leave();
+}
+
+TEST_CASE("a joined strip's new-tab button makes way for the insertion slot (offscreen)",
+          "[contour][gui][qml][drop][tabdrag]")
+{
+    // The Fluent row's "+" follows the last tab, so there is no empty bar for the slot to stand in: the strip
+    // grows by the room the slot takes, and the button and the tabs after the gap move on instead of being
+    // drawn under it.
+    auto f = StripHost { 3, contour::config::ChromeStyle::Fluent };
+    auto& slot = f.item("tabInsertionSlot");
+    auto& plus = f.item("newTabButton");
+    auto const rectOf = [](QQuickItem& item) {
+        return QRectF { item.mapToScene(QPointF {}), QSizeF { item.width(), item.height() } };
+    };
+    auto const resting = rectOf(plus).left();
+
+    SECTION("after the last tab")
+    {
+        auto const beyond = f.boundary(3) + QPointF { 30, 0 };
+        f.source.enter(beyond);
+        f.source.move(beyond);
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        REQUIRE(QTest::qWaitFor([&] { return rectOf(plus).left() > resting + 1.0; }));
+        CHECK(rectOf(slot).right() <= rectOf(plus).left() + 0.5);
+        f.source.leave();
+        CHECK(QTest::qWaitFor([&] { return rectOf(plus).left() == Catch::Approx(resting).margin(0.5); }));
+    }
+
+    SECTION("between two tabs")
+    {
+        f.source.enter(f.onTab(0, 0.5));
+        f.source.move(f.boundary(1));
+        REQUIRE(QTest::qWaitFor([&] { return slot.isVisible(); }));
+        // The last tab is whole, and stands before the button.
+        REQUIRE(QTest::qWaitFor([&] { return rectOf(plus).left() > resting + 1.0; }));
+        auto const last = rectOf(f.tab(2));
+        CHECK(last.right() <= rectOf(plus).left() + 0.5);
+        auto& clip = f.item("tabList");
+        CHECK(clip.width() >= last.right() - rectOf(clip).left() - 0.5);
+        f.source.leave();
+    }
+}
+
+TEST_CASE("a tab drag reorders through a gap (offscreen)", "[contour][gui][qml][drop][tabdrag]")
+{
+    // The third tab, taken to the gap before the first: the strip asks for that gap, and the controller (not
+    // the strip) reorders. A drop in the gap is accepted whatever the controller then makes of it.
+    auto f = StripHost {};
+    auto const first = f.boundary(0) + QPointF { 3, 0 };
+    f.source.enter(first);
+    f.source.move(first);
+    CHECK(f.source.accepted);
+    CHECK(f.source.drop(first) == Qt::MoveAction);
+    CHECK(f.controller.gapDrops
+          == std::vector<std::pair<int, QString>> { { 0, f.controller.tabDragPayload(2) } });
 }
 
 TEST_CASE("A colored TabItem fills with the user color and picks contrasting text (offscreen)",

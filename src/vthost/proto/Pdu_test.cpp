@@ -1956,6 +1956,79 @@ TEST_CASE("TabMergeRefused round-trips, and carries a reason this build does not
     STATIC_CHECK(std::to_underlying(PduType::TabMergeRefused) == 36);
 }
 
+TEST_CASE("MoveNode round-trips for every target kind and carries bytes no enumerator names",
+          "[vthost][pdu][move]")
+{
+    auto const edge =
+        MoveNode { .sourceKind = 0, .sourceSessions = { 4 }, .targetKind = 0, .targetSession = 9, .side = 3 };
+    auto const swap =
+        MoveNode { .sourceKind = 0, .sourceSessions = { 4 }, .targetKind = 1, .targetSession = 9 };
+    auto const well = MoveNode {
+        .sourceKind = 1, .sourceSessions = { 4, 5, 6 }, .targetKind = 2, .targetSession = 9, .index = 300
+    };
+    auto const newWindow = MoveNode { .sourceKind = 1, .sourceSessions = { 4, 5 }, .targetKind = 3 };
+    for (auto const& move: { edge, swap, well, newWindow })
+        CHECK(roundTrip(DecodedPdu { move }) == DecodedPdu { move });
+    auto const unknown = MoveNode { .sourceKind = 0xEE,
+                                    .sourceSessions = {},
+                                    .targetKind = 0xEF,
+                                    .targetSession = 1,
+                                    .side = 0xF0,
+                                    .index = 2 };
+    CHECK(roundTrip(DecodedPdu { unknown }) == DecodedPdu { unknown });
+    STATIC_CHECK(std::to_underlying(PduType::MoveNode) == 37);
+}
+
+TEST_CASE("MoveNodeRefused round-trips, and carries a reason this build does not know", "[vthost][pdu][move]")
+{
+    for (auto const reason: { uint8_t { 0 }, uint8_t { 4 }, uint8_t { 0xEE } })
+        for (auto const modelReason: { uint8_t { 0 }, uint8_t { 2 }, uint8_t { 0xEF } })
+        {
+            auto const refused = MoveNodeRefused { .reason = reason, .modelReason = modelReason };
+            CHECK(std::get<MoveNodeRefused>(roundTrip(DecodedPdu { refused })) == refused);
+        }
+    STATIC_CHECK(std::to_underlying(PduType::MoveNodeRefused) == 38);
+}
+
+TEST_CASE("LayoutBatchEnd round-trips, and a newer peer's appended bytes do not break it",
+          "[vthost][pdu][move]")
+{
+    for (auto const cause: { uint64_t { 0 }, uint64_t { 2 }, uint64_t { 0xFFFF'FFFF'FFFF } })
+        CHECK(std::get<LayoutBatchEnd>(roundTrip(DecodedPdu { LayoutBatchEnd { .causeSerial = cause } }))
+                  .causeSerial
+              == cause);
+    auto body = Writer {};
+    body.varint(5);
+    body.varint(7); // a field a later version appended
+    CHECK(decodeAs<LayoutBatchEnd>(frameOf(PduType::LayoutBatchEnd, body.view()))
+          == LayoutBatchEnd { .causeSerial = 5 });
+    STATIC_CHECK(std::to_underlying(PduType::LayoutBatchEnd) == 39);
+}
+
+TEST_CASE("SetSplitOrientation round-trips, and carries a state no axis names", "[vthost][pdu][move]")
+{
+    for (auto const state: { uint8_t { 1 }, uint8_t { 2 }, uint8_t { 0 }, uint8_t { 0xEE } })
+    {
+        auto const set = SetSplitOrientation { .anchorSession = 300, .state = state };
+        CHECK(roundTrip(DecodedPdu { set }) == DecodedPdu { set });
+    }
+    STATIC_CHECK(std::to_underlying(PduType::SetSplitOrientation) == 40);
+}
+
+TEST_CASE("a truncated MoveNode body is a DecodeError", "[vthost][pdu][move]")
+{
+    // The body stops after the source list: the target kind and everything after it are missing.
+    auto body = Writer {};
+    body.u8(1);
+    body.varint(1);
+    body.varint(4);
+    auto stream = Writer {};
+    writeFrame(stream, 1, std::to_underlying(PduType::MoveNode), body.view());
+    auto const decoded = decodePdu(stream.view());
+    REQUIRE(!decoded.has_value());
+    CHECK(decoded.error() == DecodeError::MalformedPdu);
+}
+
 TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[vthost][pdu]")
 {
     CHECK(std::get<CreateTab>(roundTrip(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } }))

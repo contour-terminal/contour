@@ -58,6 +58,7 @@
 #include <contour/window/SettingsPreview.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowLivenessQt.hpp>
@@ -150,6 +151,7 @@
 #include <ranges>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -442,7 +444,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              platform::AppearanceServices const& appearanceServices,
                              core::platform::SteadyTimePoint processStart,
                              window::SettingsWindowFactory settingsWindowFactory,
-                             ShellIntegrationServices shellIntegration):
+                             ShellIntegrationServices shellIntegration,
+                             std::unique_ptr<window::DragEndProbe> dragEndProbe):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _attachedHostLabel(std::move(shellIntegration.attachedHostLabel)),
@@ -477,6 +480,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _userNotificationCenter(appearanceServices.userNotifications),
     _captionButtons(appearanceServices.caption()),
     _framePlatform(appearanceServices.framePlatform),
+    _dragEndProbe(std::move(dragEndProbe)),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -1484,6 +1488,18 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             _sessionManager.postNoticeToEveryWindow(
                 window::Notice { .kind = window::NoticeKind::DropRefused,
                                  .text = std::string { window::TabMergeRefusedText } });
+        },
+        Qt::QueuedConnection);
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::moveRefused,
+        this,
+        [this](int reason, int modelReason, quint64 request) {
+            _sessionManager.remoteMoveRefused(request);
+            // A drop onto itself, or one that would leave everything where it is, has nothing to tell.
+            if (auto const text = window::moveRefusedText(reason, modelReason); !text.empty())
+                _sessionManager.postNoticeToEveryWindow(
+                    window::Notice { .kind = window::NoticeKind::DropRefused, .text = std::string { text } });
         },
         Qt::QueuedConnection);
 #ifdef CONTOUR_EXTENSIONS
@@ -2646,6 +2662,9 @@ int ContourGuiApp::terminalGuiAction()
         return likelyWayland && !wmClass.isEmpty() ? wmClass : QStringLiteral(CONTOUR_APP_ID);
     }());
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
+    // The platform Qt runs on is known now; a test injected its own probe at construction.
+    if (!_dragEndProbe)
+        _dragEndProbe = window::makeDragEndProbe(QGuiApplication::platformName());
     openDaemonSpawnGate();
     // Every Qt object this app owns goes before QApplication, on every return from here on -- the
     // failed-attach one included, which leaves before the event loop ever runs. Declared right after
@@ -2755,6 +2774,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
     qmlRegisterUncreatableType<window::SettingsPreview>("Contour.Terminal", 1, 0, "SettingsPreview", "Created by the Settings window host.");
     session::registerPermissionQmlTypes();
+    window::registerTabBarQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
@@ -3223,7 +3243,12 @@ void ContourGuiApp::newWindow(QScreen* targetScreen)
     // The engine is always up when one window spawns another (the GUI is running); the guard makes
     // the stage/consume contract exercisable headlessly, where no QML engine exists.
     if (_qmlEngine)
+    {
         _qmlEngine->loadFromModule("Contour.Ui", "Main");
+        // The load is synchronous: a window it made took what was staged for it, and one that failed to
+        // load must not leave it for whichever window opens next.
+        _sessionManager.endWindowSpawn();
+    }
 }
 
 QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
@@ -3231,6 +3256,11 @@ QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
     auto* screen = _pendingSpawnScreen.data();
     _pendingSpawnScreen.clear();
     return screen;
+}
+
+window::DragEndProbe& ContourGuiApp::dragEndProbe()
+{
+    return *_dragEndProbe;
 }
 
 bool ContourGuiApp::requestRemoteWindow(session::RemoteSpawn const& spawn)
@@ -3243,20 +3273,31 @@ void ContourGuiApp::reconcileAttachWindows()
     if (!_nativeController)
         return;
 
+    // Taken before the settled layouts are read, so they are at least as new as the push of each move named.
+    auto const landedMoves = _nativeController->takeLandedMoves();
+    _sessionManager.noteRemoteMovesLanded(landedMoves);
+
+    // Whether every window was placed: one whose OS window is still spawning is skipped, and a move landing
+    // in it is placed by the reconcile that gets to it.
+    auto reach = session::TerminalSessionManager::ReconcileReach::Whole;
+
+    // One snapshot of the layouts for every window: a move between two windows is then seen in both, however
+    // the push that made it is read meanwhile. As of the last push's end, as applyRemoteLayout realizes
+    // them: a window the next push's first frame adds would otherwise get an OS window that stays blank
+    // until that push ends.
+    auto const layouts = _nativeController->settledLayouts();
+    _reconcilingLayouts = &layouts;
+
     // Daemon window ids come ascending, so the primary (lowest-id) window is handled
-    // first — it maps to the boot window; the rest each get their own OS window.
-    for (auto const daemonWindow: _nativeController->windowIds())
-    {
-        if (auto const mapped = _attachWindowMap.find(daemonWindow); mapped != _attachWindowMap.end())
-        {
-            // Already shown: bring its tree up to date.
-            contour::remote::applyRemoteLayout(
-                _sessionManager, mapped->second, *_nativeController, daemonWindow);
-            _sessionManager.deliverRestoreSummaryTo(mapped->second);
-            continue;
-        }
+    // first — it maps to the boot window; the rest each get their own OS window. One already shown is brought
+    // up to date; this places the others.
+    auto const openWindow = [&](contour::remote::ReconciledWindow const& window) {
+        auto const& [daemonWindow, tabs, sessions] = window;
         if (_pendingAttachWindow == daemonWindow)
-            continue; // an OS window is already spawning for this daemon window
+        {
+            reach = session::TerminalSessionManager::ReconcileReach::Partial;
+            return; // an OS window is already spawning for this daemon window
+        }
 
         if (_attachBoot == session::AttachBoot::Pending)
         {
@@ -3269,21 +3310,30 @@ void ContourGuiApp::reconcileAttachWindows()
                 bindDaemonWindow(daemonWindow, boot->windowId());
             else if (!_pendingAttachWindow)
                 _pendingAttachWindow = daemonWindow;
-            continue;
+            reach = session::TerminalSessionManager::ReconcileReach::Partial;
+            return;
         }
 
         // A daemon window holding no tab is nothing to show yet -- one a reconnect found emptied, under a
         // client that follows every window -- and gets its OS window once it holds one.
-        if (auto const known = _nativeController->layout(daemonWindow); !known || known->tabs.empty())
-            continue;
+        if (tabs == contour::remote::DaemonWindowTabs::None)
+            return;
 
         // A new daemon window: spawn an OS window to host it. Its Main.qml claims the
         // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
         // and reconciles — so it never creates a stray fresh tab. The QML load is
-        // synchronous, so the stage is consumed before this returns.
+        // synchronous, so the stage is consumed before this returns. A window a move of this process asked
+        // for opens where the pane was dropped.
         _pendingAttachWindow = daemonWindow;
-        newWindow();
-    }
+        newWindow(_sessionManager.stageRemoteMoveWindow(sessions));
+    };
+    contour::remote::reconcileAttachWindows(
+        _sessionManager, *_nativeController, layouts, _attachWindowMap, openWindow);
+    _reconcilingLayouts = nullptr;
+    // A tab closed since it was paired names nothing: its pairing goes, whatever the daemon hands out next.
+    contour::remote::forgetClosedTabPairings(_sessionManager, *_nativeController);
+    // Every window is reconciled: what a landing move moved is in place, to raise, focus and announce.
+    _sessionManager.completeRemoteMoves(reach);
 }
 
 std::optional<std::uint64_t> primaryDaemonWindowToAdopt(bool anyWindowMapped,
@@ -3315,7 +3365,11 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
     if (_attachBoot == session::AttachBoot::Pending)
     {
-        if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
+        // As of the last push's end, as every reconcile reads them: the next push's first frame may name a
+        // window whose layout is not complete yet.
+        auto const settled =
+            std::ranges::to<std::vector>(_nativeController->settledLayouts() | std::views::keys);
+        if (auto const adopt = primaryDaemonWindowToAdopt(false, settled))
             bindDaemonWindow(*adopt, controller->windowId());
         return true;
     }
@@ -3374,7 +3428,11 @@ void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::Wi
 {
     _attachBoot = session::AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
-    contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+    if (_reconcilingLayouts != nullptr)
+        contour::remote::applyRemoteLayout(
+            _sessionManager, osWindow, *_nativeController, *_reconcilingLayouts, daemonWindow);
+    else
+        contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
     _sessionManager.deliverRestoreSummaryTo(osWindow);
 }
 

@@ -18,12 +18,14 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vthost/ClientCensus.hpp>
 #include <vthost/HistorySeed.hpp>
 #include <vthost/IdleExitWatcher.hpp>
 #include <vthost/LastSessionWatcher.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/WorkspacePersistence.hpp>
@@ -428,4 +430,45 @@ TEST_CASE("prepareRestore turns each verdict into a restore or nothing", "[vthos
               == std::chrono::floor<std::chrono::days>(endedAt) + std::chrono::days { 1 });
         CHECK(restoredDividerText(restore->divider).contains(std::format("{:%Y-%m-%d}", endedAt)));
     }
+}
+
+TEST_CASE("a cross-window MoveNode schedules a workspace snapshot", "[vthost][snapshot][persistence][move]")
+{
+    auto h = PersistenceHarness {};
+    auto* const dragged = h.host->createTab();
+    auto* const other = h.host->createWindow();
+    REQUIRE((dragged != nullptr && other != nullptr));
+    h.persist();
+    h.pass(Interval);
+    auto const before = h.writes;
+
+    // The whole tab leaves its window: the one event that names the change is tabMovedToWindow.
+    auto const moved = applyMoveNode(
+        h.host->model(),
+        proto::MoveNode { .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Tab),
+                          .sourceSessions = { dragged->rootPane()->session().value },
+                          .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::TabWell),
+                          .targetSession = other->tabAt(0)->rootPane()->session().value },
+        MoveWindowHooks { .create = [&] { return h.host->createEmptyWindow().id(); },
+                          .discard = [&](vtworkspace::WindowId window) { h.host->discardWindow(window); } });
+    REQUIRE(moved.has_value());
+    h.pass(Interval);
+    CHECK(h.writes > before);
+}
+
+TEST_CASE("a tab moved to another window is a layout change on its own",
+          "[vthost][snapshot][persistence][move]")
+{
+    // The event alone, as a move whose other events were all skipped would raise it.
+    auto h = PersistenceHarness {};
+    auto* const tab = h.host->createTab();
+    auto* const other = h.host->createWindow();
+    REQUIRE((tab != nullptr && other != nullptr));
+    h.persist();
+    h.pass(Interval);
+    auto const before = h.writes;
+
+    h.persistence->tabMovedToWindow(h.host->windowId(), tab->id(), 0, other->id(), 0);
+    h.pass(Interval);
+    CHECK(h.writes > before);
 }

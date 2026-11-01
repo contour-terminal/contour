@@ -160,6 +160,8 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `InputEcho` | 12 | `input-echo` | `SessionInputEcho`: the daemon tells a client sharing it what each session's terminal does with typed text, so the client locks a pane at a password prompt and turns its OS's Secure Keyboard Entry on. A client of an older daemon stays at `Unknown`: no lock, no secure input |
 | `TabMerge` | 13 | `tab-merge` | `MergeTabIntoSplit`: the daemon grafts a whole tab, sessions and all, beside a pane of another tab. A client offers a drop-to-split only to a daemon sharing it; against an older one the tab is left to tear off into its own window, as before |
 | `TabEditAcks` | 14 | `tab-edit-acks` | The daemon stamps each `LayoutState` it pushes with `servedEdit`, the serial of the last `EditTab` of that connection it had served; the client keeps its unserved activations in force over a push composed before them (`vthost::client::PendingTabEdits`). Against an older daemon, or for an older client, pushes come unstamped and a push in flight undoes a click until the echo, as before |
+| `MoveNode` | 16 | `move-node` | `MoveNode` / `MoveNodeRefused`: the daemon moves a pane or a whole tab to an edge of a pane, onto a pane (a swap), into a window's tab well, or into a new window, with every session running throughout. A client offers a pane drag, and every drop that needs more than the older tab verbs, only to a daemon sharing it; against an older one the drop shows the "daemon is too old" refusal (see [`MoveNode`](#movenode)) |
+| `LayoutBatch` | 17 | `layout-batch` | `LayoutBatchEnd`: the daemon follows every push of `LayoutState`s one change made, across every window the connection follows, with one end marker, and a client reconciles a settled snapshot per batch instead of per frame. Without it a client decides at the end of each read, and a session a push dropped from one window may be in flight to another |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -294,6 +296,108 @@ leaf beside a subtree that is exactly one other local tab's sessions). The merge
 because a layout is pushed and reconciled per window. `NativeClient::mergeTabIntoSplit` writes nothing
 unless the daemon shares `TabMerge`, and `SessionFactory::tabMergeSupport()` tells the window, so a tab
 dropped on a pane of such a daemon is not offered a split.
+
+#### `MoveNode`
+
+**`MoveNode`** (tag 37, gated on `Capability::MoveNode`; without it the daemon answers `Unsupported`)
+generalises `MergeTabIntoSplit` into the one verb behind every drag of a pane or a tab. Like it, it names
+both ends by session, never by pane or tab id, because ids are minted per model. Its fields:
+
+| Field | Meaning |
+|-------|---------|
+| `sourceKind` | a `vtworkspace::MoveSourceKind` byte: `Pane` (0) or `Tab` (1) |
+| `sourceSessions` | a pane source: its one session. A tab source: **every** session of the tab as the client sees it, the first naming the tab |
+| `targetKind` | a `vtworkspace::MoveTargetKind` byte: `Edge` (0), `Swap` (1), `TabWell` (2), `NewWindow` (3) |
+| `targetSession` | `Edge` and `Swap`: the pane, by its session. `TabWell`: any session of the window whose tab strip receives it. `NewWindow`: 0 |
+| `side` | `Edge` only: a `vtworkspace::SplitSide` byte |
+| `index` | `TabWell` only: the position among the window's tabs (clamped into range) |
+
+`vthost::applyMoveNode` (`vthost/NodeMove.*`, pure over the model, so every refusal is table-tested without
+a socket) reads both ends, and only then runs the `vtworkspace::SessionModel::moveNode` an in-process window
+runs. Kinds and sides are read through `std::to_underlying` tables, never cast. **No session is spawned or
+closed**, and a move is applied completely or not at all: it is validated before the model is touched, and a
+refusal fires no event. On success the model fires its events, and every attached client is pushed the new
+layouts; there is no reply PDU. An emptied tab closes, an emptied window is removed, the moved pane's
+session takes focus in its new tab, and zoom is cleared on both tabs; a new split divides the target pane
+in half, a swap trades two places and each keeps its ratio.
+
+A `NewWindow` move is not made by the model alone. The daemon makes the window itself, through
+`MoveWindowHooks` (`SessionHost::createEmptyWindow`): the window gets its UUID binding like any
+other, and **the requesting connection is recorded as its creator**, so that the requester's follow scope
+adopts it (`WindowClaim::Yours`) and another attached GUI does not claim a window that is this client's own.
+The window then is the well of an ordinary tab-well move, and a refused move takes it away again
+(`discardWindow`) so a refusal leaves no empty window behind. A source that is already all of its window -- its
+only tab, or that tab's only pane -- is refused as the model's `NoOp` before any window is made
+(`SessionModel::fillsItsWindow`): moved, it would only tear its window down and build it again for every client. The same hook removes the window a move took
+its last tab out of, once every client was pushed it empty — its UUID and creator go with it, and when it was
+the host's primary window, the lowest-id window left takes that role.
+
+A refusal is answered with **`MoveNodeRefused`** (tag 38, under the request's serial, only to a client that
+negotiated `MoveNode`), carrying the reason as a byte, `reason`, and after it `modelReason`: the
+`vtworkspace::MoveError` byte when `reason` is `Model`, 0 otherwise:
+
+| `NodeMoveError` | Reason |
+|-----------------|--------|
+| `UnknownSession` | no pane hosts a session the request names: it closed, or never existed (a stale drag) |
+| `UnknownKind` | a source or target kind this host does not know, or a pane source that does not name exactly one session |
+| `UnknownSide` | an edge target's side this host does not know |
+| `StaleTab` | the source tab no longer holds exactly the sessions the request named |
+| `Model` | the model refused: `vtworkspace::MoveError` says why (`UnknownSource`, `UnknownTarget`, `SelfTarget`, `TabIntoSwap`, `NoOp`) |
+
+A value this build does not know still reads as a refusal. The client logs the reason, and the GUI shows the
+user a toast (`NativeController::moveRefused`) whose text both bytes pick from a table
+(`window::moveRefusedText`): a stale source says the pane changed while it was dragged, a drop onto itself or
+one that changes nothing says nothing at all, and anything else -- a move the client could not even send among
+it -- says the daemon could not move the pane. A success is answered by the layout pushes alone.
+
+**`LayoutBatchEnd`** (tag 39, gated on `Capability::LayoutBatch`) closes a push. One move fires several model
+events, and to a client without the capability the daemon pushes each followed window's layout once per event,
+some of them between the move's halves (the window the pane left shows it gone before the window it entered
+shows it arrived). Under the capability each event only marks the window it is in, and the batch it opens is
+pushed once the frame that made the change has handed control back to the loop: each marked window this client
+follows, once, as the change left it -- a marked window the change removed goes out with no tab, so the client
+closes its own window for it -- and then one `LayoutBatchEnd`. The PTYs are resized as each event is fanned
+out, before that, for every client alike, so they have their sizes before the client sees the layout. Its field `causeSerial` is the serial of the
+`MoveNode` whose effects the batch completes, 0 when no request of this client caused it. A client therefore
+reconciles one **settled snapshot** per batch (`NativeController::layoutsSettled`): the layouts it holds when
+the end arrives are the state the change left, across every window, and a session that none of them names is
+gone, not in flight. The client that asked completes its move on the batch: the serials only grow per
+connection, so a batch ended by serial S completes every move it has in flight up to S
+(`NativeController::takeCompletedMoves`), including one that pushed nothing: the batch of a move is ended
+to the client that asked for it even when it follows none of the windows the move changed. A move whose window is never
+placed expires after five seconds instead of waiting for ever.
+
+Against a daemon without `LayoutBatch`, the client keeps the older **park and settle** path: a session a push
+dropped from every window is *parked* (`NativeController::parkSession`) rather than ended, and decided at the
+end of the read that brought the frame: if a later layout names it, its window takes over the same
+`TerminalSession`; if not, it is closed. That is correct, but it can only guess at the end of a push, which is
+why the batch marker exists.
+
+**`SetSplitOrientation`** (tag 40, gated on `Capability::MoveNode`, the same feature family; without it the
+daemon answers `Unsupported`) sets one split's axis. Its fields are `anchorSession`, a leaf inside the split
+-- the split is that leaf's parent -- and `state`, a raw `vtworkspace::SplitState` byte. The byte is carried,
+not judged: the daemon calls `SessionModel::setSplitOrientation`, which refuses one that is neither
+`Horizontal` nor `Vertical`, an unknown session and a single-pane tab, each as a logged no-op. A split already
+on that axis fires nothing. On success the model fires `paneOrientationChanged`, and every attached client is
+pushed the layout in the same batch machinery a move uses; there is no reply PDU. The GUI sends it for
+"Toggle Split Orientation" when the daemon serves `MoveNode` and does not flip locally, because the next
+layout push would revert a local flip; against an older daemon it keeps the local toggle.
+
+**Coexistence with `MergeTabIntoSplit`.** A daemon serves both. A client that shares `MoveNode` sends every
+drop as one; a client that does not, against a daemon that shares `TabMerge`, still merges a whole tab beside a
+pane of its own window with `MergeTabIntoSplit`, and reorders, moves and tears off tabs with the tab verbs.
+The GUI's move table (`contour::window::LegacyMoveRoutes`, which `moveRouteOf` consults) names exactly what a
+host older than `MoveNode` still does, and anything it does not name is refused with the "daemon is too old"
+note, so a drop is never half done. `MergeTabIntoSplit` stays for as long as such clients are supported.
+
+**tmux control mode.** A `contour client --tmux` window is a gateway, not a model the GUI can move into, so a
+drop there is refused on the client (`MoveRefusal::Tmux`). On the serving side, `tmux::ControlSession`, which
+mirrors the model to a tmux client, treats a move as the layout change it is: `tabMovedToWindow` raises
+`%sessions-changed` and a `%layout-change` for the tab, and `paneSwapped` the layout change alone.
+
+**Persistence.** `WorkspacePersistence` observes the model, and `tabMovedToWindow` is one of the events it
+takes as a `SnapshotTrigger::LayoutChanged`, so a move is saved with the next layout snapshot and a restored
+workspace has the arrangement the user left (see [Workspace snapshots](#workspace-snapshots)).
 
 #### Where a split ratio lives
 

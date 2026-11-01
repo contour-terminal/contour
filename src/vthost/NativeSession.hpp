@@ -92,6 +92,8 @@ struct HandshakePolicy
                                                                    proto::Capability::ControlPermissions,
                                                                    proto::Capability::InputEcho,
                                                                    proto::Capability::TabMerge,
+                                                                   proto::Capability::MoveNode,
+                                                                   proto::Capability::LayoutBatch,
                                                                    proto::Capability::TabEditAcks,
                                                                    proto::Capability::ColorPreference });
 };
@@ -233,38 +235,66 @@ class NativeSession final: public SessionStreamEvents
     void sessionPermissionRequested(vtworkspace::SessionId session,
                                     proto::PermissionRequest const& request) override;
 
-    /// Adapts the host's model-change fan-out into a single "layout changed"
-    /// callback: every structural change re-pushes the whole LayoutState. It is a
-    /// `vtworkspace::ModelEvents` an Attach connection subscribes to the host as its
-    /// hello is accepted, so the model stays transport-agnostic.
+    /// Adapts the host's model-change fan-out into a "layout changed" callback naming the window or the tab
+    /// the change is in: every structural change re-pushes the whole LayoutState of a window. It is a
+    /// `vtworkspace::ModelEvents` an Attach connection subscribes to the host as its hello is accepted, so
+    /// the model stays transport-agnostic.
     struct LayoutObserver final: vtworkspace::ModelEvents
     {
-        std::function<void()> onChange;
-        void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
-        void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
-        void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override { onChange(); }
+        std::function<void(vtworkspace::WindowId)> onWindowChange; ///< A change in one window's tab strip.
+        std::function<void(vtworkspace::TabId)> onTabChange;       ///< A change within one tab.
+        void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        {
+            onWindowChange(window);
+        }
+        void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int) override
+        {
+            onWindowChange(window);
+        }
+        void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId, int, int) override
+        {
+            onWindowChange(window);
+        }
         void tabMovedToWindow(
-            vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+            vtworkspace::WindowId from, vtworkspace::TabId, int, vtworkspace::WindowId to, int) override
         {
-            onChange();
+            onWindowChange(from);
+            onWindowChange(to);
         }
-        void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override { onChange(); }
-        void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
-        void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override { onChange(); }
-        void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override { onChange(); }
-        void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override { onChange(); }
-        void paneOrientationChanged(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::SplitState) override
+        void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int) override
         {
-            onChange();
+            onWindowChange(window);
         }
-        void paneSwapped(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override
+        void paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId) override
         {
-            onChange();
+            onTabChange(tab);
         }
-        void paneZoomChanged(vtworkspace::TabId, std::optional<vtworkspace::PaneId>) override { onChange(); }
-        void paneTreeRestructured(vtworkspace::TabId) override { onChange(); }
-        void tabTitleChanged(vtworkspace::TabId) override { onChange(); }
-        void tabColorChanged(vtworkspace::TabId) override { onChange(); }
+        void paneClosed(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId) override
+        {
+            onTabChange(tab);
+        }
+        void activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId) override { onTabChange(tab); }
+        void paneRatioChanged(vtworkspace::TabId tab, vtworkspace::PaneId, double) override
+        {
+            onTabChange(tab);
+        }
+        void paneOrientationChanged(vtworkspace::TabId tab,
+                                    vtworkspace::PaneId,
+                                    vtworkspace::SplitState) override
+        {
+            onTabChange(tab);
+        }
+        void paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId) override
+        {
+            onTabChange(tab);
+        }
+        void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId>) override
+        {
+            onTabChange(tab);
+        }
+        void paneTreeRestructured(vtworkspace::TabId tab) override { onTabChange(tab); }
+        void tabTitleChanged(vtworkspace::TabId tab) override { onTabChange(tab); }
+        void tabColorChanged(vtworkspace::TabId tab) override { onTabChange(tab); }
     };
 
     /// @param type A PDU type this connection may send.
@@ -457,9 +487,10 @@ class NativeSession final: public SessionStreamEvents
         Served = 1, ///< It was, and it has been carried out or refused.
     };
 
-    /// Serves @p frame if it is an EditTab (gated on Capability::TabEdits) or a MergeTabIntoSplit (gated on
-    /// Capability::TabMerge): applied to the daemon's model, whose events push the new layout to every
-    /// client, and answered Unsupported when the capability was not negotiated.
+    /// Serves @p frame if it is an EditTab (gated on Capability::TabEdits), a MergeTabIntoSplit (gated on
+    /// Capability::TabMerge) a MoveNode or a SetSplitOrientation (both gated on Capability::MoveNode):
+    /// applied to the daemon's model, whose events push the new layout to every client, and answered
+    /// Unsupported when the capability was not negotiated.
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a verb.
     [[nodiscard]] TabVerb serveTabVerb(proto::DecodedFrame const& frame);
@@ -540,8 +571,32 @@ class NativeSession final: public SessionStreamEvents
     void emitSessionEvent(proto::SessionEventPdu const& event);
 
     /// Serializes each followed window's tab/pane tree into a LayoutState and pushes it
-    /// (serial 0), once the handshake completed — on attach and on every change.
+    /// (serial 0), once the handshake completed — on attach, and on every change to a client not sharing
+    /// Capability::LayoutBatch. To a client sharing it the push is ended by a LayoutBatchEnd (@see
+    /// endLayoutBatch).
     void pushLayout();
+
+    /// Sends @p layout (serial 0), stamped with the last EditTab served to a client sharing
+    /// Capability::TabEditAcks.
+    void sendLayout(proto::LayoutState layout);
+
+    /// @return Whether this client shares Capability::LayoutBatch: its pushes are ended, and coalesced.
+    [[nodiscard]] bool batchesLayouts() const noexcept;
+
+    /// The model changed in @p window. A client sharing Capability::LayoutBatch has the window marked, and
+    /// pushed once when the batch ends (@see flushChangedLayouts); any other is pushed every followed
+    /// window's layout now, as a client of the release before it always was.
+    /// @param window The window the change is in.
+    void layoutChanged(vtworkspace::WindowId window);
+
+    /// Pushes the layout of each window changed since the batch opened (@see layoutChanged) that this client
+    /// follows, each once, as it is now; a window the batch removed is pushed with no tab to a client that
+    /// followed it, which closes its own window for it.
+    /// @return Whether any LayoutState went out.
+    bool flushChangedLayouts();
+
+    /// Opens a layout batch if none is: spawns the endLayoutBatch() that ends it.
+    void openLayoutBatch();
 
     /// Brings the followed windows in line with the model before a layout push: closed windows leave the
     /// set; this connection's own new windows, and — for the primary viewer — unclaimed ones, join it, and
@@ -642,6 +697,14 @@ class NativeSession final: public SessionStreamEvents
     /// What run() awaits before it lets `this` go: ready once spawnedFlowsEnded(), else parked until the
     /// last SpawnedFlowClaim is given back. Defined in the source file.
     struct SpawnedFlowsEnded;
+
+    /// Whether a layout push to a client sharing Capability::LayoutBatch still owes its LayoutBatchEnd.
+    enum class LayoutBatch : uint8_t
+    {
+        Closed = 0, ///< Nothing pushed since the last end: the next push or change spawns endLayoutBatch().
+        Open = 1,   ///< An endLayoutBatch() is spawned, and ends every push and change made before it runs.
+        Pushed = 2, ///< As Open, and a LayoutState went out in it already, so its end is owed.
+    };
 
     /// Whether @ref requeueOnSendRoom is parked on the send queue's watermark.
     enum class RoomWaiter : uint8_t
@@ -903,6 +966,15 @@ class NativeSession final: public SessionStreamEvents
     [[nodiscard]] core::async::Task<void> flushAt(SpawnedFlowClaim claim,
                                                   core::platform::SteadyTimePoint deadline);
 
+    /// Pushes the windows the batch changed (@see flushChangedLayouts) and sends the LayoutBatchEnd of the
+    /// pushes made since it was spawned: a flow, so that it runs once the change that pushed has run to its
+    /// end. One change fires several model events -- a pane moved out of its tab is announced shrunk before
+    /// the window it entered shows it -- and each window is pushed once for all of them, as the change left
+    /// it. The end is sent when anything was pushed, and for a move of this client's even when it pushed
+    /// nothing this client follows, so the move is known to have landed.
+    /// @param claim The batch's claim on `this` (@see claimLayoutBatch).
+    [[nodiscard]] core::async::Task<void> endLayoutBatch(SpawnedFlowClaim claim);
+
     /// @return A claim counted in @ref _flushesInFlight until a flushAt() frame gives it back.
     [[nodiscard]] SpawnedFlowClaim claimFlush();
     /// @param session The session the streamer starts on.
@@ -910,9 +982,11 @@ class NativeSession final: public SessionStreamEvents
     [[nodiscard]] SpawnedFlowClaim claimStreamer(vtworkspace::SessionId session);
     /// @return A claim that holds @ref _roomWaiter Parked until a requeueOnSendRoom() frame gives it back.
     [[nodiscard]] SpawnedFlowClaim claimRoomWaiter();
+    /// @return A claim that holds @ref _layoutBatch Open until an endLayoutBatch() frame gives it back.
+    [[nodiscard]] SpawnedFlowClaim claimLayoutBatch();
 
     /// @return Whether no flow this connection spawned holds `this` any more: no flush, no snapshot
-    ///         streamer, no waiter for send room.
+    ///         streamer, no waiter for send room, no layout batch left to end.
     [[nodiscard]] bool spawnedFlowsEnded() const noexcept;
 
     core::net::EventLoop& _loop;
@@ -986,6 +1060,15 @@ class NativeSession final: public SessionStreamEvents
     /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
+    /// Whether an endLayoutBatch() is live, which @ref run waits out before it lets `this` go.
+    LayoutBatch _layoutBatch = LayoutBatch::Closed;
+    /// The serial of the MoveNode whose pushes the open layout batch carries, sent as its
+    /// LayoutBatchEnd::causeSerial; 0 when no request of this client caused it.
+    uint64_t _layoutBatchCause = 0;
+    /// The serial of the MoveNode being applied while its model events push; 0 outside that call.
+    uint64_t _servingMove = 0;
+    /// The windows the open layout batch changed, pushed once as it ends (@see flushChangedLayouts).
+    std::unordered_set<uint64_t> _changedWindows;
     /// The earliest flush deadline armed; nullopt while no flush is due.
     std::optional<core::platform::SteadyTimePoint> _flushDeadline;
     /// The flushAt() coroutines live, superseded ones included: what @ref run waits out before it lets

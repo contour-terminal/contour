@@ -49,6 +49,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QStyleHints>
+#include <QtGui/QVector2D>
 #include <QtQml/QJSValue>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -242,65 +243,31 @@ constexpr auto HeaderTextDimmedRole = contour::window::ChromePaneRoleNames::pane
                          { QStringLiteral("jumpLabel"), QStringLiteral("Jump to Command ↑") } };
 }
 
-/// A drag the window is sent by hand: the drag-enter, -move, -drop and -leave events a platform's drag
-/// manager would deliver, carrying @ref mime. Exercises the real DropArea of PaneCard.qml, offscreen.
-struct DragSource
+constexpr auto NodeMime = contour::window::NodeDragMime;
+
+/// The `application/x-contour-node` JSON of a drag of @p payload from this process's first window, naming
+/// @p sessions (a pane names one; a tab of several, two or more).
+[[nodiscard]] QString nodeJson(contour::window::DropPayload payload, std::vector<uint64_t> sessions)
 {
-    QQuickWindow& window;
-    QMimeData mime;
-    /// Whether the last enter or move was accepted by a DropArea.
-    bool accepted = false;
+    return contour::window::writeNodeDrag(
+        contour::window::NodeDrag { .payload = payload,
+                                    .host = { .kind = contour::window::HostKind::Process, .id = "test" },
+                                    .window = vtworkspace::WindowId { 1 },
+                                    .tabIndex = 0,
+                                    .sessions = std::move(sessions) });
+}
 
-    explicit DragSource(QQuickWindow& target): window { target } {}
+/// A drag of a tab of two panes.
+[[nodiscard]] QString tabJson()
+{
+    return nodeJson(contour::window::DropPayload::Tab, { 100, 101 });
+}
 
-    static constexpr auto Actions = Qt::CopyAction | Qt::MoveAction;
-
-    /// Qt 6.12 gave the drag events QPointF constructors and deprecated the QPoint ones.
-    /// @return @p scene in the type the installed Qt's drag-event constructors take.
-    [[nodiscard]] static auto dragPosition(QPointF scene)
-    {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
-        return scene;
-#else
-        return scene.toPoint();
-#endif
-    }
-
-    void enter(QPointF scene)
-    {
-        auto event = QDragEnterEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
-        event.ignore();
-        QCoreApplication::sendEvent(&window, &event);
-        accepted = event.isAccepted();
-    }
-
-    void move(QPointF scene)
-    {
-        auto event = QDragMoveEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
-        event.ignore();
-        QCoreApplication::sendEvent(&window, &event);
-        accepted = event.isAccepted();
-    }
-
-    void leave()
-    {
-        auto event = QDragLeaveEvent {};
-        QCoreApplication::sendEvent(&window, &event);
-    }
-
-    /// @return What the drop resolved to: IgnoreAction when no DropArea accepted it.
-    [[nodiscard]] Qt::DropAction drop(QPointF scene)
-    {
-        auto event = QDropEvent { scene, Actions, &mime, Qt::LeftButton, Qt::NoModifier };
-        event.ignore();
-        QCoreApplication::sendEvent(&window, &event);
-        return event.isAccepted() ? event.dropAction() : Qt::IgnoreAction;
-    }
-};
-
-constexpr auto TabMime = "application/x-contour-tab";
-
-constexpr auto TabJson = R"({"windowId":1,"tabIndex":0})";
+/// A drag of a pane.
+[[nodiscard]] QString paneJson()
+{
+    return nodeJson(contour::window::DropPayload::Pane, { 100 });
+}
 
 /// A lone pane card in a window that carries a drop-aware controller.
 struct DropHost
@@ -310,10 +277,12 @@ struct DropHost
     MockPaneProxy leaf { /*leaf*/ true };
     DragSource source;
 
-    DropHost(): host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
+    /// @param visiblePanes How many panes the tab shows: two or more make the pane a card with a header.
+    explicit DropHost(int visiblePanes = 1):
+        host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
     {
         leaf.setSession(&session);
-        host.show(leaf, /*visiblePanes*/ 1);
+        host.show(leaf, visiblePanes);
     }
 
     [[nodiscard]] MockPaneWindowController& controller() { return host.window.controller(); }
@@ -334,27 +303,6 @@ struct DropHost
     }
 };
 
-/// Whether @p ink is @p mark over @p ground, as an edge anti-aliased across pixels draws it: every channel
-/// moved toward the mark by about the same share, and by a good part of the way.
-/// @param mark   The colour the edge is drawn in.
-/// @param ground What it is drawn over.
-/// @param ink    The strongest pixel of the edge.
-[[nodiscard]] bool isBlendOf(vtbackend::RGBColor mark, vtbackend::RGBColor ground, vtbackend::RGBColor ink)
-{
-    constexpr auto MinimumShare = 0.4;
-    constexpr auto ShareSpread = 0.1;
-    auto shares = std::vector<double> {};
-    auto const channels = std::array { std::tuple { mark.red, ground.red, ink.red },
-                                       std::tuple { mark.green, ground.green, ink.green },
-                                       std::tuple { mark.blue, ground.blue, ink.blue } };
-    for (auto const& [markValue, groundValue, inkValue]: channels)
-        if (markValue != groundValue)
-            shares.push_back(static_cast<double>(inkValue - groundValue)
-                             / static_cast<double>(markValue - groundValue));
-    return !shares.empty() && *std::ranges::min_element(shares) >= MinimumShare
-           && *std::ranges::max_element(shares) - *std::ranges::min_element(shares) <= ShareSpread;
-}
-
 /// A pane card over a REAL TerminalDisplay and a live session, in a shown window: what a user drags a tab
 /// over. The grid is full of text, so the ring and the ghost are drawn over cells that are not all one
 /// colour.
@@ -374,7 +322,9 @@ struct DropGridHost
     /// The lines of text the page is filled with.
     static constexpr int FilledLines = 25;
 
-    DropGridHost(): host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
+    /// @param visiblePanes How many panes the tab shows: two or more make the pane a card with a header.
+    explicit DropGridHost(int visiblePanes = 1):
+        host { paneCardSetup(), QSize { 400, 300 } }, source { host.window }
     {
         auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(FilledLines), vtbackend::ColumnCount(80) });
@@ -384,8 +334,8 @@ struct DropGridHost
         // PaneTreeHost stands the stub in for the terminal; the card here draws over the real one.
         qmlRegisterType<contour::display::TerminalDisplay>("Contour.Terminal", 1, 0, "ContourTerminal");
         leaf.setSession(session.get());
-        host.show(leaf, /*visiblePanes*/ 1);
-        source.mime.setData(TabMime, TabJson);
+        host.show(leaf, visiblePanes);
+        source.mime.setData(NodeMime, tabJson().toUtf8());
         fillGrid();
     }
 
@@ -425,6 +375,39 @@ struct DropGridHost
         auto const rect = card().mapRectToScene(QRectF { QPointF {}, card().size() });
         return QRect { QPointF { rect.topLeft() * dpr }.toPoint(), QSizeF { rect.size() * dpr }.toSize() };
     }
+
+    /// @return Where @p item stands in the grabbed frame's pixels, rounded outward.
+    [[nodiscard]] QRect pixelsOf(QQuickItem const& item) const
+    {
+        auto const dpr = host.window.devicePixelRatio();
+        auto const rect = item.mapRectToScene(QRectF { QPointF {}, item.size() });
+        return QRectF { rect.topLeft() * dpr, rect.size() * dpr }.toAlignedRect();
+    }
+
+    /// @return @p logical device-independent pixels in the grabbed frame's pixels.
+    [[nodiscard]] int px(qreal logical) const
+    {
+        return contour::test::pixel::devicePixels(logical, host.window.devicePixelRatio());
+    }
+
+    /// @return The probe @p logical (in device-independent pixels) from @p anchor, in the grabbed frame's
+    ///         pixels.
+    [[nodiscard]] QRect probeAt(QPoint anchor, QRect logical) const
+    {
+        return contour::test::pixel::probeAt(anchor, logical, host.window.devicePixelRatio());
+    }
+
+    /// @return @p rect, in the grabbed frame's pixels, shrunk by @p logical device-independent pixels on
+    /// every
+    ///         side (grown, for a negative one).
+    [[nodiscard]] QRect inset(QRect rect, qreal logical) const
+    {
+        auto const by = px(logical);
+        return rect.adjusted(by, by, -by, -by);
+    }
+
+    /// Makes the drag carry @p json.
+    void carry(QString const& json) { source.mime.setData(NodeMime, json.toUtf8()); }
 
     /// Fills the page with lines of text, and waits until the terminal has parsed them all.
     void fillGrid()
@@ -2208,7 +2191,7 @@ TEST_CASE(
     "[contour][gui][qml][panecard][drop]")
 {
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
     auto& ring = drop.part("dropRing");
     auto& ghost = drop.part("dropGhost");
     CHECK_FALSE(ring.isVisible());
@@ -2222,20 +2205,27 @@ TEST_CASE(
     CHECK(ghost.width() < drop.card().width() / 2);
     CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
           == QStringLiteral("Tab → split right"));
-    CHECK(drop.controller().lastTabPayload == QString::fromLatin1(TabJson));
+    CHECK(drop.controller().lastNodePayload == tabJson());
 
-    // Both marks are the colour UiStyleProvider_test holds to 3:1 on every scheme: the engaged scrollbar
-    // thumb's role, resolved on the card's own fill.
-    auto const mark =
-        drop.host.style().colorOn(static_cast<int>(contour::config::ChromeColorRole::ScrollbarThumbActive),
-                                  drop.session.backgroundColor());
+    // Every "lands here" cue is the chrome's accent, as the design draws it: the 2 px ring, the ghost's
+    // 1.5 px edge and its 18 % fill, and the label's pill with the ink that reads on it.
+    auto const mark = drop.host.style().accentColor();
     CHECK(QQmlProperty(&ring, "border.color").read().value<QColor>() == mark);
+    CHECK(QQmlProperty(&ring, "border.width").read().toDouble() == Catch::Approx(2.0));
     CHECK(QQmlProperty(&ghost, "border.color").read().value<QColor>() == mark);
+    CHECK(QQmlProperty(&ghost, "border.width").read().toDouble() == Catch::Approx(1.5));
+    auto const fill = QQmlProperty(&ghost, "color").read().value<QColor>();
+    CHECK(fill.rgb() == mark.rgb());
+    CHECK(fill.alphaF() == Catch::Approx(0.18).margin(0.01));
+    auto const& pill = PaneTreeHost::partOf(ghost, "dropGhostPill");
+    CHECK(pill.property("color").value<QColor>() == mark);
+    CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("color").value<QColor>()
+          == drop.host.style().onColor(mark));
 
     CHECK(drop.source.drop(drop.at(0.95, 0.5)) == Qt::MoveAction);
-    CHECK(drop.controller().droppedZones
-          == std::vector<int> { static_cast<int>(contour::window::DropZone::SplitRight) });
-    CHECK(drop.controller().droppedTabPayloads == std::vector<QString> { QString::fromLatin1(TabJson) });
+    CHECK(drop.controller().nodeDrops
+          == std::vector<std::pair<int, QString>> {
+              { static_cast<int>(contour::window::DropZone::SplitRight), tabJson() } });
     CHECK(QTest::qWaitFor([&] { return !ring.isVisible() && !ghost.isVisible(); }));
 }
 
@@ -2256,15 +2246,14 @@ TEST_CASE("display: a tab dragged to a pane's edge draws the ring and the ghost 
     REQUIRE(QTest::qWaitFor([&] { return ghost.isVisible(); }));
     auto const during = drop.frame();
 
-    auto const mark =
-        drop.host.style().colorOn(static_cast<int>(contour::config::ChromeColorRole::ScrollbarThumbActive),
-                                  drop.session->getBackgroundColor());
+    auto const mark = drop.host.style().accentColor();
     auto const markRgb = vtbackend::RGBColor { static_cast<uint8_t>(mark.red()),
                                                static_cast<uint8_t>(mark.green()),
                                                static_cast<uint8_t>(mark.blue()) };
 
-    // The ring: the card's own edge, in the mark's colour, and 3:1 against what it covers.
-    auto const ringProbe = QRect { cardRect.center().x() - 2, cardRect.top(), 5, 4 };
+    // The ring: the card's own edge, in the mark's colour, and 3:1 against what it covers. Every probe is
+    // sized in device-independent pixels, so it covers the same share of an edge at any device-pixel ratio.
+    auto const ringProbe = drop.probeAt({ cardRect.center().x(), cardRect.top() }, { -2, 0, 5, 4 });
     auto const ring = regionColors(during, ringProbe);
     auto const beneathRing = regionColors(before, ringProbe);
     INFO("ring ink " << hexOf(ring.ink) << " mark " << hexOf(markRgb) << " beneath "
@@ -2272,22 +2261,24 @@ TEST_CASE("display: a tab dragged to a pane's edge draws the ring and the ghost 
     CHECK(isBlendOf(markRgb, beneathRing.ground, ring.ink));
     CHECK(vtbackend::contrastRatio(ring.ink, beneathRing.ground) >= MarkContrast);
 
-    // The ghost's edge, over the cells: the half on the right edge's side, in the same colour.
+    // The ghost's edge, over the cells: the half on the right edge's side, in the same colour. Its left
+    // edge's own column: a probe straddling the edge has the edge for its most common colour wherever the 1.5
+    // px line covers two pixels -- at a ratio of two, or under a compositor that does not blend it.
     auto const ghostRect = QRectF { ghost.mapToScene(QPointF {}), ghost.size() };
     auto const ghostLeft = static_cast<int>(ghostRect.left() * dpr);
     auto const ghostMid = static_cast<int>(ghostRect.center().y() * dpr);
-    auto const ghostProbe = QRect { ghostLeft - 1, ghostMid - 2, 5, 5 };
+    auto const ghostProbe = drop.probeAt({ ghostLeft, ghostMid }, { 0, -2, 1, 5 });
     auto const ghostEdge = regionColors(during, ghostProbe);
     auto const beneathGhost = regionColors(before, ghostProbe);
-    INFO("ghost ink " << hexOf(ghostEdge.ink) << " beneath " << hexOf(beneathGhost.ground));
-    CHECK(isBlendOf(markRgb, beneathGhost.ground, ghostEdge.ink));
-    CHECK(vtbackend::contrastRatio(ghostEdge.ink, beneathGhost.ground) >= MarkContrast);
+    INFO("ghost edge " << hexOf(ghostEdge.ground) << " beneath " << hexOf(beneathGhost.ground));
+    CHECK(isBlendOf(markRgb, beneathGhost.ground, ghostEdge.ground));
+    CHECK(vtbackend::contrastRatio(ghostEdge.ground, beneathGhost.ground) >= MarkContrast);
 
     // Inside the ring, only the right half changed: nothing is drawn over the left half.
-    auto const interior = cardRect.adjusted(6, 6, -6, -6);
+    auto const interior = drop.inset(cardRect, 6);
     auto const changed = changedBounds(before, during, interior);
     REQUIRE_FALSE(changed.isNull());
-    CHECK(changed.left() >= cardRect.center().x() - 2);
+    CHECK(changed.left() >= cardRect.center().x() - drop.px(2));
 
     // The tab leaves: the frame is what it was before the drag.
     drop.source.leave();
@@ -2298,12 +2289,252 @@ TEST_CASE("display: a tab dragged to a pane's edge draws the ring and the ghost 
     CHECK(left.isNull());
 }
 
+namespace
+{
+
+/// The tolerance, in device-independent pixels, for an edge that anti-aliasing smears across a pixel or two.
+constexpr auto EdgeSlack = 2;
+
+/// How far inside a card the ring's paint reaches, in device-independent pixels: 2 px, anti-aliased, and
+/// swung inward by the card's rounded corners.
+constexpr auto RingBand = 6;
+
+/// The colour of the chrome's accent as the pixel tests compare it.
+[[nodiscard]] vtbackend::RGBColor rgbOfColor(QColor const& color)
+{
+    return vtbackend::RGBColor { static_cast<uint8_t>(color.red()),
+                                 static_cast<uint8_t>(color.green()),
+                                 static_cast<uint8_t>(color.blue()) };
+}
+
+/// A drag the pane-card pixel cases carry, and where over the card it is held.
+struct EdgeDrag
+{
+    contour::window::DropZone zone; ///< What a drop there does.
+    qreal fx;                       ///< Where, as a fraction of the card's width.
+    qreal fy;                       ///< Where, as a fraction of the card's height.
+    char const* label;              ///< What the ghost says.
+};
+
+constexpr auto EdgeDrags = std::array {
+    EdgeDrag { contour::window::DropZone::SplitLeft, 0.05, 0.6, "Pane → split left" },
+    EdgeDrag { contour::window::DropZone::SplitBottom, 0.5, 0.95, "Pane → split down" },
+};
+
+/// Checks what a ghost drawn over a full page left in the frame: the edge in the mark's colour, the label's
+/// pill, and nothing changed outside the ghost's rectangle.
+void checkGhostPixels(DropGridHost& drop, QImage const& before, QImage const& during, QQuickItem const& ghost)
+{
+    using namespace contour::test::pixel;
+    auto const mark = rgbOfColor(drop.host.style().accentColor());
+    auto const ghostPx = drop.pixelsOf(ghost);
+    auto const interior = drop.inset(drop.cardPixels(), RingBand);
+
+    // Everything that changed inside the ring is the ghost's: the grid and the header outside it are as they
+    // were, and the ghost's paint reaches its rectangle's edges.
+    auto const changed = changedBounds(before, during, interior);
+    REQUIRE_FALSE(changed.isNull());
+    INFO("changed " << changed.x() << "," << changed.y() << " " << changed.width() << "x" << changed.height()
+                    << ", ghost " << ghostPx.x() << "," << ghostPx.y() << " " << ghostPx.width() << "x"
+                    << ghostPx.height());
+    auto const expected = ghostPx.intersected(interior);
+    CHECK(drop.inset(expected, -EdgeSlack).contains(changed));
+    CHECK(changed.width() >= expected.width() - (2 * drop.px(RingBand)));
+    CHECK(changed.height() >= expected.height() - (2 * drop.px(RingBand)));
+
+    // The ghost's edge, over the cells: its top edge's own row is the mark, 3:1 against what it covers.
+    auto const probe = drop.probeAt({ ghostPx.center().x(), ghostPx.top() }, { -2, 0, 5, 1 });
+    auto const edge = regionColors(during, probe);
+    auto const beneath = regionColors(before, probe);
+    INFO("edge " << hexOf(edge.ground) << " mark " << hexOf(mark) << " beneath " << hexOf(beneath.ground));
+    CHECK(isBlendOf(mark, beneath.ground, edge.ground));
+    CHECK(vtbackend::contrastRatio(edge.ground, beneath.ground) >= MarkContrast);
+
+    // The label's pill is the mark itself, opaque.
+    auto const pill = drop.inset(drop.pixelsOf(PaneTreeHost::partOf(ghost, "dropGhostPill")), 2);
+    CHECK(nearlyEqual(regionColors(during, pill).ground, mark, 8));
+}
+
+} // namespace
+
+TEST_CASE("display: a pane dragged to an edge draws the ghost in dropGhostOf's rectangle, and only there",
+          "[display][panecard][drop][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto drop = DropGridHost { 2 };
+    drop.carry(paneJson());
+    auto const inset = chromeToken(drop.host.engine, "space", "s2");
+    auto const bodyTop = drop.part("paneHeader").height();
+    auto const before = drop.frame();
+
+    for (auto const& edge: EdgeDrags)
+    {
+        INFO("label " << edge.label);
+        drop.dragOver(edge.fx, edge.fy);
+        REQUIRE(drop.source.accepted);
+        auto& ghost = drop.part("dropGhost");
+        REQUIRE(QTest::qWaitFor([&] { return ghost.isVisible(); }));
+        auto const during = drop.frame();
+
+        // The rectangle is the policy's, below the header, inset from the card.
+        auto const rect = contour::window::dropGhostOf(
+            edge.zone, { .width = drop.card().width(), .height = drop.card().height() - bodyTop }, inset);
+        REQUIRE(rect.has_value());
+        CHECK(ghost.x() == Catch::Approx(rect->x));
+        CHECK(ghost.y() == Catch::Approx(rect->y + bodyTop));
+        CHECK(ghost.width() == Catch::Approx(rect->width));
+        CHECK(ghost.height() == Catch::Approx(rect->height));
+        CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
+              == QString::fromUtf8(edge.label));
+
+        checkGhostPixels(drop, before, during, ghost);
+
+        drop.source.leave();
+        REQUIRE(QTest::qWaitFor([&] { return !ghost.isVisible(); }));
+        CHECK(changedBounds(before, drop.frame(), drop.cardPixels()).isNull());
+    }
+}
+
+TEST_CASE("display: a pane dragged to another's middle draws the swap ghost over the whole body",
+          "[display][panecard][drop][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto drop = DropGridHost { 2 };
+    drop.carry(paneJson());
+    auto const before = drop.frame();
+
+    drop.dragOver(0.5, 0.6);
+    REQUIRE(drop.source.accepted);
+    auto& ghost = drop.part("dropGhost");
+    REQUIRE(QTest::qWaitFor([&] { return ghost.isVisible(); }));
+    auto const during = drop.frame();
+
+    auto const& header = drop.part("paneHeader");
+    auto const inset = chromeToken(drop.host.engine, "space", "s2");
+    CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
+          == QStringLiteral("Swap with %1").arg(drop.host.window.controller().swapTitle));
+    CHECK(ghost.x() == Catch::Approx(inset));
+    CHECK(ghost.y() == Catch::Approx(header.height() + inset));
+    CHECK(ghost.width() == Catch::Approx(drop.card().width() - (2 * inset)));
+    CHECK(ghost.y() + ghost.height() == Catch::Approx(drop.card().height() - inset));
+    checkGhostPixels(drop, before, during, ghost);
+
+    // The header, which the ghost keeps clear of, is as it was.
+    auto const band = drop.px(RingBand);
+    auto const headerPx = drop.pixelsOf(header).adjusted(band, band, -band, 0);
+    CHECK(changedBounds(before, during, headerPx).isNull());
+}
+
+TEST_CASE("display: a carried pane leaves a dashed placeholder where its card was",
+          "[display][panecard][drop][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto drop = DropGridHost { 2 };
+    auto const before = drop.frame();
+    auto const& placeholder = drop.part("dragPlaceholder");
+    auto& controller = drop.host.window.controller();
+    controller.setCarriedPane(drop.card().property("session").value<QObject*>());
+    REQUIRE(QTest::qWaitFor([&] { return placeholder.isVisible(); }));
+    auto const during = drop.frame();
+
+    // It stands where the card does, whole, and nothing outside the card changed.
+    auto const cardPx = drop.cardPixels();
+    CHECK(drop.pixelsOf(placeholder) == cardPx);
+    CHECK(drop.part("dropGhost").isVisible() == false);
+    auto const outside = QRect { 0, 0, during.width(), during.height() };
+    auto const changed = changedBounds(before, during, outside);
+    REQUIRE_FALSE(changed.isNull());
+    CHECK(drop.inset(cardPx, -EdgeSlack).contains(changed));
+
+    // The grid beneath is hidden: the card's own fill shows in the corner of the body.
+    auto const fill = rgbOfColor(drop.card().property("fill").value<QColor>());
+    auto const corner = drop.probeAt(cardPx.bottomRight(), { -24, -24, 8, 8 });
+    INFO("corner " << hexOf(regionColors(during, corner).ground) << " fill " << hexOf(fill));
+    CHECK(nearlyEqual(regionColors(during, corner).ground, fill, 8));
+
+    // The frame is dashed: along the top the line is made of dashes and the gaps between them.
+    auto const margin = drop.px(chromeToken(drop.host.engine, "space", "s1"));
+    auto const band = drop.probeAt({ cardPx.center().x(), cardPx.top() + margin }, { -40, -1, 80, 4 });
+    auto const dashes = regionColors(during, band);
+    INFO("dash ink " << hexOf(dashes.ink) << " ground " << hexOf(dashes.ground));
+    CHECK(distanceBetween(dashes.ink, dashes.ground) >= 30);
+    CHECK(dashes.groundPixels > 0);
+    CHECK(dashes.groundPixels < dashes.pixels);
+
+    // And it says whose place it is, legibly.
+    auto const labelPx = drop.pixelsOf(drop.part("dragPlaceholderLabel"));
+    auto const text = regionColors(during, labelPx);
+    CHECK(vtbackend::contrastRatio(text.ink, text.ground) >= MarkContrast);
+
+    controller.setCarriedPane(nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return !placeholder.isVisible(); }));
+    CHECK(changedBounds(before, drop.frame(), cardPx).isNull());
+}
+
+TEST_CASE("display: a refused pane drop draws the note and the warning ring, and nothing else",
+          "[display][panecard][drop][drag]")
+{
+    using namespace contour::test::pixel;
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto drop = DropGridHost { 2 };
+    drop.carry(paneJson());
+    drop.host.window.controller().refusal = contour::window::MoveRefusal::OtherProcess;
+    auto const before = drop.frame();
+
+    drop.dragOver(0.5, 0.6);
+    REQUIRE(drop.source.accepted);
+    auto& note = drop.part("dropRefusal");
+    REQUIRE(QTest::qWaitFor([&] { return note.isVisible(); }));
+    CHECK_FALSE(drop.part("dropGhost").isVisible());
+    auto const during = drop.frame();
+
+    auto const warning =
+        rgbOfColor(drop.host.style().statusMarkOn(static_cast<int>(contour::config::StatusColorRole::Warning),
+                                                  drop.card().property("fill").value<QColor>()));
+    auto const cardPx = drop.cardPixels();
+
+    // The ring: the card's own edge in the warning role, and not the drop mark.
+    auto const ringProbe = drop.probeAt({ cardPx.center().x(), cardPx.top() }, { -2, 0, 5, 4 });
+    auto const ring = regionColors(during, ringProbe);
+    auto const beneath = regionColors(before, ringProbe);
+    INFO("ring ink " << hexOf(ring.ink) << " warning " << hexOf(warning));
+    CHECK(isBlendOf(warning, beneath.ground, ring.ink));
+    CHECK(vtbackend::contrastRatio(ring.ink, beneath.ground) >= MarkContrast);
+
+    // Within the ring, only the note changed, and it sits under the header, as wide as the card allows.
+    auto const notePx = drop.pixelsOf(note);
+    auto const interior = drop.inset(cardPx, RingBand);
+    auto const changed = changedBounds(before, during, interior);
+    REQUIRE_FALSE(changed.isNull());
+    CHECK(drop.inset(notePx, -EdgeSlack).contains(changed));
+    CHECK(notePx.top() >= drop.pixelsOf(drop.part("paneHeader")).bottom());
+
+    // The note's edge is the warning too: its top edge's own row. A hairline is one device pixel at any ratio
+    // (ChromeStyle::hairline()), so the probe is one frame row high.
+    auto const edgeProbe = QRect { notePx.center().x() - drop.px(2), notePx.top(), drop.px(5), 1 };
+    CHECK(isBlendOf(warning, regionColors(before, edgeProbe).ground, regionColors(during, edgeProbe).ground));
+    // Its title and body read on its tint.
+    for (auto const* const name: { "dropRefusalTitle", "dropRefusalBody" })
+    {
+        INFO(name);
+        auto const text = regionColors(during, drop.pixelsOf(drop.part(name)));
+        CHECK(vtbackend::contrastRatio(text.ink, text.ground) >= TextContrast);
+    }
+
+    drop.source.leave();
+    REQUIRE(QTest::qWaitFor([&] { return !note.isVisible(); }));
+    CHECK(changedBounds(before, drop.frame(), cardPx).isNull());
+}
+
 TEST_CASE("pane card: the ghost follows the edge the tab is nearest, and the middle shows none (offscreen)",
           "[contour][gui][qml][panecard][drop]")
 {
     using contour::window::DropZone;
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
     drop.dragOver(0.5, 0.5);
 
     // Each edge, with the zone the controller would answer there and the label the ghost shows.
@@ -2317,20 +2548,21 @@ TEST_CASE("pane card: the ghost follows the edge the tab is nearest, and the mid
         auto const& ghost = drop.part("dropGhost");
         CHECK(QTest::qWaitFor([&] { return ghost.isVisible(); }));
         CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
-              == drop.controller().dropGhostLabel(static_cast<int>(zone)));
+              == drop.controller().dropGhostLabel(
+                  static_cast<int>(zone), static_cast<int>(contour::window::DropPayload::Tab), nullptr));
         drop.source.move(drop.at(0.5, 0.5));
         CHECK(QTest::qWaitFor([&] { return !ghost.isVisible(); }));
     }
     drop.source.leave();
 }
 
-TEST_CASE(
-    "pane card: a tab dropped in the middle, or where the window cannot split, is not accepted (offscreen)",
-    "[contour][gui][qml][panecard][drop]")
+TEST_CASE("pane card: a tab dropped in the middle is not accepted by the card (offscreen)",
+          "[contour][gui][qml][panecard][drop]")
 {
-    // Unaccepted, so the drag ends IgnoreAction and the tab tears off into its own window, as before.
+    // Unaccepted by the card, so the window's catch-all (Main.qml) takes it as a no-op; with none here, the
+    // drag ends IgnoreAction, which the real window never lets happen over itself.
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
 
     SECTION("the middle of the card")
     {
@@ -2340,16 +2572,7 @@ TEST_CASE(
         CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
     }
 
-    SECTION("an edge of a window that cannot split")
-    {
-        drop.controller().split = contour::window::SplitSupport::Unsupported;
-        drop.dragOver(0.95, 0.5);
-        CHECK_FALSE(drop.part("dropRing").isVisible());
-        CHECK_FALSE(drop.part("dropGhost").isVisible());
-        CHECK(drop.source.drop(drop.at(0.95, 0.5)) == Qt::IgnoreAction);
-    }
-
-    CHECK(drop.controller().droppedZones.empty());
+    CHECK(drop.controller().nodeDrops.empty());
 }
 
 TEST_CASE("pane card: files and text drop into the pane's session, whatever part of the card (offscreen)",
@@ -2407,7 +2630,7 @@ TEST_CASE("pane card: files and text drop into the pane's session, whatever part
         CHECK(drop.session.droppedTexts.empty());
     }
 
-    CHECK(drop.controller().droppedZones.empty());
+    CHECK(drop.controller().nodeDrops.empty());
 }
 
 TEST_CASE(
@@ -2417,7 +2640,7 @@ TEST_CASE(
     // Every move is answered with what a drop there would do, so the OS cursor shows it before release, and
     // the moves keep coming: leaving the middle for an edge accepts again.
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
 
     drop.source.enter(drop.at(0.95, 0.5));
     drop.source.move(drop.at(0.95, 0.5));
@@ -2434,7 +2657,7 @@ TEST_CASE(
     // And a release over the middle ends as an ignored drop, so the tab tears off as it always did.
     drop.source.move(drop.at(0.5, 0.5));
     CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
-    CHECK(drop.controller().droppedZones.empty());
+    CHECK(drop.controller().nodeDrops.empty());
 }
 
 TEST_CASE("pane card: a zone the controller does not answer refuses the drag, it never accepts (offscreen)",
@@ -2443,7 +2666,7 @@ TEST_CASE("pane card: a zone the controller does not answer refuses the drag, it
     // `undefined` is what the engine gives for a call it could not make; `undefined !== none` would
     // accept. The card fails closed, and a zone from an earlier answer does not outlive it.
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
     drop.dragOver(0.95, 0.5);
     REQUIRE(drop.source.accepted);
     REQUIRE(QTest::qWaitFor([&] { return drop.part("dropRing").isVisible(); }));
@@ -2453,7 +2676,7 @@ TEST_CASE("pane card: a zone the controller does not answer refuses the drag, it
     CHECK(QTest::qWaitFor([&] { return !drop.part("dropRing").isVisible(); }));
     CHECK_FALSE(drop.part("dropGhost").isVisible());
     CHECK(drop.source.drop(drop.at(0.96, 0.5)) == Qt::IgnoreAction);
-    CHECK(drop.controller().droppedZones.empty());
+    CHECK(drop.controller().nodeDrops.empty());
 
     // A new drag that is answered nothing at all is not accepted on entry either.
     drop.source.leave();
@@ -2472,19 +2695,252 @@ TEST_CASE("pane card: a drag the card cannot place is refused (offscreen)",
     CHECK(drop.source.drop(drop.at(0.5, 0.5)) == Qt::IgnoreAction);
     CHECK(drop.session.droppedTexts.empty());
     CHECK(drop.session.droppedUrls.empty());
-    CHECK(drop.controller().droppedZones.empty());
+    CHECK(drop.controller().nodeDrops.empty());
 }
 
 TEST_CASE("pane card: the ring and the ghost are gone once the drag leaves (offscreen)",
           "[contour][gui][qml][panecard][drop]")
 {
     auto drop = DropHost {};
-    drop.source.mime.setData(TabMime, TabJson);
+    drop.source.mime.setData(NodeMime, tabJson().toUtf8());
     drop.dragOver(0.05, 0.5);
     CHECK(QTest::qWaitFor([&] { return drop.part("dropGhost").isVisible(); }));
     drop.source.leave();
     CHECK(QTest::qWaitFor(
         [&] { return !drop.part("dropRing").isVisible() && !drop.part("dropGhost").isVisible(); }));
+}
+
+namespace
+{
+/// A pane card with its header, over a window whose controller carries the drag: what a user picks a pane
+/// up by.
+struct HeaderDropHost: DropHost
+{
+    HeaderDropHost(): DropHost { /*visiblePanes*/ 2 } { controller().ownPane = &session; }
+
+    [[nodiscard]] QQuickItem& header() const { return part("paneHeader"); }
+
+    /// @return The pane header's drag carrier, made an Internal drag so that starting it does not run the
+    ///         OS's nested drag loop, which a test cannot see the end of.
+    [[nodiscard]] QObject& dragProxy() const
+    {
+        auto* const proxy = header().findChild<QObject*>(QStringLiteral("paneDragProxy"));
+        REQUIRE(proxy != nullptr);
+        return *proxy;
+    }
+
+    [[nodiscard]] QVariant dragProperty(char const* name) const
+    {
+        return QQmlProperty { &dragProxy(),
+                              QStringLiteral("Drag.") + QLatin1String(name),
+                              qmlContext(&dragProxy()) }
+            .read();
+    }
+
+    /// Presses the header's left end (clear of its buttons) and drags it past the threshold.
+    void pickUp()
+    {
+        auto const grip = header().mapToScene(QPointF { 12, header().height() / 2 }).toPoint();
+        QTest::mousePress(&host.window, Qt::LeftButton, Qt::NoModifier, grip);
+        auto* const handler = header().findChild<QObject*>(QStringLiteral("paneDragHandler"));
+        REQUIRE(handler != nullptr);
+        // Stops as the handler takes the gesture, which starts the drag.
+        for (auto const step: std::views::iota(1, 8))
+        {
+            if (handler->property("active").toBool())
+                break;
+            QTest::mouseMove(&host.window, grip + QPoint { step * 6, step * 6 });
+        }
+    }
+};
+} // namespace
+
+TEST_CASE("pane card: a pane header starts a node drag with the pane payload (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    // The offscreen platform's drag manager returns from QDrag::exec() at once, with nothing having taken the
+    // drop: the real automatic drag, started by the real gesture, runs to its end inside pickUp().
+    auto drop = HeaderDropHost {};
+    drop.pickUp();
+
+    // What the drag carried: the pane's node payload, and nothing else.
+    auto mime = drop.dragProperty("mimeData");
+    if (mime.canConvert<QJSValue>())
+        mime = mime.value<QJSValue>().toVariant();
+    CHECK(mime.toMap().size() == 1);
+    CHECK(mime.toMap().value(QString::fromLatin1(NodeMime)).toString() == paneJson());
+
+    // The window owns the drag from its start; the header only forwards.
+    CHECK(drop.controller().beganDrags == std::vector<QString> { paneJson() });
+
+    // Its end was the controller's to decide: what the OS drag returned, never "cancelled" from QML.
+    REQUIRE(QTest::qWaitFor([&] { return !drop.controller().finishedDrags.empty(); }));
+    REQUIRE(drop.controller().finishedDrags.size() == 1);
+    CHECK(drop.controller().finishedDrags.front().dropAction == static_cast<int>(Qt::IgnoreAction));
+    CHECK(drop.controller().finishedDrags.front().payload == paneJson());
+    // And the pane is no longer carried.
+    CHECK(drop.controller().carriedPane() == nullptr);
+    CHECK_FALSE(drop.part("dragPlaceholder").isVisible());
+    QTest::mouseRelease(&drop.host.window, Qt::LeftButton);
+}
+
+TEST_CASE("pane card: the dragged card is the design's: accent edge and header, the pane's own last lines "
+          "(offscreen)",
+          "[contour][gui][qml][panecard][drag]")
+{
+    auto drop = HeaderDropHost {};
+    drop.session.tailRows = QStringList {
+        QStringLiteral("one"), QStringLiteral("two"), QStringLiteral("three"), QStringLiteral("four")
+    };
+    auto* const card = drop.header().findChild<QQuickItem*>(QStringLiteral("dragCard"));
+    REQUIRE(card != nullptr);
+
+    // The card is grabbed as the header is pressed, ahead of the drag the press may start.
+    auto const grip = drop.header().mapToScene(QPointF { 12, 8 }).toPoint();
+    QTest::mousePress(&drop.host.window, Qt::LeftButton, Qt::NoModifier, grip);
+    auto const linesOf = [&] {
+        return card->property("lines").toStringList();
+    };
+    REQUIRE(QTest::qWaitFor([&] { return linesOf().size() == 3; }));
+    QTest::mouseRelease(&drop.host.window, Qt::LeftButton, Qt::NoModifier, grip);
+    CHECK(linesOf()
+          == QStringList { QStringLiteral("two"), QStringLiteral("three"), QStringLiteral("four") });
+
+    auto const accent = drop.host.style().accentColor();
+    CHECK(card->property("mark").value<QColor>() == accent);
+    CHECK(card->property("cardWidth").toDouble() == Catch::Approx(190.0));
+    CHECK(card->property("cardOpacity").toDouble() == Catch::Approx(0.92));
+    // The header is tinted with the accent, and its grip and name are inked to read on that tint.
+    auto const headerFill = card->property("headerFill").value<QColor>();
+    CHECK(card->property("headerInk").value<QColor>() == drop.host.style().onColor(headerFill));
+    auto* const name = card->findChild<QQuickItem*>(QStringLiteral("dragCardName"));
+    REQUIRE(name != nullptr);
+    CHECK(name->property("color").value<QColor>() == card->property("headerInk").value<QColor>());
+    CHECK(card->property("lineFamily").toString() == drop.session.fontFamily());
+}
+
+TEST_CASE("pane card: a header button keeps its click and starts no drag (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    auto drop = HeaderDropHost {};
+    auto const& button = drop.part("paneHeaderAction0");
+    auto const centre = button.mapToScene(QPointF { button.width() / 2, button.height() / 2 }).toPoint();
+    QTest::mouseMove(&drop.host.window, centre);
+    REQUIRE(QTest::qWaitFor(
+        [&] { return PaneTreeHost::partOf(drop.card(), "paneHeaderActions").opacity() == 1.0; }));
+    QTest::mouseClick(&drop.host.window, Qt::LeftButton, Qt::NoModifier, centre);
+    CHECK(drop.controller().finishedDrags.empty());
+    CHECK(drop.controller().carriedPane() == nullptr);
+}
+
+TEST_CASE("pane card: the dragged card shows its placeholder (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    auto drop = HeaderDropHost {};
+    drop.session.setForegroundProcessName(QStringLiteral("htop"));
+    auto const& placeholder = drop.part("dragPlaceholder");
+    CHECK_FALSE(placeholder.isVisible());
+
+    // While the pane is carried (the controller says so for the length of the OS drag, which a test cannot
+    // hold open).
+    drop.controller().setCarriedPane(&drop.session);
+    REQUIRE(QTest::qWaitFor([&] { return placeholder.isVisible(); }));
+    // Whose place it is: the dragged pane's, by the name its header shows.
+    auto const name = drop.header().property("shownName").toString();
+    REQUIRE_FALSE(name.isEmpty());
+    CHECK(drop.part("dragPlaceholderLabel").property("text").toString()
+          == QStringLiteral("%1's place").arg(name));
+    // It stands where the card does, whole.
+    CHECK(placeholder.width() == drop.card().width());
+    CHECK(placeholder.height() == drop.card().height());
+
+    drop.controller().setCarriedPane(nullptr);
+    CHECK(QTest::qWaitFor([&] { return !placeholder.isVisible(); }));
+}
+
+TEST_CASE("pane card: a pane dragged over another pane's middle shows the swap ghost and label (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    using contour::window::DropZone;
+    auto drop = DropHost { 2 };
+    drop.source.mime.setData(NodeMime, paneJson().toUtf8());
+    drop.dragOver(0.5, 0.6);
+    CHECK(drop.source.accepted);
+
+    auto& ghost = drop.part("dropGhost");
+    REQUIRE(QTest::qWaitFor([&] { return ghost.isVisible(); }));
+    CHECK(drop.part("dropRing").isVisible());
+    CHECK(PaneTreeHost::partOf(ghost, "dropGhostLabel").property("text").toString()
+          == QStringLiteral("Swap with %1").arg(drop.controller().swapTitle));
+    // The whole pane beneath the header, not a half of it.
+    auto const& header = drop.part("paneHeader");
+    CHECK(ghost.y() >= header.height());
+    CHECK(ghost.width() > drop.card().width() * 0.9);
+    CHECK(ghost.y() + ghost.height() <= drop.card().height());
+    // And its edge is the drop mark, as a split's is.
+    auto const mark = drop.host.style().accentColor();
+    CHECK(QQmlProperty(&ghost, "border.color").read().value<QColor>() == mark);
+
+    CHECK(drop.source.drop(drop.at(0.5, 0.6)) == Qt::MoveAction);
+    CHECK(drop.controller().nodeDrops
+          == std::vector<std::pair<int, QString>> { { static_cast<int>(DropZone::Swap), paneJson() } });
+}
+
+TEST_CASE("pane card: a refused drop shows the refusal note, is accepted, and nothing moves (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    using contour::window::MoveRefusal;
+    auto drop = DropHost { 2 };
+    drop.source.mime.setData(NodeMime, paneJson().toUtf8());
+    auto& note = drop.part("dropRefusal");
+    CHECK_FALSE(note.isVisible());
+
+    for (auto const refusal: { MoveRefusal::OtherProcess, MoveRefusal::OldDaemon, MoveRefusal::Tmux })
+    {
+        CAPTURE(static_cast<int>(refusal));
+        drop.controller().refusal = refusal;
+        drop.dragOver(0.5, 0.6);
+        // Accepted, so the drag does not end as a drop outside every window.
+        CHECK(drop.source.accepted);
+        REQUIRE(QTest::qWaitFor([&] { return note.isVisible(); }));
+        CHECK(PaneTreeHost::partOf(note, "dropRefusalTitle").property("text").toString()
+              == QStringLiteral("Can't move a pane here"));
+        auto const body = contour::window::refusalTextOf(refusal);
+        CHECK(PaneTreeHost::partOf(note, "dropRefusalBody").property("text").toString()
+              == QString::fromUtf8(body.data(), static_cast<qsizetype>(body.size())));
+        // The ring is in the warning role, not the drop mark.
+        auto& ring = drop.part("dropRing");
+        CHECK(ring.isVisible());
+        auto const warning = drop.host.style().statusMarkOn(
+            static_cast<int>(contour::config::StatusColorRole::Warning), drop.session.backgroundColor());
+        CHECK(QQmlProperty(&ring, "border.color").read().value<QColor>() == warning);
+        CHECK_FALSE(drop.part("dropGhost").isVisible());
+
+        CHECK(drop.source.drop(drop.at(0.5, 0.6)) == Qt::MoveAction);
+        CHECK(drop.controller().nodeDrops.empty());
+        CHECK(QTest::qWaitFor([&] { return !note.isVisible(); }));
+    }
+}
+
+TEST_CASE("pane card: dropping a pane on itself is accepted and nothing moves (offscreen)",
+          "[contour][gui][qml][panecard][drop][drag]")
+{
+    auto drop = DropHost { 2 };
+    drop.controller().ownPane = &drop.session;
+    drop.source.mime.setData(NodeMime, paneJson().toUtf8());
+    drop.dragOver(0.5, 0.6);
+    CHECK(drop.source.accepted);
+    // Nothing would happen, so nothing is marked: no ghost, no note.
+    CHECK_FALSE(drop.part("dropGhost").isVisible());
+    CHECK_FALSE(drop.part("dropRefusal").isVisible());
+    CHECK(drop.source.drop(drop.at(0.5, 0.6)) == Qt::MoveAction);
+    CHECK(drop.controller().nodeDrops.empty());
+
+    // And an edge band of its own card is no split of itself either.
+    drop.dragOver(0.95, 0.6);
+    CHECK(drop.source.accepted);
+    CHECK(drop.source.drop(drop.at(0.95, 0.6)) == Qt::MoveAction);
+    CHECK(drop.controller().nodeDrops.empty());
 }
 
 // }}}

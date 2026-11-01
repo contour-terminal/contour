@@ -6,11 +6,14 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include <vtworkspace/Primitives.hpp>
 
 namespace vtworkspace
 {
+
+struct PaneParts;
 
 /// A node in a tab's binary split tree.
 ///
@@ -66,11 +69,14 @@ class Pane
     /// the single low-level mutator — protects every caller (the QML drag, a layout/Snapshot restore,
     /// a future daemon), not just the one that already clamps before calling.
     /// @param ratio The desired first-child space share; clamped into (0, 1).
-    void setRatio(double ratio) noexcept
+    void setRatio(double ratio) noexcept { _ratio = clampRatio(ratio); }
+
+    /// @return @p ratio as setRatio() stores it: clamped so that each child keeps a visible share.
+    [[nodiscard]] static constexpr double clampRatio(double ratio) noexcept
     {
         // A minimum visible share for each child; keeps the divider grabbable at the extremes.
         constexpr double MinimumRatio = 0.05;
-        _ratio = std::clamp(ratio, MinimumRatio, 1.0 - MinimumRatio);
+        return std::clamp(ratio, MinimumRatio, 1.0 - MinimumRatio);
     }
 
     /// Promotes this leaf into a split node along @p direction.
@@ -118,12 +124,23 @@ class Pane
     ///         session.
     SessionId closeChild(Pane* child);
 
+    /// Like closeChild(), but hands the removed child (with its whole subtree, ids and sessions intact)
+    /// back instead of destroying it, so the caller can graft it elsewhere.
+    /// @param child A direct child of this split node.
+    /// @return The detached child, now a root (its parent is null).
+    [[nodiscard]] std::unique_ptr<Pane> detachChild(Pane* child);
+
     /// Flips this split node's axis Horizontal<->Vertical, leaving its children and ratio untouched.
     ///
     /// The layout solver re-derives all geometry from the new axis, so a host need only re-read the
     /// orientation (no child rebind). No-op semantics are the caller's job; this asserts it is a split.
     /// @pre !isLeaf().
     void toggleOrientation() noexcept;
+
+    /// Sets this split node's axis, leaving its children and ratio untouched.
+    /// @param axis Horizontal or Vertical.
+    /// @pre !isLeaf() and @p axis is not SplitState::None.
+    void setOrientation(SplitState axis) noexcept;
 
     /// Swaps only the session carried by this leaf with @p other's, keeping both PaneIds.
     ///
@@ -234,6 +251,22 @@ class Pane
     /// @return Their lowest common ancestor, or nullptr.
     [[nodiscard]] static Pane* lowestCommonAncestor(Pane* a, Pane const* b) noexcept;
 
+    /// Takes the tree under @p root apart: its leaves are handed back intact (PaneId and session), each a
+    /// root of its own, and its split nodes are destroyed, their ids handed back for reuse.
+    /// @param root The tree to take apart.
+    /// @return The leaves in tree order, and the split node ids in pre-order.
+    [[nodiscard]] static PaneParts dismantle(std::unique_ptr<Pane> root);
+
+    /// Joins two roots under a new split node.
+    /// @param id     The split node's id.
+    /// @param state  Horizontal or Vertical.
+    /// @param ratio  The first child's space share; clamped as setRatio() does.
+    /// @param first  The first child, a root.
+    /// @param second The second child, a root.
+    /// @return The split node, a root.
+    [[nodiscard]] static std::unique_ptr<Pane> join(
+        PaneId id, SplitState state, double ratio, std::unique_ptr<Pane> first, std::unique_ptr<Pane> second);
+
   private:
     /// Descends into @p subtree to find the boundary leaf nearest the edge we arrived from when
     /// moving along @p direction (e.g. when moving Right, pick the left-most leaf of the subtree).
@@ -246,6 +279,13 @@ class Pane
     std::unique_ptr<Pane> _first;
     std::unique_ptr<Pane> _second;
     Pane* _parent = nullptr;
+};
+
+/// What Pane::dismantle() takes a tree apart into.
+struct PaneParts
+{
+    std::vector<std::unique_ptr<Pane>> leaves; //!< The leaves, intact, in tree order.
+    std::vector<PaneId> splitIds;              //!< The ids the split nodes had, in pre-order.
 };
 
 } // namespace vtworkspace

@@ -62,6 +62,7 @@
 #include <vthost/testing/ScenarioGuard.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
@@ -2662,6 +2663,187 @@ TEST_CASE("against a daemon without TabMerge no MergeTabIntoSplit is written",
 
     CHECK(delivery == vthost::client::Delivery::Unsupported);
     CHECK_FALSE(std::ranges::any_of(seen, carries<proto::MergeTabIntoSplit>));
+}
+
+TEST_CASE("moveNode is sent to a daemon that shares MoveNode, and the pane moves into its own tab",
+          "[vthost][attach][move][daemon]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                  { proto::Capability::MoveNode }) } };
+    auto const* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+    REQUIRE(tab->paneCount() == 2);
+    // The split's new leaf is the tab's active pane.
+    auto const moved = tab->activePane()->session();
+    auto delivery = std::optional<uint64_t> {};
+    auto scenario = [](IntentHarness* h, std::optional<uint64_t>* delivery, uint64_t moved) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        auto const tabsBefore = h->layouts.back().tabs.size();
+        *delivery = h->client->moveNode(proto::MoveNode {
+            .sourceKind = std::to_underlying(vtworkspace::MoveSourceKind::Pane),
+            .sourceSessions = { moved },
+            .targetKind = std::to_underlying(vtworkspace::MoveTargetKind::TabWell),
+            .targetSession = moved,
+            .index = 0,
+        });
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h, tabsBefore] { return h->layouts.back().tabs.size() == tabsBefore + 1; });
+        h->client->detach();
+    }(&h, &delivery, moved.value);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery.has_value());
+    // The moved pane is a tab of its own at the well's first slot, and its session still runs.
+    REQUIRE_FALSE(h.layouts.back().tabs.empty());
+    auto const& first = h.layouts.back().tabs.front().root;
+    CHECK_FALSE(first.isSplit());
+    CHECK(first.session == moved.value);
+    CHECK(h.host.terminal(moved) != nullptr);
+}
+
+TEST_CASE("a daemon's MoveNodeRefused reaches the client's handler once per refusal",
+          "[vthost][attach][compat][move]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto refusals = std::vector<std::pair<uint8_t, uint64_t>> {};
+    auto client = NativeClient {
+        loop,
+        std::move(pair.second),
+        NativeClient::HandshakeOptions { .capabilities =
+                                             proto::CapabilitySet::of({ proto::Capability::MoveNode }) },
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {},
+        NativeClient::PermissionHandler {},
+        vthost::client::LivenessPolicy {},
+        NativeClient::TabMergeRefusedHandler {},
+        NativeClient::MoveNodeRefusedHandler { [&](proto::MoveNodeRefused const& refused, uint64_t serial) {
+            refusals.emplace_back(refused.reason, serial);
+        } }
+    };
+    // Refuses every move (as a daemon that finds the source stale does), accepts the hello.
+    auto const refusing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::MoveNode })) } };
+        if (std::holds_alternative<proto::MoveNode>(frame.pdu))
+            return Script { { std::nullopt, proto::MoveNodeRefused { .reason = 3 } } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto sentUnder = std::optional<uint64_t> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<std::pair<uint8_t, uint64_t>> const* refusals,
+                       std::optional<uint64_t>* sentUnder) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        *sentUnder = client->moveNode(proto::MoveNode { .sourceSessions = { 1 }, .targetSession = 2 });
+        co_await core::net::testing::waitUntil(loop, [&] { return !refusals->empty(); });
+        client->detach();
+    }(&loop, &client, &refusals, &sentUnder);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, refusing, &seen), std::move(scenario)));
+
+    // The refusal names the request it answers by the serial moveNode() returned for it.
+    REQUIRE(sentUnder.has_value());
+    CHECK(refusals == std::vector<std::pair<uint8_t, uint64_t>> { { uint8_t { 3 }, *sentUnder } });
+}
+
+TEST_CASE("a daemon's LayoutBatchEnd reaches the client's handler after the layouts of its push",
+          "[vthost][attach][move]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto heard = std::vector<std::string> {};
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                      { proto::Capability::LayoutBatch }) },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler { [&](proto::LayoutState const& layout) {
+                                     heard.push_back(std::format("layout {}", layout.window));
+                                 } },
+                                 NativeClient::PermissionHandler {},
+                                 vthost::client::LivenessPolicy {},
+                                 NativeClient::TabMergeRefusedHandler {},
+                                 NativeClient::MoveNodeRefusedHandler {},
+                                 NativeClient::LayoutBatchEndHandler { [&](proto::LayoutBatchEnd const& end) {
+                                     heard.push_back(std::format("end {}", end.causeSerial));
+                                 } } };
+    // One push across two windows, as a daemon sharing layout-batch ends it.
+    auto const pushing = ScriptFor { [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::LayoutBatch })) },
+                            { std::nullopt, proto::LayoutState { .window = 1, .tabs = {} } },
+                            { std::nullopt, proto::LayoutState { .window = 2, .tabs = {} } },
+                            { std::nullopt, proto::LayoutBatchEnd { .causeSerial = 4 } } };
+        return Script {};
+    } };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<std::string> const* heard) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return heard->size() == 3; });
+        client->detach();
+    }(&loop, &client, &heard);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(), scriptedDaemon(&loop, daemonSocket, pushing, &seen), std::move(scenario)));
+
+    CHECK(heard == std::vector<std::string> { "layout 1", "layout 2", "end 4" });
+}
+
+TEST_CASE("against a daemon without MoveNode no MoveNode is written", "[vthost][attach][compat][move]")
+{
+    // A newer client, an older daemon: the verb is not written at all, and the caller learns it.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions { .capabilities = proto::CapabilitySet::of(
+                                                                      { proto::Capability::MoveNode }) },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto delivery = std::optional<uint64_t> { 1 };
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen,
+                       std::optional<uint64_t>* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        *delivery = client->moveNode(proto::MoveNode { .sourceSessions = { 1 }, .targetSession = 2 });
+        // A verb that is written reaches the daemon in order, so this one arriving proves the other was not
+        // sent.
+        client->createTab(0, "x");
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+        client->detach();
+    }(&loop, &client, &seen, &delivery);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(
+            &loop, daemonSocket, answeringHello(Script { { std::nullopt, acceptingHello() } }), &seen),
+        std::move(scenario)));
+
+    CHECK_FALSE(delivery.has_value());
+    CHECK_FALSE(std::ranges::any_of(seen, carries<proto::MoveNode>));
 }
 
 TEST_CASE("editTab is sent when the daemon shares TabEdits", "[vthost][attach][intent]")

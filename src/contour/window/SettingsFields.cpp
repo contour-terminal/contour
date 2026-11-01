@@ -57,11 +57,6 @@ namespace contour::window::fields
 using config::TerminalProfile;
 using namespace std::string_view_literals;
 
-QString toQString(std::string_view text)
-{
-    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
-}
-
 namespace
 {
     /// Builds a bool profile-field descriptor.

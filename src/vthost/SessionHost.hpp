@@ -809,7 +809,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Which run of the daemon this host is; 0 when none was stated. @see SessionHostConfig::instance
     [[nodiscard]] uint64_t instance() const noexcept { return _instance; }
 
-    /// @return The host's window (the daemon starts with exactly one).
+    /// @return The host's window (the daemon starts with exactly one): where a creation naming no window
+    /// lands.
+    ///         One a move emptied is removed, and another window takes this role (@see discardWindow).
     [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _window; }
 
     /// @return The UUIDs and labels of this host's windows, tabs and panes.
@@ -875,6 +877,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The created window, or nullptr on failure (nothing is leaked).
     vtworkspace::Window* createWindow(SessionSpawnRequest const& request = {},
                                       SessionStreamEvents const* creator = nullptr);
+
+    /// Creates a NEW window with no tab and no session, named and claimed: the one way every window of this
+    /// host is made -- createWindow() fills it with its first tab, a move lands its source in it. The caller
+    /// either fills it or hands it back to discardWindow().
+    /// @param creator The attached client the window is created for, which then claims it; null for none.
+    /// @return The created, empty window.
+    [[nodiscard]] vtworkspace::Window& createEmptyWindow(SessionStreamEvents const* creator = nullptr);
+
+    /// Removes a window that holds no tab -- one createEmptyWindow() made and nothing filled, or one a move
+    /// emptied -- forgetting its name and claim. The host's own window (windowId()) removed, the first window
+    /// left becomes it.
+    /// @param window The window; one that holds a tab is left alone.
+    void discardWindow(vtworkspace::WindowId window);
 
     /// @param window The window asked about.
     /// @param client The attached client asking.
@@ -1080,6 +1095,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void tabMoved(vtworkspace::WindowId window, vtworkspace::TabId tab, int fromIndex, int toIndex) override;
+    void tabAboutToBeMovedToWindow(vtworkspace::WindowId from,
+                                   int fromIndex,
+                                   vtworkspace::WindowId to,
+                                   int toIndex) override;
+    void tabMovedToWindow(vtworkspace::WindowId from,
+                          vtworkspace::TabId tab,
+                          int fromIndex,
+                          vtworkspace::WindowId to,
+                          int toIndex) override;
     void activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void paneSplit(vtworkspace::TabId tab,
                    vtworkspace::PaneId splitNode,
@@ -1099,6 +1123,12 @@ class SessionHost final: public vtworkspace::ModelEvents
     void paneTreeRestructured(vtworkspace::TabId tab) override;
 
   private:
+    /// createEmptyWindow(), named @p name.
+    [[nodiscard]] vtworkspace::Window& createEmptyWindow(SessionStreamEvents const* creator,
+                                                         vtcontrol::Uuid name);
+    /// Gives @p tab a name if no creation path did, as for a tab a move made.
+    void bindUnnamed(vtworkspace::TabId tab);
+
     /// Spawns and registers the backing session for the next model allocation
     /// (the pre-mint half of the handshake).
     ///
@@ -1263,6 +1293,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return Whether any leaf's grid moved, so callers can skip a resync of mirrors
     ///         whose grids are already correct.
     SizeChange reprojectLayouts();
+
+    /// Resizes the terminals of @p tab's leaves to their projection under the current client area: what
+    /// reprojectLayouts() does for every tab, for the one tab an event names.
+    /// @return Whether any leaf's grid moved.
+    SizeChange reprojectTab(vtworkspace::Tab const& tab);
+    /// reprojectTab() of the tab @p tab names, if it exists.
+    void reprojectTab(vtworkspace::TabId tab);
 
     /// Resizes @p backing to @p size while holding its terminal lock, then announces the change to
     /// every stream subscriber (@see SessionStreamEvents::sessionResized).

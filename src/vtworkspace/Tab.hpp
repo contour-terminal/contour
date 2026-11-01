@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtworkspace/Arrangement.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
 
@@ -78,6 +79,20 @@ class Tab
     [[nodiscard]] Pane* activePane() const noexcept { return _activeLeaf; }
     [[nodiscard]] bool hasMultiplePanes() const noexcept { return !_root->isLeaf(); }
     [[nodiscard]] int paneCount() const noexcept { return _root->leafCount(); }
+
+    /// @return The sessions of the tab's leaves, in tree order (a split's first child before its second).
+    [[nodiscard]] std::vector<SessionId> leafSessions() const;
+
+    /// @return Whether the tab's tree is @p shape already: the same splits, ratios and leaf sessions.
+    [[nodiscard]] bool isArrangedAs(PaneArrangement const& shape) const noexcept;
+
+    /// Rebuilds the tree as @p shape out of the leaves it has, each going where its session is named: no
+    /// pane is created or closed, a leaf keeps its PaneId and session, and the split nodes keep their ids
+    /// in pre-order. The active pane stays active; the zoom is cleared.
+    /// @pre @p shape is well formed and names exactly the tab's sessions, each once (as
+    ///      SessionModel::arrangeTab checks).
+    /// @param shape The tree to lay the leaves out as.
+    void arrange(PaneArrangement const& shape);
 
     /// Sets the active leaf and moves it to the front of the MRU list. @p leaf must be a leaf in
     /// this tab's tree.
@@ -154,6 +169,29 @@ class Tab
     /// @return The root of the grafted tree.
     [[nodiscard]] Pane* graftTab(
         Pane& leaf, Tab& source, SplitSide side, PaneId splitNodeId, double ratio = 0.5);
+
+    /// Grafts the detached leaf @p leaf beside @p target, on @p side, and makes it the active pane. The
+    /// zoom is cleared, so the grafted pane is visible. @p target becomes the split node, so a pointer to
+    /// it must not be used afterwards; its former pane lives on in the split's other child.
+    /// @pre @p target is a leaf of this tab, and @p leaf is a leaf that no tree owns (see detachLeaf).
+    /// @param target      The leaf to graft beside.
+    /// @param leaf        The leaf to adopt, with its PaneId and session.
+    /// @param side        The side of @p target the leaf goes on.
+    /// @param splitNodeId The id the promoted node adopts (see Pane::graft).
+    /// @param ratio       The first child's space share.
+    /// @return The grafted leaf.
+    [[nodiscard]] Pane* graftLeaf(
+        Pane& target, std::unique_ptr<Pane> leaf, SplitSide side, PaneId splitNodeId, double ratio = 0.5);
+
+    /// Takes @p detaching out of the tree without closing it: the sibling absorbs its space, as in
+    /// closePane(), but the leaf (its PaneId and session intact) is handed back for grafting elsewhere.
+    /// Every pointer into the tree other than the tab's root may be invalid afterwards (the sibling's
+    /// node is absorbed into its parent); look nodes up again by id.
+    /// @pre @p detaching is a leaf of this tab and not its last pane (see isLastPane()).
+    [[nodiscard]] std::unique_ptr<Pane> detachLeaf(Pane& detaching);
+
+    /// Drops the zoom, if any, so every pane shows.
+    void clearZoom() noexcept { _zoomed = false; }
 
     /// Closes @p leaf, absorbing its sibling. The active pane and MRU are updated. Returns the
     /// SessionId of the closed leaf so the caller can tear down that session.

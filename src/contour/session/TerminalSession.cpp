@@ -2653,6 +2653,27 @@ window::ShellQuoting TerminalSession::dropQuoting() const
     return window::shellQuotingFor(foregroundProcessName());
 }
 
+QStringList TerminalSession::visibleTextTail(int maxRows) const
+{
+    auto rows = QStringList {};
+    if (maxRows <= 0)
+        return rows;
+
+    auto const lock = std::lock_guard { _terminal };
+    auto const& screen = _terminal.displayedPage();
+    auto const lastLine = unbox<int>(_terminal.pageSize().lines) - 1;
+    for (auto const line: std::views::iota(0, lastLine + 1) | std::views::reverse)
+    {
+        auto text = QString::fromStdString(screen.lineTextAt(vtbackend::LineOffset(line)));
+        if (text.isEmpty())
+            continue;
+        rows.prepend(std::move(text));
+        if (rows.size() >= maxRows)
+            break;
+    }
+    return rows;
+}
+
 void TerminalSession::insertDroppedUrls(QList<QUrl> const& urls)
 {
     // A pane whose session ended has nothing to type to: text would be swallowed, or kept and typed into

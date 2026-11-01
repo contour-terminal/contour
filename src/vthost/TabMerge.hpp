@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <span>
 #include <string_view>
+#include <vector>
 
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -46,6 +48,12 @@ enum class TabMergeError : uint8_t
 /// @param side A vtworkspace::SplitSide as the wire spells it.
 /// @return The side, or nullopt for a byte no enumerator has.
 [[nodiscard]] std::optional<vtworkspace::SplitSide> splitSideFrom(uint8_t side) noexcept;
+
+/// @param tab A tab of the model.
+/// @param sessions Session ids, as the wire names them.
+/// @return Whether @p sessions are exactly the sessions of @p tab's leaves, in any order: the whole tab a
+///         request saw.
+[[nodiscard]] bool namesWholeTab(vtworkspace::Tab const& tab, std::span<uint64_t const> sessions);
 
 /// Grafts the tab holding @p merge's tab sessions beside the pane hosting its target session. No session is
 /// spawned or closed; the model's observers are told, so every client is pushed the merged layout (once per

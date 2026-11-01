@@ -9,6 +9,7 @@
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
+#include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
@@ -78,6 +79,8 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
                                         .secureInput = setup.secureInput },
         &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
+    // The tab strip names TabBarSpot, which ContourGuiApp registers with the engine's types.
+    contour::window::registerTabBarQmlTypes();
 
     auto* controls = new contour::window::WindowControlStyleProvider(
         setup.windowControls,

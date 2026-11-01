@@ -23,6 +23,11 @@
 // The name is never elided before the working directory, which elides in the middle so that both the
 // root and the leaf of a long path survive; assistive technology always hears the whole path.
 //
+// The header is also the pane's handle: dragging it picks the pane up (a DragHandler driving an automatic
+// Drag, as a tab's is) and carries it, as a DragCard miniature, to whatever takes `application/x-contour-node`
+// -- another pane's edge or middle, a tab, a gap of a tab strip, or the desktop. The buttons keep their
+// clicks. While the pane is carried, `dragging` is true and its card shows its place empty.
+//
 // On the native rows the header is the card's own background (the row's header fill is transparent); on
 // the Terminal row it is one cell row of the bar.
 import QtQuick
@@ -97,6 +102,22 @@ Item {
     /// A header button held the keyboard focus and has hidden, leaving it nowhere: the card's terminal takes it.
     signal focusReleased()
 
+    /// The window's controller (Main.qml's `win`); null while the window is torn down.
+    readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
+    /// The pixmap the OS drag cursor shows (a grab of the DragCard); empty until the grab lands.
+    property url dragImage: ""
+
+    // The grab is ASYNCHRONOUS, so the card is grabbed as the header is pressed, ahead of the drag that press
+    // may start: once per drag, with the lines the pane shows then. With no image ready the drag still works.
+    function grabDragImage() {
+        // grabToImage warns unless the item is realized: a size, and a visible window.
+        if (dragCard.width <= 0 || dragCard.height <= 0 || !header.Window.window || !header.Window.window.visible)
+            return
+        // What the pane shows now, for the card's body.
+        dragCard.lines = header.session && header.session.visibleTextTail ? header.session.visibleTextTail(3) : []
+        dragCard.grabToImage(function(result) { header.dragImage = result.url })
+    }
+
     // Whether one of the buttons took the keyboard focus, and it has not moved on to something else since.
     property bool actionHeldFocus: false
 
@@ -136,6 +157,45 @@ Item {
     TapHandler {
         gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: if (header.node) header.node.activate()
+    }
+
+    // The card the OS drag shows. Never visible in the scene: grabToImage renders it all the same.
+    DragCard {
+        id: dragCard
+        visible: false
+        name: header.shownName
+        background: header.background
+        mark: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
+        ink: header.dimmedText
+        lineFamily: header.session && header.session.fontFamily ? header.session.fontFamily : "monospace"
+    }
+
+    // The drag's carrier; the pane itself stays put, and the OS cursor shows the card.
+    NodeDragSource {
+        id: paneDragProxy
+        objectName: "paneDragProxy"
+        controller: header.controller
+        begin: function() { return header.session ? header.controller.beginPaneDrag(header.session) : "" }
+        image: header.dragImage
+        hotSpot: dragCard.hotSpot
+    }
+
+    DragHandler {
+        id: paneDragHandler
+        objectName: "paneDragHandler"
+        target: null
+        acceptedButtons: Qt.LeftButton
+        // As a tab's (TabItem.qml): never takes a gesture from an item that already holds it, so a header
+        // button keeps its press and the window's resize handles keep theirs.
+        grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                         | PointerHandler.ApprovesTakeOverByHandlersOfDifferentType
+                         | PointerHandler.ApprovesTakeOverByItems
+                         | PointerHandler.ApprovesCancellation
+        // A small threshold so a click still activates the pane; only a real drag picks it up.
+        dragThreshold: 8
+        onActiveChanged: if (active) paneDragProxy.carry()
+        // A press, which every drag begins with: the card is grabbed now, so its image is ready when it is.
+        onGrabChanged: (transition) => { if (transition === PointerDevice.GrabPassive) header.grabDragImage() }
     }
 
     // The fill: the card's background (opaque as an overlay, at the profile's opacity inline, as the

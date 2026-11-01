@@ -348,10 +348,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const { return {}; }
     Q_INVOKABLE void activateTab(int) {}
     Q_INVOKABLE void moveTab(int, int) {}
-    Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
-    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::mockProcessToken(); }
-    Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
-    Q_INVOKABLE void tearOffTab(int) {}
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(_activeTabIndex); }

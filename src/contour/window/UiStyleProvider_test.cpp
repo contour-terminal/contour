@@ -111,6 +111,16 @@ namespace
 
 } // namespace
 
+TEST_CASE("UiStyleProvider: the drag dwell and the tab gaps are the policy's", "[contour][uistyle][drop]")
+{
+    // QML reads them as tokens, so the strip's timer and its tabs' drop areas never restate the policy.
+    CHECK(contour::window::UiStyleProvider::tabDwellMs() == 600);
+    auto const style =
+        contour::window::UiStyleProvider(rowOf(contour::config::UiStyle::Native), QGuiApplication::font());
+    CHECK(style.tabGapHalfWidthOf(200.0) == contour::window::TabGapHalfWidth);
+    CHECK(style.tabGapHalfWidthOf(15.0) == 3.75);
+}
+
 TEST_CASE("resolveChromeFont: the native chrome keeps the platform UI font", "[contour][uistyle]")
 {
     auto config = twoProfileConfig();
@@ -1764,6 +1774,10 @@ TEST_CASE("UiStyleProvider: dropZones and dropPayloads name every window::DropZo
     CHECK(evaluate("chromeStyle.dropZones.splitRight").toInt() == static_cast<int>(DropZone::SplitRight));
     CHECK(evaluate("chromeStyle.dropZones.splitTop").toInt() == static_cast<int>(DropZone::SplitTop));
     CHECK(evaluate("chromeStyle.dropZones.splitBottom").toInt() == static_cast<int>(DropZone::SplitBottom));
+    CHECK(evaluate("chromeStyle.dropZones.swap").toInt() == static_cast<int>(DropZone::Swap));
+    CHECK(evaluate("chromeStyle.dropZones.noOp").toInt() == static_cast<int>(DropZone::NoOp));
+    CHECK(evaluate("chromeStyle.dropZones.refused").toInt() == static_cast<int>(DropZone::Refused));
+    CHECK(evaluate("chromeStyle.dropPayloads.pane").toInt() == static_cast<int>(DropPayload::Pane));
     CHECK(evaluate("chromeStyle.dropPayloads.none").toInt() == static_cast<int>(DropPayload::None));
     CHECK(evaluate("chromeStyle.dropPayloads.files").toInt() == static_cast<int>(DropPayload::Files));
     CHECK(evaluate("chromeStyle.dropPayloads.text").toInt() == static_cast<int>(DropPayload::Text));

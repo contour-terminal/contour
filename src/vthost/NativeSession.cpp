@@ -43,6 +43,7 @@
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
+#include <vthost/NodeMove.hpp>
 #include <vthost/NotifyWire.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
@@ -281,10 +282,13 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _services(std::move(services)),
     _maxWriteQueueBytes(maxWriteQueueBytes)
 {
-    // Every model change (the host fans them here once subscribed) re-pushes the
-    // whole layout — infrequent, so a full resend beats a granular diff.
-    _layoutObserver.onChange = [this] {
-        pushLayout();
+    // Every model change (the host fans them here once subscribed) re-pushes the whole layout of the window
+    // it is in — infrequent, so a full resend beats a granular diff.
+    _layoutObserver.onWindowChange = [this](vtworkspace::WindowId window) {
+        layoutChanged(window);
+    };
+    _layoutObserver.onTabChange = [this](vtworkspace::TabId tab) {
+        layoutChanged(_host.model().windowOfTab(tab));
     };
 }
 
@@ -541,16 +545,102 @@ void NativeSession::pushLayout()
     // One LayoutState per followed daemon window (B4) — the client opens a GUI window for
     // each and reconciles its tabs/splits independently.
     auto& model = _host.model();
-    auto const acknowledges =
-        _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::TabEditAcks);
+    auto pushed = false;
     for (auto const i: std::views::iota(0, model.windowCount()))
         if (auto* window = model.windowAt(i); window != nullptr && follows(window->id()))
         {
-            auto layout = serializeLayout(*window);
-            if (acknowledges)
-                layout.servedEdit = _servedEdit;
-            send(0, proto::DecodedPdu { std::move(layout) });
+            sendLayout(serializeLayout(*window));
+            pushed = true;
         }
+    if (pushed && batchesLayouts())
+    {
+        openLayoutBatch();
+        _layoutBatch = LayoutBatch::Pushed;
+    }
+}
+
+void NativeSession::sendLayout(proto::LayoutState layout)
+{
+    if (_negotiated.has_value() && _negotiated->shared.contains(proto::Capability::TabEditAcks))
+        layout.servedEdit = _servedEdit;
+    send(0, proto::DecodedPdu { std::move(layout) });
+}
+
+bool NativeSession::batchesLayouts() const noexcept
+{
+    return _negotiated.has_value() && _negotiated->shared.contains(proto::Capability::LayoutBatch);
+}
+
+void NativeSession::layoutChanged(vtworkspace::WindowId window)
+{
+    if (!batchesLayouts())
+    {
+        pushLayout();
+        return;
+    }
+    if (_phase != ConnectionPhase::Viewing || _closed)
+        return;
+    // Whether this client follows the window is decided as the batch ends: a window it joins meanwhile (its
+    // own NewWindow) is pushed as well.
+    if (window != vtworkspace::WindowId {})
+        _changedWindows.insert(window.value);
+    // A change the move being served made is part of what that move's batch completes, followed or not: the
+    // client that asked is told its move landed even when it shows none of what moved.
+    if (_servingMove != 0)
+        _layoutBatchCause = _servingMove;
+    openLayoutBatch();
+}
+
+void NativeSession::openLayoutBatch()
+{
+    if (_layoutBatch == LayoutBatch::Closed)
+        _loop.spawn(endLayoutBatch(claimLayoutBatch()));
+}
+
+bool NativeSession::flushChangedLayouts()
+{
+    auto& model = _host.model();
+    auto const changed = std::exchange(_changedWindows, {});
+    // Asked before the followed set drops them: a window the batch emptied, which the host then removed.
+    auto const removed = std::ranges::to<std::vector>(changed | std::views::filter([&](uint64_t window) {
+                                                          auto const id = vtworkspace::WindowId { window };
+                                                          return model.window(id) == nullptr && follows(id);
+                                                      }));
+    refreshFollowedWindows();
+    auto pushed = false;
+    for (auto const i: std::views::iota(0, model.windowCount()))
+        if (auto* window = model.windowAt(i);
+            window != nullptr && changed.contains(window->id().value) && follows(window->id()))
+        {
+            sendLayout(serializeLayout(*window));
+            pushed = true;
+        }
+    for (auto const window: removed)
+    {
+        auto emptied = proto::LayoutState {};
+        emptied.window = window;
+        sendLayout(std::move(emptied));
+        pushed = true;
+    }
+    return pushed;
+}
+
+core::async::Task<void> NativeSession::endLayoutBatch(SpawnedFlowClaim claim)
+{
+    // Given back as the body ends, so a change made after this frame opens a batch of its own.
+    auto const held = std::move(claim);
+    // Spawned flows run once the frame that spawned them has handed control back to the loop: by now the
+    // change has fired its last model event, and each window it changed is pushed once, as it left it.
+    if (_phase == ConnectionPhase::Viewing && !_closed)
+    {
+        if (flushChangedLayouts())
+            _layoutBatch = LayoutBatch::Pushed;
+        if (_layoutBatch == LayoutBatch::Pushed || _layoutBatchCause != 0)
+            send(0, proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = _layoutBatchCause } });
+    }
+    _changedWindows.clear();
+    _layoutBatchCause = 0;
+    co_return;
 }
 
 void NativeSession::refreshFollowedWindows()
@@ -1780,6 +1870,54 @@ NativeSession::TabVerb NativeSession::serveTabVerb(proto::DecodedFrame const& fr
         }
         return TabVerb::Served;
     }
+    if (auto const* move = std::get_if<proto::MoveNode>(&frame.pdu))
+    {
+        // As for EditTab, a client that did not negotiate it is refused.
+        if (!_negotiated->shared.contains(proto::Capability::MoveNode))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Applied to the model, so the layout pushes that reach every client, this one included, are the
+        // answer: the moved sessions keep running and none is spawned or closed. The batch those pushes
+        // open names this request, so the client can tell its move landed.
+        _servingMove = frame.serial;
+        auto const moved = applyMoveNode(
+            _host.model(),
+            *move,
+            MoveWindowHooks {
+                .create = [this] { return _host.createEmptyWindow(this).id(); },
+                .discard = [this](vtworkspace::WindowId window) { _host.discardWindow(window); } });
+        _servingMove = 0;
+        if (!moved)
+        {
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(moved.error().error));
+            // Said, so the user whose drop did nothing is told: no layout push follows a refusal.
+            auto const& failure = moved.error();
+            send(frame.serial,
+                 proto::DecodedPdu { proto::MoveNodeRefused {
+                     .reason = std::to_underlying(failure.error),
+                     .modelReason = failure.model ? std::to_underlying(*failure.model) : uint8_t { 0 } } });
+        }
+        return TabVerb::Served;
+    }
+    if (auto const* set = std::get_if<proto::SetSplitOrientation>(&frame.pdu))
+    {
+        // The same feature family as MoveNode, so the same gate.
+        if (!_negotiated->shared.contains(proto::Capability::MoveNode))
+        {
+            refuse(frame);
+            return TabVerb::Served;
+        }
+        // Read, never cast: a byte no axis names changes nothing. Applied to the model, so the layout push
+        // that reaches every client, this one included, is the answer; a stale session is a logged no-op.
+        auto const axis = static_cast<vtworkspace::SplitState>(set->state);
+        if (auto const applied =
+                _host.model().setSplitOrientation(vtworkspace::SessionId { set->anchorSession }, axis);
+            !applied)
+            errorLog()("{}: ignoring {}", _id, proto::describe(frame.pdu));
+        return TabVerb::Served;
+    }
     return TabVerb::None;
 }
 
@@ -2216,6 +2354,13 @@ NativeSession::SpawnedFlowClaim NativeSession::claimStreamer(SessionId session)
     return SpawnedFlowClaim { *this, [](NativeSession& self) noexcept { self._streamingSession.reset(); } };
 }
 
+NativeSession::SpawnedFlowClaim NativeSession::claimLayoutBatch()
+{
+    _layoutBatch = LayoutBatch::Open;
+    return SpawnedFlowClaim { *this,
+                              [](NativeSession& self) noexcept { self._layoutBatch = LayoutBatch::Closed; } };
+}
+
 NativeSession::SpawnedFlowClaim NativeSession::claimRoomWaiter()
 {
     _roomWaiter = RoomWaiter::Parked;
@@ -2302,7 +2447,8 @@ core::async::Task<void> NativeSession::run()
 
 bool NativeSession::spawnedFlowsEnded() const noexcept
 {
-    return _flushesInFlight == 0 && !_streamingSession && _roomWaiter == RoomWaiter::Idle;
+    return _flushesInFlight == 0 && !_streamingSession && _roomWaiter == RoomWaiter::Idle
+           && _layoutBatch == LayoutBatch::Closed;
 }
 
 namespace

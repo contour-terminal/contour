@@ -16,12 +16,14 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/remote/RemoteLayout.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/RestoreSummaryPolicy.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/DragEndProbe.hpp>
 #include <contour/window/HotkeyRefusals.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
@@ -325,8 +327,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         platform::AppearanceServices const& appearanceServices = {},
         core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now(),
         window::SettingsWindowFactory settingsWindowFactory = nullptr,
-        ShellIntegrationServices shellIntegration = {});
+        ShellIntegrationServices shellIntegration = {},
+        std::unique_ptr<window::DragEndProbe> dragEndProbe = nullptr);
     ~ContourGuiApp() override;
+
+    /// What decides, once a dragged pane or tab no window took has ended, whether that was a drop outside
+    /// every window or a cancel, and where outside. Injected by tests; else built for the platform Qt runs on
+    /// as run() creates the QApplication, which is when that platform is known. Not to be called before then.
+    [[nodiscard]] window::DragEndProbe& dragEndProbe();
 
     /// The shared persistence service for normal-window locations.
     [[nodiscard]] window::WindowPositionStore& windowPositionStore() noexcept
@@ -1154,6 +1162,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
     /// stage is always consumed before the next is made.
     std::optional<uint64_t> _pendingAttachWindow;
+    /// The layouts of the reconcile under way, one snapshot for every window of it -- one whose OS window
+    /// opens meanwhile (bindDaemonWindow) included -- so that all of them are brought to the same push. Null
+    /// between reconciles. Points at reconcileAttachWindows()' own.
+    remote::LayoutSnapshot const* _reconcilingLayouts = nullptr;
 
     /// Whether the boot window has adopted the daemon's primary window yet.
     /// Not "the map is empty": after a reconnect lost every window, the windows that came instead are new
@@ -1262,6 +1274,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // The platform whose frame policy the windows follow, from the appearance services. Declared before
     // _sessionManager, whose window controllers read it.
     platform::FramePlatform _framePlatform = platform::currentFramePlatform();
+    // Declared before _sessionManager, whose window controllers report their drag events to it.
+    std::unique_ptr<window::DragEndProbe> _dragEndProbe;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

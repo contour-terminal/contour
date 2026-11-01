@@ -1,7 +1,9 @@
 add_library(vtworkspace STATIC
+    Arrangement.hpp
     LayoutConvert.hpp
     LayoutTree.cpp
     LayoutTree.hpp
+    Move.hpp
     Pane.cpp
     Pane.hpp
     PaneLayout.hpp
@@ -28,7 +30,9 @@ if(VTWORKSPACE_TESTING)
     enable_testing()
     add_executable(vtworkspace_test
         test_main.cpp
+        Arrange_test.cpp
         LayoutTree_test.cpp
+        Move_test.cpp
         Pane_test.cpp
         PaneLayout_test.cpp
         Tab_test.cpp

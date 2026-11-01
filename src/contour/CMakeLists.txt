@@ -247,8 +247,13 @@ set(_header_files
     session/SizeIndicator.hpp
     window/ChromeFocus.hpp
     window/ChromeKeys.hpp
+    window/DragEndPolicy.hpp
+    window/DragEndProbe.hpp
     window/DropZonePolicy.hpp
     window/DroppedText.hpp
+    window/TabBarDropPolicy.hpp
+    window/TabBarHitValue.hpp
+    window/NodeDrag.hpp
     window/ProgramStatusBadge.hpp
     window/QuickTerminalPolicy.hpp
     window/SecureInputPolicy.hpp
@@ -294,6 +299,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
+        window/QtString.hpp
         window/SettingsFields.hpp
         window/ProfileRules.hpp
         window/SettingsControls.hpp
@@ -311,6 +317,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/Permission.hpp
         session/PermissionPrompt.hpp
         session/PermissionQueue.hpp
+        session/NodeDragSession.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
@@ -380,12 +387,16 @@ if(CONTOUR_FRONTEND_GUI)
         display/GpuInventory.cpp
         display/PciIds.cpp
         display/SysfsGpuInventory.cpp
+        session/NodeDragSession.cpp
         session/TerminalSessionManager.cpp
         window/PopupShadowImageProvider.cpp
         window/ChromeStyleHost.cpp
         window/ChromeTokenObjects.cpp
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
+        window/DragEndProbe.cpp
+        window/NodeDrag.cpp
+        window/TabBarHitValue.cpp
         window/WindowController.cpp
         window/WindowPositionStore.cpp
         window/SettingsWindowRules.cpp
@@ -445,6 +456,9 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SymbolicIcon.qml
         qml/TabStrip.qml
         qml/TabItem.qml
+        qml/DashedFrame.qml
+        qml/DragCard.qml
+        qml/NodeDragSource.qml
         qml/TabBadgeSlot.qml
         qml/TabColorFlyout.qml
         qml/WindowControls.qml
@@ -943,6 +957,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/Win32TaskbarOverlay_test.cpp
             platform/Win32Settings_test.cpp
             window/WindowPositionStore_test.cpp
+            window/DragEndProbe_test.cpp
             window/ContextMenuModel_test.cpp
             window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
@@ -1455,8 +1470,10 @@ if(CONTOUR_TESTING)
         window/ChromeFocus_test.cpp
         window/ChromeKeys_test.cpp
         window/HeldModifierReveal_test.cpp
+        window/DragEndPolicy_test.cpp
         window/DropZonePolicy_test.cpp
         window/DroppedText_test.cpp
+        window/TabBarDropPolicy_test.cpp
         window/FindBarPlacement_test.cpp
         window/LinkPillPlacement_test.cpp
         window/PaneHeaderPolicy_test.cpp

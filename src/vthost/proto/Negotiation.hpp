@@ -73,6 +73,15 @@ enum class Capability : uint8_t
     /// the field travels before the ServerHello, so a client sends it regardless and a daemon predating it
     /// ignores it.
     ColorPreference = 15,
+    /// The peer serves MoveNode: it moves a pane or a whole tab to an edge of a pane, onto a pane, into a
+    /// window's tab well or into a new window. A daemon without it cannot, so a client does not offer the
+    /// drop and tells its user instead.
+    MoveNode = 16,
+    /// The peer marks the end of each layout push: a daemon follows the LayoutStates it pushes for one change
+    /// -- however many model events it fired, across every window the connection follows -- with one
+    /// LayoutBatchEnd, and a client decides what the push dropped only then. Without it a client cannot tell
+    /// the last window's layout of a push from one still in flight, and decides at the end of each read.
+    LayoutBatch = 17,
 };
 
 /// One row of the table naming a Capability.
@@ -99,6 +108,8 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::TabMerge, .name = "tab-merge" },
     CapabilityRow { .capability = Capability::TabEditAcks, .name = "tab-edit-acks" },
     CapabilityRow { .capability = Capability::ColorPreference, .name = "color-preference" },
+    CapabilityRow { .capability = Capability::MoveNode, .name = "move-node" },
+    CapabilityRow { .capability = Capability::LayoutBatch, .name = "layout-batch" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

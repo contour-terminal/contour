@@ -959,14 +959,9 @@ vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& reques
     if (!seeded)
         return nullptr;
 
-    auto* window = _model.createWindow();
-    _objects.bind(window->id(), newWindow);
+    auto* window = &createEmptyWindow(creator, newWindow);
     if (request.presetIds)
         _objects.setLabel(ObjectRef { ObjectKind::Window, newWindow }, request.presetIds->windowLabel);
-    // Claimed before the first tab is announced: every client re-decides what it follows on that event,
-    // and the primary viewer would otherwise take an unclaimed window that is this creator's own.
-    if (creator != nullptr)
-        _windowCreators.insert_or_assign(window->id().value, creator);
     _stagedTab = StagedTab { .uuid = tabUuid,
                              .label = request.presetIds ? request.presetIds->tabLabel : std::string {} };
     auto* tab = _model.createTab(window->id());
@@ -979,12 +974,40 @@ vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& reques
                    window->id().value,
                    seeded->value);
         reapOrphan(*seeded);
-        _windowCreators.erase(window->id().value);
-        _objects.forget(window->id());
-        _model.removeWindow(window->id());
+        discardWindow(window->id());
         return nullptr;
     }
     return window;
+}
+
+vtworkspace::Window& SessionHost::createEmptyWindow(SessionStreamEvents const* creator)
+{
+    return createEmptyWindow(creator, _objects.mint());
+}
+
+vtworkspace::Window& SessionHost::createEmptyWindow(SessionStreamEvents const* creator, vtcontrol::Uuid name)
+{
+    auto* window = _model.createWindow();
+    _objects.bind(window->id(), name);
+    // Claimed before any event names the window -- every client re-decides what it follows on its first
+    // tab -- so the primary viewer does not take an unclaimed window that is this creator's own.
+    if (creator != nullptr)
+        _windowCreators.insert_or_assign(window->id().value, creator);
+    return *window;
+}
+
+void SessionHost::discardWindow(WindowId window)
+{
+    auto const* found = _model.window(window);
+    if (found == nullptr || found->tabCount() != 0)
+        return;
+    _windowCreators.erase(window.value);
+    _objects.forget(window);
+    _model.removeWindow(window);
+    // The host's own window is what a creation naming no window lands in: another takes its place. A move
+    // empties a window only by filling another, so one is left.
+    if (window == _window && _model.windowCount() > 0)
+        _window = _model.windowAt(0)->id();
 }
 
 WindowClaim SessionHost::windowClaim(WindowId window, SessionStreamEvents const* client) const noexcept
@@ -1123,21 +1146,34 @@ SizeChange SessionHost::reprojectLayouts()
     // must reach the PTYs of secondary windows too, or their apps keep rendering
     // at stale dimensions while the layout advertises the new geometry.
     _model.forEachTab([&](vtworkspace::Window&, vtworkspace::Tab& tab) {
-        // The underlying layout's leaves first; a zoomed leaf then overrides to
-        // the full area (tmux's zoom model: the saved layout keeps the rest).
-        for (auto const& rect: vtworkspace::layoutInCells(*tab.rootPane(), _pageSize))
-            if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
-                if (auto* backing = terminal(leaf->session()))
-                    moved |= resizeLocked(leaf->session(),
-                                          *backing,
-                                          vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
-                                                            .columns = vtpty::ColumnCount(rect.width) })
-                             == SizeChange::Applied;
-        if (auto const* zoomed = tab.layoutRoot(); zoomed != tab.rootPane())
-            if (auto* backing = terminal(zoomed->session()))
-                moved |= resizeLocked(zoomed->session(), *backing, _pageSize) == SizeChange::Applied;
+        moved |= reprojectTab(tab) == SizeChange::Applied;
     });
     return moved ? SizeChange::Applied : SizeChange::Unchanged;
+}
+
+SizeChange SessionHost::reprojectTab(vtworkspace::Tab const& tab)
+{
+    auto moved = false;
+    // The underlying layout's leaves first; a zoomed leaf then overrides to
+    // the full area (tmux's zoom model: the saved layout keeps the rest).
+    for (auto const& rect: vtworkspace::layoutInCells(*tab.rootPane(), _pageSize))
+        if (auto const* leaf = tab.rootPane()->findPane(rect.pane))
+            if (auto* backing = terminal(leaf->session()))
+                moved |= resizeLocked(leaf->session(),
+                                      *backing,
+                                      vtpty::PageSize { .lines = vtpty::LineCount(rect.height),
+                                                        .columns = vtpty::ColumnCount(rect.width) })
+                         == SizeChange::Applied;
+    if (auto const* zoomed = tab.layoutRoot(); zoomed != tab.rootPane())
+        if (auto* backing = terminal(zoomed->session()))
+            moved |= resizeLocked(zoomed->session(), *backing, _pageSize) == SizeChange::Applied;
+    return moved ? SizeChange::Applied : SizeChange::Unchanged;
+}
+
+void SessionHost::reprojectTab(TabId tab)
+{
+    if (auto const* found = _model.findTab(tab))
+        std::ignore = reprojectTab(*found);
 }
 
 vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
@@ -1724,6 +1760,12 @@ void SessionHost::releaseRetired(void* host)
 // events use fanOutAfterReproject so PTY sizes are brought in line BEFORE observers
 // project the new layout (what they advertise is what the shells experience).
 
+void SessionHost::bindUnnamed(TabId tab)
+{
+    if (!_objects.uuidOf(tab))
+        _objects.bind(tab, _objects.mint());
+}
+
 void SessionHost::tabAdded(WindowId window, TabId tab, int index)
 {
     // Named before the fan-out, so an observer told of the tab can already look its UUID up.
@@ -1733,6 +1775,11 @@ void SessionHost::tabAdded(WindowId window, TabId tab, int index)
         _objects.setLabel(ObjectRef { ObjectKind::Tab, _stagedTab->uuid }, _stagedTab->label);
         _stagedTab.reset();
     }
+    // A tab a move made (a pane extracted into a tab of its own) was named by no creation path; every window
+    // was, a move's own included (MoveWindowHooks).
+    bindUnnamed(tab);
+    // Re-fitted first: the pane may come from a split and be half the size its new tab gives it.
+    reprojectTab(tab);
     fanOut(&vtworkspace::ModelEvents::tabAdded, window, tab, index);
 }
 
@@ -1746,6 +1793,18 @@ void SessionHost::tabClosed(WindowId window, TabId tab, int index)
 void SessionHost::tabMoved(WindowId window, TabId tab, int fromIndex, int toIndex)
 {
     fanOut(&vtworkspace::ModelEvents::tabMoved, window, tab, fromIndex, toIndex);
+}
+
+void SessionHost::tabAboutToBeMovedToWindow(WindowId from, int fromIndex, WindowId to, int toIndex)
+{
+    fanOut(&vtworkspace::ModelEvents::tabAboutToBeMovedToWindow, from, fromIndex, to, toIndex);
+}
+
+void SessionHost::tabMovedToWindow(WindowId from, TabId tab, int fromIndex, WindowId to, int toIndex)
+{
+    // The tab lands in a window of another size: its shells are resized before observers advertise it.
+    reprojectTab(tab);
+    fanOut(&vtworkspace::ModelEvents::tabMovedToWindow, from, tab, fromIndex, to, toIndex);
 }
 
 void SessionHost::activeTabChanged(WindowId window, TabId tab, int index)

@@ -64,13 +64,22 @@ Pane* Pane::graft(
 
 SessionId Pane::closeChild(Pane* child)
 {
-    assert(!isLeaf() && "closeChild() must be called on a split node");
+    // A split child carries no session, so it yields SessionId {}.
+    return detachChild(child)->session();
+}
+
+std::unique_ptr<Pane> Pane::detachChild(Pane* child)
+{
+    assert(!isLeaf() && "detachChild() must be called on a split node");
     assert((child == _first.get() || child == _second.get()) && "child must be a direct child");
 
-    auto const closedSession = child->isLeaf() ? child->session() : SessionId {};
+    // Take the child out first: absorbing the survivor below overwrites _first/_second.
+    bool const childIsFirst = child == _first.get();
+    auto detached = std::move(childIsFirst ? _first : _second);
+    detached->_parent = nullptr;
 
     // Identify the surviving sibling and detach it from ownership so we can absorb its contents.
-    std::unique_ptr<Pane> survivor = (child == _first.get()) ? std::move(_second) : std::move(_first);
+    std::unique_ptr<Pane> survivor = std::move(childIsFirst ? _second : _first);
 
     // Absorb the survivor: become whatever it was (leaf or split). We keep the survivor's id so its
     // own identity (and any host rendering it) is preserved.
@@ -85,14 +94,21 @@ SessionId Pane::closeChild(Pane* child)
     if (_second)
         _second->_parent = this;
 
-    // The old child nodes are released here (the closed one and the now-emptied survivor wrapper).
-    return closedSession;
+    // The emptied survivor wrapper is released here.
+    return detached;
 }
 
 void Pane::toggleOrientation() noexcept
 {
     assert(!isLeaf() && "toggleOrientation() must be called on a split node");
     _splitState = _splitState == SplitState::Horizontal ? SplitState::Vertical : SplitState::Horizontal;
+}
+
+void Pane::setOrientation(SplitState axis) noexcept
+{
+    assert(!isLeaf() && "setOrientation() must be called on a split node");
+    assert(axis != SplitState::None && "a split node keeps an axis");
+    _splitState = axis;
 }
 
 void Pane::swapLeafPayload(Pane* other) noexcept
@@ -219,6 +235,38 @@ Pane* Pane::neighbor(Pane const* fromLeaf, FocusDirection direction)
         ancestor = ancestor->parent();
     }
     return nullptr;
+}
+
+PaneParts Pane::dismantle(std::unique_ptr<Pane> root)
+{
+    auto parts = PaneParts {};
+    auto const take = [&parts](this auto const& self, std::unique_ptr<Pane> node) -> void {
+        node->_parent = nullptr;
+        if (node->isLeaf())
+        {
+            parts.leaves.push_back(std::move(node));
+            return;
+        }
+        parts.splitIds.push_back(node->_id);
+        self(std::move(node->_first));
+        self(std::move(node->_second));
+    };
+    take(std::move(root));
+    return parts;
+}
+
+std::unique_ptr<Pane> Pane::join(
+    PaneId id, SplitState state, double ratio, std::unique_ptr<Pane> first, std::unique_ptr<Pane> second)
+{
+    assert(state != SplitState::None && first != nullptr && second != nullptr);
+    auto node = std::make_unique<Pane>(id, SessionId {});
+    node->_splitState = state;
+    node->setRatio(ratio);
+    first->_parent = node.get();
+    second->_parent = node.get();
+    node->_first = std::move(first);
+    node->_second = std::move(second);
+    return node;
 }
 
 } // namespace vtworkspace

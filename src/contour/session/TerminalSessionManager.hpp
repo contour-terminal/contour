@@ -12,24 +12,33 @@
 #include <contour/platform/ShellRcEditor.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
+#include <contour/session/NodeDragSession.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionRole.hpp>
 #include <contour/window/ChromeFocus.hpp>
+#include <contour/window/NodeDrag.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/NoticeQueue.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
 #include <contour/window/ShellIntegrationOffer.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TaskbarAttentionTally.hpp>
+#include <contour/window/WindowPositionStore.hpp>
 #include <contour/window/WindowRole.hpp>
+
+#include <core/platform/Clock.hpp>
 
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QObject>
+#include <QtCore/QPoint>
+#include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -41,10 +50,12 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <vthost/RestoredCounts.hpp>
 #include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -142,6 +153,12 @@ enum class RestartError : uint8_t
     }
     return "unknown error";
 }
+
+/// Why TerminalSessionManager::moveNode() moved nothing, the reason kept as each stage stated it: the place
+/// refused the drag (window::moveRefusalOf()), the host would not take what it was asked
+/// (SessionFactory::requestRemoteMove(): Refused, or Local where only the host may move), or the model
+/// refused (or named nothing to move or to land on).
+using MoveFailure = std::variant<window::MoveRefusal, RemoteRouting, vtworkspace::MoveError>;
 
 /**
  * Session-lifetime service, SessionModel host, and per-window ModelEvents router.
@@ -551,6 +568,197 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                            vtworkspace::TabId target,
                            vtworkspace::PaneId leaf,
                            vtworkspace::SplitSide side);
+    /// Applies a move -- a pane or a whole tab, beside a pane, onto one, into a tab well or into a new window
+    /// -- to this manager's model, keeping its own bookkeeping in step. Every moved TerminalSession is the
+    /// same object afterwards, shown wherever the model now puts it: none is spawned or closed. A window the
+    /// move empties is closed.
+    ///
+    /// The local half of a move only, never routed: what the attach-mode reconciler replays of a move the
+    /// daemon already made (contour::remote::applyRemoteLayout), and what an in-process drop builds on.
+    /// @param source What moves.
+    /// @param target Where it lands.
+    /// @return Where focus lands, or why the model refused (and changed nothing).
+    [[nodiscard]] std::expected<vtworkspace::MoveResult, vtworkspace::MoveError> applyNodeMove(
+        vtworkspace::MoveSource const& source, vtworkspace::MoveTarget const& target);
+
+    /// Who hosts the sessions this manager shows, as a drag payload names it: the daemon's run where they are
+    /// hosted by a daemon that states one, this process otherwise.
+    [[nodiscard]] window::HostIdentity hostIdentity() const;
+
+    /// The id the host knows @p session by, as a drag payload names it: its SessionId in-process, its daemon
+    /// session id when daemon-hosted.
+    /// @param session A session of this manager.
+    /// @return The id; std::nullopt for a daemon-hosted session not bound to a remote one yet.
+    [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(TerminalSession const& session) const;
+
+    /// The session the host knows by @p hostSession (@see hostSessionIdOf), if this process shows it.
+    [[nodiscard]] TerminalSession* sessionForHostId(uint64_t hostSession) const;
+
+    /// The drag payload of the pane showing @p session.
+    /// @return The payload; std::nullopt for a session no pane shows, or one the host has no id for yet.
+    [[nodiscard]] std::optional<window::NodeDrag> paneDragOf(TerminalSession const& session) const;
+
+    /// The drag payload of the tab at row @p tabIndex of @p window: a Tab for one of several panes, a Pane
+    /// for one of one.
+    /// @return The payload; std::nullopt for no such tab, or one with a pane the host has no id for yet.
+    [[nodiscard]] std::optional<window::NodeDrag> tabDragOf(vtworkspace::WindowId window, int tabIndex) const;
+
+    /// Resolves @p drag against the model: the local tab it is or came from, what it moves, and why it cannot
+    /// be dropped at each place (window::moveRouteOf(), window::moveRefusalOf()). Every window of this
+    /// process is hosted alike -- one session factory routes them all -- so a window only matters through the
+    /// place.
+    /// @param drag The drag, from whichever process started it.
+    /// @return The drag, resolved.
+    [[nodiscard]] ResolvedDrag resolveNodeDrag(window::NodeDrag drag) const;
+
+    /// The drag @p nodePayload names, resolved: parsed and resolved once per drag, and from then on read back
+    /// for every hover until the layout changes. The drag this process runs is the one its session holds; a
+    /// drag of another process is resolved as it enters a window (@see forgetHoveredDrag).
+    /// @param nodePayload The drag's `application/x-contour-node` JSON.
+    /// @return The drag; null for JSON that is no node drag.
+    [[nodiscard]] ResolvedDrag const* resolveNodeDrag(QString const& nodePayload) const;
+
+    /// A drag entered a window: the drag of another process it may be is resolved afresh.
+    void forgetHoveredDrag() noexcept { _hoveredDrag.reset(); }
+
+    /// Moves what @p drag names to @p target, the same sessions alive throughout: none is spawned or closed.
+    ///
+    /// In-process the move is made here (applyNodeMove): an emptied window closes, the window it landed in is
+    /// raised and focused, and its screen reader is told. A new window is spawned on @p screen at @p at and
+    /// takes the node as it opens (consumePendingTransplant). Daemon-hosted, the daemon is asked
+    /// (SessionFactory::requestRemoteMove) and nothing changes here until its layout push; the push that
+    /// ends with the move does the rest (@see stageRemoteMoveWindow, completeRemoteMoves). A daemon older
+    /// than MoveNode is asked with the tab verbs it served, where the move table has a route for it.
+    /// @param drag   What moves, resolved (resolveNodeDrag()).
+    /// @param target Where it lands, in this process's ids.
+    /// @param screen The screen a new window opens on; may be null.
+    /// @param at     Where a new window opens, in global coordinates.
+    /// @return Nothing, or why nothing moved: the place's refusal for a drag the place does not take (another
+    ///         host's), the host's answer where it would not take the move, UnknownSource for a drag naming
+    ///         nothing this host has (closed since), UnknownTarget for a target that is gone, and the model's
+    ///         own refusals.
+    [[nodiscard]] std::expected<void, MoveFailure> moveNode(ResolvedDrag const& drag,
+                                                            vtworkspace::MoveTarget const& target,
+                                                            QScreen* screen,
+                                                            QPoint at);
+    /// moveNode() of @p drag as the model has it now.
+    [[nodiscard]] std::expected<void, MoveFailure> moveNode(window::NodeDrag const& drag,
+                                                            vtworkspace::MoveTarget const& target,
+                                                            QScreen* screen,
+                                                            QPoint at)
+    {
+        return moveNode(resolveNodeDrag(drag), target, screen, at);
+    }
+
+    /// Starts the one node drag of this process: from here until endNodeDrag(), its owner's delegate runs
+    /// the OS drag, and the layout must not change under it, so afterNodeDrag() holds moves back. A drag
+    /// still running is ended first, in its own window (endNodeDrag()).
+    /// @param owner   The window controller that owns the drag.
+    /// @param drag    What it drags.
+    /// @param carried The pane whose header carries it, which shows its placeholder; null for a tab.
+    /// @return The JSON the drag carries.
+    [[nodiscard]] QString beginNodeDrag(QObject const& owner,
+                                        window::NodeDrag drag,
+                                        TerminalSession* carried);
+    /// Ends the drag @p owner owns, if it owns one: the moves held back are made, from the event loop, once
+    /// the delegate that carried the drag has returned from it. Calling it for any other owner, or twice,
+    /// does nothing.
+    /// @param owner The window controller that owns the drag.
+    /// @return The session that ended, for its owner to read how it ended (NodeDragSession::probe());
+    ///         destroying it forgets the drag. Null when @p owner owned none.
+    [[nodiscard]] std::unique_ptr<NodeDragSession> endNodeDrag(QObject const* owner);
+    /// Makes @p move now, or, while an OS drag of a node is in flight, once it has ended. A drop is handled
+    /// inside the drag's event loop, and a move that rebuilt the layout there would destroy the delegate the
+    /// loop is running on.
+    /// @param move What to do; it must not name anything it does not own, as the window it came from may be
+    ///             gone by then.
+    void afterNodeDrag(std::function<void()> move);
+    /// @return The pane whose header carries the drag @p owner owns; null for none, or a tab's drag.
+    [[nodiscard]] TerminalSession* carriedPane(QObject const* owner) const noexcept;
+
+    /// How long a move asked of the daemon waits for the push that makes it before it is given up: its
+    /// window opens wherever windows open, and nothing is announced or focused for it.
+    static constexpr auto RemoteMoveTimeout = std::chrono::seconds { 5 };
+
+    /// A move asked of the daemon, waited for until the push that makes it ends (@see moveNode).
+    struct PendingRemoteMove
+    {
+        uint64_t request = 0;           ///< Its number (RemoteMove::request).
+        std::vector<uint64_t> sessions; ///< What moves, by the daemon's ids.
+        window::DropPayload payload;    ///< What the receiving window's screen reader is told moved.
+        window::MoveLanding landing;    ///< Where it lands, as the screen reader is told it.
+        std::optional<window::WindowPosition> spawnAt; ///< NewWindow only: where its window opens.
+        core::platform::SteadyTimePoint deadline;      ///< When it is given up (RemoteMoveTimeout).
+        /// Whether its push has ended, so the reconcile now running places it.
+        enum class Phase : uint8_t
+        {
+            Asked = 0, ///< Sent; the push that makes it has not ended.
+            Landing,   ///< Its push ended: the running reconcile places it.
+        } phase = Phase::Asked;
+    };
+
+    /// @return The move asked of the daemon that is waited for: asked, neither refused nor past
+    ///         RemoteMoveTimeout, and not yet placed; null for none.
+    [[nodiscard]] PendingRemoteMove const* livePendingRemoteMove() const noexcept;
+
+    /// The daemon refused move @p request, and changed nothing: nothing waits for it any more.
+    /// @param request The request's number (SessionFactory::requestRemoteMove), or 0 for one not matched.
+    void remoteMoveRefused(uint64_t request);
+
+    /// The pushes of the moves numbered @p landed have ended (NativeController::takeLandedMoves): the move
+    /// this manager waits for, if among them, lands with the reconcile now running.
+    void noteRemoteMovesLanded(std::span<uint64_t const> landed);
+
+    /// The reconcile is about to open an OS window for a daemon window holding @p daemonSessions: when that
+    /// is the window a landing move asked for, stages where it opens.
+    /// @return The screen it opens on; null for wherever windows open.
+    [[nodiscard]] QScreen* stageRemoteMoveWindow(std::span<uint64_t const> daemonSessions);
+
+    /// How much of the daemon's windows a reconcile placed (@see completeRemoteMoves).
+    enum class ReconcileReach : uint8_t
+    {
+        Partial =
+            0, ///< A window it was to open is still to come: it skipped one, whose OS window is spawning.
+        Whole, ///< Every window it was shown is in place.
+    };
+
+    /// The reconcile placed what a landing move moved: its window is raised and focused, the moved pane takes
+    /// focus, and the window's screen reader is told. Nothing waits for the move after. A reconcile that
+    /// reached only part of the windows leaves the move waiting, until its deadline, for the one that places
+    /// the window it landed in: dropped, that window would open without its position or announcement.
+    /// @param reach How much of the daemon's windows the reconcile placed.
+    void completeRemoteMoves(ReconcileReach reach);
+
+    /// Holds back the closing of a window a move empties (applyNodeMove()) while it lives. A reconcile of one
+    /// push takes one for all of its windows' passes: a pass may take every tab out of a window that a later
+    /// pass fills again, and closing it in between would drop the daemon window it shows. Holds nest; the
+    /// last one to go closes each window a move emptied that is still empty and not kept.
+    class EmptiedWindowHold
+    {
+      public:
+        /// @param manager The manager whose emptied windows stay open meanwhile.
+        explicit EmptiedWindowHold(TerminalSessionManager& manager) noexcept;
+        ~EmptiedWindowHold();
+        EmptiedWindowHold(EmptiedWindowHold const&) = delete;
+        EmptiedWindowHold& operator=(EmptiedWindowHold const&) = delete;
+        EmptiedWindowHold(EmptiedWindowHold&&) = delete;
+        EmptiedWindowHold& operator=(EmptiedWindowHold&&) = delete;
+
+        /// Keeps @p window open once the last hold goes, though a move emptied it: it shows a daemon window
+        /// that still holds tabs, which the next reconcile realizes into it.
+        /// @param window The window.
+        void keep(vtworkspace::WindowId window) const;
+
+      private:
+        TerminalSessionManager& _manager;
+    };
+
+    /// @return A hold on the closing of the windows moves empty (@see EmptiedWindowHold).
+    [[nodiscard]] EmptiedWindowHold holdEmptiedWindows() noexcept { return EmptiedWindowHold { *this }; }
+
+    /// Drops what was staged for the next window, whether or not it took it: ContourGuiApp::newWindow() calls
+    /// it once that window's load returned, so a load that made no window leaves nothing for the next one.
+    void endWindowSpawn() noexcept;
     /// Whether a tab of window @p from can be merged into a split of window @p to: where the sessions are
     /// hosted locally, or on a daemon that serves the merge (a remote end that does not would undo a local
     /// one). A daemon's layout is pushed per window and a client reconciles one window at a time, so a merge
@@ -1034,6 +1242,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @return The new controller.
     window::WindowController* createWindowController(config::MenuPresentation menuPresentation);
 
+    /// createWindowController(), its notices said through what @p noticeAnnouncer builds: the seam a test
+    /// hears a window's announcements through.
+    /// @param menuPresentation Whether the window's menus open natively or in the scene.
+    /// @param noticeAnnouncer Builds what the window's notices are said through.
+    /// @return The new controller.
+    window::WindowController* createWindowController(config::MenuPresentation menuPresentation,
+                                                     window::NoticeAnnouncerFactory const& noticeAnnouncer);
+
     /// Stages what the NEXT createWindowController() window is for, which that call consumes: the quick
     /// terminal's window is made by the app, not by a user action, and its Main.qml mints its controller
     /// itself. Mirrors the staging of a pending spawn screen.
@@ -1193,6 +1409,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
   signals:
     void multimediaReadyChanged();
 
+    /// The node drag began or ended (@see beginNodeDrag, endNodeDrag): which pane is carried changed.
+    void nodeDragChanged();
+
     /// A window's controller was removed, because its OS window closed. The app asks itself whether
     /// anything is left that keeps it running.
     void windowRemoved();
@@ -1247,7 +1466,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Closes @p window if a tab transplant just emptied it — an empty window (no tabs) is not a valid
     /// state. Called after a cross-window tab move; MUST run after the transplant so removeWindow (via
-    /// closeWindow) never tears down the moved tab's now-relocated sessions.
+    /// closeWindow) never tears down the moved tab's now-relocated sessions. While an EmptiedWindowHold
+    /// lives, the window is noted instead, and closed once the last hold goes.
     /// @param window The source window a tab was just moved out of.
     void closeWindowIfEmpty(vtworkspace::WindowId window);
 
@@ -1454,6 +1674,58 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param targetRow The destination row in 0-based model tab-space.
     void moveTabToRow(TerminalSession* session, int targetRow);
 
+    /// A move into a window of its own, staged until that window exists.
+    struct PendingTransplant
+    {
+        vtworkspace::MoveSource source; ///< What moves.
+        window::DropPayload payload;    ///< What the new window's screen reader is told moved.
+    };
+
+    /// What a move target is, for the drag that moves there: read once per move (describeTarget()).
+    struct DescribedTarget
+    {
+        window::MovePlace place = window::MovePlace::Edge;         ///< Where it is, as the tables read it.
+        window::MoveLanding landing = window::MoveLanding::Beside; ///< Where it lands, as announced.
+        std::optional<vtworkspace::WindowId> window; ///< The window it lands in; none for a new one.
+        vtworkspace::MoveTargetKind kind = vtworkspace::MoveTargetKind::Edge; ///< What kind of target.
+        /// The host's id of the pane the daemon is asked to move beside or onto (a tab well's: its window's
+        /// active pane; a new window's: 0); none for one the host has no id for yet.
+        std::optional<uint64_t> hostSession;
+        vtworkspace::SplitSide side = vtworkspace::SplitSide::Right; ///< Edge only: the side.
+        int index = 0;                                               ///< Tab well only: the position.
+    };
+
+    /// Describes @p target for @p drag: one pass over the target, which the move, its route, its refusal,
+    /// its announcement and the daemon's request all read.
+    /// @return The description; std::nullopt for a target that names nothing that exists.
+    [[nodiscard]] std::optional<DescribedTarget> describeTarget(ResolvedDrag const& drag,
+                                                                vtworkspace::MoveTarget const& target) const;
+    /// The local move source @p drag names.
+    [[nodiscard]] std::optional<vtworkspace::MoveSource> localSourceOf(ResolvedDrag const& drag) const;
+    /// Asks the daemon to make the move (@see moveNode), and waits for it.
+    [[nodiscard]] std::expected<void, MoveFailure> requestHostMove(ResolvedDrag const& drag,
+                                                                   DescribedTarget target,
+                                                                   QScreen* screen,
+                                                                   QPoint at);
+    /// Carries out a whole-tab move by the tab verbs a daemon older than MoveNode served
+    /// (MoveRoute::TabMove).
+    [[nodiscard]] std::expected<void, MoveFailure> moveTabLegacy(ResolvedDrag const& drag,
+                                                                 vtworkspace::MoveTarget const& target,
+                                                                 QScreen* screen,
+                                                                 QPoint at);
+    /// Ends the node drag, whoever owns it (@see endNodeDrag).
+    [[nodiscard]] std::unique_ptr<NodeDragSession> takeNodeDrag();
+    /// The layout changed: a drag resolved before names what it did then (@see ResolvedDrag::layout).
+    void layoutChanged() noexcept { ++_layoutGeneration; }
+    /// Where a window opened for a drop at @p at on @p screen is placed.
+    [[nodiscard]] static std::optional<window::WindowPosition> spawnPositionFor(QScreen* screen, QPoint at);
+    /// Stages @p pending for the next window, spawned on @p screen at @p at (@see consumePendingTransplant).
+    void spawnWindowFor(PendingTransplant const& pending, QScreen* screen, QPoint at);
+    /// Tells the screen reader of the window @p moved landed in what happened.
+    void announceMove(vtworkspace::MoveResult const& moved,
+                      window::DropPayload payload,
+                      window::MoveLanding landing) const;
+
     /// The single move mechanism: reorders @p tab to row @p targetRow of its OWNING window (resolved
     /// through the model) and refreshes the status line. Every move entry point funnels through here
     /// so the post-move refresh lives in exactly one place.
@@ -1589,10 +1861,31 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // only — not to every window spawned later (see consumeDefaultLayout()).
     bool _startupLayoutConsumed = false;
 
-    // A tab tear-off staged by tearOffTabToNewWindow(): the (source window, tab) the next spawned
-    // window should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
+    // A move into a new window staged by moveNode() or tearOffTabToNewWindow(): what the next spawned window
+    // should adopt as its sole tab instead of creating a fresh one. Consumed exactly once by
     // consumePendingTransplant() from that window's Main.qml. Mirrors ContourGuiApp::_pendingSpawnScreen.
-    std::optional<std::pair<vtworkspace::WindowId, vtworkspace::TabId>> _pendingTransplant;
+    std::optional<PendingTransplant> _pendingTransplant;
+    // Where the next window spawned for a move opens, staged with it; consumed by createWindowController().
+    std::optional<window::WindowPosition> _pendingSpawnPosition;
+    // How many EmptiedWindowHolds live, and the windows a move emptied meanwhile, in the order it did.
+    int _emptiedWindowHolds = 0;
+    std::vector<vtworkspace::WindowId> _emptiedWindows;
+    // The move asked of the daemon that this manager waits for, until the push that makes it ends, the
+    // daemon refuses it, the connection is lost, or RemoteMoveTimeout passes.
+    std::optional<PendingRemoteMove> _pendingRemoteMove;
+    // The one node drag this process runs, while it runs.
+    std::unique_ptr<NodeDragSession> _nodeDrag;
+    // The drag of another process last hovered, resolved as it entered (resolveNodeDrag()).
+    struct HoveredDrag
+    {
+        QString payload;                  ///< Its JSON.
+        std::optional<ResolvedDrag> drag; ///< What it resolved as; none for JSON that is no node drag.
+    };
+    mutable std::optional<HoveredDrag> _hoveredDrag;
+    // Bumped by every change of the layout's shape, so a drag resolved before is resolved again.
+    uint64_t _layoutGeneration = 0;
+    // The number the next move asked of the daemon goes out under.
+    uint64_t _nextRemoteMove = 1;
 
     // Attach-mode window binder installed by ContourGuiApp (B4): a freshly-spawned window asks it
     // (via consumeAttachWindow, from Main.qml) whether it hosts a pending daemon window. Empty when

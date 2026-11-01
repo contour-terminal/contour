@@ -616,12 +616,6 @@ class MockMainController: public MainWindowControllerMock
         emitActiveRoleChanged();
         emit activeTabIndexChanged();
     }
-    Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
-    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::mockProcessToken(); }
-    Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
-    Q_INVOKABLE void tearOffTab(int) { ++tearOffs; }
-    /// How often a tab was torn off into its own window: what a drag no pane accepted ends in.
-    int tearOffs = 0;
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }

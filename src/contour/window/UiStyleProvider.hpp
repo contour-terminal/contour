@@ -8,7 +8,9 @@
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SecureInput.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/HeaderBarLayout.hpp>
+#include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
@@ -223,6 +225,9 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int radius READ radius CONSTANT)
     Q_PROPERTY(int borderWidth READ borderWidth CONSTANT)
     Q_PROPERTY(int dropCaretWidth READ dropCaretWidth CONSTANT)
+    Q_PROPERTY(int tabDwellMs READ tabDwellMs CONSTANT)
+    Q_PROPERTY(qreal dropRingWidth READ dropRingWidth CONSTANT)
+    Q_PROPERTY(qreal dropEdgeWidth READ dropEdgeWidth CONSTANT)
     Q_PROPERTY(int resizeBorderThickness READ resizeBorderThickness CONSTANT)
 
     Q_PROPERTY(int shadowBlur READ shadowBlur CONSTANT)
@@ -629,6 +634,26 @@ class UiStyleProvider: public QObject
     [[nodiscard]] int radius() const noexcept { return _tokens.cornerRadiusPixels; }
     [[nodiscard]] int borderWidth() const noexcept { return _tokens.borderWidthPixels; }
     [[nodiscard]] int dropCaretWidth() const noexcept { return _tokens.dropCaretPixels; }
+
+    /// How long a drag must rest on another tab before that tab opens under it, in milliseconds
+    /// (window::TabDwell).
+    [[nodiscard]] static constexpr int tabDwellMs() noexcept { return static_cast<int>(TabDwell.count()); }
+
+    /// How far each side of a tab's boundaries counts as the gap between the tabs, in logical pixels: the
+    /// strip's own hit test (window::tabGapHalfWidthOf), so that the tab's drop area never restates it.
+    /// @param tabWidth The tab's width.
+    /// @return TabGapHalfWidth, or a quarter of a tab narrower than four times that.
+    [[nodiscard]] Q_INVOKABLE qreal tabGapHalfWidthOf(qreal tabWidth) const noexcept
+    {
+        return window::tabGapHalfWidthOf(TabSpan { .left = 0.0, .right = tabWidth });
+    }
+
+    /// The width of the ring around a pane that takes a drag, in logical pixels (window::DropRingWidth).
+    [[nodiscard]] static constexpr qreal dropRingWidth() noexcept { return DropRingWidth; }
+
+    /// The width of a drop ghost's edge and of the outline of a tab a drag hovers, in logical pixels
+    /// (window::DropEdgeWidth).
+    [[nodiscard]] static constexpr qreal dropEdgeWidth() noexcept { return DropEdgeWidth; }
 
     /// How far a frameless window's resize border reaches in from each edge, in logical pixels.
     /// @see geometry::ResizeBorderThickness, geometry::gutterLeadIn

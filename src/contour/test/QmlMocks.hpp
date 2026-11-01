@@ -21,6 +21,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtQuick/QQuickItem>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -166,6 +167,13 @@ class MockSession: public QObject
     Q_INVOKABLE void insertDroppedText(QString const& text) { droppedTexts.push_back(text); }
     /// Every insertDroppedUrls() call, in order.
     std::vector<QList<QUrl>> droppedUrls;
+    /// Mirrors TerminalSession::visibleTextTail(): the rows set in @c tailRows, the last @p maxRows of them.
+    [[nodiscard]] Q_INVOKABLE QStringList visibleTextTail(int maxRows) const
+    {
+        return tailRows.mid(std::max<qsizetype>(0, tailRows.size() - maxRows));
+    }
+    /// What visibleTextTail() reads from.
+    QStringList tailRows;
     /// Every insertDroppedText() call, in order.
     std::vector<QString> droppedTexts;
     [[nodiscard]] float opacity() const { return _opacity; }

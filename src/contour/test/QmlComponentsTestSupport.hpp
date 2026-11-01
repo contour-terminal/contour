@@ -25,7 +25,9 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DropZonePolicy.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/QtString.hpp>
 #include <contour/window/SaveLayoutCheck.hpp>
+#include <contour/window/TabBarDropPolicy.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -291,15 +293,85 @@ class MockTabController: public QAbstractListModel
     void setOpenSessions(int n) noexcept { _openSessions = n; }
     int canCloseWindowCalls = 0;
     Q_INVOKABLE void createNewTab() {}
-    Q_INVOKABLE void activateTab(int) {}
+    /// Mirrors WindowController::activateTab(): recorded.
+    Q_INVOKABLE void activateTab(int index) { activatedTabs.push_back(index); }
+    std::vector<int> activatedTabs; ///< Every activateTab(), in order.
     /// Mirrors WindowController::tabWorkingDirectory: what TabItem's hover tooltip asks for the
     /// working-directory line. Answering empty means "nothing known", which suppresses that line.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int) const { return {}; }
     Q_INVOKABLE void moveTab(int, int) {}
-    Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
-    Q_INVOKABLE [[nodiscard]] QString processToken() const { return contour::test::mockProcessToken(); }
-    Q_INVOKABLE void moveTabIntoThisWindow(quint64, int, int) {}
-    Q_INVOKABLE void tearOffTab(int) {}
+    /// Mirrors WindowController::tabDragPayload(): the node drag of the tab at @p tabIndex, a tab of two
+    /// panes named after its row, so a test can tell drags apart.
+    [[nodiscard]] QString tabDragPayload(int tabIndex) const
+    {
+        return contour::window::writeNodeDrag(
+            contour::window::NodeDrag { .payload = contour::window::DropPayload::Tab,
+                                        .host = { .kind = contour::window::HostKind::Process, .id = "test" },
+                                        .window = vtworkspace::WindowId { 1 },
+                                        .tabIndex = tabIndex,
+                                        .sessions = { 100 + (static_cast<uint64_t>(tabIndex) * 2),
+                                                      101 + (static_cast<uint64_t>(tabIndex) * 2) } });
+    }
+    /// Mirrors WindowController::dragTitle(): @ref dragName for any drag.
+    Q_INVOKABLE [[nodiscard]] QString dragTitle(QString const&) const { return dragName; }
+    QString dragName = QStringLiteral("dragged"); ///< What dragTitle() names.
+    /// Mirrors WindowController::dropNodeOnTab(): records the row and the payload.
+    Q_INVOKABLE void dropNodeOnTab(int tabIndex, QString const& nodePayload)
+    {
+        tabDrops.emplace_back(tabIndex, nodePayload);
+    }
+    /// Mirrors WindowController::dropNodeInGap(): records the gap and the payload.
+    Q_INVOKABLE void dropNodeInGap(int index, QString const& nodePayload)
+    {
+        gapDrops.emplace_back(index, nodePayload);
+    }
+    /// Mirrors WindowController::setTabSpans(): kept for tabBarHit().
+    Q_INVOKABLE void setTabSpans(QList<QRectF> const& tabs)
+    {
+        // The call form: clang with libstdc++ 14 cannot pipe a view into ranges::to.
+        tabSpans = std::ranges::to<std::vector<contour::window::TabSpan>>(
+            tabs | std::views::transform([](QRectF const& tab) {
+                return contour::window::TabSpan { .left = tab.left(), .right = tab.right() };
+            }));
+    }
+    /// Mirrors WindowController::tabBarHit() through the same pure decision (resolveTabBarHit).
+    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x) const
+    {
+        return contour::window::TabBarHitValue { contour::window::resolveTabBarHit(tabSpans, x) };
+    }
+    /// Mirrors WindowController::springOpens(): any tab but the one springClosedTab names.
+    Q_INVOKABLE [[nodiscard]] bool springOpens(int tabIndex, QString const&) const
+    {
+        return tabIndex != springClosedTab;
+    }
+    /// Mirrors WindowController::beginTabDrag(): the tab's drag (tabDragPayload()), remembered as the
+    /// controller holds it.
+    Q_INVOKABLE [[nodiscard]] QString beginTabDrag(int tabIndex)
+    {
+        auto payload = tabDragPayload(tabIndex);
+        beganDrags.push_back(payload);
+        dragInFlight = payload;
+        return payload;
+    }
+    /// Mirrors WindowController::finishNodeDrag(): records how the drag ended, for the drag begun.
+    Q_INVOKABLE void finishNodeDrag(int dropAction)
+    {
+        finishedDrags.push_back({ .dropAction = dropAction, .payload = dragInFlight });
+        dragInFlight.clear();
+    }
+    /// One finishNodeDrag() call.
+    struct FinishedDrag
+    {
+        int dropAction = 0; ///< The Qt::DropAction, as its value.
+        QString payload;    ///< The JSON of the drag begun.
+    };
+    std::vector<QString> beganDrags;                ///< Every beginTabDrag(), in order.
+    QString dragInFlight;                           ///< The JSON of the drag begun and not yet finished.
+    std::vector<std::pair<int, QString>> tabDrops;  ///< Every dropNodeOnTab(), in order.
+    std::vector<std::pair<int, QString>> gapDrops;  ///< Every dropNodeInGap(), in order.
+    std::vector<contour::window::TabSpan> tabSpans; ///< What setTabSpans() last reported.
+    int springClosedTab = -1;                       ///< The row springOpens() refuses.
+    std::vector<FinishedDrag> finishedDrags;        ///< Every finishNodeDrag(), in order.
     Q_INVOKABLE void setTabTitle(int, QString const&) {}
     Q_INVOKABLE void resetTabTitle(int) {}
     Q_INVOKABLE void beginActiveTabTitleEdit() { emit tabTitleEditRequested(0); }
@@ -759,6 +831,7 @@ class MockPaneWindowController: public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    Q_PROPERTY(QObject* carriedPane READ carriedPane NOTIFY carriedPaneChanged)
 
   public:
     /// The host the window is attached to; empty for the local daemon.
@@ -775,35 +848,98 @@ class MockPaneWindowController: public QObject
     /// Mirrors WindowController::canCloseWindow(): a pane's end never closes the test's window.
     [[nodiscard]] Q_INVOKABLE bool canCloseWindow() const { return _closable; }
 
-    /// Mirrors WindowController::dropZoneAt() through the same pure decision (resolveDropZone), for a tab
-    /// from another tab of a window that @ref split says can split. Records what the pane card asked.
-    [[nodiscard]] Q_INVOKABLE QVariant
-    dropZoneAt(QObject*, int payload, qreal x, qreal y, qreal width, qreal height, QString const& tabPayload)
+    /// Mirrors WindowController::dropPayloadOf(): the kind the node JSON says.
+    [[nodiscard]] Q_INVOKABLE int dropPayloadOf(QString const& nodePayload) const
+    {
+        auto const drag = contour::window::parseNodeDrag(nodePayload);
+        return static_cast<int>(drag ? drag->payload : contour::window::DropPayload::None);
+    }
+    /// Mirrors WindowController::dropZoneAt() through the same pure decision (resolveDropZone), for a node
+    /// from another tab; over @ref ownPane it is that pane's own
+    /// drag, and @ref refusal is why the window refuses it, if it does. Records what the pane card asked.
+    [[nodiscard]] Q_INVOKABLE QVariant dropZoneAt(
+        QObject* pane, int payload, qreal x, qreal y, qreal width, qreal height, QString const& nodePayload)
     {
         lastPayload = payload;
-        lastTabPayload = tabPayload;
+        lastNodePayload = nodePayload;
         // What the QML engine hands back for a call it could not make (a argument it cannot convert).
         if (answersUndefined)
             return {};
-        return static_cast<int>(contour::window::resolveDropZone(
-            contour::window::DropZoneInputs { .payload = static_cast<contour::window::DropPayload>(payload),
-                                              .pane = { .width = width, .height = height },
-                                              .at = { .x = x, .y = y },
-                                              .split = split,
-                                              .origin = contour::window::DropOrigin::OtherTab }));
+        return static_cast<int>(contour::window::resolveDropZone(contour::window::DropZoneInputs {
+            .payload = static_cast<contour::window::DropPayload>(payload),
+            .pane = { .width = width, .height = height },
+            .at = { .x = x, .y = y },
+            .origin = pane != nullptr && pane == ownPane ? contour::window::DropOrigin::OwnPane
+                                                         : contour::window::DropOrigin::OtherTab,
+            .refusal = refusal }));
     }
-    /// Mirrors WindowController::dropTabOnPane(): records the zone.
-    Q_INVOKABLE void dropTabOnPane(QObject*, int zone, QString const& tabPayload)
+    /// Mirrors WindowController::dropGhostLabel(int, int, TerminalSession const*), naming the swap's pane
+    /// swapTitle.
+    [[nodiscard]] Q_INVOKABLE QString dropGhostLabel(int zone, int payload, QObject*) const
     {
-        droppedZones.push_back(zone);
-        droppedTabPayloads.push_back(tabPayload);
+        auto const label = contour::window::dropGhostLabelOf(
+            static_cast<contour::window::DropZone>(zone), static_cast<contour::window::DropPayload>(payload));
+        auto const text = contour::window::toQString(label);
+        return text.contains(QStringLiteral("%1")) ? text.arg(swapTitle) : text;
     }
-    /// Mirrors WindowController::dropGhostLabel().
-    [[nodiscard]] Q_INVOKABLE QString dropGhostLabel(int zone) const
+    /// The node drag a pane header carries: one pane of the test's process.
+    [[nodiscard]] static QString paneDrag()
     {
-        auto const label = contour::window::dropZoneRowOf(static_cast<contour::window::DropZone>(zone)).label;
-        return QString::fromUtf8(label.data(), static_cast<qsizetype>(label.size()));
+        return contour::window::writeNodeDrag(
+            contour::window::NodeDrag { .payload = contour::window::DropPayload::Pane,
+                                        .host = { .kind = contour::window::HostKind::Process, .id = "test" },
+                                        .window = vtworkspace::WindowId { 1 },
+                                        .tabIndex = 0,
+                                        .sessions = { 100 } });
     }
+    /// Mirrors WindowController::refusalText(): the text of @ref refusal.
+    [[nodiscard]] Q_INVOKABLE QString refusalText(QString const&) const
+    {
+        return contour::window::toQString(contour::window::refusalTextOf(refusal));
+    }
+    /// Mirrors WindowController::dropNodeOnPane(): records the zone and the payload.
+    Q_INVOKABLE void dropNodeOnPane(QObject*, int zone, QString const& nodePayload)
+    {
+        nodeDrops.emplace_back(zone, nodePayload);
+    }
+    /// Mirrors WindowController::beginPaneDrag(): the pane's drag (paneDrag()), remembered as the controller
+    /// holds it; @p pane is carried until it ends.
+    Q_INVOKABLE [[nodiscard]] QString beginPaneDrag(QObject* pane)
+    {
+        auto payload = paneDrag();
+        beganDrags.push_back(payload);
+        dragInFlight = payload;
+        setCarriedPane(pane);
+        return payload;
+    }
+    /// Mirrors WindowController::finishNodeDrag(): records how the drag ended, for the drag begun.
+    Q_INVOKABLE void finishNodeDrag(int dropAction)
+    {
+        finishedDrags.push_back({ .dropAction = dropAction, .payload = dragInFlight });
+        dragInFlight.clear();
+        setCarriedPane(nullptr);
+    }
+    /// Mirrors WindowController::carriedPane().
+    [[nodiscard]] QObject* carriedPane() const { return _carriedPane; }
+    /// Carries @p pane, as a drag the test cannot hold open would.
+    void setCarriedPane(QObject* pane)
+    {
+        if (std::exchange(_carriedPane, pane) != pane)
+            emit carriedPaneChanged();
+    }
+    /// One finishNodeDrag() call.
+    struct FinishedDrag
+    {
+        int dropAction = 0; ///< The Qt::DropAction, as its value.
+        QString payload;    ///< The JSON of the drag begun.
+    };
+    std::vector<QString> beganDrags; ///< Every beginPaneDrag(), in order.
+    QString dragInFlight;            ///< The JSON of the drag begun and not yet finished.
+    QObject* ownPane = nullptr;      ///< The pane whose drag it is.
+    contour::window::MoveRefusal refusal = contour::window::MoveRefusal::None; ///< What refusalText() names.
+    QString swapTitle = QStringLiteral("other");                               ///< The pane a swap names.
+    std::vector<std::pair<int, QString>> nodeDrops; ///< Every dropNodeOnPane(), in order.
+    std::vector<FinishedDrag> finishedDrags;        ///< Every finishNodeDrag(), in order.
     /// Mirrors WindowController::dropGhostRect().
     [[nodiscard]] Q_INVOKABLE QRectF dropGhostRect(int zone, qreal width, qreal height, qreal inset) const
     {
@@ -811,17 +947,17 @@ class MockPaneWindowController: public QObject
             static_cast<contour::window::DropZone>(zone), { .width = width, .height = height }, inset);
         return ghost ? QRectF { ghost->x, ghost->y, ghost->width, ghost->height } : QRectF {};
     }
-    contour::window::SplitSupport split =
-        contour::window::SplitSupport::Supported; ///< Whether a tab may split.
     bool answersUndefined = false; ///< Whether dropZoneAt() answers `undefined`, as a failed call does.
     int lastPayload = 0;           ///< The payload the pane card last asked about.
-    QString lastTabPayload;        ///< The tab JSON the pane card last asked about.
-    std::vector<int> droppedZones; ///< Every zone dropTabOnPane() was told, in order.
-    std::vector<QString> droppedTabPayloads; ///< The tab JSON of each.
+    QString lastNodePayload;       ///< The node JSON the pane card last asked about.
+
+  signals:
+    void carriedPaneChanged();
 
   private:
     QString _hostLabel = QStringLiteral("home");
     bool _closable = false;
+    QObject* _carriedPane = nullptr;
 };
 
 /// A window that carries its controller as `win`, as Main.qml's does.
@@ -837,6 +973,62 @@ class PaneTestWindow: public QQuickWindow
 
   private:
     MockPaneWindowController _controller;
+};
+
+/// A drag the window is sent by hand: the drag-enter, -move, -drop and -leave events a platform's drag
+/// manager would deliver, carrying @ref mime. Exercises the real DropArea of PaneCard.qml, offscreen.
+struct DragSource
+{
+    QQuickWindow& window;
+    QMimeData mime;
+    /// Whether the last enter or move was accepted by a DropArea.
+    bool accepted = false;
+
+    explicit DragSource(QQuickWindow& target): window { target } {}
+
+    static constexpr auto Actions = Qt::CopyAction | Qt::MoveAction;
+
+    /// Qt 6.12 gave the drag events QPointF constructors and deprecated the QPoint ones.
+    /// @return @p scene in the type the installed Qt's drag-event constructors take.
+    [[nodiscard]] static auto dragPosition(QPointF scene)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        return scene;
+#else
+        return scene.toPoint();
+#endif
+    }
+
+    void enter(QPointF scene)
+    {
+        auto event = QDragEnterEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        accepted = event.isAccepted();
+    }
+
+    void move(QPointF scene)
+    {
+        auto event = QDragMoveEvent { dragPosition(scene), Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        accepted = event.isAccepted();
+    }
+
+    void leave()
+    {
+        auto event = QDragLeaveEvent {};
+        QCoreApplication::sendEvent(&window, &event);
+    }
+
+    /// @return What the drop resolved to: IgnoreAction when no DropArea accepted it.
+    [[nodiscard]] Qt::DropAction drop(QPointF scene)
+    {
+        auto event = QDropEvent { scene, Actions, &mime, Qt::LeftButton, Qt::NoModifier };
+        event.ignore();
+        QCoreApplication::sendEvent(&window, &event);
+        return event.isAccepted() ? event.dropAction() : Qt::IgnoreAction;
+    }
 };
 
 /// A pane tree shown as Main.qml shows the active tab's: PaneNode.qml filling a window, told the tab's

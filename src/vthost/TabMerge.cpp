@@ -2,7 +2,7 @@
 #include <vthost/TabMerge.hpp>
 
 #include <algorithm>
-#include <array>
+#include <utility>
 #include <vector>
 
 #include <vtworkspace/Pane.hpp>
@@ -11,31 +11,17 @@
 namespace vthost
 {
 
-namespace
+bool namesWholeTab(vtworkspace::Tab const& tab, std::span<uint64_t const> sessions)
 {
-    /// @return The session of every leaf of @p tab.
-    std::vector<uint64_t> sessionsOf(vtworkspace::Tab& tab)
-    {
-        auto sessions = std::vector<uint64_t> {};
-        tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
-            if (pane.isLeaf())
-                sessions.push_back(pane.session().value);
-        });
-        return sessions;
-    }
-
-    /// Every side the wire may name.
-    constexpr auto KnownSides = std::array { vtworkspace::SplitSide::Left,
-                                             vtworkspace::SplitSide::Right,
-                                             vtworkspace::SplitSide::Top,
-                                             vtworkspace::SplitSide::Bottom };
-} // namespace
+    return std::ranges::is_permutation(
+        tab.leafSessions(), sessions, {}, [](vtworkspace::SessionId session) { return session.value; });
+}
 
 std::optional<vtworkspace::SplitSide> splitSideFrom(uint8_t side) noexcept
 {
     auto const known = std::ranges::find_if(
-        KnownSides, [side](auto candidate) { return std::to_underlying(candidate) == side; });
-    return known != KnownSides.end() ? std::optional { *known } : std::nullopt;
+        vtworkspace::AllSplitSides, [side](auto candidate) { return std::to_underlying(candidate) == side; });
+    return known != vtworkspace::AllSplitSides.end() ? std::optional { *known } : std::nullopt;
 }
 
 std::expected<void, TabMergeError> applyTabMerge(vtworkspace::SessionModel& model,
@@ -56,7 +42,7 @@ std::expected<void, TabMergeError> applyTabMerge(vtworkspace::SessionModel& mode
         return std::unexpected { TabMergeError::CrossWindow };
     // The request names the whole tab it saw. Another client (or this one, dragging twice before a push
     // arrived) may have merged more into it since: moving that would drag panes nobody dragged.
-    if (!std::ranges::is_permutation(sessionsOf(*source), merge.tabSessions))
+    if (!namesWholeTab(*source, merge.tabSessions))
         return std::unexpected { TabMergeError::StaleTab };
     if (model.mergeTabIntoSplit(
             fromWindow->id(), source->id(), toWindow->id(), target->id(), targetLeaf->id(), *side)

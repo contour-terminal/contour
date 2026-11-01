@@ -236,7 +236,7 @@ TEST_CASE("a tab inserted before the focused one leaves the focus on its tab",
                                              [&] { announced.push_back(controller.focusedTab()); });
 
     // From another window, at row 0: the tab under the focus is now on row 3.
-    controller.moveTabIntoThisWindow(other.id.value, incoming, 0);
+    controller.dropNodeInGap(0, other->tabDragPayload(incoming));
     REQUIRE(controller.count() == 4);
     REQUIRE_FALSE(announced.empty());
 

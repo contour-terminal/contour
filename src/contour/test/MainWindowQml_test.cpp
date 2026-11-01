@@ -51,6 +51,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QMimeData>
 #include <QtCore/QPoint>
 #include <QtCore/QPointF>
 #include <QtCore/QRectF>
@@ -59,6 +60,7 @@
 #include <QtCore/QUrl>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
+#include <QtGui/QDragEnterEvent>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
@@ -1100,13 +1102,34 @@ TEST_CASE("a drop in a scrolled well lands under the pointer (offscreen)",
     auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
     showWindow(*root, 900);
 
-    auto* strip = root->findChild<QQuickItem*>(QStringLiteral("tabStrip"));
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
     auto* list = root->findChild<QQuickItem*>(QStringLiteral("tabList"));
-    REQUIRE(strip != nullptr);
+    REQUIRE(window != nullptr);
     REQUIRE(list != nullptr);
-    auto* area = list->parentItem(); // the DropArea's coordinates
-    REQUIRE(area != nullptr);
     REQUIRE(QTest::qWaitFor([&] { return list->property("contentX").toReal() > 0; }, 1000)); // scrolled
+    // The strip reports where its tabs stand only for a drag over it: none came yet.
+    CHECK(controller.tabSpans.empty());
+
+    auto const payload = controller.tabDragPayload(0);
+    auto mime = QMimeData {};
+    mime.setData(QString::fromLatin1(contour::window::NodeDragMime), payload.toUtf8());
+    // Sends the window the events a platform's drag manager would for a node dragged to @p scene.
+    auto const dragTo = [&](QPoint scene) {
+        auto const send = [&](auto&& event) {
+            event.ignore();
+            QCoreApplication::sendEvent(window, &event);
+            return event.isAccepted();
+        };
+        auto const actions = Qt::MoveAction;
+        std::ignore = send(QDragEnterEvent { scene, actions, &mime, Qt::LeftButton, Qt::NoModifier });
+        return send(QDragMoveEvent { scene, actions, &mime, Qt::LeftButton, Qt::NoModifier });
+    };
+    auto const dropAt = [&](QPoint scene) {
+        auto drop = QDropEvent { QPointF { scene }, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        drop.ignore();
+        QCoreApplication::sendEvent(window, &drop);
+        return drop.isAccepted() && drop.dropAction() == Qt::MoveAction;
+    };
 
     auto const tabs = tabDelegates(*root);
     auto checked = 0;
@@ -1120,19 +1143,18 @@ TEST_CASE("a drop in a scrolled well lands under the pointer (offscreen)",
             continue; // only tabs fully in the well's view
         ++checked;
         INFO("tab " << index);
-        // A quarter into the tab is before its midpoint: the slot before it.
-        auto const pointer = tab->mapToItem(area, QPointF(tab->width() / 4, tab->height() / 2));
-        auto slot = QVariant {};
-        REQUIRE(QMetaObject::invokeMethod(
-            strip, "dropIndexFor", Q_RETURN_ARG(QVariant, slot), Q_ARG(QVariant, pointer.x())));
-        CHECK(slot.toInt() == index);
-        // The caret for that slot stands at the tab's left edge, inside the visible well.
-        auto caret = QVariant {};
-        REQUIRE(QMetaObject::invokeMethod(
-            strip, "caretX", Q_RETURN_ARG(QVariant, caret), Q_ARG(QVariant, index)));
-        CHECK(caret.toReal() == Catch::Approx(tab->mapToItem(area, QPointF(0, 0)).x()));
-        CHECK(caret.toReal() >= list->x());
-        CHECK(caret.toReal() <= list->x() + list->width());
+        // A pointer just inside the tab's left edge is in the gap before it: the slot for that row.
+        auto const gapPoint = tab->mapToScene(QPointF(2, tab->height() / 2)).toPoint();
+        controller.gapDrops.clear();
+        CHECK(dragTo(gapPoint));
+        // The span reported as the drag entered is where the tab stands in the well as scrolled.
+        REQUIRE(controller.tabSpans.size() == static_cast<std::size_t>(TabCount));
+        auto const& span = controller.tabSpans[static_cast<std::size_t>(index)];
+        CHECK(span.left == Catch::Approx(tab->mapToItem(list->parentItem(), QPointF(0, 0)).x()));
+        CHECK(span.right - span.left == Catch::Approx(tab->width()));
+        CHECK(dropAt(gapPoint));
+        REQUIRE(controller.gapDrops.size() == 1);
+        CHECK(controller.gapDrops.front() == std::pair { index, payload });
     }
     CHECK(checked > 0);
 
@@ -4699,3 +4721,43 @@ TEST_CASE("the keyboard stays on its tab when rows move around it (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+TEST_CASE("Main.qml takes every pane or tab dropped on it, and nothing else (offscreen)",
+          "[contour][gui][qml][mainwindow][drop]")
+{
+    // A drop no pane, tab or gap took is still taken by the window, as a no-op: the drag then ends
+    // MoveAction, so IgnoreAction means only a drop outside every window, or a cancel.
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto* const window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    auto const* const catchAll = root->findChild<QQuickItem*>(QStringLiteral("windowDropCatchAll"));
+    REQUIRE(catchAll != nullptr);
+    // Below everything else the window shows: the first of its content's children.
+    REQUIRE(catchAll->parentItem() != nullptr);
+    CHECK(catchAll->parentItem()->childItems().front() == catchAll);
+    // The mock's window is never sized from cell metrics, nor shown; give it a size to drop into.
+    window->resize(800, 600);
+    window->show();
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    REQUIRE(catchAll->width() > 0);
+
+    auto const at = QPoint { window->width() / 2, window->height() / 2 };
+    auto const dropOf = [&](QString const& format) {
+        auto mime = QMimeData {};
+        mime.setData(format, QByteArrayLiteral("{}"));
+        auto enter = QDragEnterEvent { at, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        QCoreApplication::sendEvent(window, &enter);
+        auto move = QDragMoveEvent { at, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        QCoreApplication::sendEvent(window, &move);
+        auto drop = QDropEvent { QPointF { at }, Qt::MoveAction, &mime, Qt::LeftButton, Qt::NoModifier };
+        QCoreApplication::sendEvent(window, &drop);
+        return drop.isAccepted() && drop.dropAction() == Qt::MoveAction;
+    };
+    CHECK(dropOf(QString::fromLatin1(contour::window::NodeDragMime)));
+    // The strip's old payload is gone: nothing writes it any more, so nothing takes it.
+    CHECK_FALSE(dropOf(QStringLiteral("application/x-contour-tab")));
+    CHECK_FALSE(dropOf(QStringLiteral("application/x-something-else")));
+}

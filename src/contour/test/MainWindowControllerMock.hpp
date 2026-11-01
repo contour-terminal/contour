@@ -9,8 +9,11 @@
 #include <contour/platform/CaptionHitTest.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/NodeDrag.hpp>
 #include <contour/window/NoticeModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/TabBarDropPolicy.hpp>
+#include <contour/window/TabBarHitValue.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/ToastPlacement.hpp>
 
@@ -19,7 +22,9 @@
 #include <core/platform/Clock.hpp>
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QList>
 #include <QtCore/QPointF>
+#include <QtCore/QRectF>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
@@ -27,6 +32,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -36,13 +42,6 @@
 
 namespace contour::test
 {
-/// The token every mock window controller answers to processToken(): what its tabs stamp into a drag.
-/// @return The token.
-[[nodiscard]] inline QString mockProcessToken()
-{
-    return QStringLiteral("mock-process-token");
-}
-
 /// The colours a mock offers in its tab menu's "Tab Color" sub-menu, in order.
 inline constexpr auto MockTabPalette = std::array {
     vtbackend::RGBColor { 0xEE6666u }, vtbackend::RGBColor { 0xF0A050u }, vtbackend::RGBColor { 0xE8D05Au },
@@ -182,19 +181,79 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
     Q_INVOKABLE void showAbout() { emit aboutRequested(); }
+    /// Mirrors WindowController::dropPayloadOf(): nothing here is a node drag.
+    Q_INVOKABLE [[nodiscard]] int dropPayloadOf(QString const&) const { return 0; }
     /// Mirrors WindowController::dropZoneAt(): nothing is a drop target here.
     Q_INVOKABLE [[nodiscard]] int dropZoneAt(QObject*, int, qreal, qreal, qreal, qreal, QString const&) const
     {
         return 0;
     }
-    /// Mirrors WindowController::dropTabOnPane(): counted.
-    Q_INVOKABLE void dropTabOnPane(QObject*, int, QString const&) { ++tabDrops; }
-    /// How often a tab was dropped on a pane's split zone.
-    int tabDrops = 0;
+    /// Mirrors WindowController::dropNodeOnPane(): nothing is dropped on a pane here.
+    Q_INVOKABLE void dropNodeOnPane(QObject*, int, QString const&) {}
     /// Mirrors WindowController::dropGhostLabel(): no zone has a ghost here.
-    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int) const { return {}; }
+    Q_INVOKABLE [[nodiscard]] QString dropGhostLabel(int, int, QObject*) const { return {}; }
     /// Mirrors WindowController::dropGhostRect(): no zone has a ghost here.
     Q_INVOKABLE [[nodiscard]] QRectF dropGhostRect(int, qreal, qreal, qreal) const { return {}; }
+    /// Mirrors WindowController::refusalText(): nothing refuses a drag here.
+    Q_INVOKABLE [[nodiscard]] QString refusalText(QString const&) const { return {}; }
+    /// Mirrors WindowController::dragTitle(): a drag here names nothing.
+    Q_INVOKABLE [[nodiscard]] QString dragTitle(QString const&) const { return {}; }
+    /// Mirrors WindowController::beginPaneDrag(): a pane here cannot be dragged.
+    Q_INVOKABLE [[nodiscard]] QString beginPaneDrag(QObject*) const { return {}; }
+    /// Mirrors WindowController::beginTabDrag(): counted, and the tab's drag (tabDragPayload()).
+    Q_INVOKABLE [[nodiscard]] QString beginTabDrag(int tabIndex)
+    {
+        ++beganDrags;
+        return tabDragPayload(tabIndex);
+    }
+    /// Mirrors WindowController::finishNodeDrag(): counted.
+    Q_INVOKABLE void finishNodeDrag(int) { ++finishedDrags; }
+    /// How often a node drag began.
+    int beganDrags = 0;
+    /// How often a node drag ended.
+    int finishedDrags = 0;
+
+    /// Mirrors WindowController::tabDragPayload(): the node drag of the tab at @p tabIndex, a tab of two
+    /// panes named after its row.
+    [[nodiscard]] QString tabDragPayload(int tabIndex) const
+    {
+        return contour::window::writeNodeDrag(
+            contour::window::NodeDrag { .payload = contour::window::DropPayload::Tab,
+                                        .host = { .kind = contour::window::HostKind::Process, .id = "test" },
+                                        .window = vtworkspace::WindowId { 1 },
+                                        .tabIndex = tabIndex,
+                                        .sessions = { 100 + (static_cast<uint64_t>(tabIndex) * 2),
+                                                      101 + (static_cast<uint64_t>(tabIndex) * 2) } });
+    }
+    /// Mirrors WindowController::dropNodeOnTab(): recorded.
+    Q_INVOKABLE void dropNodeOnTab(int tabIndex, QString const& nodePayload)
+    {
+        tabDrops.emplace_back(tabIndex, nodePayload);
+    }
+    /// Mirrors WindowController::dropNodeInGap(): recorded.
+    Q_INVOKABLE void dropNodeInGap(int index, QString const& nodePayload)
+    {
+        gapDrops.emplace_back(index, nodePayload);
+    }
+    /// Mirrors WindowController::springOpens(): any tab opens.
+    Q_INVOKABLE [[nodiscard]] bool springOpens(int, QString const&) const { return true; }
+    /// Mirrors WindowController::setTabSpans(): kept for tabBarHit().
+    Q_INVOKABLE void setTabSpans(QList<QRectF> const& tabs)
+    {
+        // The call form: clang with libstdc++ 14 cannot pipe a view into ranges::to.
+        tabSpans = std::ranges::to<std::vector<contour::window::TabSpan>>(
+            tabs | std::views::transform([](QRectF const& tab) {
+                return contour::window::TabSpan { .left = tab.left(), .right = tab.right() };
+            }));
+    }
+    /// Mirrors WindowController::tabBarHit() through the same pure decision (resolveTabBarHit).
+    Q_INVOKABLE [[nodiscard]] contour::window::TabBarHitValue tabBarHit(qreal x) const
+    {
+        return contour::window::TabBarHitValue { contour::window::resolveTabBarHit(tabSpans, x) };
+    }
+    std::vector<std::pair<int, QString>> tabDrops;  ///< Every dropNodeOnTab(), in order.
+    std::vector<std::pair<int, QString>> gapDrops;  ///< Every dropNodeInGap(), in order.
+    std::vector<contour::window::TabSpan> tabSpans; ///< What setTabSpans() last reported.
 
     /// Mirrors WindowController::windowTitle(), through the same remoteWindowTitle().
     Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const

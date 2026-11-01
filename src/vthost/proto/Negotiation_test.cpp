@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <ranges>
+#include <utility>
 
 #include <vthost/proto/Negotiation.hpp>
 
@@ -72,4 +73,20 @@ TEST_CASE("every Capability has exactly one table row", "[vthost][negotiation]")
         CHECK(std::ranges::count(CapabilityTable, row.capability, &CapabilityRow::capability) == 1);
         CHECK(std::ranges::count(CapabilityTable, row.name, &CapabilityRow::name) == 1);
     }
+}
+
+TEST_CASE("the move-node capability keeps its ident and name", "[vthost][negotiation][move]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::MoveNode) == 16);
+    auto const row = std::ranges::find(CapabilityTable, Capability::MoveNode, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "move-node");
+}
+
+TEST_CASE("the layout-batch capability keeps its ident and name", "[vthost][negotiation][move]")
+{
+    STATIC_CHECK(std::to_underlying(Capability::LayoutBatch) == 17);
+    auto const row = std::ranges::find(CapabilityTable, Capability::LayoutBatch, &CapabilityRow::capability);
+    REQUIRE(row != CapabilityTable.end());
+    CHECK(row->name == "layout-batch");
 }

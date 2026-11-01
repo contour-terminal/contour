@@ -1754,6 +1754,9 @@ class ChromeDropZoneNames: public QObject
     Q_PROPERTY(int splitRight READ splitRight CONSTANT)
     Q_PROPERTY(int splitTop READ splitTop CONSTANT)
     Q_PROPERTY(int splitBottom READ splitBottom CONSTANT)
+    Q_PROPERTY(int swap READ swap CONSTANT)
+    Q_PROPERTY(int noOp READ noOp CONSTANT)
+    Q_PROPERTY(int refused READ refused CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -1767,6 +1770,9 @@ class ChromeDropZoneNames: public QObject
     [[nodiscard]] static constexpr int splitRight() noexcept { return of(DropZone::SplitRight); }
     [[nodiscard]] static constexpr int splitTop() noexcept { return of(DropZone::SplitTop); }
     [[nodiscard]] static constexpr int splitBottom() noexcept { return of(DropZone::SplitBottom); }
+    [[nodiscard]] static constexpr int swap() noexcept { return of(DropZone::Swap); }
+    [[nodiscard]] static constexpr int noOp() noexcept { return of(DropZone::NoOp); }
+    [[nodiscard]] static constexpr int refused() noexcept { return of(DropZone::Refused); }
 
   private:
     [[nodiscard]] static constexpr int of(DropZone zone) noexcept { return static_cast<int>(zone); }
@@ -1781,6 +1787,7 @@ class ChromeDropPayloadNames: public QObject
     Q_PROPERTY(int files READ files CONSTANT)
     Q_PROPERTY(int text READ text CONSTANT)
     Q_PROPERTY(int tab READ tab CONSTANT)
+    Q_PROPERTY(int pane READ pane CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -1791,6 +1798,7 @@ class ChromeDropPayloadNames: public QObject
     [[nodiscard]] static constexpr int files() noexcept { return of(DropPayload::Files); }
     [[nodiscard]] static constexpr int text() noexcept { return of(DropPayload::Text); }
     [[nodiscard]] static constexpr int tab() noexcept { return of(DropPayload::Tab); }
+    [[nodiscard]] static constexpr int pane() noexcept { return of(DropPayload::Pane); }
 
   private:
     [[nodiscard]] static constexpr int of(DropPayload payload) noexcept { return static_cast<int>(payload); }

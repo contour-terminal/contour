@@ -119,6 +119,14 @@ struct RecordingEvents final: vtworkspace::ModelEvents
     {
         log.emplace_back("paneRatioChanged");
     }
+    void tabAboutToBeMovedToWindow(vtworkspace::WindowId, int, vtworkspace::WindowId, int) override
+    {
+        log.emplace_back("tabAboutToBeMovedToWindow");
+    }
+    void tabMovedToWindow(vtworkspace::WindowId, vtworkspace::TabId, int, vtworkspace::WindowId, int) override
+    {
+        log.emplace_back("tabMovedToWindow");
+    }
     void tabTitleChanged(vtworkspace::TabId) override { log.emplace_back("tabTitleChanged"); }
     void tabColorChanged(vtworkspace::TabId) override { log.emplace_back("tabColorChanged"); }
 
@@ -3191,4 +3199,64 @@ TEST_CASE("hosted sessions fan out block, title and cwd signals", "[vthost][host
     terminal.writeToScreen("\033]7;file://h/tmp\033\\");
     drain();
     CHECK(recorder.all<vthost::WorkingDirectoryChangedSignal>().size() == 1);
+}
+
+TEST_CASE("a whole tab moved to another window reaches the subscribers, before and after", "[vthost][move]")
+{
+    auto h = HostHarness {};
+    auto* const tab = h.host.createTab();
+    auto* const other = h.host.createWindow();
+    REQUIRE((tab != nullptr && other != nullptr));
+    h.recorder.log.clear();
+
+    auto const moved =
+        h.host.model().moveNode(vtworkspace::TabSource { h.host.windowId(), tab->id() },
+                                vtworkspace::TabWellTarget { .window = other->id(), .index = 0 });
+    REQUIRE(moved.has_value());
+
+    auto const before = std::ranges::find(h.recorder.log, "tabAboutToBeMovedToWindow");
+    auto const after = std::ranges::find(h.recorder.log, "tabMovedToWindow");
+    REQUIRE(before != h.recorder.log.end());
+    REQUIRE(after != h.recorder.log.end());
+    CHECK(before < after);
+}
+
+TEST_CASE("a window and tab a move creates are named, and the moved pane is re-fitted", "[vthost][move]")
+{
+    auto h = HostHarness {};
+    auto* const tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const stays = tab->rootPane()->session();
+    h.host.splitActivePane(tab->id(), SplitState::Vertical);
+    REQUIRE(tab->paneCount() == 2);
+    auto const dragged = tab->activePane()->session();
+    auto const halved = h.host.terminal(dragged)->totalPageSize();
+
+    auto const& window = h.host.createEmptyWindow();
+    auto const moved =
+        h.host.model().moveNode(vtworkspace::PaneSource { dragged },
+                                vtworkspace::TabWellTarget { .window = window.id(), .index = 0 });
+    REQUIRE(moved.has_value());
+
+    CHECK(h.host.objects().uuidOf(window.id()).has_value());
+    CHECK(h.host.objects().uuidOf(moved->tab).has_value());
+    // The pane is no longer half of a split: its shell is told the page it now fills.
+    CHECK(h.host.terminal(dragged)->totalPageSize() != halved);
+    CHECK(h.host.terminal(dragged)->totalPageSize() == h.host.terminal(stays)->totalPageSize());
+}
+
+TEST_CASE("a window made empty for a move is claimed by its creator and given back when unused",
+          "[vthost][move]")
+{
+    auto h = HostHarness {};
+    auto const& window = h.host.createEmptyWindow(&h.client);
+    auto const id = window.id();
+    CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Yours);
+    CHECK(h.host.windowClaim(id, &h.otherClient) == vthost::WindowClaim::Others);
+    CHECK(h.host.objects().uuidOf(id).has_value());
+
+    h.host.discardWindow(id);
+    CHECK(h.host.model().window(id) == nullptr);
+    CHECK_FALSE(h.host.objects().uuidOf(id).has_value());
+    CHECK(h.host.windowClaim(id, &h.client) == vthost::WindowClaim::Unclaimed);
 }

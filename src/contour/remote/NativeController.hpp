@@ -20,6 +20,7 @@
 
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
+#include <contour/remote/RemoteLayout.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/SessionFactory.hpp>
 
@@ -258,6 +259,20 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         reproduce the daemon tree.
     [[nodiscard]] vthost::client::WireLayout wireLayout() const;
 
+    /// @return The layouts the GUI reconciles against, as one snapshot of every window: those of the last
+    ///         push the daemon ended (proto::LayoutBatchEnd) when Capability::LayoutBatch is shared, so the
+    ///         frames of a push still arriving never mix with the last one's; the latest otherwise. A copy
+    ///         of pointers, cheap to take once per reconcile and share between its windows. Any thread.
+    [[nodiscard]] LayoutSnapshot settledLayouts() const;
+
+    /// @return The settled layout (@see settledLayouts) of @p daemonWindow; null if it has none.
+    /// @param daemonWindow The daemon's window id.
+    [[nodiscard]] std::shared_ptr<vthost::proto::LayoutState const> settledLayout(
+        uint64_t daemonWindow) const;
+
+    /// @return The settled layout (@see settledLayouts) of the primary (lowest-id) window; null if none.
+    [[nodiscard]] std::shared_ptr<vthost::proto::LayoutState const> settledLayout() const;
+
     /// Binds the NEXT createPty() to remote session @p session (instead of popping
     /// the FIFO pending queue). The layout executor calls this — via
     /// applyLayoutToWindow's beforeLeafSeed — right before each pane's backing
@@ -273,6 +288,26 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         is built locally, not re-authored on the daemon).
     [[nodiscard]] bool isRealizingLayout() const;
 
+    /// Pairs local @p tab with the daemon tab @p wireTab, the one it shows: a later push names the daemon
+    /// tab, and the reconcile brings this tab in line with it. A daemon tab is paired with one local tab at
+    /// most, so a pairing the daemon tab had before goes. GUI thread.
+    /// @param tab The local tab.
+    /// @param wireTab The daemon's id of the tab (proto::WireTab::tabId).
+    void pairTab(vtworkspace::TabId tab, uint64_t wireTab);
+
+    /// @return The local tab paired with the daemon tab @p wireTab (@see pairTab), if any.
+    /// @param wireTab The daemon's id of the tab.
+    [[nodiscard]] std::optional<vtworkspace::TabId> tabPairedWith(uint64_t wireTab) const;
+
+    /// Forgets the pairing of every local tab not among @p liveTabs: a closed tab's id names nothing, and
+    /// the daemon's tab ids it was paired with may be handed out again.
+    /// @param liveTabs The TabId values of the tabs that exist.
+    void forgetClosedTabs(std::unordered_set<uint64_t> const& liveTabs);
+
+    /// @return The daemon tab local @p tab was last reconciled against (@see pairTab), if any.
+    /// @param tab The local tab.
+    [[nodiscard]] std::optional<uint64_t> pairedWireTab(vtworkspace::TabId tab) const;
+
     // SessionFactory: hands out a ChannelPty bound to the next pending
     // remote session; cwd/command/profile do not apply to remote sessions.
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
@@ -287,6 +322,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
     {
         return contour::session::SessionHosting::Remote;
+    }
+
+    /// SessionFactory: the remote end is a Contour daemon.
+    [[nodiscard]] contour::session::SessionHostKind hostKind() const noexcept override
+    {
+        return contour::session::SessionHostKind::Daemon;
     }
 
     /// SessionFactory: a GUI "new tab" is authored on the daemon (requestCreateTab)
@@ -322,6 +363,63 @@ class NativeController final: public QObject, public contour::session::SessionFa
         std::span<vtpty::Pty const* const> tabPtys,
         vtpty::Pty const* targetPty,
         vtworkspace::SplitSide side) override;
+
+    /// SessionFactory: whether the daemon moves panes and tabs for this client: it serves proto::MoveNode and
+    /// ends each push (Capability::MoveNode and Capability::LayoutBatch shared), so that the GUI can realize
+    /// a move from the whole push that made it. Unsupported before the handshake and against an older
+    /// daemon, which a dragged pane is then refused by.
+    [[nodiscard]] contour::session::MoveSupport moveSupport() const noexcept override;
+
+    /// SessionFactory: a pane or tab dropped in a daemon-hosted window is moved by the daemon, which
+    /// re-pushes the layouts of every window it touched; applyRemoteLayout() realizes them by moving the
+    /// existing sessions. Refused when no session is named, a pane source names several, or the daemon does
+    /// not serve the move; Local only while the reconciler applies a push. The daemon's answer is reported
+    /// under the move's request number: moveRefused() for a refusal, takeLandedMoves() once the push that
+    /// made it ended.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteMove(
+        contour::session::RemoteMove const& move) override;
+
+    /// SessionFactory: the toggle of a split's axis in a daemon-hosted window is made by the daemon, whose
+    /// layout push brings it in (a local flip would be reverted by the next one). Local when the daemon does
+    /// not serve MoveNode, so an older daemon keeps the local toggle, and while the reconciler applies a
+    /// push; Refused when the pane is bound to no session.
+    [[nodiscard]] contour::session::RemoteRouting requestRemoteSplitOrientation(
+        vtpty::Pty const* anchorPty, vtworkspace::SplitState axis) override;
+
+    /// moveRefused()'s reason for a move that never reached the daemon: no connection was up to send it.
+    /// Outside every vthost::NodeMoveError value, which is a byte.
+    static constexpr int MoveNotSent = -1;
+
+    /// The moves requestRemoteMove() asked for whose pushes have ended since the last call, so the GUI can
+    /// tell its user where they landed once it has reconciled them. Taken before reading the settled
+    /// layouts, which are then at least as new as each push named here. Any thread.
+    /// @return Their request numbers, oldest first.
+    [[nodiscard]] std::vector<uint64_t> takeLandedMoves();
+
+    /// The moves in flight, by the serial each went out under, as requestRemoteMove() numbers them.
+    using MovesInFlight = std::map<uint64_t, uint64_t>;
+
+    /// Takes out of @p inFlight the moves a push ended with @p causeSerial completes. The daemon names one
+    /// cause per push, the last move it served before the push's end was sent, and serials only grow per
+    /// connection: every move with a serial up to it was served by then, so it is complete as well -- one
+    /// that pushed nothing would otherwise wait for the next reconnect.
+    /// @param inFlight    The moves in flight; the completed ones are erased.
+    /// @param causeSerial LayoutBatchEnd::causeSerial; 0 when no request of this client caused the push.
+    /// @return Their request numbers, oldest first.
+    [[nodiscard]] static std::vector<uint64_t> takeCompletedMoves(MovesInFlight& inFlight,
+                                                                  uint64_t causeSerial);
+
+    /// SessionFactory: the run of the daemon the last accepted connection reached.
+    /// @return The daemon's instance; std::nullopt before a connection was accepted, and from a daemon that
+    ///         states none.
+    [[nodiscard]] std::optional<uint64_t> daemonInstance() const noexcept override;
+
+    /// SessionFactory: the daemon session @p pty mirrors.
+    /// @return Its id; std::nullopt for a pty not bound to one.
+    [[nodiscard]] std::optional<uint64_t> hostSessionIdOf(vtpty::Pty const& pty) const noexcept override
+    {
+        return sessionForPty(&pty);
+    }
 
     /// SessionFactory: the user moved a divider, so the daemon's model — what a re-attaching client
     /// rebuilds from — is told the new ratio. @see proto::ResizeSplit.
@@ -431,6 +529,16 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// thread; connect queued). The GUI tells the user.
     void tabMergeRefused();
 
+    /// The daemon refused a move this client asked for, and changed nothing -- or the move could not be sent
+    /// at all (fires on the reactor thread; connect queued). The GUI tells the user.
+    /// @param reason Why, as a vthost::NodeMoveError's value, carried, not judged; MoveNotSent for a move no
+    ///               connection could take.
+    /// @param modelReason When @p reason is NodeMoveError::Model, why the model refused, as a
+    ///                    vtworkspace::MoveError's value; 0 otherwise.
+    /// @param request The number requestRemoteMove() was given for the move; 0 for one this client cannot
+    ///                match to a request.
+    void moveRefused(int reason, int modelReason, quint64 request);
+
   private:
     /// One discovered remote session awaiting a local tab.
     struct PendingSession
@@ -517,7 +625,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// bindings ready for the new connection's snapshots: restarted mirrors when the same daemon answered,
     /// detached bindings when it restarted. The panes closed while the connection was down are closed on
     /// the daemon now when it is the same one, and forgotten when it restarted.
-    void adoptReconnect();
+    /// @param held The caller's lock of _mutex, asked for so that no call can be made without it: the
+    ///             layouts, landed moves and tab pairings this clears are read by the GUI thread under it.
+    void adoptReconnect(std::lock_guard<std::mutex> const& held);
 
     /// Lets the tests run code on the reactor thread, against the client of the moment, to stage a
     /// connection that is ending before its state change is delivered -- a window no daemon can be made to
@@ -547,6 +657,16 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Reactor-side: stores the daemon's latest tab/pane layout and signals the
     /// GUI to reconcile its own tree against it.
     void onLayout(vthost::proto::LayoutState const& layout);
+
+    /// Reactor-side: the daemon refused a move (proto::MoveNodeRefused) it was sent under @p serial.
+    void onMoveNodeRefused(vthost::proto::MoveNodeRefused const& refused, uint64_t serial);
+
+    /// Reactor-side: the daemon ended a push (proto::LayoutBatchEnd); marks the layouts settled and signals
+    /// the GUI to reconcile the push whole.
+    void onLayoutBatchEnd(vthost::proto::LayoutBatchEnd const& end);
+
+    /// @return Whether the daemon ends its pushes (Capability::LayoutBatch shared). Under _mutex.
+    [[nodiscard]] bool layoutBatchShared() const;
 
     /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
     void onPermissionRequest(vthost::proto::PermissionRequest const& request);
@@ -630,7 +750,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::unordered_map<uint64_t, vtpty::InputEcho> _inputEchoes;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
     /// yields a stable ascending order (the primary window is the lowest id).
-    std::map<uint64_t, vthost::proto::LayoutState> _layouts;
+    LayoutSnapshot _layouts;
+    /// The layouts the GUI reconciles against (@see settledLayouts): _layouts as the last LayoutBatchEnd left
+    /// them, or as each LayoutState left them from a daemon that does not end its pushes. Written by the
+    /// reactor, read by the GUI thread: under _mutex.
+    LayoutSnapshot _settledLayouts;
     /// What this client last reported for a tab, by the daemon's tab id, until the daemon's next layout
     /// push of that window says how it presents the tab now: a second report before then is compared with
     /// this, not with a layout that predates the first, so what was already sent is not sent again.
@@ -647,6 +771,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
         vthost::proto::WireColorPreference::Unstated
     };
     bool _realizingLayout = false; ///< canCreateSession() is true while a layout is being realized.
+    /// The request number of each move in flight, by the serial it went out under (@see requestRemoteMove).
+    /// Reactor thread only.
+    MovesInFlight _moveRequests;
+    /// The request numbers of the moves whose pushes ended, for takeLandedMoves(). Under _mutex.
+    std::vector<uint64_t> _landedMoves;
+    /// The daemon tab each local tab shows, by local TabId value (@see pairTab).
+    /// Written by the GUI thread, cleared by the connection thread when the daemon restarted (its tab ids
+    /// count from 1 again): under _mutex.
+    std::unordered_map<uint64_t, uint64_t> _wireTabOf;
     /// Session ids this client is done with: a pane the user closed or ended, released while still
     /// attached. Their remote sessions can outlive the local pane by a round trip — the daemon has
     /// not honored the `ClosePane` yet, or never will because the pane was only detached from — and
