@@ -16,6 +16,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import Contour.Terminal
 
 Item {
     id: root
@@ -445,46 +446,27 @@ Item {
         }
     }
 
-    // --- Tab drag: reorder within the strip, move to another window, or tear out to a new window. ---
-    // Uses an AUTOMATIC drag (Drag.dragType: Drag.Automatic): when Drag.active goes true it runs a real
-    // QDrag::exec() that — unlike the default Internal drag, which is confined to one window's scene —
-    // crosses top-level windows in this process, so a DropArea in ANOTHER window receives it (that is what
-    // makes both cross-window drop AND the target strip's drop-caret work). The payload rides in
-    // Drag.mimeData because drop.source is not reliable across an OS QDrag; the destination reads it via
-    // drop.getDataAsString(). The real tab stays put — the OS drag cursor shows dragImage as the ghost.
-    Item {
+    // --- Tab drag: reorder within the strip, move into another window, split beside a pane, or tear out. ---
+    // The tab drags as the node it is (NodeDrag.mime, the one payload a pane card carries too): the
+    // controller decides what dropping it where does, and a tab of one pane drags as that pane. The real tab
+    // stays put -- the OS drag cursor shows dragImage as the ghost.
+    NodeDragSource {
         id: dragProxy
         objectName: "dragProxy"
-        Drag.dragType: Drag.Automatic
-        Drag.active: dragHandler.active
-        Drag.hotSpot.x: width / 2
-        Drag.hotSpot.y: height / 2
-        Drag.supportedActions: Qt.MoveAction
-        Drag.proposedAction: Qt.MoveAction
-        Drag.imageSource: root.dragImage
-        // windowId is a small sequential integer (SessionModel _nextWindowId++), so a plain JS number
-        // carries it without truncation; a DropArea in any window reads this back via getDataAsString().
-        Drag.mimeData: ({
-            "application/x-contour-tab": JSON.stringify({
-                windowId: root.controller ? root.controller.windowIdValue() : 0,
-                // A drop refuses a payload another process wrote (another token): ids and rows name ITS model.
-                token: root.controller ? root.controller.processToken() : "",
-                tabIndex: root.tabIndex
-            })
-        })
-        // The automatic QDrag has fully returned here with the real OS drop action. A strip DropArea that
-        // accepted the tab called drop.accept(Qt.MoveAction); dropping on empty desktop yields IgnoreAction
-        // -> tear the tab out into its own window. (This replaces the old Internal-drag Drag.drop() path.)
-        Drag.onDragFinished: (dropAction) => {
-            if (dropAction === Qt.IgnoreAction && root.controller)
-                root.controller.tearOffTab(root.tabIndex)
+        controller: root.controller
+        // Read when the drag starts: what the tab holds then, not what it held when it was built. A controller
+        // without drags starts none.
+        begin: function() {
+            return typeof root.controller.beginTabDrag === "function" ? root.controller.beginTabDrag(root.tabIndex)
+                                                                      : ""
         }
+        image: root.dragImage
     }
 
     DragHandler {
         id: dragHandler
         objectName: "tabDragHandler"   // findChild() handle for the GUI test
-        target: dragProxy
+        target: null
         // Says what a pointer handler already defaults to, as the window-move handler in TitleBar does and
         // for the same reason: a tab is dragged with the left button, the right one belongs to the context
         // menu, and a default is a thing a future edit can change without anyone noticing.
@@ -510,9 +492,10 @@ Item {
                          | PointerHandler.ApprovesTakeOverByItems
                          | PointerHandler.ApprovesCancellation
         // A small threshold so a click/tap still activates or renames; only a real drag begins a move.
-        // Activating this handler arms dragProxy.Drag.active, which starts the automatic QDrag; the
-        // move/tear-off decision is made by the DropArea and dragProxy.Drag.onDragFinished, not here.
+        // Activating this handler starts the automatic QDrag (dragProxy.carry()); what the drop does is
+        // decided by the DropArea that takes it and, where none does, by the controller, not here.
         dragThreshold: 8
+        onActiveChanged: if (active) dragProxy.carry()
     }
 
     // The lock, before the title, while a pane of the tab is at a password prompt.
@@ -808,6 +791,102 @@ Item {
         function onTabColorPickRequested(index) {
             if (index === root.tabIndex)
                 colorFlyout.open()
+        }
+    }
+
+    // --- A pane or tab dragged onto this tab ---
+    // Spring-loaded: resting on another tab for chromeStyle.tabDwellMs opens it under the drag, so the drag can
+    // be dropped beside one of its panes; the dwell bar along the tab's foot fills meanwhile. Released on the
+    // tab, the node lands beside the tab's active pane. The tab's edges are the strip's gaps (TabStrip.qml
+    // takes those), so this takes the middle only: a tab narrower than four gap halves keeps half its width.
+    DropArea {
+        id: nodeDrop
+        objectName: "tabDropArea"
+        keys: [NodeDrag.mime]
+        x: root.gapHalf
+        width: Math.max(0, root.width - root.gapHalf - root.gapHalf)
+        height: root.height
+
+        /// What is dragged over the tab; the drag's JSON.
+        property string nodePayload: ""
+        /// Whether resting here opens the tab: the controller refuses the tab the drag came from and a
+        /// window that cannot take the drag.
+        property bool opensOnDwell: false
+
+        onEntered: (drag) => {
+            nodePayload = drag.getDataAsString(NodeDrag.mime)
+            opensOnDwell = !root.tabActive && !!root.controller && root.controller.springOpens(root.tabIndex, nodePayload)
+            if (opensOnDwell) {
+                dwellTimer.restart()
+                dwellFill.restart()
+            }
+            drag.accepted = true
+        }
+        onExited: {
+            dwellTimer.stop()
+            dwellFill.stop()
+            dwellBar.progress = 0
+            opensOnDwell = false
+            nodePayload = ""
+        }
+        onDropped: (drop) => {
+            dwellTimer.stop()
+            dwellFill.stop()
+            dwellBar.progress = 0
+            const payload = drop.getDataAsString(NodeDrag.mime)
+            opensOnDwell = false
+            nodePayload = ""
+            if (root.controller)
+                root.controller.dropNodeOnTab(root.tabIndex, payload)
+            // Every drop recognised is accepted, a refused one included, or the drag would end as a drop
+            // outside every window and open one.
+            drop.accept(Qt.MoveAction)
+        }
+    }
+
+    /// How far each side of the tab belongs to the strip's gap rather than the tab (window::tabGapHalfWidthOf).
+    readonly property real gapHalf: chromeStyle.tabGapHalfWidthOf(root.width)
+
+    Timer {
+        id: dwellTimer
+        objectName: "tabDwellTimer"
+        interval: chromeStyle.tabDwellMs
+        onTriggered: {
+            if (root.controller)
+                root.controller.activateTab(root.tabIndex)
+        }
+    }
+
+    // The tab says a node is over it: a ring in the accent.
+    Rectangle {
+        objectName: "tabDropMark"
+        anchors.fill: parent
+        visible: nodeDrop.containsDrag
+        radius: background.radius
+        color: "transparent"
+        border.width: chromeStyle.dropEdgeWidth // the design's outline: 1.5 px in the accent
+        border.color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
+    }
+
+    // The dwell bar: fills along the tab's foot as the drag rests, and stays full once the tab has opened.
+    Rectangle {
+        id: dwellBar
+        objectName: "tabDwellBar"
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        height: chromeStyle.space.s1
+        /// How far the dwell has run, 0 to 1.
+        property real progress: 0
+        width: parent.width * progress
+        visible: nodeDrop.containsDrag && nodeDrop.opensOnDwell
+        color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
+        NumberAnimation {
+            id: dwellFill
+            target: dwellBar
+            property: "progress"
+            from: 0
+            to: 1
+            duration: chromeStyle.tabDwellMs
         }
     }
 }

@@ -18,10 +18,16 @@
 // fill of its own beneath them would composite a translucent profile twice.
 //
 // Something dragged over the card is taken or left alone by its DropArea, as WindowController.dropZoneAt
-// decides: files and text insert at the prompt, a tab dropped on an edge band splits the pane, and anything
-// else stays unaccepted -- a tab dropped in the middle ends as it did before, torn off into its own window.
-// While a drag it would take hovers the card, a ring around it and, for a split, the half the tab would
-// take say so.
+// decides: files and text insert at the prompt; a pane or tab (`application/x-contour-node`) dropped on an
+// edge band splits the pane, and a pane dropped in the middle trades places with it. Every such drop the
+// card recognises is accepted -- a no-op over the pane's own card, a refusal where the window cannot take it
+// -- so only a drop no window recognises ends as a drop outside every window. A tab dropped in the middle is
+// left to the window, which takes it as a no-op. While a drag the card takes hovers it, a ring around it and,
+// for a split or a swap, the part of the pane that would be taken say so, with a label; a refused drag shows
+// the reason in a note, and its ring in the warning role.
+//
+// The card is also the pane's own drag source (its header, PaneHeader.qml): while the pane is carried, the
+// card shows `<name>'s place` in a dashed outline in place of its content.
 //
 // Three things here sit over cells, against the spec's "nothing goes over non-blank cells" (§1.5), and all
 // are ruled exceptions, not precedent: the drop ring and ghost, for the length of a drag (Q3); the
@@ -30,6 +36,7 @@
 // takes room of its own, as the inline header and the ExitedFooter do.
 import QtQuick
 import QtQuick.Window
+import Contour.Terminal
 
 Item {
     id: card
@@ -85,6 +92,11 @@ Item {
     HoverHandler {
         id: hover
     }
+
+    /// Whether this pane is being carried by its header's drag: the window's controller says, as the drag is
+    /// the window's for its length.
+    readonly property bool dragging: !!paneDrop.controller && !!card.session
+                                     && paneDrop.controller.carriedPane === card.session
 
     ElevationShadow {
         objectName: "paneCardShadow"
@@ -295,35 +307,94 @@ Item {
         border.color: chromeStyle.accentColor
     }
 
-    // What dragged over the card would do. A tab rides in the drag's mime data (TabItem's dragProxy); the
-    // controller resolves the payload it names against the model, so nothing here trusts it.
+    // The empty place a carried pane leaves: its card, dashed, and whose place it is. Above the content and
+    // the header, under the drop marks, so a pane carried over its own card still shows where it was.
+    Item {
+        id: placeholder
+        objectName: "dragPlaceholder"
+        anchors.fill: parent
+        z: 3
+        visible: card.dragging
+
+        Rectangle {
+            anchors.fill: parent
+            radius: card.cornerRadius
+            color: card.fill
+        }
+
+        DashedFrame {
+            anchors.fill: parent
+            anchors.margins: chromeStyle.space.s1
+            cornerInset: card.cornerRadius
+            color: chromeStyle.paletteRevision < 0 ? "transparent"
+                 : chromeStyle.colorOn(chromeStyle.roles.paneCardBorder, card.fill)
+        }
+
+        Text {
+            objectName: "dragPlaceholderLabel"
+            anchors.centerIn: parent
+            width: parent.width - chromeStyle.space.s5 - chromeStyle.space.s5
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            text: qsTr("%1's place").arg(header.shownName)
+            font: chromeStyle.type.footnote
+            color: header.dimmedText
+        }
+    }
+
+    // What dragged over the card would do. A pane or tab rides in the drag's mime data
+    // (PaneHeader.qml's and TabItem.qml's drag proxies); the controller resolves the payload it names against
+    // the model, so nothing here trusts it.
     DropArea {
         id: paneDrop
         objectName: "paneDropArea"
         anchors.fill: parent
         z: 4
 
-        /// The mime format a tab drag carries (TabItem.qml's Drag.mimeData, TabStrip.qml's keys).
-        readonly property string tabFormat: "application/x-contour-tab"
+        /// The mime format a pane or tab drag carries.
+        readonly property string nodeFormat: NodeDrag.mime
         /// The window's controller (Main.qml's `win`); null while the window is torn down.
         readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
-        /// What is dragged, as a chromeStyle.dropPayloads value, and the tab JSON when it is a tab.
+        /// What is dragged, as a chromeStyle.dropPayloads value, and the node JSON when it is a pane or tab.
         property int payload: chromeStyle.dropPayloads.none
-        property string tabPayload: ""
+        property string nodePayload: ""
         /// What a drop here would do, as a chromeStyle.dropZones value.
         property int zone: chromeStyle.dropZones.none
-        /// The half of the card a split would give the tab; a null rectangle for any other zone.
-        readonly property rect ghost: controller ? controller.dropGhostRect(zone, card.width, card.height,
-                                                                            chromeStyle.space.s2)
-                                                 : Qt.rect(0, 0, 0, 0)
+        /// Whether a pane or tab is dragged over the card (rather than files or text).
+        readonly property bool carriesNode: payload === chromeStyle.dropPayloads.pane
+                                            || payload === chromeStyle.dropPayloads.tab
+        /// Where the pane starts beneath an inline header, which the ghost keeps clear of.
+        readonly property real bodyTop: card.headerInline ? header.height : 0
+        /// Whether the drag swaps the two panes: the whole pane below the header is taken.
+        readonly property bool swaps: zone === chromeStyle.dropZones.swap
+        /// The part of the pane below the header a split would give the dragged node, or the whole of it for
+        /// a swap; a null rectangle for any other zone.
+        readonly property rect ghost: {
+            if (!controller)
+                return Qt.rect(0, 0, 0, 0)
+            const inset = chromeStyle.space.s2
+            if (swaps)
+                return Qt.rect(inset, bodyTop + inset, card.width - 2 * inset, card.height - bodyTop - 2 * inset)
+            const half = controller.dropGhostRect(zone, card.width, card.height - bodyTop, inset)
+            return half.width > 0 ? Qt.rect(half.x, half.y + bodyTop, half.width, half.height)
+                                  : Qt.rect(0, 0, 0, 0)
+        }
         readonly property bool splits: ghost.width > 0
-        /// Whether the card takes the drag as it is now: text and files insert, a tab splits on an edge. The
-        /// middle of a card (PassThrough) and anything it does not understand are left unaccepted.
-        readonly property bool takes: zone === chromeStyle.dropZones.insertText || splits
+        /// Whether a pane or tab is dragged over a place the window refuses to move it to.
+        readonly property bool refuses: carriesNode && zone === chromeStyle.dropZones.refused
+        /// Whether the card takes the drag as it is now: text and files insert, and a pane or tab it has a
+        /// zone for -- a split, a swap, a no-op over itself, a refusal -- is taken. The middle of a card
+        /// under a tab (PassThrough) and anything it does not understand are left unaccepted.
+        readonly property bool takes: zone === chromeStyle.dropZones.insertText
+                                      || (carriesNode && zone !== chromeStyle.dropZones.none
+                                          && zone !== chromeStyle.dropZones.passThrough)
 
         function payloadOf(drag) {
-            if (drag.formats.indexOf(tabFormat) >= 0)
-                return chromeStyle.dropPayloads.tab
+            if (drag.formats.indexOf(nodeFormat) >= 0) {
+                // The kind the JSON says it is: a tab of one pane drags as the pane. Fail closed.
+                const kind = controller ? controller.dropPayloadOf(drag.getDataAsString(nodeFormat)) : undefined
+                return typeof kind === "number" ? kind : chromeStyle.dropPayloads.none
+            }
             // Every URL list is the session's to type (files and web links alike, escaped and checked there):
             // a page chooses what its drag carries, so none of it is pasted here as text.
             if (drag.hasUrls)
@@ -335,25 +406,25 @@ Item {
 
         function refresh(drag) {
             payload = payloadOf(drag)
-            tabPayload = payload === chromeStyle.dropPayloads.tab ? drag.getDataAsString(tabFormat) : ""
+            nodePayload = carriesNode ? drag.getDataAsString(nodeFormat) : ""
             // Fail closed: a call the engine could not make answers `undefined`, which is no zone at all.
             const answer = controller && card.session
                            ? controller.dropZoneAt(card.session, payload, drag.x, drag.y, card.width,
-                                                   card.height, tabPayload)
+                                                   card.height, nodePayload)
                            : chromeStyle.dropZones.none
             zone = typeof answer === "number" ? answer : chromeStyle.dropZones.none
         }
 
         function reset() {
             payload = chromeStyle.dropPayloads.none
-            tabPayload = ""
+            nodePayload = ""
             zone = chromeStyle.dropZones.none
         }
 
-        // A tab is accepted on entry wherever it lands on the card, so the drag keeps reporting its position
-        // into the edge bands; anything the card cannot place at all is refused here. From then on every move
-        // is answered with what a drop there would do, so the cursor says "forbidden" over the middle and
-        // "accepting" over an edge, and a release over the middle ends IgnoreAction: the tab tears off.
+        // A drag is accepted on entry wherever it lands on the card, so it keeps reporting its position into
+        // the edge bands; anything the card cannot place at all is refused here. From then on every move is
+        // answered with what a drop there would do, so the cursor says "forbidden" over the middle of a tab
+        // drag and "accepting" over an edge.
         onEntered: (drag) => {
             refresh(drag)
             drag.accepted = zone !== chromeStyle.dropZones.none
@@ -365,15 +436,25 @@ Item {
         onExited: reset()
         onDropped: (drop) => {
             refresh(drop)
-            const dropped = { zone: zone, payload: payload, tabPayload: tabPayload, takes: takes, splits: splits }
+            const dropped = { zone: zone, payload: payload, nodePayload: nodePayload, takes: takes,
+                              carriesNode: carriesNode }
             reset()
             if (!dropped.takes || !card.session || !controller) {
-                // Not accepted, so the drag ends IgnoreAction: a tab then tears off, as it always did.
+                // Not accepted: the window may take it (a tab in the middle of a card is a no-op there), or
+                // it is a drop no window recognises.
                 drop.accepted = false
                 return
             }
-            if (dropped.splits) {
-                controller.dropTabOnPane(card.session, dropped.zone, dropped.tabPayload)
+            if (dropped.carriesNode) {
+                // Splits and swaps move; a no-op or a refusal moves nothing, and is accepted all the same,
+                // or the drag would end as a drop outside every window and open one.
+                const moves = dropped.zone === chromeStyle.dropZones.splitLeft
+                              || dropped.zone === chromeStyle.dropZones.splitRight
+                              || dropped.zone === chromeStyle.dropZones.splitTop
+                              || dropped.zone === chromeStyle.dropZones.splitBottom
+                              || dropped.zone === chromeStyle.dropZones.swap
+                if (moves)
+                    controller.dropNodeOnPane(card.session, dropped.zone, dropped.nodePayload)
                 drop.accept(Qt.MoveAction)
                 return
             }
@@ -386,26 +467,30 @@ Item {
         }
     }
 
-    // The mark of a drop: the ring around the card and the ghost's edge. The one colour the overlay
-    // scrollbar's engaged thumb is, resolved on the card's own fill, which holds 3:1 on every row,
-    // appearance and bundled scheme (UiStyleProvider_test).
-    readonly property color dropMark: chromeStyle.paletteRevision < 0
-                                      ? "transparent"
-                                      : chromeStyle.colorOn(chromeStyle.roles.scrollbarThumbActive, card.fill)
+    // The mark of a drop: the ring around the card, the ghost's fill and edge and its label's pill. Every
+    // "will land here" cue of the design is the chrome's accent.
+    readonly property color dropMark: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
 
-    // The ring says the card will take what hovers it.
+    // The warning a refusal is drawn in, on the card's own fill: the chrome's warning mark.
+    readonly property color refusalMark: chromeStyle.paletteRevision < 0
+                                         ? "transparent"
+                                         : chromeStyle.statusMarkOn(chromeStyle.statusWarning, card.fill)
+
+    // The ring says the card will take what hovers it; in the warning role it says the window will not move
+    // the node here. Not over the pane's own card, where the drop changes nothing.
     Rectangle {
         objectName: "dropRing"
         anchors.fill: parent
         z: 4
-        visible: paneDrop.containsDrag && paneDrop.takes
+        visible: paneDrop.containsDrag && (paneDrop.refuses || (paneDrop.takes && paneDrop.zone !== chromeStyle.dropZones.noOp))
         radius: card.cornerRadius
         color: "transparent"
-        border.width: chromeStyle.space.s1
-        border.color: card.dropMark
+        border.width: chromeStyle.dropRingWidth // the design's ring: 2 px
+        border.color: paneDrop.refuses ? card.refusalMark : card.dropMark
     }
 
-    // The ghost shows the half a tab would take, and says what it would do, on a toast's own contrast.
+    // The ghost shows the part of the pane a split or a swap would give the dragged node, and says what it
+    // would do in a pill of the accent: the accent at 18 %, edged 1.5 px in the accent, as the design draws it.
     Rectangle {
         objectName: "dropGhost"
         x: paneDrop.ghost.x
@@ -413,18 +498,83 @@ Item {
         width: paneDrop.ghost.width
         height: paneDrop.ghost.height
         z: 4
-        visible: paneDrop.containsDrag && paneDrop.splits
+        visible: paneDrop.containsDrag && (paneDrop.splits || paneDrop.swaps)
         radius: card.cornerRadius
-        color: "transparent"
-        border.width: chromeStyle.space.s1
+        color: Qt.alpha(card.dropMark, 0.18)
+        border.width: chromeStyle.dropEdgeWidth // the design's ghost edge: 1.5 px
         border.color: card.dropMark
 
-        Toast {
-            objectName: "dropGhostLabel"
+        Rectangle {
+            id: ghostPill
+            objectName: "dropGhostPill"
             anchors.centerIn: parent
-            shown: parent.visible
-            elevation: chromeStyle.elevation.inPane
-            text: paneDrop.controller ? paneDrop.controller.dropGhostLabel(paneDrop.zone) : ""
+            width: Math.min(ghostText.implicitWidth + chromeStyle.space.s5 + chromeStyle.space.s5, parent.width)
+            height: ghostText.implicitHeight + chromeStyle.space.s3 + chromeStyle.space.s3
+            radius: chromeStyle.radii.toast
+            color: card.dropMark
+
+            Text {
+                id: ghostText
+                objectName: "dropGhostLabel"
+                anchors.centerIn: parent
+                width: parent.width - chromeStyle.space.s5 - chromeStyle.space.s5
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                text: ghostPill.visible && paneDrop.controller
+                      ? paneDrop.controller.dropGhostLabel(paneDrop.zone, paneDrop.payload, card.session) : ""
+                font: chromeStyle.activeTabFont(chromeStyle.type.footnote)
+                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.onColor(card.dropMark)
+            }
+        }
+    }
+
+    // Why the window will not take the dragged node: a note over the pane, in the warning role, naming what
+    // the drag can be moved to instead.
+    Rectangle {
+        id: refusalNote
+        objectName: "dropRefusal"
+        z: 4
+        x: chromeStyle.space.s7
+        y: paneDrop.bodyTop + chromeStyle.space.s8
+        width: card.width - x - x
+        height: refusalColumn.implicitHeight + chromeStyle.space.s5 + chromeStyle.space.s5
+        visible: paneDrop.containsDrag && paneDrop.refuses
+        radius: chromeStyle.radii.toast
+        color: chromeStyle.paletteRevision < 0 ? "transparent" : Qt.tint(card.fill, Qt.alpha(card.refusalMark, 0.18))
+        border.width: chromeStyle.hairline(Screen.devicePixelRatio)
+        border.color: card.refusalMark
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: refusalTitle.text + ", " + refusalBody.text
+
+        Column {
+            id: refusalColumn
+            x: chromeStyle.space.s5
+            y: chromeStyle.space.s5
+            width: parent.width - x - x
+            spacing: chromeStyle.space.s2
+
+            Text {
+                id: refusalTitle
+                objectName: "dropRefusalTitle"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: qsTr("Can't move a pane here")
+                // The face a row sets its emphasis apart with (bold, or the Terminal row's own).
+                font: chromeStyle.activeTabFont(chromeStyle.type.footnote)
+                color: chromeStyle.paletteRevision < 0 ? "transparent"
+                     : chromeStyle.statusTextOn(chromeStyle.statusWarning, refusalNote.color)
+            }
+
+            Text {
+                id: refusalBody
+                objectName: "dropRefusalBody"
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: paneDrop.controller && paneDrop.refuses ? paneDrop.controller.refusalText(paneDrop.nodePayload) : ""
+                font: chromeStyle.type.footnote
+                color: chromeStyle.paletteRevision < 0 ? "transparent"
+                     : chromeStyle.colorOn(chromeStyle.roles.paneHeaderText, refusalNote.color)
+            }
         }
     }
 }

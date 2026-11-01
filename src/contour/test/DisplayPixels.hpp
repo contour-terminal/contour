@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
@@ -41,6 +42,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -303,6 +305,30 @@ inline void moveMouse(contour::display::TerminalDisplay* display, QPointF pos)
     return QRect { 0, 0, frame.width(), g.rowTop(unbox<int>(h.session->terminal().pageSize().lines)) };
 }
 
+/// A length the tests state in device-independent pixels, as it stands in a frame grabbed at @p dpr: a frame
+/// is grabbed in device pixels, so a probe, a band or a slack sized for one ratio covers a different share of
+/// what it measures at another.
+/// @param logical The length in device-independent pixels.
+/// @param dpr     The frame's device-pixel ratio.
+/// @return The length in the frame's pixels.
+[[nodiscard]] inline int devicePixels(qreal logical, qreal dpr)
+{
+    return static_cast<int>(std::lround(logical * dpr));
+}
+
+/// A probe the tests state in device-independent pixels, placed relative to a point of the frame.
+/// @param anchor  Where the probe is placed from, in the frame's pixels.
+/// @param logical The probe's offset from @p anchor and its size, in device-independent pixels.
+/// @param dpr     The frame's device-pixel ratio.
+/// @return The probe in the frame's pixels.
+[[nodiscard]] inline QRect probeAt(QPoint anchor, QRect logical, qreal dpr)
+{
+    return QRect { anchor.x() + devicePixels(logical.x(), dpr),
+                   anchor.y() + devicePixels(logical.y(), dpr),
+                   devicePixels(logical.width(), dpr),
+                   devicePixels(logical.height(), dpr) };
+}
+
 /// The bounding box of every pixel inside @p region that differs between @p before and @p after.
 [[nodiscard]] inline QRect changedBounds(QImage const& before, QImage const& after, QRect const& region)
 {
@@ -314,6 +340,29 @@ inline void moveMouse(contour::display::TerminalDisplay* display, QPointF pos)
             if (before.pixel(x, y) != after.pixel(x, y))
                 bounds = bounds.isNull() ? QRect { x, y, 1, 1 } : bounds.united(QRect { x, y, 1, 1 });
     return bounds;
+}
+
+/// Whether @p ink is @p mark over @p ground, as an edge anti-aliased across pixels draws it: every channel
+/// moved toward the mark by about the same share, and by a good part of the way.
+/// @param mark   The colour the edge is drawn in.
+/// @param ground What it is drawn over.
+/// @param ink    The strongest pixel of the edge.
+[[nodiscard]] inline bool isBlendOf(vtbackend::RGBColor mark,
+                                    vtbackend::RGBColor ground,
+                                    vtbackend::RGBColor ink)
+{
+    constexpr auto MinimumShare = 0.4;
+    constexpr auto ShareSpread = 0.1;
+    auto shares = std::vector<double> {};
+    auto const channels = std::array { std::tuple { mark.red, ground.red, ink.red },
+                                       std::tuple { mark.green, ground.green, ink.green },
+                                       std::tuple { mark.blue, ground.blue, ink.blue } };
+    for (auto const& [markValue, groundValue, inkValue]: channels)
+        if (markValue != groundValue)
+            shares.push_back(static_cast<double>(inkValue - groundValue)
+                             / static_cast<double>(markValue - groundValue));
+    return !shares.empty() && *std::ranges::min_element(shares) >= MinimumShare
+           && *std::ranges::max_element(shares) - *std::ranges::min_element(shares) <= ShareSpread;
 }
 
 } // namespace contour::test::pixel

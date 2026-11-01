@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
 import Qt.labs.platform
+import Contour.Terminal
 
 ThemedWindow
 {
@@ -211,6 +212,18 @@ ThemedWindow
             && !terminalSessions.consumeDefaultLayout(win))
             win.createNewTab()
         win.showInitial()
+    }
+
+    // Every pane or tab dropped on this window is taken, as a no-op where nothing above took it: the drag
+    // then ends MoveAction, so IgnoreAction means a drop outside every Contour window, or a cancel
+    // (WindowController.finishNodeDrag). Declared first, so every pane, tab and gap target sits above it and
+    // is offered the drag before it.
+    DropArea {
+        id: windowDropCatchAll
+        objectName: "windowDropCatchAll"
+        anchors.fill: parent
+        keys: [NodeDrag.mime]
+        onDropped: (drop) => drop.accept(Qt.MoveAction)
     }
 
     // {{{ Custom title bar + terminal content

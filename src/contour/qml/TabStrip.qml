@@ -10,6 +10,12 @@
 // Flat strip as the title bar: its tabs stand on the band's floor, and its "+" and "▾" are rounded buttons
 // just above it.
 //
+// A pane or tab dragged over the strip (`application/x-contour-node`) is taken by what it is over: a tab takes
+// it for itself (TabItem's DropArea: spring-load to open it, release to land beside its active pane), and the
+// gaps between tabs -- and the empty bar after the last -- take it as a tab of its own, showing a dashed
+// tab-shaped slot where it would land. Which is which is the controller's decision over the tab spans this
+// strip reports to it (tabBarHit).
+//
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
 // the strip hosts the tabs' one context menu — not a row of the tab model. The new-tab menu is the title
@@ -17,6 +23,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Contour.Terminal
 
 Row {
     id: root
@@ -97,45 +104,76 @@ Row {
         if (tab.x < list.contentX)
             list.contentX = Math.floor(tab.x)
     }
-    onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
-    onAvailableWidthChanged: Qt.callLater(root.revealActiveTab)
-
-    // Maps a cursor x (in the drop area's coordinates, what a DropArea's drag reports) to the tab slot
-    // the dragged tab would drop into: slot i means "before tab i" (so dropping past the midpoint of tab
-    // i lands after it). Returns a value in [0, count]. A scrolled well's tabs sit at their CONTENT
-    // positions, so the visible x is shifted by how far the list has scrolled before it is compared.
-    // Kept a pure function so the drop math is obvious and reviewable.
-    function dropIndexFor(areaX) {
-        var x = areaX - listClip.x + list.contentX
-        var count = list.count
-        for (var i = 0; i < count; ++i) {
-            var item = list.itemAtIndex(i)
-            if (!item)
-                continue
-            if (x < item.x + item.width / 2)
-                return i
-        }
-        return count
+    onWellLayoutChanged: {
+        Qt.callLater(root.revealActiveTab)
+        root.scheduleSpans()
+    }
+    onAvailableWidthChanged: {
+        Qt.callLater(root.revealActiveTab)
+        root.scheduleSpans()
     }
 
-    // The content x of the insertion caret for a given drop slot: the left edge of the tab at that
-    // slot, or the right edge of the last tab when the slot is past the end.
-    function dropIndexToX(index) {
-        var count = list.count
+    /// How wide the insertion slot is.
+    readonly property real slotWidth: 110
+    /// The gap the insertion slot stands in while a node is dragged over one; -1 while there is none.
+    readonly property int slotGap: dropArea.containsDrag ? dropArea.gapIndex : -1
+    /// How far the tabs from the slot's gap on move right to make room for it: the slot and the spacing after
+    /// it. Nothing for the slot after the last tab, which has the empty bar to stand in.
+    readonly property real roomMade: slotGap >= 0 && slotGap < list.count ? slotWidth + list.spacing : 0
+    onRoomMadeChanged: root.scheduleSpans()
+    onSlotGapChanged: root.scheduleSpans()
+    /// How much wider a strip that is only as wide as its tabs becomes for the slot, so that the "+" beside it
+    /// moves on instead of standing under the slot: the room the tabs make between two of them, or the slot
+    /// itself after the last. A strip that fills the bar has the empty bar to stand in.
+    readonly property real slotRoom: root.slotGap < 0 ? 0
+                                   : root.slotGap < list.count ? root.roomMade
+                                   : root.slotWidth + chromeStyle.space.s2
+
+    // Where the tabs stand, reported to the controller as a drag enters the strip and whenever the strip lays
+    // out or scrolls while the drag is over it -- the only time anything hit-tests against them (tabBarHit) --
+    // in the coordinates of the strip's drop area (with the room the slot takes, so what the pointer is over
+    // is what the controller hit-tests it against). One span per tab, a tab with no delegate (scrolled far
+    // out of view) a zero-width span at the edge of the one before it.
+    function reportSpans() {
+        if (!root.controller)
+            return
+        const spans = []
+        let edge = listClip.x + list.x - list.contentX
+        for (let i = 0; i < list.count; ++i) {
+            // As they stand once the tabs have made room for the slot, not as they animate there.
+            const shift = i >= root.slotGap ? root.roomMade : 0
+            const tab = list.itemAtIndex(i)
+            if (tab) {
+                edge = listClip.x + list.x + tab.x - list.contentX + shift
+                spans.push(Qt.rect(edge, 0, tab.width, tab.height))
+                edge += tab.width
+            } else {
+                spans.push(Qt.rect(edge, 0, 0, 0))
+            }
+        }
+        root.controller.setTabSpans(spans)
+    }
+    function scheduleSpans() {
+        // Over the strip from its entry (which reports at once) to its exit or drop.
+        if (dropArea.nodePayload !== "")
+            Qt.callLater(root.reportSpans)
+    }
+
+    // Where the insertion slot for gap @p index stands, in the drop area's coordinates: centred on the
+    // boundary between two tabs, and running on from the last tab at the end.
+    // @param index The gap, as tabBarHit() names it: before the tab at that row, or after the last.
+    function slotX(index) {
+        const count = list.count
         if (count === 0)
-            return 0
+            return listClip.x
         if (index >= count) {
-            var last = list.itemAtIndex(count - 1)
-            return last ? last.x + last.width : 0
+            const last = list.itemAtIndex(count - 1)
+            return last ? listClip.x + list.x + last.x + last.width - list.contentX + chromeStyle.space.s2
+                        : listClip.x
         }
-        var item = list.itemAtIndex(index)
-        return item ? item.x : 0
-    }
-
-    // Where the caret for drop slot @p index stands, in the drop area's coordinates: the slot's content
-    // position, moved back by the scroll, so the caret is on the visible tab edge it names.
-    function caretX(index) {
-        return root.dropIndexToX(index) - list.contentX + listClip.x
+        // Where the tab there stands unmoved: the room the other tabs make is this one's.
+        const tab = list.itemAtIndex(index)
+        return tab ? listClip.x + list.x + tab.x - list.contentX : listClip.x
     }
 
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
@@ -145,8 +183,8 @@ Row {
         // and scrolls, so the active tab and the "+" beside it stay in view.
         // A strip on its own, whose width no bar assigns, is as wide as its tabs.
         width: root.pill ? root.wellLayout.wellWidth
-             : root.availableWidth > 0 ? Math.min(list.contentWidth, root.availableWidth)
-             : list.contentWidth
+             : root.availableWidth > 0 ? Math.min(list.contentWidth + root.slotRoom, root.availableWidth)
+             : list.contentWidth + root.slotRoom
         height: root.height
 
         // The well the pills sit in, centred in the bar. Only the Pill shape has one, and only on a row whose
@@ -198,7 +236,11 @@ Row {
                 // once more before teardown finishes (previously a TypeError in the shutdown log).
                 currentIndex: root.controller ? root.controller.activeTabIndex : -1
                 onCurrentIndexChanged: Qt.callLater(root.revealActiveTab)
-                onCountChanged: Qt.callLater(root.revealActiveTab)
+                onCountChanged: {
+                    Qt.callLater(root.revealActiveTab)
+                    root.scheduleSpans()
+                }
+                onContentXChanged: root.scheduleSpans()
 
                 delegate: TabItem {
                     // Role values injected for this row. Declared as required properties (the modern
@@ -241,6 +283,15 @@ Row {
                     tabBadgeProgress: badgeProgress
                     locked: (model.tabSecure ?? 0) !== 0
                     secureState: model.tabSecure ?? 0
+                    // The tabs from the slot's gap on make room for it, animated as a reorder is.
+                    transform: Translate {
+                        x: index >= root.slotGap ? root.roomMade : 0
+                        Behavior on x {
+                            NumberAnimation { duration: chromeStyle.motion.standard }
+                        }
+                    }
+                    onXChanged: root.scheduleSpans()
+                    onWidthChanged: root.scheduleSpans()
                     onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
                     Component.onDestruction: if (engaged) root.engagedTabs -= 1
                 }
@@ -250,21 +301,6 @@ Row {
                     NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
                 }
             }
-        }
-
-        // The insertion caret: a prominent vertical bar shown while a tab is dragged over this strip,
-        // parked at the slot boundary where the tab will land (the UX "you'll drop it here" cue). Wide,
-        // rounded and opaque so the drop position is unmistakable during a drag.
-        Rectangle {
-            id: dropIndicator
-            width: chromeStyle.dropCaretWidth
-            radius: chromeStyle.radius
-            height: parent.height
-            color: palette.highlight
-            visible: dropArea.containsDrag
-            // Center the bar on the slot boundary (caretX gives the boundary x).
-            x: root.caretX(dropArea.hoverIndex) - width / 2
-            z: 2
         }
 
         // Horizontal wheel over the tabs switches tabs. A MouseArea rather than a WheelHandler: both
@@ -289,35 +325,94 @@ Row {
             }
         }
 
+        // The gaps between the tabs, before the first and after the last, and the empty bar beyond: a node
+        // dropped there becomes a tab of its own at that slot (a tab of this window's is reordered to it).
+        // The tabs' own DropAreas lie above this one, over the middle of each tab.
         DropArea {
             id: dropArea
-            anchors.fill: parent
-            // Accept only Contour tab drags — a keyless DropArea would also light up for file/text OS
+            objectName: "tabGapDropArea"
+            // Beneath the tabs' own DropAreas, which take the middle of each tab.
+            z: -1
+            x: 0
+            y: 0
+            width: Math.max(parent.width, root.availableWidth)
+            height: parent.height
+            // Accept only Contour node drags — a keyless DropArea would also light up for file/text OS
             // drags. Qt 6.11 has no Drag.keys on the source, so we key the DropArea on the mime format.
-            keys: ["application/x-contour-tab"]
-            // The slot the dragged tab would be inserted at, derived from the cursor x over the tabs.
-            property int hoverIndex: 0
-            onPositionChanged: (drag) => { hoverIndex = root.dropIndexFor(drag.x) }
-            onEntered: (drag) => { hoverIndex = root.dropIndexFor(drag.x) }
+            keys: [NodeDrag.mime]
+            /// The drag's JSON, and the gap it is over: -1 when it is over no gap.
+            property string nodePayload: ""
+            property int gapIndex: -1
+            /// What the slot names: the dragged pane's or tab's title.
+            property string title: ""
+
+            function locate(drag) {
+                const hit = root.controller ? root.controller.tabBarHit(drag.x) : undefined
+                gapIndex = hit !== undefined && hit.spot === TabBarSpot.Gap ? hit.index : -1
+            }
+
+            onEntered: (drag) => {
+                nodePayload = drag.getDataAsString(NodeDrag.mime)
+                title = root.controller ? root.controller.dragTitle(nodePayload) : ""
+                root.reportSpans()
+                locate(drag)
+                drag.accepted = true
+            }
+            onPositionChanged: (drag) => {
+                locate(drag)
+                drag.accepted = true
+            }
+            onExited: {
+                gapIndex = -1
+                nodePayload = ""
+            }
             onDropped: (drop) => {
-                if (!root.controller)
-                    return
-                // The payload rides in mimeData (drop.source is null across an OS/cross-window QDrag);
-                // read it back as a string and parse. hoverIndex already holds the slot for the current
-                // cursor position (kept current by onPositionChanged), so reuse it.
-                var raw = drop.getDataAsString("application/x-contour-tab")
-                if (!raw)
-                    return
-                var payload = JSON.parse(raw)
-                // Written by another process (or forged): its window ids and rows are not this model's.
-                if (payload.token !== root.controller.processToken())
-                    return
-                var target = hoverIndex
-                if (payload.windowId === root.controller.windowIdValue())
-                    root.controller.moveTab(payload.tabIndex, target)  // same window: reorder
-                else
-                    root.controller.moveTabIntoThisWindow(payload.windowId, payload.tabIndex, target)
+                locate(drop)
+                const payload = drop.getDataAsString(NodeDrag.mime)
+                const gap = gapIndex
+                gapIndex = -1
+                nodePayload = ""
+                if (root.controller && gap >= 0)
+                    root.controller.dropNodeInGap(gap, payload)
+                // Every drop recognised is accepted, or the drag would end as a drop outside every window and
+                // open one.
                 drop.accept(Qt.MoveAction)
+            }
+        }
+
+        // The slot: a dashed, tab-shaped outline in the accent where the dropped node would become a tab,
+        // named for it. Between two tabs they have moved apart for it (roomMade), so it overlaps no title.
+        Item {
+            id: insertionSlot
+            objectName: "tabInsertionSlot"
+            z: 2
+            visible: dropArea.containsDrag && dropArea.gapIndex >= 0
+            width: root.slotWidth
+            height: list.height
+            x: root.slotX(dropArea.gapIndex)
+            y: listClip.y + list.y + list.height - height
+            /// The slot's edge and tint: the chrome's accent, as every "lands here" cue is.
+            readonly property color mark: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.accentColor
+
+            Rectangle {
+                anchors.fill: parent
+                radius: chromeStyle.radii.tab
+                color: Qt.alpha(insertionSlot.mark, 0.18)
+            }
+            DashedFrame {
+                anchors.fill: parent
+                cornerInset: chromeStyle.radii.tab
+                color: insertionSlot.mark
+            }
+            Text {
+                objectName: "tabInsertionSlotLabel"
+                anchors.centerIn: parent
+                width: parent.width - chromeStyle.space.s4 - chromeStyle.space.s4
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                text: dropArea.title !== "" ? dropArea.title : qsTr("New tab")
+                font: chromeStyle.activeTabFont(chromeStyle.type.tab)
+                color: chromeStyle.colors.tabText
             }
         }
     }

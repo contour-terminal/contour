@@ -1984,7 +1984,8 @@ TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen
     // DragHandler takes a PASSIVE grab on press, so it sees the moves whoever is on top; while it could
     // also take over from an item it then stole the exclusive grab from the handle that had just asked the
     // window manager to resize, and TabItem's automatic QDrag rendered the tab under the cursor for the
-    // length of the gesture. Releasing away from a strip would have gone on to call tearOffTab().
+    // length of the gesture. Releasing away from a strip would have gone on to end a node drag outside every
+    // window.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
