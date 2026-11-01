@@ -14,8 +14,10 @@
 #include <vthost/HostedShell.hpp>
 #include <vthost/SocketPath.hpp>
 
+using vthost::LabelOrigin;
 using vthost::muxSocketPath;
 using vthost::MuxSocketPathInputs;
+using vthost::SocketLabel;
 
 namespace
 {
@@ -145,7 +147,7 @@ TEST_CASE("the production overload reads its inputs from the injected environmen
     // mutated to arrange this.
     auto const environment = core::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
 
-    CHECK(muxSocketPath("work", "", environment) == "/run/user/4242/contour/work");
+    CHECK(muxSocketPath(vthost::socketLabelOf("work"), "", environment) == "/run/user/4242/contour/work");
 
     SECTION("and $CONTOUR_MUX still outranks it")
     {
@@ -154,7 +156,7 @@ TEST_CASE("the production overload reads its inputs from the injected environmen
             { "XDG_RUNTIME_DIR", "/run/user/4242" },
         } };
 
-        CHECK(muxSocketPath("work", "", overridden) == "/env/mux.sock");
+        CHECK(muxSocketPath(SocketLabel { .name = "work" }, "", overridden) == "/env/mux.sock");
     }
 }
 
@@ -168,7 +170,7 @@ TEST_CASE("a label's own socket is what neither --socket nor $CONTOUR_MUX names"
     CHECK(vthost::labelSocketPath("work", overridden) == "/run/user/4242/contour/work");
     CHECK(vthost::labelSocketPath(vthost::DefaultSocketLabel, overridden)
           == "/run/user/4242/contour/default");
-    CHECK(muxSocketPath("work", "", overridden) == "/env/mux.sock");
+    CHECK(muxSocketPath(SocketLabel { .name = "work" }, "", overridden) == "/env/mux.sock");
 }
 
 TEST_CASE("the production overload takes the sandbox from where it is injected too", "[vthost][socketpath]")
@@ -180,7 +182,7 @@ TEST_CASE("the production overload takes the sandbox from where it is injected t
                                                 .network = vtpty::NetworkAccess::Denied,
                                                 .applicationId = SandboxedAs };
 
-    CHECK(muxSocketPath("work", "", environment, sandboxed)
+    CHECK(muxSocketPath(vthost::socketLabelOf("work"), "", environment, sandboxed)
           == "/run/user/4242/app/org.contourterminal.Contour/contour/work");
 }
 
@@ -220,4 +222,72 @@ TEST_CASE("a hosted shell's pane variables are full references", "[vthost][socke
     auto const shell = vthost::hostedShellFor(base, profile, vthost::ShellOverride::Replaces, environment);
     CHECK(shell.env.at("CONTOUR_PANE") == "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
     CHECK(shell.env.at("A") == "1");
+}
+
+TEST_CASE("an explicit label beats $CONTOUR_MUX, the default label yields to it", "[vthost][socketpath]")
+{
+    constexpr auto Mux = "/run/user/1000/contour/default";
+
+    CHECK(muxSocketPath(MuxSocketPathInputs { .label = "dragtest",
+                                              .labelOrigin = LabelOrigin::Explicit,
+                                              .contourMuxEnv = Mux,
+                                              .xdgRuntimeDir = "/run/user/1000",
+                                              .user = TestUser })
+          == "/run/user/1000/contour/dragtest");
+
+    // Nobody named a label: the daemon hosting the calling shell is the one meant.
+    CHECK(muxSocketPath(MuxSocketPathInputs { .label = "dragtest",
+                                              .labelOrigin = LabelOrigin::Default,
+                                              .contourMuxEnv = "/env/mux.sock",
+                                              .xdgRuntimeDir = "/run/user/1000",
+                                              .user = TestUser })
+          == "/env/mux.sock");
+}
+
+TEST_CASE("an explicitly given `default` label beats $CONTOUR_MUX too", "[vthost][socketpath]")
+{
+    CHECK(muxSocketPath(MuxSocketPathInputs { .label = vthost::DefaultSocketLabel,
+                                              .labelOrigin = LabelOrigin::Explicit,
+                                              .contourMuxEnv = "/env/mux.sock",
+                                              .xdgRuntimeDir = "/run/user/1000",
+                                              .user = TestUser })
+          == "/run/user/1000/contour/default");
+}
+
+TEST_CASE("--socket beats both an explicit label and $CONTOUR_MUX", "[vthost][socketpath]")
+{
+    CHECK(muxSocketPath(MuxSocketPathInputs { .label = "dragtest",
+                                              .labelOrigin = LabelOrigin::Explicit,
+                                              .explicitPath = "/tmp/explicit.sock",
+                                              .contourMuxEnv = "/env/mux.sock",
+                                              .xdgRuntimeDir = "/run/user/1000",
+                                              .user = TestUser })
+          == "/tmp/explicit.sock");
+}
+
+TEST_CASE(
+    "an explicit label is derived through the sandbox rung, and the unlabelled shell still finds its daemon",
+    "[vthost][socketpath]")
+{
+    // The Flatpak rationale for $CONTOUR_MUX: a sandboxed shell with no --label reaches its own daemon.
+    auto const environment = core::testing::FakeEnvironment { {
+        { "CONTOUR_MUX", "/run/user/4242/app/org.contourterminal.Contour/contour/default" },
+        { "XDG_RUNTIME_DIR", "/run/user/4242" },
+    } };
+    auto const sandboxed = vtpty::SandboxInfo { .state = vtpty::SandboxState::Flatpak,
+                                                .network = vtpty::NetworkAccess::Denied,
+                                                .applicationId = SandboxedAs };
+
+    CHECK(muxSocketPath(SocketLabel {}, "", environment, sandboxed)
+          == "/run/user/4242/app/org.contourterminal.Contour/contour/default");
+    CHECK(muxSocketPath(vthost::socketLabelOf("work"), "", environment, sandboxed)
+          == "/run/user/4242/app/org.contourterminal.Contour/contour/work");
+}
+
+TEST_CASE("socketLabelOf reads an empty option as not given", "[vthost][socketpath]")
+{
+    CHECK(vthost::socketLabelOf("").origin == LabelOrigin::Default);
+    CHECK(vthost::socketLabelOf("").name == vthost::DefaultSocketLabel);
+    CHECK(vthost::socketLabelOf("default").origin == LabelOrigin::Explicit);
+    CHECK(vthost::socketLabelOf("work").name == "work");
 }
