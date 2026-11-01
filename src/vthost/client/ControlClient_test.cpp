@@ -301,8 +301,7 @@ TEST_CASE("resolveControlEndpoint precedence", "[vthost][client][control]")
     CHECK(describe({ .daemon = "/tmp/x" }, withDaemon) == "unix:/tmp/x");
     CHECK(describe({}, withDaemon) == "unix:/run/env.sock");
     CHECK(describe({}, empty)
-          == std::format("unix:{}",
-                         core::pathToUtf8(vthost::muxSocketPath(vthost::DefaultSocketLabel, {}, empty))));
+          == std::format("unix:{}", core::pathToUtf8(vthost::muxSocketPath({}, {}, empty))));
     CHECK(describe({ .daemon = "h:7297" }, empty) == "tls://h:7297");
     // A path with a colon in it is still a path.
     CHECK(describe({ .daemon = "/run/user/1000/x:1" }, empty) == "unix:/run/user/1000/x:1");

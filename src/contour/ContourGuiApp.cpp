@@ -1335,10 +1335,11 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     else
     {
         // The local daemon: its socket and size policy are the client's options, else the `daemon:` section.
-        auto const label =
-            _clientRequest ? _clientRequest->label : std::string { vthost::DefaultSocketLabel };
+        auto const socketLabel = vthost::socketLabelOf(_clientRequest ? _clientRequest->label : "");
+        auto const& label = socketLabel.name;
         auto const controlPath = vthost::muxSocketPath(
-            label, cli::resolveSocketOption(_clientRequest ? _clientRequest->socket : "", settings.socket));
+            socketLabel,
+            cli::resolveSocketOption(_clientRequest ? _clientRequest->socket : "", settings.socket));
         auto const sizePolicy =
             cli::resolveSizePolicy(_clientRequest ? _clientRequest->sizePolicy : "", settings.sizePolicy);
         if (!sizePolicy)
@@ -1591,11 +1592,12 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               CLI::Value { ""s },
                               "Path of the daemon's control socket file. Defaults to the "
                               "configuration's `daemon.socket`, else $XDG_RUNTIME_DIR/contour/LABEL "
-                              "(respecting $CONTOUR_MUX).",
+                              "($CONTOUR_MUX when no --label is given).",
                               "PATH" },
                 CLI::Option { "label",
-                              CLI::Value { std::string { vthost::DefaultSocketLabel } },
-                              "Socket label distinguishing daemon instances.",
+                              CLI::Value { ""s },
+                              "Socket label distinguishing daemon instances (default: `default`). Given, "
+                              "it beats $CONTOUR_MUX.",
                               "NAME" },
                 CLI::Option { "tmux",
                               CLI::Value { false },
@@ -3612,7 +3614,7 @@ int ContourGuiApp::connectAction()
     request.logFilter = parameters().get<string>("contour.connect.log");
     request.logFile = parameters().get<string>("contour.connect.log-file");
     request.config = configPath;
-    request.label = plan.label.empty() ? string { vthost::DefaultSocketLabel } : plan.label;
+    request.label = plan.label; // Empty: the default label, which $CONTOUR_MUX outranks.
     return launchClient(std::move(request), plan.host);
 }
 
@@ -3690,9 +3692,8 @@ std::expected<void, std::string> ContourGuiApp::launchConnect(config::LaunchTarg
 cli::LocalDaemonState ContourGuiApp::probeLocalDaemon(std::string const& socketOption)
 {
     auto const spawner = vthost::makeNativeDaemonSpawner();
-    return cli::probeLocalDaemon(*spawner,
-                                 vthost::muxSocketPath(vthost::DefaultSocketLabel, socketOption),
-                                 cli::nativeSessionCounter());
+    return cli::probeLocalDaemon(
+        *spawner, vthost::muxSocketPath({}, socketOption), cli::nativeSessionCounter());
 }
 
 void ContourGuiApp::refreshLauncherMenu()

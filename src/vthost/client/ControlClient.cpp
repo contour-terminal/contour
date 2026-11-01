@@ -294,7 +294,7 @@ std::expected<std::shared_ptr<ITransportFactory>, ControlClientError> resolveCon
         !options.daemon.empty() ? options.daemon : env.get("CONTOUR_DAEMON").value_or(std::string {});
     // Never a daemon started for a control call: an empty ensureDaemon.
     if (spec.empty())
-        return std::make_shared<UnixTransportFactory>(muxSocketPath(DefaultSocketLabel, {}, env),
+        return std::make_shared<UnixTransportFactory>(muxSocketPath({}, {}, env),
                                                       UnixTransportFactory::EnsureDaemon {});
     // A spec that reads as a path is one, a colon in it notwithstanding (`/run/user/1000/x:1`).
     auto const socketAt = [](std::string const& path) {

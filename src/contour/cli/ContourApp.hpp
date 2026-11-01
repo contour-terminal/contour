@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include <vthost/SocketPath.hpp>
+
 namespace vthost
 {
 enum class DaemonLaunchStyle : std::uint8_t;
@@ -123,11 +125,13 @@ class ContourApp: public core::cli::App
     int daemonServiceAction(DaemonServiceAction action, std::string const& prefix);
     /// The argv an installed registration is given, with every path already absolute.
     /// @param prefix The invoking verb's dotted flag prefix.
-    /// @param label The socket label the daemon serves.
+    /// @param label The socket label the daemon serves, and whether the user named it.
     /// @param launchStyle Whether the supervising backend wants the daemon in the foreground or detached.
     /// @return The argv (argv[0] first), or why the options could not be resolved.
     [[nodiscard]] std::expected<std::vector<std::string>, std::string> daemonServiceCommandLine(
-        std::string const& prefix, std::string const& label, vthost::DaemonLaunchStyle launchStyle) const;
+        std::string const& prefix,
+        vthost::SocketLabel const& label,
+        vthost::DaemonLaunchStyle launchStyle) const;
 };
 
 } // namespace contour::cli

@@ -107,10 +107,18 @@ contour client --label work
 The label names a socket under your per-user runtime directory. Resolution order:
 
 1. `--socket PATH` — used verbatim.
-2. `$CONTOUR_MUX` — used verbatim (analogous to tmux's `$TMUX`).
-3. `$XDG_RUNTIME_DIR/contour/<label>`.
-4. `<temp>/contour-<uid>/<label>` when there is no runtime directory (tmux's
+2. An explicitly given `--label NAME` (the value `default` included) — the label's own socket,
+   exactly as tmux's `-L` beats `$TMUX`.
+3. `$CONTOUR_MUX` — used verbatim (analogous to tmux's `$TMUX`).
+4. `$XDG_RUNTIME_DIR/contour/<label>` (the default label when none was given).
+5. `<temp>/contour-<uid>/<label>` when there is no runtime directory (tmux's
    `/tmp/tmux-<uid>/<label>` shape).
+
+A daemon exports `$CONTOUR_MUX` into every shell it hosts, so a command typed in one of its panes
+reaches that same daemon without a flag. That is why it ranks above the default label: a sandboxed
+(Flatpak) shell cannot derive where its daemon lives, and a plain `contour client` there still finds
+it. It ranks below an explicit `--label`, so `contour daemon --label work status` from inside a pane
+asks the `work` daemon rather than the one hosting the pane.
 
 The daemon binds three endpoints, all derived from that one path: the control socket itself,
 `<socket>-native` for Contour's own clients, and `<socket>-tmux` for the tmux binary.
@@ -126,8 +134,8 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 
 | Option | What it does |
 | --- | --- |
-| `--socket PATH` | Path of the control socket file. Defaults to the configuration's `daemon.socket`, else `$XDG_RUNTIME_DIR/contour/LABEL`, respecting `$CONTOUR_MUX`. |
-| `--label NAME` | Socket label distinguishing daemon instances. Default `default`. |
+| `--socket PATH` | Path of the control socket file. Defaults to the configuration's `daemon.socket`, else `$CONTOUR_MUX` when no `--label` is given, else `$XDG_RUNTIME_DIR/contour/LABEL`. |
+| `--label NAME` | Socket label distinguishing daemon instances. Default `default`. Given, it beats `$CONTOUR_MUX`. |
 | `--config FILE` | Configuration file whose profile supplies the hosted sessions' terminal settings — including `history.limit`, which is how much scrollback a session keeps for clients that attach later. |
 | `--profile NAME` | Which profile of that configuration to take them from. Defaults to the configuration's default profile. |
 | `--lifecycle POLICY` | When the daemon ends on its own: `persistent` (the default), `exit-with-last-session` or `exit-when-idle`. See [Quick start](#quick-start). |
