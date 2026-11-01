@@ -3,6 +3,8 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
@@ -10,7 +12,9 @@
 #include <utility>
 #include <vector>
 
+#include <vtworkspace/Arrangement.hpp>
 #include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/Move.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Primitives.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -172,6 +176,44 @@ class SessionModel
         WindowId from, TabId source, WindowId to, TabId target, PaneId leaf, SplitSide side);
 
     // }}}
+    // {{{ Moves
+
+    /// Moves a pane or a whole tab to a new place: beside another pane, onto another pane (trading
+    /// places), into a window's tab strip, or into a window of its own. No session is closed; the moved
+    /// node keeps its sessions, and the pane keeps its PaneId except when it swaps (only the sessions
+    /// trade places then) or becomes a tab of its own.
+    ///
+    /// Everything is validated before the first mutation, so a refusal changes nothing and fires no
+    /// event. On success the target tab becomes its window's active tab, the moved session becomes its
+    /// active pane, and zoom is cleared on every tab involved. A source tab left without panes is
+    /// removed; a source window left without tabs stays in the model, empty, for the host to close (as
+    /// with moveTabToWindow).
+    /// @param source What is dragged. A one-pane tab counts as a pane.
+    /// @param target Where it is dropped.
+    /// @return Where focus lands, or why nothing happened.
+    [[nodiscard]] std::expected<MoveResult, MoveError> moveNode(MoveSource const& source,
+                                                                MoveTarget const& target);
+
+    /// @param source What a move would drag.
+    /// @return Whether @p source is everything its window holds: its only tab, or that tab's only pane. A
+    ///         NewWindowTarget refuses such a source as MoveError::NoOp; a host that makes the new window
+    ///         itself asks this first.
+    [[nodiscard]] bool fillsItsWindow(MoveSource const& source) const;
+
+    /// Lays @p tab's panes out as @p shape: the leaves it has are rearranged into the given splits, ratios
+    /// and order, each going where its session is named. No session is spawned or closed, and every leaf
+    /// keeps its PaneId, so a host showing a pane keeps showing it. What a host mirroring another model
+    /// does once a tab holds the panes the other model's tab does, but in another tree.
+    ///
+    /// Hosts see the tree restructure (paneTreeRestructured) and, if a zoom was cleared, the zoom change
+    /// and the retitle. The active pane stays the active pane, so focus does not move. A tab already
+    /// arranged as @p shape is left as it is, and nothing fires.
+    /// @param tab   The tab to rearrange.
+    /// @param shape The tree to lay its panes out as, naming each session of the tab exactly once.
+    /// @return Nothing, or why nothing changed.
+    [[nodiscard]] std::expected<void, ArrangeError> arrangeTab(TabId tab, PaneArrangement const& shape);
+
+    // }}}
     // {{{ Panes
 
     /// Splits @p tab's active pane along @p direction, allocating a new session for the new pane.
@@ -203,6 +245,23 @@ class SessionModel
     /// Flips the orientation of @p tab's active pane's parent split (Horizontal<->Vertical). No-op if
     /// the active pane is the tab's only pane.
     void toggleActivePaneOrientation(TabId tab);
+
+    /// Why setSplitOrientation() changed nothing.
+    enum class SetOrientationError : uint8_t
+    {
+        UnknownSession, ///< No pane hosts the anchor session.
+        NoSplit,        ///< The anchor's tab is a single pane: there is no parent split.
+        NotAnAxis,      ///< The requested state is neither Horizontal nor Vertical.
+    };
+
+    /// Sets the axis of the split that is the parent of the leaf hosting @p anchor, whatever pane is
+    /// active, and clears the tab's zoom as the toggle does. A split already on @p axis is left alone and
+    /// fires no event. Fires paneOrientationChanged otherwise.
+    /// @param anchor The session of a leaf inside the split to change.
+    /// @param axis   The axis to set: Horizontal or Vertical.
+    /// @return Nothing, or why nothing changed.
+    [[nodiscard]] std::expected<void, SetOrientationError> setSplitOrientation(SessionId anchor,
+                                                                               SplitState axis);
 
     /// Swaps @p tab's active pane with its neighbor in @p direction (the two terminals trade slots),
     /// keeping the moved session focused. No-op if there is no neighbor.
@@ -346,6 +405,43 @@ class SessionModel
     ///         its own tabTitleChanged for an unrelated reason checks this so the tab is not retitled
     ///         twice, which would run the host's whole status-line fan-out for one keystroke.
     bool announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
+
+    /// Inserts @p tab into @p window at @p index (clamped), announcing it and making it the active tab.
+    Tab* insertTab(Window& window, int index, std::unique_ptr<Tab> tab);
+
+    /// Announces the zoom change, or else the retitle, of @p tab after a move touched its panes.
+    void announcePaneMove(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
+
+    /// Announces that a move took a pane out of @p tab, which keeps others: its tree restructured, its
+    /// active pane, and its zoom change or retitle.
+    void announceSourceShrunk(Tab& tab, std::optional<PaneId> zoomedLeafBefore);
+
+    // {{{ moveNode() halves, defined with it.
+    enum class SourceShape : uint8_t;
+    struct MoveSourceNode;
+    struct MoveTargetNode;
+
+    /// @return What @p source names, or why it names nothing.
+    [[nodiscard]] std::expected<MoveSourceNode, MoveError> resolveMoveSource(MoveSource const& source) const;
+
+    /// @return What @p target names, or why it names nothing.
+    [[nodiscard]] std::expected<MoveTargetNode, MoveError> resolveMoveTarget(MoveTarget const& target) const;
+
+    /// @return Whether @p src is everything its window holds (@see fillsItsWindow(MoveSource const&)).
+    [[nodiscard]] static bool fillsItsWindow(MoveSourceNode const& src) noexcept;
+
+    /// Moves @p src beside @p dst's pane, on @p side. @pre moveNode() validated the move.
+    /// @return Where focus lands; an error only were the validation wrong, never by undefined behaviour.
+    std::expected<MoveResult, MoveError> moveBeside(MoveSourceNode const& src,
+                                                    MoveTargetNode const& dst,
+                                                    SplitSide side);
+
+    /// Trades @p src's pane with @p dst's. @pre moveNode() validated the move.
+    MoveResult swapWith(MoveSourceNode const& src, MoveTargetNode const& dst);
+
+    /// Moves @p src into @p window's tab strip at @p index. @pre moveNode() validated the move.
+    MoveResult moveIntoWell(MoveSourceNode const& src, Window& window, int index);
+    // }}}
 
     ModelEvents& _events;
     SessionAllocator _allocateSession;

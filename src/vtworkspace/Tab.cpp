@@ -2,6 +2,10 @@
 #include <vtworkspace/Tab.hpp>
 
 #include <cassert>
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace vtworkspace
 {
@@ -15,6 +19,52 @@ void Tab::touchMru(PaneId id)
 void Tab::forgetFromMru(PaneId id)
 {
     std::erase(_mru, id);
+}
+
+std::vector<SessionId> Tab::leafSessions() const
+{
+    auto sessions = std::vector<SessionId> {};
+    _root->walkTree([&sessions](Pane const& pane) {
+        if (pane.isLeaf())
+            sessions.push_back(pane.session());
+    });
+    return sessions;
+}
+
+bool Tab::isArrangedAs(PaneArrangement const& shape) const noexcept
+{
+    auto const same = [](this auto const& self, Pane const& pane, PaneArrangement const& node) -> bool {
+        if (pane.splitState() != node.split)
+            return false;
+        if (pane.isLeaf())
+            return pane.session() == node.session;
+        return node.children.size() == 2 && pane.ratio() == Pane::clampRatio(node.ratio)
+               && self(*pane.first(), node.children[0]) && self(*pane.second(), node.children[1]);
+    };
+    return same(*_root, shape);
+}
+
+void Tab::arrange(PaneArrangement const& shape)
+{
+    auto parts = Pane::dismantle(std::move(_root));
+    auto leaves = std::unordered_map<uint64_t, std::unique_ptr<Pane>> {};
+    for (auto& leaf: parts.leaves)
+    {
+        auto const session = leaf->session().value;
+        leaves.emplace(session, std::move(leaf));
+    }
+    auto nextSplitId = parts.splitIds.begin();
+    auto const build = [&](this auto const& self, PaneArrangement const& node) -> std::unique_ptr<Pane> {
+        if (node.split == SplitState::None)
+            return std::move(leaves.at(node.session.value));
+        auto const id = *nextSplitId++;
+        auto first = self(node.children[0]);
+        auto second = self(node.children[1]);
+        return Pane::join(id, node.split, node.ratio, std::move(first), std::move(second));
+    };
+    _root = build(shape);
+    // The leaves are the same objects, so the active one and the MRU still name panes of the tree.
+    _zoomed = false;
 }
 
 void Tab::setActivePane(Pane* leaf)
@@ -76,9 +126,32 @@ Pane* Tab::graftTab(Pane& leaf, Tab& source, SplitSide side, PaneId splitNodeId,
     return grafted;
 }
 
+Pane* Tab::graftLeaf(
+    Pane& target, std::unique_ptr<Pane> leaf, SplitSide side, PaneId splitNodeId, double ratio)
+{
+    assert(target.isLeaf() && "graftLeaf() must be given a leaf");
+    assert(leaf != nullptr && leaf->isLeaf() && leaf->parent() == nullptr);
+
+    _zoomed = false; // the grafted pane must be visible (see Tab.h's zoom block)
+
+    auto* const grafted =
+        target.graft(std::move(leaf), splitNodeId, splitStateOf(side), graftOrderOf(side), ratio);
+
+    // `target` is a split node now, so _activeLeaf may no longer name a leaf: the grafted pane takes over.
+    setActivePane(grafted);
+    return grafted;
+}
+
 SessionId Tab::closePane(Pane* leaf)
 {
-    assert(leaf != nullptr && leaf->isLeaf());
+    assert(leaf != nullptr);
+    return detachLeaf(*leaf)->session();
+}
+
+std::unique_ptr<Pane> Tab::detachLeaf(Pane& detaching)
+{
+    auto* const leaf = &detaching;
+    assert(leaf->isLeaf());
     assert(!isLastPane(leaf) && "closing the last pane must close the tab instead");
 
     // Drop the zoom: the survivors are re-laid out, and the closed pane may well have been the zoomed
@@ -98,7 +171,7 @@ SessionId Tab::closePane(Pane* leaf)
     // those pointers after absorption is undefined behaviour, so capture the decision as a plain bool now.
     bool const activeLeafInvalidated = _activeLeaf == leaf || _activeLeaf == sibling;
 
-    auto const closedSession = parent->closeChild(leaf);
+    auto detached = parent->detachChild(leaf);
 
     forgetFromMru(closedId);
 
@@ -123,7 +196,7 @@ SessionId Tab::closePane(Pane* leaf)
         setActivePane(next);
     }
 
-    return closedSession;
+    return detached;
 }
 
 Pane* Tab::focusDirection(FocusDirection direction)

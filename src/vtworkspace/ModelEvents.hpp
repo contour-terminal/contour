@@ -125,11 +125,13 @@ class ModelEvents
     /// @p a and the leaf @p b now host each other's former session.
     ///
     /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to re-bind the two
-    /// affected panes to their new sessions.
+    /// affected panes to their new sessions. Fired only for a swap inside one tab; a swap between two
+    /// tabs fires paneTreeRestructured for each instead.
     virtual void paneSwapped(TabId tab, PaneId a, PaneId b) { (void) tab, (void) a, (void) b; }
 
     /// The leaf @p leaf of @p tab carries a new session in place of its former one (a restart in the
-    /// same pane); its PaneId, the active pane and the zoom are unchanged.
+    /// same pane); its PaneId, the active pane and the zoom are unchanged. A pane swap does not fire
+    /// it (see paneSwapped, paneTreeRestructured).
     ///
     /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to re-bind the pane
     /// to its new session.
@@ -150,8 +152,8 @@ class ModelEvents
     }
 
     /// The pane tree of @p tab was restructured in a way that reshapes topology unpredictably (a pane
-    /// was moved/re-parented). Unlike the targeted events above, the host should re-read the whole
-    /// tab's tree rather than a single node.
+    /// was moved/re-parented, or traded a session with a leaf of another tab). Unlike the targeted events
+    /// above, the host should re-read the whole tab's tree rather than a single node.
     ///
     /// Defaulted to a no-op (see paneOrientationChanged). The Qt GUI overrides it to rebuild the
     /// tab's proxy tree wholesale.

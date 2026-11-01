@@ -4,8 +4,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <ranges>
+#include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace vtworkspace
 {
@@ -121,19 +125,33 @@ Tab* SessionModel::createTab(WindowId windowId)
     auto const rootPaneId = _nextPaneId++;
     auto const session = _allocateSession();
 
+    return insertTab(
+        *win, static_cast<int>(win->_tabs.size()), std::make_unique<Tab>(tabId, rootPaneId, session));
+}
+
+Tab* SessionModel::insertTab(Window& win, int requestedIndex, std::unique_ptr<Tab> tab)
+{
+    auto const windowId = win.id();
+    auto const tabId = tab->id();
+    auto const index = std::clamp(requestedIndex, 0, static_cast<int>(win._tabs.size()));
+
     // Bracket the insertion so a Qt host's beginInsertRows() runs BEFORE the tab set grows (its contract
     // requires rowCount() to still report the old count at that point) and endInsertRows() after.
-    auto const index = static_cast<int>(win->_tabs.size());
     _events.tabAboutToBeAdded(windowId, index);
-    win->_tabs.push_back(std::make_unique<Tab>(tabId, rootPaneId, session));
+    win._tabs.insert(win._tabs.begin() + index, std::move(tab));
+    // Tabs at or after the new slot moved up by one; keep the active/previous slots on the same tabs.
+    if (win._activeTabIndex >= index)
+        ++win._activeTabIndex;
+    if (win._previousActiveTabIndex >= index)
+        ++win._previousActiveTabIndex;
     _events.tabAdded(windowId, tabId, index);
 
     // A new tab is a genuine activation: remember the outgoing active slot as the previous tab.
-    win->_previousActiveTabIndex = win->_activeTabIndex;
-    win->_activeTabIndex = index;
+    win._previousActiveTabIndex = win._activeTabIndex;
+    win._activeTabIndex = index;
     _events.activeTabChanged(windowId, tabId, index);
 
-    return win->_tabs[static_cast<size_t>(index)].get();
+    return win._tabs[static_cast<size_t>(index)].get();
 }
 
 void SessionModel::closeTabAt(Window& win, int index, std::function<void()> const& beforeErase)
@@ -385,6 +403,302 @@ Pane* SessionModel::mergeTabIntoSplit(
 }
 
 // }}}
+// {{{ Moves
+
+/// How much of its tab the dragged node is.
+enum class SessionModel::SourceShape : uint8_t
+{
+    LeafOfMany = 0, //!< One pane of a tab that has other panes.
+    WholeTab,       //!< A tab, with one pane or several.
+};
+
+/// The dragged node, resolved against the model.
+struct SessionModel::MoveSourceNode
+{
+    Window* window = nullptr;
+    Tab* tab = nullptr;
+    Pane* leaf = nullptr; //!< The dragged leaf; null for a tab with several panes.
+    SourceShape shape = SourceShape::LeafOfMany;
+};
+
+/// The drop place, resolved against the model.
+struct SessionModel::MoveTargetNode
+{
+    Window* window = nullptr;
+    Tab* tab = nullptr;
+    Pane* leaf = nullptr; //!< The pane dropped beside or onto; null for a tab well or a new window.
+};
+
+std::expected<SessionModel::MoveSourceNode, MoveError> SessionModel::resolveMoveSource(
+    MoveSource const& source) const
+{
+    if (auto const* pane = std::get_if<PaneSource>(&source))
+    {
+        auto const [window, tab, leaf] = findSessionLeaf(pane->session);
+        if (leaf == nullptr)
+            return std::unexpected(MoveError::UnknownSource);
+        return MoveSourceNode { .window = window,
+                                .tab = tab,
+                                .leaf = leaf,
+                                .shape =
+                                    tab->isLastPane(leaf) ? SourceShape::WholeTab : SourceShape::LeafOfMany };
+    }
+
+    auto const& tabSource = std::get<TabSource>(source);
+    auto* window = this->window(tabSource.window);
+    auto* tab = window != nullptr ? window->tabAt(window->indexOf(tabSource.tab)) : nullptr;
+    if (tab == nullptr)
+        return std::unexpected(MoveError::UnknownSource);
+    return MoveSourceNode { .window = window,
+                            .tab = tab,
+                            .leaf = tab->hasMultiplePanes() ? nullptr : tab->rootPane(),
+                            .shape = SourceShape::WholeTab };
+}
+
+std::expected<SessionModel::MoveTargetNode, MoveError> SessionModel::resolveMoveTarget(
+    MoveTarget const& target) const
+{
+    auto const resolveLeaf = [&](SessionId session) -> std::expected<MoveTargetNode, MoveError> {
+        auto const [window, tab, leaf] = findSessionLeaf(session);
+        if (leaf == nullptr)
+            return std::unexpected(MoveError::UnknownTarget);
+        return MoveTargetNode { .window = window, .tab = tab, .leaf = leaf };
+    };
+
+    if (auto const* edge = std::get_if<EdgeTarget>(&target))
+        return resolveLeaf(edge->pane);
+    if (auto const* swap = std::get_if<SwapTarget>(&target))
+        return resolveLeaf(swap->pane);
+    if (auto const* well = std::get_if<TabWellTarget>(&target))
+    {
+        auto* window = this->window(well->window);
+        if (window == nullptr)
+            return std::unexpected(MoveError::UnknownTarget);
+        return MoveTargetNode { .window = window };
+    }
+    return MoveTargetNode {};
+}
+
+void SessionModel::announcePaneMove(Tab& tab, std::optional<PaneId> zoomedLeafBefore)
+{
+    if (!announceZoomChange(tab, zoomedLeafBefore))
+        _events.tabTitleChanged(tab.id());
+}
+
+void SessionModel::announceSourceShrunk(Tab& tab, std::optional<PaneId> zoomedLeafBefore)
+{
+    _events.paneTreeRestructured(tab.id());
+    _events.activePaneChanged(tab.id(), tab.activePane()->id());
+    announcePaneMove(tab, zoomedLeafBefore);
+}
+
+std::expected<MoveResult, MoveError> SessionModel::moveNode(MoveSource const& source,
+                                                            MoveTarget const& target)
+{
+    // {{{ Validate everything; nothing below this block may refuse.
+    auto const src = resolveMoveSource(source);
+    if (!src)
+        return std::unexpected(src.error());
+    auto const dst = resolveMoveTarget(target);
+    if (!dst)
+        return std::unexpected(dst.error());
+
+    auto const dropsOnPane =
+        std::holds_alternative<EdgeTarget>(target) || std::holds_alternative<SwapTarget>(target);
+    if (dropsOnPane)
+    {
+        if (dst->leaf == src->leaf)
+            return std::unexpected(MoveError::SelfTarget);
+        if (src->shape == SourceShape::WholeTab && dst->tab == src->tab)
+            return std::unexpected(MoveError::SelfTarget);
+        if (std::holds_alternative<SwapTarget>(target) && src->leaf == nullptr)
+            return std::unexpected(MoveError::TabIntoSwap);
+    }
+    if (auto const* well = std::get_if<TabWellTarget>(&target);
+        well != nullptr && src->shape == SourceShape::WholeTab && dst->window == src->window)
+    {
+        auto const lastIndex = src->window->tabCount() - 1;
+        if (std::clamp(well->index, 0, lastIndex) == src->window->indexOf(src->tab))
+            return std::unexpected(MoveError::NoOp);
+    }
+    // A window of its own for what already is all of one would tear that window down to build it again.
+    if (std::holds_alternative<NewWindowTarget>(target) && fillsItsWindow(*src))
+        return std::unexpected(MoveError::NoOp);
+    // }}}
+
+    return std::visit(
+        [&](auto const& drop) -> std::expected<MoveResult, MoveError> {
+            using Drop = std::decay_t<decltype(drop)>;
+            if constexpr (std::is_same_v<Drop, EdgeTarget>)
+                return moveBeside(*src, *dst, drop.side);
+            else if constexpr (std::is_same_v<Drop, SwapTarget>)
+                return swapWith(*src, *dst);
+            else if constexpr (std::is_same_v<Drop, TabWellTarget>)
+                return moveIntoWell(*src, *dst->window, drop.index);
+            else
+                return moveIntoWell(*src, *createWindow(), 0); // a window of its own, at its first slot
+        },
+        target);
+}
+
+bool SessionModel::fillsItsWindow(MoveSourceNode const& src) noexcept
+{
+    return src.shape == SourceShape::WholeTab && src.window->tabCount() == 1;
+}
+
+bool SessionModel::fillsItsWindow(MoveSource const& source) const
+{
+    auto const src = resolveMoveSource(source);
+    return src && fillsItsWindow(*src);
+}
+
+std::expected<MoveResult, MoveError> SessionModel::moveBeside(MoveSourceNode const& src,
+                                                              MoveTargetNode const& dst,
+                                                              SplitSide side)
+{
+    // Half and half: the dropped node and the pane it lands beside share the space equally.
+    constexpr double EdgeRatio = 0.5;
+
+    // Captured now: the tabs and panes below are rearranged, and the objects may not survive it.
+    auto const srcTabId = src.tab->id();
+    auto const dstWindowId = dst.window->id();
+    auto const dstTabId = dst.tab->id();
+    auto const movedSession = src.leaf != nullptr ? src.leaf->session() : src.tab->activePane()->session();
+
+    if (src.shape == SourceShape::WholeTab)
+    {
+        // Refused before it changes anything, as everything moveNode() validated must be.
+        if (mergeTabIntoSplit(src.window->id(), srcTabId, dstWindowId, dstTabId, dst.leaf->id(), side)
+            == nullptr)
+            return std::unexpected(MoveError::UnknownTarget);
+        return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+    }
+
+    auto const srcZoomBefore = src.tab->zoomedLeafId();
+    auto const dstZoomBefore = dst.tab->zoomedLeafId();
+    auto const dstSession = dst.leaf->session();
+    auto const leafId = src.leaf->id();
+    auto detached = src.tab->detachLeaf(*src.leaf);
+    // Detaching folds the leaf's sibling into its parent, which may have been the drop pane's node.
+    auto* dropPane = dst.tab->rootPane()->findLeaf(dstSession);
+    if (dropPane == nullptr)
+    {
+        // Not reached: the drop pane is another leaf than the detached one, and a detach keeps every other
+        // leaf's session. Were it reached, the detached pane would be lost with its session; it becomes a
+        // tab of its own instead, so every session is still shown, and the move is reported as not landed.
+        announceSourceShrunk(*src.tab, srcZoomBefore);
+        (void) insertTab(
+            *dst.window, dst.window->tabCount(), std::make_unique<Tab>(_nextTabId++, leafId, movedSession));
+        return std::unexpected(MoveError::UnknownTarget);
+    }
+    (void) dst.tab->graftLeaf(*dropPane, std::move(detached), side, _nextPaneId++, EdgeRatio);
+
+    if (src.tab != dst.tab)
+        announceSourceShrunk(*src.tab, srcZoomBefore);
+    activateTab(dstWindowId, dstTabId);
+    _events.paneTreeRestructured(dstTabId);
+    _events.activePaneChanged(dstTabId, leafId);
+    announcePaneMove(*dst.tab, dstZoomBefore);
+    return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+}
+
+MoveResult SessionModel::swapWith(MoveSourceNode const& src, MoveTargetNode const& dst)
+{
+    auto const srcTabId = src.tab->id();
+    auto const srcZoomBefore = src.tab->zoomedLeafId();
+    auto const dstWindowId = dst.window->id();
+    auto const dstTabId = dst.tab->id();
+    auto const dstZoomBefore = dst.tab->zoomedLeafId();
+    auto const srcLeafId = src.leaf->id();
+    auto const dstLeafId = dst.leaf->id();
+    auto const movedSession = src.leaf->session();
+
+    src.tab->clearZoom();
+    dst.tab->clearZoom();
+    src.leaf->swapLeafPayload(dst.leaf);
+    dst.tab->setActivePane(dst.leaf);
+
+    if (src.tab == dst.tab)
+        _events.paneSwapped(dstTabId, srcLeafId, dstLeafId);
+    else
+    {
+        // Sessions trade between two trees: every observer re-reads both wholesale (paneSwapped
+        // names one tab only, and paneSessionReplaced means a restart in place).
+        _events.paneTreeRestructured(srcTabId);
+        _events.paneTreeRestructured(dstTabId);
+        // The source tab's active pane now carries another session, so its title may have changed too.
+        announcePaneMove(*src.tab, srcZoomBefore);
+    }
+    activateTab(dstWindowId, dstTabId);
+    _events.activePaneChanged(dstTabId, dstLeafId);
+    announcePaneMove(*dst.tab, dstZoomBefore);
+    return MoveResult { .window = dstWindowId, .tab = dstTabId, .focused = movedSession };
+}
+
+MoveResult SessionModel::moveIntoWell(MoveSourceNode const& src, Window& window, int index)
+{
+    auto const srcTabId = src.tab->id();
+    auto const srcZoomBefore = src.tab->zoomedLeafId();
+    auto const windowId = window.id();
+    auto const movedSession = src.leaf != nullptr ? src.leaf->session() : src.tab->activePane()->session();
+
+    if (src.shape == SourceShape::WholeTab)
+    {
+        src.tab->clearZoom();
+        moveTabToWindow(src.window->id(), srcTabId, windowId, index);
+        activateTab(windowId, srcTabId); // a reorder within one window does not activate by itself
+        _events.activePaneChanged(srcTabId, src.tab->activePane()->id());
+        // A reorder retitles nothing; only a cleared zoom does.
+        (void) announceZoomChange(*src.tab, srcZoomBefore);
+        return MoveResult { .window = windowId, .tab = srcTabId, .focused = movedSession };
+    }
+
+    // One pane of several becomes a tab of its own, keeping its PaneId and session.
+    auto const leafId = src.leaf->id();
+    auto const newTabId = _nextTabId++;
+    auto detached = src.tab->detachLeaf(*src.leaf);
+    // The new tab first, then the shrunk source: an observer told of either finds the moved session in a
+    // tab, as with a graft beside a pane of another tab (moveBeside).
+    (void) insertTab(window, index, std::make_unique<Tab>(newTabId, leafId, detached->session()));
+    announceSourceShrunk(*src.tab, srcZoomBefore);
+    _events.activePaneChanged(newTabId, leafId);
+    return MoveResult { .window = windowId, .tab = newTabId, .focused = movedSession };
+}
+
+std::expected<void, ArrangeError> SessionModel::arrangeTab(TabId tabId, PaneArrangement const& shape)
+{
+    auto* tab = findTab(tabId);
+    if (tab == nullptr)
+        return std::unexpected(ArrangeError::UnknownTab);
+    auto named = std::vector<uint64_t> {};
+    auto const collect = [&named](this auto const& self, PaneArrangement const& node) -> bool {
+        if (node.split == SplitState::None)
+        {
+            named.push_back(node.session.value);
+            return node.children.empty();
+        }
+        return node.children.size() == 2 && self(node.children[0]) && self(node.children[1]);
+    };
+    if (!collect(shape))
+        return std::unexpected(ArrangeError::Malformed);
+    auto shown = std::ranges::to<std::vector>(tab->leafSessions()
+                                              | std::views::transform([](SessionId s) { return s.value; }));
+    std::ranges::sort(named);
+    std::ranges::sort(shown);
+    if (named != shown)
+        return std::unexpected(ArrangeError::OtherSessions);
+    if (tab->isArrangedAs(shape))
+        return {};
+
+    auto const zoomBefore = tab->zoomedLeafId();
+    tab->arrange(shape);
+    // The active pane is the leaf it was, so focus stays; only the tree around it is new.
+    _events.paneTreeRestructured(tabId);
+    (void) announceZoomChange(*tab, zoomBefore);
+    return {};
+}
+
+// }}}
 // {{{ Panes
 
 std::pair<Window*, int> SessionModel::locateTab(TabId tabId) const noexcept
@@ -557,6 +871,27 @@ void SessionModel::toggleActivePaneOrientation(TabId tabId)
         return; // single-pane tab: no split to flip, so nothing (zoom included) changed
     _events.paneOrientationChanged(tabId, split->id(), split->splitState());
     announceZoomChange(*tab, zoomBefore);
+}
+
+std::expected<void, SessionModel::SetOrientationError> SessionModel::setSplitOrientation(SessionId anchor,
+                                                                                         SplitState axis)
+{
+    if (axis != SplitState::Horizontal && axis != SplitState::Vertical)
+        return std::unexpected(SetOrientationError::NotAnAxis);
+    auto const [window, tab, leaf] = findSessionLeaf(anchor);
+    if (tab == nullptr || leaf == nullptr)
+        return std::unexpected(SetOrientationError::UnknownSession);
+    auto* const split = leaf->parent();
+    if (split == nullptr)
+        return std::unexpected(SetOrientationError::NoSplit);
+    if (split->splitState() == axis)
+        return {};
+    auto const zoomBefore = tab->zoomedLeafId();
+    tab->clearZoom(); // the changed axis must be visible, as for the toggle
+    split->setOrientation(axis);
+    _events.paneOrientationChanged(tab->id(), split->id(), split->splitState());
+    announceZoomChange(*tab, zoomBefore);
+    return {};
 }
 
 void SessionModel::swapActivePane(TabId tabId, FocusDirection direction)

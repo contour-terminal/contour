@@ -10,133 +10,11 @@
 #include <vector>
 
 #include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/ModelFixture.hpp>
 #include <vtworkspace/SessionModel.hpp>
 
 using namespace vtworkspace;
-
-namespace
-{
-/// Records every model event so tests can assert what fired.
-struct RecordingEvents: ModelEvents
-{
-    std::vector<std::string> log;
-
-    void tabAboutToBeAdded(WindowId, int index) override
-    {
-        log.push_back(std::format("tabAboutToBeAdded:{}", index));
-    }
-    void tabAdded(WindowId, TabId t, int index) override
-    {
-        log.push_back(std::format("tabAdded:{}:{}", t.value, index));
-    }
-    void tabAboutToBeRemoved(WindowId, int index) override
-    {
-        log.push_back(std::format("tabAboutToBeRemoved:{}", index));
-    }
-    void tabClosed(WindowId, TabId t, int index) override
-    {
-        log.push_back(std::format("tabClosed:{}:{}", t.value, index));
-    }
-    void tabAboutToBeMoved(WindowId, int from, int to) override
-    {
-        log.push_back(std::format("tabAboutToBeMoved:{}>{}", from, to));
-    }
-    void tabMoved(WindowId, TabId t, int from, int to) override
-    {
-        log.push_back(std::format("tabMoved:{}:{}>{}", t.value, from, to));
-    }
-    void activeTabChanged(WindowId, TabId t, int index) override
-    {
-        log.push_back(std::format("activeTab:{}:{}", t.value, index));
-    }
-    void paneSplit(TabId t, PaneId splitNode, PaneId newLeaf) override
-    {
-        log.push_back(std::format("paneSplit:{}:{}", t.value, newLeaf.value));
-        lastSplitNode = splitNode;
-        lastNewLeaf = newLeaf;
-    }
-    void paneClosed(TabId t, PaneId closed, PaneId survivor) override
-    {
-        // Log the survivor too, so the collapse/fold contract (which leaf absorbs) can be asserted.
-        log.push_back(std::format("paneClosed:{}:{}:{}", t.value, closed.value, survivor.value));
-        lastClosedSurvivor = survivor;
-    }
-    void activePaneChanged(TabId t, PaneId leaf) override
-    {
-        log.push_back(std::format("activePane:{}:{}", t.value, leaf.value));
-        lastActivePane = leaf;
-    }
-    void paneRatioChanged(TabId, PaneId node, double ratio) override
-    {
-        log.push_back(std::format("ratio:{}:{}", node.value, ratio));
-        lastRatio = ratio;
-    }
-    void paneOrientationChanged(TabId t, PaneId splitNode, SplitState newState) override
-    {
-        log.push_back(
-            std::format("orientation:{}:{}:{}", t.value, splitNode.value, static_cast<int>(newState)));
-        lastOrientation = newState;
-    }
-    void paneSwapped(TabId t, PaneId a, PaneId b) override
-    {
-        log.push_back(std::format("swapped:{}:{}:{}", t.value, a.value, b.value));
-    }
-    void paneSessionReplaced(TabId t, PaneId leaf) override
-    {
-        log.push_back(std::format("replaced:{}:{}", t.value, leaf.value));
-    }
-    void paneZoomChanged(TabId t, std::optional<PaneId> zoomedLeaf) override
-    {
-        // Log the leaf, not just "on/off": zoom follows focus, so it can move between leaves while
-        // staying on, and a host has to re-read WHICH pane is on screen.
-        log.push_back(std::format(
-            "zoom:{}:{}", t.value, zoomedLeaf.has_value() ? std::to_string(zoomedLeaf->value) : "-"));
-        lastZoomedLeaf = zoomedLeaf;
-    }
-    void paneTreeRestructured(TabId t) override { log.push_back(std::format("restructured:{}", t.value)); }
-    void tabAboutToBeMovedToWindow(WindowId from, int fromIdx, WindowId to, int toIdx) override
-    {
-        log.push_back(std::format("tabAboutToMoveWin:{}:{}>{}:{}", from.value, fromIdx, to.value, toIdx));
-    }
-    void tabMovedToWindow(WindowId from, TabId t, int fromIdx, WindowId to, int toIdx) override
-    {
-        log.push_back(
-            std::format("tabMovedWin:{}:{}:{}>{}:{}", from.value, t.value, fromIdx, to.value, toIdx));
-    }
-
-    // Last-seen values for direct assertions (the log strings are for ordering/count).
-    std::optional<PaneId> lastSplitNode;
-    std::optional<PaneId> lastNewLeaf;
-    std::optional<PaneId> lastClosedSurvivor;
-    std::optional<PaneId> lastActivePane;
-    std::optional<double> lastRatio;
-    std::optional<SplitState> lastOrientation;
-    std::optional<PaneId> lastZoomedLeaf;
-
-    /// Count how many log entries start with @p prefix (for exact-once assertions).
-    [[nodiscard]] long countPrefix(std::string const& prefix) const
-    {
-        return std::count_if(log.begin(), log.end(), [&](auto const& e) { return e.starts_with(prefix); });
-    }
-    void tabTitleChanged(TabId t) override { log.push_back(std::format("title:{}", t.value)); }
-    void tabColorChanged(TabId t) override { log.push_back(std::format("color:{}", t.value)); }
-
-    [[nodiscard]] bool sawPrefix(std::string const& prefix) const
-    {
-        for (auto const& e: log)
-            if (e.starts_with(prefix))
-                return true;
-        return false;
-    }
-};
-
-struct Fixture
-{
-    RecordingEvents events;
-    uint64_t nextSession = 1000;
-    SessionModel model { events, [this] { return SessionId { nextSession++ }; } };
-};
-} // namespace
+using namespace vtworkspace::test;
 
 TEST_CASE("SessionModel: creating tabs notifies and tracks the active tab", "[vtworkspace][model][tab]")
 {
@@ -1542,6 +1420,45 @@ TEST_CASE("SessionModel: toggleActivePaneOrientation flips the parent split and 
         CHECK(f.events.sawPrefix(std::format("orientation:{}:{}", tab.value, splitId.value)));
         CHECK(f.events.lastOrientation == SplitState::Horizontal);
         CHECK_FALSE(f.events.sawPrefix("ratio:")); // orientation change is not a ratio change
+    }
+}
+
+TEST_CASE("SessionModel: setSplitOrientation sets the anchor's parent split, active pane or not",
+          "[vtworkspace][model][orientation]")
+{
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+    auto const anchor = f.model.findTab(tab)->rootPane()->session();
+
+    SECTION("a single-pane tab has no split")
+    {
+        auto const result = f.model.setSplitOrientation(anchor, SplitState::Horizontal);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == SessionModel::SetOrientationError::NoSplit);
+    }
+
+    SECTION("a split flips to the requested axis and fires once; the same axis again is silent")
+    {
+        f.model.splitActivePane(tab, SplitState::Vertical);
+        auto const splitId = f.model.findTab(tab)->rootPane()->id();
+        f.events.log.clear();
+        REQUIRE(f.model.setSplitOrientation(anchor, SplitState::Horizontal).has_value());
+        CHECK(f.events.sawPrefix(std::format("orientation:{}:{}", tab.value, splitId.value)));
+        CHECK(f.model.findTab(tab)->rootPane()->splitState() == SplitState::Horizontal);
+        f.events.log.clear();
+        REQUIRE(f.model.setSplitOrientation(anchor, SplitState::Horizontal).has_value());
+        CHECK_FALSE(f.events.sawPrefix("orientation:"));
+    }
+
+    SECTION("an unknown session and a non-axis state are refused")
+    {
+        f.model.splitActivePane(tab, SplitState::Vertical);
+        auto const unknown = f.model.setSplitOrientation(SessionId { 9999 }, SplitState::Horizontal);
+        REQUIRE_FALSE(unknown.has_value());
+        CHECK(unknown.error() == SessionModel::SetOrientationError::UnknownSession);
+        auto const none = f.model.setSplitOrientation(anchor, SplitState::None);
+        REQUIRE_FALSE(none.has_value());
+        CHECK(none.error() == SessionModel::SetOrientationError::NotAnAxis);
     }
 }
 

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <optional>
 
 #include <boxed-cpp/boxed.hpp>
 
@@ -86,6 +89,21 @@ enum class GraftOrder : uint8_t
 {
     return (side == SplitSide::Left || side == SplitSide::Top) ? GraftOrder::GraftFirst
                                                                : GraftOrder::GraftSecond;
+}
+
+/// Every side a half can be grafted on.
+inline constexpr auto AllSplitSides =
+    std::array { SplitSide::Left, SplitSide::Right, SplitSide::Top, SplitSide::Bottom };
+
+/// Returns the side that grafts a half along @p state in @p order: the inverse of splitStateOf() and
+/// graftOrderOf() together.
+/// @return The side; none for SplitState::None, which no side splits along.
+[[nodiscard]] constexpr std::optional<SplitSide> sideOf(SplitState state, GraftOrder order) noexcept
+{
+    auto const side = std::ranges::find_if(AllSplitSides, [&](SplitSide candidate) {
+        return splitStateOf(candidate) == state && graftOrderOf(candidate) == order;
+    });
+    return side != AllSplitSides.end() ? std::optional { *side } : std::nullopt;
 }
 
 /// Returns the split axis you must cross to move along @p direction.
