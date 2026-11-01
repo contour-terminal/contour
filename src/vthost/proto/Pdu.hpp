@@ -81,6 +81,10 @@ enum class PduType : uint8_t
     SessionInputEcho = 34,
     MergeTabIntoSplit = 35,
     TabMergeRefused = 36,
+    MoveNode = 37,
+    MoveNodeRefused = 38,
+    LayoutBatchEnd = 39,
+    SetSplitOrientation = 40,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1330,6 +1334,59 @@ struct TabMergeRefused
     bool operator==(TabMergeRefused const&) const = default;
 };
 
+/// Client→server (Capability::MoveNode): move a pane or a whole tab to an edge of a pane, onto a pane (swap),
+/// into a window's tab well or into a new window. Nothing is spawned or closed: every session keeps running.
+/// Both ends are named by session, like every other client→server layout verb, because tab and pane ids are
+/// minted per model and the two ends have their own. A move the daemon performs is answered by the layout
+/// pushes to every attached client alone.
+struct MoveNode
+{
+    uint8_t sourceKind = 0; ///< A vtworkspace::MoveSourceKind as the wire spells it.
+    /// A pane source: its session. A tab source: EVERY session of the tab as the client sees it, the first
+    /// naming the tab; the daemon refuses a request whose sessions are not exactly the tab's now.
+    std::vector<uint64_t> sourceSessions = {};
+    uint8_t targetKind = 0;     ///< A vtworkspace::MoveTargetKind as the wire spells it.
+    uint64_t targetSession = 0; ///< Edge/swap: the pane. Tab well: any session of the window. New window: 0.
+    uint8_t side = 0;           ///< Edge only: a vtworkspace::SplitSide as the wire spells it.
+    uint64_t index = 0;         ///< Tab well only: the position among the window's tabs.
+    bool operator==(MoveNode const&) const = default;
+};
+
+/// Client→server (Capability::MoveNode, the same feature family): set the axis of one split, so a toggle the
+/// user made reaches the model that owns the layout and a later push does not revert it. Answered by the
+/// layout push alone; a stale or unknown session is ignored.
+struct SetSplitOrientation
+{
+    uint64_t anchorSession = 0; ///< A leaf inside the split to change: the split is that leaf's parent.
+    uint8_t state = 0; ///< A vtworkspace::SplitState as the wire spells it; a byte no axis names is refused.
+    bool operator==(SetSplitOrientation const&) const = default;
+};
+
+/// Server→client (Capability::MoveNode), under the serial of the MoveNode it answers: the daemon changed
+/// nothing, so the client can tell its user.
+struct MoveNodeRefused
+{
+    /// Why, as a vthost::NodeMoveError's value. Carried, not judged: a value this build does not know is
+    /// still a refusal.
+    uint8_t reason = 0;
+    /// When @c reason is NodeMoveError::Model, why the model refused, as a vtworkspace::MoveError's value; 0
+    /// otherwise. Carried, not judged, as @c reason is.
+    uint8_t modelReason = 0;
+    bool operator==(MoveNodeRefused const&) const = default;
+};
+
+/// Server→client (Capability::LayoutBatch): every LayoutState pushed for one change has gone out. The daemon
+/// pushes each followed window's layout once per model event, and one change -- a move -- fires several, some
+/// of them between its halves; this follows the last, so the layouts a client holds when it arrives are the
+/// state the change left, across every window, and a session none of them names is gone, not still in flight.
+struct LayoutBatchEnd
+{
+    /// The serial of the MoveNode request whose effects this batch completes, so the client that asked can
+    /// tell its own move landing from any other push; 0 when no request of this client caused it.
+    uint64_t causeSerial = 0;
+    bool operator==(LayoutBatchEnd const&) const = default;
+};
+
 /// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
 /// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
 struct Heartbeat
@@ -1410,7 +1467,11 @@ using DecodedPdu = std::variant<Invalid,
                                 ProgramStatus,
                                 SessionInputEcho,
                                 MergeTabIntoSplit,
-                                TabMergeRefused>;
+                                TabMergeRefused,
+                                MoveNode,
+                                MoveNodeRefused,
+                                LayoutBatchEnd,
+                                SetSplitOrientation>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

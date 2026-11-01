@@ -454,6 +454,35 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("reason={}", std::get<TabMergeRefused>(pdu).reason);
                    } },
+        TraceRow { PduType::MoveNode,
+                   "MoveNode",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MoveNode>(pdu);
+                       return std::format("source={}x{} target={}:{} side={} index={}",
+                                          value.sourceKind,
+                                          value.sourceSessions.size(),
+                                          value.targetKind,
+                                          value.targetSession,
+                                          value.side,
+                                          value.index);
+                   } },
+        TraceRow { PduType::MoveNodeRefused,
+                   "MoveNodeRefused",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<MoveNodeRefused>(pdu);
+                       return std::format("reason={} model={}", value.reason, value.modelReason);
+                   } },
+        TraceRow { PduType::LayoutBatchEnd,
+                   "LayoutBatchEnd",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("cause={}", std::get<LayoutBatchEnd>(pdu).causeSerial);
+                   } },
+        TraceRow { PduType::SetSplitOrientation,
+                   "SetSplitOrientation",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<SetSplitOrientation>(pdu);
+                       return std::format("anchor={} state={}", value.anchorSession, value.state);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

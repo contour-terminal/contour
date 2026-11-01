@@ -164,6 +164,18 @@ namespace vthost::testing
           proto::DecodedPdu {
               proto::MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } } },
         { proto::PduType::TabMergeRefused, proto::DecodedPdu { proto::TabMergeRefused { .reason = 3 } } },
+        { proto::PduType::MoveNode,
+          proto::DecodedPdu { proto::MoveNode { .sourceKind = 1,
+                                                .sourceSessions = { 4, 5 },
+                                                .targetKind = 0,
+                                                .targetSession = 9,
+                                                .side = 2,
+                                                .index = 0 } } },
+        { proto::PduType::MoveNodeRefused,
+          proto::DecodedPdu { proto::MoveNodeRefused { .reason = 4, .modelReason = 4 } } },
+        { proto::PduType::LayoutBatchEnd, proto::DecodedPdu { proto::LayoutBatchEnd { .causeSerial = 6 } } },
+        { proto::PduType::SetSplitOrientation,
+          proto::DecodedPdu { proto::SetSplitOrientation { .anchorSession = 9, .state = 1 } } },
     };
 }
 

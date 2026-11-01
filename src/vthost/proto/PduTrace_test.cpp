@@ -272,6 +272,19 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
     CHECK(
         summarize(DecodedPdu { MergeTabIntoSplit { .tabSessions = { 4, 5 }, .targetSession = 9, .side = 2 } })
         == "tab-sessions=2 target=9 side=2");
+    CHECK(summarize(DecodedPdu { MoveNode { .sourceKind = 1,
+                                            .sourceSessions = { 4, 5 },
+                                            .targetKind = 0,
+                                            .targetSession = 9,
+                                            .side = 2,
+                                            .index = 0 } })
+          == "source=1x2 target=0:9 side=2 index=0");
+    CHECK(summarize(DecodedPdu { MoveNodeRefused { .reason = 4, .modelReason = 2 } }) == "reason=4 model=2");
+    CHECK(summarize(DecodedPdu { SetSplitOrientation { .anchorSession = 9, .state = 1 } })
+          == "anchor=9 state=1");
+    CHECK(toString(PduType::SetSplitOrientation) == "SetSplitOrientation");
+    CHECK(toString(PduType::LayoutBatchEnd) == "LayoutBatchEnd");
+    CHECK(summarize(DecodedPdu { LayoutBatchEnd { .causeSerial = 6 } }) == "cause=6");
     CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
           == "session=3 profile=\"ssh\"");
     CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");
