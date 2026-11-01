@@ -178,3 +178,19 @@ You don't need a keybinding to save: open the command palette (`Ctrl+Shift+P`) a
 **Save Layout**. Because saving needs a name, that entry opens a small prompt for you to
 type one in, then saves exactly as the `SaveLayout` action does. A key bound to
 `SaveLayout` with no `name` opens the same prompt.
+
+## Tab colors
+
+A tab's color is what makes it findable in a long tab bar. A new tab takes the `tab_color` of the profile
+it starts with:
+
+``` yaml
+profiles:
+  main:
+    tab_color: '#2E3440'
+```
+
+Like a layout's `color`, `tab_color` is a hex `'#RRGGBB'` value; `null`, the default, means no color. A color
+from a layout, one an application sets for its own tab, or one you pick from the tab's context menu takes
+precedence over the profile's, and clearing it brings the profile's color back. A split tab keeps the color of
+the profile that created it.

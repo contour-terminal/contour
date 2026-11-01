@@ -5,6 +5,8 @@ set(text_shaper_SRC
     FontLocator.hpp
     FontLocatorProvider.cpp FontLocatorProvider.hpp
     MockFontLocator.cpp MockFontLocator.hpp
+    NerdFontSymbolRanges.hpp
+    NerdFontSymbolsLocator.cpp NerdFontSymbolsLocator.hpp
     OpenShaper.cpp OpenShaper.hpp
     Shaper.cpp Shaper.hpp
 )
@@ -89,15 +91,19 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp FontLocatorProvider_test.cpp OpenShaper_test.cpp Scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp FontLocatorProvider_test.cpp NerdFontSymbolsLocator_test.cpp OpenShaper_test.cpp Scale_test.cpp)
     if(APPLE)
         target_sources(text_shaper_test PRIVATE CoreTextLocator_test.cpp)
     endif()
     if("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
         target_sources(text_shaper_test PRIVATE DirectWrite_test.cpp DirectWriteLocator_test.cpp)
     endif()
-    target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core core::testing contour_test_trace)
+    target_link_libraries(text_shaper_test PRIVATE text_shaper Freetype::Freetype Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core core::testing contour_test_trace)
     target_compile_definitions(text_shaper_test PRIVATE CONTOUR_BUNDLED_FONTS_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/contour/res/fonts")
+    if(CONTOUR_NERD_FONT_SYMBOLS_DIR)
+        # The font the build staged, for the test that checks the code point table against it.
+        target_compile_definitions(text_shaper_test PRIVATE CONTOUR_NERD_FONT_SYMBOLS_FILE="${CONTOUR_NERD_FONT_SYMBOLS_DIR}/SymbolsNerdFontMono-Regular.ttf")
+    endif()
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)
         target_compile_options(text_shaper_test PRIVATE -Wno-c2y-extensions)

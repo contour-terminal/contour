@@ -21,3 +21,12 @@ text is unchanged. The table gives the archive's hash of it.
 At startup the application registers every `*.ttf` in this directory (installed at
 `Contents/Resources/fonts` in the macOS bundle, `<prefix>/share/contour/fonts` on Linux) with the
 platform font registry, before the first font lookup.
+
+## Nerd Fonts symbols
+
+The Nerd Fonts "Symbols Only" font, which backs whichever font a profile uses for the glyphs of Nerd Fonts, is
+**not kept here**: `cmake/NerdFontSymbols.cmake` fetches it from the Nerd Fonts release archive, pinned by version
+and SHA-256, and stages it, with its MIT licence, beside the files above. See
+[`docs/internals/text-stack.md`](../../../../docs/internals/text-stack.md) for how to build offline and how to
+upgrade it.
+
