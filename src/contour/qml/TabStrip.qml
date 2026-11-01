@@ -465,8 +465,11 @@ Row {
             width: root.joined ? chromeStyle.size.profileButton : chromeStyle.stripButtonWidth
             font: chromeStyle.menuFont
             focusPolicy: Qt.NoFocus
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("New tab with profile…")
+            KitToolTip {
+                objectName: "newTabMenuToolTip"
+                text: qsTr("New tab with profile…")
+                wanted: newTabMenuButton.hovered
+            }
             onClicked: {
                 if (root.controller)
                     root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))

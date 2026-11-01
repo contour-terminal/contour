@@ -353,8 +353,11 @@ Popup {
                 // The session is the only one that knows; `checked` stays a pure binding.
                 checked: modelData.checked
                 onClicked: if (root._search) root._search.toggleSearchOption(modelData.toggle);
-                ToolTip.visible: hovered
-                ToolTip.text: modelData.tooltip
+                KitToolTip {
+                    objectName: "searchBarToggleToolTip"
+                    text: toggle.modelData.tooltip
+                    wanted: toggle.hovered
+                }
 
                 Accessible.role: Accessible.Button
                 Accessible.name: modelData.accessibleName
@@ -390,8 +393,12 @@ Popup {
             text: chromeStyle.findPreviousGlyph
             enabled: root._navigable
             onClicked: if (root._search) root._search.searchPrevious();
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("Previous match — Shift+Enter")
+            KitToolTip {
+                objectName: "searchBarPreviousToolTip"
+                text: qsTr("Previous match")
+                shortcut: chromeStyle.fixedShortcutText("FindPrevious")
+                wanted: parent.hovered
+            }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Previous match")
         }
@@ -404,8 +411,12 @@ Popup {
             text: chromeStyle.findNextGlyph
             enabled: root._navigable
             onClicked: if (root._search) root._search.searchNext();
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("Next match — Enter")
+            KitToolTip {
+                objectName: "searchBarNextToolTip"
+                text: qsTr("Next match")
+                shortcut: chromeStyle.fixedShortcutText("FindNext")
+                wanted: parent.hovered
+            }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Next match")
         }
@@ -418,8 +429,12 @@ Popup {
             // The style's own close affordance, so this bar closes with the same glyph as every tab.
             text: chromeStyle.closeGlyph
             onClicked: root.close()
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("Close — Esc")
+            KitToolTip {
+                objectName: "searchBarCloseToolTip"
+                text: qsTr("Close")
+                shortcut: chromeStyle.fixedShortcutText("FindClose")
+                wanted: parent.hovered
+            }
             Accessible.role: Accessible.Button
             Accessible.name: qsTr("Close find")
         }

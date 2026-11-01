@@ -122,6 +122,13 @@ class MockTabController: public QAbstractListModel
 
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
 
+    /// Mirrors WindowController::shortcutText(): the chord a test bound to a command, nothing for any other.
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
+    {
+        return boundChords.value(commandName);
+    }
+    QHash<QString, QString> boundChords {}; ///< Command name -> chord, as a test binds them.
+
     [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
     void setTitleBarVisible(bool v)
     {
@@ -838,10 +845,13 @@ class MockPaneWindowController: public QObject
     [[nodiscard]] QString hostLabel() const { return _hostLabel; }
     /// Names another host, or none; before the pane tree is shown, as the property is constant.
     void setHostLabel(QString label) { _hostLabel = std::move(label); }
-    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, nothing for any other; counted.
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, Ctrl+Shift+D for SplitVertical,
+    /// nothing for any other; counted.
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
         ++shortcutTextCalls;
+        if (commandName == QStringLiteral("SplitVertical"))
+            return QStringLiteral("Ctrl+Shift+D");
         return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
     }
     mutable int shortcutTextCalls = 0; ///< How often a pane asked for a chord.

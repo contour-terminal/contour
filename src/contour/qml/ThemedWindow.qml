@@ -17,6 +17,10 @@ ApplicationWindow
     // Binding the window palette to a SystemPalette (which DOES follow the application palette) makes the
     // controls inherit an explicit palette that wins over the style default, so the whole window is themed
     // consistently from first render. In `theme: system` this simply mirrors the OS palette, i.e. a no-op.
+    /// When this window's tooltips last showed: the KitToolTips of its controls read and note it, so a second
+    /// tooltip shows at once while the first is still warm.
+    readonly property KitToolTipClock tooltipClock: KitToolTipClock {}
+
     SystemPalette
     {
         id: appPalette

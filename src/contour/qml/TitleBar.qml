@@ -543,6 +543,9 @@ Item {
                 objectName: "newTabButton"
                 glyph: chromeStyle.newTabGlyph
                 accessibleName: qsTr("New tab")
+                toolTipText: qsTr("New tab")
+                toolTipCommand: "CreateNewTab"
+                toolTipController: root.controller
                 accessibleDescription: qsTr("Right-click or press and hold for a new tab with a profile")
                 focusRingShown: activeFocus && root.toolbarHasFocus
                 onClicked: if (root.controller) root.controller.createNewTab()

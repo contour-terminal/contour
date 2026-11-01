@@ -3,6 +3,7 @@
 // QML component tests, continued: the title bar and its window controls, the find bar, an ended pane and the
 // drift badge.
 
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlLook.hpp>
@@ -2720,5 +2721,37 @@ TEST_CASE("the title bar draws no window controls until its controller is bound 
     host->setProperty("ctl", QVariant::fromValue<QObject*>(nullptr));
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the find bar's buttons split their label from their shortcut (offscreen)",
+          "[contour][gui][qml][kit][tooltip][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+    auto const style = contour::command::platformShortcutStyle();
+
+    struct Case
+    {
+        char const* tip;
+        char const* label;
+        char const* chord;
+    };
+    for (auto const& row: { Case { "searchBarPreviousToolTip", "Previous match", "FindPrevious" },
+                            Case { "searchBarNextToolTip", "Next match", "FindNext" },
+                            Case { "searchBarCloseToolTip", "Close", "FindClose" } })
+    {
+        CAPTURE(row.tip);
+        auto* const tip = host.bar->findChild<QObject*>(QString::fromLatin1(row.tip));
+        REQUIRE(tip != nullptr);
+        CHECK(tip->property("text").toString() == QString::fromLatin1(row.label));
+        auto const expected = contour::command::fixedShortcutText(row.chord, style);
+        REQUIRE(expected.has_value());
+        CHECK(tip->property("shortcut").toString() == QString::fromStdString(*expected));
+        CHECK(tip->property("shortcutShown").toBool());
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
