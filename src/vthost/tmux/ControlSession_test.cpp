@@ -124,6 +124,30 @@ Task<void> driveResize(ControlSession* session,
         session->run(), resizeThenDetach(host, client, sessionId, size), collectLines(client, out));
 }
 
+/// Tells the session the model moved a tab between windows and swapped two panes, then detaches.
+Task<void> moveEventsThenDetach(ControlSession* session,
+                                core::net::ISocket* client,
+                                vtworkspace::WindowId from,
+                                vtworkspace::WindowId to,
+                                vtworkspace::TabId tab)
+{
+    session->tabMovedToWindow(from, tab, 0, to, 0);
+    session->paneSwapped(tab, vtworkspace::PaneId { 1 }, vtworkspace::PaneId { 2 });
+    std::ignore = co_await client->write(asBytes("\n")); // empty line -> detach
+}
+
+/// Runs the session concurrently with the move events and the collector.
+Task<void> driveMoveEvents(ControlSession* session,
+                           core::net::ISocket* client,
+                           vtworkspace::WindowId from,
+                           vtworkspace::WindowId to,
+                           vtworkspace::TabId tab,
+                           std::vector<std::string>* out)
+{
+    co_await core::async::whenAll(
+        session->run(), moveEventsThenDetach(session, client, from, to, tab), collectLines(client, out));
+}
+
 /// Runs the session concurrently with the burst producer and the collector.
 Task<void> driveBurst(ControlSession* session,
                       core::net::ISocket* client,
@@ -291,6 +315,24 @@ TEST_CASE("new-window creates a tab and notifies %window-add + %layout-change", 
     // The command's guard block used command number 1 (0 was the opening one).
     CHECK(contains(lines, "%begin 1000 1 1"));
     CHECK(contains(lines, "%end 1000 1 1"));
+}
+
+TEST_CASE("a tab moved to another window re-announces its layout and the session list",
+          "[vthost][control][move]")
+{
+    auto h = ControlHarness {};
+    h.host.createTab();
+    auto const* other = h.host.createWindow();
+    REQUIRE(other != nullptr);
+    auto const* tab = h.host.model().window(h.host.windowId())->activeTab();
+    auto const tabId = tab->id();
+
+    auto emitted = std::vector<std::string> {};
+    h.loop.blockOn(driveMoveEvents(
+        h.session.get(), h.pair.second.get(), h.host.windowId(), other->id(), tabId, &emitted));
+
+    CHECK(contains(emitted, "%sessions-changed"));
+    CHECK(contains(emitted, std::format("%layout-change @{}", tabId.value)));
 }
 
 TEST_CASE("split-window adds a pane and re-emits the layout", "[vthost][control]")

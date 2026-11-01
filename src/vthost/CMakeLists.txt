@@ -55,6 +55,9 @@ add_library(vthost STATIC
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     NativeSession.cpp
+    NodeMove.cpp
+    NodeMove.hpp
+    NodeMoveError.hpp
     NativeSession.hpp
     ObjectRegistry.cpp
     ObjectRegistry.hpp
@@ -239,6 +242,7 @@ if(VTHOST_TESTING)
         GracefulClose_test.cpp
         HostIdentity_test.cpp
         LoopDrain_test.cpp
+        NodeMove_test.cpp
         ObjectRegistry_test.cpp
         SessionHost_test.cpp
         FlushPolicy_test.cpp

@@ -463,6 +463,8 @@ namespace
                                                        proto::Capability::ControlPermissions,
                                                        proto::Capability::InputEcho,
                                                        proto::Capability::TabMerge,
+                                                       proto::Capability::MoveNode,
+                                                       proto::Capability::LayoutBatch,
                                                        proto::Capability::TabEditAcks,
                                                        proto::Capability::ColorPreference });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.

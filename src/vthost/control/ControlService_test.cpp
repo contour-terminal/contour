@@ -316,6 +316,27 @@ TEST_CASE("object.setLabel makes a pane addressable by label", "[vthost][control
     CHECK(list->windows[0].tabs[1].label == "build");
 }
 
+TEST_CASE("a control call from a pane moved into a new window resolves its tab", "[vthost][control][move]")
+{
+    auto h = ControlHarness {};
+    auto const first = h.openTab();
+    auto const dragged = h.openTab();
+    auto const& window = h.host.createEmptyWindow();
+    REQUIRE(h.host.model()
+                .moveNode(vtworkspace::PaneSource { dragged },
+                          vtworkspace::TabWellTarget { .window = window.id(), .index = 0 })
+                .has_value());
+    h.context.callerPane = h.paneId(dragged);
+
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = "tab:", .label = "moved" })
+                .has_value());
+    REQUIRE(callSync<vtcontrol::EmptyReply>(
+                h.service, h.context, vtcontrol::SetLabelRequest { .object = "window:", .label = "away" })
+                .has_value());
+    CHECK(h.host.terminal(first) != nullptr);
+}
+
 TEST_CASE("tab.create returns ids that workspace.list then shows", "[vthost][control][write]")
 {
     auto h = ControlHarness {};
