@@ -4,6 +4,8 @@
 #include <vtparser/ParserEvents.hpp>
 #include <vtparser/Utf8Decoding.hpp>
 
+#include <core/Escape.hpp>
+
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>
 
@@ -95,6 +97,66 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
     p.parseFragment("\xC3\xB6"); // ö
 
     REQUIRE(textListener.text == "\xC3\xB6");
+}
+
+TEST_CASE("Parser.IncompleteUtf8_EndsAtAByteThatCannotContinueIt", "[Parser]")
+{
+    // #2209: a character cut off by another byte is replaced by U+FFFD, and that byte is then handled as
+    // itself, never taken as the character's continuation.
+    constexpr auto Replacement = "\xEF\xBF\xBD"sv;
+    struct Row
+    {
+        std::string_view input;
+        std::string expectedText;
+    };
+    auto const rows = std::vector<Row> {
+        { "\xE5\xAF"
+          "a"sv,
+          std::string(Replacement) + "a" }, // ASCII
+        { "\xE5\xAF\n"
+          "x"sv,
+          std::string(Replacement) + "x" }, // a C0 control
+        { "\xE5\xAF\x1b"
+          "c"
+          "alive"sv,
+          std::string(Replacement) + "alive" },                          // ESC, here RIS
+        { "\xE5\xAF\xC3\xB6"sv, std::string(Replacement) + "\xC3\xB6" }, // the next lead byte
+        { "\xE5\xAF\xE5\xAF\xA1"sv, std::string(Replacement) + "\xE5\xAF\xA1" },
+        { "\xC3"
+          "ab"sv,
+          std::string(Replacement) + "ab" },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.input));
+        MockParserEvents listener;
+        auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+        p.parseFragment(row.input);
+        CHECK(listener.text == row.expectedText);
+    }
+}
+
+TEST_CASE("Parser.IncompleteUtf8_EndsAtAByteInTheNextRead", "[Parser]")
+{
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("\xE5\xAF"sv);
+    p.parseFragment("\033"
+                    "calive"sv);
+    CHECK(listener.text
+          == "\xEF\xBF\xBD"
+             "alive");
+
+    // The same when the first read went through the bulk text scanner: text, then the cut-off character.
+    MockParserEvents scanned;
+    auto q = vtparser::Parser<vtparser::ParserEvents>(scanned);
+    q.parseFragment("x\xE5\xAF"sv);
+    CHECK(scanned.text == "x");
+    q.parseFragment("\033"
+                    "calive"sv);
+    CHECK(scanned.text
+          == "x\xEF\xBF\xBD"
+             "alive");
 }
 
 TEST_CASE("Parser.PM")
@@ -732,7 +794,7 @@ TEST_CASE("Parser.BulkScan.ReadsEndingInsideIllFormedUtf8MatchTheStateMachine", 
     // from there, in the middle of a stretch of ASCII, of mixed text, or on its own.
     auto const input = GENERATE(values<std::string_view>({
         "\xE2"
-        "abcdefghijklmnopqrstuvwxyz tail"sv, // a lead byte, then ASCII it takes for continuation bytes
+        "abcdefghijklmnopqrstuvwxyz tail"sv, // a lead byte, then ASCII, which ends it
         "head abcdefghijklmnopqrstuvwxyz\xF0\x9F"
         " tail"sv,                                               // a stretch, then a four-byte lead cut short
         "w\xC3\xB6rld \xC3 abcdefghijklmnopqrstuvwxyz"sv,        // mixed text, a lead cut short, a stretch

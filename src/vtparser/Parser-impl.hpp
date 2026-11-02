@@ -573,6 +573,18 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
 {
     ParserTable static constexpr Table = ParserTable::get();
 
+    // A character left incomplete ends at the first byte that cannot continue it -- a C0 control, ESC, ASCII,
+    // or the lead byte of the next character -- printing U+FFFD for what there was; the byte itself is then
+    // judged on its own, from an idle decoder. Without this the pending state outlives control functions and
+    // even a reset, and the next printable byte is taken as the old character's continuation.
+    if (auto const isContinuationByte = isUtf8ContinuationByte(ch);
+        !isContinuationByte && !isDecoderIdle(_scanState.utf8))
+    {
+        _scanState.utf8 = {};
+        _eventListener.print(vtparser::ReplacementCharacter);
+        _scanState.lastCodepointHint = vtparser::ReplacementCharacter;
+    }
+
     // VT52 has its own escape grammar. processVT52() consumes the byte when it is part of a VT52
     // command (ESC, the command letter, or the ESC Y coordinates); a byte it does not consume (a
     // printable or a C0 control in VT52 ground) falls through to the normal Ground handling below.
@@ -590,7 +602,7 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         // lead (a lead byte not followed by continuation bytes) would keep the count > 0 and let it
         // mask a following 8-bit ST as content, so the string would never terminate. On any
         // non-continuation byte, abandon the sequence and judge this byte on its own.
-        auto const isContinuationByte = (ch & 0xC0) == 0x80;
+        auto const isContinuationByte = isUtf8ContinuationByte(ch);
         if (_stringUtf8Pending != 0 && isContinuationByte)
             --_stringUtf8Pending; // a continuation byte; fall through to collect it
         else

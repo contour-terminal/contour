@@ -41,8 +41,7 @@ constexpr auto PageColumns = ColumnCount(80);
 }
 
 /// Resets @p mc and prints a marker, so that a terminal left in some state by earlier input shows it is
-/// still alive and parsing. The marker's first letter may be eaten by a UTF-8 sequence that the noise left
-/// unfinished, so a test looks for the rest of it.
+/// still alive and parsing.
 [[nodiscard]] std::string firstLineAfterReset(MockTerm<>& mc)
 {
     mc.writeToScreen("\033\\\033c"sv); // leave any string in progress, then RIS
@@ -57,6 +56,15 @@ constexpr auto PageColumns = ColumnCount(80);
            && position.column >= ColumnOffset(0) && position.column < boxed_cast<ColumnOffset>(PageColumns);
 }
 } // namespace
+
+TEST_CASE("Screen.binaryInput.incompleteUtf8DoesNotSurviveAReset", "[screen][regression]")
+{
+    // #2209: a lead byte and one continuation, then RIS, then text: the text prints as itself.
+    auto mc = makeTerminal();
+    mc.writeToScreen("\xE5\xAF\x1b"
+                     "calive"sv);
+    CHECK(mc.terminal.primaryScreen().grid().lineText(LineOffset(0)).starts_with("alive"));
+}
 
 TEST_CASE("Screen.binaryInput.regisImageWithoutCellPixelSize", "[screen][regression]")
 {
@@ -74,7 +82,7 @@ TEST_CASE("Screen.binaryInput.regisImageWithoutCellPixelSize", "[screen][regress
     // arm64 nothing but the sanitizers can tell; this pins the outcome.)
     CHECK(pageHoldsAnImage(mc));
     CHECK(mc.terminal.primaryScreen().cursor().position == CellLocation {});
-    CHECK(firstLineAfterReset(mc).contains("live"));
+    CHECK(firstLineAfterReset(mc).starts_with("alive"));
 }
 
 TEST_CASE("Screen.binaryInput.sixelWithoutCellPixelSize", "[screen][regression]")
@@ -86,7 +94,7 @@ TEST_CASE("Screen.binaryInput.sixelWithoutCellPixelSize", "[screen][regression]"
     // Dropped: no cell can hold a piece of it, and the cursor has not moved.
     CHECK_FALSE(pageHoldsAnImage(mc));
     CHECK(mc.terminal.primaryScreen().cursor().position == CellLocation {});
-    CHECK(firstLineAfterReset(mc).contains("live"));
+    CHECK(firstLineAfterReset(mc).starts_with("alive"));
 }
 
 TEST_CASE("Screen.binaryInput.contourImageWithoutCellPixelSize", "[screen][regression]")
@@ -100,7 +108,7 @@ TEST_CASE("Screen.binaryInput.contourImageWithoutCellPixelSize", "[screen][regre
     mc.writeToScreen(std::format("\033P!go=s,f=3,w=2,h=2;!{}\033\\", Pixels));
     CHECK_FALSE(pageHoldsAnImage(mc));
     CHECK(mc.terminal.primaryScreen().cursor().position == CellLocation {});
-    CHECK(firstLineAfterReset(mc).contains("live"));
+    CHECK(firstLineAfterReset(mc).starts_with("alive"));
 
     auto sized = makeTerminal();
     sized.writeToScreen(std::format("\033P!go=s,f=3,w=2,h=2,c=4,r=2;!{}\033\\", Pixels));
@@ -140,6 +148,6 @@ TEST_CASE("Screen.binaryInput.randomBytesNeitherCrashNorHang", "[screen][regress
             mc.writeToScreen(chunk);
             REQUIRE(cursorIsOnThePage(mc));
         }
-        CHECK(firstLineAfterReset(mc).contains("live"));
+        CHECK(firstLineAfterReset(mc).starts_with("alive"));
     }
 }
