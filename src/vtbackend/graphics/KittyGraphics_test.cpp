@@ -22,6 +22,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -2021,20 +2022,37 @@ struct CountingTerm final: MockTerm<vtpty::MockPty>
     void kittyFrameAdvanced() override { ++framesAdvanced; }
 };
 
-/// A listener out of memory once isOutOfMemory is set, as the daemon's is when its post to the loop fails.
-struct OutOfMemoryTerm final: MockTerm<vtpty::MockPty>
+/// How a FailingListenerTerm's notifications fail, as the daemon's post to its loop can.
+enum class ListenerFailure : uint8_t
+{
+    None,
+    OutOfMemory, ///< std::bad_alloc: the post allocates.
+    SystemError, ///< std::system_error: the post takes a mutex.
+};
+
+/// A listener whose kitty notifications throw once failure is set.
+struct FailingListenerTerm final: MockTerm<vtpty::MockPty>
 {
     using MockTerm<vtpty::MockPty>::MockTerm;
-    bool isOutOfMemory = false;
+    ListenerFailure failure = ListenerFailure::None;
+    int framesAdvanced = 0;
     void kittyFrameAdvanced() override
     {
-        if (isOutOfMemory)
-            throw std::bad_alloc();
+        fail();
+        ++framesAdvanced;
     }
-    void kittyAnimationDeadlineMoved() override
+    void kittyAnimationDeadlineMoved() override { fail(); }
+
+  private:
+    void fail() const
     {
-        if (isOutOfMemory)
-            throw std::bad_alloc();
+        switch (failure)
+        {
+            case ListenerFailure::None: return;
+            case ListenerFailure::OutOfMemory: throw std::bad_alloc();
+            case ListenerFailure::SystemError:
+                throw std::system_error(std::make_error_code(std::errc::resource_deadlock_would_occur));
+        }
     }
 };
 
@@ -2116,18 +2134,32 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_notif
     CHECK(mock.screenUpdates == 0);
 }
 
-TEST_CASE("KittyGraphics.playback.a_listener_out_of_memory_does_not_end_the_tick", "[kitty]")
+TEST_CASE("KittyGraphics.playback.a_failing_listener_does_not_end_the_tick", "[kitty]")
 {
     // tick() is noexcept: a notification that cannot be delivered is dropped, not let terminate.
-    auto mock = OutOfMemoryTerm { PageSize { LineCount(4), ColumnCount(8) } };
-    placeThreeFrames(mock, 10, 20, 30);
-    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-    mock.isOutOfMemory = true;
+    for (auto const failure: { ListenerFailure::OutOfMemory, ListenerFailure::SystemError })
+    {
+        DYNAMIC_SECTION((failure == ListenerFailure::OutOfMemory ? "std::bad_alloc" : "std::system_error"))
+        {
+            auto mock = FailingListenerTerm { PageSize { LineCount(4), ColumnCount(8) } };
+            placeThreeFrames(mock, 10, 20, 30);
+            mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+            mock.failure = failure;
 
-    tickAfter(mock, 10ms);
-    CHECK(placedPixels(mock) == green());
-    // The deadline was stored before its notification failed.
-    CHECK(dueIn(mock) == 20ms);
+            tickAfter(mock, 10ms);
+            CHECK(placedPixels(mock) == green());
+            // The deadline was stored before its notification failed.
+            CHECK(dueIn(mock) == 20ms);
+            CHECK(mock.framesAdvanced == 0);
+
+            // Nothing was left half-done: once the listener recovers, playback goes on as before.
+            mock.failure = ListenerFailure::None;
+            tickAfter(mock, 20ms);
+            CHECK(placedPixels(mock) == blue());
+            CHECK(dueIn(mock) == 30ms);
+            CHECK(mock.framesAdvanced == 1);
+        }
+    }
 }
 
 TEST_CASE("KittyGraphics.playback.a_deadline_is_announced_only_when_it_moves", "[kitty]")

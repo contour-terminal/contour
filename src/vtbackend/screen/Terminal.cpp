@@ -54,6 +54,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <map>
@@ -3205,10 +3206,11 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     // as for the glide. Advanced at the frame's own time, which is what the display and the daemon pass.
     if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
         return;
-    // tick() is noexcept, and the listener behind both notifications below may allocate (the daemon posts to
-    // its loop): one that fails is dropped rather than let terminate the process. Dropping either is benign.
-    // The deadline is stored before the listener hears of it, so the next frame's nextRender() still sees
-    // it, and a dropped frame notification is made up for by the next one.
+    // tick() is noexcept, and the listener behind both notifications below may fail: the daemon posts to its
+    // loop, which allocates (std::bad_alloc) and takes a mutex (std::system_error). One that fails is dropped
+    // rather than let terminate the process -- any std::exception, nothing broader. Dropping either is
+    // benign. The deadline is stored before the listener hears of it, so the next frame's nextRender() still
+    // sees it, and a dropped frame notification is made up for by the next one.
     enum class Notification : uint8_t
     {
         Delivered,
@@ -3220,7 +3222,7 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
             notify();
             return Notification::Delivered;
         }
-        catch (std::bad_alloc const&)
+        catch (std::exception const&)
         {
             return Notification::Dropped;
         }
