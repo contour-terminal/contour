@@ -1617,6 +1617,60 @@ TEST_CASE("KittyGraphics.playback.alternate_screen_switch_pauses_and_resumes", "
     CHECK(placedPixels(mock) == green());
 }
 
+TEST_CASE("KittyGraphics.playback.a_display_asleep_for_more_than_a_loop_resumes", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    // A whole loop and more in one tick (a minimised window): the catch-up lands on the frame it started
+    // from. That frame is unchanged, not missing -- the image is still on the page and keeps playing.
+    advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == red());
+    CHECK(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == green());
+    CHECK(mock.terminal.kittyAnimationDue().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.s3_with_one_frame_plays_once_frames_arrive", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1;/wAA\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,r=1,z=10\033\\"sv);
+    // One frame: nowhere to go, so no deadline yet.
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=3\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+
+    // The application streams its frames after starting playback, as it may: they play without another a=a.
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=20;AP8A\033\\"sv);
+    REQUIRE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 0ms);
+    CHECK(placedPixels(mock) == green());
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=30;AAD/\033\\"sv);
+    advance(mock, 20ms);
+    CHECK(placedPixels(mock) == blue());
+    advance(mock, 30ms);
+    CHECK(placedPixels(mock) == red());
+}
+
+TEST_CASE("KittyGraphics.playback.s2_resumes_past_appended_gapless_frames", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1;/wAA\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,r=1,z=10\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,s=2\033\\"sv);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+
+    // A gapless frame gives playback nowhere to go yet; the gapped one after it does.
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=-1;AP8A\033\\"sv);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=10;AAD/\033\\"sv);
+    REQUIRE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 0ms);
+    CHECK(placedPixels(mock) == blue());
+}
+
 TEST_CASE("KittyGraphics.playback.RIS_drops_deadline", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };

@@ -6310,9 +6310,15 @@ std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimati
         if (animation.nextFrameDue <= now)
             animation.nextFrameDue = now + animation.shownFor(animation.currentFrame);
 
-        // Nothing on the page shows this image -- scrolled off, erased, overwritten. Hold rather than wake
-        // the display for frames no one sees; a placement re-arms it (Action::Put).
-        if (showKittyFrame(showing, animation.currentImage()) == Placed::No)
+        // A catch-up of a whole loop can land on the frame it started from: nothing to show, and no reason to
+        // look for a placement -- an unchanged frame says nothing about whether one is on the page.
+        auto const landed = animation.currentImage();
+        if (landed == showing)
+            continue;
+
+        // The frame changed and nothing on the page shows this image -- scrolled off, erased, overwritten.
+        // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put).
+        if (showKittyFrame(showing, landed) == Placed::No)
             animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
     }
     return nextKittyFrameDue();
@@ -6564,8 +6570,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
 
     auto* animation = kittyAnimationFor(command.imageId);
     Require(animation != nullptr); // The image was found above.
-    auto const appended = target > animation->frames.size();
-    if (appended)
+    if (target > animation->frames.size())
         animation->frames.push_back(
             { .image = std::move(frame), .gapMilliseconds = DefaultFrameGapMilliseconds });
     else
@@ -6586,11 +6591,11 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     if (target == animation->currentFrame)
         std::ignore = showKittyFrame(superseded, animation->frames[target - 1].image);
 
-    // `s=2` waiting at what was its last frame goes on to the one just added -- at once, as that frame has
-    // had its gap already.
-    if (appended && animation->state == AnimationState::RunAwaitingFrames
-        && animation->nextFrameDue == std::chrono::steady_clock::time_point::max()
-        && animation->currentFrame + 1 == target)
+    // A playing animation that held for want of somewhere to go -- `s=2` out of frames, `s=3` with only one
+    // frame with a gap -- goes on now that this frame gives it one. At once: the frame it held on has been
+    // shown since the hold began.
+    if (animation->isPlaying() && animation->nextFrameDue == std::chrono::steady_clock::time_point::max()
+        && animation->successor())
         animation->nextFrameDue = _terminal->steadyTimeNow();
 
     replyKittyGraphics(command, "OK");
