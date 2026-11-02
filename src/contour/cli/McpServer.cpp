@@ -96,6 +96,10 @@ namespace
     constexpr auto DefaultRunTimeout = std::chrono::seconds { 120 };
     constexpr auto DefaultMaxOutputBytes = uint32_t { 65536 };
     constexpr auto WouldCloseSelf = std::string_view { "would close this agent" };
+    constexpr auto WouldTypeIntoSelf =
+        std::string_view { "would type into this agent; use pane_split to get a shell pane" };
+    constexpr auto PaneRequired =
+        std::string_view { "pane is required: name a shell pane, or use pane_split to get one" };
 
     constexpr auto LenientOptions =
         glz::opts { .error_on_unknown_keys = false, .error_on_missing_keys = false };
@@ -107,6 +111,37 @@ namespace
         if (glz::read<LenientOptions>(value, text.empty() ? std::string_view { "{}" } : text))
             return std::nullopt;
         return value;
+    }
+
+    /// Reads a daemon's reply: leniently, because a daemon of another release may carry keys this one does
+    /// not know. Arguments the agent sends stay strictly decoded.
+    template <typename T>
+    std::expected<T, std::string> decodeReply(std::string_view text)
+    {
+        auto value = readLenient<T>(text);
+        if (!value)
+            return std::unexpected(std::string { "the daemon's reply cannot be read" });
+        return *std::move(value);
+    }
+
+    /// @return Whether @p id is a JSON string or integer, the only ids a request may carry.
+    bool isValidId(std::string_view id)
+    {
+        if (id.starts_with('"'))
+            return true;
+        auto const digits = id.starts_with('-') ? id.substr(1) : id;
+        return !digits.empty() && std::ranges::all_of(digits, [](char ch) { return ch >= '0' && ch <= '9'; });
+    }
+
+    /// @param command The command line an agent wrote.
+    /// @return It without trailing line breaks, or nothing when it is empty or spans several lines.
+    std::optional<std::string_view> oneLine(std::string_view command)
+    {
+        while (command.ends_with('\n') || command.ends_with('\r'))
+            command.remove_suffix(1);
+        if (command.empty() || command.find_first_of("\r\n") != std::string_view::npos)
+            return std::nullopt;
+        return command;
     }
 
     std::string textResult(std::string_view text, std::string_view isError)
@@ -254,6 +289,8 @@ std::optional<std::string> McpServer::handleLine(std::string_view line)
         Request { .id = envelope->id.text, .method = envelope->method, .params = envelope->params.text };
     if (request.id.empty())
         return std::nullopt; // a notification gets no answer and runs nothing
+    if (!isValidId(request.id))
+        return errorReply("null", InvalidRequest, "id must be a string or an integer");
     auto const result = dispatch(request);
     if (!result)
         return errorReply(request.id, result.error().code, result.error().message);
@@ -336,7 +373,7 @@ void McpServer::learnGrants()
     auto const answer = _channel.call("daemon.info", "{}", _options.callerPane, CallTimeout);
     if (!answer)
         return;
-    auto const info = vtcontrol::decodeJson<vtcontrol::DaemonInfoReply>(*answer);
+    auto const info = decodeReply<vtcontrol::DaemonInfoReply>(*answer);
     if (info && !info->grants.empty())
         _grants = info->grants;
 }
@@ -346,9 +383,9 @@ std::expected<vtcontrol::ListReply, McpServer::Failure> McpServer::fetchWorkspac
     auto const answer = _channel.call("workspace.list", "{}", _options.callerPane, CallTimeout);
     if (!answer)
         return std::unexpected(answer.error().message);
-    auto workspace = vtcontrol::decodeJson<vtcontrol::ListReply>(*answer);
+    auto workspace = decodeReply<vtcontrol::ListReply>(*answer);
     if (!workspace)
-        return std::unexpected(workspace.error().message);
+        return std::unexpected(workspace.error());
     // The agent's own pane has gone: never fall back to another pane.
     if (!_options.callerPane.empty() && !ownTabOf(*workspace, _options.callerPane))
         return std::unexpected(callerGoneText(_options.callerPane));
@@ -454,7 +491,7 @@ McpServer::ToolResult McpServer::toolPaneCapture(ToolRow const& row, std::string
     auto result = callDaemon(row.catalogMethod, vtcontrol::encodeJson(*request));
     if (result.outcome != ToolOutcome::Ok)
         return result;
-    auto reply = vtcontrol::decodeJson<vtcontrol::CaptureReply>(result.text);
+    auto reply = decodeReply<vtcontrol::CaptureReply>(result.text);
     if (!reply)
         return result; // not a reply we can cap: hand it on as the daemon sent it
     auto capped = capTail(std::move(reply->text), DefaultMaxOutputBytes, reply->truncated);
@@ -490,9 +527,13 @@ McpServer::ToolResult McpServer::toolPaneType(ToolRow const& /*row*/, std::strin
         return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
     if (!args->text)
         return { .outcome = ToolOutcome::BadArguments, .text = "text is required" };
+    if (args->pane.empty())
+        return { .outcome = ToolOutcome::Error, .text = std::string(PaneRequired) };
     auto const pane = resolveOwnedPane(args->pane);
     if (!pane)
         return { .outcome = ToolOutcome::Error, .text = pane.error() };
+    if (*pane == _options.callerPane)
+        return { .outcome = ToolOutcome::Error, .text = std::string(WouldTypeIntoSelf) };
     auto const request =
         vtcontrol::SendRequest { .pane = *pane, .text = *args->text, .wait = vtcontrol::SendWait::None };
     return callDaemon("pane.send", vtcontrol::encodeJson(request));
@@ -503,33 +544,46 @@ McpServer::ToolResult McpServer::toolPaneRun(ToolRow const& /*row*/, std::string
     auto const fail = [](std::string text) {
         return ToolResult { .outcome = ToolOutcome::Error, .text = std::move(text) };
     };
+    auto const badArguments = [](std::string text) {
+        return ToolResult { .outcome = ToolOutcome::BadArguments, .text = std::move(text) };
+    };
     auto const args = decodeArguments<RunArguments>(arguments);
     if (!args)
-        return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
+        return badArguments(args.error());
     if (!args->command)
-        return { .outcome = ToolOutcome::BadArguments, .text = "command is required" };
+        return badArguments("command is required");
+    auto const command = oneLine(*args->command);
+    if (!command)
+        return badArguments("command must be one non-empty command line; join with && or ;");
+    if (args->timeoutSeconds
+        && (*args->timeoutSeconds < 1 || std::cmp_greater(*args->timeoutSeconds, MaxTimeoutSeconds)))
+        return badArguments(std::format("timeoutSeconds must be between 1 and {}", MaxTimeoutSeconds));
+    if (args->pane.empty())
+        return fail(std::string(PaneRequired));
     auto const pane = resolveOwnedPane(args->pane);
     if (!pane)
         return fail(pane.error());
+    if (*pane == _options.callerPane)
+        return fail(std::string(WouldTypeIntoSelf));
 
     // A command typed into a pane that is still running one would feed that program, not the shell.
     auto const listed = callDaemon(
         "block.list", vtcontrol::encodeJson(vtcontrol::BlockListRequest { .pane = *pane, .limit = 1 }));
     if (listed.outcome != ToolOutcome::Ok)
         return listed;
-    auto const blocks = vtcontrol::decodeJson<vtcontrol::BlockListReply>(listed.text);
+    auto const blocks = decodeReply<vtcontrol::BlockListReply>(listed.text);
     if (!blocks)
-        return fail(blocks.error().message);
+        return fail(blocks.error());
     if (!blocks->blocks.empty() && blocks->blocks.front().state == vtcontrol::BlockState::Running)
         return fail("the pane is busy running a command; use pane_type to talk to it, or wait");
 
-    auto const timeout = args->timeoutSeconds && *args->timeoutSeconds != 0
-                             ? std::chrono::seconds { *args->timeoutSeconds }
-                             : DefaultRunTimeout;
+    auto const timeout =
+        args->timeoutSeconds ? std::chrono::seconds { *args->timeoutSeconds } : DefaultRunTimeout;
     auto const sent = _channel.call(
         "pane.send",
-        vtcontrol::encodeJson(vtcontrol::SendRequest {
-            .pane = *pane, .text = *args->command + "\r", .wait = vtcontrol::SendWait::CommandFinished }),
+        vtcontrol::encodeJson(vtcontrol::SendRequest { .pane = *pane,
+                                                       .text = std::string(*command) + "\r",
+                                                       .wait = vtcontrol::SendWait::CommandFinished }),
         _options.callerPane,
         std::chrono::duration_cast<std::chrono::milliseconds>(timeout));
     if (!sent)
@@ -538,26 +592,43 @@ McpServer::ToolResult McpServer::toolPaneRun(ToolRow const& /*row*/, std::string
             return { .outcome = ToolOutcome::Ok, .text = R"({"timedOut":true})" };
         return fail(sent.error().message);
     }
-    auto const sentReply = vtcontrol::decodeJson<vtcontrol::SendReply>(*sent);
+
+    // The command has run from here on: a failure now must not invite the agent to run it again.
+    auto const ranButFailed = [&](std::string_view reason, vtcontrol::BlockInfo const* block) {
+        auto text = std::format(
+            "{}; the command ran; do not re-run it \u2014 use block_read to fetch the output", reason);
+        if (block != nullptr)
+        {
+            text += std::format(" (blockId {}", block->id);
+            if (block->exitCode)
+                text += std::format(", exitCode {}", *block->exitCode);
+            if (block->durationMs)
+                text += std::format(", durationMs {}", *block->durationMs);
+            text += ')';
+        }
+        return fail(std::move(text));
+    };
+    auto const sentReply = decodeReply<vtcontrol::SendReply>(*sent);
     if (!sentReply)
-        return fail(sentReply.error().message);
+        return ranButFailed(sentReply.error(), nullptr);
     if (!sentReply->block)
-        return fail("the pane started no command block; is shell integration active there?");
+        return ranButFailed("the pane started no command block; is shell integration active there?", nullptr);
     auto const& started = *sentReply->block;
     if (started.state == vtcontrol::BlockState::Superseded)
-        return fail(std::format("{} was superseded by another command before it finished", started.id));
+        return ranButFailed(
+            std::format("{} was superseded by another command before it finished", started.id), &started);
     if (!started.exitCode)
-        return fail(std::format("{} finished without an exit status", started.id));
+        return ranButFailed(std::format("{} finished without an exit status", started.id), &started);
 
     auto const output =
         callDaemon("block.read",
                    vtcontrol::encodeJson(vtcontrol::BlockReadRequest {
                        .block = started.id, .pane = *pane, .part = vtcontrol::BlockPart::Output }));
     if (output.outcome != ToolOutcome::Ok)
-        return output;
-    auto const read = vtcontrol::decodeJson<vtcontrol::BlockReadReply>(output.text);
+        return ranButFailed(output.text, &started);
+    auto const read = decodeReply<vtcontrol::BlockReadReply>(output.text);
     if (!read)
-        return fail(read.error().message);
+        return ranButFailed(read.error(), &started);
     auto capped =
         capTail(read->output, args->maxOutputBytes.value_or(DefaultMaxOutputBytes), read->truncated);
     auto const result =

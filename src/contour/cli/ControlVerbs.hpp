@@ -40,6 +40,10 @@ class IStdioSpawner;
 namespace contour::cli
 {
 
+/// The longest `--timeout` a wait takes, about 115 days: far past any wait a script means, and far
+/// inside what milliseconds hold. `contour mcp`'s `timeoutSeconds` shares it.
+inline constexpr auto MaxTimeoutSeconds = 10'000'000;
+
 /// Whether the verb's standard output is a person's terminal.
 enum class OutputTarget : uint8_t
 {

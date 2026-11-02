@@ -79,10 +79,6 @@ namespace
 
     using Params = std::expected<std::string, std::string>;
 
-    /// The longest `--timeout` a wait takes, about 115 days: far past any wait a script means, and far
-    /// inside what milliseconds hold.
-    constexpr auto MaxTimeoutSeconds = 10'000'000;
-
     /// @param words Trailing command-line words.
     /// @return Them as owned strings.
     [[nodiscard]] std::vector<std::string> toStrings(std::span<std::string_view const> words)

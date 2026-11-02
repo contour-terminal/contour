@@ -355,10 +355,10 @@ TEST_CASE("pane_split keeps the focus and sends the resolved full id", "[mcp-ser
 TEST_CASE("pane_type sends the text as is, with no Enter and no waiting", "[mcp-server]")
 {
     auto f = Fixture {};
-    CHECK(f.call("pane_type", R"({"text":"ls"})").contains(R"("isError":false)"));
+    CHECK(f.call("pane_type", R"({"pane":"tests","text":"ls"})").contains(R"("isError":false)"));
     auto const* send = f.channel.last("pane.send");
     REQUIRE(send);
-    CHECK(send->params.contains(A1));
+    CHECK(send->params.contains(A2));
     CHECK(send->params.contains(R"("text":"ls")"));
     CHECK_FALSE(send->params.contains(R"(\r)"));
     CHECK(send->params.contains(R"("wait":"none")"));
@@ -368,7 +368,7 @@ TEST_CASE("pane_run lists, sends and reads in order and reports the exit code", 
 {
     auto f = Fixture {};
     scriptRun(f);
-    auto const out = f.call("pane_run", R"({"command":"echo hello"})");
+    auto const out = f.call("pane_run", R"({"pane":"tests","command":"echo hello"})");
     CHECK(out.contains(R"("isError":false)"));
     CHECK(out.contains(R"(\"exitCode\":0)"));
     CHECK(out.contains("hello"));
@@ -380,12 +380,13 @@ TEST_CASE("pane_run lists, sends and reads in order and reports the exit code", 
     auto const* send = f.channel.last("pane.send");
     CHECK(send->params.contains(R"("text":"echo hello\r")"));
     CHECK(send->params.contains(R"("wait":"commandFinished")"));
-    CHECK(send->params.contains(A1));
+    CHECK(send->params.contains(A2));
     CHECK(send->timeout == std::chrono::seconds { 120 });
     CHECK(f.channel.last("block.read")->params.contains(R"("part":"output")"));
     CHECK(f.channel.last("block.read")->params.contains(RunBlock));
 
-    CHECK(f.call("pane_run", R"({"command":"x","timeoutSeconds":5})").contains(R"("isError":false)"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x","timeoutSeconds":5})")
+              .contains(R"("isError":false)"));
     CHECK(f.channel.last("pane.send")->timeout == std::chrono::seconds { 5 });
 }
 
@@ -395,7 +396,7 @@ TEST_CASE("pane_run on a busy pane types nothing", "[mcp-server]")
     scriptRun(f);
     f.channel.replies["block.list"] =
         std::format(R"({{"pane":"{}","blocks":[{}]}})", A1, blockJson("running"));
-    auto const out = f.call("pane_run", R"({"command":"echo hello"})");
+    auto const out = f.call("pane_run", R"({"pane":"tests","command":"echo hello"})");
     CHECK(out.contains(R"("isError":true)"));
     CHECK(out.contains("pane_type"));
     CHECK(f.channel.count("pane.send") == 0);
@@ -408,7 +409,7 @@ TEST_CASE("pane_run that times out reports timedOut and reads nothing", "[mcp-se
     f.channel.failures["pane.send"] = { .failure = ControlFailure::TimedOut,
                                         .message = "timed out",
                                         .remote = {} };
-    auto const out = f.call("pane_run", R"({"command":"sleep 999"})");
+    auto const out = f.call("pane_run", R"({"pane":"tests","command":"sleep 999"})");
     CHECK(out.contains(R"("isError":false)"));
     CHECK(out.contains(R"(\"timedOut\":true)"));
     CHECK(f.channel.count("block.read") == 0);
@@ -416,7 +417,7 @@ TEST_CASE("pane_run that times out reports timedOut and reads nothing", "[mcp-se
     f.channel.failures["pane.send"] = { .failure = ControlFailure::Disconnected,
                                         .message = "gone",
                                         .remote = {} };
-    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x"})").contains(R"("isError":true)"));
 }
 
 TEST_CASE("pane_run with a superseded or exit-less block is an error", "[mcp-server]")
@@ -424,12 +425,12 @@ TEST_CASE("pane_run with a superseded or exit-less block is an error", "[mcp-ser
     auto f = Fixture {};
     scriptRun(f);
     f.channel.replies["pane.send"] = std::format(R"({{"block":{}}})", blockJson("superseded"));
-    auto out = f.call("pane_run", R"({"command":"x"})");
+    auto out = f.call("pane_run", R"({"pane":"tests","command":"x"})");
     CHECK(out.contains(R"("isError":true)"));
     CHECK(out.contains("superseded"));
     f.channel.replies["pane.send"] =
         std::format(R"({{"block":{{"id":"{}","pane":"{}","state":"finished"}}}})", RunBlock, A1);
-    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x"})").contains(R"("isError":true)"));
     CHECK(f.channel.count("block.read") == 0);
 }
 
@@ -440,11 +441,12 @@ TEST_CASE("pane_run and pane_capture keep the tail of long output", "[mcp-server
     auto const big = std::string(200 * 1024, 'a') + "TAIL";
     f.channel.replies["block.read"] = std::format(
         R"({{"block":{},"prompt":"","output":"{}","truncated":"none"}})", blockJson("finished"), big);
-    auto const out = f.call("pane_run", R"({"command":"x"})");
+    auto const out = f.call("pane_run", R"({"pane":"tests","command":"x"})");
     CHECK(out.contains(R"(\"truncated\":\"head\")"));
     CHECK(out.contains("TAIL"));
     CHECK(out.size() < 70 * 1024);
-    CHECK(f.call("pane_run", R"({"command":"x","maxOutputBytes":4})").contains(R"(\"output\":\"TAIL\")"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x","maxOutputBytes":4})")
+              .contains(R"(\"output\":\"TAIL\")"));
 
     f.channel.replies["pane.capture"] = std::format(
         R"({{"pane":"{}","text":"{}","truncated":"none","cursor":{{"line":1,"column":1}},"size":{{"lines":24,"columns":80}}}})",
@@ -477,7 +479,7 @@ TEST_CASE("a missing required argument is -32602", "[mcp-server]")
     CHECK(f.call("pane_split").contains("-32602"));
     CHECK(f.call("pane_type").contains("-32602"));
     CHECK(f.call("pane_run").contains("-32602"));
-    CHECK(f.call("pane_run", R"({"command":"x","bogus":1})").contains("-32602"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x","bogus":1})").contains("-32602"));
     CHECK(f.channel.count("pane.split") + f.channel.count("pane.send") == 0);
 }
 
@@ -495,8 +497,8 @@ TEST_CASE("tools/call refuses exactly what tools/list hides", "[mcp-server]")
     f.channel.replies["daemon.info"] = R"({"version":"1","protocolVersion":1,"grants":["read"]})";
     REQUIRE(f.server.handleLine(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"));
     f.channel.calls.clear();
-    CHECK(f.call("pane_type", R"({"text":"x"})").contains(R"("isError":true)"));
-    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_type", R"({"pane":"tests","text":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x"})").contains(R"("isError":true)"));
     CHECK(f.call("pane_split", R"({"direction":"right"})").contains(R"("isError":true)"));
     CHECK(f.channel.calls.empty());
 }
@@ -547,4 +549,126 @@ TEST_CASE("input-capable composites refuse a pane in another tab under OwnTab", 
             CHECK_FALSE(methodsOf(f).empty());
         }
     }
+}
+
+TEST_CASE("daemon replies with unknown keys are still read", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    auto list = vtcontrol::encodeJson(workspace());
+    list.insert(list.size() - 1, R"(,"addedLater":{"x":1})");
+    f.channel.replies["workspace.list"] = list;
+    f.channel.replies["pane.send"] = std::format(R"({{"block":{},"addedLater":1}})", blockJson("finished"));
+    CHECK(f.call("workspace_list").contains(R"("isError":false)"));
+    auto const out = f.call("pane_run", R"({"pane":"tests","command":"echo hello"})");
+    CHECK(out.contains(R"("isError":false)"));
+    CHECK(out.contains(R"(\"exitCode\":0)"));
+}
+
+TEST_CASE("pane_type and pane_run refuse the agent's own pane and need an explicit pane", "[mcp-server]")
+{
+    for (auto const* tool: { "pane_type", "pane_run" })
+    {
+        auto const extra = std::string_view { tool } == "pane_type" ? R"("text":"x")" : R"("command":"x")";
+        for (auto const* target: { A1, "build", "a001" })
+        {
+            auto f = Fixture {};
+            scriptRun(f);
+            auto const out = f.call(tool, std::format(R"({{"pane":"{}",{}}})", target, extra));
+            INFO(tool << " -> " << target);
+            CHECK(out.contains(R"("isError":true)"));
+            CHECK(out.contains("would type into this agent; use pane_split to get a shell pane"));
+            CHECK(methodsOf(f).empty());
+        }
+        auto f = Fixture {};
+        scriptRun(f);
+        auto const out = f.call(tool, std::format("{{{}}}", extra));
+        INFO(tool);
+        CHECK(out.contains(R"("isError":true)"));
+        CHECK(out.contains("pane is required"));
+        CHECK(f.channel.calls.empty());
+    }
+}
+
+TEST_CASE("pane_split and pane_capture still default to the agent's own pane", "[mcp-server]")
+{
+    auto f = Fixture {};
+    CHECK(f.call("pane_split", R"({"direction":"right"})").contains(R"("isError":false)"));
+    CHECK(f.channel.last("pane.split")->params.contains(A1));
+}
+
+TEST_CASE("pane_run failing after the command was sent says not to re-run it", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    auto const expectGuard = [](std::string const& out) {
+        CHECK(out.contains(R"("isError":true)"));
+        CHECK(out.contains("the command ran; do not re-run it"));
+        CHECK(out.contains("use block_read to fetch the output"));
+        CHECK(out.contains(RunBlock));
+        CHECK(out.contains("exitCode 0"));
+        CHECK(out.contains("durationMs 42"));
+    };
+    f.channel.failures["block.read"] = { .failure = ControlFailure::Disconnected,
+                                         .message = "gone",
+                                         .remote = {} };
+    expectGuard(f.call("pane_run", R"({"pane":"tests","command":"x"})"));
+
+    f.channel.failures.clear();
+    f.channel.replies["block.read"] = "not json";
+    expectGuard(f.call("pane_run", R"({"pane":"tests","command":"x"})"));
+}
+
+TEST_CASE("pane_run takes one command line", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"echo hi\n"})").contains(R"("isError":false)"));
+    CHECK(f.channel.last("pane.send")->params.contains(R"("text":"echo hi\r")"));
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"echo hi\r\n"})").contains(R"("isError":false)"));
+    CHECK(f.channel.last("pane.send")->params.contains(R"("text":"echo hi\r")"));
+
+    f.channel.calls.clear();
+    for (auto const* command: { R"(a\nb)", R"(a\rb)", R"(\n)", "" })
+    {
+        auto const out = f.call("pane_run", std::format(R"({{"pane":"tests","command":"{}"}})", command));
+        INFO(command);
+        CHECK(out.contains("-32602"));
+    }
+    CHECK(f.channel.calls.empty());
+}
+
+TEST_CASE("pane_run timeoutSeconds is bounded", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    for (auto const* seconds: { "0", "10000001" })
+    {
+        auto const out = f.call(
+            "pane_run", std::format(R"({{"pane":"tests","command":"x","timeoutSeconds":{}}})", seconds));
+        INFO(seconds);
+        CHECK(out.contains("-32602"));
+    }
+    CHECK(f.channel.calls.empty());
+    CHECK(f.call("pane_run", R"({"pane":"tests","command":"x","timeoutSeconds":10000000})")
+              .contains(R"("isError":false)"));
+    CHECK(f.channel.last("pane.send")->timeout == std::chrono::seconds { 10'000'000 });
+}
+
+TEST_CASE("a request id must be a string or an integer", "[mcp-server]")
+{
+    auto f = Fixture {};
+    for (auto const* id: { "null", "{}", "[1]", "1.5", "true" })
+    {
+        auto const out = f.server.handleLine(std::format(
+            R"({{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{{"name":"pane_type","arguments":{{"pane":"tests","text":"x"}}}}}})",
+            id));
+        INFO(id);
+        REQUIRE(out);
+        CHECK(out->contains("-32600"));
+        CHECK(out->contains(R"("id":null)"));
+    }
+    CHECK(f.channel.calls.empty());
+    CHECK(f.server.handleLine(R"({"jsonrpc":"2.0","id":"abc","method":"ping"})")->contains(R"("id":"abc")"));
+    CHECK(f.server.handleLine(R"({"jsonrpc":"2.0","id":-4,"method":"ping"})")->contains(R"("id":-4)"));
 }
