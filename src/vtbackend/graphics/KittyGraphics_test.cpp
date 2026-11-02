@@ -1366,6 +1366,59 @@ TEST_CASE("KittyGraphics.animation.a_new_frame_without_c_starts_from_the_backgro
     CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 0, 255, 255 });
 }
 
+/// Pins the decided #2108 acceptance: the `a=f` delta path transmits only the changed rectangle. It counts
+/// the bytes of the test's own payload strings, so it measures nothing about the terminal; what it guards
+/// is that a delta composes onto its base frame from a rectangle-sized payload alone, which the
+/// frame-equality assertion catches if the terminal ever rejects or misplaces it.
+TEST_CASE("KittyGraphics.frames.a_delta_frame_transmits_only_its_rectangle", "[kitty]")
+{
+    auto constexpr ImageSide = size_t { 64 };
+    auto constexpr PatchSide = size_t { 8 };
+    auto constexpr PatchOrigin = size_t { 16 };
+    auto constexpr FrameCount = size_t { 30 };
+    auto constexpr BytesPerPixel = size_t { 4 };
+
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const base = std::string(ImageSide * ImageSide * BytesPerPixel, '\x20');
+    auto const patch = std::string(PatchSide * PatchSide * BytesPerPixel, '\xE0');
+    auto const patchBase64 = core::base64::encode(patch);
+
+    REQUIRE(replyTo(mock,
+                    std::format("\033_Ga=T,f=32,s={0},v={0},i=7,c=1,r=1;{1}\033\\",
+                                ImageSide,
+                                core::base64::encode(base)))
+                .contains("OK"));
+
+    // Every payload byte the terminal is sent for the deltas; the base image is the one-off cost.
+    auto accepted = size_t { 0 };
+    for (auto const frame: std::views::iota(size_t { 2 }, FrameCount + 2))
+    {
+        auto const command = std::format("\033_Ga=f,i=7,r={},c=1,f=32,X=1,x={},y={},s={},v={};{}\033\\",
+                                         frame,
+                                         PatchOrigin,
+                                         PatchOrigin,
+                                         PatchSide,
+                                         PatchSide,
+                                         patchBase64);
+        REQUIRE(replyTo(mock, command).contains("OK"));
+        accepted += core::base64::decode(patchBase64).size();
+    }
+
+    // Each delta carries exactly its rectangle, and all of them together cost a small fraction of
+    // re-sending the whole image per frame (#2108 reports far more than a twentyfold saving).
+    CHECK(core::base64::decode(patchBase64).size() == PatchSide * PatchSide * BytesPerPixel);
+    CHECK(accepted < (FrameCount * ImageSide * ImageSide * BytesPerPixel) / 20);
+
+    // The last delta's frame is the base with the rectangle replaced.
+    auto expected = std::vector<uint8_t>(base.begin(), base.end());
+    for (auto const row: std::views::iota(PatchOrigin, PatchOrigin + PatchSide))
+        for (auto const column: std::views::iota(PatchOrigin, PatchOrigin + PatchSide))
+            for (auto const channel: std::views::iota(size_t { 0 }, BytesPerPixel))
+                expected[(row * ImageSide + column) * BytesPerPixel + channel] = 0xE0;
+    mock.writeToScreen(std::format("\033_Ga=a,i=7,c={}\033\\", FrameCount + 1));
+    CHECK(placedPixels(mock) == expected);
+}
+
 TEST_CASE("KittyGraphics.storage.freeing_an_image_frees_its_frames", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
