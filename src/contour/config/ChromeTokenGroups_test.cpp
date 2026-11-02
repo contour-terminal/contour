@@ -2540,6 +2540,7 @@ TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
         CHECK(row.size.tooltipPadBottom == expected.padBottom);
         CHECK(row.size.tooltipGap == expected.gap);
         CHECK(row.size.tooltipMaxWidth == (expected.style == ChromeStyle::Terminal ? 48 : 360));
+        CHECK(row.size.tooltipMaxLines == 6);
         CHECK(row.radii.tooltip == expected.radius);
         // Every row waits the same before the first tooltip and keeps the next warm for the same span.
         CHECK(row.motion.tooltipDelayMs == 600);

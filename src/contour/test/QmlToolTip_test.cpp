@@ -3,6 +3,7 @@
 // The kit's tooltip: its shortcut slot, plain multi-line text, warm and cold delay, placement, and the
 // controls that carry one (the title band's new-tab button, the find bar's buttons).
 
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/MockMainController.hpp>
@@ -11,7 +12,6 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 
-#include <QtCore/QDateTime>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
 #include <QtCore/QIODevice>
@@ -23,13 +23,16 @@
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
+#include <QtQml/QQmlExpression>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
+#include <ranges>
 
 #include <QtTest/QTest>
 
@@ -59,33 +62,36 @@ struct ToolTipHost
                                           int controlY = 50)
 {
     contour::test::installChromeStyle(engine, setup);
-    auto const source = QStringLiteral("import QtQuick\n"
-                                       "import QtQuick.Window\n"
-                                       "import Contour.Ui\n"
-                                       "Window {\n"
-                                       "  id: host\n"
-                                       "  width: 400; height: 200; visible: true\n"
-                                       "  property var tooltipClock: KitToolTipClock {}\n"
-                                       "  property var win: null\n"
-                                       "  Item {\n"
-                                       "    objectName: \"control\"\n"
-                                       "    x: %1; y: %2; width: 40; height: 20\n"
-                                       "    KitToolTip {\n"
-                                       "      objectName: \"tip\"\n"
-                                       "      text: \"New tab\"\n"
-                                       "    }\n"
-                                       "  }\n"
-                                       "  Item {\n"
-                                       "    objectName: \"hoverControl\"\n"
-                                       "    x: 250; y: 50; width: 40; height: 20\n"
-                                       "    KitToolTipHost {\n"
-                                       "      text: \"Hover me\"\n"
-                                       "      shortcutCommand: \"CreateNewTab\"\n"
-                                       "    }\n"
-                                       "  }\n"
-                                       "}\n")
-                            .arg(controlX)
-                            .arg(controlY);
+    auto const source =
+        QStringLiteral(
+            "import QtQuick\n"
+            "import QtQuick.Window\n"
+            "import Contour.Ui\n"
+            "Window {\n"
+            "  id: host\n"
+            "  width: 400; height: 200; visible: true\n"
+            "  property double fakeNow: 1000\n"
+            "  property var tooltipClock: KitToolTipClock { now: function() { return host.fakeNow } }\n"
+            "  property var win: null\n"
+            "  Item {\n"
+            "    objectName: \"control\"\n"
+            "    x: %1; y: %2; width: 40; height: 20\n"
+            "    KitToolTip {\n"
+            "      objectName: \"tip\"\n"
+            "      text: \"New tab\"\n"
+            "    }\n"
+            "  }\n"
+            "  Item {\n"
+            "    objectName: \"hoverControl\"\n"
+            "    x: 250; y: 50; width: 40; height: 20\n"
+            "    KitToolTipHost {\n"
+            "      text: \"Hover me\"\n"
+            "      shortcutCommand: \"CreateNewTab\"\n"
+            "    }\n"
+            "  }\n"
+            "}\n")
+            .arg(controlX)
+            .arg(controlY);
     auto result =
         ToolTipHost { .window = buildQmlHost(engine, source, QStringLiteral("ToolTipTestHost.qml")) };
     result.control = result.window->findChild<QQuickItem*>(QStringLiteral("control"));
@@ -97,6 +103,12 @@ struct ToolTipHost
     REQUIRE(result.tooltipClock != nullptr);
     REQUIRE(result.hoverControl != nullptr);
     return result;
+}
+
+/// @return What @p clock, a KitToolTipClock, answers to `isWarm()`.
+[[nodiscard]] bool clockIsWarm(QObject& clock)
+{
+    return QQmlExpression(qmlContext(&clock), &clock, QStringLiteral("isWarm()")).evaluate().toBool();
 }
 
 /// @return The item named @p name inside @p tip's content.
@@ -207,15 +219,15 @@ TEST_CASE("KitToolTipClock: warm for the token's span after a tooltip (offscreen
     CHECK(host.tooltipClock->property("warmMs").toInt() == 1500);
 
     auto const isWarm = [&] {
-        QVariant answer {};
-        REQUIRE(QMetaObject::invokeMethod(host.tooltipClock, "isWarm", qReturnArg(answer)));
-        return answer.toBool();
+        return clockIsWarm(*host.tooltipClock);
     };
     CHECK_FALSE(isWarm());
     REQUIRE(QMetaObject::invokeMethod(host.tooltipClock, "touch"));
     CHECK(isWarm());
-    host.tooltipClock->setProperty("lastActive",
-                                   static_cast<double>(QDateTime::currentMSecsSinceEpoch() - 5000));
+    // Time is the test's: just inside the span it is warm, at its end cold.
+    host.window->setProperty("fakeNow", 1000.0 + 1499.0);
+    CHECK(isWarm());
+    host.window->setProperty("fakeNow", 1000.0 + 1500.0);
     CHECK_FALSE(isWarm());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -287,8 +299,10 @@ TEST_CASE("KitToolTip: opens below its control at the pointer, never covering it
         tip->setProperty("pointerX", 30.0);
         showToolTip(host);
         auto const right = host.control->x() + tip->property("x").toReal() + tip->property("width").toReal();
-        CHECK(right <= host.quick().width() - tip->property("windowMargin").toReal());
-        CHECK(host.control->x() + tip->property("x").toReal() >= tip->property("windowMargin").toReal());
+        // The window keeps the box, and its shadow, off its edge: the popup's margins say how far.
+        CHECK(tip->property("margins").toReal() > 0);
+        CHECK(right <= host.quick().width() - tip->property("margins").toReal());
+        CHECK(host.control->x() + tip->property("x").toReal() >= tip->property("margins").toReal());
     }
 
     SECTION("flips above only where there is no room below")
@@ -321,9 +335,9 @@ TEST_CASE("KitToolTip: its shortcut is asked of the window's controller when abo
           "[contour][gui][qml][kit][tooltip]")
 {
     contour::test::QmlMessageCapture const warnings;
-    QQmlEngine engine;
-    MockTabController controller;
-    auto host = openToolTipHost(engine, rowSetup(contour::config::ChromeStyle::MacOS));
+    auto const engine = std::make_unique<QQmlEngine>();
+    auto const controller = std::make_unique<MockTabController>();
+    auto host = openToolTipHost(*engine, rowSetup(contour::config::ChromeStyle::MacOS));
     auto* const tip = host.toolTip;
     tip->setProperty("shortcutCommand", QStringLiteral("CreateNewTab"));
 
@@ -331,15 +345,22 @@ TEST_CASE("KitToolTip: its shortcut is asked of the window's controller when abo
     REQUIRE(QMetaObject::invokeMethod(tip, "refreshShortcut"));
     CHECK_FALSE(tip->property("shortcutShown").toBool());
 
-    host.window->setProperty("win", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    host.window->setProperty("win", QVariant::fromValue(static_cast<QObject*>(controller.get())));
     REQUIRE(QMetaObject::invokeMethod(tip, "refreshShortcut"));
-    CHECK(tip->property("shortcut").toString().isEmpty());
+    CHECK(tip->property("shownShortcut").toString().isEmpty());
     CHECK_FALSE(tip->property("shortcutShown").toBool());
 
-    controller.boundChords.insert(QStringLiteral("CreateNewTab"), QStringLiteral("Ctrl+Shift+T"));
+    controller->boundChords.insert(QStringLiteral("CreateNewTab"), QStringLiteral("Ctrl+Shift+T"));
     REQUIRE(QMetaObject::invokeMethod(tip, "refreshShortcut"));
-    CHECK(tip->property("shortcut").toString() == QStringLiteral("Ctrl+Shift+T"));
+    CHECK(tip->property("shownShortcut").toString() == QStringLiteral("Ctrl+Shift+T"));
     CHECK(tip->property("shortcutShown").toBool());
+
+    // A shortcut named as it is wins over the looked-up one, and the binding behind it survives a lookup.
+    tip->setProperty("shortcut", QStringLiteral("⌘T"));
+    REQUIRE(QMetaObject::invokeMethod(tip, "refreshShortcut"));
+    CHECK(tip->property("shownShortcut").toString() == QStringLiteral("⌘T"));
+    tip->setProperty("shortcut", QString {});
+    CHECK(tip->property("shownShortcut").toString() == QStringLiteral("Ctrl+Shift+T"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -379,9 +400,10 @@ TEST_CASE("the title band's new-tab button carries the bound chord, or none (off
           "[contour][gui][qml][kit][tooltip][titlebar]")
 {
     contour::test::QmlMessageCapture const warnings;
-    QQmlEngine engine;
-    MockTabController controller { 1 };
-    auto const host = makeTitleBarHostWith(engine, controller, rowSetup(contour::config::ChromeStyle::MacOS));
+    auto const engine = std::make_unique<QQmlEngine>();
+    auto const controller = std::make_unique<MockTabController>(1);
+    auto const host =
+        makeTitleBarHostWith(*engine, *controller, rowSetup(contour::config::ChromeStyle::MacOS));
     auto& window = *qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(QTest::qWaitForWindowExposed(&window));
     auto* const newTab = findItemNamed(*window.contentItem(), QStringLiteral("newTabButton"));
@@ -403,13 +425,13 @@ TEST_CASE("the title band's new-tab button carries the bound chord, or none (off
             },
             5000));
         auto* const tip = toolTipOf(*newTab);
-        CHECK(tip->property("shortcut").toString() == expected);
+        CHECK(tip->property("shownShortcut").toString() == expected);
         CHECK(tip->property("shortcutShown").toBool() == !expected.isEmpty());
         QTest::mouseMove(&window, QPoint { 300, 300 });
         REQUIRE(QTest::qWaitFor([&] { return toolTipOf(*newTab) == nullptr; }, 5000));
     };
     showsChord({});
-    controller.boundChords.insert(QStringLiteral("CreateNewTab"), QStringLiteral("⌘T"));
+    controller->boundChords.insert(QStringLiteral("CreateNewTab"), QStringLiteral("⌘T"));
     showsChord(QStringLiteral("⌘T"));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -461,4 +483,177 @@ TEST_CASE("no chrome QML shows a tooltip the attached way (offscreen)", "[contou
         }
     }
     CHECK(scanned > 0);
+}
+
+TEST_CASE("KitToolTip: a tooltip open a long while leaves the next one warm (offscreen)",
+          "[contour][gui][qml][kit][tooltip]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto host = openToolTipHost(engine, rowSetup(contour::config::ChromeStyle::MacOS));
+    REQUIRE(QTest::qWaitForWindowExposed(&host.quick()));
+    QTest::mouseMove(&host.quick(), QPoint { 5, 5 });
+    showToolTip(host);
+
+    // Open for far longer than the warm span: it was last noted when it opened.
+    host.window->setProperty("fakeNow", 1000.0 + (10 * 1500.0));
+    host.toolTip->setProperty("wanted", false);
+    // The hide has begun, not ended, and the clock already says so.
+    CHECK(clockIsWarm(*host.tooltipClock));
+    REQUIRE(QTest::qWaitFor([&] { return !host.toolTip->property("visible").toBool(); }, 3000));
+
+    // The neighbour shows with no delay.
+    hoverOver(host.quick(), *host.hoverControl);
+    REQUIRE(QTest::qWaitFor([&] { return toolTipOf(*host.hoverControl) != nullptr; }, 3000));
+    CHECK(toolTipOf(*host.hoverControl)->property("delay").toInt() == 0);
+    QTest::mouseMove(&host.quick(), QPoint { 5, 5 });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitToolTipHost: a press keeps the tooltip away until the pointer leaves (offscreen)",
+          "[contour][gui][qml][kit][tooltip]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto host = openToolTipHost(engine, rowSetup(contour::config::ChromeStyle::MacOS));
+    REQUIRE(QTest::qWaitForWindowExposed(&host.quick()));
+    QTest::mouseMove(&host.quick(), QPoint { 5, 5 });
+    REQUIRE(QMetaObject::invokeMethod(host.tooltipClock, "touch")); // warm: a tooltip would come back at once
+    auto const centre = host.hoverControl->mapToScene(QPointF { 20, 10 }).toPoint();
+
+    hoverOver(host.quick(), *host.hoverControl);
+    REQUIRE(QTest::qWaitFor([&] { return toolTipOf(*host.hoverControl) != nullptr; }, 3000));
+    QTest::mousePress(&host.quick(), Qt::LeftButton, Qt::NoModifier, centre);
+    REQUIRE(QTest::qWaitFor([&] { return toolTipOf(*host.hoverControl) == nullptr; }, 3000));
+    QTest::mouseRelease(&host.quick(), Qt::LeftButton, Qt::NoModifier, centre);
+
+    // Released over the control, it stays away; a moment is long enough to see a tooltip that was coming.
+    QTest::qWait(400);
+    CHECK(toolTipOf(*host.hoverControl) == nullptr);
+
+    QTest::mouseMove(&host.quick(), QPoint { 5, 5 });
+    QTest::qWait(100);
+    hoverOver(host.quick(), *host.hoverControl);
+    CHECK(QTest::qWaitFor([&] { return toolTipOf(*host.hoverControl) != nullptr; }, 3000));
+    QTest::mouseMove(&host.quick(), QPoint { 5, 5 });
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitToolTip: it is placed once and cannot outgrow its token's lines (offscreen)",
+          "[contour][gui][qml][kit][tooltip]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto host = openToolTipHost(engine, rowSetup(contour::config::ChromeStyle::MacOS));
+    auto* const tip = host.toolTip;
+    auto lines = QStringList {};
+    for (auto const index: std::views::iota(0, 40))
+        lines << QStringLiteral("line %1 of a very long message").arg(index);
+    tip->setProperty("text", lines.join(u'\n'));
+    showToolTip(host);
+
+    // Placed as it began to show and not again, so it cannot move during the fade-in.
+    CHECK(tip->property("placements").toInt() == 1);
+
+    auto const maxLines = static_cast<int>(chromeToken(engine, "size", "tooltipMaxLines"));
+    REQUIRE(maxLines > 0);
+    auto const* label = partOf(tip, "kitToolTipLabel");
+    auto const* secondary = partOf(tip, "kitToolTipSecondary");
+    REQUIRE(label != nullptr);
+    REQUIRE(secondary != nullptr);
+    CHECK(label->property("lineCount").toInt() + secondary->property("lineCount").toInt() <= maxLines);
+    CHECK(tip->property("height").toReal() <= host.quick().height());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitToolTip: CRLF text splits into the same lines as LF (offscreen)",
+          "[contour][gui][qml][kit][tooltip]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto host = openToolTipHost(engine, rowSetup(contour::config::ChromeStyle::MacOS));
+    host.toolTip->setProperty("text", QStringLiteral("Build finished\r\n~/repo\r\n/tmp"));
+    CHECK(partOf(host.toolTip, "kitToolTipLabel")->property("text").toString()
+          == QStringLiteral("Build finished"));
+    CHECK(partOf(host.toolTip, "kitToolTipSecondary")->property("text").toString()
+          == QStringLiteral("~/repo\n/tmp"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the styles' stray tooltips are placed as KitToolTip is (offscreen)",
+          "[contour][gui][qml][kit][tooltip]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto const engine = std::make_unique<QQmlEngine>();
+    for (auto const* style: { "ContourLinux", "ContourTui" })
+    {
+        CAPTURE(style);
+        auto host = openToolTipHost(*engine, rowSetup(contour::config::ChromeStyle::MacOS));
+        // Near the bottom: there is no room below, so it goes above, as KitToolTip does.
+        host.control->setY(host.quick().height() - 24);
+        QQmlComponent component(
+            engine.get(), QUrl(QStringLiteral("qrc:/qt/qml/%1/ToolTip.qml").arg(QLatin1StringView(style))));
+        INFO(component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        std::unique_ptr<QObject> stray(component.create());
+        REQUIRE(stray != nullptr);
+        stray->setProperty("parent", QVariant::fromValue(static_cast<QObject*>(host.control)));
+        stray->setProperty("text", QStringLiteral("stray"));
+        CHECK(stray->property("margins").toReal() > 0);
+        REQUIRE(QMetaObject::invokeMethod(stray.get(), "open"));
+        REQUIRE(QTest::qWaitFor([&] { return stray->property("opened").toBool(); }, 3000));
+        CHECK(stray->property("y").toReal() + stray->property("height").toReal() <= 0.0);
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the find bar's shortcut table names exactly the keys SearchBar.qml handles",
+          "[contour][gui][qml][search]")
+{
+    using contour::command::FindBarShortcuts;
+    auto const read = [](QString const& path) {
+        auto file = QFile(path);
+        REQUIRE(file.open(QIODevice::ReadOnly | QIODevice::Text));
+        return QString::fromUtf8(file.readAll());
+    };
+    auto const searchBar = read(QStringLiteral(":/qt/qml/Contour/Ui/SearchBar.qml"));
+
+    // Every name a tooltip asks for is a row; every row is asked for.
+    auto asked = QStringList {};
+    auto files = QDirIterator(QStringLiteral(":/qt/qml/Contour/Ui"), { QStringLiteral("*.qml") });
+    auto const call = QRegularExpression(QStringLiteral(R"re(findBarShortcutText\("(\w+)"\))re"));
+    while (files.hasNext())
+    {
+        auto matches = call.globalMatch(read(files.next()));
+        while (matches.hasNext())
+            asked << matches.next().captured(1);
+    }
+    for (auto const& name: asked)
+    {
+        INFO("asked for: " << name.toStdString());
+        CHECK(std::ranges::any_of(FindBarShortcuts,
+                                  [&](auto const& row) { return QString::fromLatin1(row.name) == name; }));
+    }
+    for (auto const& row: FindBarShortcuts)
+    {
+        INFO("row: " << row.name);
+        CHECK(asked.contains(QString::fromLatin1(row.name)));
+        // The key the row names, and the handler SearchBar.qml answers it with.
+        if (std::get<vtbackend::Key>(row.input) == vtbackend::Key::Enter)
+        {
+            CHECK(searchBar.contains(QStringLiteral("Keys.onReturnPressed")));
+            CHECK(searchBar.contains(QStringLiteral("Keys.onEnterPressed")));
+            // Shift turns the step round: the row with Shift is Previous, the one without is Next.
+            CHECK(row.modifiers.test(vtbackend::Modifier::Shift)
+                  == (QString::fromLatin1(row.name) == QStringLiteral("FindPrevious")));
+        }
+        else
+        {
+            CHECK(std::get<vtbackend::Key>(row.input) == vtbackend::Key::Escape);
+            CHECK(searchBar.contains(QStringLiteral("Keys.onEscapePressed")));
+        }
+    }
+    // Shift on Enter reads as "previous" in the handler itself.
+    CHECK(searchBar.contains(QStringLiteral("event.modifiers & Qt.ShiftModifier")));
+    CHECK(FindBarShortcuts.size() == 3);
 }

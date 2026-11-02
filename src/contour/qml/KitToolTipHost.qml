@@ -22,8 +22,11 @@ Item {
     /// The tooltip's object name, for a test to find it by.
     property string toolTipName: "kitToolTip"
 
+    /// Whether a press sent the tooltip away: it stays away until the pointer leaves the control, so a release
+    /// does not bring it back.
+    property bool _dismissed: false
     /// Whether the control wants its tooltip now.
-    readonly property bool wanted: hover.hovered && !press.active && !root.suppressed && root.text.length > 0
+    readonly property bool wanted: hover.hovered && !root._dismissed && !root.suppressed && root.text.length > 0
     /// The tooltip while there is one, else null.
     readonly property var toolTip: loader.item
     /// Whether the tooltip is showing, fade-out included: set by the tooltip, so the Loader keeping it alive
@@ -37,12 +40,14 @@ Item {
     HoverHandler {
         id: hover
         onPointChanged: if (!root.open) root.pointerX = point.position.x
+        onHoveredChanged: if (!hovered) root._dismissed = false
     }
 
     // Passive, so the control's own handlers still take the press: it only hides the tooltip.
     PointHandler {
         id: press
         acceptedButtons: Qt.AllButtons
+        onActiveChanged: if (active) root._dismissed = true
     }
 
     Loader {

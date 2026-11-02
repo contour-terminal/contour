@@ -1,6 +1,6 @@
 // vim:syntax=qml
 // ToolTip for the ContourTui style: any attached tooltip (the attached one is the stray case; the kit's own
-// controls use qml/KitToolTip.qml) drawn from the same tooltip tokens, below its parent. Opaque for the
+// controls use qml/KitToolTip.qml) drawn from the same tooltip tokens, placed as KitToolTip is. Opaque for the
 // reason Popup.qml states. See ToolButton.qml for what a style file is.
 import QtQuick
 import QtQuick.Templates as T
@@ -9,21 +9,25 @@ import Contour.Ui
 T.ToolTip {
     id: control
 
-    x: parent ? (parent.width - implicitWidth) / 2 : 0
-    y: parent ? parent.height + chromeStyle.space.s2 : 0
-
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
                             implicitContentWidth + leftPadding + rightPadding)
     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                              implicitContentHeight + topPadding + bottomPadding)
 
-    padding: 0
     leftPadding: chromeStyle.size.tooltipPadX
     rightPadding: chromeStyle.size.tooltipPadX
     topPadding: chromeStyle.size.tooltipPadTop
     bottomPadding: chromeStyle.size.tooltipPadBottom
 
-    closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutsideParent | T.Popup.CloseOnReleaseOutsideParent
+    // The window keeps the box, and its shadow, this far from its edges.
+    margins: background.shadowReach
+
+    // Placed as KitToolTip is: below, above where there is no room, once as it begins to show.
+    KitToolTipPlacer {
+        id: placer
+        popup: control
+    }
+    onAboutToShow: placer.place()
 
     contentItem: Text {
         text: control.text

@@ -17,10 +17,11 @@ T.ToolTip {
     id: root
     objectName: "kitToolTip"
 
-    /// The keyboard shortcut, in the dimmed slot at the label's trailing side; empty leaves the slot out.
+    /// A shortcut named as it is, in the dimmed slot at the label's trailing side. It wins over the chord
+    /// looked up for `shortcutCommand`; with neither, the slot is left out.
     property string shortcut
-    /// The command whose bound chord is the shortcut, asked of the window's controller (its `win`) whenever
-    /// the tooltip is about to show (a binding can change while the window lives); empty looks nothing up.
+    /// The command whose bound chord is the shortcut where `shortcut` is empty, asked of the window's controller
+    /// (its `win`) whenever the tooltip is about to show (a binding can change while the window lives).
     property string shortcutCommand
     /// Whether the control wants its tooltip: KitToolTipHost's to bind.
     property bool wanted: false
@@ -28,12 +29,14 @@ T.ToolTip {
     /// centre where nothing tracks the pointer.
     property real pointerX: parent ? parent.width / 2 : 0
 
-    /// The gap between the control and the tooltip.
-    readonly property real distance: chromeStyle.space.s2
     /// The pointer's offset from the tooltip's leading edge: the pointer lands inside the box.
-    readonly property real pointerInset: chromeStyle.space.s3
+    readonly property real pointerInset: placer.pointerInset
+    /// The chord looked up for `shortcutCommand` when last about to show; empty where none is bound.
+    property string _resolvedShortcut
+    /// What the slot shows: `shortcut`, else the looked-up chord.
+    readonly property string shownShortcut: root.shortcut.length > 0 ? root.shortcut : root._resolvedShortcut
     /// The label's lines, the first in the primary colour.
-    readonly property var _lines: root.text.split("\n")
+    readonly property var _lines: root.text.split(/\r?\n/)
     readonly property string _first: root._lines[0]
     readonly property string _rest: root._lines.slice(1).join("\n")
     /// The control's window, or null.
@@ -42,8 +45,8 @@ T.ToolTip {
     readonly property var _clock: _window && _window.tooltipClock ? _window.tooltipClock : null
     /// What answers `shortcutText(command)`: the window's controller (Main.qml's `win`), if it has one.
     readonly property var _controller: _window && _window.win ? _window.win : null
-    /// Whether the shortcut slot exists: there is a shortcut.
-    readonly property bool shortcutShown: root.shortcut.length > 0
+    /// Whether the shortcut slot exists: there is a shortcut to show.
+    readonly property bool shortcutShown: root.shownShortcut.length > 0
     /// Whether the secondary lines exist: the text has more than one line.
     readonly property bool secondaryShown: root._rest.length > 0
 
@@ -60,6 +63,10 @@ T.ToolTip {
     // The window keeps the box, and its shadow, this far from its edges.
     margins: background.shadowReach
 
+    // The window's clock is touched as a hide begins as well as when the tooltip is shown: a tooltip that
+    // was open a long while must leave the next one warm, not cold.
+    onAboutToHide: root.touchClock()
+
     onWantedChanged: root.sync()
     Component.onCompleted: root.sync()
 
@@ -74,38 +81,33 @@ T.ToolTip {
         root.visible = true
     }
 
+    // Placed once, as it begins to show: the box has its size by then (a popup's content is built with it), and
+    // placing it again later would move it during the fade-in.
     onAboutToShow: {
         root.refreshShortcut()
-        root.place()
+        placer.place()
     }
-    // Placed again once open: the box has its size by then, which it may not have had as it began to show.
-    onOpened: {
-        root.place()
-        root.touchClock()
-    }
-    onClosed: root.touchClock()
+    onOpened: root.touchClock()
 
-    /// Notes on the window's clock that a tooltip is showing, or has just hidden.
+    KitToolTipPlacer {
+        id: placer
+        popup: root
+        pointerX: root.pointerX
+    }
+
+    /// How often the tooltip was placed: once per showing.
+    readonly property int placements: placer.placements
+
+    /// Notes on the window's clock that a tooltip is showing, or is hiding.
     function touchClock() {
         if (root._clock)
             root._clock.touch()
     }
 
-    /// Reads the shortcut of `shortcutCommand` from the window's controller, where there are both.
+    /// Looks up the chord of `shortcutCommand` in the window's controller, where there are both.
     function refreshShortcut() {
-        if (root.shortcutCommand.length > 0 && root._controller)
-            root.shortcut = root._controller.shortcutText(root.shortcutCommand)
-    }
-
-    /// Puts the tooltip below its control at the pointer; above only where below has no room. The margins keep it
-    /// inside the window sideways.
-    function place() {
-        if (!parent)
-            return
-        x = root.pointerX - root.pointerInset
-        const bottom = parent.mapToItem(null, 0, parent.height).y + root.distance
-        const fitsBelow = !_window || bottom + implicitHeight + root.margins <= _window.height
-        y = fitsBelow ? parent.height + root.distance : -implicitHeight - root.distance
+        root._resolvedShortcut = root.shortcutCommand.length > 0 && root._controller
+            ? root._controller.shortcutText(root.shortcutCommand) : ""
     }
 
     enter: Transition {
@@ -131,6 +133,9 @@ T.ToolTip {
             id: firstLabel
             objectName: "kitToolTipLabel"
             width: content.textWidth
+            // Few lines of a label: a title that wraps is cut, not allowed to take the window.
+            maximumLineCount: 2
+            elide: Text.ElideRight
             text: root._first
             // Never AutoText: a tooltip's text may be what an application wrote (a link's URI, a tab title,
             // a command line), and AutoText renders it as rich text whenever its first line looks like markup.
@@ -146,6 +151,9 @@ T.ToolTip {
             y: firstLabel.height
             width: content.textWidth
             visible: root.secondaryShown
+            // What the token allows, less the label's lines; the rest is cut.
+            maximumLineCount: Math.max(1, chromeStyle.size.tooltipMaxLines - firstLabel.lineCount)
+            elide: Text.ElideRight
             text: root._rest
             textFormat: Text.PlainText
             font: chromeStyle.type.footnote
@@ -159,7 +167,7 @@ T.ToolTip {
             anchors.right: parent.right
             y: 0
             visible: root.shortcutShown
-            text: root.shortcut
+            text: root.shownShortcut
             textFormat: Text.PlainText
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.tooltipTextSecondary

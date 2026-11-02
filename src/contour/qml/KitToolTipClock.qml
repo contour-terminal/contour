@@ -11,16 +11,18 @@ QtObject {
 
     /// How long after a tooltip was last shown the next shows with no delay, in milliseconds.
     property int warmMs: chromeStyle.motion.tooltipWarm
-    /// The time a tooltip was last shown or hidden, in milliseconds since the epoch; never when it is 0.
+    /// The time source: milliseconds since the epoch. A test replaces it to drive time by hand.
+    property var now: function() { return Date.now() }
+    /// The time a tooltip was last shown or hidden, in `now` milliseconds; never when it is 0.
     property double lastActive: 0
 
     /// @return Whether a tooltip was shown, or hidden, within warmMs of now.
     function isWarm() {
-        return root.lastActive > 0 && Date.now() - root.lastActive < root.warmMs
+        return root.lastActive > 0 && root.now() - root.lastActive < root.warmMs
     }
 
     /// Notes that a tooltip is showing, or has just hidden.
     function touch() {
-        root.lastActive = Date.now()
+        root.lastActive = root.now()
     }
 }

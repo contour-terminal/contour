@@ -511,6 +511,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/KitToolTipBackground.qml
         qml/KitToolTipClock.qml
         qml/KitToolTipHost.qml
+        qml/KitToolTipPlacer.qml
         qml/KitDialog.qml
         qml/KitSwitch.qml
         qml/KitSegmented.qml
