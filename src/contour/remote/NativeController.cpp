@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/Actions.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
