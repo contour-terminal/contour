@@ -413,15 +413,18 @@ class UiStyleProvider: public QObject
     /// @return A colour well. Empty where it is a shape.
     [[nodiscard]] QString const& colorWellGlyph() const noexcept { return _glyphs.colorWell; }
     /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
-    [[nodiscard]] QStringList paneHeaderActionNames() const;
+    [[nodiscard]] QStringList const& paneHeaderActionNames() const noexcept { return _paneHeaderActionNames; }
     /// @return The header actions' command names, indexed by config::PaneHeaderAction.
-    [[nodiscard]] QStringList paneHeaderActionCommands() const;
+    [[nodiscard]] QStringList const& paneHeaderActionCommands() const noexcept
+    {
+        return _paneHeaderActionCommands;
+    }
 
-    /// A chord a control answers to whatever the configuration binds (command::FixedShortcutTable), spelled
+    /// A chord a control answers to whatever the configuration binds (command::FindBarShortcuts), spelled
     /// as this host spells shortcuts: glyphs on macOS, names elsewhere.
     /// @param name The chord's name, such as "FindNext".
     /// @return The shortcut; empty for a name no row has.
-    [[nodiscard]] Q_INVOKABLE QString fixedShortcutText(QString const& name) const;
+    [[nodiscard]] Q_INVOKABLE QString findBarShortcutText(QString const& name) const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
@@ -582,6 +585,12 @@ class UiStyleProvider: public QObject
     /// @param devicePixelRatio The window's device-pixel ratio.
     /// @return @c 1 / @p devicePixelRatio, or 1 for a ratio of 0 or less.
     [[nodiscard]] Q_INVOKABLE qreal hairline(qreal devicePixelRatio) const;
+
+    /// The width of a tooltip's edge: nothing where the row gives it no edge colour, else the row's
+    /// `size.tooltipEdge` in pixels, or one device pixel where that is 0.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The border width in logical pixels.
+    [[nodiscard]] Q_INVOKABLE qreal tooltipEdgeWidth(qreal devicePixelRatio) const;
 
     /// How strongly an unfocused pane dims (R-g).
     ///
@@ -1038,6 +1047,8 @@ class UiStyleProvider: public QObject
     ChromeSettingsTokens _settings;
     ChromeSettingsTraits _settingsTraits;
     ChromeColorTokens _colors;
+    QStringList _paneHeaderActionNames;    ///< PaneHeaderActions' accessible names, built once.
+    QStringList _paneHeaderActionCommands; ///< PaneHeaderActions' command names, built once.
     ChromePaneRoleNames _paneRoles;
     ChromeBadgeKindNames _badgeKinds;
     ChromePaneEndNames _paneEnds;

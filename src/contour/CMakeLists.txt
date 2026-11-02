@@ -508,7 +508,9 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SecureInputPill.qml
         qml/ElevationShadow.qml
         qml/KitToolTip.qml
+        qml/KitToolTipBackground.qml
         qml/KitToolTipClock.qml
+        qml/KitToolTipHost.qml
         qml/KitDialog.qml
         qml/KitSwitch.qml
         qml/KitSegmented.qml

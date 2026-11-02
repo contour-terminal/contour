@@ -495,6 +495,9 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
         // A hold is no animation: the size indicator stays as long as without Reduce Motion.
         CHECK(reduced.motion.lingerMs == base.motion.lingerMs);
         CHECK(reduced.motion.lingerMs == 600);
+        // The tooltip's delay is a hold too, and stays; so does the span it keeps the next one warm.
+        CHECK(reduced.motion.tooltipDelayMs == base.motion.tooltipDelayMs);
+        CHECK(reduced.motion.tooltipWarmMs == base.motion.tooltipWarmMs);
         CHECK(base.motion.popoverScalePercent == (style == ChromeStyle::Terminal ? 100 : 97));
         CHECK(reduced.size == base.size);
         CHECK(reduced.space == base.space);
@@ -2536,18 +2539,12 @@ TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
         CHECK(row.size.tooltipPadTop == expected.padTop);
         CHECK(row.size.tooltipPadBottom == expected.padBottom);
         CHECK(row.size.tooltipGap == expected.gap);
-        // Every row lifts a tooltip by e2: the soft shadow, or the Terminal row's hard offset its menus cast.
-        CHECK(row.size.tooltipElevation == 2);
         CHECK(row.size.tooltipMaxWidth == (expected.style == ChromeStyle::Terminal ? 48 : 360));
         CHECK(row.radii.tooltip == expected.radius);
         // Every row waits the same before the first tooltip and keeps the next warm for the same span.
         CHECK(row.motion.tooltipDelayMs == 600);
         CHECK(row.motion.tooltipWarmMs == 1500);
     }
-    // Under Reduce Motion the delay is a hold, not an animation, and stays.
-    auto reduced = ChromeTokenRows[static_cast<size_t>(ChromeStyle::MacOS)];
-    reduced.motion.fastMs = 0;
-    CHECK(reduced.motion.tooltipDelayMs == 600);
 }
 
 TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
@@ -2568,7 +2565,8 @@ TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
         CHECK((text.rgb == 0x000000 && text.alphaPercent == 85));
         CHECK((text.darkRgb == 0xFFFFFF && text.darkAlphaPercent == 88));
         auto const shortcut = role(ChromeStyle::MacOS, ChromeColorRole::TooltipTextSecondary);
-        CHECK((shortcut.alphaPercent == 45 && shortcut.darkAlphaPercent == 50));
+        // The kit's tertiary label, 45 / 50 %.
+        CHECK((shortcut.kind == ColorSourceKind::Label && shortcut.level == 3));
         auto const edge = role(ChromeStyle::MacOS, ChromeColorRole::TooltipEdge);
         CHECK((edge.alphaPercent == 18 && edge.darkAlphaPercent == 14));
     }

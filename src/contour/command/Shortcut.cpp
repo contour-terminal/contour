@@ -133,10 +133,10 @@ std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style)
     return shortcutText(chord.modifiers, chord.input, style);
 }
 
-std::optional<std::string> fixedShortcutText(std::string_view name, ShortcutStyle style)
+std::optional<std::string> findBarShortcutText(std::string_view name, ShortcutStyle style)
 {
-    auto const row = std::ranges::find(FixedShortcutTable, name, &FixedShortcutRow::name);
-    if (row == FixedShortcutTable.end())
+    auto const row = std::ranges::find(FindBarShortcuts, name, &FindBarShortcut::name);
+    if (row == FindBarShortcuts.end())
         return std::nullopt;
     return shortcutText(row->modifiers, row->input, style);
 }

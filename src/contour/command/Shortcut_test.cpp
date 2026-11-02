@@ -274,15 +274,15 @@ TEST_CASE("linkOpenHint names the configured gesture", "[contour][palette]")
     CHECK(linkOpenHint(std::nullopt, Modifiers { Modifier::Shift }, ShortcutStyle::MacGlyphs).empty());
 }
 
-TEST_CASE("fixedShortcutText spells the find bar's own keys in either style", "[contour][palette]")
+TEST_CASE("findBarShortcutText spells the find bar's own keys in either style", "[contour][palette]")
 {
-    CHECK(fixedShortcutText("FindPrevious", ShortcutStyle::Text) == "Shift+Enter");
-    CHECK(fixedShortcutText("FindNext", ShortcutStyle::Text) == "Enter");
-    CHECK(fixedShortcutText("FindClose", ShortcutStyle::Text) == "Escape");
+    CHECK(findBarShortcutText("FindPrevious", ShortcutStyle::Text) == "Shift+Enter");
+    CHECK(findBarShortcutText("FindNext", ShortcutStyle::Text) == "Enter");
+    CHECK(findBarShortcutText("FindClose", ShortcutStyle::Text) == "Escape");
 
-    CHECK(fixedShortcutText("FindPrevious", ShortcutStyle::MacGlyphs) == "⇧↩");
-    CHECK(fixedShortcutText("FindNext", ShortcutStyle::MacGlyphs) == "↩");
-    CHECK(fixedShortcutText("FindClose", ShortcutStyle::MacGlyphs) == "⎋");
+    CHECK(findBarShortcutText("FindPrevious", ShortcutStyle::MacGlyphs) == "⇧↩");
+    CHECK(findBarShortcutText("FindNext", ShortcutStyle::MacGlyphs) == "↩");
+    CHECK(findBarShortcutText("FindClose", ShortcutStyle::MacGlyphs) == "⎋");
 
-    CHECK_FALSE(fixedShortcutText("NoSuchKey", ShortcutStyle::Text).has_value());
+    CHECK_FALSE(findBarShortcutText("NoSuchKey", ShortcutStyle::Text).has_value());
 }

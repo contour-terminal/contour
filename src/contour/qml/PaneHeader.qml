@@ -391,9 +391,7 @@ Item {
                 hoverFill: chromeStyle.paletteRevision < 0 ? "transparent"
                          : chromeStyle.colorOn(chromeStyle.roles.paneHeaderActionHover, header.background)
                 accessibleName: chromeStyle.paneHeaderActionNames[index]
-                toolTipText: chromeStyle.paneHeaderActionNames[index]
                 toolTipCommand: chromeStyle.paneHeaderActionCommands[index]
-                toolTipController: header.controller
                 onClicked: if (header.node) header.node.runHeaderAction(index)
                 onActiveFocusChanged: {
                     if (activeFocus)

@@ -428,10 +428,12 @@ ThemedWindow
         anchors.left: parent.left
         anchors.right: parent.right
 
-        // Every tooltip is an attached one, and the engine shares one instance among them, built by the
-        // style in use. Fusion's (`ui_style: native`) reads its text as AutoText, which renders a link's URI,
-        // a tab title or a command line as rich text whenever its first line looks like markup -- an
-        // `<img src=...>` fetched on hover. Set here, on an Item, as the attached property requires.
+        // The chrome's tooltips are KitToolTips, plain text by construction. This is for a stray attached one
+        // (a test fails any attached `ToolTip.` in the chrome's QML): the engine shares one instance
+        // among them, built by the style in use, and Fusion's (`ui_style: native`) reads its text as
+        // AutoText, which renders a link's URI, a tab title or a command line as rich text whenever its
+        // first line looks like markup -- an `<img src=...>` fetched on hover. Set here, on an Item, as the
+        // attached property requires.
         Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
 
         // The terminal content: the active tab's pane tree. Settings is a window of its own

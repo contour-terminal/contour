@@ -505,7 +505,6 @@ struct SizeTokens
     int tooltipEdge = 0;       ///< A tooltip's edge in whole pixels; 0 draws one device pixel.
     int tooltipGap = 0;        ///< The gap between a tooltip's label and its shortcut (horizontal units).
     int tooltipMaxWidth = 0;   ///< The widest a tooltip's text grows before it wraps (horizontal units).
-    int tooltipElevation = 0;  ///< The shadow level (0 to 3) a tooltip lifts itself by; 0 casts none.
     int dialogWidth = 0;       ///< Width of a dialog.
     int swatchWidth = 0;       ///< Width of a menu's colour swatch.
     int swatchHeight = 0;      ///< Height of a menu's colour swatch.

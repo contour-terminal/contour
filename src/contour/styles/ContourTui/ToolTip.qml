@@ -35,17 +35,5 @@ T.ToolTip {
         wrapMode: Text.WordWrap
     }
 
-    background: Rectangle {
-        radius: chromeStyle.radii.tooltip
-        color: chromeStyle.colors.tooltipFill
-        border.width: chromeStyle.colors.tooltipEdge.a > 0 ? (chromeStyle.size.tooltipEdge > 0 ? chromeStyle.size.tooltipEdge : chromeStyle.borderWidth) : 0
-        border.color: chromeStyle.colors.tooltipEdge
-
-        ElevationShadow {
-            anchors.fill: parent
-            z: -1
-            level: [chromeStyle.elevation.e0, chromeStyle.elevation.e1, chromeStyle.elevation.e2, chromeStyle.elevation.e3][chromeStyle.size.tooltipElevation]
-            radius: parent.radius
-        }
-    }
+    background: KitToolTipBackground {}
 }

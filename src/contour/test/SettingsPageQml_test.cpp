@@ -19,6 +19,7 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/InMemoryGuiStateStore.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlComponentsTestSupport.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -90,13 +91,7 @@ void clickButton(QObject* object)
     QMetaObject::invokeMethod(object, "clicked");
 }
 
-/// The chrome setup of @p row, with the default scheme.
-[[nodiscard]] contour::test::ChromeSetup rowSetup(config::ChromeStyle row)
-{
-    auto setup = contour::test::defaultChromeSetup();
-    setup.row = row;
-    return setup;
-}
+using contour::test::qmlSupport::rowSetup;
 
 /// The Terminal row painted with the built-in colour scheme @p schemeName.
 [[nodiscard]] contour::test::ChromeSetup terminalRowSetup(std::string_view schemeName)

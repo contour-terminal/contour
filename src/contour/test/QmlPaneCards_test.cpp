@@ -3281,7 +3281,7 @@ TEST_CASE("Dismissing the palette runs nothing and gives the keyboard back (offs
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-TEST_CASE("pane card: each header action's tooltip names it and carries its bound chord (offscreen)",
+TEST_CASE("pane card: each header action's tooltip names it and its command (offscreen)",
           "[contour][gui][qml][panecard][tooltip]")
 {
     auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
@@ -3294,22 +3294,18 @@ TEST_CASE("pane card: each header action's tooltip names it and carries its boun
         char const* part;
         char const* name;
         char const* command;
-        char const* chord;
     };
-    // SplitVertical is bound in the mock; the others are not, so their slot is absent.
-    for (auto const& row: { Case { "paneHeaderAction0", "Split right", "SplitVertical", "Ctrl+Shift+D" },
-                            Case { "paneHeaderAction1", "Split down", "SplitHorizontal", "" },
-                            Case { "paneHeaderAction2", "Zoom pane", "TogglePaneZoom", "" },
-                            Case { "paneHeaderAction3", "Close pane", "ClosePane", "Ctrl+Shift+X" } })
+    // The name is the button's accessible name; the chord of the command is the window controller's to say.
+    for (auto const& row: { Case { "paneHeaderAction0", "Split right", "SplitVertical" },
+                            Case { "paneHeaderAction1", "Split down", "SplitHorizontal" },
+                            Case { "paneHeaderAction2", "Zoom pane", "TogglePaneZoom" },
+                            Case { "paneHeaderAction3", "Close pane", "ClosePane" } })
     {
         CAPTURE(row.part);
         auto const& button = PaneTreeHost::partOf(card, row.part);
-        auto* const tip = button.findChild<QObject*>(QStringLiteral("toolbarButtonToolTip"));
-        REQUIRE(tip != nullptr);
-        CHECK(tip->property("text").toString() == QString::fromLatin1(row.name));
-        CHECK(tip->property("shortcutCommand").toString() == QString::fromLatin1(row.command));
-        REQUIRE(QMetaObject::invokeMethod(tip, "refreshShortcut"));
-        CHECK(tip->property("shortcut").toString() == QString::fromLatin1(row.chord));
-        CHECK(tip->property("shortcutShown").toBool() == (row.chord[0] != '\0'));
+        auto const* const toolTipHost = button.findChild<QObject*>(QStringLiteral("kitToolTipHost"));
+        REQUIRE(toolTipHost != nullptr);
+        CHECK(toolTipHost->property("text").toString() == QString::fromLatin1(row.name));
+        CHECK(toolTipHost->property("shortcutCommand").toString() == QString::fromLatin1(row.command));
     }
 }

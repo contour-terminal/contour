@@ -30,15 +30,11 @@ Item {
     /// The fill under a hovered or focused button: the band's unless the host sits on a surface of its own.
     property color hoverFill: chromeStyle.colors.tabHoverFill
 
-    /// The tooltip's label; empty shows no tooltip.
-    property string toolTipText
-    /// The keyboard shortcut the tooltip carries beside its label; empty leaves the slot out.
-    property string toolTipShortcut
-    /// The command whose bound chord the tooltip carries instead, asked of `toolTipController` whenever the
-    /// tooltip is about to show; empty carries `toolTipShortcut`.
+    /// The tooltip's label: the accessible name unless the host says more; empty shows no tooltip.
+    property string toolTipText: root.accessibleName
+    /// The command whose bound chord the tooltip carries beside its label, asked of the window's controller
+    /// whenever the tooltip is about to show; empty carries none.
     property string toolTipCommand
-    /// What answers `shortcutText(command)`: the window's controller.
-    property var toolTipController: null
 
     /// Whether keyboard focus is on this button and the chrome says so: the host's to set, since a button
     /// knows nothing of the window's chrome focus. Draws the focus ring.
@@ -96,15 +92,10 @@ Item {
              : "transparent"
     }
 
-    KitToolTip {
-        objectName: "toolbarButtonToolTip"   // findChild() handle for the GUI test
+    KitToolTipHost {
         text: root.toolTipText
-        shortcut: root.toolTipShortcut
         shortcutCommand: root.toolTipCommand
-        shortcutSource: root.toolTipController
-        // Gone once the button is pressed: the click is its answer.
-        wanted: hover.hovered && !primary.pressed && !secondary.pressed && root.toolTipText.length > 0
-        pointerX: hover.point.position.x
+        toolTipName: "toolbarButtonToolTip"   // findChild() handle for the GUI test
     }
 
     FocusRing {

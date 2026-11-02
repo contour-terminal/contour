@@ -825,6 +825,20 @@ struct ChromeHost
     return *provider;
 }
 
+/// @return The chrome colour role @p name of @p engine's chromeStyle.
+[[nodiscard]] inline QColor chromeColor(QQmlEngine& engine, char const* name)
+{
+    return providerOf(engine).colors()->property(name).value<QColor>();
+}
+
+/// The chrome setup of @p row, with the default scheme and font.
+[[nodiscard]] inline contour::test::ChromeSetup rowSetup(contour::config::ChromeStyle row)
+{
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = row;
+    return setup;
+}
+
 /// The chrome setup the pane card cases default to: the MacOS row, Comfortable.
 [[nodiscard]] inline contour::test::ChromeSetup paneCardSetup()
 {
@@ -1569,6 +1583,7 @@ inline void openSaveLayoutPrompt(MockSaveLayoutController& controller)
                                        "Window {\n"
                                        "  id: host\n"
                                        "  width: %1; height: 400; visible: true\n"
+                                       "  property var win: terminalSessions\n"
                                        "  TitleBar {\n"
                                        "    objectName: \"titleBar\"\n"
                                        "    anchors.left: parent.left\n"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlComponentsTestSupport.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <QtCore/QFile>
@@ -435,14 +436,10 @@ TEST_CASE("A ContourTui tooltip is the surface of its menus and popups", "[conto
 
         QQmlEngine engine;
         contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
-        auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
-        REQUIRE(style != nullptr);
-        auto* colors = style->property("colors").value<QObject*>();
-        REQUIRE(colors != nullptr);
-        CHECK(colors->property("tooltipFill").value<QColor>() == palette.color(QPalette::Window));
-        CHECK(colors->property("tooltipText").value<QColor>() == palette.color(QPalette::WindowText));
-        CHECK(colors->property("tooltipEdge").value<QColor>() == palette.color(QPalette::Mid));
-        CHECK(style->property("size").value<QObject*>()->property("tooltipElevation").toInt() == 2);
+        using contour::test::qmlSupport::chromeColor;
+        CHECK(chromeColor(engine, "tooltipFill") == palette.color(QPalette::Window));
+        CHECK(chromeColor(engine, "tooltipText") == palette.color(QPalette::WindowText));
+        CHECK(chromeColor(engine, "tooltipEdge") == palette.color(QPalette::Mid));
     }
     QGuiApplication::setPalette(saved);
 }

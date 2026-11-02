@@ -390,7 +390,7 @@ namespace detail
         // and the shortcut at 45 / 50 % of the ink, a hairline of 18 / 14 %.
         tone(0xF6F6F6, 100, 0x2C2C2E, 100), // TooltipFill
         tone(0x000000, 85, 0xFFFFFF, 88),   // TooltipText
-        tone(0x000000, 45, 0xFFFFFF, 50),   // TooltipTextSecondary
+        label(3),                           // TooltipTextSecondary: 45 / 50 %
         tone(0x000000, 18, 0xFFFFFF, 14),   // TooltipEdge
     };
 
@@ -586,7 +586,6 @@ namespace detail
                   .tooltipEdge = 0,
                   .tooltipGap = 14,
                   .tooltipMaxWidth = 360,
-                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -723,7 +722,6 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 14,
                   .tooltipMaxWidth = 360,
-                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -860,7 +858,6 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 16,
                   .tooltipMaxWidth = 360,
-                  .tooltipElevation = 2,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -1002,7 +999,6 @@ namespace detail
                   .tooltipEdge = 1,
                   .tooltipGap = 2,
                   .tooltipMaxWidth = 48,
-                  .tooltipElevation = 2,
                   .dialogWidth = 32,
                   .swatchWidth = 2,
                   .swatchHeight = 1,

@@ -1030,27 +1030,24 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::ButtonsLeading:
             case SnapshotScript::NoButtons:
             case SnapshotScript::MainMenu: checkHeaderBarScript(scene, variant); break;
-            case SnapshotScript::ToolTipNewTab: {
-                // The new-tab control's tooltip is open with its shortcut; the tab's is not.
-                auto const open = scene.root().findChildren<QObject*>(QStringLiteral("toolbarButtonToolTip"));
-                auto const strip =
-                    contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("newTabButton"));
-                REQUIRE_FALSE((open.empty() && strip.empty()
-                               && contour::test::itemsNamed(*scene.window().contentItem(),
-                                                            QStringLiteral("headerNewTab"))
-                                      .empty()));
-                break;
-            }
+            case SnapshotScript::ToolTipNewTab:
             case SnapshotScript::ToolTipTab: {
-                // The tab's tooltip is open with its second line.
-                auto const tabs =
-                    contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("tabBackground"));
-                REQUIRE_FALSE(tabs.empty());
-                auto const* hover =
-                    tabs.front()->parentItem()->findChild<QObject*>(QStringLiteral("tabHoverToolTip"));
-                REQUIRE(hover != nullptr);
-                CHECK(hover->property("opened").toBool());
-                CHECK(hover->property("secondaryShown").toBool());
+                // Exactly the one tooltip the script is of is built and open.
+                auto hosts = contour::test::itemsNamed(*scene.window().contentItem(),
+                                                       QStringLiteral("kitToolTipHost"));
+                for (auto* tab:
+                     contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("tabHover")))
+                    hosts.push_back(tab);
+                auto open = std::vector<QObject*> {};
+                for (auto const* host: hosts)
+                    if (auto* toolTip = host->property("toolTip").value<QObject*>(); toolTip != nullptr)
+                        open.push_back(toolTip);
+                REQUIRE(open.size() == 1);
+                CHECK(open.front()->property("opened").toBool());
+                CHECK(open.front()->property("secondaryShown").toBool()
+                      == (variant.script == SnapshotScript::ToolTipTab));
+                CHECK(open.front()->property("shortcutShown").toBool()
+                      == (variant.script == SnapshotScript::ToolTipNewTab));
                 break;
             }
             case SnapshotScript::QuickTerminal: {
