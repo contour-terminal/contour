@@ -718,97 +718,170 @@ jobs:
           retention-days: 1
   # }}}
   # {{{ Fedora
-  # fedora:
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os_version: [40]
-  #       arch:
-  #         [
-  #           "linux/amd64 x86_64"
-  #         ]
-  #   name: "Fedora ${{ matrix.os_version }} ${{ matrix.arch }}"
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Docker Buildx
-  #       id: buildx
-  #       uses: docker/setup-buildx-action@v2
-  #       with:
-  #         version: latest
-  #     - name: Read matrix info
-  #       id: tags
-  #       shell: bash
-  #       run: |
-  #         arch="${{ matrix.arch }}"
-  #         echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
-  #         echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
-  #     - name: "update APT database"
-  #       run: sudo apt -q update
-  #     - name: Installing xmllint for ci-set-vars
-  #       run: sudo apt -qy install libxml2-utils
-  #     - name: set environment variables
-  #       id: set_vars
-  #       run: ./scripts/ci-set-vars.sh
-  #       env:
-  #         REPOSITORY: ${{ github.event.repository.name }}
-  #     - name: Fetch and unpack embeds
-  #       run: ./scripts/install-deps.sh
-  #       env:
-  #         PREPARE_ONLY_EMBEDS: 'ON'
-  #         SYSDEP_ASSUME_YES: 'ON'
-  #         OS_OVERRIDE: 'fedora'
-  #     - name: "Post-fix embedded dependency permissions."
-  #       run: sudo find _deps/sources -exec chown $UID {} \;
-  #     - name: prepare distfile
-  #       run: |
-  #         set -x
-  #         PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
-  #         DISTDIR="/tmp/dist/${PKGNAME}"
-  #         mkdir -p ${DISTDIR}
-  #         cp -rvp . ${DISTDIR}
-  #         tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
-  #     - name: disable pedantic compiler on certain OS versions
-  #       # Generally disable -Werror.
-  #       #if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
-  #       run: |
-  #         set -ex
-  #         #sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
-  #         sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
-  #     - name: Build ${{ matrix.arch }} release
-  #       shell: bash
-  #       run: |
-  #         set -x
-  #         ARCH="${{ steps.tags.outputs.ARCH }}"
-  #         VERSION="${{ steps.set_vars.outputs.VERSION }}"
-  #         OS_VERSION="${{ matrix.os_version }}"
-  #         sed -i -e "s/fedora:35/fedora:${{ matrix.os_version }}/" .github/fedora/Dockerfile
-  #         docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
-  #                 --tag contour:${ARCH} \
-  #                 --build-arg VERSION=${VERSION} \
-  #                 --build-arg VERSION_STRING=${VERSION} \
-  #                 -f .github/fedora/Dockerfile \
-  #                 --load \
-  #                 .
-  #         docker create --name contour-${ARCH} contour:${ARCH}
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker container rm contour-${{ steps.tags.outputs.ARCH }}
-  #         echo "pwd: `pwd`" && ls -hla
-  #     - name: "Uploading Fedora RPM package"
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
-  #         path: |
-  #           contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #           contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #           contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #         if-no-files-found: error
-  #         retention-days: 7
+  # Builds BOTH RPMs from the one spec, .github/fedora/contour.spec: the GUI `contour`, and with
+  # `--with daemon` the Qt-free `contour-daemon`, then installs them in clean Fedora containers -- the
+  # runner carries Qt and a toolchain, so it is no evidence of what a user's machine needs.
+  #
+  # Current Fedora is the supported target, and rawhide is the early warning for the next one, so a break
+  # there is reported but never holds a release back (continue-on-error). EL9 and EL10 (CentOS Stream,
+  # Alma, Rocky) have no job: EL9's GCC 11 cannot build the C++23 sources (it would need gcc-toolset, plus
+  # EPEL for yaml-cpp and libutempter), and a job that can never be run by hand first -- the EL10 package
+  # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
+  #
+  # Nothing but the artifact upload is conditional: the build and the install tests run on every pull
+  # request, like the Ubuntu daemon job.
+  package_for_Fedora:
+    name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the stable entry in step with do_release's fetch below and the Dockerfile's default.
+        os_version: ["44", "rawhide"]
+    continue-on-error: ${{ matrix.os_version == 'rawhide' }}
+    runs-on: ubuntu-24.04
+    env:
+      OS_VERSION: ${{ matrix.os_version }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: Fetch and unpack embeds
+      run: ./scripts/install-deps.sh
+      env:
+        PREPARE_ONLY_EMBEDS: 'ON'
+        SYSDEP_ASSUME_YES: 'ON'
+        OS_OVERRIDE: 'fedora'
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    - name: prepare distfile
+      run: |
+        set -ex
+        PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
+        DISTDIR="/tmp/dist/${PKGNAME}"
+        mkdir -p ${DISTDIR}
+        cp -rvp . ${DISTDIR}
+        tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
+    # A packaging build, not a warnings gate: the clang-debug jobs enforce zero warnings, and a warning
+    # from a newer GCC (rawhide) must not stop a package from being built.
+    - name: disable -Werror for the package build
+      run: sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
+    # The RPM Version is the dotted VERSION: VERSION_STRING carries a `-prerelease` suffix, and a hyphen
+    # is not allowed in an RPM version. The artifacts below are named with VERSION_STRING, like the .deb.
+    - name: "Build both RPMs"
+      run: |
+        set -eux
+        VERSION="${{ steps.set_vars.outputs.VERSION }}"
+        docker build \
+                --tag contour-rpm \
+                --build-arg VERSION=${VERSION} \
+                --build-arg FEDORA_VERSION=${OS_VERSION} \
+                -f .github/fedora/Dockerfile \
+                .
+        docker create --name contour-rpm contour-rpm
+        mkdir -p rpms
+        docker cp contour-rpm:/app/rpmbuild/RPMS/x86_64/. rpms/
+        docker rm contour-rpm
+        ls -la rpms
+    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm (and the
+    # -debuginfo/-debugsource beside each): the release tag is in the name because the dist tag of
+    # rawhide is not known in advance, and the VERSION_STRING because that is what the .deb carries.
+    - name: "Name the packages"
+      run: |
+        set -eux
+        VERSION="${{ steps.set_vars.outputs.VERSION }}"
+        VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}"
+        for rpm in rpms/*.rpm; do
+          base=$(basename "$rpm")
+          stem="${base%%-"${VERSION}"-1.*}"
+          mv -v "$rpm" "${stem}-${VERSION_STRING}-fedora${OS_VERSION}-x86_64.rpm"
+        done
+        # Exactly the six packages: contour and contour-daemon, each with its debuginfo and debugsource.
+        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 6
+        ls -la ./*.rpm
+    # What the packages say about themselves, read inside a Fedora container (it has rpm; the Ubuntu
+    # runner does not). The daemon must name no Qt and ship no desktop files; the GUI package must still
+    # ship them; and each declares the conflict with the other.
+    - name: "Inspect the packages"
+      run: |
+        set -eu
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          gui=/pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          test "$(rpm -qp --qf "%{NAME}" "$daemon")" = contour-daemon
+          test "$(rpm -qp --qf "%{NAME}" "$gui")" = contour
+          rpm -qpR "$daemon"
+          if rpm -qpR "$daemon" | grep -i "qt6"; then echo "contour-daemon requires Qt"; exit 1; fi
+          rpm -qpl "$daemon"
+          rpm -qpl "$daemon" | grep -qx /usr/bin/contour
+          rpm -qpl "$daemon" | grep -qx /usr/lib/systemd/user/contour-daemon.service
+          if rpm -qpl "$daemon" | grep -E "\.desktop$|/icons/|/metainfo/|/app-.*\.d"; then echo "desktop files in contour-daemon"; exit 1; fi
+          rpm -qpl "$gui" | grep -qx /usr/bin/contour
+          rpm -qpl "$gui" | grep -qx /usr/lib/systemd/user/contour-daemon.service
+          rpm -qpl "$gui" | grep -q "\.desktop$"
+          rpm -qp --conflicts "$daemon" | grep -qx contour
+          rpm -qp --conflicts "$gui" | grep -qx contour-daemon
+        '
+    # A clean machine is what a user has. dnf resolves the package's Requires from the repositories, which
+    # is the point: nothing Qt may come with the daemon.
+    - name: "Install contour-daemon in a clean fedora:${{ matrix.os_version }}"
+      run: |
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          dnf install -y /pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          rpm -q contour-daemon
+          if rpm -qa | grep -i "^qt6"; then echo "a Qt package was pulled in"; exit 1; fi
+          test -x /usr/bin/contour
+          if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
+          contour daemon --help
+          test -f /usr/lib/systemd/user/contour-daemon.service
+          # ...and the GUI package must refuse to be installed over it, on the declared conflict.
+          if dnf install -y /pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm >/tmp/swap.log 2>&1; then
+            cat /tmp/swap.log; echo "contour installed over contour-daemon"; exit 1
+          fi
+          cat /tmp/swap.log
+          grep -qi conflict /tmp/swap.log
+          rpm -q contour-daemon
+        '
+    - name: "Install contour in a clean fedora:${{ matrix.os_version }}, then refuse contour-daemon"
+      run: |
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          dnf install -y /pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          rpm -q contour
+          if dnf install -y /pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm >/tmp/swap.log 2>&1; then
+            cat /tmp/swap.log; echo "contour-daemon installed over contour"; exit 1
+          fi
+          cat /tmp/swap.log
+          grep -qi conflict /tmp/swap.log
+          rpm -q contour
+        '
+    - name: "Uploading Fedora RPM package: contour"
+      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
+        path: |
+          contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Uploading Fedora RPM package: contour-daemon"
+      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
+        path: |
+          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-daemon-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-daemon-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        if-no-files-found: error
+        retention-days: 7
   # }}}
   # {{{ FreeBSD
   freebsd:
@@ -2771,6 +2844,7 @@ jobs:
       - package_for_Ubuntu
       - package_daemon_for_Ubuntu
       - test_daemon_package_swap
+      - package_for_Fedora
       - windows
     permissions:
       # We need write permissions on contents to create GitHub releases and on
@@ -2804,6 +2878,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+      # The Fedora RPMs (stable release only: rawhide is a canary and publishes nothing). The release
+      # number follows the stable entry of package_for_Fedora's matrix.
+      - name: "fetch artifact: contour RPM (Fedora 44)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
+      - name: "fetch artifact: contour-daemon RPM (Fedora 44)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
@@ -2849,6 +2933,7 @@ jobs:
           files: |
             *.deb
             *.ddeb
+            *.rpm
             *.dmg
             *.msi
             *.zip
