@@ -362,7 +362,7 @@ user. When `loginctl` reports lingering as off, `contour daemon-service install`
 naming the command to run:
 
 ```sh
-sudo loginctl enable-linger $USER
+loginctl enable-linger
 ```
 
 Contour never enables lingering itself. To install the daemon alone on a server, see

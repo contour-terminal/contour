@@ -57,15 +57,16 @@ and have no display, such as a server you reach over SSH. It ships the `contour`
 without the GUI stack. Packages are attached to each
 [release](https://github.com/contour-terminal/contour/releases) (they are not served from a package repository):
 
-- `.deb` for Ubuntu 24.04 and 26.04
-- `.rpm` for Fedora
+- `.deb` for Ubuntu 24.04 and 26.04 (amd64), named `contour-daemon-<version>-ubuntu<release>-amd64.deb`
+- `.rpm` for Fedora 44 (x86_64), named `contour-daemon-<version>-fedora44-x86_64.rpm`
 
 ```sh
-sudo apt install ./contour-daemon_*.deb     # Ubuntu
-sudo dnf install ./contour-daemon-*.rpm     # Fedora
+sudo apt install ./contour-daemon-[0-9]*-ubuntu24.04-amd64.deb   # Ubuntu 24.04 (use ubuntu26.04 on 26.04)
+sudo dnf install ./contour-daemon-[0-9]*-fedora44-x86_64.rpm     # Fedora 44
 ```
 
 CentOS and RHEL (EL9, EL10) packages are not provided yet.
+The release also carries `-debuginfo`/`-debugsource` RPMs and a `-dbgsym` `.ddeb`, which the patterns above skip.
 The RPM packages come without the bundled status-line extensions; the `.deb` ships them.
 
 `contour-daemon` and the GUI package `contour` conflict with and replace each other, and `contour` already
@@ -77,8 +78,8 @@ The package installs a systemd user unit but does not enable it. Each user regis
 contour daemon-service install
 ```
 
-See [Starting the daemon at login](persistent-sessions.md#starting-the-daemon-at-login). The daemon opens no
-listening port; reach it over SSH, see [Remote hosts](remote-hosts.md).
+See [Starting the daemon at login](persistent-sessions.md#starting-the-daemon-at-login). The packaged service opens no
+listening port (TCP is opt-in, see [Remote access over TCP](persistent-sessions.md#remote-access-over-tcp)); reach it over SSH, see [Remote hosts](remote-hosts.md).
 
 ## Installing from source
 
