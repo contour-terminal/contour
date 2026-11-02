@@ -110,6 +110,7 @@ struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
 struct ToggleInputMethodHandling {};
 struct ToggleInputProtection{};
+struct ToggleMouseForwarding{};
 struct ToggleStatusLine{};
 struct ToggleTitleBar{};
 struct TraceBreakAtEmptyQueue{};
@@ -249,6 +250,7 @@ using ActionVariant = std::variant<CancelSelection,
                                    ToggleFullscreen,
                                    ToggleInputMethodHandling,
                                    ToggleInputProtection,
+                                   ToggleMouseForwarding,
                                    ToggleStatusLine,
                                    ToggleTitleBar,
                                    TraceBreakAtEmptyQueue,
@@ -679,6 +681,10 @@ namespace documentation
         "Enables/disables IME (input method editor) handling."
     };
     constexpr inline std::string_view ToggleInputProtection { "Enables/disables terminal input protection." };
+    constexpr inline std::string_view ToggleMouseForwarding {
+        "Blocks/forwards mouse events to applications that track the mouse, until a profile switch or "
+        "a configuration reload re-imposes the profile's mouse_forwarding."
+    };
     constexpr inline std::string_view ToggleStatusLine {
         "Shows/hides the VT320 compatible Indicator status line."
     };

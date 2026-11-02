@@ -1742,6 +1742,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleFullscreen);
     bool operator()(actions::ToggleInputMethodHandling);
     bool operator()(actions::ToggleInputProtection);
+    bool operator()(actions::ToggleMouseForwarding);
     bool operator()(actions::ToggleStatusLine);
     bool operator()(actions::ToggleTitleBar);
     bool operator()(actions::TraceBreakAtEmptyQueue);
@@ -2380,6 +2381,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Re-decides the pointer shape where the pointer rests: a held or released modifier changes it without a
     /// move. Does nothing while the pointer is off the grid. GUI thread; takes the terminal lock.
     void refreshPointerShape();
+
+    /// Re-decides how links are presented where the pointer rests -- the pointer shape and the link target --
+    /// after the terminal reported LinkRevealChange::Changed. GUI thread; takes the terminal lock.
+    void refreshLinkPresentation();
 
     void setDefaultCursor();
     void configureTerminal();

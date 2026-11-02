@@ -3,6 +3,7 @@
 
 #include <contour/command/BlockMenu.hpp>
 
+#include <vtbackend/core/MouseForwarding.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
 
@@ -27,6 +28,8 @@ struct ContextMenuState
     bool hasLocalWorkingDirectory = false; ///< OSC 7 reported a working directory on THIS host (openable).
     bool hasSplits = false;                ///< This tab holds more than one pane.
     bool inputProtected = false; ///< The user's read-only lock is on for this pane (not the host's KAM).
+    /// Whether this pane's mouse events reach an application that tracks the mouse.
+    vtbackend::MouseForwarding mouseForwarding = vtbackend::MouseForwarding::Forwarded;
     /// Whether this build can speak, and this platform has a voice to speak with.
     ///
     /// A fact about the machine rather than about the pane, but it belongs in the snapshot for the same

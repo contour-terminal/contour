@@ -77,6 +77,7 @@ namespace
         ActionCategory { .name = "ToggleFullscreen", .category = CommandCategory::Window },
         ActionCategory { .name = "ToggleInputMethodHandling", .category = CommandCategory::Shell },
         ActionCategory { .name = "ToggleInputProtection", .category = CommandCategory::Shell },
+        ActionCategory { .name = "ToggleMouseForwarding", .category = CommandCategory::View },
         ActionCategory { .name = "ToggleStatusLine", .category = CommandCategory::View },
         ActionCategory { .name = "ToggleTitleBar", .category = CommandCategory::Window },
         ActionCategory { .name = "TraceBreakAtEmptyQueue", .category = CommandCategory::Shell },

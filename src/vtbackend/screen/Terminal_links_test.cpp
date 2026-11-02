@@ -160,6 +160,24 @@ TEST_CASE("Terminal.links.anApplicationThatTakesClicksKeepsLinksAtRest", "[termi
     CHECK(mock.terminal.linkPointerShape() == LinkPointerShape::Hand);
 }
 
+TEST_CASE("Terminal.links.blockedMouseForwardingHandsLinksBackToTheTerminal", "[terminal][links]")
+{
+    // Blocking mouse forwarding gives clicks back to the terminal as the bypass modifier does, and says so,
+    // so the frontend re-decides the pointer shape; setting what is already set changes nothing.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    mock.writeToScreen("\033[?1000h\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+    mock.terminal.sendMouseMoveEvent(Modifier::None, OnLink, PixelCoordinate {}, false);
+    CHECK(mock.terminal.linkPointerShape() == LinkPointerShape::Default);
+
+    CHECK(mock.terminal.setMouseForwarding(MouseForwarding::Blocked) == LinkRevealChange::Changed);
+    CHECK(renderedRow(mock, LineOffset(0)).at(1).linkRole == LinkDecorationRole::Hover);
+    CHECK(mock.terminal.linkPointerShape() == LinkPointerShape::Hand);
+    CHECK(mock.terminal.setMouseForwarding(MouseForwarding::Blocked) == LinkRevealChange::Unchanged);
+
+    CHECK(mock.terminal.setMouseForwarding(MouseForwarding::Forwarded) == LinkRevealChange::Changed);
+    CHECK(mock.terminal.linkPointerShape() == LinkPointerShape::Default);
+}
+
 TEST_CASE("Terminal.links.applicationTakesClicksOnlyWhileItTracksTheMouseInInsertMode", "[terminal][links]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };

@@ -238,6 +238,9 @@
           <li>On macOS, a command that ran ten seconds or more in a pane you were not looking at raises a Notification Center notification when Contour runs from its app bundle; clicking it brings the pane forward with the command's block in view, and it chimes only while the bell sound is on</li>
           <li>Fixes <code>contour help</code> for commands with subcommands such as <code>contour daemon</code>: their usage lines now wrap inside the terminal width, under the command's first option, instead of running past it or indenting a subcommand's options by hundreds of columns</li>
           <li>Resizing with text reflow now respects a finite scrollback limit and releases excess history storage; infinite scrollback remains unlimited.</li>
+          <li>Adds the per-profile <code>mouse_forwarding</code> setting (<code>forwarded</code>, the default, or <code>blocked</code>) and the <code>ToggleMouseForwarding</code> action (View menu, command palette), which keep mouse clicks, motion and the wheel from applications that turn mouse tracking on, so selecting, scrolling and links keep working while they run; DEC locator reports and position requests follow it too, and the toggle lasts until a profile switch or a configuration reload (#2034)</li>
+          <li>DEC locator button reports (DECELR) now honour read-only mode, the keyboard lock an application sets (KAM), Vi modes other than Insert, and the bypass modifier, as mouse tracking reports do; a button's release, by mouse protocol or locator, is reported exactly when its press was</li>
+          <li>Fixes a <code>ChangeProfile</code> key binding switching to a profile named <code>ChangeProfile</code> instead of the one its <code>name</code> names</li>
         </ul>
       </description>
     </release>

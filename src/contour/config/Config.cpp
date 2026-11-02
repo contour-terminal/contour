@@ -1863,6 +1863,7 @@ vtbackend::Settings sessionSettings(Config const& config,
     settings.smoothScrolling = profile.smoothScrolling.value();
     settings.momentumScrolling = profile.momentumScrolling.value();
     settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
+    settings.mouseForwarding = profile.mouseForwarding.value();
     settings.linkPatterns = linkPatternsFor(profile);
     settings.linkDetection = linkDetectionPolicyOf(profile.linkDetection.value());
     settings.linkDecorationMode = profile.hyperlinkDecoration.value().mode;
@@ -2740,6 +2741,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
                        "entry to silence this warning.");
 
         loadFromEntry(child, "search_case_sensitivity", where.searchCaseSensitivity);
+        loadFromEntry(child, "mouse_forwarding", where.mouseForwarding);
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "notify_on_command_finish", where.notifyOnCommandFinish);
@@ -5519,7 +5521,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         {
             if (auto name = node["name"]; name && name.IsScalar())
             {
-                return actions::ChangeProfile { actionNode.as<std::string>() };
+                return actions::ChangeProfile { name.as<std::string>() };
             }
             else
                 return std::nullopt;

@@ -1620,6 +1620,36 @@ TEST_CASE("xterm's modifyOtherKeys level mirrors", "[vthost][mirror]")
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("a mirror that blocks mouse forwarding keeps alternate scroll on its own wheel", "[vthost][mirror]")
+{
+    // The server's wheel mode says tracking takes the wheel; a client whose user blocked mouse forwarding
+    // must not take that over, or the wheel would do nothing on the alternate screen.
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    h.serverTerminal(session)->writeToScreen("shell-ready");
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("shell-ready");
+        });
+        std::ignore = h->mirror->setMouseForwarding(vtbackend::MouseForwarding::Blocked);
+
+        serverWrites(h, session, "\033[?1049h\033[?1000h");
+        co_await waitUntil(&h->loop, [&] { return h->mirror->mouseProtocol().has_value(); });
+        CHECK(h->serverTerminal(session)->mouseWheelMode()
+              == vtbackend::InputGenerator::MouseWheelMode::Default);
+        CHECK(h->mirror->mouseWheelMode() != vtbackend::InputGenerator::MouseWheelMode::Default);
+
+        // Forwarded again, tracking takes the wheel, as on the server.
+        std::ignore = h->mirror->setMouseForwarding(vtbackend::MouseForwarding::Forwarded);
+        CHECK(h->mirror->mouseWheelMode() == vtbackend::InputGenerator::MouseWheelMode::Default);
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("a cursor-shape reset carried by a snapshot reaches the mirror", "[vthost][mirror]")
 {
     // Same asymmetry as the Kitty flags: DECSCUSR Ps 0 IS the default, so a replay that

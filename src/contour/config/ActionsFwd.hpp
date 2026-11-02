@@ -72,6 +72,7 @@ struct ToggleAllKeyMaps;
 struct ToggleFullscreen;
 struct ToggleInputMethodHandling;
 struct ToggleInputProtection;
+struct ToggleMouseForwarding;
 struct ToggleStatusLine;
 struct ToggleTitleBar;
 struct TraceBreakAtEmptyQueue;

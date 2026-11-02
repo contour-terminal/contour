@@ -5430,8 +5430,12 @@ void TerminalSession::paneSeen()
 void TerminalSession::onHeldModifiersChanged(vtbackend::Modifiers held)
 {
     if (_terminal.runUnderStateLock([&]() { return _terminal.updateHeldModifiers(held); })
-        == vtbackend::LinkRevealChange::Unchanged)
-        return;
+        == vtbackend::LinkRevealChange::Changed)
+        refreshLinkPresentation();
+}
+
+void TerminalSession::refreshLinkPresentation()
+{
     refreshPointerShape();
     refreshLinkTarget(_linkTarget.text);
 }
@@ -5773,6 +5777,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // a session knows about itself.
             .hasSplits = false,
             .inputProtected = terminal().userInputLock() == vtbackend::UserInputLock::Locked,
+            .mouseForwarding = terminal().mouseForwarding(),
             // A property of the build and the machine, asked once here so the menu itself stays a pure
             // function of this snapshot.
             .canSpeak = _app.speechSynthesizer().available(),
@@ -7085,6 +7090,27 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ToggleMouseForwarding)
+{
+    // A runtime override of the profile's mouse_forwarding: a reload or a profile switch re-imposes the
+    // profile's value (configureTerminal()). Under the state lock, as setMouseForwarding() requires.
+    auto const [forwarding, linkReveal] = _terminal.runUnderStateLock([&]() {
+        auto const toggled = terminal().mouseForwarding() == vtbackend::MouseForwarding::Forwarded
+                                 ? vtbackend::MouseForwarding::Blocked
+                                 : vtbackend::MouseForwarding::Forwarded;
+        return std::pair { toggled, terminal().setMouseForwarding(toggled) };
+    });
+    // Whether an application takes clicks decides the link pointer, as the bypass modifier does.
+    if (linkReveal == vtbackend::LinkRevealChange::Changed)
+        refreshLinkPresentation();
+
+    // Little on screen changes, so say what the mouse does now.
+    announce(forwarding == vtbackend::MouseForwarding::Blocked ? tr("Mouse Forwarding off")
+                                                               : tr("Mouse Forwarding on"),
+             QAccessible::AnnouncementPoliteness::Polite);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
     // Locked: the status line resizes the page. See ViNormalMode. The user's choice is a selection, which a
@@ -7876,6 +7902,7 @@ namespace
 
 void TerminalSession::configureTerminal()
 {
+    auto linkReveal = vtbackend::LinkRevealChange::Unchanged;
     // Re-read on every application, as everything below is: the terminal is configured as a new one built
     // now would be. Built before the lock, because it reads only this session's own GUI-thread state, so the
     // parser need not wait for it. The light/dark preference is re-read too, not through
@@ -7898,6 +7925,8 @@ void TerminalSession::configureTerminal()
         _terminal.setWordDelimiters(_config.wordDelimiters.value());
         _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
         _terminal.setMouseProtocolBypassModifiers(configured.mouseProtocolBypassModifiers);
+        // Through its setter, not ReloadedSettings: the wheel mode and the link pointer derive from it.
+        linkReveal = _terminal.setMouseForwarding(configured.mouseForwarding);
         _terminal.setLinkPatterns(configured.linkPatterns);
         _terminal.setLinkDetectionPolicy(configured.linkDetection);
         // A new table means a new detector, whose link ids start over.
@@ -7982,6 +8011,9 @@ void TerminalSession::configureTerminal()
         // restores the reloaded terminal ID rather than the one the session started with.
         _terminal.reconfigureFactorySettings(std::move(configured));
     }
+
+    if (linkReveal == vtbackend::LinkRevealChange::Changed)
+        refreshLinkPresentation();
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

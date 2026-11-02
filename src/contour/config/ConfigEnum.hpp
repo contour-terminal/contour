@@ -4,6 +4,7 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 
 #include <vtbackend/core/LinkDecoration.hpp> // LinkDecorationMode
+#include <vtbackend/core/MouseForwarding.hpp>
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/GutterSettings.hpp> // LineNumberMode
@@ -59,6 +60,14 @@ namespace detail
             vtbackend::SearchCaseSensitivity::Insensitive, "insensitive", "Ignore case" },
         ConfigEnumInfo<vtbackend::SearchCaseSensitivity> {
             vtbackend::SearchCaseSensitivity::Sensitive, "sensitive", "Match case" },
+    };
+
+    /// Whether mouse events reach an application that tracks the mouse.
+    inline constexpr auto MouseForwardingTable = std::array {
+        ConfigEnumInfo<vtbackend::MouseForwarding> {
+            vtbackend::MouseForwarding::Forwarded, "forwarded", "Report to applications that ask" },
+        ConfigEnumInfo<vtbackend::MouseForwarding> {
+            vtbackend::MouseForwarding::Blocked, "blocked", "Keep for the terminal" },
     };
 
     /// Which line numbers the gutter shows, in vim's terms.
@@ -133,6 +142,12 @@ template <>
 constexpr std::span<ConfigEnumInfo<vtbackend::SearchCaseSensitivity> const> configEnumValues() noexcept
 {
     return detail::SearchCaseSensitivityTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::MouseForwarding> const> configEnumValues() noexcept
+{
+    return detail::MouseForwardingTable;
 }
 
 template <>

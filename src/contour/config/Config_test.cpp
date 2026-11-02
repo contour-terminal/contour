@@ -141,6 +141,24 @@ profiles:
     CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 10000 });
 }
 
+TEST_CASE("Config: auto_scroll_on_update defaults off", "[config]")
+{
+    // New output must not yank a user who scrolled back to read history down to the bottom. The type's
+    // default, a profile that never mentions the key, and the generated configuration all agree.
+    CHECK_FALSE(contour::config::HistoryConfig {}.autoScrollOnUpdate);
+    CHECK(contour::config::defaultConfigString().contains("auto_scroll_on_update: false"));
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK_FALSE(profile->history.value().autoScrollOnUpdate);
+}
+
 TEST_CASE("Config: grapheme clustering defaults on and can be turned off", "[config]")
 {
     // Mode 2027 is set at power-on by default; the setting only chooses what an application finds,

@@ -168,6 +168,17 @@ constexpr StringLiteral SearchCaseSensitivityConfig {
     "\n"
 };
 
+constexpr StringLiteral MouseForwardingConfig {
+    "{comment} Mouse Forwarding: whether mouse events reach an application that asks for them. One of:\n"
+    "{comment}   forwarded -- clicks, motion and the wheel are reported to the application (default)\n"
+    "{comment}   blocked   -- no mouse report and no DEC locator event reaches the application; selection,\n"
+    "{comment}                scrolling and links work as usual, and on the alternate screen the wheel\n"
+    "{comment}                still becomes cursor keys (alternate scroll)\n"
+    "{comment} The ToggleMouseForwarding action flips it at runtime, until a profile switch or a reload.\n"
+    "mouse_forwarding: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral InsertAfterYankConfig {
     "{comment} Whether or not to switch from normal mode into insert after yank command. If this value is "
     "set to true,\n"
@@ -1473,6 +1484,7 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ToggleFullScreen  Enables/disables full screen mode.\n"
     "{comment} - ToggleInputMethodHandling Enables/disables IME (input method editor) handling.\n"
     "{comment} - ToggleInputProtection Enables/disables terminal input protection.\n"
+    "{comment} - ToggleMouseForwarding Blocks/forwards mouse events to applications that track the mouse.\n"
     "{comment} - ToggleStatusLine  Shows/hides the VT320 compatible Indicator status line.\n"
     "{comment} - ToggleTitleBar    Shows/Hides titlebar\n"
     "{comment} - TraceBreakAtEmptyQueue Executes any pending VT sequence from the VT sequence buffer in "
@@ -3495,6 +3507,27 @@ constexpr StringLiteral SearchCaseSensitivityWeb {
     "\n"
 };
 
+constexpr StringLiteral MouseForwardingWeb {
+    "Mouse Forwarding: whether mouse events reach an application that asks for them.\n"
+    "\n"
+    "- `forwarded` (default): an application that turns mouse tracking on (`vim`, `tmux`, `htop`, many "
+    "TUIs) is told about clicks, motion and the wheel.\n"
+    "- `blocked`: no mouse report and no DEC locator event reaches the application, and a locator "
+    "position request is answered as from an unavailable locator. Selecting, scrolling and following "
+    "links work as if no application had asked, and on the alternate screen the wheel still becomes "
+    "cursor keys (alternate scroll). The application's request is still recorded, so forwarding again "
+    "resumes the protocol it asked for.\n"
+    "\n"
+    "The `ToggleMouseForwarding` action flips this at runtime. A profile switch or a configuration "
+    "reload re-imposes the profile's value.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    mouse_forwarding: forwarded\n"
+    "```\n"
+    "\n"
+};
+
 constexpr StringLiteral InsertAfterYankWeb {
     "This configuration option determines whether the terminal should automatically switch from normal mode "
     "to insert mode after executing a yank command. When enabled, the terminal will enter insert mode, "
@@ -3602,6 +3635,10 @@ struct Text<Mouse>: DocumentationEntry<MouseConfig, MouseWeb>
 };
 template <>
 struct Text<SearchCaseSensitivity>: DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>
+{
+};
+template <>
+struct Text<MouseForwarding>: DocumentationEntry<MouseForwardingConfig, MouseForwardingWeb>
 {
 };
 template <>

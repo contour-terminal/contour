@@ -487,6 +487,7 @@ command::MenuBarState WindowController::menuBarState() const
             pane.canSpeak ? command::SpeechAvailability::Available : command::SpeechAvailability::Unavailable;
         state.inputProtection =
             pane.inputProtected ? command::InputProtection::On : command::InputProtection::Off;
+        state.mouseForwarding = pane.mouseForwarding;
         state.activeProfile = session->profileName();
     }
     return state;

@@ -328,6 +328,23 @@ TEST_CASE("ContextMenu.readOnly.reflectsInputProtection", "[contextmenu]")
     }
 }
 
+TEST_CASE("ContextMenu.mouseForwarding.reflectsThePane", "[contextmenu]")
+{
+    // Always present and checkable, checked while the pane forwards mouse events; picking it flips that.
+    auto state = fullyEnabledState();
+    auto const rowOf = [&](vtbackend::MouseForwarding forwarding) {
+        state.mouseForwarding = forwarding;
+        auto const menu = buildContextMenu(state);
+        auto const* row = find(menu, "Mouse Forwarding");
+        REQUIRE(row != nullptr);
+        CHECK(std::holds_alternative<actions::ToggleMouseForwarding>(row->action));
+        return row->check;
+    };
+
+    CHECK(rowOf(vtbackend::MouseForwarding::Forwarded) == RowCheck::Checked);
+    CHECK(rowOf(vtbackend::MouseForwarding::Blocked) == RowCheck::Unchecked);
+}
+
 TEST_CASE("ContextMenu.profiles.submenuVanishesWhenThereAreNone", "[contextmenu]")
 {
     // A submenu that opens onto nothing is worse than no submenu.

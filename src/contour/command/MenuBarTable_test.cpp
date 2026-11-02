@@ -281,6 +281,27 @@ TEST_CASE("menuBar.tabBarMirrorsTheTitleBar", "[menubar]")
     CHECK(same(*mine, *theirs));
 }
 
+TEST_CASE("menuBar.mouseForwardingMirrorsThePane", "[menubar]")
+{
+    // The View menu's row is checked while the focused pane forwards mouse events, like Read-Only is
+    // while its lock holds, and it needs a window to act on.
+    auto state = fullState();
+    auto const rowOf = [&](vtbackend::MouseForwarding forwarding) {
+        state.mouseForwarding = forwarding;
+        auto const bar = buildMenuBar(state);
+        auto const* view = find(bar, "View");
+        REQUIRE(view != nullptr);
+        auto const* row = find(view->children, "Mouse Forwarding");
+        REQUIRE(row != nullptr);
+        CHECK(std::holds_alternative<actions::ToggleMouseForwarding>(row->action));
+        return row->check;
+    };
+
+    CHECK(rowOf(vtbackend::MouseForwarding::Forwarded) == RowCheck::Checked);
+    CHECK(rowOf(vtbackend::MouseForwarding::Blocked) == RowCheck::Unchecked);
+    CHECK(find(buildMenuBar(MenuBarState {}), "Mouse Forwarding")->availability == RowAvailability::Disabled);
+}
+
 TEST_CASE("menuBar.windowRowsNeedAWindow", "[menubar]")
 {
     auto const bare = buildMenuBar(MenuBarState {});

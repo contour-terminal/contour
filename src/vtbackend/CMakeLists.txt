@@ -73,6 +73,7 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     core/LinkDecoration.hpp
+    core/MouseForwarding.hpp
     core/PasteStrip.hpp
     screen/LinkDetector.hpp
     links/LinkDetectionPolicy.hpp

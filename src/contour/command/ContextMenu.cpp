@@ -65,6 +65,11 @@ namespace
         return state.inputProtected;
     }
 
+    bool mouseForwarded(ContextMenuState const& state) noexcept
+    {
+        return state.mouseForwarding == vtbackend::MouseForwarding::Forwarded;
+    }
+
     bool canSpeakSelection(ContextMenuState const& state) noexcept
     {
         return state.canSpeak && state.hasSelection;
@@ -174,6 +179,8 @@ namespace
             // Read-only == the user's read-only lock (not the host's KAM). The check reflects the pane's
             // state at open time; picking it runs ToggleInputProtection, which flips it for the next open.
             Table::command(ToggleInputProtection {}, "Read-Only Mode").checkedWhen(inputProtected),
+            // Checked while the pane's mouse events reach an application that tracks the mouse.
+            Table::command(ToggleMouseForwarding {}, "Mouse Forwarding").checkedWhen(mouseForwarded),
 
             Table::separator(),
 

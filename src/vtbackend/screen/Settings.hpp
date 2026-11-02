@@ -2,6 +2,7 @@
 
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/LinkDecoration.hpp>
+#include <vtbackend/core/MouseForwarding.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
@@ -320,6 +321,8 @@ struct Settings
     std::u32string wordDelimiters = U" ";         ///< What ends a word a double click selects.
     std::u32string extendedWordDelimiters = U" "; ///< What ends a word a triple click selects.
     Modifiers mouseProtocolBypassModifiers = Modifier::Shift;
+    /// Whether mouse events reach an application that tracks the mouse (profile mouse_forwarding).
+    MouseForwarding mouseForwarding = MouseForwarding::Forwarded;
     Modifiers mouseBlockSelectionModifiers = Modifier::Control;
     /// The link pattern table hint mode and link detection scan with: the built-ins merged with the profile's
     /// hint_patterns, compiled once when the profile is applied.
