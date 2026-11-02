@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/testing/Environment.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <vthost/Linger.hpp>
@@ -53,15 +58,44 @@ TEST_CASE("lingerStateOf runs nothing without a user", "[vthost][linger]")
     CHECK(runner.calls.empty());
 }
 
-TEST_CASE("lingerHintFor speaks only when lingering is off", "[vthost][linger]")
+namespace
 {
+std::string_view hintFor(vthost::ServiceStartMode mode,
+                         vthost::testing::FakeCommandRunner& runner,
+                         std::optional<std::string> user = "alice")
+{
+    auto const env =
+        user ? core::testing::FakeEnvironment { { { "USER", *user } } } : core::testing::FakeEnvironment {};
+    return vthost::lingerHintAfterInstall(mode, runner, env);
+}
+} // namespace
+
+TEST_CASE("lingerHintAfterInstall speaks only for Logon with lingering off", "[vthost][linger]")
+{
+    using vthost::ServiceStartMode;
     auto runner = vthost::testing::FakeCommandRunner {};
+
     runner.answerAll({ 0, "Linger=no\n" });
-    CHECK(vthost::lingerHintFor(runner, "alice") == vthost::lingerAdvice());
+    CHECK(hintFor(ServiceStartMode::Logon, runner) == vthost::lingerAdvice());
     CHECK(vthost::lingerAdvice().contains("loginctl enable-linger"));
 
     runner.answerAll({ 0, "Linger=yes\n" });
-    CHECK(vthost::lingerHintFor(runner, "alice").empty());
-    runner.answerAll({ 0, "garbage" });
-    CHECK(vthost::lingerHintFor(runner, "alice").empty());
+    CHECK(hintFor(ServiceStartMode::Logon, runner).empty());
+
+    runner.failToStart(std::make_error_code(std::errc::no_such_file_or_directory));
+    CHECK(hintFor(ServiceStartMode::Logon, runner).empty());
+    runner.answerAll({ 1, "Linger=no\n" });
+    CHECK(hintFor(ServiceStartMode::Logon, runner).empty());
+}
+
+TEST_CASE("lingerHintAfterInstall runs nothing for other modes or without USER", "[vthost][linger]")
+{
+    using vthost::ServiceStartMode;
+    auto runner = vthost::testing::FakeCommandRunner {};
+    runner.answerAll({ 0, "Linger=no\n" });
+
+    CHECK(hintFor(ServiceStartMode::Boot, runner).empty());
+    CHECK(hintFor(ServiceStartMode::Manual, runner).empty());
+    CHECK(hintFor(ServiceStartMode::Logon, runner, std::nullopt).empty());
+    CHECK(runner.calls.empty());
 }

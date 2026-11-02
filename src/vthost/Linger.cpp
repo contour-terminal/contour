@@ -33,8 +33,13 @@ std::string_view lingerAdvice()
            "To keep it running, run: loginctl enable-linger";
 }
 
-std::string_view lingerHintFor(CommandRunner& commands, std::string_view user)
+std::string_view lingerHintAfterInstall(ServiceStartMode mode,
+                                        CommandRunner& commands,
+                                        core::Environment const& environment)
 {
+    if (mode != ServiceStartMode::Logon)
+        return {};
+    auto const user = environment.get("USER").value_or("");
     return lingerStateOf(commands, user) == LingerState::Off ? lingerAdvice() : std::string_view {};
 }
 

@@ -1792,11 +1792,9 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
 #ifdef __linux__
             // Only the systemd user manager can stop at logout; the Logon install is the one that lands
             // there.
-            if (*mode == vthost::ServiceStartMode::Logon)
-                if (auto const advice =
-                        vthost::lingerHintFor(*commands, processEnvironment().get("USER").value_or(""));
-                    !advice.empty())
-                    cout << std::format("contour daemon-service: {}\n", advice);
+            if (auto const advice = vthost::lingerHintAfterInstall(*mode, *commands, processEnvironment());
+                !advice.empty())
+                cout << std::format("contour daemon-service: {}\n", advice);
 #endif
             return EXIT_SUCCESS;
         }

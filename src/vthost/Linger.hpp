@@ -4,10 +4,13 @@
 /// @file
 /// Whether a systemd user's services outlive their last login (`loginctl enable-linger`).
 
+#include <core/Environment.hpp>
+
 #include <cstdint>
 #include <string_view>
 
 #include <vthost/CommandRunner.hpp>
+#include <vthost/ServiceControl.hpp>
 
 namespace vthost
 {
@@ -30,9 +33,14 @@ enum class LingerState : uint8_t
 /// @return One sentence saying the daemon stops at logout, with the `loginctl enable-linger` command.
 [[nodiscard]] std::string_view lingerAdvice();
 
+/// What to tell the user right after a successful service install.
+/// @param mode The start mode that was installed; only Logon lands in the systemd user manager.
 /// @param commands Where `loginctl` is run.
-/// @param user The invoking user's login name.
-/// @return lingerAdvice() when lingering is Off, otherwise an empty view (On and Unknown stay silent).
-[[nodiscard]] std::string_view lingerHintFor(CommandRunner& commands, std::string_view user);
+/// @param environment Supplies the invoking user's login name (`USER`).
+/// @return lingerAdvice() for Logon with lingering Off; otherwise empty. Without a user, or for another
+///         mode, no command is run.
+[[nodiscard]] std::string_view lingerHintAfterInstall(ServiceStartMode mode,
+                                                      CommandRunner& commands,
+                                                      core::Environment const& environment);
 
 } // namespace vthost
