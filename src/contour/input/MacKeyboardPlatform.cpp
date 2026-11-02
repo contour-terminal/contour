@@ -31,7 +31,7 @@ namespace
                 return detail::inputMethodCommitOf(event, macLockKeysOf(event.nativeModifiers));
 
             auto const modifiers = vtbackend::KeyboardModifiers {
-                chordOf(Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers))),
+                chordOf(qtModifiersOf(event.qtModifiers)),
                 macLockKeysOf(event.nativeModifiers),
             };
             auto const altSide = optionKeySideOf(event.nativeModifiers);

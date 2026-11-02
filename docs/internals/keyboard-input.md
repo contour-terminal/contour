@@ -1,8 +1,77 @@
 # Keyboard input
 
-How a key press becomes bytes for the program in the terminal: one native event, normalized by the
-platform's `KeyboardPlatform`, routed against the bindings, then encoded. This page records the
-decisions behind the parts that are not obvious from the code.
+How a key press becomes bytes for the program in the terminal. The pipeline has one place where a
+platform is allowed to matter -- the normalizer -- and everything beneath it is platform-free. This page
+gives the overview, says where each platform decision lives, and records the decisions behind the parts
+that are not obvious from the code.
+
+## The pipeline
+
+```
+QKeyEvent / QInputMethodEvent
+   |  captureKeyEvent()            input/QtKeyCapture.cpp        (the only reader of a Qt key event)
+   v
+NativeKeyEvent                     plain data: recordable, replayable, no Qt in it
+   |  KeyboardPlatform::normalize()  input/{Xkb,Win32,Mac}KeyboardPlatform.cpp
+   v
+KeyEvent                           a named key, or text; the semantic chord; Option side; app modifier
+   |  routeKey() / routeChar()     input/KeyRouter.cpp           (user binding, built-in binding, else...)
+   v
+KeyRoute -> SessionInput           session/SessionInput.cpp, TerminalSessionKeyInput.cpp
+   |  run the bound actions, or hand the key / character to the terminal's encoder (vtbackend)
+   v
+bytes for the PTY
+```
+
+Every `KeyboardPlatform` compiles on every host and is picked at runtime from a `KeyboardPlatformKind`
+(`Xkb`, `Win32`, `Mac`), so each platform's rules run in the Linux test suite: the characterization table
+(`session/KeyCharacterizationRows.hpp`) pins the bytes written for a native event of each kind, and the
+per-platform tests drive the normalizers with recorded events.
+
+### Where each platform decision lives
+
+| Decision | Home |
+|----------|------|
+| What the Qt event holds, and the Windows lock-key sample (`GetKeyState`) | `input/QtKeyCapture.cpp` |
+| The active native key layout (Carbon / Windows `MapVirtualKey` / the live XKB keymap) | `input/KeyboardLayout.cpp`, `input/XkbLiveKeymap.cpp` |
+| Which kind this build is | `config/KeyboardPlatformKind.hpp`, read once by the composition root |
+| Option sides, ⌘ as the application modifier, the Option rule, input-method bypass (macOS) | `input/MacKeyboardPlatform.cpp` |
+| AltGr versus Ctrl+Alt, lock keys, layout-resolved OEM keys (Windows) | `input/Win32KeyboardPlatform.cpp` |
+| Keysym to codepoint, the unshifted key from the keymap (X11, Wayland) | `input/XkbKeyboardPlatform.cpp`, `input/KeysymTable.hpp`, `input/XkbKeymap.hpp` |
+| Which chords are default bindings on which platform, and `Primary` | `config/DefaultBindings.cpp` (one table, with a platform column), `config/ModifierNames.hpp` |
+| How a shortcut is drawn (`⇧⌘P` or `Ctrl+Shift+P`) | `command/Shortcut.*` |
+
+Nothing below the normalizer asks which platform it runs on. The `Primary` modifier is resolved when the
+configuration is read, against the kind the configuration was loaded for, and bindings are matched on the
+resulting concrete chord.
+
+### The lint gate
+
+`scripts/check-input-platform-neutral.py` (CTest label `lint`, with a `--self-test`) fails when a platform
+test -- `#if`, `#ifdef`, `#elif`, `defined(` naming `__APPLE__`, `_WIN32`, `_WIN64`, `__linux__`, `__unix__`
+or `Q_OS_*` -- or the identifier `BuildKeyboardPlatformKind` or `BuildPaneChordHost` appears in the files
+that sit beneath the normalizer: the key event and platform interface, the router, the key tables, the
+session's key path and the default-binding table. Add a new file of that kind to the list in the script. The
+composition root may use `BuildKeyboardPlatformKind`; the files that may test the platform are
+`QtKeyCapture.cpp`, `KeyboardLayout.cpp`, `XkbLiveKeymap.cpp` and `KeyboardPlatformKind.hpp`.
+
+### Latency
+
+`normalize()` plus `route()` is budgeted at 1 microsecond at the 99th percentile on a release build, and a
+single-codepoint key press allocates nothing. `input/KeyPipeline_bench_test.cpp` measures it
+(`contour_gui_test "[bench]"`; set `CONTOUR_BENCH_ENFORCE=1` to make the budget a failure), and
+`bench-headless keypress` is the end-to-end comparison against `master`.
+
+### Known limitations
+
+* **Wayland has no live keymap.** Qt does not expose the compositor's keymap, so the unshifted key is read
+  through the keysym table (below).
+* **A rewrite of the XKB keymap on X11 is not followed** until Contour restarts (below).
+* **The macOS input-method bypass is unverified on hardware.** The decision (`inputMethodRouteFor`) is
+  table-tested, but whether Qt lets a held key skip the input method per keystroke has only been checked
+  by reading Qt, not on a Mac.
+* The macOS and Windows normalizers are pinned by recorded-event tests written from what Qt is believed to
+  deliver; the macOS and Windows CI runners are what confirms those rows.
 
 ## Where the live XKB keymap comes from
 

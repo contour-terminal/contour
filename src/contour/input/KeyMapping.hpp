@@ -154,6 +154,14 @@ inline constexpr auto NamedKeyRows = std::array {
 /// @return The chord.
 [[nodiscard]] vtbackend::Modifiers chordOf(Qt::KeyboardModifiers qtModifiers) noexcept;
 
+/// Qt modifier flags from the raw bits a NativeKeyEvent records.
+/// @param bits Qt::KeyboardModifiers bits.
+/// @return The flags.
+[[nodiscard]] inline Qt::KeyboardModifiers qtModifiersOf(uint32_t bits) noexcept
+{
+    return Qt::KeyboardModifiers::fromInt(static_cast<int>(bits));
+}
+
 /// The bit of X11's core modifier mask (`XCB_MOD_MASK_LOCK`) set while CapsLock is latched. Fixed by the X11
 /// protocol; Wayland's Qt plugin reports the same mask.
 inline constexpr quint32 XcbCapsLockBit = 0x02;

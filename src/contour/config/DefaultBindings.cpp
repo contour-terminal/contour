@@ -413,7 +413,7 @@ namespace
         using vtbackend::MouseButton;
         static auto const rows = std::vector<DefaultBindingRow<MouseButton>> {
             // Following a link takes Control; the Native2026 edition takes Command on macOS, where Qt's
-            // Control/Meta swap is off (@see followHyperlinkModifier, AA_MacDontSwapCtrlAndMeta).
+            // Control/Meta swap is off (@see AA_MacDontSwapCtrlAndMeta).
             classicOnly(
                 written(PlatformScope::All, Ctrl, MouseButton::Left, Any, { actions::FollowHyperlink {} })),
             native2026Only(written(
@@ -541,15 +541,6 @@ InputMappings makeDefaultInputMappings(DefaultsEdition edition, KeyboardPlatform
     return InputMappings { .keyMappings = writtenBindings(keyRows(), edition, kind),
                            .charMappings = writtenBindings(charRows(), edition, kind),
                            .mouseMappings = writtenBindings(mouseRows(), edition, kind) };
-}
-
-vtbackend::Modifiers followHyperlinkModifier(KeyboardPlatformKind kind)
-{
-    for (auto const& row: mouseRows())
-        if (row.edition == EditionScope::Native2026Only && existsOn(row.scope, kind) && !row.binding.empty()
-            && std::holds_alternative<actions::FollowHyperlink>(row.binding.front()))
-            return resolveChord(row.chord, kind);
-    return {};
 }
 
 std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings(KeyboardPlatformKind kind)
