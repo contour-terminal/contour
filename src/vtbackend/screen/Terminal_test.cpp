@@ -6186,3 +6186,64 @@ TEST_CASE("Terminal.hintLabels.everySchemeDimsByItsOpacityAndKeepsItsLabelsLegib
               >= vtbackend::MinimumTextContrast);
     }
 }
+
+TEST_CASE("Terminal.userVar", "[terminal][uservar]")
+{
+    using std::string_view_literals::operator""sv;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+    auto& terminal = mock.terminal;
+    auto const setVar = [&](std::string_view name, std::string_view base64) {
+        mock.writeToScreen(std::format("\033]1337;SetUserVar={}={}\a", name, base64));
+    };
+
+    SECTION("remembered decoded, without extensions")
+    {
+        CHECK(!terminal.userVar("foo").has_value());
+        setVar("foo", "YmFy");
+        CHECK(terminal.userVar("foo") == "bar"sv);
+        setVar("foo", "YmF6");
+        CHECK(terminal.userVar("foo") == "baz"sv);
+        setVar("foo", ""); // an empty value is a value
+        CHECK(terminal.userVar("foo") == ""sv);
+    }
+
+    SECTION("rejected assignments leave the variables alone")
+    {
+        setVar("foo", "YmFy");
+        setVar("foo", "Y m!y");
+        CHECK(terminal.userVar("foo") == "bar"sv);
+        setVar("bad", "Y");
+        CHECK(!terminal.userVar("bad").has_value());
+        setVar("bad", "YmFy$");
+        CHECK(!terminal.userVar("bad").has_value());
+    }
+
+    SECTION("capped at 64 names; known names still update")
+    {
+        for (auto const i: std::views::iota(0, 64))
+            setVar(std::format("v{}", i), "YQ==");
+        setVar("extra", "YQ==");
+        CHECK(!terminal.userVar("extra").has_value());
+        setVar("v7", "Yg==");
+        CHECK(terminal.userVar("v7") == "b"sv);
+        CHECK(terminal.userVar("v63") == "a"sv);
+    }
+
+    SECTION("a dropped assignment is reported")
+    {
+        auto const limit = terminal.userVarLimits().maxCount;
+        for (auto const i: std::views::iota(std::size_t { 0 }, limit))
+            CHECK(terminal.userVarChanged({ .name = std::format("v{}", i), .value = "a" })
+                  == vtbackend::UserVarStorage::Stored);
+        CHECK(terminal.userVarChanged({ .name = "extra", .value = "a" })
+              == vtbackend::UserVarStorage::Dropped);
+        CHECK(terminal.userVarChanged({ .name = "v1", .value = "b" }) == vtbackend::UserVarStorage::Stored);
+    }
+
+    SECTION("survive a hard reset")
+    {
+        setVar("foo", "YmFy");
+        mock.writeToScreen("\033c");
+        CHECK(terminal.userVar("foo") == "bar"sv);
+    }
+}

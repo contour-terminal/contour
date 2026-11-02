@@ -369,7 +369,7 @@ Terminal::Terminal(Events& eventListener,
     _extensions { extensionServices ? &extensionServices->extensions : nullptr },
     _publishSink { extensionServices ? &extensionServices->published : nullptr },
     _extensionEvents { _extensions },
-    _maxRememberedUserVars { extensionServices ? extensionServices->maxUserVars : 0 },
+    _maxReplayedUserVars { extensionServices ? extensionServices->maxUserVars : 0 },
     _takeOverName { _extensions ? _extensions->takeOverName() : std::nullopt },
     _statusLineCommands { commandServices ? std::make_unique<StatusLineCommandCache>(
                                                 *commandServices,
@@ -938,10 +938,8 @@ std::vector<StatusLineEvent> Terminal::currentStatusLineEvents(StatusLineEventKi
                 events.emplace_back(FontChanged { .metrics = _statusLineFont });
             break;
         case StatusLineEventKind::UserVar:
-            // Decoded here, as the live hook decodes; the adapter makes both valid UTF-8 alike.
-            for (auto const& [name, base64Value]: _userVars)
-                events.emplace_back(
-                    UserVarChanged { .name = name, .value = core::base64::decode(base64Value) });
+            for (auto const& [name, value]: _userVars | std::views::take(_maxReplayedUserVars))
+                events.emplace_back(UserVarChanged { .name = name, .value = value });
             break;
     }
     return events;
@@ -1030,27 +1028,38 @@ void Terminal::foregroundProcessChanged(std::string_view name)
         [&] { return StatusLineEvents::ForegroundProcessChanged { .name = std::string { name } }; });
 }
 
-void Terminal::userVarChanged(std::string_view name, std::string_view base64Value)
+UserVarStorage Terminal::userVarChanged(UserVarAssignment assignment)
 {
-    if (_extensions) [[unlikely]]
-        rememberUserVar(name, base64Value);
-    // Decoded inside the event's builder, which runs only if an extension subscribed.
+    if (rememberUserVar(assignment.name, assignment.value) == UserVarStorage::Dropped)
+        return UserVarStorage::Dropped;
     _extensionEvents.post([&] {
-        return StatusLineEvents::UserVarChanged { .name = std::string { name },
-                                                  .value = core::base64::decode(base64Value) };
+        return StatusLineEvents::UserVarChanged { .name = std::move(assignment.name),
+                                                  .value = std::move(assignment.value) };
     });
 }
 
-void Terminal::rememberUserVar(std::string_view name, std::string_view base64Value)
+std::optional<std::string_view> Terminal::userVar(std::string_view name) const noexcept
+    return UserVarStorage::Stored;
 {
     if (auto const known = std::ranges::find(_userVars, name, &RememberedUserVar::first);
         known != _userVars.end())
-        known->second = base64Value;
-    else if (_userVars.size() < _maxRememberedUserVars)
-        _userVars.emplace_back(std::string { name }, std::string { base64Value });
+        return std::string_view { known->second };
+    return std::nullopt;
+}
+
+UserVarStorage Terminal::rememberUserVar(std::string_view name, std::string_view value)
+{
+    if (auto const known = std::ranges::find(_userVars, name, &RememberedUserVar::first);
+        known != _userVars.end())
+        known->second = value;
+    else if (_userVars.size() < _settings.userVarLimits.maxCount)
+        _userVars.emplace_back(std::string { name }, std::string { value });
 }
 
 void Terminal::inputModeChanged(ViMode mode)
+    else
+        return UserVarStorage::Dropped;
+    return UserVarStorage::Stored;
 {
     _eventListener.inputModeChanged(mode);
     _extensionEvents.post([&] { return StatusLineEvents::InputModeChanged { .mode = mode }; });

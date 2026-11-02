@@ -784,6 +784,28 @@ TEST_CASE("Terminal.extensions.refreshedWithoutRendering", "[extensions]")
     auto mock = MockTerm { ExtensionPageSize, extensions.services() };
     auto& terminal = mock.terminal;
     terminal.setStatusLineDefinition(parseStatusLineDefinition("<{Extension:git}>", "", ""));
+TEST_CASE("Terminal.extensions.userVarsTellOnlyWhatIsStored", "[extensions][uservar]")
+{
+    // A name beyond the terminal's bound is dropped, and so no extension is told of it either.
+    using namespace StatusLineEvents;
+    auto extensions = FakeStatusLineExtensions {};
+    extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::UserVar });
+    auto mock = MockTerm { ExtensionPageSize, extensions.services() };
+    auto& terminal = mock.terminal;
+    auto const limit = terminal.userVarLimits().maxCount;
+    for (auto const i: std::views::iota(std::size_t { 0 }, limit))
+        mock.writeToScreen(std::format("\033]1337;SetUserVar=v{}=YQ==\a", i));
+    REQUIRE(extensions.posted().size() == limit);
+
+    mock.writeToScreen("\033]1337;SetUserVar=extra=YQ==\a");
+    CHECK(extensions.posted().size() == limit);
+    CHECK_FALSE(terminal.userVar("extra").has_value());
+
+    mock.writeToScreen("\033]1337;SetUserVar=v0=Yg==\a"); // a known name still updates, and is told
+    CHECK(extensions.posted().size() == limit + 1);
+    CHECK(terminal.userVar("v0") == "b");
+}
+
     terminal.setStatusDisplay(StatusDisplayType::Indicator);
     mock.writeToScreen("\033]7;file:///tmp/x\033\\");
 

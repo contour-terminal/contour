@@ -57,6 +57,7 @@ set(vtbackend_HEADERS
     vt/HierarchicalContext.hpp
     vt/ProgramStatus.hpp
     vt/SemanticBlockQuery.hpp
+    vt/UserVar.hpp
     screen/ProgramStatusSet.hpp
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
@@ -169,6 +170,7 @@ set(vtbackend_SOURCES
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
     vt/ProgramStatus.cpp
+    vt/UserVar.cpp
     screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
@@ -320,6 +322,7 @@ if(LIBTERMINAL_TESTING)
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
         vt/ProgramStatus_test.cpp
+        vt/UserVar_test.cpp
         screen/ProgramStatusSet_test.cpp
         screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
