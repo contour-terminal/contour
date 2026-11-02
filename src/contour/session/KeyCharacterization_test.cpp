@@ -43,10 +43,39 @@ using contour::test::ExpectedBinding;
 using contour::test::KeyCharacterizationRow;
 using contour::test::KeyEncoding;
 
-/// @param kind The platform kind whose layout is wanted.
-/// @return The keyboard layout the platform's key path reads native key codes with.
-[[nodiscard]] contour::input::KeyboardLayout const& layoutFor(KeyboardPlatformKind kind)
+/// A fixed Russian Windows layout: the live ToUnicodeEx call that names a key by the user's layout exists on
+/// Windows only, so this stands in for it on every host. Keys it does not name fall back to the US table.
+class RussianWin32Layout final: public contour::input::KeyboardLayout
 {
+  public:
+    [[nodiscard]] char32_t unshiftedKeyOf(contour::input::NativeKeyCode key) const noexcept override
+    {
+        switch (key.virtualKey)
+        {
+            case 0x41: return U'ф'; // VK_A
+            case 0xBA: return U'ж'; // VK_OEM_1
+            default: break;
+        }
+        return _us->unshiftedKeyOf(key);
+    }
+
+    [[nodiscard]] uint32_t win32VirtualKeyOf(contour::input::NativeKeyCode key) const noexcept override
+    {
+        return key.virtualKey;
+    }
+
+  private:
+    std::unique_ptr<contour::input::KeyboardLayout> _us = contour::input::makeWin32UsKeyboardLayout();
+};
+
+/// @param row The row whose platform's layout is wanted.
+/// @return The keyboard layout the platform's key path reads native key codes with.
+[[nodiscard]] contour::input::KeyboardLayout const& layoutFor(KeyCharacterizationRow const& row)
+{
+    static auto const russian = RussianWin32Layout {};
+    if (row.layout == contour::test::KeyLayoutFixture::Russian)
+        return russian;
+    auto const kind = row.kind;
     static auto const mac = contour::input::makeMacUsAnsiKeyboardLayout();
     static auto const win32 = contour::input::makeWin32UsKeyboardLayout();
     // The keymap behind the Xkb rows: a US keyboard's number row is all they read.
@@ -71,6 +100,7 @@ using contour::test::KeyEncoding;
     {
         case KeyEncoding::Legacy: return {};
         case KeyEncoding::KittyDisambiguate: return "\033[>1u";
+        case KeyEncoding::KittyReportEventTypes: return "\033[>2u";
         case KeyEncoding::KittyReportAll: return "\033[>9u";
         case KeyEncoding::Win32InputMode: return "\033[?9001h";
     }
@@ -144,7 +174,7 @@ TEST_CASE("key characterization", "[input][characterization]")
                 &app.app().sessionsManager(),
                 std::move(pty),
                 app.app(),
-                contour::input::makeKeyboardPlatformFactory(row.kind, layoutFor(row.kind)));
+                contour::input::makeKeyboardPlatformFactory(row.kind, layoutFor(row)));
             auto& mockPty = contour::test::mockPtyOf(*session);
 
             if (row.mode == contour::test::KeyMode::SelectionActive)

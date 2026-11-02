@@ -54,9 +54,14 @@ bindings follow that:
 * The Ctrl+Shift defaults answer to `⌘` instead (`⌘C`, `⌘V`, `⌘T`, `⌘W`, `⌘N`, `⌘K`, `⌘,`, `⇧⌘P`, …), and
   `Ctrl+Shift+letter` reaches the program in the terminal. A `⌘` chord nothing is bound to is consumed rather
   than typed as its letter.
+* `⌘K` clears to the prompt (`ClearToPrompt`) on the primary screen; in the alternate screen it is consumed, so a
+  running vim or tmux is never reset. `ClearHistoryAndReset` has no macOS default.
 * Font size is on `⌘0`, `⌘-` and `⌘+` only; `Ctrl+0` reaches the program.
 * `⌘X` and `⌘S` are deliberately unbound (a terminal cannot cut, and there is nothing to save), so
-  `ClosePane` and `SpeakSelection` have no macOS default; bind them if you want them.
+  `ClosePane` and `SpeakSelection` have no macOS default; bind them if you want them. The same holds for the
+  stripping paste (`Ctrl+Alt+V`), `ScreenshotVT`, `OpenFileManager`, `ToggleStatusLine`,
+  `ToggleInputMethodHandling`, `ScrollMarkUp`/`ScrollMarkDown` (`Ctrl+Alt+K`/`J`), `OpenCommandOutput` and
+  selecting the tenth tab.
 * The defaults that hung on `Alt` plus a character are not installed on macOS, because Option composes
   characters there (see below). Tabs stay on `⌘1` to `⌘9`.
 * `⌥←` / `⌥→` move by word (`ESC b` / `ESC f`) outside the alternate screen, and `⌘←` / `⌘→` / `⌘⌫` edit the

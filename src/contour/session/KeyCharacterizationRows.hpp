@@ -23,10 +23,11 @@ namespace contour::test
 /// How the application in the terminal asked for its keys to be encoded.
 enum class KeyEncoding : uint8_t
 {
-    Legacy = 0,        //!< Nothing negotiated: VT100/xterm bytes.
-    KittyDisambiguate, //!< Kitty keyboard protocol, flag 1 (what fish enables).
-    KittyReportAll,    //!< Kitty keyboard protocol, flags 1 and 8: every key as an escape code.
-    Win32InputMode,    //!< ConPTY's win32-input-mode (DECSET 9001).
+    Legacy = 0,            //!< Nothing negotiated: VT100/xterm bytes.
+    KittyDisambiguate,     //!< Kitty keyboard protocol, flag 1 (what fish enables).
+    KittyReportEventTypes, //!< Kitty keyboard protocol, flag 2 alone: a press is still legacy-encoded.
+    KittyReportAll,        //!< Kitty keyboard protocol, flags 1 and 8: every key as an escape code.
+    Win32InputMode,        //!< ConPTY's win32-input-mode (DECSET 9001).
 };
 
 /// Whether a key binding claims the event.
@@ -34,6 +35,13 @@ enum class ExpectedBinding : uint8_t
 {
     None = 0, //!< No binding: the event reaches the encoder.
     Fires,    //!< A binding claims the event; nothing is written.
+};
+
+/// The keyboard layout a row's platform resolves native key codes with.
+enum class KeyLayoutFixture : uint8_t
+{
+    Standard = 0, //!< The platform's US layout (the Xkb rows carry a US number row).
+    Russian,      //!< A fixed Russian layout: the layout's own letters stand where the US ones do.
 };
 
 /// The terminal state a row runs in, for the bindings that are mode-dependent.
@@ -54,8 +62,9 @@ struct KeyCharacterizationRow
     input::NativeKeyEvent event;
     std::string_view expectedPty; ///< Exact bytes; empty means nothing written.
     ExpectedBinding binding = ExpectedBinding::None;
-    std::string_view boundAction = {}; ///< Action name when binding == Fires.
-    KeyMode mode = KeyMode::Default;   ///< The terminal state the row runs in.
+    std::string_view boundAction = {};                    ///< Action name when binding == Fires.
+    KeyMode mode = KeyMode::Default;                      ///< The terminal state the row runs in.
+    KeyLayoutFixture layout = KeyLayoutFixture::Standard; ///< The layout the row's platform reads codes with.
 };
 
 namespace keybits
@@ -300,6 +309,17 @@ namespace keybits
             { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0xba },
             "\033[59u",
             KeyEncoding::KittyReportAll);
+        // deliberate: spec "Deliberate behaviour changes" -- the live layout (ToUnicodeEx) names the key, so
+        // a non-Latin layout reports its own letter: VK_OEM_1 (0xba) on a Russian layout is 'ж' (1078), where
+        // the row above shows the US table's ';'. The live call exists on Windows only; the fixed Russian
+        // layout stands in for it on every host.
+        table.push_back(KeyCharacterizationRow {
+            .name = "win32: Cyrillic letter on a Russian layout under kitty report-all",
+            .kind = Win32,
+            .encoding = KeyEncoding::KittyReportAll,
+            .event = { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0xba },
+            .expectedPty = "\033[1078u",
+            .layout = KeyLayoutFixture::Russian });
         add("win32: AltGr [ under win32-input-mode (#2127)",
             Win32,
             { .qtKey = '[', .text = U"[", .qtModifiers = Ctrl | Alt, .nativeVirtualKey = 0x38 },
@@ -464,6 +484,13 @@ namespace keybits
             Mac,
             { .qtKey = 'C', .text = U"c", .qtModifiers = Meta, .nativeVirtualKey = 0x08 },
             "");
+        // deliberate: kitty flag 2 (report event types) alone leaves a press legacy-encoded, which cannot
+        // carry Super, so the unbound chord is still consumed rather than typed as "j".
+        add("mac: Command+j, unbound, under kitty report-event-types",
+            Mac,
+            { .qtKey = 'J', .text = U"j", .qtModifiers = Meta, .nativeVirtualKey = 0x26 },
+            "",
+            KeyEncoding::KittyReportEventTypes);
         table.push_back(KeyCharacterizationRow {
             .name = "mac: Command+T is a binding",
             .kind = Mac,

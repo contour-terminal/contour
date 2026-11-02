@@ -154,6 +154,19 @@ TEST_CASE("an unbound app-modifier character is consumed only where Super cannot
     CHECK(std::holds_alternative<SendChar>(absent.otherwise));
 }
 
+TEST_CASE("an unbound app-modifier character is consumed under the event-type flag alone", "[input][router]")
+{
+    // Kitty flag 2 leaves a press legacy-encoded, so the session reports the encoding as unrepresentable: an
+    // unbound Command+J is consumed rather than typed as 'j'.
+    auto const config = configWith("    - { mods: [], key: F3, action: ToggleFullscreen }");
+    auto const route = contour::input::routeChar(U'j',
+                                                 vtbackend::KeyIdentity { .unshiftedKey = U'j' },
+                                                 KeyboardModifiers { Modifier::Super },
+                                                 AppModifier::Held,
+                                                 contextOf(config, SuperEncoding::Unrepresentable));
+    CHECK(std::holds_alternative<ConsumeInput>(route.otherwise));
+}
+
 TEST_CASE("an unbound app-modifier named key is sent", "[input][router]")
 {
     auto const config = configWith("    - { mods: [], key: F3, action: ToggleFullscreen }");

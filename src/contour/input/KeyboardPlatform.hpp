@@ -123,7 +123,9 @@ class KeyboardPlatform
 /// @param qtKey The Qt::Key.
 /// @param qtModifiers The Qt::KeyboardModifiers bits.
 /// @param text The text the press produced.
-/// @return The chord; empty where the platform means the press as no key.
+/// @return The chord the platform keeps for the press, which is empty only when it holds no modifier the
+///         platform counts (a composing Option key or AltGr leaves none); a text-typing press keeps its
+///         modifiers.
 [[nodiscard]] vtbackend::Modifiers chordOfKeyPress(KeyboardPlatform const& platform,
                                                    int qtKey,
                                                    uint32_t qtModifiers,

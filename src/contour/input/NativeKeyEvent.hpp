@@ -45,6 +45,12 @@ struct NativeKeyEvent
 /// Parses a line written by formatRecorded().
 /// @param line The recorded line.
 /// @return The event, or nullopt when the line is malformed.
+/// A raw space inside the text field is malformed, as formatRecorded() writes it escaped.
 [[nodiscard]] std::optional<NativeKeyEvent> parseRecorded(std::string_view line);
+
+/// Logs @p event through the `gui.input` log category in formatRecorded()'s form, so a tester can send back
+/// exactly what the platform delivered. Nothing is formatted or allocated while the category is disabled.
+/// @param event The captured event.
+void logRecorded(NativeKeyEvent const& event);
 
 } // namespace contour::input

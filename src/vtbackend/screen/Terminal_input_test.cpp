@@ -198,6 +198,28 @@ TEST_CASE("mouse reports add the reported cell origin", "[vtbackend][mouse]")
     CHECK(e(mc.replyData()) == e("\033[<0;31;16m"sv));
 }
 
+TEST_CASE("Terminal.keyboardProtocolEncodesModifiers", "[terminal]")
+{
+    using vtbackend::KeyboardEventFlag;
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    auto& terminal = mc.terminal;
+
+    CHECK_FALSE(terminal.keyboardProtocolEncodesModifiers());
+
+    // Reporting event types alone leaves a press legacy-encoded: Super would be dropped.
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(KeyboardEventFlag::ReportEventTypes); });
+    CHECK_FALSE(terminal.keyboardProtocolEncodesModifiers());
+
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.flags().enable(KeyboardEventFlag::DisambiguateEscapeCodes); });
+    CHECK(terminal.keyboardProtocolEncodesModifiers());
+
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.flags() = KeyboardEventFlag::ReportAllKeysAsEscapeCodes; });
+    CHECK(terminal.keyboardProtocolEncodesModifiers());
+}
+
 TEST_CASE("Terminal.KittyKeyRelease.sendKeyEvent", "[terminal]")
 {
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };

@@ -26,6 +26,24 @@ using namespace contour::config;
 namespace
 {
 
+/// Overload set of the actions whose arguments describeAction() spells out; every other action
+/// goes through formatAction(). Named non-template functions, so no std::format call sits inside a
+/// generic visitor lambda.
+[[nodiscard]] std::string describeArguments(contour::actions::PasteClipboard const& a)
+{
+    return std::format("PasteClipboard(strip={})", a.strip ? "yes" : "no");
+}
+
+[[nodiscard]] std::string describeArguments(contour::actions::SendChars const& a)
+{
+    return std::format("SendChars({:?})", a.chars);
+}
+
+[[nodiscard]] std::string describeArguments(contour::actions::HintMode const& a)
+{
+    return std::format("HintMode({}, {})", a.patterns, std::to_underlying(a.hintAction));
+}
+
 /// An action with the arguments that identify it, which formatAction() leaves out where the config
 /// writer has no use for them (a paste's strip flag, the characters a SendChars sends).
 [[nodiscard]] std::string describeAction(contour::actions::Action const& action)
@@ -33,13 +51,8 @@ namespace
     using namespace contour::actions;
     return std::visit(
         [&](auto const& a) -> std::string {
-            using T = std::decay_t<decltype(a)>;
-            if constexpr (std::is_same_v<T, PasteClipboard>)
-                return std::format("PasteClipboard(strip={})", a.strip ? "yes" : "no");
-            else if constexpr (std::is_same_v<T, SendChars>)
-                return std::format("SendChars({:?})", a.chars);
-            else if constexpr (std::is_same_v<T, HintMode>)
-                return std::format("HintMode({}, {})", a.patterns, std::to_underlying(a.hintAction));
+            if constexpr (requires { describeArguments(a); })
+                return describeArguments(a);
             else
                 return formatAction(action);
         },

@@ -69,6 +69,17 @@ TEST_CASE("parseRecorded rejects malformed lines", "[input][capture]")
     CHECK_FALSE(
         parseRecorded("key=0x41 mods=0x0 native=0x0 vk=0x0 scan=0x0 type=press origin=keyboard text=\\x4")
             .has_value());
+
+    // A raw space in the text is not the escaped form formatRecorded() writes.
+    CHECK_FALSE(
+        parseRecorded("key=0x20 mods=0x0 native=0x0 vk=0x0 scan=0x0 type=press origin=keyboard text= ")
+            .has_value());
+    CHECK_FALSE(
+        parseRecorded("key=0x41 mods=0x0 native=0x0 vk=0x0 scan=0x0 type=press origin=keyboard text=a b")
+            .has_value());
+    auto const space = formatRecorded(NativeKeyEvent { .qtKey = Qt::Key_Space, .text = U" " });
+    CHECK(space.ends_with("text=\\x20"));
+    CHECK(parseRecorded(space).has_value());
 }
 
 TEST_CASE("captureKeyEvent keeps every field Qt reports", "[input][capture]")

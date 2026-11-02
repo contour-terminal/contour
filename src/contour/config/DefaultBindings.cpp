@@ -385,7 +385,14 @@ namespace
                      { actions::CopySelection {}, actions::CancelSelection {} },
                      DeclinedInput::Consume),
             fallback(MacOnly, Super, U'V', Any, { actions::PasteClipboard { .strip = false } }),
-            fallback(MacOnly, Super, U'K', Any, { actions::ClearHistoryAndReset {} }),
+            // Command+K clears to the prompt (a hard reset would destroy a running vim or tmux), on the
+            // primary screen only; consumed when it declines, so it never types a 'k'.
+            fallback(MacOnly,
+                     Super,
+                     U'K',
+                     PrimaryScreenOnly,
+                     { actions::ClearToPrompt {} },
+                     DeclinedInput::Consume),
             fallback(MacOnly, Super, U',', Any, { actions::OpenConfiguration {} }),
             fallback(MacOnly, Super, U'N', Any, { actions::NewTerminal {} }),
             fallback(MacOnly, Super, U'+', Any, { actions::IncreaseFontSize {} }),

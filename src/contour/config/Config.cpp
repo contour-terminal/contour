@@ -454,8 +454,9 @@ namespace
     [[nodiscard]] std::string acceptedModifierSpellings()
     {
         return std::string { PrimaryModifierName } + ", "
-               + (ConfigModifierTable | std::views::transform(&ConfigModifierRow::name)
-                  | core::views::joinWith(", ") | std::ranges::to<std::string>());
+               + std::ranges::to<std::string>(ConfigModifierTable
+                                              | std::views::transform(&ConfigModifierRow::name)
+                                              | core::views::joinWith(", "));
     }
 
     /// Renders an `input_mapping` row for a diagnostic, e.g. "action: ClearHistoryAndReset, key: Q".
@@ -1808,9 +1809,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
 namespace
 {
-    /// Says so for every character binding that carries Alt on a macOS configuration whose profiles all keep
-    /// Option for composing characters: such a binding cannot fire there, because Option+letter produces
-    /// the composed character and no Alt chord (@see OptionAsAlt).
+    /// Says so, in one line, for the character bindings that carry Alt on a macOS configuration whose
+    /// profiles all keep Option for composing characters: such a binding cannot fire there, because
+    /// Option+letter produces the composed character and no Alt chord (@see OptionAsAlt). A binding that
+    /// also holds Control or Super is left out: it fires, as the control character keeps Alt.
     /// @param c The loaded configuration.
     void warnAboutAltCharacterBindings(Config const& c)
     {
@@ -1821,11 +1823,23 @@ namespace
         });
         if (!optionComposes)
             return;
+        auto chords = std::string {};
         for (auto const& mapping: c.inputMappings.value().charMappings)
-            if (mapping.modifiers.test(vtbackend::Modifier::Alt))
-                errorLog()("input_mapping: Alt+{} cannot fire on macOS while option_as_alt is off; Option "
-                           "composes characters there",
-                           unicode::convert_to<char>(mapping.input));
+        {
+            auto const& modifiers = mapping.modifiers;
+            if (!modifiers.test(vtbackend::Modifier::Alt) || modifiers.test(vtbackend::Modifier::Control)
+                || modifiers.test(vtbackend::Modifier::Super))
+                continue;
+            if (!chords.empty())
+                chords += ", ";
+            chords += std::format("Alt+{}{}",
+                                  modifiers.test(vtbackend::Modifier::Shift) ? "Shift+" : "",
+                                  unicode::convert_to<char>(mapping.input));
+        }
+        if (!chords.empty())
+            errorLog()("input_mapping: {} cannot fire on macOS while option_as_alt is off; Option composes "
+                       "characters there",
+                       chords);
     }
 } // namespace
 
@@ -4129,7 +4143,7 @@ namespace
         else
             add(mods);
         std::ranges::sort(names);
-        return names | core::views::joinWith(std::string_view(",")) | std::ranges::to<std::string>();
+        return std::ranges::to<std::string>(names | core::views::joinWith(std::string_view(",")));
     }
 
     /// Remembers which spelling each resolved binding was written with, to say when two rows written

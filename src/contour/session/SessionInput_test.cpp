@@ -1031,7 +1031,7 @@ TEST_CASE("macOS chords reach their actions as Qt delivers them", "[session][inp
     auto const rows = std::vector<Row> {
         { "Command+C", Qt::Key_C, Command, 0x08, "c", 0, "CopySelection", "" },
         { "Command+V", Qt::Key_V, Command, 0x09, "v", 0, "PasteClipboard", "" },
-        { "Command+K", Qt::Key_K, Command, 0x28, "k", 0, "ClearHistoryAndReset", "" },
+        { "Command+K", Qt::Key_K, Command, 0x28, "k", 0, "ClearToPrompt", "" },
         { "Command+comma", Qt::Key_Comma, Command, 0x2B, ",", 0, "OpenConfiguration", "" },
         { "Command+N", Qt::Key_N, Command, 0x2D, "n", 0, "NewTerminal", "" },
         { "Command+equal", Qt::Key_Equal, Command, 0x18, "=", 0, "IncreaseFontSize", "" },
@@ -1124,6 +1124,30 @@ TEST_CASE("Command+X and Command+S are bound to nothing on macOS and are consume
     }
 }
 
+TEST_CASE("Command+K clears to the prompt on the primary screen only, and never resets",
+          "[session][input][macos]")
+{
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+    auto event = cocoaPress(Qt::Key_K, Qt::MetaModifier, 0x28, "k");
+
+    SECTION("on the primary screen it is ClearToPrompt")
+    {
+        CHECK(resolvedAction(*session, event) == std::optional { std::string { "ClearToPrompt" } });
+    }
+
+    SECTION("on the alternate screen nothing is bound, and the chord is consumed")
+    {
+        session->terminal().writeToScreen("\033[?1049h");
+        CHECK_FALSE(resolvedAction(*session, event).has_value());
+        pty.stdinBuffer().clear();
+        std::ignore = contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session);
+        CHECK(pty.stdinBuffer().empty());
+        CHECK(session->terminal().isAlternateScreen());
+    }
+}
+
 TEST_CASE("Command+Backspace on the alternate screen is the application's", "[session][input][macos]")
 {
     contour::test::TestApp app;
@@ -1135,5 +1159,6 @@ TEST_CASE("Command+Backspace on the alternate screen is the application's", "[se
     CHECK_FALSE(resolvedAction(*session, event).has_value());
     pty.stdinBuffer().clear();
     std::ignore = contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session);
-    CHECK(pty.stdinBuffer() != "\025");
+    // Super is dropped by the legacy encoding of a named key: the application gets a plain Backspace (DEL).
+    CHECK(pty.stdinBuffer() == "\177");
 }

@@ -35,6 +35,8 @@ Requires:       fontconfig
 Requires:       freetype
 Requires:       libssh2
 Requires:       harfbuzz
+Requires:       libxkbcommon
+Requires:       libxkbcommon-x11
 Requires:       qt6-qtbase
 Requires:       qt6-qtbase-gui
 Requires:       qt6-qtmultimedia-devel
