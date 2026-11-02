@@ -6032,8 +6032,7 @@ void Screen::processKittyGraphics(std::string_view body)
             renderKittyImage(command, current ? current : it->second);
             // A playing animation that held for want of a placement has one again. Only here: a=T replaces
             // the image under its id, and its animation with it.
-            if (animation != _kittyAnimations.end()
-                && animation->second.nextFrameDue == std::chrono::steady_clock::time_point::max())
+            if (animation != _kittyAnimations.end() && animation->second.isHeld())
                 animation->second.arm(_terminal->steadyTimeNow());
             replyKittyGraphics(command, "OK");
             return;
@@ -6315,8 +6314,7 @@ void Screen::KittyAnimation::skipWholeLoops(std::chrono::steady_clock::time_poin
 
 void Screen::KittyAnimation::arm(std::chrono::steady_clock::time_point now) noexcept
 {
-    nextFrameDue = isPlaying() && successor() ? now + shownFor(currentFrame)
-                                              : std::chrono::steady_clock::time_point::max();
+    nextFrameDue = isPlaying() && successor() ? now + shownFor(currentFrame) : Held;
 }
 
 KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_point now)
@@ -6347,7 +6345,7 @@ KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_poin
             if (!next)
             {
                 // `s=2` out of frames: transmitKittyFrame() ends the wait when one arrives.
-                animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
+                animation.hold();
                 break;
             }
             if (*next < animation.currentFrame)
@@ -6358,7 +6356,7 @@ KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_poin
                 if (animation.loopCount > 1 && animation.loopsDone >= animation.loopCount - 1)
                 {
                     animation.state = AnimationState::Stop;
-                    animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
+                    animation.hold();
                     break;
                 }
             }
@@ -6379,7 +6377,7 @@ KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_poin
         // The frame changed and nothing on the page shows this image -- scrolled off, erased, overwritten.
         // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put).
         if (showKittyFrame(showing, landed) == Placed::No)
-            animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
+            animation.hold();
         else
             shown = KittyFrameShown::Yes;
     }
@@ -6388,12 +6386,10 @@ KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_poin
 
 std::optional<std::chrono::steady_clock::time_point> Screen::nextKittyFrameDue() const noexcept
 {
-    auto earliest = std::chrono::steady_clock::time_point::max();
+    auto earliest = KittyAnimation::Held;
     for (auto const& animation: _kittyAnimations | std::views::values)
         earliest = std::min(earliest, animation.nextFrameDue);
-    if (earliest == std::chrono::steady_clock::time_point::max())
-        return std::nullopt;
-    return earliest;
+    return toDeadline(earliest);
 }
 
 void Screen::stopKittyAnimations() noexcept
@@ -6401,7 +6397,7 @@ void Screen::stopKittyAnimations() noexcept
     for (auto& animation: _kittyAnimations | std::views::values)
     {
         animation.state = kitty_graphics::AnimationState::Stop;
-        animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
+        animation.hold();
     }
 }
 
@@ -6634,8 +6630,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // A playing animation that held for want of somewhere to go -- `s=2` out of frames, `s=3` with only one
     // frame with a gap -- goes on now that this frame gives it one. At once: the frame it held on has been
     // shown since the hold began.
-    if (animation.isPlaying() && animation.nextFrameDue == std::chrono::steady_clock::time_point::max()
-        && animation.successor())
+    if (animation.isPlaying() && animation.isHeld() && animation.successor())
         animation.nextFrameDue = _terminal->steadyTimeNow();
 
     replyKittyGraphics(command, "OK");
@@ -6787,8 +6782,7 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
     // Selecting a frame starts its gap afresh, and so does a change of state (s=1 holds). A command that
     // does neither leaves a running deadline where it was, or it would stretch the frame on screen; only a
     // playing animation that holds none -- its placement had gone -- is given a fresh one to try.
-    if (command.currentFrame != 0 || stateChanged
-        || animation->nextFrameDue == std::chrono::steady_clock::time_point::max())
+    if (command.currentFrame != 0 || stateChanged || animation->isHeld())
         animation->arm(_terminal->steadyTimeNow());
 
     replyKittyGraphics(command, "OK");

@@ -206,6 +206,15 @@ enum class KittyFrameShown : uint8_t
     Yes, ///< At least one placement now shows another frame.
 };
 
+/// @return @p due as a deadline, or nullopt for time_point::max(), which stands for none.
+[[nodiscard]] constexpr std::optional<std::chrono::steady_clock::time_point> toDeadline(
+    std::chrono::steady_clock::time_point due) noexcept
+{
+    if (due == std::chrono::steady_clock::time_point::max())
+        return std::nullopt;
+    return due;
+}
+
 /// What Screen::advanceKittyAnimations() did.
 struct KittyAdvance
 {
@@ -310,9 +319,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         uint32_t loopCount = 0; ///< 0 unspecified, 1 forever, n>1 loop n-1 times.
         uint32_t loopsDone = 0; ///< Loops played since playback started or `v=` was last given.
 
-        /// When playback moves on from the current frame; max() while it holds -- stopped, out of frames
+        /// The nextFrameDue of an animation that holds: never.
+        static constexpr auto Held = std::chrono::steady_clock::time_point::max();
+
+        /// When playback moves on from the current frame; Held while it holds -- stopped, out of frames
         /// under `s=2`, with no other frame to move to, or with no placement on the page to show one in.
-        std::chrono::steady_clock::time_point nextFrameDue = std::chrono::steady_clock::time_point::max();
+        std::chrono::steady_clock::time_point nextFrameDue = Held;
+
+        /// @return whether playback holds on the current frame, with no deadline to move on at.
+        [[nodiscard]] bool isHeld() const noexcept { return nextFrameDue == Held; }
+
+        /// Holds playback on the current frame until something re-arms it.
+        void hold() noexcept { nextFrameDue = Held; }
 
         /// @return the image of 1-based frame @p number, or nullptr if there is no such frame.
         [[nodiscard]] std::shared_ptr<Image const> frameImage(uint32_t number) const

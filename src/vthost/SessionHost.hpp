@@ -299,9 +299,9 @@ class HostedSession
     /// @param fileSystem Where the terminal looks printed paths up. Borrowed: it must outlive the session.
     /// @param onScreenUpdated Invoked on the PUMP thread after each processed
     ///        input batch (the host marshals it onto the loop).
-    /// @param onRenderBufferUpdated Invoked on ANY thread, possibly with the terminal lock held, when the
-    ///        terminal's render buffer went stale or its next wakeup moved -- a kitty animation's next frame
-    ///        among it. It must read no terminal state: the host only posts it to the loop.
+    /// @param onKittyAnimationDeadlineMoved Invoked on ANY thread, possibly with the terminal lock held, when
+    ///        the next frame of a kitty animation on display is due at another time, or no longer due. It
+    ///        must read no terminal state: the host only posts it to the loop.
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
     ///        pump loop ended (the host marshals it onto the loop).
     /// @param onSignal Invoked on the PARSER thread, with the terminal lock held, for each SessionSignal (the
@@ -320,7 +320,7 @@ class HostedSession
                   vtbackend::TerminalClocks clocks,
                   core::platform::FileSystem const& fileSystem,
                   std::function<void()> onScreenUpdated,
-                  std::function<void()> onRenderBufferUpdated,
+                  std::function<void()> onKittyAnimationDeadlineMoved,
                   std::function<void()> onBell,
                   SessionNotifyCallback onNotify,
                   std::function<void(std::string)> onCopyToClipboard,
@@ -430,7 +430,7 @@ class HostedSession
     {
         Events(vtbackend::HostIdentity hostIdentity,
                std::function<void()> screenUpdated,
-               std::function<void()> renderBufferUpdated,
+               std::function<void()> kittyAnimationDeadlineMoved,
                std::function<void()> bell,
                SessionNotifyCallback notify,
                std::function<void(std::string)> copyToClipboard,
@@ -438,7 +438,7 @@ class HostedSession
                std::function<void()> extensionPublished):
             identity(std::move(hostIdentity)),
             onScreenUpdated(std::move(screenUpdated)),
-            onRenderBufferUpdated(std::move(renderBufferUpdated)),
+            onKittyAnimationDeadlineMoved(std::move(kittyAnimationDeadlineMoved)),
             onBell(std::move(bell)),
             onNotify(std::move(notify)),
             onCopyToClipboard(std::move(copyToClipboard)),
@@ -451,9 +451,9 @@ class HostedSession
         /// parser thread.
         vtbackend::HostIdentity identity;
         std::function<void()> onScreenUpdated;
-        /// The render buffer went stale or the terminal's next wakeup moved: invoked on any thread, possibly
-        /// under the terminal lock. Fixed at construction, as those threads read it without a lock.
-        std::function<void()> onRenderBufferUpdated;
+        /// A kitty animation's next deadline moved: invoked on any thread, possibly under the terminal lock.
+        /// Fixed at construction, as those threads read it without a lock.
+        std::function<void()> onKittyAnimationDeadlineMoved;
         std::function<void()> onBell;
         SessionNotifyCallback onNotify;
         std::function<void(std::string)> onCopyToClipboard;
@@ -482,12 +482,12 @@ class HostedSession
             if (onScreenUpdated)
                 onScreenUpdated();
         }
-        /// The daemon renders no frame of its own; what it hears here is a kitty animation's next deadline
-        /// moving, which it arms its frame timer from. Hands it on without reading terminal state.
-        void renderBufferUpdated() override
+        /// The daemon renders no frame of its own, so of the wakeups it hears only this one, and arms its
+        /// frame timer from it. Hands it on without reading terminal state.
+        void kittyAnimationDeadlineMoved() override
         {
-            if (onRenderBufferUpdated)
-                onRenderBufferUpdated();
+            if (onKittyAnimationDeadlineMoved)
+                onKittyAnimationDeadlineMoved();
         }
         void bell() override
         {
@@ -1334,12 +1334,15 @@ class SessionHost final: public vtworkspace::ModelEvents
         std::optional<core::net::DeadlineTimer> timer {}; ///< Fires at @ref deadline; settled when idle.
         core::platform::SteadyTimePoint deadline {};      ///< When @ref timer fires, while it is armed.
         std::optional<core::platform::SteadyTimePoint> lastTick {}; ///< When it last fired, for the throttle.
+
+        /// @return whether the timer is waiting to fire.
+        [[nodiscard]] bool isArmed() const noexcept { return timer && !timer->settled(); }
     };
 
     /// Arms @p session's frame timer from its terminal's kittyAnimationDue(), no sooner than
     /// DaemonMinimumFrameInterval after the last tick. Idempotent: keeps an armed timer unless the deadline
     /// moved earlier, as the terminal announces a deadline from many places. Loop thread: the post of the
-    /// session's renderBufferUpdated(), and the timer's own callback.
+    /// session's kittyAnimationDeadlineMoved(), and the timer's own callback.
     void armAnimationTick(vtworkspace::SessionId session);
 
     /// What the frame timer does: ticks the session's terminal at the loop's time -- which raises the

@@ -584,6 +584,11 @@ class Terminal: public IStatusLinePublishTarget
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+        /// When the next kitty animation frame of the page on display is due moved (@see
+        /// Terminal::kittyAnimationDue). Raised under renderBufferUpdated()'s rules, which it forwards to by
+        /// default: a display re-reads nextRender() on it, and a host that renders nothing itself (the
+        /// daemon) can hear this alone.
+        virtual void kittyAnimationDeadlineMoved() { renderBufferUpdated(); }
 
         /// Whether the frame shows a running block's time changed (@see Terminal::hasVisibleRunningStatus):
         /// a time on display goes stale unless a frame is drawn again. Raised by the frame build -- on the

@@ -70,7 +70,7 @@ HostedSession::HostedSession(SessionId id,
                              vtbackend::TerminalClocks clocks,
                              core::platform::FileSystem const& fileSystem,
                              std::function<void()> onScreenUpdated,
-                             std::function<void()> onRenderBufferUpdated,
+                             std::function<void()> onKittyAnimationDeadlineMoved,
                              std::function<void()> onBell,
                              SessionNotifyCallback onNotify,
                              std::function<void(std::string)> onCopyToClipboard,
@@ -86,7 +86,7 @@ HostedSession::HostedSession(SessionId id,
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
-            std::move(onRenderBufferUpdated),
+            std::move(onKittyAnimationDeadlineMoved),
             std::move(onBell),
             std::move(onNotify),
             std::move(onCopyToClipboard),
@@ -508,7 +508,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
             // drain time only if the loop is too, so `this` stays valid.
             _loop.post([this, id] { onSessionScreenUpdated(id); });
         },
-        /*onRenderBufferUpdated=*/
+        /*onKittyAnimationDeadlineMoved=*/
         [this, id] {
             // Any thread, possibly under the terminal lock: only handed to the loop, which reads the
             // deadline.
@@ -1774,9 +1774,8 @@ void SessionHost::armAnimationTick(SessionId session)
     auto const deadline = tick.lastTick ? std::max(*due, *tick.lastTick + DaemonMinimumFrameInterval) : *due;
     // The terminal announces its deadline from many places, most of which move nothing: an armed timer stays,
     // unless the next frame is now due sooner. One due later finds nothing to advance, and re-arms.
-    if (tick.timer && !tick.timer->settled() && tick.deadline <= deadline)
+    if (tick.isArmed() && tick.deadline <= deadline)
         return;
-    tick.timer.reset();
     tick.deadline = deadline;
     tick.timer.emplace(_loop, deadline, &animationTickExpired, &tick);
 }
@@ -1809,7 +1808,7 @@ void SessionHost::animationTickExpired(void* tick)
 bool SessionHost::ticksKittyAnimations(SessionId session) const noexcept
 {
     auto const it = _animationTicks.find(session.value);
-    return it != _animationTicks.end() && it->second->timer && !it->second->timer->settled();
+    return it != _animationTicks.end() && it->second->isArmed();
 }
 
 void SessionHost::scheduleRetiredRelease()

@@ -3237,10 +3237,7 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 
 optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept
 {
-    auto const due = _kittyAnimationDue.load(std::memory_order_relaxed);
-    if (due == chrono::steady_clock::time_point::max())
-        return nullopt;
-    return due;
+    return toDeadline(_kittyAnimationDue.load(std::memory_order_relaxed));
 }
 
 void Terminal::publishKittyAnimationDeadline(optional<chrono::steady_clock::time_point> due)
@@ -3250,7 +3247,7 @@ void Terminal::publishKittyAnimationDeadline(optional<chrono::steady_clock::time
     // notification while a frame waits for its swap -- and an idle display must hear of the deadline to
     // re-read nextRender(). Only on a change: every kitty command publishes, and most move nothing.
     if (_kittyAnimationDue.exchange(value, std::memory_order_relaxed) != value)
-        _eventListener.renderBufferUpdated();
+        _eventListener.kittyAnimationDeadlineMoved();
 }
 
 void Terminal::advanceMomentumGlide(chrono::steady_clock::time_point now)
