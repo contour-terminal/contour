@@ -7,8 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <expected>
 #include <map>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,10 +90,9 @@ class ScriptedChannel final: public contour::cli::ControlChannel
 
     [[nodiscard]] Call const* last(std::string_view method) const
     {
-        for (auto it = calls.rbegin(); it != calls.rend(); ++it)
-            if (it->method == method)
-                return &*it;
-        return nullptr;
+        auto const reversed = calls | std::views::reverse;
+        auto const found = std::ranges::find(reversed, method, &Call::method);
+        return found == reversed.end() ? nullptr : &*found;
     }
 
     std::vector<Call> calls;
