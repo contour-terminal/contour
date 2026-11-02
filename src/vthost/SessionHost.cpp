@@ -1790,8 +1790,8 @@ void SessionHost::animationTickExpired(void* tick)
     if (hosted == host._sessions.end())
         return;
     // The loop's time, which the throttle measures. The terminal catches up from its own deadline, so the
-    // frames a throttled tick skips are dropped, not queued: within a loop it lands on the frame that time
-    // shows; further behind than a whole loop, it catches up one loop and resumes from now.
+    // frames a throttled tick skips are dropped, not queued: it lands on the frame that time shows, however
+    // far behind it is, because whole loops are skipped arithmetically (Screen::advanceKittyAnimations).
     auto const now = host._loop.clock().now();
     auto& terminal = hosted->second->terminal();
     // A deadline that moved later since this was armed leaves nothing to advance, nor a tick to throttle by.
