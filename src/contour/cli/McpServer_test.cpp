@@ -438,13 +438,13 @@ TEST_CASE("pane_run and pane_capture keep the tail of long output", "[mcp-server
 {
     auto f = Fixture {};
     scriptRun(f);
-    auto const big = std::string(200 * 1024, 'a') + "TAIL";
+    auto const big = std::string(200uz * 1024, 'a') + "TAIL";
     f.channel.replies["block.read"] = std::format(
         R"({{"block":{},"prompt":"","output":"{}","truncated":"none"}})", blockJson("finished"), big);
     auto const out = f.call("pane_run", R"({"pane":"tests","command":"x"})");
     CHECK(out.contains(R"(\"truncated\":\"head\")"));
     CHECK(out.contains("TAIL"));
-    CHECK(out.size() < 70 * 1024);
+    CHECK(out.size() < 70uz * 1024);
     CHECK(f.call("pane_run", R"({"pane":"tests","command":"x","maxOutputBytes":4})")
               .contains(R"(\"output\":\"TAIL\")"));
 
@@ -455,7 +455,7 @@ TEST_CASE("pane_run and pane_capture keep the tail of long output", "[mcp-server
     auto const capture = f.call("pane_capture");
     CHECK(capture.contains(R"(\"truncated\":\"head\")"));
     CHECK(capture.contains("TAIL"));
-    CHECK(capture.size() < 70 * 1024);
+    CHECK(capture.size() < 70uz * 1024);
 }
 
 TEST_CASE("tab_create keeps the focus and needs AllTabs", "[mcp-server]")

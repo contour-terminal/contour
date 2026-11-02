@@ -70,13 +70,13 @@ std::vector<std::string> linesOf(std::string const& text)
     return lines;
 }
 
-int serve(std::string const& input, std::string& output, core::async::StopToken stop = {})
+int serve(std::string const& input, std::string& output, core::async::StopToken const& stop = {})
 {
     auto channel = EmptyChannel {};
     auto in = std::istringstream { input };
     auto out = std::ostringstream {};
-    auto const status = contour::cli::runMcpServer(
-        McpOptions { .scope = TabScope::AllTabs }, channel, in, out, std::move(stop));
+    auto const status =
+        contour::cli::runMcpServer(McpOptions { .scope = TabScope::AllTabs }, channel, in, out, stop);
     output = out.str();
     return status;
 }

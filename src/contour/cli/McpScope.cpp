@@ -170,7 +170,7 @@ std::string annotateWorkspace(vtcontrol::ListReply const& workspace, std::string
         self["pane"] = std::string(callerPane);
         self["tab"] = caller->tab->id;
         self["window"] = caller->window->id;
-        rootObject["self"] = std::move(self);
+        rootObject["self"] = self;
     }
 
     auto text = std::string {};

@@ -31,7 +31,11 @@ bool lists(std::string const& json, std::string_view tool)
     return json.contains(std::format(R"("name":"{}")", tool));
 }
 
-Grants const AllGrants = std::vector<std::string> { "read", "screen", "input", "write" };
+/// @return Every permission, as a grant list.
+Grants allGrants()
+{
+    return std::vector<std::string> { "read", "screen", "input", "write" };
+}
 } // namespace
 
 TEST_CASE("McpTools.read_screen_grants", "[mcp-tools]")
@@ -65,7 +69,7 @@ TEST_CASE("McpTools.no_grants_lists_all_but_tab_create_and_tab_close", "[mcp-too
 
 TEST_CASE("McpTools.read_only_drops_input_and_write_tools", "[mcp-tools]")
 {
-    auto const json = toolsListJson(AllGrants, McpAccess::ReadOnly, TabScope::AllTabs);
+    auto const json = toolsListJson(allGrants(), McpAccess::ReadOnly, TabScope::AllTabs);
     for (auto const tool: { "pane_type",
                             "pane_run",
                             "pane_split",

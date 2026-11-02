@@ -29,7 +29,7 @@ struct McpOptions
 {
     TabScope scope = TabScope::OwnTab;  ///< Which tabs the agent may reach.
     McpAccess access = McpAccess::Full; ///< Whether the agent may type or change the workspace.
-    std::string callerPane;             ///< The full id of the pane the agent runs in; empty when unknown.
+    std::string callerPane {};          ///< The full id of the pane the agent runs in; empty when unknown.
     std::string serverVersion = "0";    ///< Reported as `serverInfo.version`.
 };
 
@@ -99,7 +99,7 @@ class McpServer
     [[nodiscard]] ToolResult toolPaneType(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolPaneRun(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolTabCreate(ToolRow const& row, std::string_view arguments);
-    template <typename Request>
+    template <typename PaneRequest>
     [[nodiscard]] ToolResult toolOnPane(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolPaneClose(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolTabClose(ToolRow const& row, std::string_view arguments);

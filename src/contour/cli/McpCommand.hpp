@@ -45,7 +45,7 @@ namespace contour::cli
                                ControlChannel& channel,
                                std::istream& in,
                                std::ostream& out,
-                               core::async::StopToken stop);
+                               core::async::StopToken const& stop);
 
 /// Runs `contour mcp`: reads the flags, dials the daemon and serves on `io.in` and `io.out`.
 /// @param flags The parsed command line.

@@ -52,6 +52,7 @@ add_library(contour_cli STATIC
     McpScope.cpp McpScope.hpp
     McpServer.cpp McpServer.hpp
     McpTools.cpp McpTools.hpp McpToolsDetail.hpp
+    McpWire.hpp
     ExitStatus.hpp
     Hosting.hpp
     HostTransport.cpp HostTransport.hpp

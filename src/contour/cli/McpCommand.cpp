@@ -61,7 +61,7 @@ int runMcpServer(McpOptions options,
                  ControlChannel& channel,
                  std::istream& in,
                  std::ostream& out,
-                 core::async::StopToken stop)
+                 core::async::StopToken const& stop)
 {
     auto server = McpServer { channel, std::move(options) };
     auto line = std::string {};

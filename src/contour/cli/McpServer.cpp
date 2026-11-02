@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/McpServer.hpp>
+#include <contour/cli/McpWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -17,71 +18,6 @@ using vtcontrol::ObjectKind;
 
 namespace contour::cli
 {
-
-namespace wire
-{
-    /// The JSON-RPC message, as far as routing needs it. Unknown members are ignored.
-    struct Envelope
-    {
-        std::string jsonrpc {};
-        vtcontrol::RawJson id {};
-        std::string method {};
-        vtcontrol::RawJson params {};
-    };
-
-    struct InitializeParams
-    {
-        std::string protocolVersion {};
-    };
-
-    /// Arguments of the composite tools; a member without a default is required.
-    struct SplitArguments
-    {
-        std::string pane {};
-        std::optional<vtcontrol::SplitDirection> direction {};
-        std::optional<uint8_t> ratioPercent {};
-        std::string cwd {};
-        std::vector<std::string> command {};
-        std::string label {};
-    };
-
-    struct TypeArguments
-    {
-        std::string pane {};
-        std::optional<std::string> text {};
-    };
-
-    struct RunArguments
-    {
-        std::string pane {};
-        std::optional<std::string> command {};
-        std::optional<uint32_t> timeoutSeconds {};
-        std::optional<uint32_t> maxOutputBytes {};
-    };
-
-    struct TabCreateArguments
-    {
-        std::string cwd {};
-        std::vector<std::string> command {};
-        std::string label {};
-    };
-
-    /// What `pane_run` returns.
-    struct RunResult
-    {
-        int32_t exitCode = 0;
-        std::string output {};
-        std::optional<uint32_t> durationMs {};
-        std::string blockId {};
-        vtcontrol::Truncation truncated = vtcontrol::Truncation::None;
-    };
-
-    struct CallParams
-    {
-        std::string name {};
-        vtcontrol::RawJson arguments {};
-    };
-} // namespace wire
 
 namespace
 {
@@ -174,10 +110,8 @@ namespace
         constexpr auto Prefix = std::string_view { "block:" };
         if (!block.starts_with(Prefix))
             return {};
-        auto const uuid =
-            block.substr(Prefix.size(),
-                         block.find('/') == std::string_view::npos ? std::string_view::npos
-                                                                   : block.find('/') - Prefix.size());
+        auto const rest = block.substr(Prefix.size());
+        auto const uuid = rest.substr(0, rest.find('/'));
         return uuid.empty() ? std::string {} : "pane:" + std::string(uuid);
     }
 
@@ -211,7 +145,7 @@ namespace
                                                              std::string_view spec,
                                                              TabScope scope)
     {
-        auto const ownTab = ownTabOf(workspace, callerPane).value_or(std::string {});
+        auto ownTab = ownTabOf(workspace, callerPane).value_or(std::string {});
         if (kind == ObjectKind::Tab && spec.empty())
         {
             if (ownTab.empty())
@@ -454,10 +388,10 @@ McpServer::ToolResult McpServer::toolDaemonInfo(ToolRow const& row, std::string_
     return callDaemon(row.catalogMethod, "{}");
 }
 
-template <typename Request>
+template <typename PaneRequest>
 McpServer::ToolResult McpServer::toolOnPane(ToolRow const& row, std::string_view arguments)
 {
-    auto request = decodeArguments<Request>(arguments);
+    auto request = decodeArguments<PaneRequest>(arguments);
     if (!request)
         return { .outcome = ToolOutcome::Error, .text = request.error() };
     auto const workspace = fetchWorkspace();
@@ -567,7 +501,7 @@ McpServer::ToolResult McpServer::toolPaneRun(ToolRow const& /*row*/, std::string
         return fail(std::string(WouldTypeIntoSelf));
 
     // A command typed into a pane that is still running one would feed that program, not the shell.
-    auto const listed = callDaemon(
+    auto listed = callDaemon(
         "block.list", vtcontrol::encodeJson(vtcontrol::BlockListRequest { .pane = *pane, .limit = 1 }));
     if (listed.outcome != ToolOutcome::Ok)
         return listed;

@@ -23,94 +23,125 @@ namespace
 {
     // One row per tool; adding a tool is adding a row (and, for a composite, its handler in the server).
     /// `pane_run`'s schema; its timeout bounds are the CLI's, so they are spelled from the one constant.
-    std::string const RunSchema =
-        std::string {
-            R"({"type":"object","properties":{)"
-            R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
-            R"("command":{"type":"string","description":"One command line to run; join several with && or ;."},)"
-            R"("timeoutSeconds":{"type":"integer","minimum":1,"maximum":)"
-        }
-        + std::to_string(MaxTimeoutSeconds)
-        + R"(,"default":120,"description":"Seconds to wait for it to finish; default 120."},)"
-          R"("maxOutputBytes":{"type":"integer","minimum":0,"default":65536,"description":"Bytes of output to return at most; default 65536."}},)"
-          R"("required":["pane","command"],"additionalProperties":false})";
+    std::string const& runSchema()
+    {
+        static auto const schema =
+            std::string {
+                R"({"type":"object","properties":{)"
+                R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
+                R"("command":{"type":"string","description":"One command line to run; join several with && or ;."},)"
+                R"("timeoutSeconds":{"type":"integer","minimum":1,"maximum":)"
+            }
+            + std::to_string(MaxTimeoutSeconds)
+            + R"(,"default":120,"description":"Seconds to wait for it to finish; default 120."},)"
+              R"("maxOutputBytes":{"type":"integer","minimum":0,"default":65536,"description":"Bytes of output to return at most; default 65536."}},)"
+              R"("required":["pane","command"],"additionalProperties":false})";
+        return schema;
+    }
 
-    auto const Rows = std::to_array<ToolRow>({
-        { "workspace_list",
-          ToolKind::Catalog,
-          "workspace.list",
-          ControlGrants::of({ Permission::Read }),
-          {},
-          {} },
-        { "pane_capture",
-          ToolKind::Catalog,
-          "pane.capture",
-          ControlGrants::of({ Permission::Screen }),
-          {},
-          {} },
-        { "pane_close", ToolKind::Catalog, "pane.close", ControlGrants::of({ Permission::Write }), {}, {} },
-        { "tab_close",
-          ToolKind::Catalog,
-          "tab.close",
-          ControlGrants::of({ Permission::Write }),
-          {},
-          {},
-          TabScope::AllTabs },
-        { "object_setLabel",
-          ToolKind::Catalog,
-          "object.setLabel",
-          ControlGrants::of({ Permission::Write }),
-          {},
-          {} },
-        { "block_list", ToolKind::Catalog, "block.list", ControlGrants::of({ Permission::Screen }), {}, {} },
-        { "block_read", ToolKind::Catalog, "block.read", ControlGrants::of({ Permission::Screen }), {}, {} },
-        { "daemon_info", ToolKind::Catalog, "daemon.info", ControlGrants::of({ Permission::Read }), {}, {} },
-        { "pane_split",
-          ToolKind::Composite,
-          {},
-          ControlGrants::of({ Permission::Write }),
-          "Split a pane and optionally run a command in the new pane.",
-          R"({"type":"object","properties":{)"
-          R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; defaults to the pane this agent runs in"},)"
-          R"("direction":{"type":"string","enum":["right","below"],"description":"Where the new pane goes."},)"
-          R"("ratioPercent":{"type":"integer","minimum":1,"maximum":100,"description":"Share of the space, in percent, the new pane takes."},)"
-          R"("cwd":{"type":"string","description":"Working directory of the new pane."},)"
-          R"("command":{"type":"array","items":{"type":"string"},"description":"Program and arguments to run in the new pane."},)"
-          R"("label":{"type":"string","description":"Label to give the new pane."}},)"
-          R"("required":["direction"],"additionalProperties":false})" },
-        {
-            "pane_run",
-            ToolKind::Composite,
-            {},
-            ControlGrants::of({ Permission::Input, Permission::Screen }),
-            "Type one command line into a shell pane, wait for it to finish, and return its output and exit "
-            "status. The pane needs OSC 133 shell integration. If the result says timedOut, the command is "
-            "still running; fetch its output later with block_read. The output is the last 64 KiB unless "
-            "maxOutputBytes says otherwise. Refuses the pane this agent runs in; use pane_split to get a "
-            "shell pane first.",
-            RunSchema,
-        },
-        { "pane_type",
-          ToolKind::Composite,
-          {},
-          ControlGrants::of({ Permission::Input }),
-          "Type text into a pane without waiting for anything. Refuses the pane this agent runs in.",
-          R"({"type":"object","properties":{)"
-          R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
-          R"("text":{"type":"string","description":"The text to type."}},)"
-          R"("required":["pane","text"],"additionalProperties":false})" },
-        { "tab_create",
-          ToolKind::Composite,
-          {},
-          ControlGrants::of({ Permission::Write }),
-          "Open a new tab, optionally running a command in it.",
-          R"({"type":"object","properties":{)"
-          R"("cwd":{"type":"string","description":"Working directory of the new tab."},)"
-          R"("command":{"type":"array","items":{"type":"string"},"description":"Program and arguments to run."},)"
-          R"("label":{"type":"string","description":"Label to give the new tab."}},)"
-          R"("additionalProperties":false})",
-          TabScope::AllTabs },
-    });
+    /// @return The tool table, built on first use.
+    std::span<ToolRow const> rows()
+    {
+        static auto const table = std::to_array<ToolRow>({
+            { "workspace_list",
+              ToolKind::Catalog,
+              "workspace.list",
+              ControlGrants::of({ Permission::Read }),
+              {},
+              {} },
+            { "pane_capture",
+              ToolKind::Catalog,
+              "pane.capture",
+              ControlGrants::of({ Permission::Screen }),
+              {},
+              {} },
+            { "pane_close",
+              ToolKind::Catalog,
+              "pane.close",
+              ControlGrants::of({ Permission::Write }),
+              {},
+              {} },
+            { "tab_close",
+              ToolKind::Catalog,
+              "tab.close",
+              ControlGrants::of({ Permission::Write }),
+              {},
+              {},
+              TabScope::AllTabs },
+            { "object_setLabel",
+              ToolKind::Catalog,
+              "object.setLabel",
+              ControlGrants::of({ Permission::Write }),
+              {},
+              {} },
+            { "block_list",
+              ToolKind::Catalog,
+              "block.list",
+              ControlGrants::of({ Permission::Screen }),
+              {},
+              {} },
+            { "block_read",
+              ToolKind::Catalog,
+              "block.read",
+              ControlGrants::of({ Permission::Screen }),
+              {},
+              {} },
+            { "daemon_info",
+              ToolKind::Catalog,
+              "daemon.info",
+              ControlGrants::of({ Permission::Read }),
+              {},
+              {} },
+            { "pane_split",
+              ToolKind::Composite,
+              {},
+              ControlGrants::of({ Permission::Write }),
+              "Split a pane and optionally run a command in the new pane.",
+              R"({"type":"object","properties":{)"
+              R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; defaults to the pane this agent runs in"},)"
+              R"("direction":{"type":"string","enum":["right","below"],"description":"Where the new pane goes."},)"
+              R"("ratioPercent":{"type":"integer","minimum":1,"maximum":100,"description":"Share of the space, in percent, the new pane takes."},)"
+              R"("cwd":{"type":"string","description":"Working directory of the new pane."},)"
+              R"("command":{"type":"array","items":{"type":"string"},"description":"Program and arguments to run in the new pane."},)"
+              R"("label":{"type":"string","description":"Label to give the new pane."}},)"
+              R"("required":["direction"],"additionalProperties":false})" },
+            {
+                "pane_run",
+                ToolKind::Composite,
+                {},
+                ControlGrants::of({ Permission::Input, Permission::Screen }),
+                "Type one command line into a shell pane, wait for it to finish, and return its output and "
+                "exit "
+                "status. The pane needs OSC 133 shell integration. If the result says timedOut, the command "
+                "is "
+                "still running; fetch its output later with block_read. The output is the last 64 KiB unless "
+                "maxOutputBytes says otherwise. Refuses the pane this agent runs in; use pane_split to get a "
+                "shell pane first.",
+                runSchema(),
+            },
+            { "pane_type",
+              ToolKind::Composite,
+              {},
+              ControlGrants::of({ Permission::Input }),
+              "Type text into a pane without waiting for anything. Refuses the pane this agent runs in.",
+              R"({"type":"object","properties":{)"
+              R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
+              R"("text":{"type":"string","description":"The text to type."}},)"
+              R"("required":["pane","text"],"additionalProperties":false})" },
+            { "tab_create",
+              ToolKind::Composite,
+              {},
+              ControlGrants::of({ Permission::Write }),
+              "Open a new tab, optionally running a command in it.",
+              R"({"type":"object","properties":{)"
+              R"("cwd":{"type":"string","description":"Working directory of the new tab."},)"
+              R"("command":{"type":"array","items":{"type":"string"},"description":"Program and arguments to run."},)"
+              R"("label":{"type":"string","description":"Label to give the new tab."}},)"
+              R"("additionalProperties":false})",
+              TabScope::AllTabs },
+        });
+        return table;
+    }
 
     constexpr auto PermissionNames = std::to_array<std::pair<std::string_view, Permission>>({
         { "read", Permission::Read },
@@ -239,7 +270,7 @@ bool isOffered(ToolRow const& row,
 
 std::span<ToolRow const> mcpToolRows()
 {
-    return Rows;
+    return rows();
 }
 
 std::string toolsListJson(std::optional<std::vector<std::string>> const& grants,
@@ -249,7 +280,7 @@ std::string toolsListJson(std::optional<std::vector<std::string>> const& grants,
     auto json = std::string { R"({"tools":[)" };
     auto separator = std::string_view {};
     for (auto const& row:
-         Rows | std::views::filter([&](auto const& r) { return isOffered(r, grants, access, scope); }))
+         rows() | std::views::filter([&](auto const& r) { return isOffered(r, grants, access, scope); }))
     {
         auto summary = std::string { row.summary };
         auto schema = std::string { row.inputSchema };
