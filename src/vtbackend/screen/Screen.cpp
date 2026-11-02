@@ -383,12 +383,15 @@ namespace // {{{ helper
     [[nodiscard]] std::expected<Image::Data, std::string_view> decodeKittyPayload(
         kitty_graphics::Command const& command, size_t maxInflatedBytes, std::string_view tooLargeReply)
     {
-        auto const decoded = core::base64::decode(command.payload);
-        auto bytes = Image::Data(decoded.begin(), decoded.end());
+        // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
+        // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and
+        // the blend arithmetic into nonsense. Straight into the vector, so the payload is held once.
+        auto bytes = Image::Data(core::base64::decodeLength(command.payload));
+        bytes.resize(core::base64::decode(command.payload, bytes.data()));
         if (command.compression == kitty_graphics::Compression::None)
             return bytes;
 
-        return kitty_graphics::inflateZlib(bytes, maxInflatedBytes)
+        return kitty_graphics::inflateZlib(std::span<uint8_t const> { bytes }, maxInflatedBytes)
             .transform_error([&](kitty_graphics::InflateError error) -> std::string_view {
                 return error == kitty_graphics::InflateError::TooLarge ? tooLargeReply
                                                                        : "EINVAL:corrupt compressed payload";
@@ -6052,34 +6055,29 @@ void Screen::processKittyGraphics(std::string_view body)
     // match the declared size is a read past the end waiting to happen. That size is also the
     // exact bound for inflating one: a bomb is refused after a few KiB instead of being inflated
     // and then found to be the wrong size. A PNG states its own size only once decoded, so it is
-    // bounded by what the quota still has room for instead.
+    // bounded by what the quota still has room for instead. Declared dimensions are attacker-chosen,
+    // though, so they bound an inflate only when they are sane: an overflowing or over-quota size is
+    // refused before a single byte is inflated.
     auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
                           * bytesPerPixel(command.transmissionFormat());
-    // Declared dimensions are attacker-chosen, so they bound an inflate only when they are sane: an
-    // overflowing or over-quota size is refused before a single byte is inflated.
-    auto inflateCap = expected;
-    if (command.compression != Compression::None && format != ImageFormat::PNG)
+    if (command.compression != Compression::None && format != ImageFormat::PNG
+        && !boundedRawBytes(command.pixelWidth,
+                            command.pixelHeight,
+                            bytesPerPixel(command.transmissionFormat()),
+                            _settings->kittyImageStorageQuota))
     {
-        auto const bounded = boundedRawBytes(command.pixelWidth,
-                                             command.pixelHeight,
-                                             bytesPerPixel(command.transmissionFormat()),
-                                             _settings->kittyImageStorageQuota);
-        if (!bounded)
-        {
-            replyKittyGraphics(command, "EINVAL:image dimensions too large");
-            return;
-        }
-        inflateCap = *bounded;
+        replyKittyGraphics(command, "EINVAL:image dimensions too large");
+        return;
     }
-    auto const quotaRemainder = [&] {
-        auto const stored = storedKittyBytes() - storedKittyBytesOf(command.imageId);
-        return stored < _settings->kittyImageStorageQuota ? _settings->kittyImageStorageQuota - stored
-                                                          : size_t { 0 };
-    };
+    // Everything stored except this id's image and frames, which a re-transmission replaces.
+    auto const storedByOthers = storedKittyBytes() - storedKittyBytesOf(command.imageId);
+    auto const quota = _settings->kittyImageStorageQuota;
     auto payload =
         format == ImageFormat::PNG
-            ? decodeKittyPayload(command, quotaRemainder(), "ENOSPC:image storage quota exceeded")
-            : decodeKittyPayload(command, inflateCap, "EINVAL:payload size does not match dimensions");
+            ? decodeKittyPayload(command,
+                                 storedByOthers < quota ? quota - storedByOthers : size_t { 0 },
+                                 "ENOSPC:image storage quota exceeded")
+            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
     if (!payload)
     {
         replyKittyGraphics(command, payload.error());
@@ -6111,8 +6109,7 @@ void Screen::processKittyGraphics(std::string_view body)
         // were composited from that image and go with it, so charging the new one for bytes that are
         // about to be freed refuses a re-transmission that in fact fits. They are dropped only once
         // the replacement is accepted -- a refused re-transmission leaves the image as it was.
-        if (storedKittyBytes() - storedKittyBytesOf(command.imageId) + image->data().size()
-            > _settings->kittyImageStorageQuota)
+        if (storedByOthers + image->data().size() > quota)
         {
             replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
             return;
@@ -6492,9 +6489,6 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
 
-    // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
-    // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and the
-    // blend arithmetic below into nonsense.
     auto const bounded = boundedRawBytes(rectWidth, rectHeight, bpp, _settings->kittyImageStorageQuota);
     if (!bounded)
     {

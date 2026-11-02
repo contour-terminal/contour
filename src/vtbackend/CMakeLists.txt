@@ -436,7 +436,7 @@ if(LIBTERMINAL_TESTING)
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 
