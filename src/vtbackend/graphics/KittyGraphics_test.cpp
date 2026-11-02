@@ -1966,12 +1966,28 @@ TEST_CASE("KittyGraphics.playback.an_image_back_on_the_page_plays_on", "[kitty]"
     CHECK(dueIn(mock) == 20ms);
     tickAfter(mock, 20ms);
     CHECK(placedCells(mock) == Cells { blue() });
+}
 
-    SECTION("a=a,c= finds the placement")
-    {
-        mock.writeToScreen("\033_Ga=a,i=7,c=1\033\\"sv);
-        CHECK(placedCells(mock) == Cells { red() });
-    }
+TEST_CASE("KittyGraphics.playback.a_a_c_finds_a_placement_left_on_an_earlier_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) },
+                                           HistoryLimits::plain(LineCount(10)) };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1,C=1;/wAA\033\\"sv);
+    playThreeFrames(mock);
+
+    // Into the history, where the tick moves playback on to green without finding the placement.
+    mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
+    REQUIRE(placedCells(mock).empty());
+    tickAfter(mock, 10ms);
+
+    // Unscroll (kitty's CSI + T) brings the row back as it left: on red, which is no longer the current
+    // frame.
+    mock.writeToScreen("\033[4+T"sv);
+    REQUIRE(placedCells(mock) == Cells { red() });
+
+    // Selecting a frame finds the placement whichever of the image's frames it shows.
+    mock.writeToScreen("\033_Ga=a,i=7,c=3\033\\"sv);
+    CHECK(placedCells(mock) == Cells { blue() });
 }
 
 TEST_CASE("KittyGraphics.playback.a_tick_walks_the_page_once", "[kitty]")
