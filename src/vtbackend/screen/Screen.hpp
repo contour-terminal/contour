@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <concepts>
 #include <expected>
 #include <format>
@@ -252,6 +253,23 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void processSequence(Sequence const& seq) override;
     void processAPC(std::string_view body) override;
 
+    // {{{ kitty animation playback
+    /// Advances every playing kitty animation whose next frame is due at @p now, as many frames as are due
+    /// but at most one full loop -- a display that slept through more resumes from @p now rather than replay
+    /// what it missed. Under the state lock.
+    /// @param now The time to advance to: the frame's, as Terminal::tick() was given it.
+    /// @return The earliest deadline left, or nullopt when no animation on this page is due to advance.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> advanceKittyAnimations(
+        std::chrono::steady_clock::time_point now);
+
+    /// @return When the next kitty animation frame of this page is due, or nullopt when none is.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> nextKittyFrameDue() const noexcept;
+
+    /// Stops every kitty animation of this page on the frame it shows. For a frame that could not be
+    /// advanced for want of memory: a deadline left behind would retry it on every tick.
+    void stopKittyAnimations() noexcept;
+    // }}}
+
   private:
     /// Handles one kitty graphics command (the APC body after its leading 'G').
     void processKittyGraphics(std::string_view body);
@@ -276,6 +294,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         uint32_t currentFrame = 1; ///< Which frame a placement displays.
         kitty_graphics::AnimationState state = kitty_graphics::AnimationState::Unset;
         uint32_t loopCount = 0; ///< 0 unspecified, 1 forever, n>1 loop n-1 times.
+        uint32_t loopsDone = 0; ///< Loops played since playback started or `v=` was last given.
+
+        /// When playback moves on from the current frame; max() while it holds -- stopped, out of frames
+        /// under `s=2`, with no other frame to move to, or with no placement on the page to show one in.
+        std::chrono::steady_clock::time_point nextFrameDue = std::chrono::steady_clock::time_point::max();
 
         /// @return the image of 1-based frame @p number, or nullptr if there is no such frame.
         [[nodiscard]] std::shared_ptr<Image const> frameImage(uint32_t number) const
@@ -285,6 +308,31 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
         /// @return the image a placement of this animation shows now.
         [[nodiscard]] std::shared_ptr<Image const> currentImage() const { return frameImage(currentFrame); }
+
+        /// @return whether playback runs: `s=2` or `s=3`, and not yet stopped by its loop count.
+        [[nodiscard]] bool isPlaying() const noexcept
+        {
+            return state == kitty_graphics::AnimationState::RunAwaitingFrames
+                   || state == kitty_graphics::AnimationState::Loop;
+        }
+
+        /// @return how long 1-based frame @p number is shown: zero for a gapless frame (`z<0`), which
+        ///         playback skips, and the protocol's default for one whose gap was never given.
+        [[nodiscard]] std::chrono::milliseconds shownFor(uint32_t number) const noexcept;
+
+        /// @return the frame playback moves to from the current one -- the next with a gap, returning to
+        ///         the first under `s=3` -- or nullopt when there is none to move to.
+        [[nodiscard]] std::optional<uint32_t> successor() const noexcept;
+
+        /// Starts the current frame's gap at @p now, or holds when playback has nowhere to go.
+        void arm(std::chrono::steady_clock::time_point now) noexcept;
+    };
+
+    /// Whether showKittyFrame() found a placement to show the frame in.
+    enum class Placed : uint8_t
+    {
+        No,  ///< No fragment of the previous frame is on the page.
+        Yes, ///< At least one fragment was replaced.
     };
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
@@ -320,8 +368,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Works from the grid rather than from a recorded position, so it cannot drift as the cells
     /// scroll, are inserted or deleted, are erased or are reflowed -- if the image is no longer
     /// there, there is nothing to find and nothing happens.
-    void showKittyFrame(std::shared_ptr<Image const> const& previous,
-                        std::shared_ptr<Image const> const& next);
+    /// @return whether any fragment was replaced: playback holds no deadline for an image not on the page.
+    [[nodiscard]] Placed showKittyFrame(std::shared_ptr<Image const> const& previous,
+                                        std::shared_ptr<Image const> const& next);
+
+    /// Publishes this page's next kitty animation deadline to the terminal, if this is the page on display.
+    void publishKittyAnimationDue();
 
     /// @return decoded bytes held by stored kitty images and their animation frames.
     [[nodiscard]] size_t storedKittyBytes() const;

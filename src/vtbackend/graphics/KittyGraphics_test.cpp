@@ -10,11 +10,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <zlib.h>
@@ -806,17 +810,16 @@ TEST_CASE("KittyGraphics.animation.alpha_blends_over_the_base_frame", "[kitty]")
     CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
 }
 
-TEST_CASE("KittyGraphics.animation.self_running_playback_is_declined", "[kitty]")
+TEST_CASE("KittyGraphics.animation.self_running_playback_is_accepted", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
     mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
-    mock.terminal.flushInput();
 
-    // Nothing advances frames on a timer, so answering OK would leave the client believing an
-    // animation is running while the screen holds one frame forever.
-    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+    // Frames now advance on the terminal's own clock (@see KittyGraphics.playback.*), so both playing
+    // states are honoured -- and answered as such, not with the ENOTSUP they used to get.
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=3\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=2\033\\"sv) == "\033_Gi=7;OK\033\\");
 }
 
 TEST_CASE("KittyGraphics.animation.control_is_legal_before_any_frame", "[kitty]")
@@ -1041,14 +1044,14 @@ TEST_CASE("KittyGraphics.animation.a_frame_in_another_format_is_refused", "[kitt
     CHECK(mock.terminal.peekInput().contains("EINVAL"));
 }
 
-TEST_CASE("KittyGraphics.animation.selecting_a_frame_survives_a_playback_refusal", "[kitty]")
+TEST_CASE("KittyGraphics.animation.selecting_a_frame_together_with_playback_shows_it", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
     mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
 
-    // The keys are independent and nothing makes a client split them. Refusing the half we cannot do
-    // must not discard the half we can.
+    // The keys are independent and nothing makes a client split them: starting playback must not
+    // discard the frame selection that came with it.
     mock.writeToScreen("\033_Ga=a,i=7,c=2,s=3\033\\"sv);
     CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
 }
@@ -1352,3 +1355,347 @@ TEST_CASE("KittyGraphics.compression.chunked_transmission_is_inflated_once_reass
     CHECK(replyTo(mock, std::format("\033_Gm=0;{}\033\\", encoded.substr(split))).contains("OK"));
     CHECK(placedPixels(mock) == std::vector<uint8_t> { pixels.begin(), pixels.end() });
 }
+
+// {{{ playback
+namespace
+{
+using namespace std::chrono_literals;
+
+/// The single pixel of each frame placeThreeFrames() builds, as placedPixels() reads it back.
+[[nodiscard]] std::vector<uint8_t> red()
+{
+    return { 255, 0, 0 };
+}
+[[nodiscard]] std::vector<uint8_t> green()
+{
+    return { 0, 255, 0 };
+}
+[[nodiscard]] std::vector<uint8_t> blue()
+{
+    return { 0, 0, 255 };
+}
+[[nodiscard]] std::vector<uint8_t> white()
+{
+    return { 255, 255, 255 };
+}
+
+/// Places a one-pixel image under id 7 at the top left with three frames -- red, green, blue -- each shown
+/// for the matching gap in milliseconds (`z=`: zero leaves the default, negative makes the frame gapless).
+void placeThreeFrames(MockTerm<vtpty::MockPty>& mock, int first, int second, int third)
+{
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1;/wAA\033\\"sv);
+    mock.writeToScreen(std::format("\033_Ga=a,i=7,r=1,z={}\033\\", first));
+    mock.writeToScreen(std::format("\033_Ga=f,i=7,X=1,s=1,v=1,z={};AP8A\033\\", second));
+    mock.writeToScreen(std::format("\033_Ga=f,i=7,X=1,s=1,v=1,z={};AAD/\033\\", third));
+    mock.discardPendingReplies();
+}
+
+/// Moves the test's clock on by @p delta and lets the display tick at the new time, as it does each frame.
+void advance(MockTerm<vtpty::MockPty>& mock, std::chrono::milliseconds delta)
+{
+    mock.steadyClock.advance(delta);
+    mock.terminal.tick(mock.steadyClock.now());
+}
+
+/// The playback deadline the terminal published, relative to the test's clock.
+[[nodiscard]] std::optional<std::chrono::steady_clock::duration> dueIn(MockTerm<vtpty::MockPty>& mock)
+{
+    auto const due = mock.terminal.kittyAnimationDue();
+    if (!due)
+        return std::nullopt;
+    return *due - mock.steadyClock.now();
+}
+} // namespace
+
+TEST_CASE("KittyGraphics.playback.s3_advances_frames_by_their_gaps", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=3\033\\"sv) == "\033_Gi=7;OK\033\\");
+    REQUIRE(placedPixels(mock) == red());
+
+    // Each frame is shown for its own gap, measured from when it came up -- not a moment less.
+    advance(mock, 9ms);
+    CHECK(placedPixels(mock) == red());
+    advance(mock, 1ms);
+    CHECK(placedPixels(mock) == green());
+    advance(mock, 19ms);
+    CHECK(placedPixels(mock) == green());
+    advance(mock, 1ms);
+    CHECK(placedPixels(mock) == blue());
+}
+
+TEST_CASE("KittyGraphics.playback.s3_wraps_to_frame_1", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    advance(mock, 10ms);
+    advance(mock, 20ms);
+    REQUIRE(placedPixels(mock) == blue());
+    advance(mock, 30ms);
+    CHECK(placedPixels(mock) == red());
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == green());
+    CHECK(dueIn(mock) == 20ms);
+}
+
+TEST_CASE("KittyGraphics.playback.v_n_stops_after_n_minus_1_loops", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    // v=3: two loops, then rest on the last frame.
+    mock.writeToScreen("\033_Ga=a,i=7,s=3,v=3\033\\"sv);
+
+    advance(mock, 10ms);
+    advance(mock, 20ms);
+    REQUIRE(placedPixels(mock) == blue());
+    advance(mock, 30ms);
+    REQUIRE(placedPixels(mock) == red());
+    advance(mock, 10ms);
+    advance(mock, 20ms);
+    REQUIRE(placedPixels(mock) == blue());
+
+    advance(mock, 30ms);
+    CHECK(placedPixels(mock) == blue());
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == blue());
+}
+
+TEST_CASE("KittyGraphics.playback.s2_holds_at_last_frame_then_continues_on_new_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=2\033\\"sv) == "\033_Gi=7;OK\033\\");
+
+    advance(mock, 10ms);
+    advance(mock, 20ms);
+    advance(mock, 30ms);
+    // Out of frames: it waits on the last one, and nothing need wake the display for it meanwhile.
+    CHECK(placedPixels(mock) == blue());
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+
+    // A new frame ends the wait at once: the last one has had its gap already.
+    CHECK(replyTo(mock, "\033_Ga=f,i=7,X=1,s=1,v=1,z=10;////\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK(dueIn(mock) == 0ms);
+    advance(mock, 0ms);
+    CHECK(placedPixels(mock) == white());
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == white());
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.s1_stops_on_current_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    advance(mock, 10ms);
+    REQUIRE(placedPixels(mock) == green());
+
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=1\033\\"sv) == "\033_Gi=7;OK\033\\");
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == green());
+}
+
+TEST_CASE("KittyGraphics.playback.gapless_frames_are_skipped", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, -1, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == blue());
+    advance(mock, 30ms);
+    CHECK(placedPixels(mock) == red());
+}
+
+TEST_CASE("KittyGraphics.playback.zero_gap_uses_the_default", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // The root frame's gap is never set, so it has the protocol's default.
+    placeThreeFrames(mock, 0, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    auto const defaultGap = std::chrono::milliseconds(DefaultFrameGapMilliseconds);
+    advance(mock, defaultGap - 1ms);
+    CHECK(placedPixels(mock) == red());
+    advance(mock, 1ms);
+    CHECK(placedPixels(mock) == green());
+}
+
+TEST_CASE("KittyGraphics.playback.all_gapless_holds_without_a_deadline", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, -1, -1, -1);
+    CHECK(replyTo(mock, "\033_Ga=a,i=7,s=3\033\\"sv) == "\033_Gi=7;OK\033\\");
+
+    // Nothing to show for any time at all: a deadline would spin the display for no frame.
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == red());
+}
+
+TEST_CASE("KittyGraphics.playback.explicit_frame_selection_works_while_playing", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    advance(mock, 10ms);
+    REQUIRE(placedPixels(mock) == green());
+
+    mock.writeToScreen("\033_Ga=a,i=7,c=3\033\\"sv);
+    CHECK(placedPixels(mock) == blue());
+    mock.writeToScreen("\033_Ga=a,i=7,c=1\033\\"sv);
+    CHECK(placedPixels(mock) == red());
+
+    // ... and playback goes on from the frame selected, for that frame's whole gap.
+    CHECK(dueIn(mock) == 10ms);
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == green());
+}
+
+TEST_CASE("KittyGraphics.playback.deleted_image_drops_deadline", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    REQUIRE(mock.terminal.kittyAnimationDue().has_value());
+
+    mock.writeToScreen("\033_Ga=d,d=I,i=7\033\\"sv);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    CHECK_FALSE(mock.terminal.nextRender().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.scrolled_off_placement_holds_no_deadline", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    // Off the page and into the history: nothing on display to advance, so nothing to wake up for.
+    mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
+    REQUIRE(placedPixels(mock).empty());
+    advance(mock, 10ms);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+
+    // A placement on the page plays again.
+    mock.writeToScreen("\033_Ga=p,i=7\033\\"sv);
+    CHECK(mock.terminal.kittyAnimationDue().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.nextRender_reports_time_to_next_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    CHECK(mock.terminal.nextRender() == 10ms);
+    // Measured against the steady clock as well: in the daemon, nothing moves the terminal's own clock.
+    mock.steadyClock.advance(10ms);
+    CHECK(mock.terminal.nextRender() == 0ms);
+}
+
+TEST_CASE("KittyGraphics.playback.alternate_screen_switch_pauses_and_resumes", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    // The primary screen's animation is not on display behind the alternate screen.
+    mock.writeToScreen("\033[?1049h"sv);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 10ms);
+    CHECK(placedPixels(mock) == red());
+
+    mock.writeToScreen("\033[?1049l"sv);
+    CHECK(mock.terminal.kittyAnimationDue().has_value());
+    advance(mock, 0ms);
+    CHECK(placedPixels(mock) == green());
+}
+
+TEST_CASE("KittyGraphics.playback.RIS_drops_deadline", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    REQUIRE(mock.terminal.kittyAnimationDue().has_value());
+
+    mock.writeToScreen("\033c"sv);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+}
+
+namespace
+{
+/// Counts what the terminal tells its display, for the tests that assert on the notifications themselves.
+struct CountingTerm final: MockTerm<vtpty::MockPty>
+{
+    using MockTerm<vtpty::MockPty>::MockTerm;
+    int screenUpdates = 0;
+    int renderBufferUpdates = 0;
+    void screenUpdated() override { ++screenUpdates; }
+    void renderBufferUpdated() override { ++renderBufferUpdates; }
+};
+} // namespace
+
+TEST_CASE("KittyGraphics.playback.tick_raises_screenUpdated_when_a_frame_advanced", "[kitty]")
+{
+    // The daemon hears of a frame through screenUpdated() alone: it never asks nextRender().
+    auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    mock.screenUpdates = 0;
+
+    advance(mock, 5ms);
+    CHECK(mock.screenUpdates == 0);
+    advance(mock, 5ms);
+    CHECK(mock.screenUpdates == 1);
+}
+
+TEST_CASE("KittyGraphics.playback.a_deadline_is_announced_only_when_it_moves", "[kitty]")
+{
+    // An idle display re-reads nextRender() when told to. Not telling it would leave it asleep past the
+    // first frame; telling it on every command would wake it for nothing.
+    auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+
+    auto const before = mock.renderBufferUpdates;
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    auto const afterStart = mock.renderBufferUpdates;
+    CHECK(afterStart > before);
+
+    // The same deadline again: nothing for the display to re-read.
+    mock.writeToScreen("\033_Ga=a,i=7,v=1\033\\"sv);
+    CHECK(mock.renderBufferUpdates == afterStart);
+}
+
+TEST_CASE("KittyGraphics.playback.tick_and_parser_do_not_race", "[kitty][threading]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 1, 1, 1);
+    // Playing first: tick() takes the state lock only while a frame is due, so a stopped animation would
+    // race nothing.
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    REQUIRE(mock.terminal.kittyAnimationDue().has_value());
+
+    auto stop = std::atomic<bool> { false };
+    auto ticker = std::thread { [&]() {
+        while (!stop.load(std::memory_order_acquire))
+            advance(mock, 1ms);
+    } };
+
+    for (auto const round: std::views::iota(0, 200))
+    {
+        mock.writeToScreen("\033_Ga=f,i=7,r=2,X=1,s=1,v=1;////\033\\"sv);
+        mock.writeToScreen(std::format("\033_Ga=a,i=7,c={}\033\\", (round % 3) + 1));
+        mock.discardPendingReplies();
+    }
+
+    stop.store(true, std::memory_order_release);
+    ticker.join();
+    CHECK(mock.terminal.kittyAnimationDue().has_value());
+}
+// }}}

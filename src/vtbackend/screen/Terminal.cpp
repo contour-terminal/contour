@@ -57,6 +57,7 @@
 #include <filesystem>
 #include <format>
 #include <map>
+#include <new>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -3167,6 +3168,14 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             nextWakeup,
             chrono::ceil<chrono::milliseconds>(std::max(due - now, chrono::steady_clock::duration::zero())));
 
+    // A kitty animation's next frame, as the state lock last published it. Measured against the steady clock
+    // as well: where nothing paints, nothing moves currentTime(), and the wait would never shrink.
+    if (auto const due = kittyAnimationDue())
+        nextWakeup =
+            std::min(nextWakeup,
+                     chrono::ceil<chrono::milliseconds>(std::max(*due - std::max(now, _clocks.steady.now()),
+                                                                 chrono::steady_clock::duration::zero())));
+
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
 
@@ -3191,6 +3200,51 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         auto const _ = std::scoped_lock { _ownStateLock };
         advanceMomentumGlide(now);
     }
+
+    // A kitty animation frame that is due: grid state, under the state lock, which is taken only once one is,
+    // as for the glide. Advanced at the frame's own time, which is what the display and the daemon pass.
+    if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
+        return;
+    {
+        auto const _ = std::scoped_lock { _ownStateLock };
+        // Moved or dropped by the parser between the read above and the lock.
+        if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
+            return;
+        auto& page = displayedPage();
+        try
+        {
+            publishKittyAnimationDeadline(page.advanceKittyAnimations(now));
+        }
+        catch (std::bad_alloc const&)
+        {
+            // The frame could not be built. Stop rather than retry on every frame: a deadline left behind
+            // would be due again at once.
+            page.stopKittyAnimations();
+            publishKittyAnimationDeadline(nullopt);
+        }
+    }
+    // Outside the lock, as it calls back into the frontend. The only news of the frame the daemon hears. A
+    // due deadline that only ended a wait (s=2 out of frames, a placement gone) announces an unchanged
+    // screen once, which costs a frame that shows the same cells.
+    screenUpdated();
+}
+
+optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept
+{
+    auto const due = _kittyAnimationDue.load(std::memory_order_relaxed);
+    if (due == chrono::steady_clock::time_point::max())
+        return nullopt;
+    return due;
+}
+
+void Terminal::publishKittyAnimationDeadline(optional<chrono::steady_clock::time_point> due)
+{
+    auto const value = due.value_or(chrono::steady_clock::time_point::max());
+    // Straight to the listener, not through renderBufferUpdated(), whose swap bookkeeping swallows the
+    // notification while a frame waits for its swap -- and an idle display must hear of the deadline to
+    // re-read nextRender(). Only on a change: every kitty command publishes, and most move nothing.
+    if (_kittyAnimationDue.exchange(value, std::memory_order_relaxed) != value)
+        _eventListener.renderBufferUpdated();
 }
 
 void Terminal::advanceMomentumGlide(chrono::steady_clock::time_point now)
@@ -8141,6 +8195,8 @@ void Terminal::hardReset()
     _savedCursorPage = NoSavedCursorPages; // DEC STD 070 DECSC: on reset the save buffer's page is 1
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
+    // Every page's animations went with their images; showPage() above republished only if the page changed.
+    publishKittyAnimationDeadline(nullopt);
 
     _imagePool.clear();
     _tabs.clear();
@@ -8360,6 +8416,8 @@ void Terminal::showPage(PageIndex page)
         _displayedScreenType = screenTypeFromPage(page);
         // The glide and the sub-line offset were the page shown before's.
         resetSmoothScroll();
+        // So were its kitty animations: each page keeps its own, and only the one on display plays.
+        publishKittyAnimationDeadline(pageAt(page).nextKittyFrameDue());
     }
     _viewport.clampScrollOffset();
     if (!isAnotherPage)
