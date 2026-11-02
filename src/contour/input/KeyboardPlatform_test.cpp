@@ -17,6 +17,7 @@
 #include <array>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -80,18 +81,24 @@ constexpr auto XkbTranslations = std::array {
                           .chord = Ctrl, .unshiftedKey = U'u' },
     ExpectedTranslation { .row = "xkb: Ctrl+U under kitty report-all", .text = U"U",
                           .chord = Ctrl, .unshiftedKey = U'u' },
-    // The passthrough layout reads the legacy Cyrillic keysym as a codepoint: the documented gap.
+    // The legacy Cyrillic keysym is read through the keysym table.
     ExpectedTranslation { .row = "xkb: Cyrillic letter under kitty disambiguate", .text = U"ж",
-                          .unshiftedKey = 0x06d6 },
+                          .unshiftedKey = U'ж' },
     ExpectedTranslation { .row = "xkb: Cyrillic letter under kitty report-all", .text = U"ж",
-                          .unshiftedKey = 0x06d6 },
+                          .unshiftedKey = U'ж' },
+    // The keymap's level 0 of keycode 12, not the shifted keysym the event reports.
+    ExpectedTranslation { .row = "xkb: Shift+3 under kitty report-all", .text = U"#", .chord = Shift,
+                          .unshiftedKey = U'3' },
 };
 // clang-format on
 
-/// @return The layout the Xkb rows are read with: X11's codepoint-valued keysyms.
-[[nodiscard]] contour::input::KeyboardLayout const& passthroughLayout()
+/// @return The layout the rows are read with: X11 keysyms, with a keymap that knows the number row's '3'.
+[[nodiscard]] contour::input::KeyboardLayout const& xkbLayout()
 {
-    static auto const layout = contour::input::makePassthroughKeyboardLayout();
+    static auto const rows =
+        std::array { contour::input::FixedXkbKey { .keycode = 12, .group = 0, .keysym = 0x33 } };
+    static auto const layout =
+        contour::input::makeXkbKeyboardLayout(contour::input::makeFixedXkbKeymap(rows));
     return *layout;
 }
 
@@ -99,8 +106,7 @@ constexpr auto XkbTranslations = std::array {
 
 TEST_CASE("the Xkb platform reproduces today's Linux translation", "[input][platform]")
 {
-    auto const platform =
-        contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, passthroughLayout());
+    auto const platform = contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, xkbLayout());
 
     for (auto const& row: contour::test::keyCharacterizationRows())
     {
@@ -127,7 +133,7 @@ TEST_CASE("an event the platform cannot translate is reported unhandled", "[inpu
     for (auto const kind:
          { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32, KeyboardPlatformKind::Mac })
     {
-        auto const platform = contour::input::makeKeyboardPlatform(kind, {}, passthroughLayout());
+        auto const platform = contour::input::makeKeyboardPlatform(kind, {}, xkbLayout());
         auto const event = platform->normalize({ .qtKey = Qt::Key_unknown });
         CHECK(!event.key);
         CHECK(event.text.empty());
@@ -137,8 +143,7 @@ TEST_CASE("an event the platform cannot translate is reported unhandled", "[inpu
 
 TEST_CASE("an input method commit is text, unmodified", "[input][platform]")
 {
-    auto const platform =
-        contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, passthroughLayout());
+    auto const platform = contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, xkbLayout());
     auto const event = platform->normalize({ .qtKey = 0,
                                              .text = U"日本",
                                              .qtModifiers = contour::test::keybits::Shift,
@@ -156,7 +161,7 @@ TEST_CASE("an input method commit carries the lock keys its capture sampled", "[
     using contour::input::KeyEventOrigin;
     using namespace contour::test::keybits;
     auto const commitWith = [](KeyboardPlatformKind kind, uint32_t nativeModifiers) {
-        return contour::input::makeKeyboardPlatform(kind, {}, passthroughLayout())
+        return contour::input::makeKeyboardPlatform(kind, {}, xkbLayout())
             ->normalize({ .text = U"x",
                           .nativeModifiers = nativeModifiers,
                           .origin = KeyEventOrigin::InputMethodCommit });
@@ -165,17 +170,15 @@ TEST_CASE("an input method commit carries the lock keys its capture sampled", "[
     CHECK(xkb.modifiers.locks == LockKeys { LockKey::CapsLock, LockKey::NumLock });
     CHECK(xkb.modifiers.chord.none());
     CHECK(commitWith(KeyboardPlatformKind::Mac, MacCapsLock).modifiers.locks == CapsLock);
-    // Win32 decodes the lock bits nativeModifiersWithLockState() samples, which are the host's for now.
-    CHECK(commitWith(KeyboardPlatformKind::Win32, contour::input::nativeModifiersWithLockState(0))
+    CHECK(commitWith(KeyboardPlatformKind::Win32,
+                     contour::input::Win32CapsLockBit | contour::input::Win32NumLockBit)
               .modifiers.locks
-          == contour::input::makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0))
-                 .locks);
+          == LockKeys { LockKey::CapsLock, LockKey::NumLock });
 }
 
 TEST_CASE("a release keeps its type through the platform", "[input][platform]")
 {
-    auto const platform =
-        contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, passthroughLayout());
+    auto const platform = contour::input::makeKeyboardPlatform(KeyboardPlatformKind::Xkb, {}, xkbLayout());
     auto const event =
         platform->normalize({ .qtKey = Qt::Key_Up, .type = vtbackend::KeyboardEventType::Release });
     CHECK(event.key == Key::UpArrow);

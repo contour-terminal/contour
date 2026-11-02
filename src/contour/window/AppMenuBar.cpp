@@ -149,7 +149,7 @@ namespace
     }
 
     /// A chord modifier and the Qt modifier it is, under Qt::AA_MacDontSwapCtrlAndMeta: the inverse of
-    /// input/KeyMapping.cpp's makeModifiers().
+    /// input/KeyMapping.cpp's chordOf().
     struct ModifierRow
     {
         Modifier modifier;

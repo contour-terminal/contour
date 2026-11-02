@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string_view>
 
 namespace contour::input
 {
@@ -46,6 +47,44 @@ inline constexpr uint32_t MacRightOptionBit = 0x00000040;
     return static_cast<config::OptionKeySide>(bits);
 }
 
+/// The bit `captureKeyEvent` sets in NativeKeyEvent::nativeModifiers while CapsLock is toggled on, on
+/// Windows, where Qt's native modifier mask omits the lock toggles and the capture boundary samples them
+/// instead.
+inline constexpr uint32_t Win32CapsLockBit = 0x0001;
+
+/// The bit `captureKeyEvent` sets in NativeKeyEvent::nativeModifiers while NumLock is toggled on, on Windows.
+inline constexpr uint32_t Win32NumLockBit = 0x0002;
+
+/// The lock keys a Windows key event says are toggled on.
+/// @param nativeModifiers The value of NativeKeyEvent::nativeModifiers, after the capture boundary sampled
+/// it.
+/// @return CapsLock and NumLock, as their sampled bits say.
+[[nodiscard]] constexpr vtbackend::LockKeys win32LockKeysOf(uint32_t nativeModifiers) noexcept
+{
+    auto locks = vtbackend::LockKeys {};
+    if ((nativeModifiers & Win32CapsLockBit) != 0)
+        locks |= vtbackend::LockKey::CapsLock;
+    if ((nativeModifiers & Win32NumLockBit) != 0)
+        locks |= vtbackend::LockKey::NumLock;
+    return locks;
+}
+
+/// What a Ctrl+Alt combination means for one event. Windows reports the AltGr key as Ctrl+Alt, so the same
+/// two modifiers are either a chord the user pressed or a keyboard-layout level that selected the character.
+enum class CtrlAltRole : uint8_t
+{
+    Chord = 0, //!< Ctrl and Alt are modifiers, reported as such.
+    AltGr,     //!< Ctrl and Alt selected the AltGr level; they are not modifiers of the result.
+};
+
+/// Classifies a key event's Ctrl+Alt the way Windows itself does: the AltGr level yields graphical
+/// characters, while a genuine Ctrl+Alt chord yields none (or a control character). This is Windows
+/// Terminal's heuristic for the same ambiguity.
+/// @param qtModifiers The event's Qt::KeyboardModifiers bits.
+/// @param text The text the platform produced for the event.
+/// @return AltGr when Ctrl and Alt are both held and @p text is non-empty and wholly graphical, else Chord.
+[[nodiscard]] CtrlAltRole ctrlAltRoleOf(uint32_t qtModifiers, std::u32string_view text) noexcept;
+
 /// The user's settings a keyboard platform decodes events under. Fixed for a platform's life: a new
 /// policy is a new platform (see KeyboardPlatformFactory).
 struct KeyboardPolicy
@@ -77,6 +116,18 @@ class KeyboardPlatform
     /// @return Bypass where a held key is one the input method must not compose with.
     [[nodiscard]] virtual InputMethodRoute inputMethodRouteFor(uint32_t nativeModifiers) const = 0;
 };
+
+/// The chord a key press holds, decided as @p platform decides it for the terminal -- so that AltGr on
+/// Windows, or a composing Option key on macOS, is no more a chord for a lookup than it is for the program.
+/// @param platform Decodes the press.
+/// @param qtKey The Qt::Key.
+/// @param qtModifiers The Qt::KeyboardModifiers bits.
+/// @param text The text the press produced.
+/// @return The chord; empty where the platform means the press as no key.
+[[nodiscard]] vtbackend::Modifiers chordOfKeyPress(KeyboardPlatform const& platform,
+                                                   int qtKey,
+                                                   uint32_t qtModifiers,
+                                                   std::u32string_view text);
 
 /// Builds the keyboard platform of one kind.
 /// @param kind Whose conventions the events speak.

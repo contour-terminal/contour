@@ -542,6 +542,15 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
              .tuning = {} };
 }
 
+input::KeyboardLayout const& ContourGuiApp::keyboardLayout() const
+{
+    // The layout reads the keymap through the running Qt application, so asking before it exists would
+    // latch the fallback for the life of the process.
+    Require(QGuiApplication::instance() != nullptr);
+    std::call_once(_keyboardLayoutOnce, [this] { _keyboardLayout = input::makePlatformKeyboardLayout(); });
+    return *_keyboardLayout;
+}
+
 window::LocatedBinary ContourGuiApp::locatedContourBinary() const
 {
     if (!_contourBinary.empty())

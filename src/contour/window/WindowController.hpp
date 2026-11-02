@@ -504,8 +504,10 @@ class WindowController:
     /// left unhandled.
     /// @param qtKey The Qt::Key of the event.
     /// @param qtModifiers The event's Qt::KeyboardModifiers.
+    /// @param text The event's text, which tells a Windows AltGr level from a Ctrl+Alt chord; the chord a
+    ///        binding is looked up under is the one the session's keyboard platform decodes.
     /// @return Whether the key was handled, so QML should accept the event (a QML-facing carve-out).
-    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers);
+    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers, QString const& text = {});
     /// Returns focus to the terminal and hides the ring (Escape, a pointer press, the terminal regaining
     /// focus). No-op when the chrome has no focus.
     Q_INVOKABLE void leaveChrome();
@@ -1548,7 +1550,8 @@ class WindowController:
     /// The actions the active session's key bindings give a key press while the chrome has focus.
     /// @return The bound actions; nullptr when nothing is bound or there is no active session.
     [[nodiscard]] actions::ActionList const* boundActionsFor(int qtKey,
-                                                             Qt::KeyboardModifiers modifiers) const;
+                                                             Qt::KeyboardModifiers modifiers,
+                                                             QString const& text) const;
     /// Closes the tab at @p row, asking first unless every pane is known to be idle (a pane whose program
     /// cannot be known asks too: window::closeConfirmationFor).
     void closeTabAskingIfBusy(int row);

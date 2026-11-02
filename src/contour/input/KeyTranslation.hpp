@@ -18,8 +18,11 @@ namespace contour::input::detail
 /// The key's layout-resolved identity: what it produces unmodified, and its Win32 VK code.
 /// @param event The native event.
 /// @param layout Reads the event's native key code.
+/// @param group The XKB group the event was made under, as its platform decoded it; 0 where there is none.
 /// @return The identity.
-[[nodiscard]] vtbackend::KeyIdentity identityOf(NativeKeyEvent const& event, KeyboardLayout const& layout);
+[[nodiscard]] vtbackend::KeyIdentity identityOf(NativeKeyEvent const& event,
+                                                KeyboardLayout const& layout,
+                                                uint32_t group = 0);
 
 /// The steps that do not depend on how the platform treats characters: the keypad keys, the named keys,
 /// a text-less key the Qt key → character table names, and Backtab -- in that order, as the first that
@@ -68,10 +71,12 @@ namespace contour::input::detail
 /// @param event The native event, of origin KeyEventOrigin::Keyboard.
 /// @param modifiers The modifiers the platform decoded.
 /// @param layout Reads the event's native key code.
+/// @param group The XKB group the event was made under, as its platform decoded it; 0 where there is none.
 /// @return The event; unhandled when no step applies.
 [[nodiscard]] KeyEvent translateEvent(NativeKeyEvent const& event,
                                       vtbackend::KeyboardModifiers modifiers,
-                                      KeyboardLayout const& layout);
+                                      KeyboardLayout const& layout,
+                                      uint32_t group = 0);
 
 /// @param policy Which Option keys are Alt.
 /// @param layout Resolves native key codes; held by reference.
@@ -82,5 +87,9 @@ namespace contour::input::detail
 /// @param layout Resolves native key codes; held by reference.
 /// @return The X11/Wayland normalizer.
 [[nodiscard]] std::unique_ptr<KeyboardPlatform> makeXkbKeyboardPlatform(KeyboardLayout const& layout);
+
+/// @param layout Resolves native key codes; held by reference.
+/// @return The Windows normalizer.
+[[nodiscard]] std::unique_ptr<KeyboardPlatform> makeWin32KeyboardPlatform(KeyboardLayout const& layout);
 
 } // namespace contour::input::detail

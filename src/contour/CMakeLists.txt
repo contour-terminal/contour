@@ -937,6 +937,8 @@ if(CONTOUR_FRONTEND_GUI)
             input/KeyboardPlatform_test.cpp
             input/KeyRouter_test.cpp
             input/MacKeyboardPlatform_test.cpp
+            input/Win32KeyboardPlatform_test.cpp
+            input/XkbLayout_test.cpp
             session/KeyCharacterization_test.cpp
             display/ImeQueryRect_test.cpp
             display/ShortcutOverride_test.cpp
@@ -1059,6 +1061,10 @@ if(CONTOUR_FRONTEND_GUI)
                 platform/CocoaTaskbarProgressSink_test.mm platform/CocoaTitleBandMaterial_test.mm
                 platform/CocoaUserNotificationCenter_test.mm platform/CocoaWindowFrame_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        endif()
+        if(UNIX AND NOT APPLE)
+            # The adapter over libxkbcommon exists on these hosts only (input/CMakeLists.txt).
+            target_sources(contour_gui_test PRIVATE input/XkbLiveKeymap_test.cpp)
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)

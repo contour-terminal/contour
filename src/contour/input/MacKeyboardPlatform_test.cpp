@@ -143,9 +143,8 @@ TEST_CASE("the input method is bypassed only for an Option key acting as Alt", "
 
     // No other platform has a keystroke to keep from its input method.
     for (auto const kind: { KeyboardPlatformKind::Xkb, KeyboardPlatformKind::Win32 })
-        CHECK(contour::input::makeKeyboardPlatform(kind,
-                                                   { .optionAsAlt = OptionAsAlt::Both },
-                                                   *contour::input::makePassthroughKeyboardLayout())
+        CHECK(contour::input::makeKeyboardPlatform(
+                  kind, { .optionAsAlt = OptionAsAlt::Both }, *contour::input::makeXkbKeyboardLayout(nullptr))
                   ->inputMethodRouteFor(MacLeftOption)
               == InputMethodRoute::ToInputMethod);
 }

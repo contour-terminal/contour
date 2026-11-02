@@ -9,6 +9,7 @@
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/MouseMapping.hpp>
+#include <contour/input/QtKeyCapture.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/SpawnCommand.hpp>
@@ -37,7 +38,6 @@
 #include <ranges>
 #include <tuple>
 
-using contour::input::makeModifiers;
 using contour::input::makeMouseButton;
 
 TEST_CASE("namedKeyOf names the keys that are terminal keys and no character", "[contour][input]")
@@ -68,38 +68,42 @@ TEST_CASE("makeMouseButton maps Qt buttons onto VT buttons", "[session][input]")
     STATIC_CHECK(makeMouseButton(Qt::BackButton) == vtbackend::MouseButton::Left);
 }
 
-TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[session][input]")
+TEST_CASE("chordOf maps Qt keyboard modifiers onto VT modifiers", "[session][input]")
 {
-    CHECK(makeModifiers(Qt::NoModifier) == vtbackend::Modifiers {});
-    CHECK(makeModifiers(Qt::ShiftModifier) == vtbackend::Modifiers { vtbackend::Modifier::Shift });
-    CHECK(makeModifiers(Qt::ControlModifier) == vtbackend::Modifiers { vtbackend::Modifier::Control });
-    CHECK(makeModifiers(Qt::AltModifier) == vtbackend::Modifiers { vtbackend::Modifier::Alt });
-    CHECK(makeModifiers(Qt::MetaModifier) == vtbackend::Modifiers { vtbackend::Modifier::Super });
+    using contour::input::chordOf;
 
-    // CtrlAltRole::Chord so the raw Qt->Modifier mapping is asserted: with the default (AltGr), Win32
-    // treats a Ctrl+Alt combination as AltGr and strips both, which is correct platform behavior but
-    // not what this basic-mapping case is checking.
-    auto const combined = makeModifiers(
-        Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, contour::input::CtrlAltRole::Chord);
-    CHECK(combined.chord.contains(vtbackend::Modifier::Shift));
-    CHECK(combined.chord.contains(vtbackend::Modifier::Control));
-    CHECK(combined.chord.contains(vtbackend::Modifier::Alt));
-    CHECK_FALSE(combined.chord.contains(vtbackend::Modifier::Super));
+    CHECK(chordOf(Qt::NoModifier) == vtbackend::Modifiers {});
+    CHECK(chordOf(Qt::ShiftModifier) == vtbackend::Modifiers { vtbackend::Modifier::Shift });
+    CHECK(chordOf(Qt::ControlModifier) == vtbackend::Modifiers { vtbackend::Modifier::Control });
+    CHECK(chordOf(Qt::AltModifier) == vtbackend::Modifiers { vtbackend::Modifier::Alt });
+    CHECK(chordOf(Qt::MetaModifier) == vtbackend::Modifiers { vtbackend::Modifier::Super });
 
-    // Qt's modifier mask never yields a lock key; those come from the native mask only.
-    CHECK(combined.locks.none());
+    auto const combined = chordOf(Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier);
+    CHECK(combined.contains(vtbackend::Modifier::Shift));
+    CHECK(combined.contains(vtbackend::Modifier::Control));
+    CHECK(combined.contains(vtbackend::Modifier::Alt));
+    CHECK_FALSE(combined.contains(vtbackend::Modifier::Super));
+}
+
+TEST_CASE("a mouse chord keeps Ctrl+Alt as Ctrl+Alt", "[session][input]")
+{
+    // A mouse event has no text to tell an AltGr level from a chord, so on Windows too Ctrl+Alt+click is
+    // the chord it says.
+    using contour::input::chordOf;
+    CHECK(chordOf(Qt::ControlModifier | Qt::AltModifier)
+          == vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt });
 }
 
 TEST_CASE("macOS Command chords reach the tab actions as Qt delivers them", "[session][input]")
 {
-    // The macOS host: Qt's Control/Meta swap is off, so Command is Qt::MetaModifier, which makeModifiers()
+    // The macOS host: Qt's Control/Meta swap is off, so Command is Qt::MetaModifier, which chordOf()
     // reads as Super; Shift+[ arrives as '{' and is retried under its unshifted base, as TerminalSession
     // does.
     using vtbackend::Modifier;
     auto const command = Qt::MetaModifier;
     auto const commandShift = Qt::MetaModifier | Qt::ShiftModifier;
     auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
-        auto const modifiers = makeModifiers(qtModifiers).chord;
+        auto const modifiers = contour::input::chordOf(qtModifiers);
         auto const folded = contour::config::foldedBindingCodepoint(input);
         auto const& table = contour::config::macTabChords();
         return std::ranges::find_if(table, [&](auto const& row) {
@@ -128,11 +132,11 @@ TEST_CASE("macOS Command chords reach the tab actions as Qt delivers them", "[se
 TEST_CASE("macOS Command+D and Command+Shift+D reach the split actions as Qt delivers them",
           "[session][input][panes]")
 {
-    // Command is Qt::MetaModifier on macOS, which makeModifiers() reads as Super; the letter arrives folded,
+    // Command is Qt::MetaModifier on macOS, which chordOf() reads as Super; the letter arrives folded,
     // as TerminalSession folds it before the lookup.
     using contour::config::PaneChordHost;
     auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
-        auto const modifiers = makeModifiers(qtModifiers).chord;
+        auto const modifiers = contour::input::chordOf(qtModifiers);
         auto const folded = contour::config::foldedBindingCodepoint(input);
         auto const table = contour::config::paneCharChords(PaneChordHost::Mac);
         return std::ranges::find_if(table, [&](auto const& row) {
@@ -151,38 +155,6 @@ TEST_CASE("macOS Command+D and Command+Shift+D reach the split actions as Qt del
 
     // Control+Shift+E is the desktop's chord, not a Mac one.
     CHECK(lookUp(Qt::ControlModifier | Qt::ShiftModifier, U'e') == table.end());
-}
-
-TEST_CASE("ctrlAltRoleOf tells AltGr from a Ctrl+Alt chord by the text produced", "[session][input]")
-{
-    using contour::input::CtrlAltRole;
-    using contour::input::ctrlAltRoleOf;
-
-    auto const ctrlAlt = Qt::ControlModifier | Qt::AltModifier;
-
-    // The AltGr level of a layout yields a graphical character -- ASCII or not.
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("[")) == CtrlAltRole::AltGr);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("@")) == CtrlAltRole::AltGr);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\\")) == CtrlAltRole::AltGr);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QString(QChar(0x20AC))) == CtrlAltRole::AltGr); // €
-    CHECK(ctrlAltRoleOf(ctrlAlt | Qt::ShiftModifier, QStringLiteral("{")) == CtrlAltRole::AltGr);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QString::fromUcs4(U"\U0001F600", 1)) == CtrlAltRole::AltGr); // 😀
-    // A ligature entry, or a dead key that did not combine with the next character.
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("ab")) == CtrlAltRole::AltGr);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QString::fromUcs4(U"´e", 2)) == CtrlAltRole::AltGr); // ´e
-
-    // A genuine chord yields nothing, or a control character (Ctrl+Alt+Esc is 0x1B).
-    CHECK(ctrlAltRoleOf(ctrlAlt, QString {}) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\x1b")) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\x7f")) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QString(QChar(0x9B))) == CtrlAltRole::Chord); // C1 CSI
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral(" ")) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("a\x1b")) == CtrlAltRole::Chord);
-
-    // Without both modifiers there is no AltGr to recognize.
-    CHECK(ctrlAltRoleOf(Qt::ControlModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(Qt::AltModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
-    CHECK(ctrlAltRoleOf(Qt::NoModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
 }
 
 TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[session][input]")
@@ -209,30 +181,24 @@ TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[session][inpu
     CHECK(contour::input::unshiftedCodepoint(U'5') == U'5');
 }
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-TEST_CASE("makeModifiers derives CapsLock/NumLock from the X11 native modifier mask", "[session][input]")
+TEST_CASE("xcbLockKeysOf derives CapsLock/NumLock from the X11 native modifier mask", "[session][input]")
 {
-    // On Linux the lock states come from the XCB/XKB native mask (CapsLock = XCB_MOD_MASK_LOCK 0x02,
-    // NumLock = XCB_MOD_MASK_2 0x10), independent of the Qt modifier bits.
+    // On X11 and Wayland the lock states come from the XCB/XKB native mask (CapsLock = XCB_MOD_MASK_LOCK
+    // 0x02, NumLock = XCB_MOD_MASK_2 0x10), independent of the Qt modifier bits.
+    using contour::input::xcbLockKeysOf;
     constexpr quint32 XcbCapsLockMask = 0x02;
     constexpr quint32 XcbNumLockMask = 0x10;
 
-    CHECK(makeModifiers(Qt::NoModifier, XcbCapsLockMask).locks.contains(vtbackend::LockKey::CapsLock));
-    CHECK(makeModifiers(Qt::NoModifier, XcbNumLockMask).locks.contains(vtbackend::LockKey::NumLock));
+    CHECK(xcbLockKeysOf(XcbCapsLockMask).contains(vtbackend::LockKey::CapsLock));
+    CHECK(xcbLockKeysOf(XcbNumLockMask).contains(vtbackend::LockKey::NumLock));
 
-    auto const both = makeModifiers(Qt::ShiftModifier, XcbCapsLockMask | XcbNumLockMask);
-    CHECK(both.chord.contains(vtbackend::Modifier::Shift));
-    CHECK(both.locks.contains(vtbackend::LockKey::CapsLock));
-    CHECK(both.locks.contains(vtbackend::LockKey::NumLock));
-
-    // A lock key never lands in the chord, so key bindings and Vi mode cannot see it.
-    CHECK(both.chord == vtbackend::Modifiers { vtbackend::Modifier::Shift });
+    auto const both = xcbLockKeysOf(XcbCapsLockMask | XcbNumLockMask);
+    CHECK(both.contains(vtbackend::LockKey::CapsLock));
+    CHECK(both.contains(vtbackend::LockKey::NumLock));
 
     // No native bits set -> no lock keys.
-    auto const none = makeModifiers(Qt::ControlModifier, 0);
-    CHECK(none.locks.none());
+    CHECK(xcbLockKeysOf(0).none());
 }
-#endif
 
 namespace
 {
@@ -244,11 +210,11 @@ namespace
     return contour::test::makeTestSession(&app.sessionsManager(), std::move(pty), app);
 }
 
-/// The layout for every test that is not about layouts: passthrough leaves the native key
-/// identifier alone, which for the events built here (nativeVirtualKey 0) means "unknown".
-[[nodiscard]] contour::input::KeyboardLayout const& passthroughLayout()
+/// The layout for every test that is not about layouts: with no keymap it reads the native key identifier
+/// as a keysym, which for the events built here (nativeVirtualKey 0) means "unknown".
+[[nodiscard]] contour::input::KeyboardLayout const& xkbLayout()
 {
-    static auto const layout = contour::input::makePassthroughKeyboardLayout();
+    static auto const layout = contour::input::makeXkbKeyboardLayout(nullptr);
     return *layout;
 }
 
@@ -401,11 +367,11 @@ TEST_CASE("the macOS layout reads Carbon key codes as positions, not codepoints"
     CHECK(layout.win32VirtualKeyOf({ .virtualKey = 0x20 }) == 0);
 }
 
-TEST_CASE("the passthrough layout decodes the X11 Unicode keysym form", "[session][input]")
+TEST_CASE("the Xkb layout decodes the X11 Unicode keysym form", "[session][input]")
 {
-    auto const& layout = passthroughLayout();
+    auto const& layout = xkbLayout();
 
-    // Latin-1 keysyms and Win32 VK codes are already codepoints for the keys that reach this path.
+    // Latin-1 keysyms are already codepoints.
     CHECK(layout.unshiftedKeyOf({ .virtualKey = 0x75 }) == U'u');
 
     // Anything outside Latin-1 arrives as `0x01000000 | codepoint`, which is not one.
@@ -461,7 +427,7 @@ TEST_CASE("AltGr characters reach ConPTY verbatim under Win32 input mode (issue 
 
     // sendKeyEvent reads the live CapsLock/NumLock toggles, which ConPTY's dwControlKeyState
     // reports; take them from the same source so the expectation does not depend on the machine.
-    auto const locks = makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0)).locks;
+    auto const locks = contour::input::win32LockKeysOf(contour::input::nativeModifiersWithLockState(0));
     using vtbackend::Win32ControlKeyFlag;
     using vtbackend::Win32ControlKeyState;
     auto lockState = Win32ControlKeyState {};
@@ -517,7 +483,7 @@ input_mapping:
     {
         session->terminal().writeToScreen("\033[>1u");
         auto const locks =
-            makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0)).locks.value();
+            contour::input::win32LockKeysOf(contour::input::nativeModifiersWithLockState(0)).value();
         CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {})
               == std::format("\033[97;{}u", 7u + locks));
         CHECK(pressWithCtrlAlt(*session, Qt::Key_BracketLeft, 0x38, QStringLiteral("[")) == "[");

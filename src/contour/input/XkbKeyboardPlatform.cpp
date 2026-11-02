@@ -24,7 +24,7 @@ namespace
                 chordOf(Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers))),
                 xcbLockKeysOf(event.nativeModifiers),
             };
-            return detail::translateEvent(event, modifiers, _layout);
+            return detail::translateEvent(event, modifiers, _layout, xcbGroupOf(event.nativeModifiers));
         }
 
         /// Nothing on X11 or Wayland bypasses the input method: no modifier there means Alt on one side and

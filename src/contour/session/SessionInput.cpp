@@ -408,9 +408,9 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
     using vtbackend::Modifier;
 
-    // Mouse events carry no lock state: makeModifiers() derives it from the native modifier mask,
-    // which Qt only populates for key events. Take the chord and be explicit about it.
-    auto const modifiers = input::makeModifiers(event->modifiers()).chord;
+    // Mouse events carry no lock state -- Qt only populates the native modifier mask for key events -- so
+    // the chord is all there is to take.
+    auto const modifiers = input::chordOf(event->modifiers());
 
     auto const pixelPosition = makeMousePixelPosition(
         event, session.display()->gridMetrics().pageMargin, session.display()->devicePixelRatio());
@@ -465,7 +465,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 
     if (session.sendGutterPressEvent(gutterHitAt(event->position(), session),
                                      input::makeMouseButton(event->button()),
-                                     input::makeModifiers(event->modifiers()).chord)
+                                     input::chordOf(event->modifiers()))
         == ConsumedByGutter::Yes)
     {
         event->accept();
@@ -475,14 +475,14 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     // After the gutter, whose strip beside row 0 keeps its own meaning, and before the grid.
     if (session.sendStickyHeaderPressEvent(stickyHeaderRowAt(event->position(), session),
                                            input::makeMouseButton(event->button()),
-                                           input::makeModifiers(event->modifiers()).chord)
+                                           input::chordOf(event->modifiers()))
         == ConsumedByStickyHeader::Yes)
     {
         event->accept();
         return;
     }
 
-    session.sendMousePressEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMousePressEvent(input::chordOf(event->modifiers()),
                                 input::makeMouseButton(event->button()),
                                 makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                 makeMousePixelPosition(event,
@@ -506,7 +506,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
         return;
     }
 
-    session.sendMouseReleaseEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseReleaseEvent(input::chordOf(event->modifiers()),
                                   input::makeMouseButton(event->button()),
                                   makeMousePixelPosition(event,
                                                          session.display()->gridMetrics().pageMargin,
@@ -540,7 +540,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
         return;
     }
 
-    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::chordOf(event->modifiers()),
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
@@ -570,7 +570,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     }
 
     auto const position = event->position().toPoint();
-    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::chordOf(event->modifiers()),
                                makeMouseCellLocation(position.x(), position.y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,

@@ -8,6 +8,17 @@
 namespace contour::input
 {
 
+/// The native modifier mask to record for a key event, with the CapsLock/NumLock toggle state folded in.
+///
+/// This is the single OS-boundary seam for lock state: on Windows it reads the live toggle state from the OS
+/// (GetKeyState), which Qt does not surface in its native modifier mask, and encodes it as the Win32 lock
+/// bits (Win32CapsLockBit, Win32NumLockBit); on X11, Wayland and macOS the lock state already rides in Qt's
+/// native mask, so it is returned unchanged. Isolating the ambient query here keeps every normalizer a pure
+/// function of the event it is handed.
+/// @param qtNativeModifiers Qt's native modifier mask for the event (QKeyEvent::nativeModifiers()).
+/// @return The native modifier mask to record.
+[[nodiscard]] uint32_t nativeModifiersWithLockState(uint32_t qtNativeModifiers) noexcept;
+
 /// Captures everything a Qt key event reports as plain data.
 ///
 /// This is the one place the ambient keyboard state is read: on Windows, where Qt's native
