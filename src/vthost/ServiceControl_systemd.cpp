@@ -219,8 +219,10 @@ std::expected<ServiceStatus, ServiceError> SystemdUserBackend::status() const
         auto status = ServiceStatus { .mode = ServiceStartMode::Logon };
         // A vendor unit systemd has loaded does not make this a user registration: without the user's own
         // unit file the service is not installed, whatever systemd says about it.
+        // The same predicate as uninstall(): an unreadable unit file is still the user's registration.
+        auto const isRegistered = _fileSystem.exists(_config.unitPath);
         auto const userUnit = _fileSystem.readFile(_config.unitPath);
-        if (!userUnit || value("LoadState") == "not-found")
+        if (!isRegistered || value("LoadState") == "not-found")
             status.state = ServiceRunState::NotInstalled;
         else if (value("ActiveState") == "active")
             status.state = ServiceRunState::Running;

@@ -15,6 +15,7 @@
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/ServiceControl_systemd.hpp>
 #include <vthost/testing/FakeCommandRunner.hpp>
+#include <vthost/testing/ForwardingFileSystem.hpp>
 
 using namespace std::string_literals;
 using Calls = std::vector<std::vector<std::string>>;
@@ -36,6 +37,16 @@ struct Fixture
     [[nodiscard]] static vthost::ServiceInstallRequest request()
     {
         return { .commandLine = { "/usr/bin/contour", "daemon" }, .displayName = "Contour daemon (default)" };
+    }
+};
+
+/// A file system whose files exist but cannot be read.
+struct UnreadableFileSystem final: vthost::testing::ForwardingFileSystem
+{
+    [[nodiscard]] std::expected<std::string, std::string> readFile(
+        std::filesystem::path const&) const override
+    {
+        return std::unexpected("permission denied"s);
     }
 };
 } // namespace
@@ -340,4 +351,19 @@ TEST_CASE("a vendor-only machine has no registration, so the client spawns the d
     CHECK_FALSE(vthost::findRegisteredService("default", factory).has_value());
     CHECK_FALSE(std::ranges::any_of(fixture.commands.calls,
                                     [](auto const& argv) { return std::ranges::contains(argv, "start"s); }));
+}
+
+TEST_CASE("systemd status: an unreadable user unit file is still a registration, as for uninstall",
+          "[vthost][service][systemd]")
+{
+    auto files = UnreadableFileSystem {};
+    REQUIRE(files.files.writeFile(UnitPath, vthost::renderSystemdUnit(Fixture::request())));
+    auto commands = vthost::testing::FakeCommandRunner {};
+    auto environment = core::testing::FakeEnvironment { { { "HOME", "/home/u" } } };
+    auto backend = vthost::SystemdUserBackend { { .unitName = UnitName, .unitPath = UnitPath },
+                                                { files, commands, environment } };
+    commands.answerAll({ .exitCode = 0, .standardOutput = "LoadState=loaded\nActiveState=inactive\n" });
+    auto const status = backend.status();
+    REQUIRE(status);
+    CHECK(status->state == vthost::ServiceRunState::Stopped);
 }
