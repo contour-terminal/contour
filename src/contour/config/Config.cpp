@@ -4696,7 +4696,7 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
     return matchModes;
 }
 
-std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node const& nodeYAML)
+std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node const& nodeYAML) const
 {
     using vtbackend::Modifier;
     auto node = nodeYAML["mods"];
@@ -5240,7 +5240,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtbackend::Modifiers& where)
+                                     vtbackend::Modifiers& where) const
 {
     if (auto const child = node[entry])
     {

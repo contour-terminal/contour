@@ -5,6 +5,7 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/TerminalDisplay.hpp>

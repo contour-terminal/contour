@@ -323,7 +323,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorShape& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, contour::config::SelectionAction& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, InputMappings& where);
@@ -499,7 +499,7 @@ struct YAMLConfigReader
 
     std::optional<actions::Action> parseAction(YAML::Node const& node);
     std::optional<vtbackend::Modifiers> parseModifierKey(std::string const& key) const;
-    std::optional<vtbackend::Modifiers> parseModifier(YAML::Node const& nodeYAML);
+    std::optional<vtbackend::Modifiers> parseModifier(YAML::Node const& nodeYAML) const;
     static std::optional<vtbackend::MatchModes> parseMatchModes(YAML::Node const& nodeYAML);
     std::optional<vtbackend::Key> parseKey(std::string const& name);
     std::optional<std::variant<vtbackend::Key, char32_t>> parseKeyOrChar(std::string const& name);

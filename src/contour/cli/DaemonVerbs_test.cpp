@@ -4,6 +4,7 @@
 // system.
 
 #include <contour/cli/DaemonVerbs.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 
 #include <core/platform/testing/InMemoryFileSystem.hpp>
