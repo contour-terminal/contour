@@ -40,6 +40,10 @@ class IStdioSpawner;
 namespace contour::cli
 {
 
+/// The longest `--timeout` a wait takes, about 115 days: far past any wait a script means, and far
+/// inside what milliseconds hold. `contour mcp`'s `timeoutSeconds` shares it.
+inline constexpr auto MaxTimeoutSeconds = 10'000'000;
+
 /// Whether the verb's standard output is a person's terminal.
 enum class OutputTarget : uint8_t
 {
@@ -227,6 +231,17 @@ struct ControlVerbGroup
 /// @param verb A control verb.
 /// @return The method it calls given @p flags, which is empty for a local verb.
 [[nodiscard]] std::string_view methodFor(ControlVerb const& verb, core::cli::FlagStore const& flags);
+
+/// Opens the per-call channel to the daemon that `--daemon`, `--token-file` and `--tls-ca` name.
+///
+/// Reads the three flags from @p flags under the command path @p flagPath, exactly as runControlVerb does,
+/// and says on `io.err` why it could not.
+/// @param flags The parsed command line.
+/// @param flagPath The dotted command path the flags were parsed under (`ls`, `mcp`).
+/// @param io Environment, files and streams.
+/// @return The channel, or the exit status for the failure already reported on `io.err`.
+[[nodiscard]] std::expected<std::unique_ptr<ControlChannel>, ExitStatus> openControlChannel(
+    core::cli::FlagStore const& flags, std::string_view flagPath, ControlIo const& io);
 
 /// Runs a verb against the daemon its flags and the environment name.
 ///

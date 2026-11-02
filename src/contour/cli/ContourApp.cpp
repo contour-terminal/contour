@@ -8,6 +8,7 @@
 #include <contour/cli/ControlVerbs.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
+#include <contour/cli/McpCommand.hpp>
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
@@ -439,6 +440,17 @@ namespace
         };
     }
 
+    /// @return The `mcp` command: the MCP server that gives coding agents the control API as tools.
+    [[nodiscard]] core::cli::Command mcpCommand()
+    {
+        return core::cli::Command { .name = "mcp",
+                                    .helpText = "Serves Contour's control API to a coding agent over MCP "
+                                                "on standard input and output.",
+                                    .options = contour::cli::mcpOptions(),
+                                    .children = {},
+                                    .select = core::cli::CommandSelect::Explicit };
+    }
+
     /// Builds the commands of the control verbs from @ref contour::cli::controlVerbs, nesting the dotted
     /// paths (`block.list`) under their groups.
     /// @return The commands, to be added at the top level.
@@ -534,6 +546,7 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
     link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
+    link("contour.mcp", bind(&ContourApp::mcpAction, this));
     for (auto const& verb: contour::cli::controlVerbs())
         link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
     // One handler per verb rather than one that switches: core::cli::App dispatches on the first
@@ -1519,6 +1532,30 @@ int ContourApp::controlVerbAction(ControlVerb const& verb)
                                       .resolveSavedHost = std::move(resolveSavedHost) });
 }
 
+int ContourApp::mcpAction()
+{
+    auto const wallClock = core::platform::SystemWallClock {};
+    auto& fileSystem = core::platform::NativeFileSystem::instance();
+    auto const sshSearchPath = vtpty::execSearchPath(processEnvironment().get("PATH"));
+    auto resolveSavedHost = makeSavedHostResolver(
+        [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
+        fileSystem,
+        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+            .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }));
+    // Standard output carries the protocol and nothing else; the diagnostics go to standard error.
+    return runMcpCommand(parameters(),
+                         ControlIo { .env = processEnvironment(),
+                                     .fs = fileSystem,
+                                     .in = std::cin,
+                                     .out = cout,
+                                     .err = cerr,
+                                     .clock = wallClock,
+                                     .target = OutputTarget::Pipe,
+                                     .stop = {},
+                                     .resolveSavedHost = std::move(resolveSavedHost) },
+                         CONTOUR_VERSION_STRING);
+}
+
 int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
 {
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
@@ -2167,6 +2204,7 @@ core::cli::Command ContourApp::parameterDefinition() const
     for (auto& verbCommand: controlVerbCommands())
         command.children.emplace_back(std::move(verbCommand));
     command.children.emplace_back(agentCommand());
+    command.children.emplace_back(mcpCommand());
     return command;
 }
 

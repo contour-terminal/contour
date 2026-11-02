@@ -33,6 +33,20 @@ TEST_CASE("API replies round-trip through JSON", "[vtcontrol][api]")
     CHECK(back->windows[0].tabs[0].panes[0].size.columns == 80);
 }
 
+TEST_CASE("DaemonInfoReply round-trips grants", "[vtcontrol][api]")
+{
+    auto const json = vtcontrol::encodeJson(vtcontrol::DaemonInfoReply { .grants = { "read", "screen" } });
+    CHECK(json.contains(R"("grants":["read","screen"])"));
+    auto const back = vtcontrol::decodeJson<vtcontrol::DaemonInfoReply>(json);
+    REQUIRE(back);
+    CHECK(back->grants == std::vector<std::string> { "read", "screen" });
+
+    auto const old = vtcontrol::decodeJson<vtcontrol::DaemonInfoReply>(
+        R"({"version":"0.9.0","protocolVersion":1,"platform":"linux","hostname":"devbox","uptimeSeconds":3600})");
+    REQUIRE(old);
+    CHECK(old->grants.empty());
+}
+
 TEST_CASE("an empty request decodes from nothing and from an empty object", "[vtcontrol][api]")
 {
     CHECK(vtcontrol::decodeJson<vtcontrol::DaemonInfoRequest>(""));

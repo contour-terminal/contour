@@ -137,6 +137,8 @@ A daemon's TCP tokens carry grants (`contour daemon --access-file`): `read` for 
 capturing, reading blocks and program status (`pane.programStatusChanged`, and the `programStatus` of
 `contour ls --json`), `input` for typing, and `write` for changing the workspace. A call outside the
 token's grants is refused as forbidden (exit status 1). The daemon's socket grants everything to its owner.
+`daemon.info` reports the connection's own grants in its `grants` array (by name, in the order above), so a
+client can tell what it may call before it tries.
 A connection holds at most 64 subscriptions and 256 pending waits; one more is refused as `limitReached`
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.
@@ -168,3 +170,45 @@ contour agent setup --agent claude --dry-run
 Rerun it after upgrading Contour: a file it generated is updated, one that is already current is left alone,
 and a file it did not generate is kept unless you pass `--force`. `--dry-run` reports what would happen, and
 `--json` prints the outcomes as an array.
+
+## MCP
+
+`contour mcp` serves the control API to coding agents that speak the Model Context Protocol (MCP): it reads
+JSON-RPC requests, one per line, on standard input and writes the replies, one per line, on standard output.
+Nothing else is ever written to standard output; diagnostics go to standard error. Register it once:
+
+```sh
+claude mcp add contour -- contour mcp
+```
+
+An agent started in a Contour pane inherits `$CONTOUR_PANE`, which is its own pane. The server offers these
+tools (an agent sees only those the daemon's grants permit, see `daemon.info`):
+
+| Tool | Does | Needs |
+| --- | --- | --- |
+| `workspace_list` | Lists windows, tabs and panes, marking your own | `read` |
+| `daemon_info` | Reports the daemon and the connection's grants | `read` |
+| `pane_capture` | Reads a pane's screen | `screen` |
+| `block_list`, `block_read` | Lists and reads command blocks | `screen` |
+| `pane_run` | Runs a command in a pane and waits for its result | `input`, `screen` |
+| `pane_type` | Types into a pane | `input` |
+| `pane_split`, `tab_create` | Opens a split or a tab | `write` |
+| `pane_close`, `tab_close`, `object_setLabel` | Closes or labels | `write` |
+
+`pane_run` needs OSC 133 shell integration in the pane. It types one command line (join several with `&&`
+or `;`), waits, and returns the exit code and the last 64 KiB of output (`maxOutputBytes` changes that). A
+result of `timedOut` means the command is still running; fetch its output later with `block_read`. It
+refuses the agent's own pane, as does `pane_type`: use `pane_split` to get a shell pane.
+
+By default the agent acts only on the panes of its own tab: an action aimed at another tab is refused, and a
+label or id suffix is matched within the own tab only. `workspace_list` still lists every tab, so the agent
+can tell you what exists; scoping limits what it may do, not what it can see. Without `$CONTOUR_PANE` the
+server refuses to start (exit status 2) unless you pass `--allow-all-tabs`, which lets the agent act on every
+tab and enables `tab_create` and `tab_close`. `--read-only` leaves out the tools that type or change the
+workspace. `--daemon`, `--token-file` and `--tls-ca` work as
+for every verb.
+
+The scoping is a guardrail against an agent wandering into the wrong tab, not a sandbox: an agent that can
+run shell commands can run `contour` itself, with the same connection. The real boundary is what the
+daemon's token grants (`contour daemon --access-file`); give an agent a token that can do no more than you
+want it to.

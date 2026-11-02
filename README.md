@@ -38,6 +38,7 @@ it feels native on Windows 11, macOS and Linux.
 - 🎯 **Keyboard-driven.** Vi-like input modes, [hint mode](https://contour-terminal.org/demo/hint-mode/) for URLs, paths and git hashes,
   clickable links in any output, a GUI find bar and a quick-terminal hotkey.
 - 🤖 **Scriptable.** A [control API and CLI](https://contour-terminal.org/control-api/) to list, split, type into and read panes and command blocks,
+  an [MCP server](https://contour-terminal.org/control-api/) (`contour mcp`) that lets Claude Code, Codex and other coding agents drive their own tab,
   sandboxed WebAssembly [status-line extensions](https://contour-terminal.org/extensions/), and a tmux control-mode gateway in both directions.
 
 ## Features
@@ -163,6 +164,7 @@ running tmux server into a Contour window, windows as tabs and panes as splits.
 Every window, tab and pane has a stable ID, and the daemon serves a typed
 [control API](https://contour-terminal.org/control-api/) that `contour ls`, `new`, `split`, `send`,
 `pane capture` and `block read` script from the shell — handy for tooling and coding agents alike.
+Agents that speak MCP can use the same API through `contour mcp` (`claude mcp add contour -- contour mcp`).
 
 See [Persistent sessions](https://contour-terminal.org/persistent-sessions/) for the full guide.
 
@@ -264,6 +266,7 @@ cmake --build build/ --target install
     contour block list | read   and   contour wait | events          Read command blocks and follow what happens
     contour api list | describe | call                               The typed control API
     contour agent setup                                              Teach coding agents to operate Contour panes
+    contour mcp [--allow-all-tabs] [--read-only]                 MCP server over stdio: coding agents drive their own tab
     contour cat [IMAGE_FILE]                                         Show an image in the terminal
     contour capture [logical] [words] [lines COUNT] to FILE          Capture the screen contents
     contour set profile [to NAME]

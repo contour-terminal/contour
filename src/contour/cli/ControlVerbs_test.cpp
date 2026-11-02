@@ -465,6 +465,34 @@ TEST_CASE("a TCP daemon without --tls-ca is refused before connecting", "[contou
     CHECK(run.err.str().contains("--tls-ca"));
 }
 
+TEST_CASE("openControlChannel refuses an unverified HOST:PORT", "[contour][cli][control]")
+{
+    auto run = Run {};
+
+    auto const channel =
+        contour::cli::openControlChannel(parseFlags({ "ls", "--daemon", "127.0.0.1:1234" }), "ls", run.io());
+
+    // The transport is built lazily: the refusal to dial an unverified TCP daemon is the first call's.
+    REQUIRE(channel.has_value());
+    auto const reply = (*channel)->call("pane.list", "{}", "", std::nullopt);
+    REQUIRE_FALSE(reply.has_value());
+    CHECK(reply.error().failure == ControlFailure::Untrusted);
+    CHECK(contour::cli::exitStatusFor(reply.error()) == ExitStatus::Failed);
+    CHECK(reply.error().message.contains("--tls-ca"));
+}
+
+TEST_CASE("openControlChannel reports an unreadable --tls-ca", "[contour][cli][control]")
+{
+    auto run = Run {};
+
+    auto const channel = contour::cli::openControlChannel(
+        parseFlags({ "ls", "--daemon", "127.0.0.1:9", "--tls-ca", "/no/such.pem" }), "ls", run.io());
+
+    REQUIRE_FALSE(channel.has_value());
+    CHECK(channel.error() == ExitStatus::BadUsage);
+    CHECK(run.err.str().contains("--tls-ca"));
+}
+
 TEST_CASE("an unreadable --tls-ca is bad usage", "[contour][cli][control]")
 {
     auto run = Run {};

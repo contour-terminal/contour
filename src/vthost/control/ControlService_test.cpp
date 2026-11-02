@@ -110,6 +110,23 @@ TEST_CASE("daemon.info reports the configured version", "[vthost][control]")
     CHECK(info->uptimeSeconds == 42);
 }
 
+TEST_CASE("daemon.info reports the connection's grants", "[vthost][control]")
+{
+    auto h = ControlHarness {};
+    auto const names = [&](vtcontrol::ControlGrants grants) {
+        h.context.granted = grants;
+        auto const info =
+            callSync<vtcontrol::DaemonInfoReply>(h.service, h.context, vtcontrol::DaemonInfoRequest {});
+        REQUIRE(info.has_value());
+        return info->grants;
+    };
+    using vtcontrol::Permission;
+    CHECK(names(vtcontrol::ControlGrants::of({ Permission::Read, Permission::Screen }))
+          == std::vector<std::string> { "read", "screen" });
+    CHECK(names(vtcontrol::ControlGrants::all())
+          == std::vector<std::string> { "read", "screen", "input", "write" });
+}
+
 TEST_CASE("pane.capture reads the page and scrollback", "[vthost][control]")
 {
     auto h = ControlHarness {};

@@ -322,6 +322,9 @@ struct DaemonInfoReply
     std::string platform {};      ///< The operating system.
     std::string hostname {};      ///< The host's name.
     uint32_t uptimeSeconds = 0;   ///< Seconds since the daemon started.
+    /// The permissions this connection holds, by name (`read`, `screen`, `input`, `write`), in that order;
+    /// empty when an older daemon does not report them.
+    std::vector<std::string> grants {};
 };
 
 /// `list` request.

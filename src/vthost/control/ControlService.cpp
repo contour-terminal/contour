@@ -381,17 +381,23 @@ vtcontrol::WindowInfo ControlService::windowInfoOf(vtworkspace::Window const& wi
 // }}}
 // {{{ Read verbs
 
-void ControlService::handle(vtcontrol::CallContext& /*context*/,
+void ControlService::handle(vtcontrol::CallContext& context,
                             vtcontrol::DaemonInfoRequest const& /*request*/,
                             vtcontrol::Completion<vtcontrol::DaemonInfoReply> done)
 {
     auto const uptime = std::chrono::duration_cast<std::chrono::seconds>(_config.clock.now() - _startedAt);
+    auto const held = context.grants();
+    auto grants = std::vector<std::string> {};
+    for (auto const& row: vtcontrol::EnumTable<vtcontrol::Permission>::Rows)
+        if (held.contains(row.value))
+            grants.emplace_back(row.name);
     done(vtcontrol::DaemonInfoReply {
         .version = _config.version,
         .protocolVersion = proto::SupportedVersions.max,
         .platform = std::string { PlatformName },
         .hostname = vtcontrol::toValidUtf8(_host.identity().hostname),
         .uptimeSeconds = apiCount(static_cast<std::size_t>(std::max<int64_t>(uptime.count(), 0))),
+        .grants = std::move(grants),
     });
 }
 

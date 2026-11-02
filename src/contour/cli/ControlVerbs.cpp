@@ -79,10 +79,6 @@ namespace
 
     using Params = std::expected<std::string, std::string>;
 
-    /// The longest `--timeout` a wait takes, about 115 days: far past any wait a script means, and far
-    /// inside what milliseconds hold.
-    constexpr auto MaxTimeoutSeconds = 10'000'000;
-
     /// @param words Trailing command-line words.
     /// @return Them as owned strings.
     [[nodiscard]] std::vector<std::string> toStrings(std::span<std::string_view const> words)
@@ -1201,19 +1197,18 @@ int runControlVerb(ControlVerb const& verb,
     return callAndPrint(verb, prepared->flags, prepared->params, channel, io);
 }
 
-int runControlVerb(ControlVerb const& verb, CLI::FlagStore const& flags, ControlIo const& io)
+std::expected<std::unique_ptr<ControlChannel>, ExitStatus> openControlChannel(CLI::FlagStore const& flags,
+                                                                              std::string_view flagPath,
+                                                                              ControlIo const& io)
 {
-    auto prepared = prepareRequest(verb, flags, io);
-    if (!prepared)
-        return prepared.error();
-    if (isLocal(verb))
-        return runLocal(verb, io);
-
-    auto const f = VerbFlags { flags, verb.path };
+    auto const f = VerbFlags { flags, flagPath };
     auto const token = readOptionFile(io.fs, "token-file", f.text("token-file"));
     auto const authority = readOptionFile(io.fs, "tls-ca", f.text("tls-ca"));
     if (!token || !authority)
-        return reportBadUsage(!token ? token.error() : authority.error(), io.err);
+    {
+        (void) reportBadUsage(!token ? token.error() : authority.error(), io.err);
+        return std::unexpected(ExitStatus::BadUsage);
+    }
     auto const transport = vthost::client::resolveControlEndpoint(
         vthost::client::ControlEndpointOptions { .daemon = f.text("daemon"),
                                                  .token = cleanToken(*token),
@@ -1223,10 +1218,23 @@ int runControlVerb(ControlVerb const& verb, CLI::FlagStore const& flags, Control
     if (!transport)
     {
         reportFailure(transport.error(), io.err);
-        return exitCode(exitStatusFor(transport.error()));
+        return std::unexpected(exitStatusFor(transport.error()));
     }
-    auto channel = makeTransportChannel(*transport);
-    return callAndPrint(verb, prepared->flags, prepared->params, *channel, io);
+    return makeTransportChannel(*transport);
+}
+
+int runControlVerb(ControlVerb const& verb, CLI::FlagStore const& flags, ControlIo const& io)
+{
+    auto prepared = prepareRequest(verb, flags, io);
+    if (!prepared)
+        return prepared.error();
+    if (isLocal(verb))
+        return runLocal(verb, io);
+
+    auto channel = openControlChannel(flags, verb.path, io);
+    if (!channel)
+        return exitCode(channel.error());
+    return callAndPrint(verb, prepared->flags, prepared->params, **channel, io);
 }
 
 } // namespace contour::cli
