@@ -384,7 +384,7 @@
         </ul>
         <p>Images and graphics</p>
         <ul>
-          <li>Adds kitty graphics animation frames (<code>a=f</code>) and frame selection (<code>a=a</code>), so applications can send only what changed between frames instead of re-sending the whole image. Self-running playback (<code>s=2</code>/<code>s=3</code>) and frame composition (<code>a=c</code>) are not supported yet (#2108)</li>
+          <li>Adds kitty graphics animation frames (<code>a=f</code>) and frame selection (<code>a=a</code>), so applications can send only what changed between frames instead of re-sending the whole image. Animations now play on their own (<code>s=2</code>/<code>s=3</code>), with loop counts (<code>v=</code>) and gapless frames, instead of staying frozen on frame 1 (#2126). Frame payloads can be zlib-compressed (<code>o=z</code>), and frames can be composed from one another (<code>a=c</code>) (#2108). Sessions hosted by contour daemon play too, at a throttled frame rate</li>
           <li>Fixes images.sixel_scrolling: false being lost once a program reset the terminal (RIS), and never applying in a session hosted by contour daemon</li>
           <li>Fixes the kitty graphics protocol's APC payload being parsed one byte at a time through the escape-sequence state machine, where the equivalent sixel payload has long had a bulk path. An image-heavy workload's time in the parser falls from 47% of its wall clock to 6.6% — 7.55 s to 1.06 s over 1.4 GB of payload</li>
         </ul>

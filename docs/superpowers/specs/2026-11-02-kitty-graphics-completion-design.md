@@ -91,7 +91,9 @@ Each blocks the PR named. Until decided, the builder must not pick a side.
 - **Next-deadline scheduling.** The earliest frame deadline across running animations is tracked
   and the terminal is woken at it. No polling.
 - **Advance** goes through the existing `Screen::showKittyFrame()`, which finds placements in the
-  grid, so scrolling, erasing and reflow stay correct.
+  grid, so scrolling, erasing and reflow stay correct. A tick lands on the frame its time shows, not
+  on one frame per tick: whole loops are skipped in O(1), capped at the `v=n` limit, and the
+  remainder (less than one loop) is walked frame by frame.
 - **Protocol:** `s=1` stops on the current frame. `s=2` plays and waits at the last frame until
   another `a=f` arrives, then continues. `s=3` plays and returns to frame 1 after the last frame.
   `v=`: 0 unspecified, 1 forever, n means n-1 loops. `z<0` is a gapless frame and is skipped.
@@ -192,8 +194,9 @@ overwrite (default: alpha blend). Note the key reuse: `C`, `X`, `Y`, `x`, `y`, `
 something else under other actions, and today the parser maps `C`→doNotMoveCursor, `X`→compositionMode
 and `Y`→frameBackground unconditionally, so `a=c` needs action-aware decoding of these keys.
 Errors per spec: `ENOENT` for a missing image or frame, `EINVAL` for rectangles out of bounds or for
-overlapping rectangles when source and destination frame are the same, `ENOSPC` when the quota is
-exceeded. Where the spec leaves an edge case to the implementation, behaviour is cross-checked
+overlapping rectangles when source and destination frame are the same. There is no `ENOSPC`
+(decided with the maintainer): a composition yields a same-size copy, so the quota check can never
+fire. Where the spec leaves an edge case to the implementation, behaviour is cross-checked
 against kitty 0.49.2 (installed locally) and recorded in the tests. After composition, if the
 destination is the current frame, the placement is refreshed through the same path as playback.
 
