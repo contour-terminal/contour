@@ -197,6 +197,7 @@
           <li>CLI: contour agent setup installs a generated skill that teaches Claude Code, Codex and other coding agents to operate Contour panes.</li>
           <li>Adds OSC 7501 program status: a program reports that it is working, done, blocked on the user or failed, and each terminal keeps up to 64 such records, dropping working and blocked ones at the next prompt or when the process exits.</li>
           <li>Daemon: mirrors each pane's OSC 7501 program status to attached clients, lists it in contour ls --json and emits pane.programStatusChanged events.</li>
+          <li>Adds OSC 1337 SetUserVar: a program publishes named variables (up to 64 per terminal, kept across a hard reset), and the new <code>{UserVar:&lt;name&gt;}</code> indicator status-line placeholder shows one, in daemon clients too (#2161)</li>
           <li>The tab strip shows a badge for a tab whose program is working, waiting for the user, done or failed (OSC 7501), with the program's message as its tooltip, invisible formatting characters removed.</li>
           <li>DEC mode 2034's SBQUERY answers an older command block by its id (Ps 4), and its JSON, now version 2, gives each block its id, working directory, start time and duration; every version 1 field is unchanged.</li>
           <li>Adds the status-line placeholders <code>{Cwd}</code>, <code>{Git}</code> (read from <code>.git/HEAD</code>, no process spawned), <code>{LastCommand}</code>, <code>{Selection}</code> and <code>{Scroll}</code></li>
