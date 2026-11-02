@@ -381,6 +381,17 @@ class HostedSession
     /// @return Whether the session runs status-line extensions.
     [[nodiscard]] bool hasExtensions() const noexcept { return _extensions != nullptr; }
 
+    /// @return Whether the indicator row has to be repainted here to be sent: extensions run, or its
+    ///         template shows what only the terminal knows (@see
+    ///         vtbackend::Terminal::indicatorStatusLineDependsOnHostState). Takes the terminal lock.
+    [[nodiscard]] bool indicatorRowIsHostDrawn()
+    {
+        if (hasExtensions())
+            return true;
+        auto const guard = std::lock_guard { _terminal };
+        return _terminal.indicatorStatusLineDependsOnHostState();
+    }
+
     /// @return Whether the session's extensions follow its foreground program.
     [[nodiscard]] bool followsForegroundProcess() const noexcept
     {
@@ -389,8 +400,7 @@ class HostedSession
     }
 
     /// Has the indicator row its extensions draw repainted on the loop, once for however many requests arrive
-    /// before it is: through the same pending flag a published frame goes through. Without extensions,
-    /// nothing. Any thread.
+    /// before it is: through the same pending flag a published frame goes through. Any thread.
     void requestStatusLineRepaint() const
     {
         if (_events.onStatusLineExtensionPublished)

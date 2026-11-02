@@ -1733,6 +1733,55 @@ TEST_CASE("SessionHost.extension.repaintsOnlyForClients", "[vthost][host][extens
     host.unsubscribeStream(&watcher);
 }
 
+TEST_CASE("SessionHost.userVar.hostRowFollowsTheVariable", "[vthost][host][uservar]")
+{
+    // A client runs no parser, so a {UserVar} segment is drawn here, extensions or none: the row is
+    // repainted as the program's SetUserVar arrives, and sent on to an attached client.
+    struct Mirror final: vthost::SessionStreamEvents
+    {
+        int updates = 0;
+        void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
+    };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto settings = vtbackend::Settings {};
+    settings.statusDisplayType = vtbackend::StatusDisplayType::Indicator;
+    settings.indicatorStatusLine.left = "[{UserVar:foo}]";
+    settings.indicatorStatusLine.middle.clear();
+    settings.indicatorStatusLine.right.clear();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              std::move(settings),
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto const* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto* terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    auto mirror = Mirror {};
+    host.subscribeStream(&mirror);
+
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const row = [&] {
+        auto const _ = std::lock_guard { *terminal };
+        return terminal->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).toUtf8Trimmed();
+    };
+    turn();
+    CHECK(row() == "[]");
+
+    terminal->writeToScreen("\033]1337;SetUserVar=foo=dmlt\a"); // "vim"
+    turn();
+    CHECK(row() == "[vim]");
+
+    host.unsubscribeStream(&mirror);
+}
+
 TEST_CASE("SessionHost.extension.hostRowCarriesTheGitBranch", "[vthost][host][extensions][git]")
 {
     // A row an extension draws is the host's, {Git} included: the client mirrors it, and for a client on

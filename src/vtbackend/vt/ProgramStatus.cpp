@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/ProgramStatus.hpp>
 
+#include <vtbackend/vt/Base64Validation.hpp>
+
 #include <core/Base64.hpp>
 #include <core/Utils.hpp>
 
@@ -140,24 +142,6 @@ namespace
                 return false;
         }
         return true;
-    }
-
-    /// The standard base64 digits (RFC 4648 section 4), which core::base64::decode reads. Spelled here
-    /// rather than borrowed from the library's detail namespace, which a re-vendor may rename.
-    constexpr auto Base64Digits =
-        string_view { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" };
-
-    /// Whether @p text is base64: digits, then at most two `=` that complete a quartet. Padding is
-    /// optional, but a lone digit in the last quartet carries no byte and is never valid.
-    [[nodiscard]] bool isValidBase64(string_view text) noexcept
-    {
-        auto const digits = text.substr(0, text.find_first_not_of(Base64Digits));
-        auto const padding = text.substr(digits.size());
-        if (padding.size() > 2 || !std::ranges::all_of(padding, [](char ch) { return ch == '='; }))
-            return false;
-        if (digits.size() % 4 == 1)
-            return false;
-        return padding.empty() || (digits.size() + padding.size()) % 4 == 0;
     }
 
     /// Checks decoded text: UTF-8, single-line, no control character of any set.

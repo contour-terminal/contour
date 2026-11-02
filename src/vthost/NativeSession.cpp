@@ -1015,7 +1015,7 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         if (terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
             return std::pair { vtbackend::StatusDisplayType::HostWritable,
                                &terminal.hostWritableStatusLineDisplay() };
-        if (terminal.indicatorStatusLineDrivenByExtensions())
+        if (terminal.indicatorStatusLineDependsOnHostState())
             return std::pair { vtbackend::StatusDisplayType::Indicator,
                                &terminal.indicatorStatusLineDisplay() };
         return std::nullopt;

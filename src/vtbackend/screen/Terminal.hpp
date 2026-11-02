@@ -55,6 +55,7 @@
 #include <vtbackend/vt/ProgressState.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
+#include <vtbackend/vt/UserVar.hpp>
 
 #include <vtparser/Parser.hpp>
 
@@ -1442,14 +1443,16 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Does for the status-line extensions what a frame refresh does, for a host that renders nothing itself
     /// (the daemon): tells them the state they newly follow, and repaints the indicator status line while
-    /// they draw it (@see indicatorStatusLineDrivenByExtensions) -- whether this terminal shows it or not, as
+    /// they draw it (@see indicatorStatusLineDependsOnHostState) -- whether this terminal shows it or not, as
     /// its clients may -- so that its row can be read off indicatorStatusLineDisplay(). Call with the state
     /// lock held.
     void refreshIndicatorStatusLine();
 
-    /// @return Whether the indicator status line shows what only this terminal's extensions draw: a take-over
-    ///         extension, or an `{Extension}` item of its template. Call with the state lock held.
-    [[nodiscard]] bool indicatorStatusLineDrivenByExtensions() const noexcept;
+    /// @return Whether the indicator status line shows what only this terminal knows, and a client mirroring
+    ///         it cannot: a take-over extension, an `{Extension}` item of its template, or a `{UserVar}`
+    ///         item (the client runs no parser, so it never sees the program's SetUserVar). Call with the
+    ///         state lock held.
+    [[nodiscard]] bool indicatorStatusLineDependsOnHostState() const noexcept;
 
     /// Shows @p row as the indicator status line in place of its template and of any take-over, until told
     /// none: what a mirror shows of the row its host drew. Call with the state lock held.
@@ -1471,12 +1474,20 @@ class Terminal: public IStatusLinePublishTarget
     /// @param name The process's name.
     void foregroundProcessChanged(std::string_view name);
 
-    /// Tells the status-line extensions that a program set a user variable (OSC 1337 ; SetUserVar), and
-    /// remembers its latest value to tell extensions that follow them later -- for the first
-    /// StatusLineExtensionServices::maxUserVars names only. Call with the state lock held.
+    /// Remembers a user variable a program set (OSC 1337 ; SetUserVar), already validated and decoded by
+    /// decodeUserVar(), and tells the status-line extensions. Dropped if the name is new and
+    /// Settings::userVarLimits already holds as many names as it allows. Call with the state lock held.
+    /// @param assignment The variable and its decoded value.
+    /// @return Whether it was remembered; a dropped one is told to no extension either.
+    UserVarStorage userVarChanged(UserVarAssignment assignment);
+
+    /// @return The bounds on the user variables programs may set, for decodeUserVar().
+    [[nodiscard]] UserVarLimits const& userVarLimits() const noexcept { return _settings.userVarLimits; }
+
     /// @param name The variable's name.
-    /// @param base64Value Its value, as the program sent it: decoded only if an extension subscribed.
-    void userVarChanged(std::string_view name, std::string_view base64Value);
+    /// @return The latest decoded value a program set for @p name, or nothing if it never set one. Valid
+    ///         until the next user variable update. Survives a hard reset. Call with the state lock held.
+    [[nodiscard]] std::optional<std::string_view> userVar(std::string_view name) const noexcept;
 
     /// @p when in local civil time, through the converter the terminal was constructed with.
     /// @see TerminalClocks::localTime
@@ -4231,10 +4242,11 @@ class Terminal: public IStatusLinePublishTarget
     ///         if it has none to tell, one per remembered variable for user variables, one otherwise.
     [[nodiscard]] std::vector<StatusLineEvent> currentStatusLineEvents(StatusLineEventKind kind) const;
 
-    /// Remembers @p name's latest value for the replay, if it is known already or the bound has room.
+    /// Remembers @p name's latest value, if it is known already or the bound has room.
     /// @param name The variable's name.
-    /// @param base64Value Its value, as the program sent it.
-    void rememberUserVar(std::string_view name, std::string_view base64Value);
+    /// @param value Its decoded value.
+    /// @return Whether it was remembered.
+    [[nodiscard]] UserVarStorage rememberUserVar(std::string_view name, std::string_view value);
 
     /// Replays what statusLineExtensionsPublished() found newly subscribed, if anything. With the state lock.
     void drainStatusLineReplay();
@@ -6070,23 +6082,27 @@ class Terminal: public IStatusLinePublishTarget
     /// subscribed to nothing, forever, without extension services.
     StatusLineEventGate _extensionEvents;
 
-    /// A user variable a program set, and its latest value as the program sent it (base64).
+    /// A user variable a program set, and its latest decoded value.
     using RememberedUserVar = std::pair<std::string, std::string>;
 
-    /// What the extensions are told again when they newly follow it, since no host repeats it: the latest
-    /// value of each user variable a program set, in the order first set, and the foreground process its
-    /// host last told of (empty for none). Kept only with extension services -- without them each hook
-    /// skips it in one untaken branch. Guarded by the state lock; no worker reads it.
+    /// The latest value of each user variable a program set, in the order first set, at most
+    /// Settings::userVarLimits names. Kept for the session: a hard reset leaves it alone. Extensions that
+    /// newly follow user variables are told the first StatusLineExtensionServices::maxUserVars of them.
+    /// Guarded by the state lock; no worker reads it.
     std::vector<RememberedUserVar> _userVars;
+
+    /// What the extensions are told again when they newly follow it, since no host repeats it: the
+    /// foreground process its host last told of (empty for none). Kept only with extension services --
+    /// without them the hook skips it in one untaken branch. Guarded by the state lock.
     std::string _foregroundProcessName;
 
     /// The font metrics the extensions were last told; empty until the host first tells them. Guarded by
     /// the state lock.
     StatusLineFontMetrics _statusLineFont {};
 
-    /// How many distinct names _userVars holds at most: StatusLineExtensionServices::maxUserVars; 0
-    /// without extension services. Fixed at construction.
-    std::size_t _maxRememberedUserVars;
+    /// How many user variables a newly following extension is told: StatusLineExtensionServices::maxUserVars;
+    /// 0 without extension services. Fixed at construction.
+    std::size_t _maxReplayedUserVars;
 
     /// The extension drawing the whole indicator row instead of its template; read at construction and by
     /// statusLineExtensionsReplaced(). Guarded by the state lock once constructed.

@@ -212,8 +212,15 @@ TEST_CASE("Isolation.hookNeverBlocks", "[vtextension][isolation][threading]")
     auto host = ExtensionHost(follower(), ExtensionHostServices { .engines = engines, .runners = services });
     auto adapter = StatusLineAdapter { host };
     {
+        // The terminal remembers (and so tells) a bounded number of names, as a program should be held to;
+        // this test floods the queue with new ones, so it raises that bound.
+        auto settings = vtbackend::MockTerm<>::createSettings(PaneSize, vtbackend::HistoryLimits {}, 1024);
+        settings.userVarLimits.maxCount = HookCalls;
         auto mock = vtbackend::MockTerm {
-            PaneSize,
+            std::move(settings),
+            std::nullopt,
+            &vtbackend::fixedOffsetLocalTime<>,
+            std::nullopt,
             vtbackend::StatusLineExtensionServices {
                 .extensions = adapter, .published = sink, .maxUserVars = ExtensionLimits {}.maxUserVars }
         };

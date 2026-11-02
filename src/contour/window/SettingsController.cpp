@@ -3104,7 +3104,7 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
                                                              ? toQString(ItemTraits<T>::Label)
                                                              : QString::fromStdString(v.command);
                 }
-                else if constexpr (std::same_as<T, Extension>)
+                else if constexpr (std::derived_from<T, vtbackend::StatusLineDefinitions::NamedItem>)
                 {
                     row[QStringLiteral("name")] = QString::fromStdString(v.name);
                     row[QStringLiteral("displayName")] =
@@ -3188,8 +3188,8 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
                         command.interval = std::chrono::seconds { seconds };
                     return command;
                 }
-                else if constexpr (std::same_as<T, Extension>)
-                    return Extension { styles, row.value(QStringLiteral("name")).toString().toStdString() };
+                else if constexpr (std::derived_from<T, vtbackend::StatusLineDefinitions::NamedItem>)
+                    return T { { styles, row.value(QStringLiteral("name")).toString().toStdString() } };
                 else if constexpr (std::same_as<T, Tabs>)
                 {
                     auto const separator = row.value(QStringLiteral("separator")).toString();

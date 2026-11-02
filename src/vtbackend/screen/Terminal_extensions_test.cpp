@@ -746,7 +746,7 @@ TEST_CASE("Terminal.extensions.drivenByExtensions", "[extensions]")
     {
         auto mock = MockTerm { ExtensionPageSize };
         showIndicator(mock.terminal, "{Extension:git}");
-        CHECK_FALSE(mock.terminal.indicatorStatusLineDrivenByExtensions());
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
     }
 
     auto extensions = FakeStatusLineExtensions {};
@@ -755,14 +755,24 @@ TEST_CASE("Terminal.extensions.drivenByExtensions", "[extensions]")
     {
         auto mock = MockTerm { ExtensionPageSize, extensions.services() };
         showIndicator(mock.terminal, "{Title} {Clock}");
-        CHECK_FALSE(mock.terminal.indicatorStatusLineDrivenByExtensions());
+        CHECK_FALSE(mock.terminal.indicatorStatusLineDependsOnHostState());
     }
 
     SECTION("an {Extension} segment in any part of the template is")
     {
         auto mock = MockTerm { ExtensionPageSize, extensions.services() };
         mock.terminal.setStatusLineDefinition(parseStatusLineDefinition("", "", "[{Extension:git}]"));
-        CHECK(mock.terminal.indicatorStatusLineDrivenByExtensions());
+        CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
+    }
+
+    SECTION("a {UserVar} segment is, with or without extensions: a client runs no parser")
+    {
+        auto plain = MockTerm { ExtensionPageSize };
+        showIndicator(plain.terminal, "{UserVar:foo}");
+        CHECK(plain.terminal.indicatorStatusLineDependsOnHostState());
+        auto mock = MockTerm { ExtensionPageSize, extensions.services() };
+        showIndicator(mock.terminal, "{UserVar:foo}");
+        CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
     }
 
     SECTION("a take-over is")
@@ -770,8 +780,30 @@ TEST_CASE("Terminal.extensions.drivenByExtensions", "[extensions]")
         extensions.takeOver("plasma");
         auto mock = MockTerm { ExtensionPageSize, extensions.services() };
         showIndicator(mock.terminal, "template");
-        CHECK(mock.terminal.indicatorStatusLineDrivenByExtensions());
+        CHECK(mock.terminal.indicatorStatusLineDependsOnHostState());
     }
+}
+
+TEST_CASE("Terminal.extensions.userVarsTellOnlyWhatIsStored", "[extensions][uservar]")
+{
+    // A name beyond the terminal's bound is dropped, and so no extension is told of it either.
+    using namespace StatusLineEvents;
+    auto extensions = FakeStatusLineExtensions {};
+    extensions.subscribe(StatusLineEventKinds { StatusLineEventKind::UserVar });
+    auto mock = MockTerm { ExtensionPageSize, extensions.services() };
+    auto& terminal = mock.terminal;
+    auto const limit = terminal.userVarLimits().maxCount;
+    for (auto const i: std::views::iota(std::size_t { 0 }, limit))
+        mock.writeToScreen(std::format("\033]1337;SetUserVar=v{}=YQ==\a", i));
+    REQUIRE(extensions.posted().size() == limit);
+
+    mock.writeToScreen("\033]1337;SetUserVar=extra=YQ==\a");
+    CHECK(extensions.posted().size() == limit);
+    CHECK_FALSE(terminal.userVar("extra").has_value());
+
+    mock.writeToScreen("\033]1337;SetUserVar=v0=Yg==\a"); // a known name still updates, and is told
+    CHECK(extensions.posted().size() == limit + 1);
+    CHECK(terminal.userVar("v0") == "b");
 }
 
 TEST_CASE("Terminal.extensions.refreshedWithoutRendering", "[extensions]")
@@ -823,7 +855,7 @@ TEST_CASE("Terminal.extensions.refreshedWithoutRendering", "[extensions]")
         plain.writeToScreen("\033]2;title\033\\");
         plain.terminal.runUnderStateLock([&] { plain.terminal.refreshIndicatorStatusLine(); });
         CHECK(indicatorText(plain.terminal) == before);
-        CHECK_FALSE(plain.terminal.indicatorStatusLineDrivenByExtensions());
+        CHECK_FALSE(plain.terminal.indicatorStatusLineDependsOnHostState());
     }
 }
 
@@ -863,7 +895,7 @@ TEST_CASE("Terminal.extensions.none", "[extensions]")
         showIndicator(mock.terminal, "<{Extension:git}>");
         CHECK(indicatorText(mock.terminal) == "<>");
         CHECK(serializeToVT(mock.terminal,
-                            StatusLineSegment { StatusLineDefinitions::Extension { {}, "git" } },
+                            StatusLineSegment { StatusLineDefinitions::Extension { { {}, "git" } } },
                             StatusLineStyling::Enabled)
                   .empty());
         for (auto const& hook: hookCases())

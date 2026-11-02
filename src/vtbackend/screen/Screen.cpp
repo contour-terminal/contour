@@ -29,6 +29,7 @@
 #include <vtbackend/vt/SemanticBlockQuery.hpp>
 #include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/SgrWriter.hpp>
+#include <vtbackend/vt/UserVar.hpp>
 #include <vtbackend/vt/VTType.hpp>
 #include <vtbackend/vt/VTWriter.hpp>
 
@@ -5000,11 +5001,17 @@ void Screen::processITerm2(std::string_view payload)
 void Screen::setITerm2UserVar(std::string_view argument)
 {
     // `SetUserVar=<name>=<base64 value>`: the value is base64 so that it may hold anything, ';' and BEL too.
-    auto const separator = argument.find('=');
-    if (separator == std::string_view::npos || separator == 0)
+    // A rejected argument is ignored, and so is one that no longer fits.
+    auto assignment = decodeUserVar(argument, _terminal->userVarLimits());
+    if (!assignment)
+    {
+        vtParserLog()("Ignoring SetUserVar: {}", toString(assignment.error()));
         return;
-    // Passed encoded: the terminal decodes it only if an extension wants it.
-    _terminal->userVarChanged(argument.substr(0, separator), argument.substr(separator + 1));
+    }
+    auto const name = assignment->name;
+    if (_terminal->userVarChanged(std::move(*assignment)) == UserVarStorage::Dropped)
+        vtParserLog()(
+            "Ignoring SetUserVar {}: already {} variables", name, _terminal->userVarLimits().maxCount);
 }
 
 void Screen::reportITerm2Capabilities()

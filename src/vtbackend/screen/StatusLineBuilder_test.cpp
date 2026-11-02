@@ -302,6 +302,8 @@ TEST_CASE("serializeStatusLineSegment.everyPlaceholderNameRoundTrips", "[statusl
                 return "{Command:Program=true}";
             else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
                 return "{Extension:git}";
+            else if constexpr (std::same_as<T, StatusLineDefinitions::UserVar>)
+                return "{UserVar:foo}";
             else
                 return "{" + name + "}";
         }();
@@ -635,6 +637,94 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
             CHECK(serializeStatusLineSegment(segment) == text);
         }
     }
+}
+
+TEST_CASE("StatusLineBuilder.userVar.parse", "[statusline][uservar]")
+{
+    using StatusLineDefinitions::UserVar;
+
+    SECTION("shorthand")
+    {
+        auto const segment = parseStatusLineSegment("{UserVar:WEZTERM_PROG}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<UserVar>(segment[0]));
+        auto const& item = std::get<UserVar>(segment[0]);
+        CHECK(item.name == "WEZTERM_PROG");
+        CHECK_FALSE(item.flags.any());
+    }
+
+    SECTION("attributes keep their styles")
+    {
+        auto const segment = parseStatusLineSegment("{UserVar:Name=WEZTERM_PROG,Bold}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<UserVar>(segment[0]));
+        CHECK(std::get<UserVar>(segment[0]).name == "WEZTERM_PROG");
+        CHECK(std::get<UserVar>(segment[0]).flags.any());
+    }
+
+    SECTION("without a name it is no item")
+    {
+        for (auto const text: { "{UserVar}"sv, "{UserVar:Bold,Color=#ff0000}"sv, "{UserVar: }"sv })
+        {
+            INFO(text);
+            auto const segment = parseStatusLineSegment(text);
+            REQUIRE(segment.size() == 1);
+            REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+            CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == text);
+        }
+    }
+
+    SECTION("MaxWidth is read, defaults to 40 and round-trips")
+    {
+        auto const segment = parseStatusLineSegment("{UserVar:Name=foo,MaxWidth=7}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<UserVar>(segment[0]));
+        CHECK(std::get<UserVar>(segment[0]).maxWidth == ColumnCount(7));
+        CHECK(serializeStatusLineSegment(segment) == "{UserVar:Name=foo,MaxWidth=7}"sv);
+        CHECK(std::get<UserVar>(parseStatusLineSegment("{UserVar:foo}"sv)[0]).maxWidth == ColumnCount(40));
+        CHECK(std::get<UserVar>(parseStatusLineSegment("{UserVar:Name=foo,MaxWidth=0}"sv)[0]).maxWidth
+              == ColumnCount(40));
+    }
+
+    SECTION("both forms round-trip")
+    {
+        for (auto const text: { "{UserVar:foo}"sv, "{UserVar:Name=foo,Bold,Color=#FF0000,Left=[}"sv })
+        {
+            INFO(text);
+            CHECK(serializeStatusLineSegment(parseStatusLineSegment(text)) == text);
+        }
+    }
+}
+
+TEST_CASE("serializeToVT.userVar", "[statusline][uservar]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto const render = [&] {
+        return serializeToVT(
+            mc.terminal, parseStatusLineSegment("{UserVar:foo}"), StatusLineStyling::Disabled);
+    };
+
+    CHECK(render().empty()); // unset
+
+    mc.writeToScreen("\033]1337;SetUserVar=foo=dmlt\a"); // "vim"
+    CHECK(render() == "vim");
+
+    // Sanitized: the ESC a program smuggled in never reaches the line as an escape.
+    mc.writeToScreen("\033]1337;SetUserVar=foo=YVtiYw==\a"); // "a[bc" is harmless ...
+    CHECK(render() == "a[bc");
+    mc.writeToScreen("\033]1337;SetUserVar=foo=YRtbMW1i\a"); // "a\x1b[1mb"
+    CHECK_FALSE(render().contains('\x1b'));
+
+    // Cut at its end to MaxWidth columns, with an ellipsis.
+    mc.writeToScreen("\033]1337;SetUserVar=foo=MDEyMzQ1Njc4OQ==\a"); // "0123456789"
+    CHECK(serializeToVT(mc.terminal,
+                        parseStatusLineSegment("{UserVar:Name=foo,MaxWidth=5}"),
+                        StatusLineStyling::Disabled)
+          == "0123\u2026");
+    CHECK(serializeToVT(mc.terminal,
+                        parseStatusLineSegment("{UserVar:Name=foo,MaxWidth=10}"),
+                        StatusLineStyling::Disabled)
+          == "0123456789");
 }
 
 // {{{ Role colours
@@ -1620,3 +1710,15 @@ TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][
 }
 
 // }}}
+
+TEST_CASE("Terminal.userVar.repaintsTheIndicator", "[statusline][uservar]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("[{UserVar:foo}]", "", ""));
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    CHECK(indicatorTextAfterRefresh(mc.terminal).starts_with("[]"));
+    mc.writeToScreen("\033]1337;SetUserVar=foo=dmlt\a");
+    CHECK(indicatorTextAfterRefresh(mc.terminal).starts_with("[vim]"));
+    mc.writeToScreen("\033]1337;SetUserVar=foo=bnZpbQ==\a"); // "nvim"
+    CHECK(indicatorTextAfterRefresh(mc.terminal).starts_with("[nvim]"));
+}

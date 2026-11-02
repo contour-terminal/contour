@@ -15,6 +15,7 @@
 #include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
+#include <vtbackend/vt/UserVar.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
 #include <vtparser/BulkScan.hpp>
@@ -348,6 +349,9 @@ struct Settings
     bool isInsertAfterYank = false;
 
     TabsNamingMode tabNamingMode = TabsNamingMode::Indexing;
+
+    /// Bounds on the user variables programs may set.
+    UserVarLimits userVarLimits;
 
     // TODO: we could configure also the number of lines of the host writable statusline and indicator
     // statusline.

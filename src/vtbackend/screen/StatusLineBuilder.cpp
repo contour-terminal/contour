@@ -265,9 +265,9 @@ static std::string_view shorthandOf(crispy::StringInterpolation const& interpola
     return text.substr(colon + 1);
 }
 
-/// Whether @p raw, the text of a `{Extension:<raw>}` shorthand, is an extension's name: not blank, and
-/// holding no attribute, since a ',' or '=' means the user wrote attributes and forgot `Name=`.
-[[nodiscard]] static bool isExtensionShorthand(std::string_view raw) noexcept
+/// Whether @p raw, the text of a `{Extension:<raw>}` or `{UserVar:<raw>}` shorthand, is a name: not blank,
+/// and holding no attribute, since a ',' or '=' means the user wrote attributes and forgot `Name=`.
+[[nodiscard]] static bool isNameShorthand(std::string_view raw) noexcept
 {
     return raw.find_first_not_of(" \t") != std::string_view::npos
            && raw.find_first_of(",={}") == std::string_view::npos;
@@ -275,10 +275,10 @@ static std::string_view shorthandOf(crispy::StringInterpolation const& interpola
 
 /// Builds the item of type @p T that @p interpolation describes, given its already-parsed @p styles.
 ///
-/// The alternatives carrying payload beyond `Styles` (Text, Command, Extension, Context and Tabs) are the
-/// only ones that need saying here; every other placeholder is exactly its styles. Returns nullopt when a
-/// required attribute is missing, which makes the placeholder unrecognized and so echoed verbatim by the
-/// caller.
+/// The alternatives carrying payload beyond `Styles` (Text, Command, Extension, UserVar, Context and Tabs)
+/// are the only ones that need saying here; every other placeholder is exactly its styles. Returns nullopt
+/// when a required attribute is missing, which makes the placeholder unrecognized and so echoed verbatim by
+/// the caller.
 template <typename T>
 static std::optional<StatusLineDefinitions::Item> makeItemOfType(
     StatusLineDefinitions::Styles const& styles, crispy::StringInterpolation const& interpolation)
@@ -305,15 +305,15 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         // Without a program there is nothing to run, so this is not a usable {Command}.
         return std::nullopt;
     }
-    else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+    else if constexpr (std::derived_from<T, StatusLineDefinitions::NamedItem>)
     {
         if (auto name = tryParseStringAttribute(interpolation, "Name"); name && !name->empty())
-            return StatusLineDefinitions::Extension { styles, std::move(*name) };
+            return T { { styles, std::move(*name) } };
         // Shorthand {Extension:<name>}: everything after "Extension:" is the name, unstyled, exactly as the
         // {Command:<raw>} shorthand is -- so "{Extension:Bold}" names an extension rather than a style.
-        if (auto const raw = shorthandOf(interpolation); isExtensionShorthand(raw))
-            return StatusLineDefinitions::Extension { StatusLineDefinitions::Styles {}, std::string { raw } };
-        // Without a name there is nothing to show, so this is not a usable {Extension}.
+        if (auto const raw = shorthandOf(interpolation); isNameShorthand(raw))
+            return T { { StatusLineDefinitions::Styles {}, std::string { raw } } };
+        // Without a name there is nothing to show, so this is not a usable item.
         return std::nullopt;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
@@ -762,6 +762,18 @@ namespace
             return text;
         }
 
+        std::string visit(StatusLineDefinitions::UserVar const& item)
+        {
+            // A program set it, so it is sanitized as the working directory is: no control byte of it
+            // reaches the status line's screen as an escape (which also leaves no SGR for the styling to
+            // strip, unlike an extension's frame). Sanitized before it is cut.
+            if (auto const value = vt.userVar(item.name))
+                return elideEnd(sanitizeCommandLine(*value, SanitizePurpose::Display),
+                                item.maxWidth,
+                                vt.clusterWidthPolicy());
+            return {};
+        }
+
         std::string visit(StatusLineDefinitions::Text const& item)
         {
             core::ignoreUnused(this);
@@ -1161,6 +1173,17 @@ namespace
                && isUnstyled(item);
     }
 
+    /// @return Whether @p item has no MaxWidth of its own (or has none at all), as the shorthand cannot say
+    /// one.
+    template <typename T>
+    [[nodiscard]] bool hasDefaultMaxWidth(T const& item)
+    {
+        if constexpr (StatusLineDefinitions::HasMaxWidth<T>)
+            return item.maxWidth == T {}.maxWidth;
+        else
+            return true;
+    }
+
     /// The payload @p item is written with in its `{<Name>:<payload>}` shorthand, or nullopt when it has
     /// none or the shorthand would not read back as @p item.
     template <typename T>
@@ -1177,9 +1200,9 @@ namespace
                 return item.command;
         }
         // The shorthand is what a user writes for an extension; kept wherever it reads back the same.
-        else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+        else if constexpr (std::derived_from<T, StatusLineDefinitions::NamedItem>)
         {
-            if (isUnstyled(item) && isExtensionShorthand(item.name))
+            if (isUnstyled(item) && isNameShorthand(item.name) && hasDefaultMaxWidth(item))
                 return item.name;
         }
         return std::nullopt;
@@ -1299,7 +1322,7 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     if (v.interval != StatusLineDefinitions::DefaultCommandInterval)
                         attributes.add("Interval", std::to_string(v.interval.count()));
                 }
-                else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+                else if constexpr (std::derived_from<T, StatusLineDefinitions::NamedItem>)
                     attributes.add("Name", v.name);
 
                 appendStyles(attributes, v);
