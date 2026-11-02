@@ -73,6 +73,8 @@ add_library(vthost STATIC
     ServiceControl_launchd.hpp
     ServiceControl_systemd.cpp
     ServiceControl_systemd.hpp
+    Linger.cpp
+    Linger.hpp
     ServiceControl_win32.cpp
     RestoredCounts.hpp
     SessionSettings.cpp
@@ -277,6 +279,7 @@ if(VTHOST_TESTING)
         PduPump_test.cpp
         ServiceControl_launchd_test.cpp
         ServiceControl_systemd_test.cpp
+        Linger_test.cpp
         ServiceControl_test.cpp
         SocketPath_test.cpp
         SshTransport_test.cpp
