@@ -3837,6 +3837,20 @@ class Terminal: public IStatusLinePublishTarget
         return _inputGenerator.keyboardProtocol();
     }
 
+    /// Whether the active Kitty keyboard mode encodes a key's every modifier -- Super included -- on a
+    /// press: DisambiguateEscapeCodes or ReportAllKeysAsEscapeCodes. ReportEventTypes alone does not, for
+    /// a press is then still encoded as in the legacy mode. Read under the input lock, which every change
+    /// of the protocol takes: a key asks as it arrives, and must not wait for the parser thread's state
+    /// lock.
+    /// @return True while a flag that makes a press carry its modifiers is set.
+    [[nodiscard]] bool keyboardProtocolEncodesModifiers() const
+    {
+        auto const _ = std::scoped_lock { _inputMutex };
+        auto const& protocol = _inputGenerator.keyboardProtocol();
+        return protocol.enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
+               || protocol.enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    }
+
     /// Changes the Kitty keyboard protocol's state, under the input lock as well as the state lock the caller
     /// holds, as every change to what a key is encoded with is. @see changeInputEncoding()
     /// @param change What to do to the protocol's state.

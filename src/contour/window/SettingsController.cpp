@@ -989,8 +989,8 @@ void SettingsController::refresh()
                                                      : std::make_shared<platform::NullFontFamilySource>())
                                  ->monospaceFamilies())
         _fontFamilies.push_back(QString::fromStdString(family));
-    _linkGesture =
-        QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
+    _linkGesture = QString::fromStdString(
+        command::describeLinkGesture(cfg, command::shortcutStyleFor(cfg.keyboardPlatformKind)));
     listShellRows();
 
     // gui_config_locked configures the session rather than changing its state, so a change of it starts a
@@ -1044,9 +1044,18 @@ void SettingsController::refresh()
     appendConfiguredBindings(_keybindings, mappings.keyMappings);
     appendConfiguredBindings(_keybindings, mappings.charMappings);
     appendConfiguredBindings(_keybindings, mappings.mouseMappings);
-    appendBuiltInBindings(_keybindings, config::builtinFallbackKeyMappings(), mappings.keyMappings, cfg);
-    appendBuiltInBindings(_keybindings, config::builtinFallbackCharMappings(), mappings.charMappings, cfg);
-    appendBuiltInBindings(_keybindings, config::builtinFallbackMouseMappings(), mappings.mouseMappings, cfg);
+    appendBuiltInBindings(_keybindings,
+                          config::builtinFallbackKeyMappings(cfg.keyboardPlatformKind),
+                          mappings.keyMappings,
+                          cfg);
+    appendBuiltInBindings(_keybindings,
+                          config::builtinFallbackCharMappings(cfg.keyboardPlatformKind),
+                          mappings.charMappings,
+                          cfg);
+    appendBuiltInBindings(_keybindings,
+                          config::builtinFallbackMouseMappings(cfg.keyboardPlatformKind),
+                          mappings.mouseMappings,
+                          cfg);
 
     emit changed();
     emit globalFieldsChanged();

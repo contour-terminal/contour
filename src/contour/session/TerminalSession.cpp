@@ -395,7 +395,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  std::optional<vtpty::Process::ExecInfo> launchedCommand,
                                  std::unique_ptr<platform::Notifier> notifier,
                                  SessionRole role,
-                                 SessionHosting hosting):
+                                 SessionHosting hosting,
+                                 input::KeyboardPlatformFactory keyboardPlatforms):
     _manager { manager },
     _id { createSessionId() },
     _startTime { app.terminalClocks().steady.now() },
@@ -412,6 +413,9 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                           : std::nullopt },
     _profile { *_config.profile(_profileName) },
     _app { app },
+    _keyboardPlatformFactory { keyboardPlatforms ? std::move(keyboardPlatforms)
+                                                 : app.keyboardPlatformFactory() },
+    _keyboardPlatform { _keyboardPlatformFactory(input::keyboardPolicyOf(_profile)) },
     _currentColorPreference { app.colorPreference() },
     _gutterChrome { gutterChromeFor(app.chromeStyle()) },
     _systemScrollBars { app.platformAppearance().scrollBars },
@@ -604,11 +608,6 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
 display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcept
 {
     return _app.forcedFontDpiProvider();
-}
-
-input::KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
-{
-    return _app.keyboardLayout();
 }
 
 vtbackend::StatusLineFontMetrics TerminalSession::displayFontMetrics()
@@ -3976,137 +3975,6 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 // }}}
 // {{{ Input Events
 
-namespace
-{
-    /// What became of a key or character event once its binding was looked up.
-    enum class BindingOutcome : uint8_t
-    {
-        PassOn = 0, ///< No binding claimed it: it goes on to the next table, then to the application.
-        Claimed,    ///< A binding ran, or swallowed it.
-    };
-
-    /// Runs @p actions for a press or a repeat, through the repeat filter.
-    ///
-    /// A press whose actions all decline is claimed only when @p declined says so. A repeat whose actions
-    /// were all filtered out is always claimed: the binding owns the chord, so its repeats must not reach
-    /// the application as the chord's own encoding (a held Ctrl+Shift+G would send ^G per repeat).
-    /// @param actions The bound actions; nullptr when nothing is bound.
-    /// @param eventType Press or Repeat.
-    /// @param declined What a press whose actions all declined does.
-    /// @param execute Runs a list of actions, returning how many ran.
-    /// @return Whether the event was claimed.
-    template <typename Execute>
-    [[nodiscard]] BindingOutcome runBinding(config::ActionList const* actions,
-                                            KeyboardEventType eventType,
-                                            config::DeclinedInput declined,
-                                            Execute const& execute)
-    {
-        if (actions == nullptr)
-            return BindingOutcome::PassOn;
-
-        // Drop actions that must not fire on auto-repeat (e.g. CloseTab/ClosePane/CreateNewTab). The
-        // overwhelmingly common held keys (characters, arrows) bind only repeatable actions, so avoid
-        // allocating a filtered copy unless there is actually a non-repeatable action to drop.
-        auto executed = 0;
-        if (eventType != KeyboardEventType::Repeat
-            || std::ranges::none_of(*actions, actions::isNonRepeatable))
-            executed = execute(*actions);
-        else if (auto const repeatable = actions::filterRepeatableActions(*actions); repeatable.empty())
-            return BindingOutcome::Claimed;
-        else
-            executed = execute(repeatable);
-
-        return executed > 0 || declined == config::DeclinedInput::Consume ? BindingOutcome::Claimed
-                                                                          : BindingOutcome::PassOn;
-    }
-
-    /// Runs the actions of a built-in row, honouring what the row says a declined press does.
-    /// @param row The matching row; nullptr when none matched.
-    template <typename Input, typename Execute>
-    [[nodiscard]] BindingOutcome runFallbackRow(config::FallbackMapping<Input> const* row,
-                                                KeyboardEventType eventType,
-                                                Execute const& execute)
-    {
-        if (row == nullptr)
-            return BindingOutcome::PassOn;
-        return runBinding(&row->mapping.binding, eventType, row->declined, execute);
-    }
-} // namespace
-
-void TerminalSession::sendKeyEvent(Key key,
-                                   KeyboardModifiers modifiers,
-                                   KeyboardEventType eventType,
-                                   Timestamp now)
-{
-    input::inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
-
-    // An ended pane waits for its footer's answer: the input mappings still run first (so the ClosePane
-    // binding closes it, through terminate()'s already-closed branch, and Alt+Enter still toggles full
-    // screen), an unmodified Return they leave alone is Restart, and nothing reaches the PTY, whose
-    // program is gone. GUI-thread state, read without the lock (see _end).
-    auto const ended = _end != EndReason::None;
-
-    auto const modifierOnly = vtbackend::isModifierKey(key);
-    if (modifierOnly)
-        onHeldModifiersChanged(vtbackend::heldAfter(key, eventType, modifiers.chord));
-
-    // A bare modifier is no typing: hiding the pointer then hides the very link Ctrl is held to reach.
-    // Guarded for display-less sessions (background pane, headless test), which have no cursor to hide.
-    if (_profile.mouse.value().hideWhileTyping && _display != nullptr && !modifierOnly)
-        _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
-
-    if (eventType != KeyboardEventType::Release)
-    {
-        auto const flags = _terminal.bindingModes();
-        auto const execute = [this](auto const& actions) {
-            return executeAllActions(actions);
-        };
-
-        // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
-        if (runBinding(config::apply(_config.inputMappings.value().keyMappings, key, modifiers.chord, flags),
-                       eventType,
-                       config::DeclinedInput::PassThrough,
-                       execute)
-            == BindingOutcome::Claimed)
-            return;
-
-        // The user's mappings did not claim this key, so fall back to the built-in ones. They are
-        // consulted second on purpose: an explicit binding in the user's config always wins, because it
-        // is found first (see builtinFallbackKeyMappings for why a plain default could not reach an
-        // existing user at all).
-        if (runFallbackRow(
-                config::builtinFallbackRow(_config, key, modifiers.chord, flags), eventType, execute)
-            == BindingOutcome::Claimed)
-            return;
-    }
-    if (ended)
-    {
-        // Only a bare Return: a modified one is a chord the user may bind, and a release or repeat is
-        // not a request. The Return's release then reaches the NEW session, whose terminal ignores it:
-        // a fresh terminal has negotiated no keyboard protocol that reports releases.
-        if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
-            && modifiers.chord.none())
-            runFooterAction();
-        return;
-    }
-    // Before the key leaves: a prompt that turned echo off after its last output (stty -echo; read) is
-    // noticed here. This key has already been shown to the OS (event taps saw it before Qt did), so secure
-    // input protects the keys after it, not this one; it also releases a stale lock before the key goes in.
-    refreshInputEcho();
-    noteInputActivity();
-    // Typing is the keyboard acting on the shell, not on a block. A bare modifier is no typing: Ctrl goes
-    // down before the Ctrl+Enter that needs the focus, and a release ends nothing.
-    if (eventType != KeyboardEventType::Release && !modifierOnly)
-        dropBlockFocusOnInput();
-    if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
-        && modifiers.chord.none())
-        noteCommandEntered();
-    terminal().sendKeyEvent(key, modifiers, eventType, now);
-    // Echo turned back on with nothing printed (a prompt answered by a program that stays quiet) is
-    // noticed at the next key, once the key's bytes have reached the PTY.
-    refreshInputEcho();
-}
-
 void TerminalSession::noteCommandEntered()
 {
     // Read as the Return is pressed, under the lock the parser thread writes the screen and the command
@@ -4227,76 +4095,6 @@ void TerminalSession::declineShellIntegrationCard()
         case window::CardStage::Confirm: break;
     }
     hideShellIntegrationCard();
-}
-
-void TerminalSession::sendCharEvent(char32_t value,
-                                    KeyIdentity keyIdentity,
-                                    KeyboardModifiers modifiers,
-                                    KeyboardEventType eventType,
-                                    Timestamp now)
-{
-    input::inputLog()("Character {} event received: {} '{}'",
-                      eventType,
-                      modifiers,
-                      core::escape(unicode::convert_to<char>(value)));
-
-    // As in sendKeyEvent: an ended pane runs the input mappings, and passes no text to the PTY.
-    auto const ended = _end != EndReason::None;
-
-    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
-        _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
-
-    if (eventType != KeyboardEventType::Release)
-    {
-        auto const& charMappings = _config.inputMappings.value().charMappings;
-        auto const flags = _terminal.bindingModes();
-        auto const execute = [this](auto const& actions) {
-            return executeAllActions(actions);
-        };
-
-        // Bindings are stored folded (see YAMLConfigReader::parseKeyOrChar), because WHICH case a
-        // letter arrives in is decided by the route contour::sendKeyEvent() took rather than by the
-        // user — and on macOS the option-as-Alt branch even lets CapsLock decide, which would
-        // otherwise let a latched lock key pick the shortcut. Match in the same folded form.
-        // NB: only the *lookup* is folded; `value` itself is forwarded verbatim to the terminal
-        // below, so what the application receives is unchanged.
-        //
-        // A shortcut written with the base key label (e.g. `Ctrl+Shift+,`) is stored under the base
-        // character, but Qt delivers a Shift+punctuation chord as the *shifted* symbol ('<' here). When
-        // the direct lookup misses and Shift is held, retry under the un-shifted base so the binding
-        // fires as the user intended. The two normalizations are disjoint — unshiftedCodepoint()
-        // rewrites only digits and punctuation, foldedBindingCodepoint() only ASCII letters — so they
-        // compose in either order. Both tables are looked up through this one rule.
-        auto const folded = config::foldedBindingCodepoint(value);
-        auto const lookUp = [&](auto const& find) {
-            auto const* found = find(folded);
-            if (found == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
-                if (auto const base = input::unshiftedCodepoint(folded); base != folded)
-                    found = find(base);
-            return found;
-        };
-
-        auto const* bound =
-            lookUp([&](char32_t ch) { return config::apply(charMappings, ch, modifiers.chord, flags); });
-        if (runBinding(bound, eventType, config::DeclinedInput::PassThrough, execute)
-            == BindingOutcome::Claimed)
-            return;
-
-        // Then the built-in ones, as for keys: an explicit binding of the same chord in the user's config is
-        // found first and wins, and one that declines lets the built-in one try.
-        auto const* row = lookUp(
-            [&](char32_t ch) { return config::builtinFallbackRow(_config, ch, modifiers.chord, flags); });
-        if (runFallbackRow(row, eventType, execute) == BindingOutcome::Claimed)
-            return;
-    }
-    if (ended)
-        return;
-    refreshInputEcho(); // before the key leaves, as in sendKeyEvent
-    noteInputActivity();
-    if (eventType != KeyboardEventType::Release)
-        dropBlockFocusOnInput();
-    terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
-    refreshInputEcho(); // as in sendKeyEvent
 }
 
 void TerminalSession::sendMousePressEvent(Modifiers modifiers,
@@ -4918,8 +4716,10 @@ void TerminalSession::refreshLinkTarget(QString text)
     auto const reveal = linkTargetRevealOf(_config.hyperlinkHoverTooltip.value());
     auto next = LinkTarget {
         .text = std::move(text),
-        .hint = QString::fromStdString(command::linkOpenHint(
-            config::followHyperlinkModifiers(_config), state.bypass, command::platformShortcutStyle())),
+        .hint = QString::fromStdString(
+            command::linkOpenHint(config::followHyperlinkModifiers(_config),
+                                  state.bypass,
+                                  command::shortcutStyleFor(_config.keyboardPlatformKind))),
         .visibility = LinkPillVisibility::Hidden,
     };
     next.visibility = linkPillVisibility(reveal, state.pointer, state.held, next.text.toStdString());
@@ -7796,6 +7596,8 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
     _profileName = newProfileName;
     auto const previousPermissions = _profile.permissions.value();
     _profile = *newProfile;
+    // A new policy is a new platform: the keyboard platform is configured once, at construction.
+    _keyboardPlatform = _keyboardPlatformFactory(input::keyboardPolicyOf(_profile));
     reconcilePermissions(previousPermissions);
     configureTerminal();
 #ifdef CONTOUR_EXTENSIONS

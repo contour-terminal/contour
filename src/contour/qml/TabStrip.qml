@@ -72,7 +72,7 @@ Row {
     // focused tab's own editor, when one is open, takes its keys first and never lets them up.
     Keys.onPressed: (event) => {
         if (root.controller && root.controller.chromeKey)
-            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers, event.text)
     }
 
     /// Gives keyboard focus to the tab at @p index, bringing it into view: how the controller's chrome focus

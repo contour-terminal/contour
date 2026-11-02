@@ -6,7 +6,9 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/ScrollBarMode.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
-#include <contour/input/KeyboardLayout.hpp>
+#include <contour/input/KeyEvent.hpp>
+#include <contour/input/KeyRouter.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/Audio.hpp>
@@ -199,6 +201,13 @@ struct GutterHit
     vtbackend::LineOffset gridLine {};  ///< The grid line beside the pointer.
     vtbackend::LineOffset screenRow {}; ///< The screen row that line is drawn on, a top status line counted.
     vtbackend::GutterSegmentKind segment {}; ///< The segment under the pointer.
+};
+
+/// Whether a key event became input. @see TerminalSession::sendKeyboardEvent
+enum class KeyDelivery : uint8_t
+{
+    Unhandled = 0, ///< The platform could not translate it: Qt routes it on.
+    Handled,       ///< It was routed: a binding ran, the terminal received it, or it was consumed.
 };
 
 /**
@@ -858,6 +867,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        tray where it offers none; a test passes a recording one to assert what was raised and
      *        to drive close/activation events back.
      * @param role what the session's program is to the user (@see SessionRole). The default is a shell.
+     * @param hosting where the session's program runs (@see SessionHosting).
+     * @param keyboardPlatforms how the session builds the keyboard platform that decodes its key events,
+     *        for its profile's policy -- and again whenever a profile change replaces that policy. Empty (the
+     *        default) means the build host's, @c app.keyboardPlatformFactory(); a test passes another kind's
+     *        to run that platform's key path on any machine.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
@@ -867,7 +881,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                     std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt,
                     std::unique_ptr<platform::Notifier> notifier = nullptr,
                     SessionRole role = SessionRole::Shell,
-                    SessionHosting hosting = SessionHosting::Local);
+                    SessionHosting hosting = SessionHosting::Local,
+                    input::KeyboardPlatformFactory keyboardPlatforms = {});
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
@@ -1308,10 +1323,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The provider, or nullptr when no Qt application exists (tests).
     [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider() noexcept;
 
-    /// The app-wide keyboard layout (see KeyboardLayout.h), for the display's key path. Routed
-    /// through the session for the same reason as the DPI provider above.
-    /// @return The layout; never nullptr.
-    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept;
+    /// What this session's platform means by a key event, for the display's key path: built for the
+    /// profile's policy, and replaced -- not reconfigured -- when a profile change replaces that policy. GUI
+    /// thread.
+    /// @return The platform; never null.
+    [[nodiscard]] input::KeyboardPlatform const& keyboardPlatform() const noexcept
+    {
+        return *_keyboardPlatform;
+    }
 
     // The guarded roles' executors: each answers its role's pending request, remembers the answer for the
     // session unless @p memory is Once (see executeRole()), and settles the role's question if it is asked.
@@ -1563,10 +1582,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
+
+    /// Routes a normalized key event and executes the route: the user's binding, then the built-in one,
+    /// then the terminal. A named key goes as one key event; text goes one character event per codepoint.
+    /// @param event The event, as keyboardPlatform() normalized it.
+    /// @param now When it arrived.
+    /// @return Unhandled for an event the platform could not translate, which Qt then routes on.
+    [[nodiscard]] KeyDelivery sendKeyboardEvent(input::KeyEvent const& event, Timestamp now);
+
+    /// Routes and executes a named key that no platform modifier rule applies to (remote input, tests): as
+    /// sendKeyboardEvent() does, with the application modifier absent.
     void sendKeyEvent(vtbackend::Key key,
                       vtbackend::KeyboardModifiers modifiers,
                       vtbackend::KeyboardEventType eventType,
                       Timestamp now);
+    /// Routes and executes a character, as sendKeyEvent() does a named key.
     void sendCharEvent(char32_t value,
                        vtbackend::KeyIdentity keyIdentity,
                        vtbackend::KeyboardModifiers modifiers,
@@ -2520,6 +2550,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<std::chrono::steady_clock::time_point> _resyncGraceEnd;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
+    /// Builds _keyboardPlatform for the profile's policy; fixed for the session's life. @see keyboardPlatform
+    input::KeyboardPlatformFactory _keyboardPlatformFactory;
+    /// Replaced, never reconfigured, when activateProfile() installs a profile. GUI thread.
+    std::unique_ptr<input::KeyboardPlatform> _keyboardPlatform;
     vtbackend::ColorPreference _currentColorPreference;
     /// The chrome row's gutter form and rail metrics, fixed for the session's life: the chrome row is
     /// resolved before any session exists and no reload changes it. Declared before _terminal, whose
@@ -2747,6 +2781,24 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void runBindingForBlock(vtbackend::MouseButton button,
                             vtbackend::Modifiers modifiers,
                             vtbackend::CommandBlockId block);
+
+    /// The bindings and terminal state a key route is decided in, read as the key arrives.
+    [[nodiscard]] input::RouteContext keyRouteContext() const;
+
+    /// sendKeyEvent(), with whether the platform's application modifier is held.
+    void deliverKey(vtbackend::Key key,
+                    vtbackend::KeyboardModifiers modifiers,
+                    input::AppModifier appModifier,
+                    vtbackend::KeyboardEventType eventType,
+                    Timestamp now);
+
+    /// sendCharEvent(), with whether the platform's application modifier is held.
+    void deliverChar(char32_t value,
+                     vtbackend::KeyIdentity keyIdentity,
+                     vtbackend::KeyboardModifiers modifiers,
+                     input::AppModifier appModifier,
+                     vtbackend::KeyboardEventType eventType,
+                     Timestamp now);
 
     /// Opens the menu of @p block at the pointer: what a click on its status mark in the gutter does.
     /// @param block The block.

@@ -381,6 +381,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/NoticeModel.cpp
         window/QuickTerminalController.cpp
         session/TerminalSession.cpp
+        session/TerminalSessionKeyInput.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
         display/LatencyProbeDriver.cpp
@@ -932,6 +933,14 @@ if(CONTOUR_FRONTEND_GUI)
             display/CaretReportGate_test.cpp
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
+            input/NativeKeyEvent_test.cpp
+            input/KeyboardPlatform_test.cpp
+            input/KeyRouter_test.cpp
+            input/KeyPipeline_bench_test.cpp
+            input/MacKeyboardPlatform_test.cpp
+            input/Win32KeyboardPlatform_test.cpp
+            input/XkbLayout_test.cpp
+            session/KeyCharacterization_test.cpp
             display/ImeQueryRect_test.cpp
             display/ShortcutOverride_test.cpp
             display/ViewportTextIndex_test.cpp
@@ -1003,10 +1012,12 @@ if(CONTOUR_FRONTEND_GUI)
             display/CommandBlockRendering_test.cpp
             display/TerminalAccessible_test.cpp
             display/TerminalDisplayIme_test.cpp
+            display/TerminalDisplayInput_test.cpp
             remote/TmuxController_test.cpp
             session/FocusRouting_test.cpp
             session/FontControl_test.cpp
             session/SessionInput_test.cpp
+            session/TerminalSessionKeyInput_test.cpp
             session/TabSizeInheritance_test.cpp
             test/ContourGuiApp_test.cpp
             test/MainWindowQml_test.cpp
@@ -1051,6 +1062,10 @@ if(CONTOUR_FRONTEND_GUI)
                 platform/CocoaTaskbarProgressSink_test.mm platform/CocoaTitleBandMaterial_test.mm
                 platform/CocoaUserNotificationCenter_test.mm platform/CocoaWindowFrame_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        endif()
+        if(UNIX AND NOT APPLE)
+            # The adapter over libxkbcommon exists on these hosts only (input/CMakeLists.txt).
+            target_sources(contour_gui_test PRIVATE input/XkbLiveKeymap_test.cpp)
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
@@ -1405,6 +1420,7 @@ if(CONTOUR_TESTING)
         config/Actions_test.cpp
         config/BindingCollisions_test.cpp
         config/ChromeTokenGroups_test.cpp
+        config/DefaultBindings_test.cpp
         config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
@@ -1538,7 +1554,8 @@ if(CONTOUR_TESTING)
     # skill's; the tests compare against the files themselves.
     target_compile_definitions(contour_test PRIVATE
         CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
-        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md")
+        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
+        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
@@ -2009,7 +2026,7 @@ else()
 
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}")
+        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
         set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
         set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

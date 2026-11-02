@@ -272,7 +272,7 @@ class MockMainController: public MainWindowControllerMock
     }
     /// Records a key the chrome offered, and answers as the controller does for one it handles.
     /// @return Whether the key counts as handled: true unless a test set @c chromeKeysHandled to false.
-    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers)
+    Q_INVOKABLE [[nodiscard]] bool chromeKey(int qtKey, int qtModifiers, QString const& /*text*/ = {})
     {
         chromeKeys.emplace_back(qtKey, qtModifiers);
         if (mirrorsChromeKeys && _chromeArea == window::ChromeArea::Tabs)

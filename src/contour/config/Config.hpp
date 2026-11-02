@@ -12,6 +12,7 @@
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/HostUrl.hpp>
+#include <contour/config/KeyboardPlatformKind.hpp>
 #include <contour/config/OptionAsAlt.hpp>
 #include <contour/config/PreeditStyle.hpp>
 #include <contour/config/QuickTerminalConfig.hpp>
@@ -158,83 +159,21 @@ using FallbackCharMapping = FallbackMapping<char32_t>;
 /// tables *after* theirs is what lets a new default still reach them — while an explicit binding of the
 /// same input in their config continues to win, because that one is found first.
 ///
+/// They come from the same table as makeDefaultInputMappings() (@see DefaultBindings.hpp), restricted to
+/// the rows that exist on @p kind and are fallbacks.
+///
+/// @param kind The keyboard platform the configuration is loaded for.
 /// @return The fallback mappings, in match order.
-[[nodiscard]] std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings();
+[[nodiscard]] std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings(
+    KeyboardPlatformKind kind);
 
 /// @copydoc builtinFallbackMouseMappings
-[[nodiscard]] std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings();
+[[nodiscard]] std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings(KeyboardPlatformKind kind);
 
 /// @copydoc builtinFallbackMouseMappings
 /// Characters, stored folded upper-case as a parsed binding is: a Ctrl+Shift+letter chord arrives as one.
 /// @see foldedBindingCodepoint
-[[nodiscard]] std::vector<FallbackCharMapping> const& builtinFallbackCharMappings();
-
-/// The macOS find chords (R-j): ⌘F opens the find bar, ⌘G and ⇧⌘G step to the next and previous match, ⌘E
-/// uses the selection. Fallbacks, in every mode -- so ⌘G with no search reaches the session, which opens the
-/// bar -- and an explicit binding of the same chord still wins. builtinFallbackCharMappings() holds them on
-/// macOS only; declared everywhere so the table can be tested everywhere.
-/// @return The four rows.
-[[nodiscard]] std::array<FallbackCharMapping, 4> const& macFindChords();
-
-/// How many tab positions ⌘1 … ⌘9 select.
-inline constexpr int MacTabPositionCount = 9;
-
-/// How many rows macTabChords() holds: ⌘T, ⌘W, ⇧⌘[ and ⇧⌘], and one per tab position.
-inline constexpr std::size_t MacTabChordCount = 4 + static_cast<std::size_t>(MacTabPositionCount);
-
-/// The macOS tab chords: ⌘T opens a tab, ⌘W closes it, ⇧⌘[ and ⇧⌘] step to the previous and next tab, and
-/// ⌘1 … ⌘9 select the tab at that position. Qt's Control/Meta swap is off, so ⌘ arrives as Super. Fallbacks,
-/// in every mode, so an explicit binding of the same chord still wins; builtinFallbackCharMappings() holds
-/// them on macOS only, declared everywhere so the table can be tested everywhere.
-/// @return The rows.
-[[nodiscard]] std::array<FallbackCharMapping, MacTabChordCount> const& macTabChords();
-
-/// The chords that act on the focused command block (R-j): Ctrl+Enter and Shift+F10 open its menu, Enter
-/// folds it, Escape lets go of it. Every one requires MatchModes::BlockFocus, so without a focused block the
-/// key reaches the application as it always did. In makeDefaultInputMappings() for a freshly written
-/// configuration, and in builtinFallbackKeyMappings() for one that predates them.
-/// @return The four rows.
-[[nodiscard]] std::array<KeyInputMapping, 4> const& blockFocusChords();
-
-/// The macOS chords that move the block focus (R-j): Super+Up and Super+Down step to the previous and next
-/// command, Shift+Super+Up and Shift+Super+Down do so and select its output. In every mode but the
-/// alternate screen, where an application keeps the chord. Fallbacks; builtinFallbackKeyMappings() holds
-/// them on macOS only, declared everywhere so the table can be tested everywhere.
-/// @return The four rows.
-[[nodiscard]] std::array<FallbackKeyMapping, 4> const& macBlockChords();
-
-/// The host a pane chord table is written for. A parameter rather than an `#ifdef` at the use site so that
-/// both tables are testable on every machine.
-enum class PaneChordHost : uint8_t
-{
-    Desktop = 0, ///< Linux and Windows: Ctrl/Alt chords.
-    Mac,         ///< macOS: the Command chords iTerm2 and Terminal users already know.
-    Count,       ///< Not a host: the number of them.
-};
-
-/// The host this binary runs on.
-inline constexpr auto BuildPaneChordHost =
-#ifdef __APPLE__
-    PaneChordHost::Mac;
-#else
-    PaneChordHost::Desktop;
-#endif
-
-/// The key chords that move between panes (and zoom one) and move the active tab on @p host: Alt+Shift+Arrow
-/// and Ctrl+Shift+PageUp/PageDown on the desktop, Command+Option+Arrow, Command+Shift+Enter and
-/// Command+PageUp/PageDown on a Mac. Not Alt+Arrow on a Mac, where Option+Arrow is the
-/// shell's word motion. In makeDefaultInputMappings() for a freshly written configuration, and in
-/// builtinFallbackKeyMappings() for one that predates them.
-/// @param host The host whose chords to return.
-/// @return The rows, in match order.
-[[nodiscard]] std::span<FallbackKeyMapping const> paneKeyChords(PaneChordHost host);
-
-/// The character chords that split the active pane on @p host: Ctrl+Shift+E and Ctrl+Shift+O on the desktop,
-/// Command+D (side by side) and Command+Shift+D (stacked) on a Mac.
-/// @param host The host whose chords to return.
-/// @return The rows, in match order.
-/// @see paneKeyChords
-[[nodiscard]] std::span<FallbackCharMapping const> paneCharChords(PaneChordHost host);
+[[nodiscard]] std::vector<FallbackCharMapping> const& builtinFallbackCharMappings(KeyboardPlatformKind kind);
 
 namespace helper
 {
@@ -275,10 +214,10 @@ namespace helper
 
 /// Folds @p ch into the case that character bindings are stored and matched in (uppercase).
 ///
-/// WHICH case a letter reaches a binding in is decided by the route contour::sendKeyEvent() took,
-/// not by the user: the CharMappings table and the Ctrl branch both report the UPPERCASE key label,
-/// event->text() reports whatever the layout produced (lowercase for an unmodified press), and on
-/// macOS the option-as-Alt branch picks the case from Shift XOR CapsLock. Since the chord carries
+/// WHICH case a letter reaches a binding in is decided by the route the keyboard platform took, not by
+/// the user: the CharMappings table and the Ctrl+ASCII rule both report the UPPERCASE key label, the
+/// text route reports whatever the layout produced (lowercase for an unmodified press), and on macOS
+/// an Option key acting as Alt picks the case from Shift XOR CapsLock. Since the chord carries
 /// Shift separately, a letter's case says nothing the modifiers do not already say, so it is
 /// normalized away on both sides -- when a binding is parsed, and when a key event is looked up.
 ///
@@ -981,11 +920,10 @@ struct EditionDefaults
     /// The color scheme a dark system uses. When it equals @ref lightColorScheme the profile names one
     /// scheme (`colors: <name>`) rather than a dark/light pair.
     std::string_view darkColorScheme;
-    std::string_view lightColorScheme;           ///< The color scheme a light system uses.
-    TabBarVisibility tabBarVisibility;           ///< When the window's tab strip is shown.
-    vtbackend::Modifier followHyperlinkModifier; ///< The modifier a click opens a link with.
-    GuiTheme theme;                              ///< Which palette the window chrome follows.
-    ChromeDensity chromeDensity;                 ///< How much room the window chrome takes.
+    std::string_view lightColorScheme; ///< The color scheme a light system uses.
+    TabBarVisibility tabBarVisibility; ///< When the window's tab strip is shown.
+    GuiTheme theme;                    ///< Which palette the window chrome follows.
+    ChromeDensity chromeDensity;       ///< How much room the window chrome takes.
     /// Whether hovering a link shows its target without the follow modifier held
     /// (`hyperlink_hover_tooltip`). A `bool` because the YAML key it seeds is one: Config's documented
     /// carve-out; the session converts it at the boundary.
@@ -1168,12 +1106,22 @@ struct TerminalProfile
     ConfigEntry<OptionAsAlt, documentation::OptionKeyAsAlt> optionAsAlt { OptionAsAlt::Off };
 };
 
-/// The built-in key/mouse bindings of @p edition, built afresh.
-/// @param edition The edition whose bindings to build; only the FollowHyperlink modifier differs.
-/// @param paneHost The host whose pane chords the bindings carry; the build host's for a real configuration.
+/// The built-in key/mouse bindings of @p edition for @p kind, built afresh.
+/// @param edition The edition whose bindings to build.
+/// @param kind The keyboard platform the bindings are for: what `Primary` rows resolve to, and which
+///             platform-specific rows are included. @see DefaultBindings.hpp
 /// @return The bindings.
-[[nodiscard]] InputMappings makeDefaultInputMappings(DefaultsEdition edition,
-                                                     PaneChordHost paneHost = BuildPaneChordHost);
+[[nodiscard]] InputMappings makeDefaultInputMappings(DefaultsEdition edition, KeyboardPlatformKind kind);
+
+/// The built-in key/mouse bindings of @p edition for @p kind, used when the config file does not override
+/// them.
+///
+/// A function-local static rather than a namespace-scope object: its construction allocates, so a
+/// throw here is catchable by the caller instead of terminating during static initialization.
+/// @param edition The edition whose bindings to return.
+/// @param kind The keyboard platform.
+/// @return The default input mappings (constructed on first use).
+[[nodiscard]] InputMappings const& defaultInputMappings(DefaultsEdition edition, KeyboardPlatformKind kind);
 
 /// The built-in key/mouse bindings of @p edition, used when the config file does not override them.
 ///
@@ -1195,6 +1143,12 @@ struct Config
     /// loadConfigFromFile(path) scans `defaults_edition` before it constructs the Config.
     /// Fixed at construction: changing it afterwards changes no default already taken.
     DefaultsEdition defaultsEdition { DefaultsEdition::Native2026 };
+    /// The keyboard platform the configuration is loaded for: what `Primary` in a `mods:` entry resolves
+    /// to, which platform's default bindings it carries, and how bindings are written back. The build's
+    /// own by default; a test builds a configuration for another with `Config { .keyboardPlatformKind = k }`.
+    /// Fixed at construction, like @ref defaultsEdition, because the default bindings below are taken from
+    /// it.
+    KeyboardPlatformKind keyboardPlatformKind { BuildKeyboardPlatformKind };
     /// What `contour.yml` and `settings.yml` each stated as their edition, as the scan found them. Set by
     /// loadConfigFromFile(path) beside @ref defaultsEdition, and empty for a Config built in code. Runtime
     /// only: the GUI reads it to decide whether to offer the newest defaults (see NewDefaultsOffer).
@@ -1344,7 +1298,7 @@ struct Config
     /// Built afresh rather than copied from defaultInputMappings(): a copy here would instantiate the Action
     /// variant's copy constructor in every file that includes this header, where a prvalue is moved in.
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { makeDefaultInputMappings(
-        defaultsEdition) };
+        defaultsEdition, keyboardPlatformKind) };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
         gitDrawings {};
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {

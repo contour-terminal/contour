@@ -103,7 +103,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                                      &_hostCommands,
                                                      &_boundCommands,
                                                      &_actionCommands },
-        command::platformShortcutStyle(),
+        command::shortcutStyleFor(manager.app().config().keyboardPlatformKind),
         this) },
     _menuPresentation { menuPresentation },
     _nativeMenus { manager.app().nativeMenuPresenter() },
@@ -165,8 +165,8 @@ void WindowController::openCommandPalette()
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all. Also
     // re-queries the sources (so the tab rows track the tabs that exist now) and returns to the top level
     // with an empty filter.
-    _commandPalette->refresh(
-        command::shortcutIndex(_manager.app().config(), command::platformShortcutStyle()));
+    _commandPalette->refresh(command::shortcutIndex(
+        _manager.app().config(), command::shortcutStyleFor(_manager.app().config().keyboardPlatformKind)));
 
     emit commandPaletteRequested();
 }
@@ -1442,7 +1442,9 @@ void WindowController::clampChromeFocus()
     emit chromeFocusChanged();
 }
 
-actions::ActionList const* WindowController::boundActionsFor(int qtKey, Qt::KeyboardModifiers modifiers) const
+actions::ActionList const* WindowController::boundActionsFor(int qtKey,
+                                                             Qt::KeyboardModifiers modifiers,
+                                                             QString const& text) const
 {
     auto const* session = activeSession();
     if (session == nullptr)
@@ -1451,7 +1453,9 @@ actions::ActionList const* WindowController::boundActionsFor(int qtKey, Qt::Keyb
     // No mode flags: the chrome has focus, so no terminal mode (search, vi, alternate screen) applies.
     constexpr auto NoModes = uint8_t { 0 };
     auto const& mappings = session->config().inputMappings.value();
-    auto chord = input::makeModifiers(modifiers).chord;
+    // The chord as the terminal decides it, so that AltGr is no chord here where it is none there.
+    auto chord = input::chordOfKeyPress(
+        session->keyboardPlatform(), qtKey, static_cast<uint32_t>(modifiers.toInt()), text.toStdU32String());
 
     // A key a binding can name, as the terminal keys it: a named key, Shift+Tab's Backtab, or a character.
     auto const named =
@@ -1473,10 +1477,10 @@ actions::ActionList const* WindowController::boundActionsFor(int qtKey, Qt::Keyb
     return bound;
 }
 
-bool WindowController::chromeKey(int qtKey, int qtModifiers)
+bool WindowController::chromeKey(int qtKey, int qtModifiers, QString const& text)
 {
     auto const modifiers = Qt::KeyboardModifiers { qtModifiers };
-    auto const* bound = boundActionsFor(qtKey, modifiers);
+    auto const* bound = boundActionsFor(qtKey, modifiers, text);
     if (bound != nullptr)
         if (auto const action = focusActionOf(*bound))
         {

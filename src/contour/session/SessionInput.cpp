@@ -3,6 +3,7 @@
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/Logging.hpp>
 #include <contour/input/MouseMapping.hpp>
+#include <contour/input/QtKeyCapture.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/SessionInput.hpp>
@@ -17,15 +18,9 @@
 #include <QtGui/QGuiApplication>
 
 #include <algorithm>
-#include <array>
 #include <mutex>
 
-using std::array;
 using std::clamp;
-using std::nullopt;
-using std::optional;
-using std::pair;
-using std::u32string;
 using std::chrono::steady_clock;
 
 using crispy::Point;
@@ -381,218 +376,21 @@ namespace
 
 } // namespace
 
-bool sendKeyEvent(QKeyEvent* event,
-                  vtbackend::KeyboardEventType eventType,
-                  TerminalSession& session,
-                  input::KeyboardLayout const& keyboardLayout)
+bool sendKeyEvent(QKeyEvent* event, vtbackend::KeyboardEventType eventType, TerminalSession& session)
 {
-    using vtbackend::Key;
-    using vtbackend::Modifier;
-
-    auto const now = steady_clock::now();
-
-    static auto constexpr CharMappings = array {
-        // {{{
-        // clang-format off
-        pair { Qt::Key_Space, ' ' },
-        pair { Qt::Key_Exclam, '!' },
-        pair { Qt::Key_QuoteDbl, '"' },
-        pair { Qt::Key_NumberSign, '#' },
-        pair { Qt::Key_Dollar, '$' },
-        pair { Qt::Key_Percent, '%' },
-        pair { Qt::Key_Ampersand, '&' },
-        pair { Qt::Key_Apostrophe, '\'' },
-        pair { Qt::Key_ParenLeft, '(' },
-        pair { Qt::Key_ParenRight, ')' },
-        pair { Qt::Key_Asterisk, '*' },
-        pair { Qt::Key_Plus, '+' },
-        pair { Qt::Key_Comma, ',' },
-        pair { Qt::Key_Minus, '-' },
-        pair { Qt::Key_Period, '.' },
-        pair { Qt::Key_Slash, '/' },
-        pair { Qt::Key_0, '0' },
-        pair { Qt::Key_1, '1' },
-        pair { Qt::Key_2, '2' },
-        pair { Qt::Key_3, '3' },
-        pair { Qt::Key_4, '4' },
-        pair { Qt::Key_5, '5' },
-        pair { Qt::Key_6, '6' },
-        pair { Qt::Key_7, '7' },
-        pair { Qt::Key_8, '8' },
-        pair { Qt::Key_9, '9' },
-        pair { Qt::Key_Colon, ':' },
-        pair { Qt::Key_Semicolon, ';' },
-        pair { Qt::Key_Less, '<' },
-        pair { Qt::Key_Equal, '=' },
-        pair { Qt::Key_Greater, '>' },
-        pair { Qt::Key_Question, '?' },
-        pair { Qt::Key_At, '@' },
-        pair { Qt::Key_A, 'A' },
-        pair { Qt::Key_B, 'B' },
-        pair { Qt::Key_C, 'C' },
-        pair { Qt::Key_D, 'D' },
-        pair { Qt::Key_E, 'E' },
-        pair { Qt::Key_F, 'F' },
-        pair { Qt::Key_G, 'G' },
-        pair { Qt::Key_H, 'H' },
-        pair { Qt::Key_I, 'I' },
-        pair { Qt::Key_J, 'J' },
-        pair { Qt::Key_K, 'K' },
-        pair { Qt::Key_L, 'L' },
-        pair { Qt::Key_M, 'M' },
-        pair { Qt::Key_N, 'N' },
-        pair { Qt::Key_O, 'O' },
-        pair { Qt::Key_P, 'P' },
-        pair { Qt::Key_Q, 'Q' },
-        pair { Qt::Key_R, 'R' },
-        pair { Qt::Key_S, 'S' },
-        pair { Qt::Key_T, 'T' },
-        pair { Qt::Key_U, 'U' },
-        pair { Qt::Key_V, 'V' },
-        pair { Qt::Key_W, 'W' },
-        pair { Qt::Key_X, 'X' },
-        pair { Qt::Key_Y, 'Y' },
-        pair { Qt::Key_Z, 'Z' },
-        pair { Qt::Key_BracketLeft, '[' },
-        pair { Qt::Key_Backslash, '\\' },
-        pair { Qt::Key_BracketRight, ']' },
-        pair { Qt::Key_AsciiCircum, '^' },
-        pair { Qt::Key_Underscore, '_' },
-        pair { Qt::Key_QuoteLeft, '`' },
-        pair { Qt::Key_BraceLeft, '{' },
-        pair { Qt::Key_Bar, '|' },
-        pair { Qt::Key_BraceRight, '}' },
-        pair { Qt::Key_AsciiTilde, '~' },
-        // clang-format on
-    }; // }}}
-
-    auto const modifiers = input::makeModifiers(event->modifiers(),
-                                                input::nativeModifiersWithLockState(event->nativeModifiers()),
-                                                input::ctrlAltRoleOf(event->modifiers(), event->text()));
-    auto const key = event->key();
-
-    if (event->modifiers().testFlag(Qt::KeypadModifier))
+    // Capture, normalize, route: what the platform means by the event is the session's platform's to say,
+    // and where it goes is the router's. Nothing here knows which platform this is.
+    auto const captured = input::captureKeyEvent(*event, eventType);
+    input::logRecorded(captured);
+    if (session.sendKeyboardEvent(session.keyboardPlatform().normalize(captured), steady_clock::now())
+        == KeyDelivery::Handled)
     {
-        std::optional<Key> mappedKey = nullopt;
-        auto inferredModifiers = modifiers;
-        switch (key)
-        {
-            // Qt reports Key_0..9 with KeypadModifier only when NumLock is ON.
-            // When NumLock is OFF, Qt reports navigation keys instead (Insert, End, etc.).
-            // So the presence of these key codes definitionally implies NumLock is active.
-            case Qt::Key_0:
-            case Qt::Key_1:
-            case Qt::Key_2:
-            case Qt::Key_3:
-            case Qt::Key_4:
-            case Qt::Key_5:
-            case Qt::Key_6:
-            case Qt::Key_7:
-            case Qt::Key_8:
-            case Qt::Key_9:
-                mappedKey = static_cast<Key>(static_cast<int>(Key::Numpad_0) + (key - Qt::Key_0));
-                inferredModifiers.locks |= vtbackend::LockKey::NumLock;
-                break;
-            // Operator and Enter keys have the same Qt key code regardless of NumLock state,
-            // but produce text when NumLock is active.
-            case Qt::Key_Asterisk: mappedKey = Key::Numpad_Multiply; break;
-            case Qt::Key_Plus: mappedKey = Key::Numpad_Add; break;
-            case Qt::Key_Minus: mappedKey = Key::Numpad_Subtract; break;
-            case Qt::Key_Period: mappedKey = Key::Numpad_Decimal; break;
-            case Qt::Key_Slash: mappedKey = Key::Numpad_Divide; break;
-            case Qt::Key_Enter: mappedKey = Key::Numpad_Enter; break;
-            default: break;
-        }
-        if (mappedKey)
-        {
-            // For operator/Enter keys, infer NumLock from non-empty text
-            if (!event->text().isEmpty())
-                inferredModifiers.locks |= vtbackend::LockKey::NumLock;
-            session.sendKeyEvent(*mappedKey, inferredModifiers, eventType, now);
-            return true;
-        }
-    }
-
-    if (auto const named = input::namedKeyOf(event->key()))
-    {
-        session.sendKeyEvent(*named, modifiers, eventType, now);
         event->accept();
         return true;
     }
 
-    // What the platform natively calls this key, translated into the two vocabularies the keyboard
-    // protocols speak. Both go through the layout rather than being copied across raw: only it knows
-    // how to read nativeVirtualKey(), which is a positional Carbon key code on macOS, a keysym on
-    // X11 and a VK code on Win32.
-    auto const nativeVirtualKey = event->nativeVirtualKey();
-    auto const keyIdentity = vtbackend::KeyIdentity {
-        .unshiftedKey = keyboardLayout.unshiftedKeyOf(nativeVirtualKey),
-        .nativeVirtualKey = keyboardLayout.win32VirtualKeyOf(nativeVirtualKey),
-    };
-
-    if (event->text().isEmpty())
-    {
-        // NOLINTNEXTLINE(readability-qualified-auto)
-        if (auto const i = std::ranges::find_if(CharMappings,
-                                                [event](auto const& x) { return x.first == event->key(); });
-            i != end(CharMappings))
-        {
-            session.sendCharEvent(static_cast<char32_t>(i->second), keyIdentity, modifiers, eventType, now);
-            event->accept();
-            return true;
-        }
-    }
-
-    if (key == Qt::Key_Backtab)
-    {
-        session.sendKeyEvent(Key::Tab, modifiers.with(Modifier::Shift), eventType, now);
-        event->accept();
-        return true;
-    }
-
-#ifdef __APPLE__
-    if (0x20 <= key && key < 0x80
-        && (modifiers.chord.test(Modifier::Alt)
-            && config::optionKeyRoleForHeldChord(session.profile().optionAsAlt.value(),
-                                                 input::optionKeySideOf(event->nativeModifiers()))
-                   == config::OptionKeyRole::Alt))
-    {
-        // CapsLock inverts the effect of Shift on letter case, which is the one thing a lock key
-        // legitimately decides here.
-        bool const shiftPressed =
-            modifiers.chord.test(Modifier::Shift) ^ modifiers.locks.test(vtbackend::LockKey::CapsLock);
-        auto const ch = static_cast<char32_t>(shiftPressed ? std::toupper(key) : std::tolower(key));
-        session.sendCharEvent(ch, keyIdentity, modifiers, eventType, now);
-        event->accept();
-        return true;
-    }
-#endif
-
-    if (0x20 <= key && key < 0x80 && modifiers.chord.test(Modifier::Control))
-    {
-        session.sendCharEvent(static_cast<char32_t>(key), keyIdentity, modifiers, eventType, now);
-        event->accept();
-        return true;
-    }
-
-    if (!event->text().isEmpty())
-    {
-        auto const codepoints = event->text().toUcs4();
-        assert(!codepoints.empty());
-#ifdef __APPLE__
-        // On macOS the Alt-modifier does not seem to be passed to the terminal apps
-        // but rather remapped to whatever macOS is mapping them to.
-        for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, keyIdentity, modifiers.without(Modifier::Alt), eventType, now);
-#else
-        for (char32_t const ch: codepoints)
-            session.sendCharEvent(ch, keyIdentity, modifiers, eventType, now);
-#endif
-        event->accept();
-        return true;
-    }
-
-    input::inputLog()("Input not handled for mods {} key 0x{:X}", modifiers, key);
+    input::inputLog()(
+        "Input not handled for mods 0x{:X} key 0x{:X}", event->modifiers().toInt(), event->key());
     return false;
 }
 
@@ -611,9 +409,9 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
 
     using vtbackend::Modifier;
 
-    // Mouse events carry no lock state: makeModifiers() derives it from the native modifier mask,
-    // which Qt only populates for key events. Take the chord and be explicit about it.
-    auto const modifiers = input::makeModifiers(event->modifiers()).chord;
+    // Mouse events carry no lock state -- Qt only populates the native modifier mask for key events -- so
+    // the chord is all there is to take.
+    auto const modifiers = input::chordOf(event->modifiers());
 
     auto const pixelPosition = makeMousePixelPosition(
         event, session.display()->gridMetrics().pageMargin, session.display()->devicePixelRatio());
@@ -668,7 +466,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 
     if (session.sendGutterPressEvent(gutterHitAt(event->position(), session),
                                      input::makeMouseButton(event->button()),
-                                     input::makeModifiers(event->modifiers()).chord)
+                                     input::chordOf(event->modifiers()))
         == ConsumedByGutter::Yes)
     {
         event->accept();
@@ -678,14 +476,14 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     // After the gutter, whose strip beside row 0 keeps its own meaning, and before the grid.
     if (session.sendStickyHeaderPressEvent(stickyHeaderRowAt(event->position(), session),
                                            input::makeMouseButton(event->button()),
-                                           input::makeModifiers(event->modifiers()).chord)
+                                           input::chordOf(event->modifiers()))
         == ConsumedByStickyHeader::Yes)
     {
         event->accept();
         return;
     }
 
-    session.sendMousePressEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMousePressEvent(input::chordOf(event->modifiers()),
                                 input::makeMouseButton(event->button()),
                                 makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                 makeMousePixelPosition(event,
@@ -709,7 +507,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
         return;
     }
 
-    session.sendMouseReleaseEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseReleaseEvent(input::chordOf(event->modifiers()),
                                   input::makeMouseButton(event->button()),
                                   makeMousePixelPosition(event,
                                                          session.display()->gridMetrics().pageMargin,
@@ -743,7 +541,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
         return;
     }
 
-    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::chordOf(event->modifiers()),
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
@@ -773,7 +571,7 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     }
 
     auto const position = event->position().toPoint();
-    session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
+    session.sendMouseMoveEvent(input::chordOf(event->modifiers()),
                                makeMouseCellLocation(position.x(), position.y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,

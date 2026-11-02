@@ -5,7 +5,6 @@
 
 #include <vtbackend/input/InputGenerator.hpp>
 
-#include <QtCore/QString>
 #include <QtCore/Qt>
 #include <QtCore/QtTypes>
 
@@ -149,71 +148,66 @@ inline constexpr auto NamedKeyRows = std::array {
     return 0;
 }
 
-/// Returns the native modifier mask to hand makeModifiers() for a key event, with the CapsLock/
-/// NumLock toggle state folded in. This is the single OS-boundary seam for lock state: on Windows
-/// it reads the live toggle state from the OS (GetKeyState) — which Qt does not surface in its
-/// native modifier mask — and encodes it into the Win32 lock bits; on X11/Wayland/macOS the lock
-/// state already rides in Qt's native mask, so it is returned unchanged. Isolating the ambient
-/// query here keeps makeModifiers() a pure function of its arguments, and therefore unit-testable
-/// without depending on the machine's live lock state.
-/// @param qtNativeModifiers Qt's native modifier mask for the event (QKeyEvent::nativeModifiers()).
-/// @return The native modifier mask to pass to makeModifiers().
-[[nodiscard]] quint32 nativeModifiersWithLockState(quint32 qtNativeModifiers) noexcept;
-
-/// What a Ctrl+Alt combination means for one event. Windows reports the AltGr key to Qt as
-/// Ctrl+Alt, so the same two modifiers are either a chord the user pressed or a keyboard-layout
-/// level that selected the character. AltGr is zero because it is makeModifiers' default.
-enum class CtrlAltRole : uint8_t
-{
-    AltGr, ///< Ctrl and Alt selected the AltGr level; they are not modifiers of the result.
-    Chord, ///< Ctrl and Alt are modifiers, reported as such.
-};
-
-/// Classifies a key event's Ctrl+Alt the way Windows itself does: the AltGr level yields
-/// graphical characters, while a genuine Ctrl+Alt chord yields none (or a control character).
-/// This is Windows Terminal's heuristic for the same ambiguity.
+/// The chord a key or mouse event holds, as Qt reports it: Alt, Shift, Control, and Meta as Super.
+/// Lock keys and the keypad flag are not part of a chord.
 /// @param qtModifiers The event's Qt modifiers.
-/// @param text The text the platform produced for the event (QKeyEvent::text()).
-/// @return AltGr when Ctrl and Alt are both held and @p text is non-empty and wholly graphical,
-///         else Chord.
-[[nodiscard]] CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text) noexcept;
+/// @return The chord.
+[[nodiscard]] vtbackend::Modifiers chordOf(Qt::KeyboardModifiers qtModifiers) noexcept;
 
-/// The bit of macOS's device-dependent modifier flags (`NX_DEVICELALTKEYMASK`) set while the left Option key
-/// is down. Qt hands the flags over as QKeyEvent::nativeModifiers().
-inline constexpr quint32 MacLeftOptionBit = 0x00000020;
-
-/// The bit of macOS's device-dependent modifier flags (`NX_DEVICERALTKEYMASK`) set while the right Option key
-/// is down.
-inline constexpr quint32 MacRightOptionBit = 0x00000040;
-
-/// Which Option keys are down, as macOS's device-dependent modifier flags report them.
-/// A pure function of the bits on every host, so that it is tested everywhere; only the macOS key path
-/// consults it. The device-independent Option flag (`0x80000`) says Option is held but not which one, and
-/// is ignored here.
-/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
-/// @return The keys whose bit is set; None when neither is.
-[[nodiscard]] constexpr config::OptionKeySide optionKeySideOf(quint32 nativeModifiers) noexcept
+/// Qt modifier flags from the raw bits a NativeKeyEvent records.
+/// @param bits Qt::KeyboardModifiers bits.
+/// @return The flags.
+[[nodiscard]] inline Qt::KeyboardModifiers qtModifiersOf(uint32_t bits) noexcept
 {
-    auto bits = uint8_t { 0 };
-    if ((nativeModifiers & MacLeftOptionBit) != 0)
-        bits |= static_cast<uint8_t>(config::OptionKeySide::Left);
-    if ((nativeModifiers & MacRightOptionBit) != 0)
-        bits |= static_cast<uint8_t>(config::OptionKeySide::Right);
-    return static_cast<config::OptionKeySide>(bits);
+    return Qt::KeyboardModifiers::fromInt(static_cast<int>(bits));
 }
 
-/// Creates the VT keyboard modifier state from Qt modifiers and native platform modifiers.
-/// The chord is taken from the Qt modifiers, the CapsLock and NumLock state from the
-/// platform-specific native modifiers.
-/// @param qtModifiers Standard Qt keyboard modifiers
-/// @param nativeModifiers Platform-specific value from QKeyEvent::nativeModifiers()
-/// @param ctrlAltRole AltGr (the default) strips a held Ctrl+Alt from the chord on Windows; Chord
-///                    keeps it. Ignored elsewhere, where AltGr is a key of its own. Key events pass
-///                    ctrlAltRoleOf(); only mouse events still take the default.
-/// @return The chord being held, plus the latched lock keys.
-[[nodiscard]] vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
-                                                         quint32 nativeModifiers = 0,
-                                                         CtrlAltRole ctrlAltRole = CtrlAltRole::AltGr);
+/// The bit of X11's core modifier mask (`XCB_MOD_MASK_LOCK`) set while CapsLock is latched. Fixed by the X11
+/// protocol; Wayland's Qt plugin reports the same mask.
+inline constexpr quint32 XcbCapsLockBit = 0x02;
+
+/// The bit of X11's core modifier mask (`XCB_MOD_MASK_2`) set while NumLock is latched -- the conventional
+/// mapping, which every desktop keymap follows.
+inline constexpr quint32 XcbNumLockBit = 0x10;
+
+/// The lock keys an X11 or Wayland key event says are latched.
+/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
+/// @return CapsLock and NumLock, as their XCB mask bits say.
+[[nodiscard]] constexpr vtbackend::LockKeys xcbLockKeysOf(quint32 nativeModifiers) noexcept
+{
+    auto locks = vtbackend::LockKeys {};
+    if ((nativeModifiers & XcbCapsLockBit) != 0)
+        locks |= vtbackend::LockKey::CapsLock;
+    if ((nativeModifiers & XcbNumLockBit) != 0)
+        locks |= vtbackend::LockKey::NumLock;
+    return locks;
+}
+
+/// The XKB group (layout index) an X11 or Wayland key event was made under. The X11 core event state carries
+/// it in bits 13 and 14, and Qt's xcb plugin hands that state over as QKeyEvent::nativeModifiers().
+/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
+/// @return The group, 0 to 3.
+[[nodiscard]] constexpr uint32_t xcbGroupOf(quint32 nativeModifiers) noexcept
+{
+    constexpr auto GroupShift = 13;
+    constexpr auto GroupMask = quint32 { 0x3 };
+    return (nativeModifiers >> GroupShift) & GroupMask;
+}
+
+/// The bit of macOS's modifier flags (`NSEventModifierFlagCapsLock`) set while CapsLock is latched. A Mac
+/// keyboard has no NumLock.
+inline constexpr quint32 MacCapsLockBit = 0x00010000;
+
+/// The lock keys a macOS key event says are latched.
+/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
+/// @return CapsLock when its flag is set.
+[[nodiscard]] constexpr vtbackend::LockKeys macLockKeysOf(quint32 nativeModifiers) noexcept
+{
+    auto locks = vtbackend::LockKeys {};
+    if ((nativeModifiers & MacCapsLockBit) != 0)
+        locks |= vtbackend::LockKey::CapsLock;
+    return locks;
+}
 
 /// Maps a US-ASCII "shifted" character back to the base character its physical key produces without
 /// Shift (e.g. '<' -> ',', '?' -> '/', '_' -> '-', '@' -> '2'). Returns @p ch unchanged when it is not
