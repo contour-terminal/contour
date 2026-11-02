@@ -1438,6 +1438,7 @@ if(CONTOUR_TESTING)
         command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentSkill_test.cpp
+        cli/McpCommand_test.cpp
         cli/McpScope_test.cpp
         cli/McpServer_test.cpp
         cli/McpTools_test.cpp

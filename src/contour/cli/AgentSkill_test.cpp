@@ -73,6 +73,7 @@ TEST_CASE("the skill names every verb and method", "[contour][cli][agent]")
     // The example an agent copies carries the `--` that keeps its text from being read as an option.
     CHECK(skill.contains("contour send --pane \"$pane\" --enter --wait -- 'make test'"));
     CHECK(skill.contains("Put `--` before the text"));
+    CHECK(skill.contains("claude mcp add contour -- contour mcp"));
 }
 
 TEST_CASE("the skill and the docs list every exit status in the one table's words", "[contour][cli][agent]")

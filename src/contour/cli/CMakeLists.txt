@@ -48,6 +48,7 @@ add_library(contour_cli STATIC
     ContourApp.cpp ContourApp.hpp
     ControlVerbs.cpp ControlVerbs.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
+    McpCommand.cpp McpCommand.hpp
     McpScope.cpp McpScope.hpp
     McpServer.cpp McpServer.hpp
     McpTools.cpp McpTools.hpp McpToolsDetail.hpp

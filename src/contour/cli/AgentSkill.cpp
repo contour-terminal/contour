@@ -113,6 +113,13 @@ std::string renderAgentSkill(std::string_view version)
     line("Put `--` before the text a verb types or runs: without it, text that starts with an option's name "
          "is read as that option (`contour send --enter wait` waits, and types nothing).");
     line();
+    line("## MCP");
+    line();
+    line("An agent that speaks the Model Context Protocol can take these verbs as tools instead: register "
+         "the server with `claude mcp add contour -- contour mcp`. It serves your own tab unless started "
+         "with `--allow-all-tabs`, and `--read-only` leaves out the tools that type or change the "
+         "workspace.");
+    line();
     line("## Exit statuses");
     line();
     for (auto const status: ExitStatuses)

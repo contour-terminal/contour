@@ -92,6 +92,9 @@ class ContourApp: public core::cli::App
     /// Writes the agent skill: `contour agent setup`.
     /// @return The process exit code.
     int agentSetupAction();
+    /// Serves the MCP server on standard input and output: `contour mcp`.
+    /// @return The process exit code.
+    int mcpAction();
     /// Runs one control verb (`contour ls`, `contour send`, ...) against the daemon its flags name.
     /// @param verb The verb's row.
     /// @return The process exit code.
