@@ -6155,7 +6155,7 @@ size_t Screen::storedKittyBytesOf(uint32_t imageId) const
     return total;
 }
 
-Screen::KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
+KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
 {
     // Every transmitted image already has a root frame in this protocol -- frame 1 IS the image -- so
     // an animation exists as soon as the image does. Materialising it here rather than at the first
@@ -6178,10 +6178,10 @@ uint32_t Screen::kittyFrameCount(uint32_t imageId) const
     return _kittyImages.contains(imageId) ? 1 : 0;
 }
 
-Screen::KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
-                                                uint32_t target,
-                                                std::shared_ptr<Image const> frame,
-                                                std::shared_ptr<Image const> const& previous)
+KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
+                                        uint32_t target,
+                                        std::shared_ptr<Image const> frame,
+                                        std::shared_ptr<Image const> const& previous)
 {
     auto* animation = kittyAnimationFor(imageId);
     Require(animation != nullptr); // The caller found the image.
@@ -6256,127 +6256,18 @@ auto Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     return replacements.empty() ? Placed::No : Placed::Yes;
 }
 
-std::chrono::milliseconds Screen::KittyAnimation::shownFor(uint32_t number) const noexcept
-{
-    auto const gap = frames[number - 1].gapMilliseconds;
-    if (gap < 0)
-        return std::chrono::milliseconds::zero();
-    // The root frame is the transmitted image, so nothing gave it a gap unless a=a did; z=0 is "unset" too.
-    return std::chrono::milliseconds(gap != 0 ? gap : kitty_graphics::DefaultFrameGapMilliseconds);
-}
-
-std::optional<uint32_t> Screen::KittyAnimation::successor() const noexcept
-{
-    auto const hasGap = [this](uint32_t number) {
-        return frames[number - 1].gapMilliseconds >= 0;
-    };
-    auto const count = static_cast<uint32_t>(frames.size());
-    for (auto const number: std::views::iota(currentFrame + 1, count + 1))
-        if (hasGap(number))
-            return number;
-    // Out of frames: `s=2` waits here for another to arrive, `s=3` starts over. Not at the current frame
-    // itself, which would "advance" to what is already shown and wake the display for nothing.
-    if (state != kitty_graphics::AnimationState::Loop)
-        return std::nullopt;
-    for (auto const number: std::views::iota(uint32_t { 1 }, currentFrame))
-        if (hasGap(number))
-            return number;
-    return std::nullopt;
-}
-
-std::chrono::milliseconds Screen::KittyAnimation::loopDuration() const noexcept
-{
-    auto total = std::chrono::milliseconds::zero();
-    for (auto const number: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(frames.size()) + 1))
-        total += shownFor(number);
-    return total;
-}
-
-void Screen::KittyAnimation::skipWholeLoops(std::chrono::steady_clock::time_point now,
-                                            std::chrono::milliseconds loop) noexcept
-{
-    // Only `s=3` loops, and only from a frame inside the loop: a gapless current frame is left by a step
-    // first. A loop of no time at all (every frame gapless) has nowhere to go and holds instead.
-    if (state != kitty_graphics::AnimationState::Loop || nextFrameDue > now || loop <= loop.zero()
-        || frames[currentFrame - 1].gapMilliseconds < 0)
-        return;
-    auto loops = static_cast<uint64_t>((now - nextFrameDue) / loop);
-    if (loopCount > 1)
-    {
-        // `v=n` plays n-1 loops. Skip at most to one short of that, so the walk plays the last to its end
-        // and stops there, on the last frame.
-        auto const left = uint64_t { loopCount - 1 } - std::min<uint64_t>(loopsDone, loopCount - 1);
-        loops = std::min(loops, left > 0 ? left - 1 : 0);
-    }
-    nextFrameDue += static_cast<int64_t>(loops) * loop;
-    loopsDone += static_cast<uint32_t>(loops);
-}
-
-void Screen::KittyAnimation::arm(std::chrono::steady_clock::time_point now) noexcept
-{
-    nextFrameDue = isPlaying() && successor() ? now + shownFor(currentFrame) : Held;
-}
-
 KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_point now)
 {
-    using kitty_graphics::AnimationState;
-
     auto shown = KittyFrameShown::No;
     for (auto& animation: _kittyAnimations | std::views::values)
     {
-        if (animation.nextFrameDue > now)
-            continue;
-
         auto const showing = animation.currentImage();
-        // Summed only for a tick late by more than the current frame's gap: one less late cannot hold a loop.
-        auto loop = std::optional<std::chrono::milliseconds> {};
-        // Whole loops are skipped in one go, so what is left to walk frame by frame is less than one loop.
-        for ([[maybe_unused]] auto const step: std::views::iota(size_t { 0 }, animation.frames.size()))
-        {
-            if (animation.nextFrameDue + animation.shownFor(animation.currentFrame) <= now)
-            {
-                if (!loop)
-                    loop = animation.loopDuration();
-                animation.skipWholeLoops(now, *loop);
-            }
-            if (animation.nextFrameDue > now)
-                break;
-            auto const next = animation.successor();
-            if (!next)
-            {
-                // `s=2` out of frames: transmitKittyFrame() ends the wait when one arrives.
-                animation.hold();
-                break;
-            }
-            if (*next < animation.currentFrame)
-            {
-                // Back to the start is one loop played; `v=n` plays n-1 of them, then rests on the last
-                // frame.
-                ++animation.loopsDone;
-                if (animation.loopCount > 1 && animation.loopsDone >= animation.loopCount - 1)
-                {
-                    animation.state = AnimationState::Stop;
-                    animation.hold();
-                    break;
-                }
-            }
-            animation.currentFrame = *next;
-            // From the deadline rather than from now, so a late tick does not stretch every later frame.
-            animation.nextFrameDue += animation.shownFor(*next);
-        }
-        // Whole loops skipped, less than one is left to walk, and the walk takes a frame per step.
-        Require(animation.nextFrameDue > now);
-
-        // A tick can land on the frame it started from (a whole number of loops later): nothing to show, and
-        // no reason to look for a placement -- an unchanged frame says nothing about whether one is on the
-        // page.
-        auto const landed = animation.currentImage();
-        if (landed == showing)
+        if (animation.advance(now) == KittyAnimation::FrameChanged::No)
             continue;
 
         // The frame changed and nothing on the page shows this image -- scrolled off, erased, overwritten.
         // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put).
-        if (showKittyFrame(showing, landed) == Placed::No)
+        if (showKittyFrame(showing, animation.currentImage()) == Placed::No)
             animation.hold();
         else
             shown = KittyFrameShown::Yes;

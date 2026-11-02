@@ -71,6 +71,7 @@ set(vtbackend_HEADERS
     input/InputHandler.hpp
     input/vi/JumpHistory.hpp
     vt/KittyClipboard.hpp
+    graphics/KittyAnimation.hpp
     graphics/KittyGraphics.hpp
     graphics/KittyInflate.hpp
     grid/Line.hpp
@@ -207,6 +208,7 @@ set(vtbackend_SOURCES
     screen/PreeditPlacement.cpp
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
+    graphics/KittyAnimation.cpp
     graphics/KittyGraphics.cpp
     graphics/KittyInflate.cpp
     vt/TextSizing.cpp
@@ -384,6 +386,7 @@ if(LIBTERMINAL_TESTING)
         vt/KittyClipboard_test.cpp
         vt/MacroDefinition_test.cpp
         vt/PointerShape_test.cpp
+        graphics/KittyAnimation_test.cpp
         graphics/KittyGraphics_test.cpp
         graphics/KittyInflate_test.cpp
         vt/TextSizing_test.cpp
