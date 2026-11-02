@@ -354,6 +354,19 @@ shell that wrote it. Unless you give `--log-file` the daemon logs to `SOCKET.log
 
 Packages for Linux also ship a `contour-daemon.service` unit file. It is **not enabled** by the
 package; `contour daemon-service install` writes your own copy, which takes precedence.
+`daemon-service status` and `uninstall` count the service as installed only once you registered it
+with `install`; the packaged unit alone does not.
+
+On Linux, a user's daemon stops when their last login session ends, unless lingering is on for that
+user. When `loginctl` reports lingering as off, `contour daemon-service install` prints a one-line note
+naming the command to run:
+
+```sh
+sudo loginctl enable-linger $USER
+```
+
+Contour never enables lingering itself. To install the daemon alone on a server, see
+[Contour daemon on a server](install.md#contour-daemon-on-a-server).
 
 A service-managed daemon runs with `--lifecycle=persistent`: it **never exits on its own**, not even
 with zero sessions and zero clients. `contour client` finds the registration and starts it before it

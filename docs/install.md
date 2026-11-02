@@ -50,6 +50,36 @@ Contour is available at the Flathub store.
 [![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
 
 
+## Contour daemon on a server
+
+`contour-daemon` is the Qt-free package for machines that only host [persistent sessions](persistent-sessions.md)
+and have no display, such as a server you reach over SSH. It ships the `contour` command-line tool
+without the GUI stack. Packages are attached to each
+[release](https://github.com/contour-terminal/contour/releases) (they are not served from a package repository):
+
+- `.deb` for Ubuntu 24.04 and 26.04
+- `.rpm` for Fedora
+
+```sh
+sudo apt install ./contour-daemon_*.deb     # Ubuntu
+sudo dnf install ./contour-daemon-*.rpm     # Fedora
+```
+
+CentOS and RHEL (EL9, EL10) packages are not provided yet.
+The RPM packages come without the bundled status-line extensions; the `.deb` ships them.
+
+`contour-daemon` and the GUI package `contour` conflict with and replace each other, and `contour` already
+includes the daemon, so a desktop installation needs nothing more.
+
+The package installs a systemd user unit but does not enable it. Each user registers and starts their own copy:
+
+```sh
+contour daemon-service install
+```
+
+See [Starting the daemon at login](persistent-sessions.md#starting-the-daemon-at-login). The daemon opens no
+listening port; reach it over SSH, see [Remote hosts](remote-hosts.md).
+
 ## Installing from source
 
 Contour is best installed from supported package managers, but you can build
