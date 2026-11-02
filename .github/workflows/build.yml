@@ -271,18 +271,32 @@ jobs:
               --base origin/${{ github.base_ref }} \
               --build-dir build
 
-  # Builds the GUI-less configuration, whose product is `contour daemon` -- a session host for a
-  # server or a container. Being unbuilt is exactly how this configuration rotted before; one job
-  # is what keeps a new GUI source from landing outside its CONTOUR_FRONTEND_GUI guard.
+  # Builds, tests, packages and install-tests the GUI-less configuration, whose product is `contour daemon`
+  # -- a session host for a server or a container -- shipped as the `contour-daemon` Debian package.
+  # Being unbuilt is exactly how this configuration rotted before; one job is what keeps a new GUI source
+  # from landing outside its CONTOUR_FRONTEND_GUI guard. It replaces `build_headless`, and so carries every
+  # guard that job had, and it runs on EVERY pull request: nothing but the artifact upload is conditional.
   #
   # Deliberately NOT installing a modern Qt over the distro one: relying on Ubuntu's Qt 6.4.2
   # proves the headless build needs nothing beyond Qt6::Core -- no Qt6::GuiPrivate, no Qt Quick.
-  # Clang only, since this gates a build configuration and not a toolchain.
-  build_headless:
-    name: "Ubuntu Linux (no GUI frontend)"
+  # Clang only, since this gates a build configuration and not a toolchain. RelWithDebInfo rather than
+  # Debug, because the product is a package: it is what a user installs, and what carries a -dbgsym.
+  package_daemon_for_Ubuntu:
+    name: "Ubuntu Linux (contour-daemon package)"
     runs-on: ubuntu-24.04
+    env:
+      OS_VERSION: "24.04"
     steps:
     - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
@@ -290,8 +304,6 @@ jobs:
         max-size: 500M
         save: ${{ github.event_name == 'push' }}
         evict-old-files: job
-    - name: "update APT database"
-      run: sudo ./scripts/apt-update.sh
     - name: "install dependencies"
       run: sudo env QTVER=6 ./scripts/install-deps.sh
     - name: "Post-fix embedded dependency permissions."
@@ -310,12 +322,15 @@ jobs:
     # step above installed Qt, which is what makes the assertion worth anything: the point is not
     # that Qt is absent from the runner, it is that the build never reaches for it. Issue #2042 is
     # reported from a machine where Qt6 does not exist at all.
+    #
+    # CMAKE_INSTALL_PREFIX=/usr: the package installs under /usr, like the GUI one.
     - name: "cmake"
       run: |
         cmake \
-              --preset clang-debug \
+              --preset clang-release \
               -B build \
               -G Ninja \
+              -D CMAKE_INSTALL_PREFIX=/usr \
               -D CONTOUR_WAYLAND=OFF \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
@@ -363,6 +378,140 @@ jobs:
         for extension in agent-status clock git plasma sysload; do
           test -f "$RUNNER_TEMP/contour-headless/share/contour/extensions/$extension.wasm"
         done
+    # The package files are found by glob and counted rather than named: CPack derives the file name
+    # (contour-daemon_<version>_<arch>.deb, and the debug-info package beside it), and a name guessed
+    # here would be a second place to keep in step with it. Exactly one of each, or the step says which.
+    - name: "CPack: Creating DEB package"
+      run: |
+        set -eu
+        cpack --config build/CPackConfig.cmake
+        ls -la build
+        pick() {
+          # pick <glob-pattern> <what>: print the single file under build/ matching it.
+          local matches count
+          matches=$(find build -maxdepth 1 -type f -name "$1" | sort)
+          count=$(printf '%s' "$matches" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one $2 ($1) in build/, found $count:" >&2
+            printf '%s\n' "$matches" >&2
+            exit 1
+          fi
+          printf '%s\n' "$matches"
+        }
+        deb=$(pick 'contour-daemon*.deb' 'contour-daemon .deb')
+        ddeb=$(pick 'contour-daemon*.ddeb' 'contour-daemon debug-info .ddeb')
+        mv -v "$deb" "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
+        mv -v "$ddeb" "contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.ddeb"
+    - name: "Inspect the package"
+      run: |
+        set -eu
+        deb="contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
+        dpkg-deb -I "$deb"
+        dpkg-deb -c "$deb"
+        depends=$(dpkg-deb -f "$deb" Depends)
+        echo "Depends: $depends"
+        if printf '%s' "$depends" | grep -Eiq 'qt|qml'; then
+          echo "::error::contour-daemon depends on Qt: $depends"
+          exit 1
+        fi
+        test "$(dpkg-deb -f "$deb" Package)" = contour-daemon
+    # A clean machine is what a user has, and the runner is not one: it carries Qt, the whole build
+    # toolchain and more. So the package is installed into a bare ubuntu image. `apt-get install ./file`
+    # resolves its Depends from the archive, which is the point: nothing Qt may come with it. The script
+    # runs as root inside the container; the repository checkout is mounted read-only.
+    - name: "Install the package in a clean ubuntu:24.04"
+      run: |
+        docker run --rm -v "$PWD:/pkg:ro" ubuntu:24.04 bash -euxc '
+          apt-get update
+          apt-get install -y "/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+          dpkg -s contour-daemon
+          if dpkg -s contour-daemon | grep "^Depends:" | grep -Eiq "qt|qml"; then echo "Qt in Depends"; exit 1; fi
+          if dpkg -l | grep -Ei "libqt|qml6|qt6"; then echo "a Qt package was pulled in"; exit 1; fi
+          test -x /usr/bin/contour
+          if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
+          contour daemon --help
+          test -f /usr/lib/systemd/user/contour-daemon.service
+          for extension in agent-status clock git plasma sysload; do
+            test -f "/usr/share/contour/extensions/$extension.wasm"
+          done
+        '
+    # Uploaded wherever the GUI package is, and no more widely: the install-swap job and the release
+    # take it from here. The steps above are what run on a pull request.
+    - name: "Uploading artifact .deb package"
+      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+        path: |
+          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.ddeb
+        if-no-files-found: error
+        retention-days: 7
+
+  # The two Debian packages ship the same /usr/bin/contour and declare Conflicts/Replaces on each other,
+  # so installing either over the other must leave exactly one of them, with exactly one binary. That
+  # needs BOTH packages, and the GUI one is only built by package_for_Ubuntu (on 26.04, and not on pull
+  # requests), so this job needs both packaging jobs, downloads their artifacts, and runs where they
+  # exist. On a pull request the daemon-only install test above is what runs.
+  #
+  # ubuntu:26.04, because that is the release the GUI package was built for: its Qt dependencies
+  # resolve there. The daemon package, built on 24.04, has no such dependency on the release it ran on,
+  # which is what this also exercises -- a package built a release earlier installing on a later one.
+  test_daemon_package_swap:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    name: "Ubuntu Linux (contour / contour-daemon swap)"
+    runs-on: ubuntu-24.04
+    needs:
+      - package_for_Ubuntu
+      - package_daemon_for_Ubuntu
+    steps:
+    - uses: actions/checkout@v4
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "fetch artifact: contour (GUI)"
+      uses: actions/download-artifact@v4
+      with:
+        name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+        path: pkg
+    - name: "fetch artifact: contour-daemon"
+      uses: actions/download-artifact@v4
+      with:
+        name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+        path: pkg
+    - name: "Swap the packages in a clean ubuntu:26.04"
+      run: |
+        ls -la pkg
+        docker run --rm -v "$PWD/pkg:/pkg:ro" ubuntu:26.04 bash -euxc '
+          gui=/pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+          apt-get update
+
+          # Asserts which of the two packages is installed, and that /usr/bin/contour is a single file.
+          expect_only() {
+            local present=$1 absent=$2
+            dpkg -s "$present" | grep -q "^Status: install ok installed"
+            if dpkg -s "$absent" 2>/dev/null | grep -q "^Status: install ok installed"; then
+              echo "$absent is still installed after installing $present"; exit 1
+            fi
+            test -x /usr/bin/contour
+            test "$(dpkg -S /usr/bin/contour | wc -l)" -eq 1
+            dpkg -S /usr/bin/contour | grep -q "^$present:"
+          }
+
+          # apt-get install ./file is the way a user installs a downloaded .deb, and it is what lets the
+          # Conflicts remove the other package instead of refusing.
+          apt-get install -y "$daemon"
+          expect_only contour-daemon contour
+          apt-get install -y "$gui"
+          expect_only contour contour-daemon
+          apt-get install -y "$daemon"
+          expect_only contour-daemon contour
+        '
 
   # CONTOUR_EXTENSIONS=OFF compiles the status-line extensions out, and with them every type the code that
   # drives them names: whatever reaches for one outside its #ifdef breaks this configuration alone, which no
@@ -2597,6 +2746,8 @@ jobs:
       - check_notcurses_test_matrix
       - macOSArm
       - package_for_Ubuntu
+      - package_daemon_for_Ubuntu
+      - test_daemon_package_swap
       - windows
     permissions:
       # We need write permissions on contents to create GitHub releases and on
@@ -2620,6 +2771,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+      # The Qt-free contour-daemon package; its .deb and -dbgsym .ddeb land beside the GUI ones and are
+      # attached by the same *.deb / *.ddeb globs below.
+      - name: "fetch artifact: contour-daemon (Ubuntu 24.04)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:

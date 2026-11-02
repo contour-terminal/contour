@@ -138,14 +138,14 @@ debug info compresses well. `max-size` is about 1.3x the tree:
 | Packaging, Ubuntu 26.04 | `ccache-ubuntu-26.04` | 1200 MB |
 | `check_clang_tidy` (push/merge group) | `ccache-ubuntu2404-clang-tidy` | 700 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 700 MB |
-| `build_headless` | `ccache-ubuntu2404-headless` | 500 MB |
+| `package_daemon_for_Ubuntu` | `ccache-ubuntu2404-headless` | 500 MB |
 | macOS (arm) | `ccache-macosArm-r1` | 800 MB |
 | Windows (MSVC) | `ccache-windows-msvc-release` | 1500 MB |
 
 The caps sum to 9.5 GB; the entries should settle near 70 % of that, about 6.7 GB, beside roughly
 1.5 GB of Qt, vcpkg, FreeBSD and apt caches. That is inside the 10 GB quota with little to spare: a
 second `master` push before the first generation is evicted costs the oldest entries first. The guard
-jobs (`build_headless`, `build_no_extensions`, tidy) were not turned into read-only restorers of the
+jobs (`package_daemon_for_Ubuntu`, `build_no_extensions`, tidy) were not turned into read-only restorers of the
 Linux Clang key as the plan suggested: they compile with a different preset, so their command lines
 differ and a restored Clang-matrix entry would hit almost nothing. If eviction churn shows, drop the
 tidy cache first -- it caches compiles only, and the tidy runs themselves are not cacheable.
