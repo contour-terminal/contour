@@ -48,7 +48,7 @@ Item {
             root.offerRestart()
             event.accepted = true
         } else if (root.controller && root.controller.chromeKey) {
-            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers, event.text)
         }
     }
 

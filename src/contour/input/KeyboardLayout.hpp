@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/input/XkbKeymap.hpp>
+
 #include <cstdint>
 #include <memory>
 
@@ -10,12 +12,13 @@ namespace contour::input
 /// What the windowing system calls a physical key: the two native identifiers a key event carries.
 ///
 /// Which of them means anything is the platform's business: X11 and Wayland report a keysym in
-/// `virtualKey` and the XKB keycode in `scanCode`; Win32 a virtual-key code and a scan code; macOS a
-/// Carbon key code in `virtualKey`.
+/// `virtualKey`, the XKB keycode in `scanCode` and the active group in `group`; Win32 a virtual-key code and
+/// a scan code; macOS a Carbon key code in `virtualKey`.
 struct NativeKeyCode
 {
     uint32_t virtualKey = 0; ///< QKeyEvent::nativeVirtualKey().
     uint32_t scanCode = 0;   ///< QKeyEvent::nativeScanCode().
+    uint32_t group = 0;      ///< X11/Wayland: the XKB group (layout index) in force; the platform decodes it.
 };
 
 /// Translates a windowing system's native key identifier into the vocabularies the keyboard
@@ -50,16 +53,24 @@ class KeyboardLayout
 /// @return The KeyboardLayout implementation for the platform this build targets.
 [[nodiscard]] std::unique_ptr<KeyboardLayout> makePlatformKeyboardLayout();
 
-/// @return A KeyboardLayout that takes the native key identifier to already be codepoint-valued,
-///         decoding the X11 `0x01000000 | codepoint` keysym form on the way. This is what every
-///         platform except macOS currently gets from makePlatformKeyboardLayout().
+/// @param keymap What the keymap in force says about a key; may be null.
+/// @return A KeyboardLayout for X11 and Wayland, where a key event reports the keysym it produced -- the
+///         *shifted* one when Shift was held -- and its XKB keycode.
 ///
-/// It is right for the keys this path sees on a US layout and wrong beyond that, which is a known
-/// gap rather than a claim: X11's legacy charset keysyms (`XK_Cyrillic_a` is 0x06C1) and Windows'
-/// OEM punctuation codes (`VK_OEM_1` is 0xBA) are as positional as the macOS codes are, and X11
-/// reports the *shifted* keysym, so Shift+3 reports '#' where the spec asks for '3'. Closing those
-/// needs a keysym→UCS table and a VK table respectively — the same shape as the macOS one below.
-[[nodiscard]] std::unique_ptr<KeyboardLayout> makePassthroughKeyboardLayout();
+/// The unshifted key is what @p keymap says the key's keycode produces at shift level 0, read through the
+/// keysym table (keysymToCodepoint()). Without a keymap, or where it has nothing for the key, the event's
+/// own keysym is read through the same table -- right for any key held without Shift, and for a shifted one
+/// only where the shifted and unshifted characters coincide.
+[[nodiscard]] std::unique_ptr<KeyboardLayout> makeXkbKeyboardLayout(std::unique_ptr<XkbKeymap> keymap);
+
+/// @return A KeyboardLayout that reads native key identifiers as Windows virtual-key codes (`VK_*`) and
+///         resolves them against a US keyboard, ignoring the user's actual layout; the VK code itself is
+///         what win32VirtualKeyOf() reports.
+///
+/// This is the fallback the Windows layout composes when the live layout cannot answer, exposed on its own
+/// so it can be constructed anywhere -- including on Linux CI, where it is what lets the Windows rules be
+/// tested at all. Reports 0 for keys that carry no character.
+[[nodiscard]] std::unique_ptr<KeyboardLayout> makeWin32UsKeyboardLayout();
 
 /// @return A KeyboardLayout that reads native key identifiers as macOS Carbon key codes (`kVK_*`)
 ///         and resolves them against a US ANSI keyboard, ignoring the user's actual layout.

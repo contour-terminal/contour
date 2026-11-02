@@ -24,6 +24,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <format>
 #include <memory>
@@ -33,6 +34,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 namespace
 {
@@ -46,8 +48,19 @@ using contour::test::KeyEncoding;
 [[nodiscard]] contour::input::KeyboardLayout const& layoutFor(KeyboardPlatformKind kind)
 {
     static auto const mac = contour::input::makeMacUsAnsiKeyboardLayout();
-    static auto const passthrough = contour::input::makePassthroughKeyboardLayout();
-    return kind == KeyboardPlatformKind::Mac ? *mac : *passthrough;
+    static auto const win32 = contour::input::makeWin32UsKeyboardLayout();
+    // The keymap behind the Xkb rows: a US keyboard's number row is all they read.
+    static auto const keymapRows =
+        std::array { contour::input::FixedXkbKey { .keycode = 12, .group = 0, .keysym = 0x33 } };
+    static auto const xkb =
+        contour::input::makeXkbKeyboardLayout(contour::input::makeFixedXkbKeymap(keymapRows));
+    switch (kind)
+    {
+        case KeyboardPlatformKind::Mac: return *mac;
+        case KeyboardPlatformKind::Win32: return *win32;
+        case KeyboardPlatformKind::Xkb: break;
+    }
+    return *xkb;
 }
 
 /// @param encoding The encoding a row runs under.
@@ -117,8 +130,6 @@ TEST_CASE("key characterization", "[input][characterization]")
     {
         DYNAMIC_SECTION(row.name)
         {
-            if (row.kind == KeyboardPlatformKind::Win32)
-                SKIP("the Win32 normalizer lands in Task 9");
             if (row.kind != contour::config::BuildKeyboardPlatformKind)
             {
                 switch (row.host)

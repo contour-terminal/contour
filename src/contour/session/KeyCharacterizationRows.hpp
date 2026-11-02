@@ -144,7 +144,7 @@ namespace keybits
                                                      .mode = mode });
         };
 
-        // {{{ Xkb: X11 and Wayland. nativeVirtualKey is a keysym; the passthrough layout reads it.
+        // {{{ Xkb: X11 and Wayland. nativeVirtualKey is a keysym; the Xkb layout reads it.
         constexpr auto Xkb = KeyboardPlatformKind::Xkb;
         add("xkb: printable ASCII", Xkb, { .qtKey = 'X', .text = U"x" }, "x");
         add("xkb: Shift+letter", Xkb, { .qtKey = 'A', .text = U"A", .qtModifiers = Shift }, "A");
@@ -208,10 +208,24 @@ namespace keybits
             { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0x06d6 },
             "\xd0\xb6",
             KeyEncoding::KittyDisambiguate);
+        // deliberate: spec Goal 8, X11 row -- the legacy Cyrillic keysym is read through the keysym table. It
+        // was reported as the codepoint 1750 (0x06d6, the keysym's own number); XK_Cyrillic_zhe is 'ж'
+        // (1078).
         add("xkb: Cyrillic letter under kitty report-all",
             Xkb,
             { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0x06d6 },
-            "\033[1750u",
+            "\033[1078u",
+            KeyEncoding::KittyReportAll);
+        // deliberate: spec Goal 8, X11 row -- Shift+3 arrives as the keysym '#', and the unshifted key is
+        // what the keymap says keycode 12 types at level 0: '3' (51), where it used to be reported as '#'.
+        add("xkb: Shift+3 under kitty report-all",
+            Xkb,
+            { .qtKey = 0x23,
+              .text = U"#",
+              .qtModifiers = Shift,
+              .nativeVirtualKey = 0x23,
+              .nativeScanCode = 12 },
+            "\033[51;2u",
             KeyEncoding::KittyReportAll);
         // }}}
 
@@ -299,10 +313,12 @@ namespace keybits
             { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0xba },
             "\xd0\xb6",
             KeyEncoding::KittyDisambiguate);
+        // deliberate: spec Goal 8 -- the VK is resolved by the layout. VK_OEM_1 (0xba) was reported as the
+        // codepoint 186 (º); the US table reads it as ';' (59), and the live layout as the key's own letter.
         add("win32: Cyrillic letter under kitty report-all",
             Win32,
             { .qtKey = 0x0416, .text = U"ж", .nativeVirtualKey = 0xba },
-            "\033[186u",
+            "\033[59u",
             KeyEncoding::KittyReportAll);
         add("win32: AltGr [ under win32-input-mode (#2127)",
             Win32,

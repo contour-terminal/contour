@@ -473,15 +473,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes
     /// to it, so one instance is shared rather than one per pane.
+    ///
+    /// Built on first use, because the X11 keymap it reads is reachable only through the running Qt
+    /// application, which the app is constructed before.
     /// @return The layout; never nullptr.
-    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+    [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const;
 
     /// How a session builds its keyboard platform: the build host's kind, over the app-wide layout. The one
     /// place the build host is named for keyboard purposes.
     /// @return The factory; the platforms it builds hold the layout by reference, which the app outlives.
     [[nodiscard]] input::KeyboardPlatformFactory keyboardPlatformFactory() const
     {
-        return input::makeKeyboardPlatformFactory(config::BuildKeyboardPlatformKind, *_keyboardLayout);
+        return input::makeKeyboardPlatformFactory(config::BuildKeyboardPlatformKind, keyboardLayout());
     }
 
     /// @return The machine's GPUs, listed without waking any; never null.
@@ -1242,8 +1245,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::optional<vtbackend::LinkDetectionServices> _injectedLinkServices;
     // Shared by every session's keyboard platform, which holds it by reference; @see keyboardLayout() and
     // keyboardPlatformFactory(). Declared before _sessionManager, so that it outlives every session and the
-    // platform each one holds. It needs no Qt application, so it is built eagerly with the app.
-    std::unique_ptr<input::KeyboardLayout> _keyboardLayout = input::makePlatformKeyboardLayout();
+    // platform each one holds. Built by keyboardLayout() on first use, once the Qt application exists.
+    mutable std::once_flag _keyboardLayoutOnce;
+    mutable std::unique_ptr<input::KeyboardLayout> _keyboardLayout;
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.

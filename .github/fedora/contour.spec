@@ -21,6 +21,8 @@ BuildRequires:  freetype-devel
 BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
 BuildRequires:  libssh2-devel
+BuildRequires:  libxkbcommon-devel
+BuildRequires:  libxkbcommon-x11-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkgconf
 BuildRequires:  systemd-devel

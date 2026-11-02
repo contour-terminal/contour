@@ -1,9 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/input/KeyMapping.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/QtKeyCapture.hpp>
+
+#ifdef _WIN32
+    #include <windows.h>
+#endif
 
 namespace contour::input
 {
+
+uint32_t nativeModifiersWithLockState([[maybe_unused]] uint32_t qtNativeModifiers) noexcept
+{
+#ifdef _WIN32
+    auto bits = uint32_t { 0 };
+    if ((GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+        bits |= Win32CapsLockBit;
+    if ((GetKeyState(VK_NUMLOCK) & 0x0001) != 0)
+        bits |= Win32NumLockBit;
+    return bits;
+#else
+    return qtNativeModifiers;
+#endif
+}
 
 NativeKeyEvent captureKeyEvent(QKeyEvent const& event, vtbackend::KeyboardEventType type)
 {

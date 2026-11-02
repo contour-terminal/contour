@@ -4,8 +4,6 @@
 #include <contour/input/KeyTranslation.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 
-#include <QtCore/QString>
-
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -165,50 +163,21 @@ namespace
             inferredModifiers.locks |= vtbackend::LockKey::NumLock;
         return keyEventOf(event, *mappedKey, inferredModifiers);
     }
-
-    /// Decodes the modifiers with makeModifiers(), whose lock and AltGr rules are those of the build host.
-    ///
-    /// It stands in for the Win32 normalizer until that has one of its own: on its own host it decodes
-    /// exactly as the key path always did.
-    class HostDecodedKeyboardPlatform final: public KeyboardPlatform
-    {
-      public:
-        explicit HostDecodedKeyboardPlatform(KeyboardLayout const& layout): _layout { layout } {}
-
-        [[nodiscard]] KeyEvent normalize(NativeKeyEvent const& event) const override
-        {
-            if (event.origin == KeyEventOrigin::InputMethodCommit)
-                return detail::inputMethodCommitOf(
-                    event, makeModifiers(Qt::NoModifier, event.nativeModifiers).locks);
-
-            auto const qtModifiers = Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers));
-            auto const modifiers =
-                makeModifiers(qtModifiers,
-                              event.nativeModifiers,
-                              ctrlAltRoleOf(qtModifiers, QString::fromStdU32String(event.text)));
-            return detail::translateEvent(event, modifiers, _layout);
-        }
-
-        [[nodiscard]] InputMethodRoute inputMethodRouteFor(uint32_t /*nativeModifiers*/) const override
-        {
-            return InputMethodRoute::ToInputMethod;
-        }
-
-      private:
-        KeyboardLayout const& _layout;
-    };
 } // namespace
 
 namespace detail
 {
-    vtbackend::KeyIdentity identityOf(NativeKeyEvent const& event, KeyboardLayout const& layout)
+    vtbackend::KeyIdentity identityOf(NativeKeyEvent const& event,
+                                      KeyboardLayout const& layout,
+                                      uint32_t group)
     {
         // What the platform natively calls this key, translated into the two vocabularies the keyboard
         // protocols speak. Both go through the layout rather than being copied across raw: only it knows
         // how to read nativeVirtualKey(), which is a positional Carbon key code on macOS, a keysym on
         // X11 and a VK code on Win32.
-        auto const nativeKey =
-            NativeKeyCode { .virtualKey = event.nativeVirtualKey, .scanCode = event.nativeScanCode };
+        auto const nativeKey = NativeKeyCode { .virtualKey = event.nativeVirtualKey,
+                                               .scanCode = event.nativeScanCode,
+                                               .group = group };
         return vtbackend::KeyIdentity {
             .unshiftedKey = layout.unshiftedKeyOf(nativeKey),
             .nativeVirtualKey = layout.win32VirtualKeyOf(nativeKey),
@@ -274,9 +243,10 @@ namespace detail
 
     KeyEvent translateEvent(NativeKeyEvent const& event,
                             vtbackend::KeyboardModifiers modifiers,
-                            KeyboardLayout const& layout)
+                            KeyboardLayout const& layout,
+                            uint32_t group)
     {
-        auto const identity = identityOf(event, layout);
+        auto const identity = identityOf(event, layout, group);
         if (auto translated = translateKey(event, modifiers, identity))
             return *std::move(translated);
         if (auto control = controlCharacterOf(event, modifiers, identity))
@@ -298,6 +268,17 @@ KeyboardPolicy keyboardPolicyOf(config::TerminalProfile const& profile)
     return KeyboardPolicy { .optionAsAlt = profile.optionAsAlt.value() };
 }
 
+vtbackend::Modifiers chordOfKeyPress(KeyboardPlatform const& platform,
+                                     int qtKey,
+                                     uint32_t qtModifiers,
+                                     std::u32string_view text)
+{
+    return platform
+        .normalize(
+            NativeKeyEvent { .qtKey = qtKey, .text = std::u32string { text }, .qtModifiers = qtModifiers })
+        .modifiers.chord;
+}
+
 std::unique_ptr<KeyboardPlatform> makeKeyboardPlatform(config::KeyboardPlatformKind kind,
                                                        KeyboardPolicy policy,
                                                        KeyboardLayout const& layout)
@@ -305,8 +286,7 @@ std::unique_ptr<KeyboardPlatform> makeKeyboardPlatform(config::KeyboardPlatformK
     switch (kind)
     {
         case config::KeyboardPlatformKind::Xkb: return detail::makeXkbKeyboardPlatform(layout);
-        case config::KeyboardPlatformKind::Win32:
-            return std::make_unique<HostDecodedKeyboardPlatform>(layout);
+        case config::KeyboardPlatformKind::Win32: return detail::makeWin32KeyboardPlatform(layout);
         case config::KeyboardPlatformKind::Mac: return detail::makeMacKeyboardPlatform(policy, layout);
     }
     return detail::makeXkbKeyboardPlatform(layout);
