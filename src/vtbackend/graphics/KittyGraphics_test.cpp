@@ -1891,6 +1891,110 @@ TEST_CASE("KittyGraphics.playback.s2_resumes_past_appended_gapless_frames", "[ki
     CHECK(placedPixels(mock) == blue());
 }
 
+namespace
+{
+/// One pixel buffer per placed cell.
+using Cells = std::vector<std::vector<uint8_t>>;
+
+/// The pixels of the image fragment at each cell of the page that holds one, row by row.
+[[nodiscard]] Cells placedCells(MockTerm<vtpty::MockPty>& mock)
+{
+    auto cells = Cells {};
+    auto const& screen = mock.terminal.primaryScreen();
+    for (auto const line: std::views::iota(0, *screen.pageSize().lines))
+        for (auto const column: std::views::iota(0, *screen.pageSize().columns))
+            if (auto const fragment = screen.at(LineOffset(line), ColumnOffset(column)).imageFragment())
+            {
+                auto const& data = fragment->rasterizedImage().image().data();
+                cells.emplace_back(data.begin(), data.end());
+            }
+    return cells;
+}
+
+/// Adds frames 2 (green) and 3 (blue) to image 7, gaps 10, 20 and 30 ms, and starts it looping.
+void playThreeFrames(MockTerm<vtpty::MockPty>& mock)
+{
+    mock.writeToScreen("\033_Ga=a,i=7,r=1,z=10\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=20;AP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=30;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    mock.discardPendingReplies();
+}
+} // namespace
+
+TEST_CASE("KittyGraphics.playback.rows_back_from_the_history_show_the_current_frame", "[kitty]")
+{
+    // A three-row placement at the bottom of the page; the page shrinks so its top row goes into the
+    // history, a frame advances on the rows left, and the page grows back.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033[2;1H\033_Ga=T,f=24,i=7,s=1,v=1,c=1,r=3,C=1;/wAA\033\\\033[4;1H"sv);
+    playThreeFrames(mock);
+    REQUIRE(placedCells(mock) == Cells { red(), red(), red() });
+
+    mock.terminal.resizeScreen(PageSize { LineCount(2), ColumnCount(8) });
+    REQUIRE(placedCells(mock).size() == 2);
+    tickAfter(mock, 10ms);
+    REQUIRE(placedCells(mock) == Cells { green(), green() });
+
+    // The returning row left with red: it comes back showing the frame the others show, not torn.
+    mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(8) });
+    CHECK(placedCells(mock) == Cells { green(), green(), green() });
+    tickAfter(mock, 20ms);
+    CHECK(placedCells(mock) == Cells { blue(), blue(), blue() });
+}
+
+TEST_CASE("KittyGraphics.playback.an_image_back_on_the_page_plays_on", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1,C=1;/wAA\033\\\033[4;1H"sv);
+    playThreeFrames(mock);
+
+    // All of it in the history: the frame advances, finds no placement, and holds.
+    mock.terminal.resizeScreen(PageSize { LineCount(1), ColumnCount(8) });
+    REQUIRE(placedCells(mock).empty());
+    tickAfter(mock, 10ms);
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+
+    // Back on the page: it shows the frame playback is on, and plays on from there.
+    mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(8) });
+    CHECK(placedCells(mock) == Cells { green() });
+    CHECK(dueIn(mock) == 20ms);
+    tickAfter(mock, 20ms);
+    CHECK(placedCells(mock) == Cells { blue() });
+
+    SECTION("a=a,c= finds the placement")
+    {
+        mock.writeToScreen("\033_Ga=a,i=7,c=1\033\\"sv);
+        CHECK(placedCells(mock) == Cells { red() });
+    }
+}
+
+TEST_CASE("KittyGraphics.playback.a_tick_walks_the_page_once", "[kitty]")
+{
+    // Hundreds of tiny animations, one per cell: a walk of the page for each would make every frame cost
+    // cells times images, under the lock.
+    auto constexpr Lines = 10;
+    auto constexpr Columns = 20;
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(Lines), ColumnCount(Columns) } };
+    for (auto const line: std::views::iota(0, Lines))
+        for (auto const column: std::views::iota(0, Columns))
+        {
+            auto const id = (line * Columns) + column + 1;
+            mock.writeToScreen(std::format(
+                "\033[{};{}H\033_Ga=T,f=24,i={},s=1,v=1,C=1,q=2;/wAA\033\\", line + 1, column + 1, id));
+            mock.writeToScreen(std::format("\033_Ga=a,i={},r=1,z=10,q=2\033\\", id));
+            mock.writeToScreen(std::format("\033_Ga=f,i={},X=1,s=1,v=1,z=10,q=2;AP8A\033\\", id));
+            mock.writeToScreen(std::format("\033_Ga=a,i={},s=3,q=2\033\\", id));
+        }
+    REQUIRE(placedCells(mock).size() == static_cast<size_t>(Lines * Columns));
+
+    auto const walksBefore = mock.terminal.primaryScreen().kittyFragmentWalks();
+    tickAfter(mock, 10ms);
+    CHECK(mock.terminal.primaryScreen().kittyFragmentWalks() == walksBefore + 1);
+    auto const cells = placedCells(mock);
+    CHECK(std::ranges::all_of(cells, [](auto const& pixel) { return pixel == green(); }));
+}
+
 TEST_CASE("KittyGraphics.playback.RIS_drops_deadline", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };

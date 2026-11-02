@@ -530,6 +530,10 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 
     // TODO: find out what to do with DECOM mode. Reset it to?
 
+    // Rows the resize brought back from the history hold the frame they left with.
+    if (sizeChanged)
+        resyncKittyAnimations();
+
     verifyState();
 }
 
@@ -5810,6 +5814,7 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
 void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto const& selects,
                                   std::invocable<CellProxy&, ImageFragment const&> auto const& update)
 {
+    ++_kittyFragmentWalks;
     for (auto const line: std::views::iota(0, *pageSize().lines))
     {
         // A blank line holds no cells, let alone a fragment, and reading a cell of one would
@@ -5886,7 +5891,7 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
             // than the base -- the current one, since every advance replaces the frame before it --
             // so put the base back under it before the frames go.
             if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
-                showKittyFrame(animation->second.currentImage(), stored->second);
+                showKittyFrame(command.imageId, stored->second, nullptr);
             _kittyAnimations.erase(animation);
             return {};
         }
@@ -5903,13 +5908,8 @@ void Screen::removeKittyPlacementsOf(uint32_t imageId)
 {
     // Every frame counts as "this image": after an advance the cells hold a frame Image, and matching
     // only the base would skip them.
-    auto wanted = std::unordered_set<Image const*> {};
-    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
-        wanted.insert(image->second.get());
-    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
-        for (auto const& frame: animation->second.frames)
-            if (frame.image)
-                wanted.insert(frame.image.get());
+    auto wanted = KittyFrameSwaps {};
+    addKittyFrameSwaps(wanted, imageId, nullptr);
 
     updateKittyFragments(
         [&](ImageFragment const& fragment) {
@@ -6201,7 +6201,7 @@ KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
     // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
     // while every later delta is silently accepted.
     if (target == animation->currentFrame)
-        showKittyFrame(previous, animation->frames[target - 1].image);
+        showKittyFrame(imageId, animation->frames[target - 1].image, previous);
     return *animation;
 }
 
@@ -6215,8 +6215,35 @@ std::shared_ptr<Image const> Screen::kittyFrameImage(uint32_t imageId, uint32_t 
     return nullptr;
 }
 
-auto Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
-                            std::shared_ptr<Image const> const& next) -> Placed
+void Screen::addKittyFrameSwaps(KittyFrameSwaps& swaps,
+                                uint32_t imageId,
+                                std::shared_ptr<Image const> const& next) const
+{
+    auto const add = [&](std::shared_ptr<Image const> const& image) {
+        if (image)
+            swaps.insert_or_assign(image.get(), KittyFrameSwap { .next = next, .imageId = imageId });
+    };
+    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
+        add(image->second);
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        for (auto const& frame: animation->second.frames)
+            add(frame.image);
+}
+
+auto Screen::showKittyFrame(uint32_t imageId,
+                            std::shared_ptr<Image const> const& next,
+                            std::shared_ptr<Image const> const& superseded) -> Placed
+{
+    if (!next)
+        return Placed::No;
+    auto swaps = KittyFrameSwaps {};
+    addKittyFrameSwaps(swaps, imageId, next);
+    if (superseded)
+        swaps.insert_or_assign(superseded.get(), KittyFrameSwap { .next = next, .imageId = imageId });
+    return showKittyFrames(swaps).empty() ? Placed::No : Placed::Yes;
+}
+
+std::unordered_set<uint32_t> Screen::showKittyFrames(KittyFrameSwaps const& swaps)
 {
     // Deliberately NOT driven from a recorded placement. A placement is the fragments in the cells,
     // and the cells move: they scroll in either direction, are inserted and deleted, are erased, and
@@ -6224,8 +6251,9 @@ auto Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     // had to remember to keep the record in step, and the ones that did not produced frames stamped
     // over live text. Finding the fragments where they actually are cannot drift: if the image was
     // scrolled away, erased or overwritten, there is nothing to find and nothing happens.
-    if (previous == next || !previous || !next)
-        return Placed::No;
+    auto placed = std::unordered_set<uint32_t> {};
+    if (swaps.empty())
+        return placed;
 
     // One replacement per placement, not per image: the same image placed twice at different sizes is
     // two rasters, and sharing one would hand the second placement the first one's geometry. Keyed on
@@ -6233,8 +6261,17 @@ auto Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     auto replacements =
         std::unordered_map<std::shared_ptr<RasterizedImage const>, std::shared_ptr<RasterizedImage>> {};
     updateKittyFragments(
-        [&](ImageFragment const& fragment) { return fragment.rasterizedImage().imagePointer() == previous; },
+        [&](ImageFragment const& fragment) {
+            auto const& shown = fragment.rasterizedImage().imagePointer();
+            auto const swap = swaps.find(shown.get());
+            if (swap == swaps.end())
+                return false;
+            // On the page whichever frame it shows; replaced only when that is not already the one to show.
+            placed.insert(swap->second.imageId);
+            return shown != swap->second.next;
+        },
         [&](CellProxy& cell, ImageFragment const& fragment) {
+            auto const& next = swaps.at(fragment.rasterizedImage().imagePointer().get()).next;
             // Built from the fragment already on screen, so the new frame inherits the geometry,
             // alignment and gap colour the placement was made with -- rather than whatever the cursor
             // happens to carry now, which would repaint the letterbox in the current SGR background
@@ -6253,26 +6290,58 @@ auto Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
                                                                 previousRaster.imageSubSize());
             cell.setImageFragment(replacement, fragment.offset());
         });
-    return replacements.empty() ? Placed::No : Placed::Yes;
+    return placed;
 }
 
 KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_point now)
 {
-    auto shown = KittyFrameShown::No;
-    for (auto& animation: _kittyAnimations | std::views::values)
+    // Every due animation advances first, and then the page is walked once for all of them: a walk per
+    // animation made a page of tiny looping images cost cells times images on every frame, under the lock.
+    auto advanced = std::vector<uint32_t> {};
+    auto swaps = KittyFrameSwaps {};
+    for (auto& [imageId, animation]: _kittyAnimations)
     {
-        auto const showing = animation.currentImage();
         if (animation.advance(now) == KittyAnimation::FrameChanged::No)
             continue;
+        if (auto const current = animation.currentImage())
+        {
+            advanced.push_back(imageId);
+            addKittyFrameSwaps(swaps, imageId, current);
+        }
+    }
+    if (advanced.empty())
+        return { .shown = KittyFrameShown::No, .nextDue = nextKittyFrameDue() };
 
+    auto const placed = showKittyFrames(swaps);
+    auto shown = KittyFrameShown::No;
+    for (auto const imageId: advanced)
+    {
         // The frame changed and nothing on the page shows this image -- scrolled off, erased, overwritten.
-        // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put).
-        if (showKittyFrame(showing, animation.currentImage()) == Placed::No)
-            animation.hold();
-        else
+        // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put, a
+        // resize that brings it back).
+        if (placed.contains(imageId))
             shown = KittyFrameShown::Yes;
+        else
+            _kittyAnimations.at(imageId).hold();
     }
     return { .shown = shown, .nextDue = nextKittyFrameDue() };
+}
+
+void Screen::resyncKittyAnimations()
+{
+    if (_kittyAnimations.empty())
+        return;
+    auto swaps = KittyFrameSwaps {};
+    for (auto const& [imageId, animation]: _kittyAnimations)
+        if (auto const current = animation.currentImage())
+            addKittyFrameSwaps(swaps, imageId, current);
+    auto const placed = showKittyFrames(swaps);
+
+    auto const now = _terminal->steadyTimeNow();
+    for (auto& [imageId, animation]: _kittyAnimations)
+        if (animation.isPlaying() && animation.isHeld() && placed.contains(imageId))
+            animation.arm(now);
+    publishKittyAnimationDue();
 }
 
 std::optional<std::chrono::steady_clock::time_point> Screen::nextKittyFrameDue() const noexcept
@@ -6657,9 +6726,8 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
     // whatever the playback state, playing or stopped.
     if (command.currentFrame != 0)
     {
-        auto const showing = animation->currentImage();
         animation->currentFrame = command.currentFrame;
-        showKittyFrame(showing, animation->currentImage());
+        showKittyFrame(command.imageId, animation->currentImage(), nullptr);
     }
 
     auto const stateChanged =

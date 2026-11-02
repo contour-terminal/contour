@@ -53,6 +53,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -283,6 +285,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Stops every kitty animation of this page on the frame it shows. For a frame that could not be
     /// advanced for want of memory: a deadline left behind would retry it on every tick.
     void stopKittyAnimations() noexcept;
+
+    /// @return How many times a kitty operation has walked this page for image fragments: a tick must cost
+    ///         one walk however many animations it advances. For tests and diagnostics.
+    [[nodiscard]] uint64_t kittyFragmentWalks() const noexcept { return _kittyFragmentWalks; }
     // }}}
 
   private:
@@ -344,15 +350,51 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///         before it has decided to succeed.
     [[nodiscard]] std::shared_ptr<Image const> kittyFrameImage(uint32_t imageId, uint32_t number) const;
 
-    /// Replaces every on-screen fragment of @p previous with the same fragment of @p next.
+    /// What one walk of the page shows instead of an image a fragment holds.
+    struct KittyFrameSwap
+    {
+        std::shared_ptr<Image const> next; ///< The frame to show in its place.
+        uint32_t imageId = 0;              ///< The kitty image both frames belong to.
+    };
+
+    /// Every image a fragment may show, keyed by its address, and what to show instead.
+    using KittyFrameSwaps = std::unordered_map<Image const*, KittyFrameSwap>;
+
+    /// Adds a swap to @p next for every image a fragment of @p imageId may still show: the stored image and
+    /// each of its frames. Any of them, not only the frame shown last: a row that spent a frame advance in
+    /// the history (a shrunk page) comes back holding the frame it left with.
+    /// @param swaps The swaps to add to.
+    /// @param imageId The kitty image.
+    /// @param next The frame its placements are to show.
+    void addKittyFrameSwaps(KittyFrameSwaps& swaps,
+                            uint32_t imageId,
+                            std::shared_ptr<Image const> const& next) const;
+
+    /// Replaces, in one walk of the page, every fragment showing an image @p swaps names with the same
+    /// fragment of the image it swaps to.
     ///
     /// Works from the grid rather than from a recorded position, so it cannot drift as the cells
     /// scroll, are inserted or deleted, are erased or are reflowed -- if the image is no longer
     /// there, there is nothing to find and nothing happens.
-    /// @return whether any fragment was replaced: playback holds no deadline for an image not on the page.
-    ///         Only playback needs to know; every other caller shows a frame and is done.
-    Placed showKittyFrame(std::shared_ptr<Image const> const& previous,
-                          std::shared_ptr<Image const> const& next);
+    /// @param swaps What to replace, and with what.
+    /// @return The image ids with at least one fragment on the page, already showing its swap or not.
+    std::unordered_set<uint32_t> showKittyFrames(KittyFrameSwaps const& swaps);
+
+    /// Shows @p next in every placement of @p imageId, whichever of its frames the cells hold: one page walk.
+    /// @param imageId The kitty image.
+    /// @param next The frame to show.
+    /// @param superseded A former frame of the image, no longer among them, whose placements move too;
+    ///        nullptr for none.
+    /// @return whether any placement of the image is on the page: playback holds no deadline for one that
+    ///         is not. Only playback needs to know; every other caller shows a frame and is done.
+    Placed showKittyFrame(uint32_t imageId,
+                          std::shared_ptr<Image const> const& next,
+                          std::shared_ptr<Image const> const& superseded);
+
+    /// Brings every kitty placement on the page back in step with its animation after a resize, which can
+    /// return rows from the history still showing the frame they left with, and re-arms a playing animation
+    /// that had held for want of a placement and has one again.
+    void resyncKittyAnimations();
 
     /// Publishes this page's next kitty animation deadline to the terminal, if this is the page on display.
     void publishKittyAnimationDue();
@@ -1748,6 +1790,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
 
     std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
+    uint64_t _kittyFragmentWalks = 0; ///< @see kittyFragmentWalks()
 
     // NOTE: the `OSC 5522` write transmission lives on Terminal, not here: an application may switch
     // screens (DECSASD, or a page change) between chunks, and a per-screen buffer would drop the
