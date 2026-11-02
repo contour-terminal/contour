@@ -8,6 +8,7 @@
 #include <contour/display/RenderState.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
 #include <contour/display/WindowHost.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/SessionInput.hpp>
@@ -632,6 +633,15 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// grid-backed questions on any other thread before it gets here. Mutable because Qt's query is const,
     /// and this is a cache of its answer, not state.
     mutable std::optional<ImeAnchor> _lastImeAnchor;
+    /// Whether the keystroke Qt last asked about (ShortcutOverride) may reach the input method, as the
+    /// session's keyboard platform said; cleared when the key's press or release arrives, and on focus loss.
+    ///
+    /// Qt's Cocoa plugin asks the focus object for Qt::ImEnabled between the ShortcutOverride and the press,
+    /// and hands the key to the input method only when it is enabled: answering false for this one
+    /// keystroke is what keeps Option+e an ESC e rather than a dead key. Atomic because the query may be
+    /// asked on another thread, where it bubbles to the base class -- the record is written on the GUI
+    /// thread.
+    std::atomic<input::InputMethodRoute> _pendingInputMethodRoute = input::InputMethodRoute::ToInputMethod;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
     /// The cursor column of the frame prepareFrameRhi() drew last.

@@ -3837,6 +3837,16 @@ class Terminal: public IStatusLinePublishTarget
         return _inputGenerator.keyboardProtocol();
     }
 
+    /// Whether a non-legacy Kitty keyboard mode is active, so that a key's every modifier -- Super included
+    /// -- is encoded. Read under the input lock, which every change of the protocol takes: a key asks as it
+    /// arrives, and must not wait for the parser thread's state lock.
+    /// @return True while a flag beyond the legacy encoding is set.
+    [[nodiscard]] bool isKeyboardProtocolNonLegacy() const
+    {
+        auto const _ = std::scoped_lock { _inputMutex };
+        return _inputGenerator.keyboardProtocol().isNonLegacyMode();
+    }
+
     /// Changes the Kitty keyboard protocol's state, under the input lock as well as the state lock the caller
     /// holds, as every change to what a key is encoded with is. @see changeInputEncoding()
     /// @param change What to do to the protocol's state.

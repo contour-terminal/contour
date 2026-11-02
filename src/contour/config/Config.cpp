@@ -754,8 +754,8 @@ InputMappings makeDefaultInputMappings(DefaultsEdition edition, PaneChordHost pa
                                .input = 'X',
                                .binding = { { actions::ClosePane {} } } },
             // Ctrl+Shift+P: the command palette. A CharInputMapping (not a KeyInputMapping) because
-            // Qt::Key_P is not in helper.cpp's KeyMappings table: any Ctrl+printable is routed through
-            // sendCharEvent, so the chord arrives as the character 'P' — exactly like Ctrl+Shift+T above.
+            // Qt::Key_P is not a named key: the keyboard platform's Ctrl+ASCII rule routes any
+            // Ctrl+printable as a character, so the chord arrives as 'P' — exactly like Ctrl+Shift+T above.
             CharInputMapping { .modes { vtbackend::MatchModes {} },
                                .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                                .input = 'P',
@@ -5146,9 +5146,9 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
     auto const text = unicode::convert_to<char32_t>(std::string_view { name });
     if (text.size() == 1)
         // Folded, because the case a letter arrives in is decided by the input route rather than by
-        // the user; the lookup in TerminalSession::sendCharEvent folds the delivered codepoint to
-        // match. Both sides must agree -- folding only here would break `key: 'a'` bindings that
-        // work today. @see config::foldedBindingCodepoint
+        // the user; the lookup in input::routeChar folds the delivered codepoint to match. Both sides must
+        // agree -- folding only here would break `key: 'a'` bindings that work today. @see
+        // config::foldedBindingCodepoint
         return foldedBindingCodepoint(static_cast<char32_t>(text[0]));
 
     auto constexpr NamedChars =

@@ -24,9 +24,9 @@ inline constexpr std::size_t KeyboardPlatformKindCount = 3;
 
 /// The kind this build targets.
 inline constexpr KeyboardPlatformKind BuildKeyboardPlatformKind =
-#if defined(__APPLE__)
+#ifdef __APPLE__
     KeyboardPlatformKind::Mac;
-#elif defined(_WIN32)
+#elifdef _WIN32
     KeyboardPlatformKind::Win32;
 #else
     KeyboardPlatformKind::Xkb;

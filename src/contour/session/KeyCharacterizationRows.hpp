@@ -4,9 +4,8 @@
 // per platform kind. It pins current behaviour, deliberately including the behaviour that is wrong; a
 // change to the key pipeline edits a row and says so in its commit.
 //
-// The Mac and Win32 rows cannot run on Linux -- their code paths are #ifdef'd -- so their expectations
-// are derived by reading SessionInput.cpp and KeyMapping.cpp, and the macOS and Windows CI runners
-// confirm them.
+// Every row runs on every host, through its own kind's KeyboardPlatform. The Mac and Win32 expectations
+// were derived by reading the key path, and the macOS and Windows CI runners confirm them.
 #pragma once
 
 #include <contour/config/KeyboardPlatformKind.hpp>
@@ -44,6 +43,17 @@ enum class KeyMode : uint8_t
     SelectionActive, //!< A selection exists (binding mode Select).
 };
 
+/// Whether a row's expectation holds on every host, or only on its own kind's -- because something below
+/// the keyboard platform still reads the build host.
+enum class RowHost : uint8_t
+{
+    AnyHost = 0,      //!< The row's platform decides everything it expects.
+    OwnFallbackTable, //!< Its binding is in a fallback table only its own host builds (the macOS ⌘
+                      //!< chords), until the default-row table gains its platform column (Task 12).
+    OwnHostEncoder,   //!< Its bytes depend on an encoder rule only macOS hosts compile:
+                      //!< makeVirtualTerminalParam() reports a bare Alt on a CSI-parameter key as Control.
+};
+
 /// One row of the characterization table.
 struct KeyCharacterizationRow
 {
@@ -56,6 +66,7 @@ struct KeyCharacterizationRow
     ExpectedBinding binding = ExpectedBinding::None;
     std::string_view boundAction = {}; ///< Action name when binding == Fires.
     KeyMode mode = KeyMode::Default;   ///< The terminal state the row runs in.
+    RowHost host = RowHost::AnyHost;   ///< Whether the row holds off its own kind's host.
 };
 
 namespace keybits
@@ -167,7 +178,12 @@ namespace keybits
         addBound("xkb: Shift+Up is a binding", Xkb, { .qtKey = KeyUp, .qtModifiers = Shift }, "ScrollOneUp");
         add("xkb: Ctrl+Left", Xkb, { .qtKey = KeyLeft, .qtModifiers = Ctrl }, "\033[1;5D");
         add("xkb: Ctrl+Up", Xkb, { .qtKey = KeyUp, .qtModifiers = Ctrl }, "\033[1;5A");
-        add("xkb: Alt+Left", Xkb, { .qtKey = KeyLeft, .qtModifiers = Alt }, "\033[1;3D");
+        // The encoder's macOS rule (see "mac: Alt+Left") would make this 1;5D on a macOS host.
+        table.push_back(KeyCharacterizationRow { .name = "xkb: Alt+Left",
+                                                 .kind = Xkb,
+                                                 .event = { .qtKey = KeyLeft, .qtModifiers = Alt },
+                                                 .expectedPty = "\033[1;3D",
+                                                 .host = RowHost::OwnHostEncoder });
         add("xkb: Escape", Xkb, { .qtKey = KeyEscape }, "\033");
         add("xkb: Backspace", Xkb, { .qtKey = KeyBackspace }, "\177");
         add("xkb: Ctrl+Space", Xkb, { .qtKey = KeySpace, .qtModifiers = Ctrl }, "\0"sv);
@@ -254,7 +270,11 @@ namespace keybits
             "win32: Shift+Up is a binding", Win32, { .qtKey = KeyUp, .qtModifiers = Shift }, "ScrollOneUp");
         add("win32: Ctrl+Left", Win32, { .qtKey = KeyLeft, .qtModifiers = Ctrl }, "\033[1;5D");
         add("win32: Ctrl+Up", Win32, { .qtKey = KeyUp, .qtModifiers = Ctrl }, "\033[1;5A");
-        add("win32: Alt+Left", Win32, { .qtKey = KeyLeft, .qtModifiers = Alt }, "\033[1;3D");
+        table.push_back(KeyCharacterizationRow { .name = "win32: Alt+Left",
+                                                 .kind = Win32,
+                                                 .event = { .qtKey = KeyLeft, .qtModifiers = Alt },
+                                                 .expectedPty = "\033[1;3D",
+                                                 .host = RowHost::OwnHostEncoder });
         add("win32: Escape", Win32, { .qtKey = KeyEscape }, "\033");
         add("win32: Backspace", Win32, { .qtKey = KeyBackspace }, "\177");
         add("win32: Ctrl+Space", Win32, { .qtKey = KeySpace, .qtModifiers = Ctrl }, "\0"sv);
@@ -331,7 +351,14 @@ namespace keybits
         addBound("mac: Shift+Up is a binding", Mac, { .qtKey = KeyUp, .qtModifiers = Shift }, "ScrollOneUp");
         add("mac: Ctrl+Left", Mac, { .qtKey = KeyLeft, .qtModifiers = Ctrl }, "\033[1;5D");
         add("mac: Ctrl+Up", Mac, { .qtKey = KeyUp, .qtModifiers = Ctrl }, "\033[1;5A");
-        add("mac: Alt+Left", Mac, { .qtKey = KeyLeft, .qtModifiers = Alt }, "\033[1;3D");
+        // What a real Mac writes (macOS CI): the encoder reports a bare Option on a CSI-parameter key as
+        // Ctrl, for Ctrl+arrow word motion -- an #ifdef __APPLE__ in vtbackend's makeVirtualTerminalParam(),
+        // so it holds on a macOS host only. The chord itself stays Alt, which is what bindings see.
+        table.push_back(KeyCharacterizationRow { .name = "mac: Alt+Left",
+                                                 .kind = Mac,
+                                                 .event = { .qtKey = KeyLeft, .qtModifiers = Alt },
+                                                 .expectedPty = "\033[1;5D",
+                                                 .host = RowHost::OwnHostEncoder });
         add("mac: Escape", Mac, { .qtKey = KeyEscape }, "\033");
         add("mac: Backspace", Mac, { .qtKey = KeyBackspace }, "\177");
         add("mac: Ctrl+Space",
@@ -424,16 +451,54 @@ namespace keybits
                                                  .binding = ExpectedBinding::Fires,
                                                  .boundAction = "ToggleFullscreen" });
 
-        // Command is Qt::MetaModifier. Command+C is unbound -- Copy is the menu's -- and today the chord
-        // reaches the application as a bare "c" (the text route strips Alt, and the encoder drops Super).
+        // Command is Qt::MetaModifier. Command+C is unbound -- Copy is the menu's.
+        // deliberate: spec "Deliberate behaviour changes", row 1 -- an unbound ⌘ chord is consumed. It
+        // reached the application as a bare "c" (the text route stripped Alt, and the encoder drops Super).
         add("mac: Command+c, unbound",
             Mac,
             { .qtKey = 'C', .text = U"c", .qtModifiers = Meta, .nativeVirtualKey = 0x08 },
-            "c");
-        addBound("mac: Command+T is a binding",
-                 Mac,
-                 { .qtKey = 'T', .text = U"t", .qtModifiers = Meta, .nativeVirtualKey = 0x11 },
-                 "CreateNewTab");
+            "");
+        table.push_back(KeyCharacterizationRow {
+            .name = "mac: Command+T is a binding",
+            .kind = Mac,
+            .event = { .qtKey = 'T', .text = U"t", .qtModifiers = Meta, .nativeVirtualKey = 0x11 },
+            .expectedPty = {},
+            .binding = ExpectedBinding::Fires,
+            .boundAction = "CreateNewTab",
+            .host = RowHost::OwnFallbackTable });
+
+        // deliberate: spec "Deliberate behaviour changes", row 2 -- the Option rule. An Option key
+        // option_as_alt does not name composes, and the chord carries no Alt. The bytes are as before; what
+        // changed is that they follow from the rule rather than from Alt being stripped off all text.
+        add("mac: Option+1, option_as_alt off",
+            Mac,
+            { .qtKey = '1',
+              .text = U"¡",
+              .qtModifiers = Alt,
+              .nativeModifiers = MacLeftOption,
+              .nativeVirtualKey = 0x12 },
+            "\xc2\xa1");
+        // deliberate: spec "Deliberate behaviour changes", row 5 -- an Option dead key on a side
+        // option_as_alt names is the ESC-prefixed letter. A dead key types nothing, and the text-less key
+        // used to be named by its uppercase Qt key ("\033E").
+        add("mac: Option+e dead key, option_as_alt left, left Option",
+            Mac,
+            { .qtKey = 'E', .qtModifiers = Alt, .nativeModifiers = MacLeftOption, .nativeVirtualKey = 0x0e },
+            "\033e",
+            KeyEncoding::Legacy,
+            OptionAsAlt::Left);
+        // deliberate: spec "Deliberate behaviour changes", row 5, and "The Option rule" -- with the Option
+        // key option_as_alt names held, the letter is the Qt key's in the case Shift XOR CapsLock say, so a
+        // text-less Ctrl+Option+e is 'e', where it used to be the uppercase 'E' of the Qt key table.
+        add("mac: Ctrl+Option+e, option_as_alt left, left Option, under kitty report-all",
+            Mac,
+            { .qtKey = 'E',
+              .qtModifiers = Ctrl | Alt,
+              .nativeModifiers = MacLeftOption,
+              .nativeVirtualKey = 0x0e },
+            "\033[101;7u",
+            KeyEncoding::KittyReportAll,
+            OptionAsAlt::Left);
         // }}}
 
         return table;

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/input/KeyboardLayout.hpp>
-
 #include <vtbackend/input/InputGenerator.hpp>
 
 #include <QtGui/QKeyEvent>
@@ -14,22 +12,14 @@ class TerminalSession;
 
 /// Translates a Qt key event into terminal input and hands it to @p session.
 ///
-/// The translation itself lives a layer down in contour::input, which knows nothing about sessions.
-/// What this layer adds is the delivery: which session receives the input, and the session-state
-/// questions (Win32 input mode, the active keyboard protocol) that decide how it is encoded.
+/// The event is captured as plain data, normalized by the session's keyboard platform -- which alone knows
+/// what this platform means by it -- and routed by the session. This layer adds only the delivery.
 ///
-/// @param keyEvent The Qt event.
+/// @param keyEvent The Qt event; accepted when it became input.
 /// @param eventType Whether this is a press, a repeat or a release.
 /// @param session The session to send the resulting input to.
-/// @param keyboardLayout Resolves the event's native key identifier to the codepoint the key
-///                       carries unmodified. Passed in rather than queried, because it reads the
-///                       user's active input source -- an ambient resource tests must be able to
-///                       substitute.
 /// @return Whether the event was translated into input; false leaves it for Qt to route on.
-bool sendKeyEvent(QKeyEvent* keyEvent,
-                  vtbackend::KeyboardEventType eventType,
-                  TerminalSession& session,
-                  input::KeyboardLayout const& keyboardLayout);
+bool sendKeyEvent(QKeyEvent* keyEvent, vtbackend::KeyboardEventType eventType, TerminalSession& session);
 void sendWheelEvent(QWheelEvent* event, TerminalSession& session);
 void sendMousePressEvent(QMouseEvent* event, TerminalSession& session);
 void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session);

@@ -113,8 +113,9 @@ namespace
     class PassthroughKeyboardLayout final: public KeyboardLayout
     {
       public:
-        [[nodiscard]] char32_t unshiftedKeyOf(uint32_t nativeVirtualKey) const noexcept override
+        [[nodiscard]] char32_t unshiftedKeyOf(NativeKeyCode key) const noexcept override
         {
+            auto const nativeVirtualKey = key.virtualKey;
             // Keysyms outside Latin-1 take the `0x01000000 | codepoint` form, which is not itself a
             // codepoint. Everything still out of range after that is a key we cannot name — a
             // function or media key — and 0 tells the caller to fall back to the character.
@@ -124,9 +125,9 @@ namespace
             return candidate < MaxCodepoint ? static_cast<char32_t>(candidate) : char32_t { 0 };
         }
 
-        [[nodiscard]] uint32_t win32VirtualKeyOf(uint32_t nativeVirtualKey) const noexcept override
+        [[nodiscard]] uint32_t win32VirtualKeyOf(NativeKeyCode key) const noexcept override
         {
-            return win32VirtualKeyOrNone(nativeVirtualKey);
+            return win32VirtualKeyOrNone(key.virtualKey);
         }
     };
 
@@ -134,17 +135,14 @@ namespace
     class MacUsAnsiKeyboardLayout final: public KeyboardLayout
     {
       public:
-        [[nodiscard]] char32_t unshiftedKeyOf(uint32_t nativeVirtualKey) const noexcept override
+        [[nodiscard]] char32_t unshiftedKeyOf(NativeKeyCode key) const noexcept override
         {
-            return usLayoutKeyOfMacVirtualKey(nativeVirtualKey);
+            return usLayoutKeyOfMacVirtualKey(key.virtualKey);
         }
 
         /// Never a VK code: this layout reads its input as a Carbon key code, which one is not. The
         /// answer does not depend on the host platform -- only on what the value being read is.
-        [[nodiscard]] uint32_t win32VirtualKeyOf(uint32_t /*nativeVirtualKey*/) const noexcept override
-        {
-            return 0;
-        }
+        [[nodiscard]] uint32_t win32VirtualKeyOf(NativeKeyCode /*key*/) const noexcept override { return 0; }
     };
 
 #ifdef __APPLE__
@@ -187,21 +185,18 @@ namespace
             CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDistributedCenter(), this);
         }
 
-        [[nodiscard]] char32_t unshiftedKeyOf(uint32_t nativeVirtualKey) const noexcept override
+        [[nodiscard]] char32_t unshiftedKeyOf(NativeKeyCode key) const noexcept override
         {
-            if (auto const ch = translate(nativeVirtualKey); ch != 0)
+            if (auto const ch = translate(key.virtualKey); ch != 0)
                 return ch;
 
             // A layout that cannot answer — a dead key, or one of the legacy 'KCHR' layouts that
             // carry no kTISPropertyUnicodeKeyLayoutData at all — still leaves the key's position
             // known, and its US-layout meaning is a better answer than none.
-            return _fallback->unshiftedKeyOf(nativeVirtualKey);
+            return _fallback->unshiftedKeyOf(key);
         }
 
-        [[nodiscard]] uint32_t win32VirtualKeyOf(uint32_t /*nativeVirtualKey*/) const noexcept override
-        {
-            return 0;
-        }
+        [[nodiscard]] uint32_t win32VirtualKeyOf(NativeKeyCode /*key*/) const noexcept override { return 0; }
 
       private:
         static void onInputSourceChanged(CFNotificationCenterRef /*center*/,

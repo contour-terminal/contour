@@ -21,8 +21,11 @@ NativeKeyEvent captureKeyEvent(QKeyEvent const& event, vtbackend::KeyboardEventT
 
 NativeKeyEvent captureInputMethodCommit(QString const& commit)
 {
-    return NativeKeyEvent {
+    // The lock state is sampled as for a key: on Windows the toggles come from the OS, and a commit carries
+    // them as the text a key typed would.
+    return {
         .text = commit.toStdU32String(),
+        .nativeModifiers = nativeModifiersWithLockState(0),
         .origin = KeyEventOrigin::InputMethodCommit,
     };
 }
@@ -31,14 +34,14 @@ QKeyEvent toQKeyEvent(NativeKeyEvent const& event)
 {
     auto const qtType =
         event.type == vtbackend::KeyboardEventType::Release ? QEvent::KeyRelease : QEvent::KeyPress;
-    return QKeyEvent(qtType,
-                     event.qtKey,
-                     Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers)),
-                     event.nativeScanCode,
-                     event.nativeVirtualKey,
-                     event.nativeModifiers,
-                     QString::fromStdU32String(event.text),
-                     event.type == vtbackend::KeyboardEventType::Repeat);
+    return { qtType,
+             event.qtKey,
+             Qt::KeyboardModifiers::fromInt(static_cast<int>(event.qtModifiers)),
+             event.nativeScanCode,
+             event.nativeVirtualKey,
+             event.nativeModifiers,
+             QString::fromStdU32String(event.text),
+             event.type == vtbackend::KeyboardEventType::Repeat };
 }
 
 } // namespace contour::input
