@@ -391,6 +391,7 @@ install_deps_FreeBSD() {
         cairo \
         cmake \
         fontconfig \
+        dejavu \
         freetype2 \
         git \
         harfbuzz \

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <contour/cli/DaemonVerbs.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 
 #include <core/Utf8Path.hpp>
