@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/ControlVerbs.hpp>
 #include <contour/cli/McpTools.hpp>
 #include <contour/cli/McpToolsDetail.hpp>
 
@@ -21,7 +22,20 @@ namespace contour::cli
 namespace
 {
     // One row per tool; adding a tool is adding a row (and, for a composite, its handler in the server).
-    constexpr auto Rows = std::to_array<ToolRow>({
+    /// `pane_run`'s schema; its timeout bounds are the CLI's, so they are spelled from the one constant.
+    std::string const RunSchema =
+        std::string {
+            R"({"type":"object","properties":{)"
+            R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
+            R"("command":{"type":"string","description":"One command line to run; join several with && or ;."},)"
+            R"("timeoutSeconds":{"type":"integer","minimum":1,"maximum":)"
+        }
+        + std::to_string(MaxTimeoutSeconds)
+        + R"(,"default":120,"description":"Seconds to wait for it to finish; default 120."},)"
+          R"("maxOutputBytes":{"type":"integer","minimum":0,"default":65536,"description":"Bytes of output to return at most; default 65536."}},)"
+          R"("required":["pane","command"],"additionalProperties":false})";
+
+    auto const Rows = std::to_array<ToolRow>({
         { "workspace_list",
           ToolKind::Catalog,
           "workspace.list",
@@ -35,7 +49,13 @@ namespace
           {},
           {} },
         { "pane_close", ToolKind::Catalog, "pane.close", ControlGrants::of({ Permission::Write }), {}, {} },
-        { "tab_close", ToolKind::Catalog, "tab.close", ControlGrants::of({ Permission::Write }), {}, {} },
+        { "tab_close",
+          ToolKind::Catalog,
+          "tab.close",
+          ControlGrants::of({ Permission::Write }),
+          {},
+          {},
+          TabScope::AllTabs },
         { "object_setLabel",
           ToolKind::Catalog,
           "object.setLabel",
@@ -58,26 +78,27 @@ namespace
           R"("command":{"type":"array","items":{"type":"string"},"description":"Program and arguments to run in the new pane."},)"
           R"("label":{"type":"string","description":"Label to give the new pane."}},)"
           R"("required":["direction"],"additionalProperties":false})" },
-        { "pane_run",
-          ToolKind::Composite,
-          {},
-          ControlGrants::of({ Permission::Input, Permission::Screen }),
-          "Type a command into a pane, wait for it to finish, and return its output and exit status.",
-          R"({"type":"object","properties":{)"
-          R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; defaults to the pane this agent runs in"},)"
-          R"("command":{"type":"string","description":"The command line to run."},)"
-          R"("timeoutSeconds":{"type":"integer","minimum":0,"default":120,"description":"Seconds to wait for it to finish; default 120."},)"
-          R"("maxOutputBytes":{"type":"integer","minimum":0,"default":65536,"description":"Bytes of output to return at most; default 65536."}},)"
-          R"("required":["command"],"additionalProperties":false})" },
+        {
+            "pane_run",
+            ToolKind::Composite,
+            {},
+            ControlGrants::of({ Permission::Input, Permission::Screen }),
+            "Type one command line into a shell pane, wait for it to finish, and return its output and exit "
+            "status. The pane needs OSC 133 shell integration. If the result says timedOut, the command is "
+            "still running; fetch its output later with block_read. The output is the last 64 KiB unless "
+            "maxOutputBytes says otherwise. Refuses the pane this agent runs in; use pane_split to get a "
+            "shell pane first.",
+            RunSchema,
+        },
         { "pane_type",
           ToolKind::Composite,
           {},
           ControlGrants::of({ Permission::Input }),
-          "Type text into a pane without waiting for anything.",
+          "Type text into a pane without waiting for anything. Refuses the pane this agent runs in.",
           R"({"type":"object","properties":{)"
-          R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; defaults to the pane this agent runs in"},)"
+          R"("pane":{"type":"string","description":"Pane: id, label or hex id suffix; required, and never the pane this agent runs in."},)"
           R"("text":{"type":"string","description":"The text to type."}},)"
-          R"("required":["text"],"additionalProperties":false})" },
+          R"("required":["pane","text"],"additionalProperties":false})" },
         { "tab_create",
           ToolKind::Composite,
           {},
@@ -123,122 +144,81 @@ namespace detail
 
     namespace
     {
-        constexpr auto MaxInlineRounds = 16;
-        constexpr auto RefPrefix = std::string_view { R"({"$ref":"#/$defs/)" };
+        using Object = glz::generic::object_t;
+        using Array = glz::generic::array_t;
 
-        /// @param text JSON text.
-        /// @param open Index of a '{' or '[' in @p text.
-        /// @return The index one past the bracket that closes the one at @p open (strings are skipped), or
-        ///         npos when it is not closed.
-        size_t endOfValue(std::string_view text, size_t open)
+        constexpr auto MaxRefDepth = 16;
+        constexpr auto RefPrefix = std::string_view { "#/$defs/" };
+
+        /// Replaces every `{"$ref":"#/$defs/X"}` below @p node by the definition `X`.
+        /// @param node The value to rewrite in place.
+        /// @param defs The definitions by name.
+        /// @param depth How many references deep @p node already sits.
+        /// @return Nothing, or why a reference cannot be resolved.
+        std::expected<void, std::string> resolveRefs(glz::generic& node, Object const& defs, int depth)
         {
-            auto depth = 0;
-            auto inString = false;
-            for (auto at = open; at < text.size(); ++at)
+            if (auto* array = node.get_if<Array>())
             {
-                auto const ch = text[at];
-                if (inString)
-                {
-                    if (ch == '\\')
-                        ++at;
-                    else if (ch == '"')
-                        inString = false;
-                }
-                else if (ch == '"')
-                    inString = true;
-                else if (ch == '{' || ch == '[')
-                    ++depth;
-                else if ((ch == '}' || ch == ']') && --depth == 0)
-                    return at + 1;
+                for (auto& element: *array)
+                    if (auto const resolved = resolveRefs(element, defs, depth); !resolved)
+                        return resolved;
+                return {};
             }
-            return std::string_view::npos;
-        }
+            auto* object = node.get_if<Object>();
+            if (object == nullptr)
+                return {};
 
-        using Definitions = std::vector<std::pair<std::string, std::string>>;
-
-        /// @param body The inside of a `$defs` object: `"name":{...},"name":{...}`.
-        /// @return The named definitions, or nothing when @p body is malformed.
-        std::optional<Definitions> parseDefinitions(std::string_view body)
-        {
-            auto defs = Definitions {};
-            for (auto at = size_t { 0 }; at < body.size();)
-            {
-                if (body[at] != '"')
-                    return std::nullopt;
-                auto const nameEnd = body.find('"', at + 1);
-                if (nameEnd == std::string_view::npos || nameEnd + 2 >= body.size()
-                    || body[nameEnd + 1] != ':' || body[nameEnd + 2] != '{')
-                    return std::nullopt;
-                auto const valueEnd = endOfValue(body, nameEnd + 2);
-                if (valueEnd == std::string_view::npos)
-                    return std::nullopt;
-                defs.emplace_back(std::string { body.substr(at + 1, nameEnd - at - 1) },
-                                  std::string { body.substr(nameEnd + 2, valueEnd - nameEnd - 2) });
-                at = valueEnd;
-                if (at < body.size())
+            if (auto const ref = object->find("$ref"); ref != object->end())
+                if (auto const* target = ref->second.get_if<std::string>();
+                    target != nullptr && std::string_view { *target }.starts_with(RefPrefix))
                 {
-                    if (body[at] != ',')
-                        return std::nullopt;
-                    ++at;
+                    auto const definition = defs.find(std::string_view { *target }.substr(RefPrefix.size()));
+                    if (definition == defs.end())
+                        return std::unexpected("$ref to an unknown definition");
+                    if (depth >= MaxRefDepth)
+                        return std::unexpected("$ref nesting too deep or cyclic");
+                    auto replacement = definition->second;
+                    // Members written beside the reference refine the definition.
+                    for (auto& [key, value]: *object)
+                        if (key != "$ref")
+                            replacement.get<Object>()[key] = std::move(value);
+                    node = std::move(replacement);
+                    return resolveRefs(node, defs, depth + 1);
                 }
-            }
-            return defs;
-        }
 
-        /// Replaces each `{"$ref":"#/$defs/name"}` of @p text by its definition.
-        /// @return Whether anything was replaced.
-        bool substituteOnce(std::string& text, Definitions const& defs)
-        {
-            auto replaced = false;
-            for (auto const& [name, value]: defs)
-            {
-                auto const reference = std::format(R"({}{}"}})", RefPrefix, name);
-                for (auto at = text.find(reference); at != std::string::npos;
-                     at = text.find(reference, at + value.size()))
-                {
-                    text.replace(at, reference.size(), value);
-                    replaced = true;
-                }
-            }
-            return replaced;
+            for (auto& [key, member]: *object)
+                if (auto const resolved = resolveRefs(member, defs, depth); !resolved)
+                    return resolved;
+            return {};
         }
     } // namespace
 
     std::expected<std::string, std::string> inlineSchemaRefs(std::string_view schema)
     {
-        auto text = std::string { schema };
-        auto defs = Definitions {};
+        auto document = glz::generic {};
+        if (glz::read_json(document, schema))
+            return std::unexpected("malformed schema");
+        auto* root = document.get_if<Object>();
+        if (root == nullptr)
+            return std::unexpected("schema is not an object");
 
-        constexpr auto DefsKey = std::string_view { R"("$defs":{)" };
-        if (auto const keyAt = text.find(DefsKey); keyAt != std::string::npos)
+        auto defs = Object {};
+        if (auto const node = root->find("$defs"); node != root->end())
         {
-            auto const open = keyAt + DefsKey.size() - 1;
-            auto const end = endOfValue(text, open);
-            if (end == std::string_view::npos)
-                return std::unexpected("unterminated $defs");
-            auto parsed = parseDefinitions(std::string_view { text }.substr(open + 1, end - open - 2));
-            if (!parsed)
+            auto* definitions = node->second.get_if<Object>();
+            if (definitions == nullptr || !std::ranges::all_of(*definitions, [](auto const& entry) {
+                    return entry.second.template get_if<Object>() != nullptr;
+                }))
                 return std::unexpected("malformed $defs");
-            defs = *std::move(parsed);
-
-            // Drop the member together with one neighbouring comma, so it may be first, middle or last.
-            auto from = keyAt;
-            auto to = end;
-            if (from > 0 && text[from - 1] == ',')
-                --from;
-            else if (to < text.size() && text[to] == ',')
-                ++to;
-            text.erase(from, to - from);
+            defs = std::move(*definitions);
+            root->erase(node);
         }
+        if (auto const resolved = resolveRefs(document, defs, 0); !resolved)
+            return std::unexpected(resolved.error());
 
-        // A definition may name another, in any order: substitute until no reference is left.
-        for (auto round = 0; text.contains(RefPrefix); ++round)
-        {
-            if (round == MaxInlineRounds)
-                return std::unexpected("$ref nesting too deep or cyclic");
-            if (!substituteOnce(text, defs))
-                return std::unexpected("$ref to an unknown definition");
-        }
+        auto text = std::string {};
+        if (glz::write_json(document, text))
+            return std::unexpected("schema cannot be written");
         return text;
     }
 

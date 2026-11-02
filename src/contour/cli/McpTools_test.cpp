@@ -2,6 +2,7 @@
 //
 // `contour mcp` tool table: which tools a connection's grants and the operator's access list.
 
+#include <contour/cli/ControlVerbs.hpp>
 #include <contour/cli/McpTools.hpp>
 #include <contour/cli/McpToolsDetail.hpp>
 
@@ -52,13 +53,14 @@ TEST_CASE("McpTools.pane_run_needs_input_and_screen", "[mcp-tools]")
                 "pane_run"));
 }
 
-TEST_CASE("McpTools.no_grants_lists_all_but_tab_create", "[mcp-tools]")
+TEST_CASE("McpTools.no_grants_lists_all_but_tab_create_and_tab_close", "[mcp-tools]")
 {
     auto const own = toolsListJson(std::nullopt, McpAccess::Full, TabScope::OwnTab);
     for (auto const& row: contour::cli::mcpToolRows())
-        CHECK((lists(own, row.name) == (row.name != "tab_create")));
+        CHECK((lists(own, row.name) == (row.name != "tab_create" && row.name != "tab_close")));
 
     CHECK(lists(toolsListJson(std::nullopt, McpAccess::Full, TabScope::AllTabs), "tab_create"));
+    CHECK(lists(toolsListJson(std::nullopt, McpAccess::Full, TabScope::AllTabs), "tab_close"));
 }
 
 TEST_CASE("McpTools.read_only_drops_input_and_write_tools", "[mcp-tools]")
@@ -160,21 +162,26 @@ TEST_CASE("McpTools.composite_schemas_match_the_spec", "[mcp-tools]")
 
     auto const run = composite(json, "pane_run");
     CHECK(propertyNames(run) == Names { "command", "maxOutputBytes", "pane", "timeoutSeconds" });
-    CHECK(requiredNames(run) == Names { "command" });
+    CHECK(requiredNames(run) == Names { "pane", "command" });
     CHECK(run["properties"]["timeoutSeconds"]["default"].as<int>() == 120);
+    CHECK(run["properties"]["timeoutSeconds"]["minimum"].as<int>() == 1);
+    CHECK(run["properties"]["timeoutSeconds"]["maximum"].as<int>() == contour::cli::MaxTimeoutSeconds);
     CHECK(run["properties"]["maxOutputBytes"]["default"].as<int>() == 65536);
 
     auto const type = composite(json, "pane_type");
     CHECK(propertyNames(type) == Names { "pane", "text" });
-    CHECK(requiredNames(type) == Names { "text" });
+    CHECK(requiredNames(type) == Names { "pane", "text" });
 
     auto const tab = composite(json, "tab_create");
     CHECK(propertyNames(tab) == Names { "command", "cwd", "label" });
     CHECK(requiredNames(tab).empty());
 
     auto const paneDescription = split["properties"]["pane"]["description"].get_string();
-    CHECK(run["properties"]["pane"]["description"].get_string() == paneDescription);
-    CHECK(type["properties"]["pane"]["description"].get_string() == paneDescription);
+    CHECK(paneDescription.contains("defaults to the pane this agent runs in"));
+    auto const typedDescription = type["properties"]["pane"]["description"].get_string();
+    CHECK(run["properties"]["pane"]["description"].get_string() == typedDescription);
+    CHECK_FALSE(typedDescription.contains("defaults"));
+    CHECK(typedDescription.contains("never the pane this agent runs in"));
 }
 
 TEST_CASE("McpTools.inlineSchemaRefs", "[mcp-tools]")
@@ -216,6 +223,13 @@ TEST_CASE("McpTools.inlineSchemaRefs", "[mcp-tools]")
         CHECK_FALSE(inlineSchemaRefs(R"({"$defs":{X:{}}})"));
         CHECK_FALSE(inlineSchemaRefs(R"({"$defs":{"X":5}})"));
         CHECK_FALSE(inlineSchemaRefs(R"({"a":{"$ref":"#/$defs/Y"},"$defs":{"X":{}}})"));
+    }
+    SECTION("members beside a reference refine the definition")
+    {
+        auto const out = inlineSchemaRefs(
+            R"({"a":{"$ref":"#/$defs/X","description":"d"},"b":[{"$ref":"#/$defs/X"}],"$defs":{"X":{"type":"integer"}}})");
+        REQUIRE(out);
+        CHECK(*out == R"({"a":{"type":"integer","description":"d"},"b":[{"type":"integer"}]})");
     }
     SECTION("cycle terminates with an error")
     {
