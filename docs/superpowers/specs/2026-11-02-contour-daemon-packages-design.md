@@ -18,7 +18,9 @@ deliberately dropped from this work; it may return as its own change.)
 ## Goals
 
 - `apt install ./contour-daemon_*.deb` / `dnf install contour-daemon` on a minimal server pulls in
-  no Qt and no X11/Wayland libraries.
+  no Qt/QML and no GUI toolkit. Cairo (used by the text shaper) still pulls in X11 client libraries
+  (`libx11-6`, `libxcb1`, `libxrender1`, `libxext6`); splitting Cairo out of the GUI-less link is a
+  follow-up.
 - The user then runs `contour daemon-service install` and has a daemon that starts with their
   login session (and, with lingering, survives logout).
 - `daemon-service status` and `uninstall` behave correctly on a machine where only the packaged
@@ -96,7 +98,7 @@ deliberately dropped from this work; it may return as its own change.)
   `contour_test`, run `contour_test`, `contour_e2e_cli_verbs` and `contour_e2e_shell_integration`,
   and check the linked binary with `ldd` for `libQt`. It then runs CPack, installs the package
   into a clean `ubuntu:24.04` container, and asserts: no `libQt*` in the package's `Depends`,
-  `contour daemon --help` runs, the user unit and the bundled extensions are present. The job runs
+  `contour version` runs and `contour help` lists the `daemon` verb, the user unit and the bundled extensions are present. The job runs
   on every PR; only release attachment is conditional.
 - The job builds a type that is both testable and shippable (the builder picks; RelWithDebInfo
   with `CONTOUR_TESTING=ON` is the obvious candidate) on **Ubuntu 24.04**, and 26.04 too if cheap.

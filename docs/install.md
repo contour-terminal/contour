@@ -54,7 +54,7 @@ Contour is available at the Flathub store.
 
 `contour-daemon` is the Qt-free package for machines that only host [persistent sessions](persistent-sessions.md)
 and have no display, such as a server you reach over SSH. It ships the `contour` command-line tool
-without the GUI stack. Packages are attached to each
+without the GUI stack (no Qt, no QML; the text shaper's Cairo dependency still pulls in the X11 client libraries). Packages are attached to each
 [release](https://github.com/contour-terminal/contour/releases) (they are not served from a package repository):
 
 - `.deb` for Ubuntu 24.04 and 26.04 (amd64), named `contour-daemon-<version>-ubuntu<release>-amd64.deb`
@@ -69,10 +69,11 @@ CentOS and RHEL (EL9, EL10) packages are not provided yet.
 The release also carries `-debuginfo`/`-debugsource` RPMs and a `-dbgsym` `.ddeb`, which the patterns above skip.
 The RPM packages come without the bundled status-line extensions; the `.deb` ships them.
 
-`contour-daemon` and the GUI package `contour` conflict with and replace each other, and `contour` already
-includes the daemon, so a desktop installation needs nothing more.
+`contour-daemon` and the GUI package `contour` conflict, and `contour` already includes the daemon, so a desktop
+installation needs nothing more. On Debian and Ubuntu, `apt` replaces one with the other; on Fedora, `dnf install`
+refuses, so swap them with `dnf swap contour contour-daemon` (or `dnf install --allowerasing`).
 
-The package installs a systemd user unit but does not enable it. Each user registers and starts their own copy:
+The package installs a systemd user unit but does not enable it. Each user registers and enables their own copy (it then starts with their next login; `daemon-service start` starts it now):
 
 ```sh
 contour daemon-service install

@@ -2057,8 +2057,9 @@ else()
         endif()
 
         # The runtime libraries the Qt-free part of the program links, in the order the GUI package has
-        # always listed them.
-        set(DEPENDS_QT_FREE ", libssh2-1")
+        # always listed them. Cairo and Fontconfig are linked by the text shaper (contour_config ->
+        # vtrasterizer -> text_shaper), so the GUI-less binary needs them without any Qt.
+        set(DEPENDS_QT_FREE ", libcairo2, libfontconfig1, libssh2-1")
 
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS

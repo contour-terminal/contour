@@ -335,8 +335,10 @@ jobs:
     # CMAKE_INSTALL_PREFIX=/usr: the package installs under /usr, like the GUI one.
     #
     # PEDANTIC_COMPILER_WERROR=OFF: this is a release/packaging build, and no other job builds
-    # clang-release (the GUI packaging job turns -Werror off as well). The clang-debug jobs keep
-    # enforcing zero warnings; a release-only warning must not block packaging.
+    # clang-release (the GUI packaging job turns -Werror off as well). No Linux pull-request job builds
+    # the GUI-less tree with -Werror: the sources it shares with the GUI builds are checked there, and
+    # docs.yml's gcc-debug job (merge queue, GCC 14, GUI-less, -Werror=ON) compiles the `contour` target
+    # GUI-less. build_headless_macos only configures. A release-only warning must not block packaging.
     #
     # CONTOUR_PACKAGE_TERMINFO=OFF, like the GUI .deb: the contour terminfo entry is probably shipped by
     # the distribution's ncurses packages already, and packaging it again would risk a file conflict on
@@ -356,6 +358,7 @@ jobs:
               -D PEDANTIC_COMPILER_WERROR=OFF \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
               -D CONTOUR_LINK_JOBS=1 \
+              -D CMAKE_C_COMPILER="clang-${LLVM_VERSION}" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
     # One link at a time (CONTOUR_LINK_JOBS above): the runner was shut down three runs in a row at the
     # same step, while contour and contour_test linked side by side -- memory, not time (see #2186).
@@ -381,7 +384,7 @@ jobs:
     # a Qt resource. All three are ctest tests rather than steps of this job, so they also run in the
     # ordinary GUI builds, where they assert the other half.
     - name: "tests"
-      run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration" --output-on-failure
+      run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration|contour_e2e_packaging_rules" --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.
@@ -406,7 +409,7 @@ jobs:
         set -eu
         # -G DEB: nothing on Linux sets CPACK_GENERATOR (the GUI job gets DEB from the gcc-release
         # package preset), and without it cpack builds tarballs. It also writes the -dbgsym .ddeb.
-        cpack -G DEB --config build/CPackConfig.cmake
+        cpack -G DEB -B build --config build/CPackConfig.cmake
         ls -la build
         pick() {
           # pick <glob-pattern> <what>: print the single file under build/ matching it.
@@ -451,7 +454,8 @@ jobs:
           if dpkg -l | grep -Ei "libqt|qml6|qt6"; then echo "a Qt package was pulled in"; exit 1; fi
           test -x /usr/bin/contour
           if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
-          contour daemon --help
+          contour version
+          contour help | grep -q "contour daemon"
           test -f /usr/lib/systemd/user/contour-daemon.service
           for extension in agent-status clock git plasma sysload; do
             test -f "/usr/share/contour/extensions/$extension.wasm"
@@ -843,7 +847,8 @@ jobs:
           if rpm -qa | grep -i "^qt6"; then echo "a Qt package was pulled in"; exit 1; fi
           test -x /usr/bin/contour
           if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
-          contour daemon --help
+          contour version
+          contour help | grep -q "contour daemon"
           test -f /usr/lib/systemd/user/contour-daemon.service
           # ...and the GUI package must refuse to be installed over it, on the declared conflict.
           if dnf install -y /pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm >/tmp/swap.log 2>&1; then

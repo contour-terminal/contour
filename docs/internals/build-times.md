@@ -142,7 +142,7 @@ debug info compresses well. `max-size` is about 1.3x the tree:
 | macOS (arm) | `ccache-macosArm-r1` | 800 MB |
 | Windows (MSVC) | `ccache-windows-msvc-release` | 1500 MB |
 
-The caps sum to 9.5 GB; the entries should settle near 70 % of that, about 6.7 GB, beside roughly
+The caps sum to 9.7 GB (counting both 500 MB entries of the daemon package job, 24.04 and 26.04); the entries should settle near 70 % of that, about 6.8 GB, beside roughly
 1.5 GB of Qt, vcpkg, FreeBSD and apt caches. That is inside the 10 GB quota with little to spare: a
 second `master` push before the first generation is evicted costs the oldest entries first. The guard
 jobs (`package_daemon_for_Ubuntu`, `build_no_extensions`, tidy) were not turned into read-only restorers of the

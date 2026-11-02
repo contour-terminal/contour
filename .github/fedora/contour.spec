@@ -58,6 +58,8 @@ BuildRequires:  qt6-qtdeclarative-devel
 BuildRequires:  qt6-qtmultimedia-devel
 %endif
 
+Requires:       cairo
+Requires:       fontconfig
 Requires:       freetype
 Requires:       harfbuzz
 Requires:       libssh2
@@ -69,7 +71,6 @@ Requires:       yaml-cpp
 Conflicts:      contour
 Conflicts:      contour-terminal
 %else
-Requires:       fontconfig
 Requires:       libxkbcommon
 Requires:       libxkbcommon-x11
 Requires:       qt6-qtbase
@@ -121,7 +122,8 @@ cmake . \
     -GNinja
 cd build
 %if %{with daemon}
-# Explicit targets, not ALL: the targets the Debian daemon job builds, plus the two suites %check runs.
+# The targets the Debian daemon job builds, plus the two suites %check runs, named so they build first
+# (and under CONTOUR_LINK_JOBS=1). %ninja_install below still builds whatever else the install needs.
 %ninja_build contour contour_test crispy_test vtbackend_test
 %else
 %ninja_build
@@ -144,7 +146,7 @@ cd build
 
 %files
 %license LICENSE.txt
-%doc README.md docs/CONTRIBUTING.md TODO.md
+%doc README.md docs/CONTRIBUTING.md
 %{_bindir}/*
 %{_datadir}/*
 # The daemon as a systemd user service: shipped in both packages, enabled by neither.
