@@ -37,14 +37,17 @@ The seven features, with their PR:
 
 Each blocks the PR named. Until decided, the builder must not pick a side.
 
-- **Blocks A — #2108 acceptance.** The "notcurses must show the frame-delta path" criterion is not
+- **Decided — #2108 acceptance.** The "notcurses must show the frame-delta path" criterion is not
   attainable here: notcurses picks its animated path by detecting kitty's version, so re-running the
-  demo gives the same byte count. Recommended: replace it with a byte-counting test in
-  `vtbackend_test` that drives `a=f` deltas, plus an upstream notcurses request. Closing #2108 on
-  that basis needs the maintainer's yes.
-- **Blocks A — daemon playback cost.** Every advanced frame is a full image on the wire (~25 MB/s
-  per client for a 1 MB GIF at 40 ms). Recommended: throttle on the daemon path. Alternative: send
-  the first frame only and defer client-side animation.
+  demo gives the same byte count. #2108 closes instead on a byte-counting test in `vtbackend_test`
+  that drives `a=f` deltas and shows only the changed rectangle is transmitted, plus an upstream
+  notcurses request to enable its animated path for Contour (filed by the maintainer, linked from
+  the PR). The earlier acceptance bullet on the `notcurses-demo` ratio is superseded by this.
+- **Decided — daemon playback cost.** Every advanced frame is a full image on the wire (~25 MB/s
+  per client for a 1 MB GIF at 40 ms). The daemon path throttles: the session host advances and
+  ships frames no faster than a fixed minimum interval per client (the interval is a named
+  constant, builder's call on the value), dropping intermediate frames rather than queueing them.
+  Local (non-daemon) playback is unthrottled.
 - **Blocks B — fragment model.** One image fragment per cell means a relative child overlapping its
   parent destroys the parent's cells, and `d=z`/`d=q` can only remove what is on top. Recommended:
   lift the limit first (per-cell vector ordered by z; wire carries N). Alternative: keep it and
@@ -248,9 +251,8 @@ winning for a given number, and the reply carries the assigned id as the spec re
   an injected clock for order, gaps, loops, gapless frames, the `s=2` wait, and a scrolled-off or
   deleted placement.
 - `kitten icat` of an animated GIF animates in Contour (manual check, kitten permitting).
-- #2108 closes with a measurement: the issue's `notcurses-demo -c -d 0 x` byte accounting is re-run
-  and the numbers go in the PR. It must show the frame-delta path in use; the exact ratio is
-  reported, not promised.
+- #2108 closes (PR A) on a byte-counting test showing an `a=f` delta transmits only its rectangle,
+  and a linked upstream notcurses request. No notcurses ratio is promised.
 - Zero warnings; `ctest --preset=clang-asan` and the `[threading]` tests under `clang-tsan` pass;
   coverage of the new code is reported; the release notes in `metainfo.xml` are updated, replacing
   the line that says self-running playback and composition are unsupported.
