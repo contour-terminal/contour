@@ -101,8 +101,6 @@ using namespace std;
 
 using std::chrono::steady_clock;
 
-using actions::Action;
-
 // {{{ helper
 namespace
 {
