@@ -537,7 +537,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredDivider);
     if (_pumping == SessionPumping::Threaded)
         session->start();
-    if (session->hasExtensions())
+    if (session->indicatorRowIsHostDrawn())
     {
         // The row a client attaching now mirrors: the daemon renders no frame that would paint it. Nothing is
         // polled yet: what the extensions follow is known once their build lands (extensionsReplaced).
@@ -845,7 +845,7 @@ void SessionHost::onSessionScreenUpdated(SessionId session)
     // What the output changed of the indicator's other items, as a frame would repaint it: for a
     // client to be sent, so not while none is attached, and once per loop turn however many
     // batches arrived meanwhile.
-    if (hosted->second->hasExtensions() && hasScreenMirrors())
+    if (hasScreenMirrors() && hosted->second->indicatorRowIsHostDrawn())
         hosted->second->requestStatusLineRepaint();
     typeInitialInputAtPrompt(session);
     clearInterruptionOnNextCommand(session);
@@ -1408,7 +1408,7 @@ void SessionHost::subscribeStream(SessionStreamEvents* observer)
     if (!observer->mirrorsScreens())
         return;
     for (auto const& [id, session]: _sessions)
-        if (session->hasExtensions())
+        if (session->indicatorRowIsHostDrawn())
             refreshStatusLine(*session);
 }
 
@@ -1560,8 +1560,6 @@ std::vector<proto::PermissionRequest> SessionHost::rehomePermissionRequests(Sess
 
 HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
 {
-    if (!_extensions)
-        return {};
     // Every hook marshals onto the loop, and does nothing there once the session or the host is gone: session
     // ids are never reused, so one no longer hosted is this one, destroyed; the gate is revoked as the host
     // goes. A job dropped that way is destroyed on the loop, which is where a dropped build must release
@@ -1569,6 +1567,21 @@ HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
     auto const hosted = [gate = _gate, session] {
         return gate->host != nullptr && gate->host->_sessions.contains(session.value);
     };
+    // A burst of requests costs the loop one repaint, not one per request: the caller posts only while none
+    // is pending, and the loop takes the flag down before it repaints, so one made meanwhile posts again.
+    // Hooked for every session, extensions or not: output changes a `{UserVar}` row too.
+    auto pending = std::make_shared<std::atomic<bool>>(false);
+    auto onPublished = [&loop = _loop, gate = _gate, hosted, session, pending] {
+        if (pending->exchange(true, std::memory_order_acq_rel))
+            return;
+        loop.post([gate, hosted, session, pending] {
+            pending->store(false, std::memory_order_release);
+            if (hosted())
+                gate->host->extensionFramePublished(session);
+        });
+    };
+    if (!_extensions)
+        return HostedSessionExtensions { .onPublished = std::move(onPublished) };
     auto post = OwnerPost { [&loop = _loop, hosted](std::function<void()> job) {
         loop.post([hosted, job = std::move(job)] {
             if (hosted())
@@ -1609,19 +1622,6 @@ HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
                           std::chrono::milliseconds timeout) {
                 return bridge.call(method, params, granted, timeout);
             },
-    };
-    // A burst of frames costs the loop one repaint, not one per frame: the worker posts only while none is
-    // pending, and the loop takes the flag down before it repaints, so a frame published meanwhile posts
-    // again.
-    auto pending = std::make_shared<std::atomic<bool>>(false);
-    auto onPublished = [&loop = _loop, gate = _gate, hosted, session, pending] {
-        if (pending->exchange(true, std::memory_order_acq_rel))
-            return;
-        loop.post([gate, hosted, session, pending] {
-            pending->store(false, std::memory_order_release);
-            if (hosted())
-                gate->host->extensionFramePublished(session);
-        });
     };
     // What the extensions follow is known once they have loaded: the poll is re-checked as a frame shows it
     // changed, not only on a replace, which comes before they load.

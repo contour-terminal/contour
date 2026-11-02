@@ -1443,14 +1443,16 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Does for the status-line extensions what a frame refresh does, for a host that renders nothing itself
     /// (the daemon): tells them the state they newly follow, and repaints the indicator status line while
-    /// they draw it (@see indicatorStatusLineDrivenByExtensions) -- whether this terminal shows it or not, as
+    /// they draw it (@see indicatorStatusLineDependsOnHostState) -- whether this terminal shows it or not, as
     /// its clients may -- so that its row can be read off indicatorStatusLineDisplay(). Call with the state
     /// lock held.
     void refreshIndicatorStatusLine();
 
-    /// @return Whether the indicator status line shows what only this terminal's extensions draw: a take-over
-    ///         extension, or an `{Extension}` item of its template. Call with the state lock held.
-    [[nodiscard]] bool indicatorStatusLineDrivenByExtensions() const noexcept;
+    /// @return Whether the indicator status line shows what only this terminal knows, and a client mirroring
+    ///         it cannot: a take-over extension, an `{Extension}` item of its template, or a `{UserVar}`
+    ///         item (the client runs no parser, so it never sees the program's SetUserVar). Call with the
+    ///         state lock held.
+    [[nodiscard]] bool indicatorStatusLineDependsOnHostState() const noexcept;
 
     /// Shows @p row as the indicator status line in place of its template and of any take-over, until told
     /// none: what a mirror shows of the row its host drew. Call with the state lock held.

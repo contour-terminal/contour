@@ -150,12 +150,21 @@ namespace StatusLineDefinitions
         std::string command;                                    ///< Shell command line, UTF-8.
         std::chrono::seconds interval = DefaultCommandInterval; ///< How often it re-runs.
     };
-    /// The latest frame of the status-line extension the configuration calls @ref name, as text and SGR.
-    struct Extension: Styles
+    /// An item that is named by a single identifier: `{Extension:<name>}`, `{UserVar:<name>}`.
+    struct NamedItem: Styles
     {
-        /// What the configuration calls the extension. Defaulted, so that `Extension { styles }` builds,
-        /// as the settings editor builds every item it does not special-case.
+        /// What the item refers to. Defaulted, so that `Extension { styles }` builds, as the settings
+        /// editor builds every item it does not special-case.
         std::string name {};
+    };
+    /// The latest frame of the status-line extension the configuration calls @ref name, as text and SGR.
+    struct Extension: NamedItem {};
+    /// The latest value a program set for the user variable @ref name (OSC 1337 ; SetUserVar); empty
+    /// while it is unset.
+    struct UserVar: NamedItem
+    {
+        /// Widest the value may draw, in columns; a longer one is cut at its end with `…`.
+        ColumnCount maxWidth { 40 };
     };
     struct HistoryLineCount: Styles {};
     struct Hyperlink: Styles {};
@@ -325,6 +334,7 @@ namespace StatusLineDefinitions
         Clock,
         Command,
         Extension,
+        UserVar,
         HistoryLineCount,
         Hyperlink,
         InputMode,
@@ -462,6 +472,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Extension>
     { static constexpr std::string_view Name = "Extension", Label = "Extension", Sample = "(extension)"; static constexpr auto Priority = StatusLinePriority::Normal; };
+
+    template <> struct ItemTraits<UserVar>
+    { static constexpr std::string_view Name = "UserVar", Label = "User variable", Sample = "vim"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<CellSGR>
     { static constexpr std::string_view Name = "CellSGR", Label = "Cell SGR at cursor", Sample = "1;38:2::255:0:0"; static constexpr auto Priority = StatusLinePriority::Low; };

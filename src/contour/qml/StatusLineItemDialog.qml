@@ -46,7 +46,8 @@ Popup {
     property string itemLabel: ""
     property string itemText: ""
     property string itemCommand: ""
-    // The extension an Extension item shows: its key under the profile's `extensions:`.
+    // The extension an Extension item shows (its key under the profile's `extensions:`), or the user
+    // variable a UserVar item shows.
     property string itemName: ""
     // Seconds between runs of a Command item. No control edits it yet; it is carried so that applying
     // the dialog does not reset a hand-written Interval= to the default.
@@ -67,6 +68,9 @@ Popup {
     readonly property bool isText: root.itemType === "Text"
     readonly property bool isCommand: root.itemType === "Command"
     readonly property bool isExtension: root.itemType === "Extension"
+    readonly property bool isUserVar: root.itemType === "UserVar"
+    // Items named by a single identifier, kept in itemName.
+    readonly property bool isNamed: root.isExtension || root.isUserVar
     readonly property bool isTabs: root.itemType === "Tabs"
 
     /// A template has no escaping, so these characters cannot survive inside an attribute value. Rejecting
@@ -146,7 +150,7 @@ Popup {
             item.interval = root.itemInterval
             item.displayName = root.itemCommand.length > 0 ? root.itemCommand : root.itemLabel
         }
-        if (root.isExtension) {
+        if (root.isNamed) {
             item.name = root.itemName
             item.displayName = root.itemName.length > 0 ? root.itemName : root.itemLabel
         }
@@ -193,7 +197,7 @@ Popup {
 
         // Text content, for the placeholders that carry some.
         ColumnLayout {
-            visible: root.isText || root.isCommand || root.isExtension
+            visible: root.isText || root.isCommand || root.isNamed
             Layout.fillWidth: true
             spacing: chromeStyle.space.s1
 
@@ -201,7 +205,7 @@ Popup {
                 Layout.fillWidth: true
                 spacing: chromeStyle.space.s5
                 Label {
-                    text: root.isCommand ? qsTr("Program") : root.isExtension ? qsTr("Extension") : qsTr("Text")
+                    text: ({ "Command": qsTr("Program"), "Extension": qsTr("Extension"), "UserVar": qsTr("Variable") })[root.itemType] ?? qsTr("Text")
                     font: chromeStyle.type.body
                     color: chromeStyle.colors.settingsLabel
                     Layout.preferredWidth: chromeStyle.settings.sidebarWidth
@@ -209,12 +213,12 @@ Popup {
                 TextField {
                     objectName: "indicatorItemTextField"
                     Layout.fillWidth: true
-                    text: root.isCommand ? root.itemCommand : root.isExtension ? root.itemName : root.itemText
+                    text: root.isCommand ? root.itemCommand : root.isNamed ? root.itemName : root.itemText
                     selectByMouse: true
                     onTextChanged: {
                         if (root.isCommand)
                             root.itemCommand = text
-                        else if (root.isExtension)
+                        else if (root.isNamed)
                             root.itemName = text
                         else
                             root.itemText = text

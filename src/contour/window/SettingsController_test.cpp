@@ -2324,6 +2324,19 @@ TEST_CASE("SettingsController: an extension item keeps its name and styles throu
     }
 }
 
+TEST_CASE("SettingsController: a user variable item keeps its name and styles through an edit", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    for (auto const& text: { QString("{UserVar:foo}"), QString("{UserVar:Name=foo,Bold,Left=[}") })
+    {
+        INFO(text.toStdString());
+        auto const items = fx.controller->parseIndicatorSegment(text);
+        REQUIRE(items.size() == 1);
+        CHECK(items.first().toMap().value("name").toString() == "foo");
+        CHECK(fx.controller->serializeIndicatorSegment(items) == text);
+    }
+}
+
 TEST_CASE("SettingsController: the indicator bridge keeps role colours", "[settings]")
 {
     // A role is a word, not a hex colour: a bridge that read it through a hex parser would save it as black.
@@ -2570,6 +2583,8 @@ TEST_CASE("SettingsController: the indicator placeholder catalog matches what pa
                 return QString("{Command:Program=true}");
             if (type == "Extension")
                 return QString("{Extension:git}");
+            if (type == "UserVar")
+                return QString("{UserVar:foo}");
             return QString("{%1}").arg(type);
         }();
         auto const items = fx.controller->parseIndicatorSegment(templateText);

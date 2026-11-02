@@ -45,6 +45,7 @@ Variable             | Description
 `{Cwd}`              | the working directory the shell reports, with the home directory as `~` when it is on this machine; at most `MaxWidth=` columns (default `40`), eliding the middle directories (`/…/d59`)
 `{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
 `{Extension}`        | what the [status-line extension](../extensions.md) named by parameter `Name=...` (or the `{Extension:<name>}` shorthand) draws
+`{UserVar}`          | the value a program last set for the user variable named by parameter `Name=...` (or the `{UserVar:<name>}` shorthand) with `OSC 1337 ; SetUserVar=<name>=<base64 value>`, as iTerm2 and WezTerm do; empty while it is unset. At most 64 variables of at most 4096 bytes each are kept per session, and they survive a terminal reset
 `{Git}`              | the branch of the Git repository the shell's directory is in (a ref outside `refs/heads/` as `remotes/origin/x`, a detached HEAD as its first 7 hex digits in parentheses, `(a1b2c3d)`), read from `.git/HEAD` or a worktree's `.git` file; empty outside a repository or in a directory on another machine. It is looked up in the background, so it shows a moment after the directory does, and again only after a command ends or the shell reports its directory, never per frame. As git does by default, the search for the repository stops at a filesystem boundary. The directory is walked as the shell reports it: in a symlink to a directory inside a repository, no branch shows. A repository using the reftable ref backend (`git init --ref-format=reftable`) shows no branch for now.
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
@@ -94,11 +95,11 @@ Parameter                 | Description
 
 These parameters apply to all variables above.
 
-`{Cwd}`, `{Context}` and `{LastCommand}` additionally take this attribute:
+`{Cwd}`, `{Context}`, `{LastCommand}` and `{UserVar}` additionally take this attribute:
 
 Parameter                 | Description
 --------------------------|--------------------------------------------------------------------
-`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}` and for `{LastCommand}`'s command text, which is cut at its end instead; a value that is not a number `> 0` keeps the default.
+`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}` and for `{LastCommand}`'s command text, which is cut at its end instead, as is `{UserVar}`'s value (default `40`); a value that is not a number `> 0` keeps the default.
 
 A role names a color by what it means rather than by its value, and takes it from the active color
 scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),

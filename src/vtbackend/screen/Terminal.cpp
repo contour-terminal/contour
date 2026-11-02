@@ -857,12 +857,15 @@ void Terminal::refreshIndicatorStatusLine()
     drainStatusLineReplay();
     // Whether this terminal shows it or not: a daemon's terminals show no indicator, and their clients do.
     if (_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine
-        && indicatorStatusLineDrivenByExtensions())
+        && indicatorStatusLineDependsOnHostState())
         updateIndicatorStatusLine();
 }
 
-bool Terminal::indicatorStatusLineDrivenByExtensions() const noexcept
+bool Terminal::indicatorStatusLineDependsOnHostState() const noexcept
 {
+    // A user variable is told to this terminal alone: a client mirroring it runs no parser to see it.
+    if (containsItem<StatusLineDefinitions::UserVar>(_indicatorStatusLineDefinition))
+        return true;
     if (!_extensions)
         return false;
     if (_takeOverName)
@@ -1036,10 +1039,10 @@ UserVarStorage Terminal::userVarChanged(UserVarAssignment assignment)
         return StatusLineEvents::UserVarChanged { .name = std::move(assignment.name),
                                                   .value = std::move(assignment.value) };
     });
+    return UserVarStorage::Stored;
 }
 
 std::optional<std::string_view> Terminal::userVar(std::string_view name) const noexcept
-    return UserVarStorage::Stored;
 {
     if (auto const known = std::ranges::find(_userVars, name, &RememberedUserVar::first);
         known != _userVars.end())
@@ -1054,12 +1057,12 @@ UserVarStorage Terminal::rememberUserVar(std::string_view name, std::string_view
         known->second = value;
     else if (_userVars.size() < _settings.userVarLimits.maxCount)
         _userVars.emplace_back(std::string { name }, std::string { value });
-}
-
-void Terminal::inputModeChanged(ViMode mode)
     else
         return UserVarStorage::Dropped;
     return UserVarStorage::Stored;
+}
+
+void Terminal::inputModeChanged(ViMode mode)
 {
     _eventListener.inputModeChanged(mode);
     _extensionEvents.post([&] { return StatusLineEvents::InputModeChanged { .mode = mode }; });
