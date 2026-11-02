@@ -453,6 +453,193 @@ TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act 
     }
 }
 
+TEST_CASE("Terminal.mouse forwarding gates what a tracking application hears", "[vtbackend][mouse]")
+{
+    // Blocking governs delivery only: the application's request stays recorded, so forwarding again
+    // resumes the protocol it last asked for.
+    using namespace vtbackend;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto const reportOf = [&](auto const& event) {
+        mc.resetReplyData();
+        event();
+        return e(mc.replyData());
+    };
+    auto const click = [&] {
+        pressAt(mc, MouseButton::Left, 0, 0);
+        release(mc, MouseButton::Left);
+    };
+
+    SECTION("mouse tracking")
+    {
+        mc.writeToScreen("\033[?1003h\033[?1006h"sv); // any-event tracking, SGR
+        REQUIRE(mc.terminal.mouseForwarding() == MouseForwarding::Forwarded);
+        CHECK(reportOf(click) == e("\033[<0;1;1M\033[<0;1;1m"sv));
+        CHECK(mc.terminal.applicationTakesClicks());
+
+        std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+        CHECK(reportOf(click).empty());
+        CHECK(reportOf([&] { pointAt(mc, 0, 3); }).empty());
+        CHECK(reportOf([&] { pressAt(mc, MouseButton::WheelUp, 0, 0); }).empty());
+        CHECK_FALSE(mc.terminal.applicationTakesClicks());
+        CHECK(mc.terminal.mouseProtocol().has_value());
+
+        std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Forwarded);
+        CHECK(reportOf(click) == e("\033[<0;1;1M\033[<0;1;1m"sv));
+    }
+
+    SECTION("a release follows its press, whatever changed in between")
+    {
+        mc.writeToScreen("\033[?1000h\033[?1006h"sv);
+        auto const press = [&] {
+            pressAt(mc, MouseButton::Left, 0, 0);
+        };
+        auto const lift = [&] {
+            release(mc, MouseButton::Left);
+        };
+
+        // Blocked while the button is down: the application still hears the button come up.
+        CHECK(reportOf(press) == e("\033[<0;1;1M"sv));
+        std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+        CHECK(reportOf(lift) == e("\033[<0;1;1m"sv));
+
+        // Forwarded while the button is down: it never heard the button go down, so not up either.
+        CHECK(reportOf(press).empty());
+        std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Forwarded);
+        CHECK(reportOf(lift).empty());
+
+        // The bypass modifier pressed or let go mid-click changes nothing about whose click it is.
+        CHECK(reportOf(press) == e("\033[<0;1;1M"sv));
+        CHECK(reportOf([&] {
+                  std::ignore = mc.terminal.sendMouseReleaseEvent(
+                      Modifier::Shift, MouseButton::Left, PixelCoordinate {}, /*uiHandledHint=*/false);
+              })
+              == e("\033[<4;1;1m"sv));
+    }
+
+    SECTION("the DEC locator follows the same gate as the mouse protocol")
+    {
+        mc.writeToScreen("\033[1;2'z\033[1;3'{"sv); // DECELR on; DECSLE: report presses and releases
+        pointAt(mc, 0, 0);
+        auto const shiftClick = [&] {
+            std::ignore = mc.terminal.sendMousePressEvent(Modifier::Shift,
+                                                          MouseButton::Left,
+                                                          CellLocation {},
+                                                          PixelCoordinate {},
+                                                          /*uiHandledHint=*/false);
+            std::ignore = mc.terminal.sendMouseReleaseEvent(
+                Modifier::Shift, MouseButton::Left, PixelCoordinate {}, /*uiHandledHint=*/false);
+        };
+        // DECRQLP
+        auto const requestPosition = [&] {
+            mc.writeToScreen("\033['|"sv);
+        };
+
+        CHECK(reportOf(click) == e("\033[2;4;1;1;1&w\033[3;0;1;1;1&w"sv));
+        CHECK(reportOf(requestPosition) == e("\033[1;0;1;1;1&w"sv));
+
+        SECTION("blocked: no button report, and a position request is answered as unavailable")
+        {
+            std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+            CHECK(reportOf(click).empty());
+            CHECK(reportOf(requestPosition) == e("\033[0&w"sv));
+        }
+        SECTION("read-only: no button report")
+        {
+            mc.terminal.setUserInputLock(UserInputLock::Locked);
+            CHECK(reportOf(click).empty());
+        }
+        SECTION("vi normal mode: no button report")
+        {
+            mc.terminal.inputHandler().setMode(ViMode::Normal);
+            CHECK(reportOf(click).empty());
+        }
+        SECTION("the bypass modifier held: no button report")
+        {
+            CHECK(reportOf(shiftClick).empty());
+        }
+        SECTION("an up follows its down")
+        {
+            auto const press = [&] {
+                pressAt(mc, MouseButton::Left, 0, 0);
+            };
+            auto const lift = [&] {
+                release(mc, MouseButton::Left);
+            };
+            auto const shiftLift = [&] {
+                std::ignore = mc.terminal.sendMouseReleaseEvent(
+                    Modifier::Shift, MouseButton::Left, PixelCoordinate {}, /*uiHandledHint=*/false);
+            };
+
+            // Shift pressed between down and up: the up is still reported.
+            CHECK(reportOf(press) == e("\033[2;4;1;1;1&w"sv));
+            CHECK(reportOf(shiftLift) == e("\033[3;0;1;1;1&w"sv));
+
+            // Blocked between down and up: the up is still reported.
+            CHECK(reportOf(press) == e("\033[2;4;1;1;1&w"sv));
+            std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+            CHECK(reportOf(lift) == e("\033[3;0;1;1;1&w"sv));
+
+            // Forwarded between down and up: the down was not reported, so neither is the up.
+            CHECK(reportOf(press).empty());
+            std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Forwarded);
+            CHECK(reportOf(lift).empty());
+        }
+    }
+}
+
+TEST_CASE("Terminal.mouse forwarding blocked gives the alternate screen's wheel back to alternate scroll",
+          "[vtbackend][mouse]")
+{
+    // Blocked is as if the application had not asked: on the alternate screen, with ?1007 on as at
+    // power-on, a wheel notch becomes cursor keys; forwarded, tracking takes the wheel again.
+    using namespace vtbackend;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mc.writeToScreen("\033[?1049h\033[?1000h\033[?1006h"sv);
+    auto const wheel = [&] {
+        mc.resetReplyData();
+        pressAt(mc, MouseButton::WheelDown, 0, 0);
+        return e(mc.replyData());
+    };
+
+    CHECK(wheel().starts_with(e("\033[<"sv)));
+
+    std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+    auto const blocked = wheel();
+    CHECK(blocked.starts_with(e("\033[B"sv)));
+    CHECK_FALSE(blocked.contains(e("\033[<"sv)));
+
+    std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Forwarded);
+    CHECK(wheel().starts_with(e("\033[<"sv)));
+}
+
+TEST_CASE("Terminal.mouse forwarding blocked lets no wheel through to the mouse protocol",
+          "[vtbackend][mouse]")
+{
+    // Alternate scroll translates only the vertical wheel, and only without passive tracking; whatever it
+    // does not translate must not fall through to a report the application is not to hear.
+    using namespace vtbackend;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mc.writeToScreen("\033[?1049h\033[?1000h\033[?1006h"sv);
+    std::ignore = mc.terminal.setMouseForwarding(MouseForwarding::Blocked);
+    auto const wheel = [&](MouseButton button) {
+        mc.resetReplyData();
+        pressAt(mc, button, 0, 0);
+        return e(mc.replyData());
+    };
+
+    CHECK(wheel(MouseButton::WheelLeft).empty());
+    CHECK(wheel(MouseButton::WheelRight).empty());
+    CHECK(wheel(MouseButton::WheelUp).starts_with(e("\033[A"sv)));
+    CHECK(wheel(MouseButton::WheelDown).starts_with(e("\033[B"sv)));
+
+    mc.writeToScreen("\033[?2029h"sv); // passive mouse tracking
+    for (auto const button: { MouseButton::WheelUp, MouseButton::WheelDown, MouseButton::WheelLeft })
+    {
+        INFO(std::format("{}", button));
+        CHECK(wheel(button).empty());
+    }
+}
+
 TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent output and resize",
           "[terminal][ime]")
 {

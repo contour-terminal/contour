@@ -38,6 +38,11 @@ namespace
         return state.inputProtection == InputProtection::On;
     }
 
+    bool isMouseForwarded(MenuBarState const& state) noexcept
+    {
+        return state.mouseForwarding == vtbackend::MouseForwarding::Forwarded;
+    }
+
     bool hasMultipleTabs(MenuBarState const& state) noexcept
     {
         return state.tabCount > 1;
@@ -293,6 +298,7 @@ namespace
             Table::separator(),
             inWindow(Table::submenu("Tab Bar", tabBarRows)),
             Table::command(ToggleStatusLine {}),
+            windowCommand(ToggleMouseForwarding {}, "Mouse Forwarding").checkedWhen(isMouseForwarded),
             Table::command(ToggleTitleBar {}),
             Table::command(ToggleFullscreen {}),
             Table::separator(),

@@ -307,6 +307,9 @@ span<ActionCatalogEntry const> actionCatalog()
         ActionCatalogEntry { "ToggleInputProtection",
                              Action { ToggleInputProtection {} },
                              documentation::ToggleInputProtection },
+        ActionCatalogEntry { "ToggleMouseForwarding",
+                             Action { ToggleMouseForwarding {} },
+                             documentation::ToggleMouseForwarding },
         ActionCatalogEntry {
             "ToggleStatusLine", Action { ToggleStatusLine {} }, documentation::ToggleStatusLine },
         ActionCatalogEntry { "ToggleTitleBar", Action { ToggleTitleBar {} }, documentation::ToggleTitleBar },

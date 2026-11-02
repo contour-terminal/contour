@@ -30,6 +30,7 @@ struct DimUnfocused {};
 struct ShowIndicatorOnResize {};
 struct Mouse {};
 struct SearchCaseSensitivity {};
+struct MouseForwarding {};
 struct InsertAfterYank {};
 struct CopyLastMarkRangeOffset {};
 struct WMClass {};

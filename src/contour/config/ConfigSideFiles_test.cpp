@@ -15,6 +15,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
+#include <vtbackend/core/MouseForwarding.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
@@ -286,6 +287,42 @@ TEST_CASE("config.search_case_sensitivity", "[config]")
 
         auto const reloaded = loadFromYaml(dir, written);
         CHECK(reloaded.profile("main")->searchCaseSensitivity.value() == SearchCaseSensitivity::Sensitive);
+    }
+}
+
+TEST_CASE("config.mouse_forwarding", "[config]")
+{
+    using vtbackend::MouseForwarding;
+    QTemporaryDir dir;
+
+    SECTION("defaults to forwarded, which is what the terminal has always done")
+    {
+        CHECK(contour::config::TerminalProfile {}.mouseForwarding.value() == MouseForwarding::Forwarded);
+    }
+
+    SECTION("a profile's value reaches the terminal's settings")
+    {
+        auto const config = loadFromYaml(
+            dir, contour::test::profileConfigYaml("main", {}, "        mouse_forwarding: blocked\n"));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->mouseForwarding.value() == MouseForwarding::Blocked);
+        CHECK(contour::config::sessionSettings(
+                  config, *profile, vtbackend::ColorPreference::Dark, vtbackend::BlockColumnForm::Glyphs)
+                  .mouseForwarding
+              == MouseForwarding::Blocked);
+    }
+
+    SECTION("round-trips through the generated config")
+    {
+        auto config = contour::config::Config {};
+        config.profile("main")->mouseForwarding = MouseForwarding::Blocked;
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("mouse_forwarding: blocked"));
+
+        auto const reloaded = loadFromYaml(dir, written);
+        CHECK(reloaded.profile("main")->mouseForwarding.value() == MouseForwarding::Blocked);
     }
 }
 

@@ -615,6 +615,13 @@ std::vector<ProfileFieldGroup> const& profileFieldGroups()
                   "three at any time.",
                   [](TerminalProfile const& p) { return p.searchCaseSensitivity.value(); },
                   [](TerminalProfile& p, auto v) { p.searchCaseSensitivity = v; }),
+              enumFieldFromTable<vtbackend::MouseForwarding>(
+                  "mouse_forwarding",
+                  "Mouse Forwarding",
+                  "Whether mouse events reach an application that asks for them. Blocked keeps selection, "
+                  "scrolling and links working while such an application runs.",
+                  [](TerminalProfile const& p) { return p.mouseForwarding.value(); },
+                  [](TerminalProfile& p, auto v) { p.mouseForwarding = v; }),
               enumField(
                   "pixel_reporting",
                   "Pixel reporting",

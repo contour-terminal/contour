@@ -1118,6 +1118,9 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
     ConfigEntry<vtbackend::SearchCaseSensitivity, documentation::SearchCaseSensitivity>
         searchCaseSensitivity { vtbackend::SearchCaseSensitivity::Smart };
+    ConfigEntry<vtbackend::MouseForwarding, documentation::MouseForwarding> mouseForwarding {
+        vtbackend::MouseForwarding::Forwarded
+    };
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
     };

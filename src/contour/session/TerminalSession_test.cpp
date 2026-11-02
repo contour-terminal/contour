@@ -1432,6 +1432,48 @@ TEST_CASE("TerminalSession: manager creates real tabs headlessly through the inj
         CHECK(pty->isClosed());
 }
 
+TEST_CASE("TerminalSession: ToggleMouseForwarding flips delivery until the profile is re-applied",
+          "[contour][session][actions][mouse]")
+{
+    // A runtime override of the profile's mouse_forwarding: the action flips it both ways, and a reload or a
+    // profile switch re-imposes the profile's value.
+    using vtbackend::MouseForwarding;
+    namespace actions = contour::actions;
+    TestApp testApp;
+    // Registered before the session is made, which takes its copy of the configuration then.
+    auto const blocking = registerProfile(testApp.app(), "no-mouse", [](contour::config::TerminalProfile& p) {
+        p.mouseForwarding = MouseForwarding::Blocked;
+    });
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const forwarding = [&] {
+        return session->terminal().runUnderStateLock([&] { return session->terminal().mouseForwarding(); });
+    };
+
+    REQUIRE(session->profile().mouseForwarding.value() == MouseForwarding::Forwarded);
+    REQUIRE(forwarding() == MouseForwarding::Forwarded);
+
+    CHECK((*session)(actions::ToggleMouseForwarding {}));
+    CHECK(forwarding() == MouseForwarding::Blocked);
+    CHECK((*session)(actions::ToggleMouseForwarding {}));
+    CHECK(forwarding() == MouseForwarding::Forwarded);
+
+    SECTION("a reload re-imposes the profile's value")
+    {
+        CHECK((*session)(actions::ToggleMouseForwarding {}));
+        REQUIRE(forwarding() == MouseForwarding::Blocked);
+        session->applyReloadedConfig(testApp.app().config(), session->profileName());
+        CHECK(forwarding() == MouseForwarding::Forwarded);
+    }
+
+    SECTION("a profile switch applies the new profile's value, and the toggle overrides it")
+    {
+        CHECK((*session)(actions::ChangeProfile { .name = blocking }));
+        CHECK(forwarding() == MouseForwarding::Blocked);
+        CHECK((*session)(actions::ToggleMouseForwarding {}));
+        CHECK(forwarding() == MouseForwarding::Forwarded);
+    }
+}
+
 TEST_CASE("TerminalSession: display-independent actions dispatch without a display",
           "[contour][session][actions]")
 {

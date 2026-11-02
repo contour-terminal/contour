@@ -6,6 +6,8 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
+#include <vtbackend/core/MouseForwarding.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -87,10 +89,12 @@ struct MenuBarState
     SelectionPresence selection = SelectionPresence::Absent;     ///< Whether the pane has a selection.
     SpeechAvailability speech = SpeechAvailability::Unavailable; ///< Whether speech is available.
     InputProtection inputProtection = InputProtection::Off;      ///< The pane's read-only lock.
-    int tabCount = 0;                                            ///< Tabs in the window.
-    int activeTab = -1;                                          ///< The active tab's index, or -1.
-    int paneCount = 0;                                           ///< Panes in the active tab.
-    std::vector<std::string> tabTitles {};                       ///< One per tab, in order.
+    /// Whether the pane's mouse events reach an application that tracks the mouse.
+    vtbackend::MouseForwarding mouseForwarding = vtbackend::MouseForwarding::Forwarded;
+    int tabCount = 0;                      ///< Tabs in the window.
+    int activeTab = -1;                    ///< The active tab's index, or -1.
+    int paneCount = 0;                     ///< Panes in the active tab.
+    std::vector<std::string> tabTitles {}; ///< One per tab, in order.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always; ///< Mode in force.
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;          ///< Placement in force.
     std::string activeProfile {};             ///< The active pane's profile.

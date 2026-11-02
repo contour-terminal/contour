@@ -873,7 +873,8 @@ void ScreenMirror::syncInputEncoding(RemoteScreen const& screen)
     _terminal->setMouseProtocol(protocol.value_or(vtbackend::MouseProtocol::NormalTracking),
                                 protocol.has_value());
     _terminal->setMouseTransport(mouseTransportOf(screen.mouse.transport));
-    _terminal->setMouseWheelMode(mouseWheelModeOf(screen.mouse.wheelMode));
+    // The server's wheel mode, unless this terminal blocks mouse forwarding (Terminal derives its own then).
+    _terminal->setMirroredMouseWheelMode(mouseWheelModeOf(screen.mouse.wheelMode));
 }
 
 void ScreenMirror::applyStatusLines(RemoteScreen const& screen)

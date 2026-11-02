@@ -69,6 +69,20 @@ profiles:
                 right: "{Extension:git} │ {Clock:Bold}"
 )"sv;
 
+/// The actions of type @p Action that @p mappings bind, in binding order.
+/// @param mappings A list of input mappings, each with a binding of actions.
+/// @return Every bound @p Action.
+template <typename Action, typename Mappings>
+[[nodiscard]] std::vector<Action> boundActionsOf(Mappings const& mappings)
+{
+    auto found = std::vector<Action> {};
+    for (auto const& mapping: mappings)
+        for (auto const& action: mapping.binding)
+            if (auto const* a = std::get_if<Action>(&action))
+                found.push_back(*a);
+    return found;
+}
+
 /// Every row of every table in @p Enums formats as the token it carries.
 template <typename... Enums>
 void checkFormatsAsToken()
@@ -1481,6 +1495,8 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
     checkEnumerators(std::array { vtbackend::SearchCaseSensitivity::Smart,
                                   vtbackend::SearchCaseSensitivity::Insensitive,
                                   vtbackend::SearchCaseSensitivity::Sensitive });
+    checkEnumerators(
+        std::array { vtbackend::MouseForwarding::Forwarded, vtbackend::MouseForwarding::Blocked });
 
     // The reader is case-insensitive, and refuses what no row carries.
     CHECK(configEnumFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
@@ -1519,6 +1535,7 @@ TEST_CASE("Config: every configuration enum is written as its table's token", "[
                         vtbackend::ContextMarkPolicy,
                         vtbackend::ContextTintScope,
                         vtbackend::SearchCaseSensitivity,
+                        vtbackend::MouseForwarding,
                         vtbackend::LineNumberMode,
                         vtbackend::StickyHeaderMode,
                         vtbackend::LinkDecorationMode,
@@ -1935,16 +1952,18 @@ input_mapping:
 
     // ResizePane parses its direction (case-insensitive) and an optional percent (default 5) as
     // sibling keys — the round-trip format the generated default config also uses.
-    std::vector<contour::actions::ResizePane> resizes;
-    for (auto const& km: mappings.keyMappings)
-        for (auto const& action: km.binding)
-            if (auto const* r = std::get_if<contour::actions::ResizePane>(&action))
-                resizes.push_back(*r);
+    auto const resizes = boundActionsOf<contour::actions::ResizePane>(mappings.keyMappings);
     REQUIRE(resizes.size() == 2);
     CHECK(resizes[0].direction == contour::actions::Direction::Left);
     CHECK(resizes[0].percent == 8);
     CHECK(resizes[1].direction == contour::actions::Direction::Right);
     CHECK(resizes[1].percent == 5); // default when omitted
+
+    // ChangeProfile switches to the profile its `name` names. It used to take the action's own name, so
+    // every such binding asked for a profile called "ChangeProfile".
+    auto const profileChanges = boundActionsOf<contour::actions::ChangeProfile>(mappings.charMappings);
+    REQUIRE(profileChanges.size() == 1);
+    CHECK(profileChanges[0].name == "main");
 }
 
 // No comma in the name: Catch2 splits its command-line test filter on commas, so a comma here
@@ -1966,11 +1985,7 @@ input_mapping:
 
     // A binding on a literal character lands in charMappings, not keyMappings — the latter holds
     // only the named keys (LeftArrow, Insert, F6, …).
-    std::vector<contour::actions::HintMode> hints;
-    for (auto const& cm: config.inputMappings.value().charMappings)
-        for (auto const& action: cm.binding)
-            if (auto const* h = std::get_if<contour::actions::HintMode>(&action))
-                hints.push_back(*h);
+    auto const hints = boundActionsOf<contour::actions::HintMode>(config.inputMappings.value().charMappings);
 
     REQUIRE(hints.size() == 4);
     CHECK(hints[0].scope == vtbackend::HintScope::Scrollback);

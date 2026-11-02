@@ -2087,20 +2087,23 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     verifyState();
 
     // A press the DEC locator reports is not the application's.
-    if (handleLocatorMouseEvent(LocatorEvent::ButtonDown, button))
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonDown, button, modifiers))
         return Handled { true };
 
-    // Hand the event to the input generator for app tracking or wheel->cursor-key translation;
-    // generateMousePress() self-rejects the cases where neither applies.
-    auto const eventHandledByApp =
-        (allowPassMouseEventToApp(modifiers) || allowWheelTranslationToApp(button, modifiers))
-        && core::locked(_inputMutex, [&] {
-               return _inputGenerator.generateMousePress(modifiers,
-                                                         button,
-                                                         _currentMousePosition + _reportedCellOrigin,
-                                                         pixelPosition,
-                                                         uiHandledHint);
-           });
+    // Hand the event to the input generator for app tracking, or else for wheel->cursor-key translation
+    // alone, which reports nothing: a press the application may not hear never reaches its mouse protocol.
+    auto const position = _currentMousePosition + _reportedCellOrigin;
+    auto const eventHandledByApp = [&] {
+        if (allowPassMouseEventToApp(modifiers))
+            return core::locked(_inputMutex, [&] {
+                return _inputGenerator.generateMousePress(
+                    modifiers, button, position, pixelPosition, uiHandledHint);
+            });
+        if (allowWheelTranslationToApp(button, modifiers))
+            return core::locked(_inputMutex,
+                                [&] { return _inputGenerator.generateWheelCursorKeys(button, position); });
+        return false;
+    }();
 
     flushInput();
     return Handled { eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking) };
@@ -2475,12 +2478,18 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
     }
 
     // A release the DEC locator reports is not the application's.
-    if (handleLocatorMouseEvent(LocatorEvent::ButtonUp, button))
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonUp, button, modifiers))
         return Handled { true };
 
-    if (allowPassMouseEventToApp(modifiers) && core::locked(_inputMutex, [&] {
-            return _inputGenerator.generateMouseRelease(
-                modifiers, button, _currentMousePosition + _reportedCellOrigin, pixelPosition, uiHandledHint);
+    // A release follows its press: reported if the press was, whatever changed in between (forwarding,
+    // the bypass modifier, the input lock, vi mode), and not if it was not.
+    if (core::locked(_inputMutex, [&] {
+            return _inputGenerator.mouseButtonPressed(button)
+                   && _inputGenerator.generateMouseRelease(modifiers,
+                                                           button,
+                                                           _currentMousePosition + _reportedCellOrigin,
+                                                           pixelPosition,
+                                                           uiHandledHint);
         }))
     {
         flushInput();
@@ -6517,6 +6526,18 @@ void Terminal::setMouseProtocol(MouseProtocol protocol, bool enabled)
     updateWheelMode();
 }
 
+LinkRevealChange Terminal::setMouseForwarding(MouseForwarding value)
+{
+    auto const before = hoverPointer();
+    _settings.mouseForwarding = value;
+    // Blocked, tracking no longer takes the wheel: it acts on the page on display, as with tracking off.
+    updateWheelMode();
+    if (hoverPointer() == before)
+        return LinkRevealChange::Unchanged;
+    renderBufferUpdated();
+    return LinkRevealChange::Changed;
+}
+
 void Terminal::setMouseTransport(MouseTransport transport)
 {
     changeInputEncoding([&](InputGenerator& input) { input.setMouseTransport(transport); });
@@ -6567,6 +6588,14 @@ void Terminal::setMouseCoordinateMode(DECMode mode, bool enable)
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 {
     changeInputEncoding([&](InputGenerator& input) { input.setMouseWheelMode(mode); });
+}
+
+void Terminal::setMirroredMouseWheelMode(InputGenerator::MouseWheelMode mode)
+{
+    if (_settings.mouseForwarding == MouseForwarding::Blocked)
+        updateWheelMode();
+    else
+        setMouseWheelMode(mode);
 }
 
 void Terminal::setMouseWheelScrollMultiplier(LineCount lines)
@@ -8337,7 +8366,7 @@ InputGenerator::MouseWheelMode Terminal::wheelModeForDisplayedPage() const noexc
     // Tracking wins, as in Windows Terminal (mouseInput.cpp asks for tracking before alternate scroll);
     // page 1 has a history to scroll, as xterm's alternate scroll applies to its alternate buffer only; and
     // ?1007 reset turns alternate scroll off, as in xterm, Windows Terminal and foot.
-    if (mouseProtocol().has_value() || displayedScreenType() == ScreenType::Primary
+    if (effectiveMouseProtocol().has_value() || displayedScreenType() == ScreenType::Primary
         || !isModeEnabled(DECMode::MouseAlternateScroll))
         return Mode::Default;
     // Cursor keys, in DECCKM's form at the moment, as xterm, Windows Terminal and foot send them.
@@ -8918,7 +8947,10 @@ void Terminal::sendLocatorReport(int event)
 
 void Terminal::requestLocatorPosition()
 {
-    sendLocatorReport(_locatorState.reporting == LocatorReporting::Off ? 0 : 1);
+    // Blocked mouse forwarding answers as an unavailable locator does: the pointer is not the application's.
+    auto const available = _locatorState.reporting != LocatorReporting::Off
+                           && _settings.mouseForwarding == MouseForwarding::Forwarded;
+    sendLocatorReport(available ? 1 : 0);
 }
 
 namespace
@@ -8940,17 +8972,33 @@ namespace
     };
 } // namespace
 
-Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button)
+Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button, Modifiers modifiers)
 {
     auto const code = std::ranges::find(LocatorButtonCodes, button, &LocatorButtonCode::button);
     if (code == LocatorButtonCodes.end())
         return Handled { false };
 
-    switch (event)
-    {
-        case LocatorEvent::ButtonDown: _locatorButtonsHeld |= code->held; break;
-        case LocatorEvent::ButtonUp: _locatorButtonsHeld &= static_cast<uint8_t>(~code->held); break;
-    }
+    // Whether the application owns this press: decided once, at the down, so the up follows it.
+    auto const ownedByApp = [&] {
+        auto const wasOwned = (_locatorButtonsOwnedByApp & code->held) != 0;
+        switch (event)
+        {
+            case LocatorEvent::ButtonDown:
+                _locatorButtonsHeld |= code->held;
+                if (mouseReachesApplication(modifiers))
+                {
+                    _locatorButtonsOwnedByApp |= code->held;
+                    return true;
+                }
+                _locatorButtonsOwnedByApp &= static_cast<uint8_t>(~code->held);
+                return false;
+            case LocatorEvent::ButtonUp:
+                _locatorButtonsHeld &= static_cast<uint8_t>(~code->held);
+                _locatorButtonsOwnedByApp &= static_cast<uint8_t>(~code->held);
+                return wasOwned;
+        }
+        core::unreachable();
+    }();
 
     auto const selected = [&] {
         switch (event)
@@ -8960,7 +9008,7 @@ Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button
         }
         core::unreachable();
     }();
-    if (_locatorState.reporting == LocatorReporting::Off || !selected)
+    if (_locatorState.reporting == LocatorReporting::Off || !selected || !ownedByApp)
         return Handled { false };
 
     sendLocatorReport(event == LocatorEvent::ButtonDown ? code->down : code->up);

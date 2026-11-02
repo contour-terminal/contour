@@ -708,11 +708,23 @@ class InputGenerator
     /// ESC [ 201 ~ with every ESC taken out, so nothing inside can end the paste early.
     /// @param text The pasted text; untrusted.
     void generatePaste(std::string_view const& text);
+    /// Translates a vertical wheel notch into cursor keys while the wheel mode is not Default (alternate
+    /// scroll), and never into a mouse report: what a press no application may hear is limited to.
+    /// @param button The button; anything but WheelUp and WheelDown generates nothing.
+    /// @param pos    Where the pointer is.
+    /// @return Whether cursor keys were generated.
+    bool generateWheelCursorKeys(MouseButton button, CellLocation pos);
     bool generateMousePress(Modifiers modifier,
                             MouseButton button,
                             CellLocation pos,
                             PixelCoordinate pixelPosition,
                             bool uiHandled);
+    /// @param button A mouse button.
+    /// @return Whether a press of @p button was reported and its release has not been yet.
+    [[nodiscard]] bool mouseButtonPressed(MouseButton button) const
+    {
+        return _currentlyPressedMouseButtons.contains(button);
+    }
     bool generateMouseMove(Modifiers modifier,
                            CellLocation pos,
                            PixelCoordinate pixelPosition,

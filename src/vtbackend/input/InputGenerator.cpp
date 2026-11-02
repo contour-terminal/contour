@@ -1436,15 +1436,8 @@ bool InputGenerator::mouseTransportURXVT(MouseEventType eventType,
     return true;
 }
 
-bool InputGenerator::generateMousePress(
-    Modifiers modifiers, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+bool InputGenerator::generateWheelCursorKeys(MouseButton button, CellLocation pos)
 {
-    auto const logged = [=](bool success) -> bool {
-        if (success)
-            inputLog()("Sending mouse press {} {} at {}.", button, modifiers, pos);
-        return success;
-    };
-
     _currentMousePosition = pos;
 
     // Wheel-notch -> cursor-key sequences, indexed by wheel mode. Add a wheel mode = add a row.
@@ -1464,27 +1457,35 @@ bool InputGenerator::generateMousePress(
     };
 
     // Alternate-scroll: on the alt screen (less/most/man) the wheel translates to cursor keys.
-    // Runs before the protocol gate; setMouseProtocol resets the mode so tracking apps are unaffected.
-    if (!_passiveMouseTracking && isMouseWheel(button))
-    {
-        auto const keys = cursorKeysFor(mouseWheelMode());
-        auto const sequence = [&]() -> std::string_view {
-            switch (button)
-            {
-                case MouseButton::WheelUp: return keys.up;
-                case MouseButton::WheelDown: return keys.down;
-                default: return {};
-            }
-        }();
-        if (!sequence.empty())
+    if (_passiveMouseTracking || !isMouseWheel(button))
+        return false;
+    auto const keys = cursorKeysFor(mouseWheelMode());
+    auto const sequence = [&]() -> std::string_view {
+        switch (button)
         {
-            // One cursor-key per notch, repeated to match the primary-screen scroll multiplier.
-            auto success = false;
-            for ([[maybe_unused]] auto const _: std::views::iota(0u, mouseWheelScrollMultiplier()))
-                success = append(sequence);
-            return logged(success);
+            case MouseButton::WheelUp: return keys.up;
+            case MouseButton::WheelDown: return keys.down;
+            default: return {};
         }
-    }
+    }();
+    if (sequence.empty())
+        return false;
+
+    // One cursor-key per notch, repeated to match the primary-screen scroll multiplier.
+    auto success = false;
+    for ([[maybe_unused]] auto const _: std::views::iota(0u, mouseWheelScrollMultiplier()))
+        success = append(sequence);
+    if (success)
+        inputLog()("Sending wheel {} as cursor keys at {}.", button, pos);
+    return success;
+}
+
+bool InputGenerator::generateMousePress(
+    Modifiers modifiers, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+{
+    // Runs before the protocol gate; setMouseProtocol resets the wheel mode so tracking apps are unaffected.
+    if (generateWheelCursorKeys(button, pos))
+        return true;
 
     if (!_mouseProtocol.has_value())
         return false;
@@ -1493,8 +1494,11 @@ bool InputGenerator::generateMousePress(
         if (!_currentlyPressedMouseButtons.contains(button))
             _currentlyPressedMouseButtons.insert(button);
 
-    return logged(generateMouse(
-        MouseEventType::Press, modifiers, button, _currentMousePosition, pixelPosition, uiHandled));
+    auto const success = generateMouse(
+        MouseEventType::Press, modifiers, button, _currentMousePosition, pixelPosition, uiHandled);
+    if (success)
+        inputLog()("Sending mouse press {} {} at {}.", button, modifiers, pos);
+    return success;
 }
 
 bool InputGenerator::generateMouseRelease(

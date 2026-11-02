@@ -1214,12 +1214,17 @@ class Terminal: public IStatusLinePublishTarget
     /// Resets locator state (called by soft reset).
     void resetLocator() noexcept { _locatorState = {}; }
 
-    /// Reports a button going down or up to the host, as DECLRP, while the locator is on and DECSLE selects
-    /// the event. Keeps the buttons held down, which every report names, also while the locator is off.
-    /// @param event  Whether the button went down or up.
-    /// @param button The button; one the locator has no code for is not reported.
+    /// Reports a button going down or up to the host, as DECLRP, while the locator is on, DECSLE selects
+    /// the event and the press is the application's: decided when the button goes down
+    /// (mouseReachesApplication()), so an up follows its down whatever changed in between. Keeps the buttons
+    /// held down, which every report names, also while the locator is off.
+    /// @param event     Whether the button went down or up.
+    /// @param button    The button; one the locator has no code for is not reported.
+    /// @param modifiers The modifiers held at a down, which may bypass the application; unused at an up.
     /// @return Whether the event was reported, and is therefore not the application's.
-    [[nodiscard]] Handled handleLocatorMouseEvent(LocatorEvent event, MouseButton button);
+    [[nodiscard]] Handled handleLocatorMouseEvent(LocatorEvent event,
+                                                  MouseButton button,
+                                                  Modifiers modifiers);
     // }}}
 
     // {{{ Image canvas size
@@ -1587,6 +1592,16 @@ class Terminal: public IStatusLinePublishTarget
     void clearScreen();
 
     void setMouseProtocolBypassModifiers(Modifiers value) { _settings.mouseProtocolBypassModifiers = value; }
+
+    /// Sets whether mouse events reach an application that tracks the mouse. The caller holds the state lock.
+    /// A post-construction setter on purpose: live reconfiguration is the feature.
+    /// @param value Blocked to keep every mouse event for the terminal, Forwarded to report them again.
+    /// @return Whether that changes how links are presented; the frontend then re-decides the pointer shape.
+    [[nodiscard]] LinkRevealChange setMouseForwarding(MouseForwarding value);
+
+    /// @return Whether mouse events currently reach an application that tracks the mouse.
+    [[nodiscard]] MouseForwarding mouseForwarding() const noexcept { return _settings.mouseForwarding; }
+
     void setMouseBlockSelectionModifiers(Modifiers value) { _settings.mouseBlockSelectionModifiers = value; }
 
     /// Applies a profile's link pattern table to a running terminal. The caller holds the terminal lock.
@@ -1680,13 +1695,12 @@ class Terminal: public IStatusLinePublishTarget
     /// Whether the follow gesture's modifiers are held (Settings::linkFollowModifiers).
     [[nodiscard]] FollowModifiers followModifiers() const noexcept;
 
-    /// Whether a plain click goes to the application: it tracks the mouse, input is allowed and vi mode is
-    /// Insert. Only then does a click need the bypass modifiers to reach the terminal (a link, a selection).
-    /// The caller holds the state lock.
+    /// Whether a plain click goes to the application: it tracks the mouse and a click with no modifiers
+    /// reaches it (mouseReachesApplication()). Only then does a click need the bypass modifiers to reach the
+    /// terminal (a link, a selection). The caller holds the state lock.
     [[nodiscard]] bool applicationTakesClicks() const noexcept
     {
-        return _inputGenerator.mouseProtocol().has_value() && allowInput()
-               && _inputHandler.mode() == ViMode::Insert;
+        return _inputGenerator.mouseProtocol().has_value() && mouseReachesApplication(Modifiers {});
     }
 
     /// Where the pointer counts as being when it is over a link: Elsewhere while an application takes clicks
@@ -3533,6 +3547,11 @@ class Terminal: public IStatusLinePublishTarget
     /// @param enable Whether the mode is being set or reset.
     void setMouseCoordinateMode(DECMode mode, bool enable);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    /// Applies the wheel mode a mirrored terminal derived, unless mouse forwarding is blocked here: then the
+    /// wheel mode is derived from this terminal's own state, as the mirrored application's tracking does not
+    /// take this terminal's wheel.
+    /// @param mode The wheel mode the mirrored terminal reports.
+    void setMirroredMouseWheelMode(InputGenerator::MouseWheelMode mode);
     void setWarningBellVolume(BellVolume volume);
 
     /// The RESOLVED mouse-reporting state, as the input generator will actually encode it. This is
@@ -3549,6 +3568,17 @@ class Terminal: public IStatusLinePublishTarget
         return _inputGenerator.mouseWheelMode();
     }
     /// @}
+
+    /// The mouse protocol mouse events are delivered under. What the terminal's own mouse handling asks;
+    /// DECRQM and mirrors read mouseProtocol().
+    /// @return mouseProtocol(), or none while mouse forwarding is blocked.
+    [[nodiscard]] std::optional<MouseProtocol> effectiveMouseProtocol() const noexcept
+    {
+        if (_settings.mouseForwarding == MouseForwarding::Blocked)
+            return std::nullopt;
+        return _inputGenerator.mouseProtocol();
+    }
+
     /// Sets alternate-scroll lines per wheel notch, syncing @ref Settings and the input generator.
     /// @param lines Lines per notch (values below 1 are clamped to 1 at emit time).
     void setMouseWheelScrollMultiplier(LineCount lines);
@@ -4231,8 +4261,8 @@ class Terminal: public IStatusLinePublishTarget
     void showPage(PageIndex page);
 
     /// What the mouse wheel does over the page on display while no binding claims it: Default -- reported to
-    /// an application that enabled mouse tracking, else page 1's history scrolls -- or the cursor keys it
-    /// becomes over a page without history (alternate scroll):
+    /// an application that enabled mouse tracking (effectiveMouseProtocol()), else page 1's history scrolls
+    /// -- or the cursor keys it becomes over a page without history (alternate scroll):
     ///
     /// | Mouse protocol | Page on display | ?1007 | Wheel                          |
     /// |----------------|-----------------|-------|--------------------------------|
@@ -4245,7 +4275,7 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] InputGenerator::MouseWheelMode wheelModeForDisplayedPage() const noexcept;
 
     /// Hands wheelModeForDisplayedPage() to the input generator. Called by each writer of what it derives
-    /// from: showPage(), the mouse protocol modes, ?1007 and DECCKM.
+    /// from: showPage(), the mouse protocol modes, ?1007, DECCKM and mouse forwarding.
     void updateWheelMode();
 
     /// One batch's birth stamp, in force on the primary screen for exactly as long as this lives.
@@ -4637,17 +4667,30 @@ class Terminal: public IStatusLinePublishTarget
                && modifiers.contains(_settings.mouseProtocolBypassModifiers);
     }
 
-    /// Shared gate for handing a mouse event to the app: input allowed, no bypass modifier
-    /// (usually Shift), and Vi Insert mode. The two callers add their distinguishing condition.
+    /// Whether mouse input may reach the application at all: input allowed, no bypass modifier (usually
+    /// Shift), and Vi Insert mode. Alternate scroll asks only this, as its cursor keys are no mouse report.
+    /// @param currentlyPressedModifier The modifiers held.
+    /// @return Whether mouse input may reach the application.
     bool mouseInputAllowedInInsertMode(Modifiers currentlyPressedModifier) const noexcept
     {
         return allowInput() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier)
                && _inputHandler.mode() == ViMode::Insert;
     }
 
+    /// The one gate for reporting a press or a motion to the application, by mouse protocol or by the DEC
+    /// locator: mouse forwarding is not blocked and mouse input may reach it. A release follows its press.
+    /// @param currentlyPressedModifier The modifiers held, which may bypass the application.
+    /// @return Whether the event is the application's.
+    [[nodiscard]] bool mouseReachesApplication(Modifiers currentlyPressedModifier) const noexcept
+    {
+        return _settings.mouseForwarding == MouseForwarding::Forwarded
+               && mouseInputAllowedInInsertMode(currentlyPressedModifier);
+    }
+
     bool allowPassMouseEventToApp(Modifiers currentlyPressedModifier) const noexcept
     {
-        return applicationTakesClicks() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
+        return _inputGenerator.mouseProtocol().has_value()
+               && mouseReachesApplication(currentlyPressedModifier);
     }
 
     /// No-protocol counterpart to @ref allowPassMouseEventToApp: fires when a wheel notch should
@@ -5369,6 +5412,9 @@ class Terminal: public IStatusLinePublishTarget
     /// The locator's buttons held down, as DECLRP's Pb names them (right 1, middle 2, left 4): what a report
     /// says of them after its event. Kept on every press and release, the locator on or off.
     uint8_t _locatorButtonsHeld = 0;
+    /// The locator's buttons, in _locatorButtonsHeld's bits, whose press was the application's: their up is
+    /// reported, and only theirs, so the host never sees an up without its down or a down without its up.
+    uint8_t _locatorButtonsOwnedByApp = 0;
     std::unordered_map<int, DRCSCharset> _drcsCharsets;
     std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
