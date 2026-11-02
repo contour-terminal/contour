@@ -133,6 +133,14 @@ std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style)
     return shortcutText(chord.modifiers, chord.input, style);
 }
 
+std::optional<std::string> findBarShortcutText(std::string_view name, ShortcutStyle style)
+{
+    auto const row = std::ranges::find(FindBarShortcuts, name, &FindBarShortcut::name);
+    if (row == FindBarShortcuts.end())
+        return std::nullopt;
+    return shortcutText(row->modifiers, row->input, style);
+}
+
 ChordIndex chordIndex(config::InputMappings const& mappings, ChordPreference preference)
 {
     auto result = ChordIndex {};

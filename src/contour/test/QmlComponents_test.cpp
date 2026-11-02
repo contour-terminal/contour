@@ -2039,10 +2039,10 @@ TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
-    auto* toolTip = tab->findChild<QObject*>(QStringLiteral("tabHoverToolTip"));
+    // The tooltip itself is built while the pointer rests on the tab, and always draws plain text (see the
+    // KitToolTip cases); what is the tab's to get right is the text it hands the host.
+    auto* toolTip = tab->findChild<QObject*>(QStringLiteral("tabHover"));
     REQUIRE(toolTip != nullptr);
-    auto* content = toolTip->property("contentItem").value<QQuickItem*>();
-    REQUIRE(content != nullptr);
 
     auto const hostile = std::array {
         QStringLiteral("<font color=red>x</font>"),
@@ -2057,9 +2057,6 @@ TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as
         REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
         tab->setProperty("hoverTooltip", composed);
         CHECK(toolTip->property("text").toString().startsWith(text));
-        CHECK(content->property("text").toString().startsWith(text));
-        // 0 = Text.PlainText: the string is drawn as the characters it holds.
-        CHECK(content->property("textFormat").toInt() == 0);
     }
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);

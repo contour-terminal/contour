@@ -429,21 +429,14 @@ Item {
     // program sent (its OSC 7501 message, the title it set), and a style's default Text.AutoText would
     // render that as markup -- colours, and an <img> the engine goes off to load -- whenever it looks like
     // some.
-    ToolTip {
+    KitToolTipHost {
         id: hoverToolTip
-        objectName: "tabHoverToolTip"   // findChild() handle for the GUI test
+        objectName: "tabHover"   // findChild() handle for the GUI test; its tooltip is "tabHoverToolTip"
+        toolTipName: "tabHoverToolTip"
         text: root.hoverTooltip
         // Suppressed while renaming: the editor covers the label, and the tooltip would sit over the field
         // the user is typing into.
-        visible: hover.hovered && root.hoverTooltip !== "" && !renameLoader.active
-        delay: 600
-        contentItem: Text {
-            text: hoverToolTip.text
-            textFormat: Text.PlainText
-            font: chromeStyle.font
-            color: hoverToolTip.palette.toolTipText
-            wrapMode: Text.WordWrap
-        }
+        suppressed: renameLoader.active
     }
 
     // --- Tab drag: reorder within the strip, move into another window, split beside a pane, or tear out. ---

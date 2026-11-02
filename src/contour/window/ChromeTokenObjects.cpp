@@ -193,6 +193,8 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
     {
         case config::ColorSourceKind::Fixed:
             return faded(platform::toQColor(vtbackend::RGBColor(source.rgb)));
+        case config::ColorSourceKind::PaletteMid:
+            return faded(QGuiApplication::palette().color(QPalette::Mid));
         case config::ColorSourceKind::PaletteWindow:
             return faded(QGuiApplication::palette().color(QPalette::Window));
         case config::ColorSourceKind::PaletteWindowText:
@@ -217,6 +219,10 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
         case config::ColorSourceKind::Separator:
             return platform::atOpacity(QColor(dark ? Qt::white : Qt::black),
                                        _separatorPercent * source.alphaPercent / 100);
+        case config::ColorSourceKind::Tone:
+            return platform::atOpacity(
+                platform::toQColor(vtbackend::RGBColor(dark ? source.darkRgb : source.rgb)),
+                dark ? source.darkAlphaPercent : source.alphaPercent);
         case config::ColorSourceKind::Fill: return kitInk(config::FillAlphas);
         case config::ColorSourceKind::Label: return kitInk(config::LabelAlphas);
         case config::ColorSourceKind::Surface:

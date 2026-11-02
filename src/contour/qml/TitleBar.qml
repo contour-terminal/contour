@@ -249,6 +249,12 @@ Item {
                      : "transparent"
             }
 
+            KitToolTipHost {
+                text: headerButton.modelData.accessibleName
+                shortcutCommand: headerButton.modelData.command
+                toolTipName: headerButton.modelData.objectName + "ToolTip"
+            }
+
             // The new-tab item opens the profiles on a secondary click, as the band's "+" does.
             readonly property bool isNewTab: headerButton.modelData.menu === "newTab"
             TapHandler {
@@ -543,6 +549,7 @@ Item {
                 objectName: "newTabButton"
                 glyph: chromeStyle.newTabGlyph
                 accessibleName: qsTr("New tab")
+                toolTipCommand: "CreateNewTab"
                 accessibleDescription: qsTr("Right-click or press and hold for a new tab with a profile")
                 focusRingShown: activeFocus && root.toolbarHasFocus
                 onClicked: if (root.controller) root.controller.createNewTab()

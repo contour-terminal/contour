@@ -3280,3 +3280,32 @@ TEST_CASE("Dismissing the palette runs nothing and gives the keyboard back (offs
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
+
+TEST_CASE("pane card: each header action's tooltip names it and its command (offscreen)",
+          "[contour][gui][qml][panecard][tooltip]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    auto const& card = host.cardOf(panes.left());
+
+    struct Case
+    {
+        char const* part;
+        char const* name;
+        char const* command;
+    };
+    // The name is the button's accessible name; the chord of the command is the window controller's to say.
+    for (auto const& row: { Case { "paneHeaderAction0", "Split right", "SplitVertical" },
+                            Case { "paneHeaderAction1", "Split down", "SplitHorizontal" },
+                            Case { "paneHeaderAction2", "Zoom pane", "TogglePaneZoom" },
+                            Case { "paneHeaderAction3", "Close pane", "ClosePane" } })
+    {
+        CAPTURE(row.part);
+        auto const& button = PaneTreeHost::partOf(card, row.part);
+        auto const* const toolTipHost = button.findChild<QObject*>(QStringLiteral("kitToolTipHost"));
+        REQUIRE(toolTipHost != nullptr);
+        CHECK(toolTipHost->property("text").toString() == QString::fromLatin1(row.name));
+        CHECK(toolTipHost->property("shortcutCommand").toString() == QString::fromLatin1(row.command));
+    }
+}

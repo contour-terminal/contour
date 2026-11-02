@@ -40,4 +40,8 @@ ApplicationWindow
     palette.mid: appPalette.mid
     palette.dark: appPalette.dark
     palette.shadow: appPalette.shadow
+
+    /// When this window's tooltips last showed: the KitToolTips of its controls read and note it, so a second
+    /// tooltip shows at once while the first is still warm.
+    readonly property KitToolTipClock tooltipClock: KitToolTipClock {}
 }

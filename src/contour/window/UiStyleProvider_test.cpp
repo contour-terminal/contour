@@ -1511,6 +1511,16 @@ TEST_CASE("UiStyleProvider publishes the pane tokens", "[contour][uistyle]")
     REQUIRE(nameCount == contour::window::PaneHeaderActions.size());
     for (auto const& row: contour::window::PaneHeaderActions)
         CHECK(names[static_cast<qsizetype>(row.action)] == QString::fromUtf8(row.accessibleName));
+    // So do the commands a tooltip asks the controller for the bound chord of.
+    auto const commands = mac.property("paneHeaderActionCommands").toStringList();
+    REQUIRE(static_cast<size_t>(commands.size()) == contour::window::PaneHeaderActions.size());
+    for (auto const& row: contour::window::PaneHeaderActions)
+        CHECK(commands[static_cast<qsizetype>(row.action)] == QString::fromUtf8(row.commandName));
+    CHECK(commands == QStringList { "SplitVertical", "SplitHorizontal", "TogglePaneZoom", "ClosePane" });
+
+    // The find bar's fixed keys are spelled as the host spells shortcuts; an unknown name has none.
+    CHECK_FALSE(mac.findBarShortcutText(QStringLiteral("FindNext")).isEmpty());
+    CHECK(mac.findBarShortcutText(QStringLiteral("NoSuchKey")).isEmpty());
 
     auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
     // A vertical gap is one cell's height on the Terminal row, its horizontal twin one cell's width.
@@ -2975,5 +2985,30 @@ TEST_CASE("UiStyleProvider publishes the Settings window's tokens per row", "[co
     {
         CAPTURE(role);
         CHECK(colors->property(role).isValid());
+    }
+}
+
+TEST_CASE("UiStyleProvider resolves a tooltip's tone colours and edge", "[contour][uistyle][tooltip]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    auto const font = QGuiApplication::font();
+    auto const provider =
+        contour::window::UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, font));
+    auto const* colors = qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+    REQUIRE(colors != nullptr);
+    auto const& fill = contour::config::ChromeTokenRows[static_cast<size_t>(ChromeStyle::MacOS)]
+                           .colors[static_cast<size_t>(ChromeColorRole::TooltipFill)];
+    CHECK(colors->resolve(fill, Qt::ColorScheme::Light).name() == QStringLiteral("#f6f6f6"));
+    CHECK(colors->resolve(fill, Qt::ColorScheme::Dark).name() == QStringLiteral("#2c2c2e"));
+
+    // macOS draws its edge one device pixel wide, Windows and Linux one pixel; the Terminal row's edge is
+    // the palette's mid colour, so it has one too.
+    CHECK(provider.tooltipEdgeWidth(2.0) == Catch::Approx(0.5));
+    for (auto const style: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        auto const other = contour::window::UiStyleProvider(contour::window::chromeInputsFor(style, font));
+        CAPTURE(static_cast<int>(style));
+        CHECK(other.tooltipEdgeWidth(2.0) == Catch::Approx(1.0));
     }
 }

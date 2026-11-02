@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
@@ -236,6 +237,17 @@ namespace
         return QString::fromUtf8(name);
     }
 
+    /// @param column The text of a header action's row to list.
+    /// @return That text of every header action, indexed by config::PaneHeaderAction.
+    [[nodiscard]] QStringList paneHeaderActionTexts(std::string_view PaneHeaderActionRow::* column)
+    {
+        auto texts = QStringList {};
+        texts.reserve(static_cast<qsizetype>(PaneHeaderActions.size()));
+        for (auto const& row: PaneHeaderActions)
+            texts.append(nameOf(row.*column));
+        return texts;
+    }
+
 } // namespace
 
 platform::PlatformAppearance chromeAppearanceOf(platform::PlatformAppearance appearance)
@@ -284,6 +296,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _settings { _groups.settings, _units, this },
     _settingsTraits { _groups.layout.settings, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
+    _paneHeaderActionNames { paneHeaderActionTexts(&PaneHeaderActionRow::accessibleName) },
+    _paneHeaderActionCommands { paneHeaderActionTexts(&PaneHeaderActionRow::commandName) },
     _paneRoles { this },
     _badgeKinds { this },
     _paneEnds { this },
@@ -441,7 +455,8 @@ QVariantList UiStyleProvider::headerBarItems() const
                                    { QStringLiteral("accessibleName"), nameOf(row.accessibleName) },
                                    { QStringLiteral("iconName"), nameOf(row.iconName) },
                                    { QStringLiteral("bundledIcon"), nameOf(row.bundledIcon) },
-                                   { QStringLiteral("menu"), nameOf(headerBarMenuName(row.menu)) } });
+                                   { QStringLiteral("menu"), nameOf(headerBarMenuName(row.menu)) },
+                                   { QStringLiteral("command"), nameOf(row.commandName) } });
     return items;
 }
 
@@ -659,13 +674,10 @@ qreal UiStyleProvider::overlayPaneHeader() const noexcept
     return config::ChromeTokenRows[static_cast<size_t>(_inputs.row)].size.paneHeader * _units.vertical;
 }
 
-QStringList UiStyleProvider::paneHeaderActionNames() const
+QString UiStyleProvider::findBarShortcutText(QString const& name) const
 {
-    auto names = QStringList {};
-    names.reserve(static_cast<qsizetype>(PaneHeaderActions.size()));
-    for (auto const& row: PaneHeaderActions)
-        names.append(nameOf(row.accessibleName));
-    return names;
+    auto const text = command::findBarShortcutText(name.toStdString(), command::platformShortcutStyle());
+    return text ? QString::fromStdString(*text) : QString {};
 }
 
 QVariantMap UiStyleProvider::paneHeader(
@@ -890,6 +902,14 @@ qreal UiStyleProvider::paneHeaderHeight(qreal devicePixelRatio) const
 qreal UiStyleProvider::hairline(qreal devicePixelRatio) const
 {
     return devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;
+}
+
+qreal UiStyleProvider::tooltipEdgeWidth(qreal devicePixelRatio) const
+{
+    if (_colors.tooltipEdge().alpha() == 0)
+        return 0;
+    auto const pixels = _size.tooltipEdge();
+    return pixels > 0 ? pixels : hairline(devicePixelRatio);
 }
 
 qreal UiStyleProvider::unfocusedDim(qreal profileDim) const

@@ -62,6 +62,7 @@ struct HeaderBarItemRow
     std::string_view iconName {};               ///< The freedesktop icon name, resolved through the theme.
     std::string_view bundledIcon {};            ///< The bundled icon used when the theme lacks @c iconName.
     HeaderBarMenu menu = HeaderBarMenu::None;   ///< The menu the item pops below itself.
+    std::string_view commandName {}; ///< The command whose bound chord the tooltip carries; empty for none.
 };
 
 /// The header bar's items, in enumerator order.
@@ -71,12 +72,14 @@ inline constexpr auto HeaderBarItems = std::array {
                        .accessibleName = "New tab",
                        .iconName = "tab-new-symbolic",
                        .bundledIcon = "qrc:/contour/icons/tab-new-symbolic.svg",
-                       .menu = HeaderBarMenu::NewTab },
+                       .menu = HeaderBarMenu::NewTab,
+                       .commandName = "CreateNewTab" },
     HeaderBarItemRow { .item = HeaderBarItem::Search,
                        .objectName = "headerSearch",
                        .accessibleName = "Search",
                        .iconName = "edit-find-symbolic",
-                       .bundledIcon = "qrc:/contour/icons/edit-find-symbolic.svg" },
+                       .bundledIcon = "qrc:/contour/icons/edit-find-symbolic.svg",
+                       .commandName = "SearchReverse" },
     HeaderBarItemRow { .item = HeaderBarItem::MainMenu,
                        .objectName = "headerMainMenu",
                        .accessibleName = "Main menu",

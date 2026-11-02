@@ -393,6 +393,8 @@ class ChromeSnapshotScene
                 break;
             case ScriptAction::DeactivateWindow: deactivateWindow(); break;
             case ScriptAction::OpenMainMenu: openMainMenu(); break;
+            case ScriptAction::ShowNewTabToolTip: showToolTips(ToolTipOf::NewTab); break;
+            case ScriptAction::ShowTabToolTip: showToolTips(ToolTipOf::Tab); break;
         }
         // The cards announce where the header lives once the panes have their size, which showSticky() reads.
         _incubation.settle();
@@ -462,6 +464,8 @@ class ChromeSnapshotScene
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
 
+    /// The tab hover tooltip's two lines.
+    static constexpr auto ToolTipTabHover = "Build finished · 2 warnings\n~/repo/contour/src/contour";
     /// The toast's message.
     [[nodiscard]] static QString toastText() { return QStringLiteral("Copied 3 lines"); }
     /// The windows and tabs the restore-summary script's daemon brought back.
@@ -1351,6 +1355,74 @@ class ChromeSnapshotScene
         // Triggering a sub-menu's row is what a click on it does: the menu opens the sub-menu beside it.
         REQUIRE(QMetaObject::invokeMethod(colorRow, "triggered"));
         REQUIRE(QTest::qWaitFor([&] { return colors->property("opened").toBool(); }, 2000));
+    }
+
+    /// How long the pointer is given to be seen at each step of its way onto a control, in milliseconds.
+    static constexpr int HoverStepMs = 60;
+
+    /// Which control's tooltip a tooltip script opens.
+    enum class ToolTipOf : uint8_t
+    {
+        NewTab, //!< The new-tab control's, with the shortcut the mock binds.
+        Tab,    //!< The first tab's two-line hover tooltip.
+    };
+
+    /// Opens one tooltip of the board under its control, by resting the pointer on the control, and waits for
+    /// it. The two are separate scripts: on the Linux and Terminal rows the controls sit side by side, and
+    /// their tooltips would cover each other.
+    /// @param which The control whose tooltip to open.
+    void showToolTips(ToolTipOf which)
+    {
+        // A window that is not up yet takes no pointer.
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), PopupSettleMs));
+        // The tabs may still be incubating: the tooltips belong to the delegates that stay.
+        _incubation.settle();
+        QCoreApplication::processEvents();
+        QQuickItem* toolTipHost = nullptr;
+        if (which == ToolTipOf::NewTab)
+        {
+            // The band's button, the strip's, or the header bar's item: whichever this row draws.
+            for (auto const* name: { "newTabButton", "headerNewTab" })
+            {
+                auto const buttons = itemsNamed(*window().contentItem(), QString::fromLatin1(name));
+                if (buttons.empty())
+                    continue;
+                REQUIRE(buttons.size() == 1);
+                toolTipHost = buttons.front()->findChild<QQuickItem*>(QStringLiteral("kitToolTipHost"));
+                break;
+            }
+        }
+        else
+        {
+            auto const tabs = itemsNamed(*window().contentItem(), QStringLiteral("tabBackground"));
+            REQUIRE_FALSE(tabs.empty());
+            toolTipHost = tabs.front()->parentItem()->findChild<QQuickItem*>(QStringLiteral("tabHover"));
+        }
+        REQUIRE(toolTipHost != nullptr);
+
+        // Warm, so the picture does not wait the delay out; the pointer rests on the control's left part, or
+        // its middle where it is narrower.
+        REQUIRE(QMetaObject::invokeMethod(window().property("tooltipClock").value<QObject*>(), "touch"));
+        auto const rest =
+            toolTipHost
+                ->mapToScene(QPointF { std::min(24.0, toolTipHost->width() / 2), toolTipHost->height() / 2 })
+                .toPoint();
+        // The pointer outlives the windows of earlier scenes: come from elsewhere, or a move to where it was
+        // sends no hover.
+        QTest::mouseMove(&window(), QPoint { window().width() / 2, window().height() / 2 });
+        QTest::qWait(HoverStepMs);
+        QTest::mouseMove(&window(), rest - QPoint { 3, 0 });
+        QTest::qWait(HoverStepMs);
+        QTest::mouseMove(&window(), rest);
+        if (which == ToolTipOf::Tab)
+            // What the tab says on hover when the program has something to say; the mock has no directory.
+            toolTipHost->parentItem()->setProperty("hoverTooltip", QString::fromUtf8(ToolTipTabHover));
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const* toolTip = toolTipHost->property("toolTip").value<QObject*>();
+                return toolTip != nullptr && toolTip->property("opened").toBool();
+            },
+            PopupSettleMs));
     }
 
     /// Asks for the main menu as the header bar's button does, and waits for it where the row has one: the

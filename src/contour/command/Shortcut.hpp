@@ -189,8 +189,33 @@ struct ShortcutChord
     [[nodiscard]] bool operator==(ShortcutChord const&) const = default;
 };
 
+/// A key of the find bar and the name a view asks for its spelling by.
+struct FindBarShortcut
+{
+    std::string_view name {};          ///< What a view asks for it by.
+    vtbackend::Modifiers modifiers {}; ///< The modifiers held.
+    ShortcutInput input {};            ///< The key it ends on.
+};
+
+/// The find bar's keys, so its buttons' tooltips can show them as this host spells shortcuts. This table
+/// only NAMES them: what the keys do is SearchBar.qml's own key handling, which does not read it, so a row
+/// here changes a tooltip and never a binding.
+inline constexpr auto FindBarShortcuts = std::array {
+    FindBarShortcut { "FindPrevious",
+                      vtbackend::Modifiers { vtbackend::Modifier::Shift },
+                      ShortcutInput { vtbackend::Key::Enter } },
+    FindBarShortcut { "FindNext", vtbackend::Modifiers {}, ShortcutInput { vtbackend::Key::Enter } },
+    FindBarShortcut { "FindClose", vtbackend::Modifiers {}, ShortcutInput { vtbackend::Key::Escape } },
+};
+
 /// Command id (see commandId()) -> the chord that runs it.
 using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
+
+/// Renders one of FindBarShortcuts' chords.
+/// @param name  The row's name, e.g. "FindNext".
+/// @param style How to spell it.
+/// @return The rendered shortcut; nullopt when no row has that name.
+[[nodiscard]] std::optional<std::string> findBarShortcutText(std::string_view name, ShortcutStyle style);
 
 /// Renders @p chord the way shortcutText(modifiers, input, style) does.
 /// @param chord The chord.

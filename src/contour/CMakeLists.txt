@@ -507,6 +507,11 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SecureInputLock.qml
         qml/SecureInputPill.qml
         qml/ElevationShadow.qml
+        qml/KitToolTip.qml
+        qml/KitToolTipBackground.qml
+        qml/KitToolTipClock.qml
+        qml/KitToolTipHost.qml
+        qml/KitToolTipPlacer.qml
         qml/KitDialog.qml
         qml/KitSwitch.qml
         qml/KitSegmented.qml
@@ -1007,6 +1012,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/MainWindowQml_test.cpp
             test/QmlPalette_test.cpp
             test/QmlTitleBar_test.cpp
+            test/QmlToolTip_test.cpp
             test/QmlDialogs_test.cpp
             window/CommandPaletteModel_test.cpp
             window/SettingsController_test.cpp

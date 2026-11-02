@@ -3,6 +3,7 @@
 // QML component tests, continued: the title bar and its window controls, the find bar, an ended pane and the
 // drift badge.
 
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlLook.hpp>
@@ -110,22 +111,6 @@ namespace
     return contour::test::ChromeSetup { .row = row,
                                         .font = QGuiApplication::font(),
                                         .windowControls = contour::config::WindowControlStyle::Windows };
-}
-
-/// @return @p engine's chromeStyle provider.
-[[nodiscard]] contour::window::UiStyleProvider& chromeProviderOf(QQmlEngine& engine)
-{
-    auto* provider = engine.rootContext()
-                         ->contextProperty(QStringLiteral("chromeStyle"))
-                         .value<contour::window::UiStyleProvider*>();
-    REQUIRE(provider != nullptr);
-    return *provider;
-}
-
-/// @return The chrome colour role @p name of @p engine's chromeStyle.
-[[nodiscard]] QColor chromeColorOf(QQmlEngine& engine, char const* name)
-{
-    return chromeProviderOf(engine).colors()->property(name).value<QColor>();
 }
 
 struct SearchBarHost
@@ -425,13 +410,13 @@ TEST_CASE("the native hover state lights the maximise button (offscreen)",
 
     controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Hover);
     // The Windows style washes with the kit's fill.
-    CHECK(fillColor() == chromeColorOf(engine, "captionWash"));
-    CHECK(glyphColor() != chromeColorOf(engine, "captionGlyphPressed"));
+    CHECK(fillColor() == chromeColor(engine, "captionWash"));
+    CHECK(glyphColor() != chromeColor(engine, "captionGlyphPressed"));
 
     controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Pressed);
-    CHECK(fillColor() == chromeColorOf(engine, "captionWash"));
+    CHECK(fillColor() == chromeColor(engine, "captionWash"));
     REQUIRE(window->isActive());
-    CHECK(glyphColor().rgba() == chromeColorOf(engine, "captionGlyphPressed").rgba());
+    CHECK(glyphColor().rgba() == chromeColor(engine, "captionGlyphPressed").rgba());
 
     controller.setNativeMaximizeVisual(contour::platform::CaptionButtonVisual::Rest);
     CHECK(fillColor().alpha() == 0);
@@ -471,7 +456,7 @@ TEST_CASE("a contrast theme drops the red close hover (offscreen)",
         REQUIRE(QTest::qWaitFor([&] { return button->property("hovered").toBool(); }, 2000));
         // Windows' red without a contrast theme; under one, the wash every other caption button takes.
         auto const expected = contrast == contour::platform::ContrastTheme::Active
-                                  ? chromeColorOf(engine, "captionWash")
+                                  ? chromeColor(engine, "captionWash")
                                   : QColor(QStringLiteral("#c42b1c"));
         CHECK(QTest::qWaitFor([&] { return fill->property("color").value<QColor>() == expected; }, 2000));
 
@@ -490,7 +475,7 @@ TEST_CASE("the caption buttons report their rectangles (offscreen)",
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
     REQUIRE(QTest::qWaitForWindowExposed(window));
-    auto const& provider = chromeProviderOf(engine);
+    auto const& provider = providerOf(engine);
     auto const maximize = static_cast<int>(contour::config::WindowControlKind::Maximize);
     auto const* slot = findItemNamed(*window->contentItem(), QStringLiteral("windowControl_maximize"));
     REQUIRE(slot != nullptr);
@@ -653,7 +638,7 @@ TEST_CASE("an inactive window dims the caption glyphs (offscreen)",
     activate(other);
     REQUIRE(QTest::qWaitFor([&] { return !window->isActive(); }, 2000));
     // By value: the binding hands back the colour in another spec than the role's.
-    CHECK(glyphColor().rgba() == chromeColorOf(engine, "captionGlyphInactive").rgba());
+    CHECK(glyphColor().rgba() == chromeColor(engine, "captionGlyphInactive").rgba());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -669,7 +654,7 @@ TEST_CASE("the Terminal row draws a Windows host's controls as scheme-inked cell
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
     activate(*window);
-    auto const& provider = chromeProviderOf(engine);
+    auto const& provider = providerOf(engine);
 
     struct Cell
     {
@@ -2720,5 +2705,38 @@ TEST_CASE("the title bar draws no window controls until its controller is bound 
     host->setProperty("ctl", QVariant::fromValue<QObject*>(nullptr));
     QCoreApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the find bar's buttons split their label from their shortcut (offscreen)",
+          "[contour][gui][qml][kit][tooltip][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSession session;
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+    auto const style = contour::command::platformShortcutStyle();
+
+    struct Case
+    {
+        char const* button;
+        char const* label;
+        char const* chord;
+    };
+    for (auto const& row: { Case { "searchBarPrevious", "Previous match", "FindPrevious" },
+                            Case { "searchBarNext", "Next match", "FindNext" },
+                            Case { "searchBarClose", "Close", "FindClose" } })
+    {
+        CAPTURE(row.button);
+        auto* const button = host.bar->findChild<QQuickItem*>(QString::fromLatin1(row.button));
+        REQUIRE(button != nullptr);
+        auto* const toolTipHost = button->findChild<QObject*>(QStringLiteral("kitToolTipHost"));
+        REQUIRE(toolTipHost != nullptr);
+        CHECK(toolTipHost->property("text").toString() == QString::fromLatin1(row.label));
+        auto const expected = contour::command::findBarShortcutText(row.chord, style);
+        REQUIRE(expected.has_value());
+        CHECK(toolTipHost->property("shortcut").toString() == QString::fromStdString(*expected));
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

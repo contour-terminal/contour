@@ -122,6 +122,13 @@ class MockTabController: public QAbstractListModel
 
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
 
+    /// Mirrors WindowController::shortcutText(): the chord a test bound to a command, nothing for any other.
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
+    {
+        return boundChords.value(commandName);
+    }
+    QHash<QString, QString> boundChords {}; ///< Command name -> chord, as a test binds them.
+
     [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
     void setTitleBarVisible(bool v)
     {
@@ -818,6 +825,20 @@ struct ChromeHost
     return *provider;
 }
 
+/// @return The chrome colour role @p name of @p engine's chromeStyle.
+[[nodiscard]] inline QColor chromeColor(QQmlEngine& engine, char const* name)
+{
+    return providerOf(engine).colors()->property(name).value<QColor>();
+}
+
+/// The chrome setup of @p row, with the default scheme and font.
+[[nodiscard]] inline contour::test::ChromeSetup rowSetup(contour::config::ChromeStyle row)
+{
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = row;
+    return setup;
+}
+
 /// The chrome setup the pane card cases default to: the MacOS row, Comfortable.
 [[nodiscard]] inline contour::test::ChromeSetup paneCardSetup()
 {
@@ -838,10 +859,13 @@ class MockPaneWindowController: public QObject
     [[nodiscard]] QString hostLabel() const { return _hostLabel; }
     /// Names another host, or none; before the pane tree is shown, as the property is constant.
     void setHostLabel(QString label) { _hostLabel = std::move(label); }
-    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, nothing for any other; counted.
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, Ctrl+Shift+D for SplitVertical,
+    /// nothing for any other; counted.
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
         ++shortcutTextCalls;
+        if (commandName == QStringLiteral("SplitVertical"))
+            return QStringLiteral("Ctrl+Shift+D");
         return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
     }
     mutable int shortcutTextCalls = 0; ///< How often a pane asked for a chord.
@@ -1559,6 +1583,7 @@ inline void openSaveLayoutPrompt(MockSaveLayoutController& controller)
                                        "Window {\n"
                                        "  id: host\n"
                                        "  width: %1; height: 400; visible: true\n"
+                                       "  property var win: terminalSessions\n"
                                        "  TitleBar {\n"
                                        "    objectName: \"titleBar\"\n"
                                        "    anchors.left: parent.left\n"

@@ -495,6 +495,9 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
         // A hold is no animation: the size indicator stays as long as without Reduce Motion.
         CHECK(reduced.motion.lingerMs == base.motion.lingerMs);
         CHECK(reduced.motion.lingerMs == 600);
+        // The tooltip's delay is a hold too, and stays; so does the span it keeps the next one warm.
+        CHECK(reduced.motion.tooltipDelayMs == base.motion.tooltipDelayMs);
+        CHECK(reduced.motion.tooltipWarmMs == base.motion.tooltipWarmMs);
         CHECK(base.motion.popoverScalePercent == (style == ChromeStyle::Terminal ? 100 : 97));
         CHECK(reduced.size == base.size);
         CHECK(reduced.space == base.space);
@@ -1868,7 +1871,9 @@ TEST_CASE("chromeTokens.focusRingTokens", "[chrometokens]")
     CHECK(FocusColorRoleEnd - FocusColorRoleBegin == 2);
     CHECK(FocusColorRoleEnd == SettingsColorRoleBegin);
     CHECK(SettingsColorRoleEnd == static_cast<size_t>(ChromeColorRole::WindowButtonFill));
-    CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1 == ChromeColorRoleCount);
+    CHECK(static_cast<size_t>(ChromeColorRole::HeaderSeparator) + 1
+          == static_cast<size_t>(ChromeColorRole::TooltipFill));
+    CHECK(static_cast<size_t>(ChromeColorRole::TooltipEdge) + 1 == ChromeColorRoleCount);
 
     // Native: a ring that marks on the window and no fill. Terminal: no ring, the bar's selection as fill.
     auto const none = contour::config::detail::noColor();
@@ -2510,3 +2515,96 @@ TEST_CASE("chromeTokens.settingsTextReadsOnTheTerminalRow", "[chrometokens]")
 }
 
 // }}}
+
+TEST_CASE("chromeTokens.tooltipTokensPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    struct Row
+    {
+        ChromeStyle style;
+        int padX;
+        int padTop;
+        int padBottom;
+        int gap;
+        int radius;
+    };
+    for (auto const& expected: { Row { ChromeStyle::MacOS, 8, 3, 3, 14, 6 },
+                                 Row { ChromeStyle::Fluent, 9, 5, 7, 14, 8 },
+                                 Row { ChromeStyle::ContourLinux, 10, 5, 5, 16, 8 },
+                                 Row { ChromeStyle::Terminal, 1, 0, 0, 2, 0 } })
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const& row = ChromeTokenRows[static_cast<size_t>(expected.style)];
+        CHECK(row.size.tooltipPadX == expected.padX);
+        CHECK(row.size.tooltipPadTop == expected.padTop);
+        CHECK(row.size.tooltipPadBottom == expected.padBottom);
+        CHECK(row.size.tooltipGap == expected.gap);
+        CHECK(row.size.tooltipMaxWidth == (expected.style == ChromeStyle::Terminal ? 48 : 360));
+        CHECK(row.size.tooltipMaxLines == 6);
+        CHECK(row.radii.tooltip == expected.radius);
+        // Every row waits the same before the first tooltip and keeps the next warm for the same span.
+        CHECK(row.motion.tooltipDelayMs == 600);
+        CHECK(row.motion.tooltipWarmMs == 1500);
+    }
+}
+
+TEST_CASE("chromeTokens.tooltipColourRolesPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const role = [](ChromeStyle style, ChromeColorRole colorRole) {
+        return ChromeTokenRows[static_cast<size_t>(style)].colors[static_cast<size_t>(colorRole)];
+    };
+
+    SECTION(
+        "macOS: the kit's near-white and elevated dark, label 85/88 %, shortcut 45/50 %, hairline 18/14 %")
+    {
+        auto const fill = role(ChromeStyle::MacOS, ChromeColorRole::TooltipFill);
+        CHECK(fill.kind == ColorSourceKind::Tone);
+        CHECK(fill.rgb == 0xF6F6F6);
+        CHECK(fill.darkRgb == 0x2C2C2E);
+        auto const text = role(ChromeStyle::MacOS, ChromeColorRole::TooltipText);
+        CHECK((text.rgb == 0x000000 && text.alphaPercent == 85));
+        CHECK((text.darkRgb == 0xFFFFFF && text.darkAlphaPercent == 88));
+        auto const shortcut = role(ChromeStyle::MacOS, ChromeColorRole::TooltipTextSecondary);
+        // The kit's tertiary label, 45 / 50 %.
+        CHECK((shortcut.kind == ColorSourceKind::Label && shortcut.level == 3));
+        auto const edge = role(ChromeStyle::MacOS, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 18 && edge.darkAlphaPercent == 14));
+    }
+
+    SECTION("Windows 11: #F9F9F9 / #2C2C2C, label 90 % / white, shortcut 55 / 60 %, edge 6 / 8 %")
+    {
+        auto const fill = role(ChromeStyle::Fluent, ChromeColorRole::TooltipFill);
+        CHECK((fill.rgb == 0xF9F9F9 && fill.darkRgb == 0x2C2C2C));
+        auto const text = role(ChromeStyle::Fluent, ChromeColorRole::TooltipText);
+        CHECK((text.alphaPercent == 90 && text.darkAlphaPercent == 100));
+        auto const shortcut = role(ChromeStyle::Fluent, ChromeColorRole::TooltipTextSecondary);
+        CHECK((shortcut.alphaPercent == 55 && shortcut.darkAlphaPercent == 60));
+        auto const edge = role(ChromeStyle::Fluent, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 6 && edge.darkAlphaPercent == 8));
+    }
+
+    SECTION("ContourLinux: white / #38383D, label 87 / 92 %, shortcut 55 %, edge 12 / 10 %")
+    {
+        auto const fill = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipFill);
+        CHECK((fill.rgb == 0xFFFFFF && fill.darkRgb == 0x38383D));
+        auto const text = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipText);
+        CHECK((text.alphaPercent == 87 && text.darkAlphaPercent == 92));
+        auto const shortcut = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipTextSecondary);
+        CHECK((shortcut.alphaPercent == 55 && shortcut.darkAlphaPercent == 55));
+        auto const edge = role(ChromeStyle::ContourLinux, ChromeColorRole::TooltipEdge);
+        CHECK((edge.alphaPercent == 12 && edge.darkAlphaPercent == 10));
+    }
+
+    SECTION("Terminal: the surface of its in-scene menus, the palette's window, ink and mid colour")
+    {
+        // ContourTui/Menu.qml paints palette.window with a palette.mid border: the tooltip agrees.
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipFill).kind
+              == ColorSourceKind::PaletteWindow);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipText).kind
+              == ColorSourceKind::PaletteWindowText);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipTextSecondary).kind
+              == ColorSourceKind::PaletteWindowText);
+        CHECK(role(ChromeStyle::Terminal, ChromeColorRole::TooltipEdge).kind == ColorSourceKind::PaletteMid);
+    }
+}

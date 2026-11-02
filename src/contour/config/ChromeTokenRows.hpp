@@ -57,7 +57,9 @@ namespace detail
                                                  .style = MotionStyle::Full,
                                                  .headerRevealMs = 500,
                                                  .popoverScalePercent = 97,
-                                                 .lingerMs = 600 };
+                                                 .lingerMs = 600,
+                                                 .tooltipDelayMs = 600,
+                                                 .tooltipWarmMs = 1500 };
 
     inline constexpr ElevationTokens NativeElevation {
         .levels = { ElevationLevel { .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
@@ -154,6 +156,26 @@ namespace detail
                                    .slot = slot,
                                    .alphaPercent = 100,
                                    .level = level };
+    }
+
+    /// @param lightRgb          The colour on a light chrome, @c 0xRRGGBB.
+    /// @param lightAlphaPercent Its opacity there.
+    /// @param darkRgb           The colour on a dark chrome, @c 0xRRGGBB.
+    /// @param darkAlphaPercent  Its opacity there.
+    /// @return A @c Tone source.
+    constexpr ChromeColorSource tone(uint32_t lightRgb,
+                                     int lightAlphaPercent,
+                                     uint32_t darkRgb,
+                                     int darkAlphaPercent) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Tone,
+                                   .rgb = lightRgb,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = lightAlphaPercent,
+                                   .level = 0,
+                                   .darkRgb = darkRgb,
+                                   .darkAlphaPercent = darkAlphaPercent };
     }
 
     /// @return A source that paints nothing.
@@ -364,13 +386,34 @@ namespace detail
         fill(1),                          // WindowButtonPressedFill
         label(1),                         // WindowButtonGlyph: the bar's own ink.
         separator(),                      // HeaderSeparator
+        // The macOS tooltip: a near-white (#F6F6F6) or the elevated dark surface, the label at 85 / 88 %
+        // and the shortcut at 45 / 50 % of the ink, a hairline of 18 / 14 %.
+        tone(0xF6F6F6, 100, 0x2C2C2E, 100), // TooltipFill
+        tone(0x000000, 85, 0xFFFFFF, 88),   // TooltipText
+        label(3),                           // TooltipTextSecondary: 45 / 50 %
+        tone(0x000000, 18, 0xFFFFFF, 14),   // TooltipEdge
     };
+
+    /// The Windows 11 row's colours: the native ones, with Fluent's own tooltip (#F9F9F9 / #2C2C2C).
+    inline constexpr std::array<ChromeColorSource, ChromeColorRoleCount> FluentColors = [] {
+        auto colors = NativeColors;
+        colors[static_cast<size_t>(ChromeColorRole::TooltipFill)] = tone(0xF9F9F9, 100, 0x2C2C2C, 100);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = tone(0x000000, 90, 0xFFFFFF, 100);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = tone(0x000000, 55, 0xFFFFFF, 60);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = tone(0x000000, 6, 0xFFFFFF, 8);
+        return colors;
+    }();
 
     /// ContourLinux's colours: the native ones, with the Linux board's active tab, white 11 % on the bar
     /// (the kit's fill.3) rather than an elevated surface.
     inline constexpr std::array<ChromeColorSource, ChromeColorRoleCount> LinuxColors = [] {
         auto colors = NativeColors;
         colors[static_cast<size_t>(ChromeColorRole::TabActiveFill)] = fill(3);
+        // The Linux board's tooltip: white / #38383D, the label at 87 / 92 %, the shortcut at 55 %.
+        colors[static_cast<size_t>(ChromeColorRole::TooltipFill)] = tone(0xFFFFFF, 100, 0x38383D, 100);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipText)] = tone(0x000000, 87, 0xFFFFFF, 92);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipTextSecondary)] = tone(0x000000, 55, 0xFFFFFF, 55);
+        colors[static_cast<size_t>(ChromeColorRole::TooltipEdge)] = tone(0x000000, 12, 0xFFFFFF, 10);
         return colors;
     }();
 
@@ -537,6 +580,13 @@ namespace detail
                   .control = 28,
                   .paneHeader = 22,
                   .toast = 36,
+                  .tooltipPadX = 8,
+                  .tooltipPadTop = 3,
+                  .tooltipPadBottom = 3,
+                  .tooltipEdge = 0,
+                  .tooltipGap = 14,
+                  .tooltipMaxWidth = 360,
+                  .tooltipMaxLines = 6,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -603,6 +653,7 @@ namespace detail
                    .paneCard = 10,
                    .noticeCard = 12,
                    .toast = 18,
+                   .tooltip = 6,
                    .tab = 12,
                    .tabWell = 14,
                    .tabIcon = 3,
@@ -666,6 +717,13 @@ namespace detail
                   .control = 32,
                   .paneHeader = 28,
                   .toast = 36,
+                  .tooltipPadX = 9,
+                  .tooltipPadTop = 5,
+                  .tooltipPadBottom = 7,
+                  .tooltipEdge = 1,
+                  .tooltipGap = 14,
+                  .tooltipMaxWidth = 360,
+                  .tooltipMaxLines = 6,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -732,6 +790,7 @@ namespace detail
                    .paneCard = 4,
                    .noticeCard = 8,
                    .toast = 18,
+                   .tooltip = 8,
                    .tab = 6,
                    .tabWell = 0,
                    .tabIcon = 3,
@@ -780,7 +839,7 @@ namespace detail
                     .settings = SettingsLayout::Cards,
                     .headerBar = HeaderBarArrangement::Band },
         .tint = { .tabPercent = 20 },
-        .colors = NativeColors,
+        .colors = FluentColors,
         .statusInk = NativeStatusInk,
         .dim = PaneDim,
         .minimal = NativeMinimal,
@@ -795,6 +854,13 @@ namespace detail
                   .control = 34,
                   .paneHeader = 28,
                   .toast = 36,
+                  .tooltipPadX = 10,
+                  .tooltipPadTop = 5,
+                  .tooltipPadBottom = 5,
+                  .tooltipEdge = 1,
+                  .tooltipGap = 16,
+                  .tooltipMaxWidth = 360,
+                  .tooltipMaxLines = 6,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
                   .swatchHeight = 16,
@@ -860,6 +926,7 @@ namespace detail
                    .paneCard = 6,
                    .noticeCard = 12,
                    .toast = 18,
+                   .tooltip = 8,
                    .tab = 8,
                    .tabWell = 0,
                    .tabIcon = 3,
@@ -929,6 +996,13 @@ namespace detail
                   .control = 2,
                   .paneHeader = 1,
                   .toast = 1,
+                  .tooltipPadX = 1,
+                  .tooltipPadTop = 0,
+                  .tooltipPadBottom = 0,
+                  .tooltipEdge = 1,
+                  .tooltipGap = 2,
+                  .tooltipMaxWidth = 48,
+                  .tooltipMaxLines = 6,
                   .dialogWidth = 32,
                   .swatchWidth = 2,
                   .swatchHeight = 1,
@@ -1015,6 +1089,7 @@ namespace detail
                    .paneCard = 0,
                    .noticeCard = 0,
                    .toast = 0,
+                   .tooltip = 0,
                    .tab = 0,
                    .tabWell = 0,
                    .tabIcon = 0,
@@ -1051,7 +1126,9 @@ namespace detail
                     .style = MotionStyle::Full,
                     .headerRevealMs = 500,
                     .popoverScalePercent = 100,
-                    .lingerMs = 600 },
+                    .lingerMs = 600,
+                    .tooltipDelayMs = 600,
+                    .tooltipWarmMs = 1500 },
         .elevation = { .levels = { ElevationLevel {
                                        .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
                                    TerminalShadow,
@@ -1176,7 +1253,15 @@ namespace detail
                     schemeColor(SchemeSlot::Bar),    // WindowButtonPressedFill
                     schemeColor(SchemeSlot::BarInk), // WindowButtonGlyph
                     // The Terminal row draws no header bar.
-                    detail::noColor() }, // HeaderSeparator
+                    detail::noColor(), // HeaderSeparator
+                    // A tooltip is the surface of the row's in-scene menus (ContourTui/Menu.qml): the
+                    // palette's window colour and ink, its mid colour as the border, and the row's e2 hard
+                    // shadow. The shortcut is the ink at 60 %.
+                    detail::sourceOf(ColorSourceKind::PaletteWindow),     // TooltipFill
+                    detail::sourceOf(ColorSourceKind::PaletteWindowText), // TooltipText
+                    ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
+                                        .alphaPercent = 60 },        // TooltipTextSecondary
+                    detail::sourceOf(ColorSourceKind::PaletteMid) }, // TooltipEdge
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

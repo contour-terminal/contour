@@ -12,6 +12,9 @@
 # The script fails unless the PNG count is non-zero and equals the manifest's line count; the count is
 # never written here, because the table owns it.
 #
+# CONTOUR_SNAPSHOT_SCRIPT=<name> (a table name such as `tooltips`) narrows every pass to that one script;
+# the count check still holds, as the manifest lists only what rendered.
+#
 # Usage: scripts/run-chrome-snapshots.sh <path-to-contour_gui_test> <output-dir>
 
 set -euo pipefail

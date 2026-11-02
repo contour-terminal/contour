@@ -304,6 +304,10 @@ TEST_CASE("snapshot.environment", "[snapshot]")
                                                           { "CONTOUR_SNAPSHOT_DIR", "" } } };
     CHECK(controlsStyleFor(empty) == "Fusion");
     CHECK_FALSE(snapshotDirectory(empty).has_value());
+    CHECK_FALSE(snapshotScriptFilter(none).has_value());
+    CHECK_FALSE(snapshotScriptFilter(empty).has_value());
+    auto const one = core::testing::FakeEnvironment { { { "CONTOUR_SNAPSHOT_SCRIPT", "tooltip" } } };
+    CHECK(snapshotScriptFilter(one) == "tooltip");
 }
 
 TEST_CASE("the offscreen platform on Windows is given the system's fonts", "[snapshot]")
@@ -727,10 +731,12 @@ TEST_CASE("snapshot.scriptTable.linuxHeaderBar", "[snapshot]")
     CHECK(static_cast<int>(SnapshotScript::ButtonsLeading)
           == static_cast<int>(SnapshotScript::InactiveWindow) + 1);
     CHECK(static_cast<int>(SnapshotScript::MainMenu) == static_cast<int>(SnapshotScript::NoButtons) + 1);
-    // The Hosts page's Settings row comes after the quick terminal.
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SettingsHost);
+    // The Hosts page's Settings row comes after the quick terminal, and the two tooltip rows close the table.
     CHECK(static_cast<int>(SnapshotScript::SettingsHost)
           == static_cast<int>(SnapshotScript::QuickTerminal) + 1);
+    CHECK(static_cast<int>(SnapshotScript::ToolTipNewTab)
+          == static_cast<int>(SnapshotScript::SettingsHost) + 1);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::ToolTipTab);
     struct Expected
     {
         SnapshotScript script;
