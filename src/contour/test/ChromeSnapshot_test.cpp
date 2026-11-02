@@ -54,6 +54,7 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
+#include <iterator>
 #include <limits>
 #include <ranges>
 
@@ -532,6 +533,29 @@ void checkWindowsCaption(contour::test::snapshot::ChromeSnapshotScene const& sce
     // By value: the binding hands back the colour in another spec than the role's.
     CHECK(glyphs.front()->property("color").value<QColor>().rgba()
           == colors->property("captionGlyphInactive").value<QColor>().rgba());
+}
+/// Checks a tooltip script: exactly the one tooltip the script is of is built and open, showing the
+/// shortcut slot (new tab) or the dimmed second line (tab hover).
+/// @param scene The shown scene.
+/// @param variant Its picture; its script is ToolTipNewTab or ToolTipTab.
+void checkToolTipScript(contour::test::snapshot::ChromeSnapshotScene const& scene,
+                        contour::test::snapshot::SnapshotVariant const& variant)
+{
+    using namespace contour::test::snapshot;
+    auto const& content = *scene.window().contentItem();
+    auto hosts = contour::test::itemsNamed(content, QStringLiteral("kitToolTipHost"));
+    std::ranges::copy(contour::test::itemsNamed(content, QStringLiteral("tabHover")),
+                      std::back_inserter(hosts));
+    auto open = std::vector<QObject*> {};
+    for (auto const* host: hosts)
+        if (auto* toolTip = host->property("toolTip").value<QObject*>(); toolTip != nullptr)
+            open.push_back(toolTip);
+    REQUIRE(open.size() == 1);
+    CHECK(open.front()->property("opened").toBool());
+    CHECK(open.front()->property("secondaryShown").toBool()
+          == (variant.script == SnapshotScript::ToolTipTab));
+    CHECK(open.front()->property("shortcutShown").toBool()
+          == (variant.script == SnapshotScript::ToolTipNewTab));
 }
 } // namespace
 
@@ -1031,25 +1055,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             case SnapshotScript::NoButtons:
             case SnapshotScript::MainMenu: checkHeaderBarScript(scene, variant); break;
             case SnapshotScript::ToolTipNewTab:
-            case SnapshotScript::ToolTipTab: {
-                // Exactly the one tooltip the script is of is built and open.
-                auto hosts = contour::test::itemsNamed(*scene.window().contentItem(),
-                                                       QStringLiteral("kitToolTipHost"));
-                for (auto* tab:
-                     contour::test::itemsNamed(*scene.window().contentItem(), QStringLiteral("tabHover")))
-                    hosts.push_back(tab);
-                auto open = std::vector<QObject*> {};
-                for (auto const* host: hosts)
-                    if (auto* toolTip = host->property("toolTip").value<QObject*>(); toolTip != nullptr)
-                        open.push_back(toolTip);
-                REQUIRE(open.size() == 1);
-                CHECK(open.front()->property("opened").toBool());
-                CHECK(open.front()->property("secondaryShown").toBool()
-                      == (variant.script == SnapshotScript::ToolTipTab));
-                CHECK(open.front()->property("shortcutShown").toBool()
-                      == (variant.script == SnapshotScript::ToolTipNewTab));
-                break;
-            }
+            case SnapshotScript::ToolTipTab: checkToolTipScript(scene, variant); break;
             case SnapshotScript::QuickTerminal: {
                 // The panel's frame, and a role that made the window a frameless tool window.
                 CHECK(scene.window().size() == ChromeSnapshotScene::quickTerminalPanelSize());
