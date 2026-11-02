@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <cstdlib>
+#include <system_error>
 #include <utility>
 
 namespace vtbackend::kitty_graphics

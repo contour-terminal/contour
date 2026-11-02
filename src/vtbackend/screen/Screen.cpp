@@ -56,6 +56,7 @@
 #include <array>
 #include <cassert>
 #include <charconv>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <iostream>
@@ -66,6 +67,7 @@
 #include <span>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>

@@ -45,6 +45,7 @@
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <cstdint>
 #include <expected>
 #include <format>
 #include <functional>

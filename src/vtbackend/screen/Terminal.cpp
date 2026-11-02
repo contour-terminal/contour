@@ -53,6 +53,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>

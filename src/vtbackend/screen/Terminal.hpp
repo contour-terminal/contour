@@ -72,6 +72,7 @@
 
 #include <gsl/pointers>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bitset>
@@ -79,6 +80,7 @@
 #include <cmath>
 #include <concepts>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <format>
@@ -89,8 +91,10 @@
 #include <optional>
 #include <span>
 #include <stack>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>

@@ -73,6 +73,7 @@
 #include <expected>
 #include <format>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,6 +81,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <qcolor.h>
