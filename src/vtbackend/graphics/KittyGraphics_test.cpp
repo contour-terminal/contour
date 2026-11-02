@@ -1942,6 +1942,42 @@ TEST_CASE("KittyGraphics.playback.tick_raises_screenUpdated_when_a_frame_advance
     CHECK(mock.screenUpdates == 1);
 }
 
+TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_screenUpdated", "[kitty]")
+{
+    // A due deadline that only ends a wait changed nothing on screen: the daemon would send a Delta for it.
+    auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+
+    SECTION("s=2 out of frames")
+    {
+        mock.writeToScreen("\033_Ga=a,i=7,s=2\033\\"sv);
+        advance(mock, 10ms);
+        advance(mock, 20ms);
+        REQUIRE(placedPixels(mock) == blue());
+        mock.screenUpdates = 0;
+        advance(mock, 30ms);
+        CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    }
+    SECTION("no placement on the page")
+    {
+        mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+        mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
+        REQUIRE(placedPixels(mock).empty());
+        mock.screenUpdates = 0;
+        advance(mock, 10ms);
+        CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    }
+    SECTION("whole loops landing on the frame they started from")
+    {
+        mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+        mock.screenUpdates = 0;
+        advance(mock, 600ms);
+        REQUIRE(placedPixels(mock) == red());
+        CHECK(dueIn(mock) == 10ms);
+    }
+    CHECK(mock.screenUpdates == 0);
+}
+
 TEST_CASE("KittyGraphics.playback.a_deadline_is_announced_only_when_it_moves", "[kitty]")
 {
     // An idle display re-reads nextRender() when told to. Not telling it would leave it asleep past the

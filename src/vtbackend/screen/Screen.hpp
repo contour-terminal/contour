@@ -199,6 +199,21 @@ enum class ImageCursorPolicy : uint8_t
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
+/// Whether a kitty animation tick changed what a placement on the page shows.
+enum class KittyFrameShown : uint8_t
+{
+    No,  ///< Nothing on the page changed: no frame was due, or the one that was had nowhere to show.
+    Yes, ///< At least one placement now shows another frame.
+};
+
+/// What Screen::advanceKittyAnimations() did.
+struct KittyAdvance
+{
+    KittyFrameShown shown = KittyFrameShown::No; ///< Whether the page changed.
+    /// The earliest deadline left, or nullopt when no animation on the page is due to advance.
+    std::optional<std::chrono::steady_clock::time_point> nextDue;
+};
+
 class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 {
   public:
@@ -258,9 +273,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// whole loops a late tick (a sleeping display, the daemon's throttle) missed are skipped at once and
     /// counted towards `v=`, the rest walked frame by frame. Under the state lock.
     /// @param now The time to advance to: the frame's, as Terminal::tick() was given it.
-    /// @return The earliest deadline left, or nullopt when no animation on this page is due to advance.
-    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> advanceKittyAnimations(
-        std::chrono::steady_clock::time_point now);
+    /// @return Whether a placement now shows another frame, and the earliest deadline left.
+    [[nodiscard]] KittyAdvance advanceKittyAnimations(std::chrono::steady_clock::time_point now);
 
     /// @return When the next kitty animation frame of this page is due, or nullopt when none is.
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> nextKittyFrameDue() const noexcept;

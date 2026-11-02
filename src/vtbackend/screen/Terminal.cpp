@@ -3205,6 +3205,7 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     // as for the glide. Advanced at the frame's own time, which is what the display and the daemon pass.
     if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
         return;
+    auto shown = KittyFrameShown::No;
     {
         auto const _ = std::scoped_lock { _ownStateLock };
         // Moved or dropped by the parser between the read above and the lock.
@@ -3213,7 +3214,9 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         auto& page = displayedPage();
         try
         {
-            publishKittyAnimationDeadline(page.advanceKittyAnimations(now));
+            auto const advance = page.advanceKittyAnimations(now);
+            shown = advance.shown;
+            publishKittyAnimationDeadline(advance.nextDue);
         }
         catch (std::bad_alloc const&)
         {
@@ -3221,12 +3224,15 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
             // would be due again at once.
             page.stopKittyAnimations();
             publishKittyAnimationDeadline(nullopt);
+            // Another animation may have advanced before this one failed.
+            shown = KittyFrameShown::Yes;
         }
     }
-    // Outside the lock, as it calls back into the frontend. The only news of the frame the daemon hears. A
-    // due deadline that only ended a wait (s=2 out of frames, a placement gone) announces an unchanged
-    // screen once, which costs a frame that shows the same cells.
-    screenUpdated();
+    // Outside the lock, as it calls back into the frontend. The only news of the frame the daemon hears, and
+    // only when there is a frame: a due deadline that only ended a wait (s=2 out of frames, a placement gone,
+    // a whole number of loops landing on the frame it started from) changed nothing on screen.
+    if (shown == KittyFrameShown::Yes)
+        screenUpdated();
 }
 
 optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept

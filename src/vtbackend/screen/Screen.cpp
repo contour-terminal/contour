@@ -5812,6 +5812,10 @@ void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto cons
 {
     for (auto const line: std::views::iota(0, *pageSize().lines))
     {
+        // A blank line holds no cells, let alone a fragment, and reading a cell of one would
+        // materialise it: every animation frame would inflate every empty line of the page.
+        if (std::as_const(_grid).lineAt(LineOffset(line)).isBlank())
+            continue;
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
             auto cell = at(LineOffset(line), ColumnOffset(column));
@@ -6315,22 +6319,28 @@ void Screen::KittyAnimation::arm(std::chrono::steady_clock::time_point now) noex
                                               : std::chrono::steady_clock::time_point::max();
 }
 
-std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimations(
-    std::chrono::steady_clock::time_point now)
+KittyAdvance Screen::advanceKittyAnimations(std::chrono::steady_clock::time_point now)
 {
     using kitty_graphics::AnimationState;
 
+    auto shown = KittyFrameShown::No;
     for (auto& animation: _kittyAnimations | std::views::values)
     {
         if (animation.nextFrameDue > now)
             continue;
 
         auto const showing = animation.currentImage();
-        auto const loop = animation.loopDuration();
+        // Summed only for a tick late by more than the current frame's gap: one less late cannot hold a loop.
+        auto loop = std::optional<std::chrono::milliseconds> {};
         // Whole loops are skipped in one go, so what is left to walk frame by frame is less than one loop.
         for ([[maybe_unused]] auto const step: std::views::iota(size_t { 0 }, animation.frames.size()))
         {
-            animation.skipWholeLoops(now, loop);
+            if (animation.nextFrameDue + animation.shownFor(animation.currentFrame) <= now)
+            {
+                if (!loop)
+                    loop = animation.loopDuration();
+                animation.skipWholeLoops(now, *loop);
+            }
             if (animation.nextFrameDue > now)
                 break;
             auto const next = animation.successor();
@@ -6356,9 +6366,8 @@ std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimati
             // From the deadline rather than from now, so a late tick does not stretch every later frame.
             animation.nextFrameDue += animation.shownFor(*next);
         }
-        // Not reached once whole loops are skipped; kept so no deadline is ever left in the past.
-        if (animation.nextFrameDue <= now)
-            animation.nextFrameDue = now + animation.shownFor(animation.currentFrame);
+        // Whole loops skipped, less than one is left to walk, and the walk takes a frame per step.
+        Require(animation.nextFrameDue > now);
 
         // A tick can land on the frame it started from (a whole number of loops later): nothing to show, and
         // no reason to look for a placement -- an unchanged frame says nothing about whether one is on the
@@ -6371,8 +6380,10 @@ std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimati
         // Hold rather than wake the display for frames no one sees; a placement re-arms it (Action::Put).
         if (showKittyFrame(showing, landed) == Placed::No)
             animation.nextFrameDue = std::chrono::steady_clock::time_point::max();
+        else
+            shown = KittyFrameShown::Yes;
     }
-    return nextKittyFrameDue();
+    return { .shown = shown, .nextDue = nextKittyFrameDue() };
 }
 
 std::optional<std::chrono::steady_clock::time_point> Screen::nextKittyFrameDue() const noexcept

@@ -2438,7 +2438,8 @@ class Terminal: public IStatusLinePublishTarget
     /// a momentum glide, and the kitty animations of the page on display (@see kittyAnimationDue). The render
     /// thread's alone, before and after each frame, the daemon's frame timer's, and a test's: one ticker per
     /// terminal, so what it advances has one owner. Takes the state lock while a glide is armed or a frame is
-    /// due, so it is never called with that lock held; after a frame it raises screenUpdated(), outside it.
+    /// due, so it is never called with that lock held; after a frame that changed what a placement shows it
+    /// raises screenUpdated(), outside it.
     /// @param now The time of the frame.
     void tick(std::chrono::steady_clock::time_point now) noexcept;
     void tick(std::chrono::milliseconds delta) { tick(currentTime() + delta); }
