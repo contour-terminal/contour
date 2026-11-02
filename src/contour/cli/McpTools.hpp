@@ -47,6 +47,18 @@ struct ToolRow
 /// @return Every tool in table order.
 [[nodiscard]] std::span<ToolRow const> mcpToolRows();
 
+/// The one rule for whether a tool exists for the agent: `tools/list` shows exactly what this accepts and
+/// `tools/call` runs exactly what this accepts.
+/// @param row The tool.
+/// @param grants Permission names from `daemon.info`; nothing when the daemon sent none (all are offered).
+/// @param access Whether the agent may type or change the workspace at all.
+/// @param scope Which tabs the agent may reach; `tab_create` is offered only under `AllTabs`.
+/// @return Whether the tool is offered.
+[[nodiscard]] bool isOffered(ToolRow const& row,
+                             std::optional<std::vector<std::string>> const& grants,
+                             McpAccess access,
+                             TabScope scope);
+
 /// @param grants Permission names from `daemon.info`; nothing when the daemon sent none (all are listed).
 /// @param access Whether the agent may type or change the workspace at all.
 /// @param scope Which tabs the agent may reach; `tab_create` is listed only under `AllTabs`.

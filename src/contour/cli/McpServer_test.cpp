@@ -55,15 +55,16 @@ class ScriptedChannel final: public contour::cli::ControlChannel
         std::string method;
         std::string params;
         std::string context;
+        std::optional<std::chrono::milliseconds> timeout;
     };
 
     std::expected<std::string, ControlClientError> call(
         std::string_view method,
         std::string_view params,
         std::string_view context,
-        std::optional<std::chrono::milliseconds> /*t*/) override
+        std::optional<std::chrono::milliseconds> timeout) override
     {
-        calls.push_back({ std::string(method), std::string(params), std::string(context) });
+        calls.push_back({ std::string(method), std::string(params), std::string(context), timeout });
         if (auto const failure = failures.find(std::string(method)); failure != failures.end())
             return std::unexpected(failure->second);
         if (auto const it = replies.find(std::string(method)); it != replies.end())
@@ -298,4 +299,216 @@ TEST_CASE("read-only access refuses mutating tools", "[mcp-server]")
     CHECK(f.call("pane_close", R"({"pane":"tests"})").contains(R"("isError":true)"));
     CHECK(f.channel.count("pane.close") == 0);
     CHECK(f.call("daemon_info").contains(R"("isError":false)"));
+}
+
+namespace
+{
+constexpr auto RunBlock = "block:018f3c4e-0000-7000-8000-00000000a001/3";
+
+std::string blockJson(std::string_view state, std::string_view exitCode = "0")
+{
+    return std::format(R"({{"id":"{}","pane":"{}","state":"{}","exitCode":{},"durationMs":42}})",
+                       RunBlock,
+                       A1,
+                       state,
+                       exitCode);
+}
+
+/// A pane whose newest block is finished, whose command finishes with exit code 0 and prints "hello".
+void scriptRun(Fixture& f)
+{
+    f.channel.replies["block.list"] =
+        std::format(R"({{"pane":"{}","blocks":[{}]}})", A1, blockJson("finished"));
+    f.channel.replies["pane.send"] = std::format(R"({{"block":{}}})", blockJson("finished"));
+    f.channel.replies["block.read"] = std::format(
+        R"({{"block":{},"prompt":"","output":"hello\n","truncated":"none"}})", blockJson("finished"));
+}
+
+std::vector<std::string> methodsOf(Fixture const& f)
+{
+    auto out = std::vector<std::string> {};
+    for (auto const& c: f.channel.calls)
+        if (c.method != "workspace.list")
+            out.push_back(c.method);
+    return out;
+}
+} // namespace
+
+TEST_CASE("pane_split keeps the focus and sends the resolved full id", "[mcp-server]")
+{
+    auto f = Fixture {};
+    auto const out =
+        f.call("pane_split",
+               R"({"pane":"tests","direction":"below","ratioPercent":30,"label":"x","command":["ls"]})");
+    CHECK(out.contains(R"("isError":false)"));
+    auto const* split = f.channel.last("pane.split");
+    REQUIRE(split);
+    CHECK(split->params.contains(A2));
+    CHECK_FALSE(split->params.contains("tests"));
+    CHECK(split->params.contains(R"("focus":"keep")"));
+    CHECK(split->params.contains(R"("direction":"below")"));
+    CHECK(split->params.contains(R"("ratioPercent":30)"));
+    CHECK(split->context == A1);
+}
+
+TEST_CASE("pane_type sends the text as is, with no Enter and no waiting", "[mcp-server]")
+{
+    auto f = Fixture {};
+    CHECK(f.call("pane_type", R"({"text":"ls"})").contains(R"("isError":false)"));
+    auto const* send = f.channel.last("pane.send");
+    REQUIRE(send);
+    CHECK(send->params.contains(A1));
+    CHECK(send->params.contains(R"("text":"ls")"));
+    CHECK_FALSE(send->params.contains(R"(\r)"));
+    CHECK(send->params.contains(R"("wait":"none")"));
+}
+
+TEST_CASE("pane_run lists, sends and reads in order and reports the exit code", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    auto const out = f.call("pane_run", R"({"command":"echo hello"})");
+    CHECK(out.contains(R"("isError":false)"));
+    CHECK(out.contains(R"(\"exitCode\":0)"));
+    CHECK(out.contains("hello"));
+    CHECK(out.contains(R"(\"truncated\":\"none\")"));
+    CHECK(out.contains(RunBlock));
+    CHECK(methodsOf(f) == std::vector<std::string> { "block.list", "pane.send", "block.read" });
+    auto const* list = f.channel.last("block.list");
+    CHECK(list->params.contains(R"("limit":1)"));
+    auto const* send = f.channel.last("pane.send");
+    CHECK(send->params.contains(R"("text":"echo hello\r")"));
+    CHECK(send->params.contains(R"("wait":"commandFinished")"));
+    CHECK(send->params.contains(A1));
+    CHECK(send->timeout == std::chrono::seconds { 120 });
+    CHECK(f.channel.last("block.read")->params.contains(R"("part":"output")"));
+    CHECK(f.channel.last("block.read")->params.contains(RunBlock));
+
+    CHECK(f.call("pane_run", R"({"command":"x","timeoutSeconds":5})").contains(R"("isError":false)"));
+    CHECK(f.channel.last("pane.send")->timeout == std::chrono::seconds { 5 });
+}
+
+TEST_CASE("pane_run on a busy pane types nothing", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    f.channel.replies["block.list"] =
+        std::format(R"({{"pane":"{}","blocks":[{}]}})", A1, blockJson("running"));
+    auto const out = f.call("pane_run", R"({"command":"echo hello"})");
+    CHECK(out.contains(R"("isError":true)"));
+    CHECK(out.contains("pane_type"));
+    CHECK(f.channel.count("pane.send") == 0);
+}
+
+TEST_CASE("pane_run that times out reports timedOut and reads nothing", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    f.channel.failures["pane.send"] = { .failure = ControlFailure::TimedOut,
+                                        .message = "timed out",
+                                        .remote = {} };
+    auto const out = f.call("pane_run", R"({"command":"sleep 999"})");
+    CHECK(out.contains(R"("isError":false)"));
+    CHECK(out.contains(R"(\"timedOut\":true)"));
+    CHECK(f.channel.count("block.read") == 0);
+
+    f.channel.failures["pane.send"] = { .failure = ControlFailure::Disconnected,
+                                        .message = "gone",
+                                        .remote = {} };
+    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+}
+
+TEST_CASE("pane_run with a superseded or exit-less block is an error", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    f.channel.replies["pane.send"] = std::format(R"({{"block":{}}})", blockJson("superseded"));
+    auto out = f.call("pane_run", R"({"command":"x"})");
+    CHECK(out.contains(R"("isError":true)"));
+    CHECK(out.contains("superseded"));
+    f.channel.replies["pane.send"] =
+        std::format(R"({{"block":{{"id":"{}","pane":"{}","state":"finished"}}}})", RunBlock, A1);
+    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+    CHECK(f.channel.count("block.read") == 0);
+}
+
+TEST_CASE("pane_run and pane_capture keep the tail of long output", "[mcp-server]")
+{
+    auto f = Fixture {};
+    scriptRun(f);
+    auto const big = std::string(200 * 1024, 'a') + "TAIL";
+    f.channel.replies["block.read"] = std::format(
+        R"({{"block":{},"prompt":"","output":"{}","truncated":"none"}})", blockJson("finished"), big);
+    auto const out = f.call("pane_run", R"({"command":"x"})");
+    CHECK(out.contains(R"(\"truncated\":\"head\")"));
+    CHECK(out.contains("TAIL"));
+    CHECK(out.size() < 70 * 1024);
+    CHECK(f.call("pane_run", R"({"command":"x","maxOutputBytes":4})").contains(R"(\"output\":\"TAIL\")"));
+
+    f.channel.replies["pane.capture"] = std::format(
+        R"({{"pane":"{}","text":"{}","truncated":"none","cursor":{{"line":1,"column":1}},"size":{{"lines":24,"columns":80}}}})",
+        A1,
+        big);
+    auto const capture = f.call("pane_capture");
+    CHECK(capture.contains(R"(\"truncated\":\"head\")"));
+    CHECK(capture.contains("TAIL"));
+    CHECK(capture.size() < 70 * 1024);
+}
+
+TEST_CASE("tab_create keeps the focus and needs AllTabs", "[mcp-server]")
+{
+    auto own = Fixture {};
+    CHECK(own.call("tab_create", R"({"label":"x"})").contains("--allow-all-tabs"));
+    CHECK(own.channel.count("tab.create") == 0);
+
+    auto all = Fixture { { .scope = TabScope::AllTabs, .callerPane = A1 } };
+    CHECK(all.call("tab_create", R"({"cwd":"/tmp","label":"x","command":["sh"]})")
+              .contains(R"("isError":false)"));
+    auto const* create = all.channel.last("tab.create");
+    REQUIRE(create);
+    CHECK(create->params.contains(R"("focus":"keep")"));
+    CHECK(create->params.contains("/tmp"));
+}
+
+TEST_CASE("a missing required argument is -32602", "[mcp-server]")
+{
+    auto f = Fixture {};
+    CHECK(f.call("pane_split").contains("-32602"));
+    CHECK(f.call("pane_type").contains("-32602"));
+    CHECK(f.call("pane_run").contains("-32602"));
+    CHECK(f.call("pane_run", R"({"command":"x","bogus":1})").contains("-32602"));
+    CHECK(f.channel.count("pane.split") + f.channel.count("pane.send") == 0);
+}
+
+TEST_CASE("a tools/call notification runs nothing", "[mcp-server]")
+{
+    auto f = Fixture {};
+    CHECK_FALSE(f.server.handleLine(
+        R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"pane_type","arguments":{"text":"rm -rf"}}})"));
+    CHECK(f.channel.calls.empty());
+}
+
+TEST_CASE("tools/call refuses exactly what tools/list hides", "[mcp-server]")
+{
+    auto f = Fixture {};
+    f.channel.replies["daemon.info"] = R"({"version":"1","protocolVersion":1,"grants":["read"]})";
+    REQUIRE(f.server.handleLine(R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})"));
+    f.channel.calls.clear();
+    CHECK(f.call("pane_type", R"({"text":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_run", R"({"command":"x"})").contains(R"("isError":true)"));
+    CHECK(f.call("pane_split", R"({"direction":"right"})").contains(R"("isError":true)"));
+    CHECK(f.channel.calls.empty());
+}
+
+TEST_CASE("tab_create is refused by scope under OwnTab and allowed under AllTabs", "[mcp-server]")
+{
+    auto own = Fixture {};
+    auto const refused = own.call("tab_create");
+    CHECK(refused.contains(R"("isError":true)"));
+    CHECK(refused.contains("--allow-all-tabs"));
+    CHECK_FALSE(refused.contains("is not available\""));
+    CHECK(own.channel.calls.empty());
+
+    auto all = Fixture { { .scope = TabScope::AllTabs, .callerPane = A1 } };
+    CHECK(all.call("tab_create").contains(R"("isError":false)"));
 }

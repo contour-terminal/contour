@@ -116,19 +116,6 @@ namespace
         });
     }
 
-    bool isListed(ToolRow const& row,
-                  std::optional<ControlGrants> const& held,
-                  McpAccess access,
-                  TabScope scope)
-    {
-        if (row.requiredScope == TabScope::AllTabs && scope != TabScope::AllTabs)
-            return false;
-        if (access == McpAccess::ReadOnly
-            && (row.needs.contains(Permission::Input) || row.needs.contains(Permission::Write)))
-            return false;
-        return !held || holdsAll(*held, row.needs);
-    }
-
 } // namespace
 
 namespace detail
@@ -257,6 +244,19 @@ namespace detail
 
 } // namespace detail
 
+bool isOffered(ToolRow const& row,
+               std::optional<std::vector<std::string>> const& grants,
+               McpAccess access,
+               TabScope scope)
+{
+    if (row.requiredScope == TabScope::AllTabs && scope != TabScope::AllTabs)
+        return false;
+    if (access == McpAccess::ReadOnly
+        && (row.needs.contains(Permission::Input) || row.needs.contains(Permission::Write)))
+        return false;
+    return !grants || holdsAll(grantsOf(*grants), row.needs);
+}
+
 std::span<ToolRow const> mcpToolRows()
 {
     return Rows;
@@ -266,11 +266,10 @@ std::string toolsListJson(std::optional<std::vector<std::string>> const& grants,
                           McpAccess access,
                           TabScope scope)
 {
-    auto const held = grants ? std::optional { grantsOf(*grants) } : std::nullopt;
     auto json = std::string { R"({"tools":[)" };
     auto separator = std::string_view {};
     for (auto const& row:
-         Rows | std::views::filter([&](auto const& r) { return isListed(r, held, access, scope); }))
+         Rows | std::views::filter([&](auto const& r) { return isOffered(r, grants, access, scope); }))
     {
         auto summary = std::string { row.summary };
         auto schema = std::string { row.inputSchema };

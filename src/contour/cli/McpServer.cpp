@@ -34,6 +34,48 @@ namespace wire
         std::string protocolVersion {};
     };
 
+    /// Arguments of the composite tools; a member without a default is required.
+    struct SplitArguments
+    {
+        std::string pane {};
+        std::optional<vtcontrol::SplitDirection> direction {};
+        std::optional<uint8_t> ratioPercent {};
+        std::string cwd {};
+        std::vector<std::string> command {};
+        std::string label {};
+    };
+
+    struct TypeArguments
+    {
+        std::string pane {};
+        std::optional<std::string> text {};
+    };
+
+    struct RunArguments
+    {
+        std::string pane {};
+        std::optional<std::string> command {};
+        std::optional<uint32_t> timeoutSeconds {};
+        std::optional<uint32_t> maxOutputBytes {};
+    };
+
+    struct TabCreateArguments
+    {
+        std::string cwd {};
+        std::vector<std::string> command {};
+        std::string label {};
+    };
+
+    /// What `pane_run` returns.
+    struct RunResult
+    {
+        int32_t exitCode = 0;
+        std::string output {};
+        std::optional<uint32_t> durationMs {};
+        std::string blockId {};
+        vtcontrol::Truncation truncated = vtcontrol::Truncation::None;
+    };
+
     struct CallParams
     {
         std::string name {};
@@ -51,6 +93,8 @@ namespace
     constexpr auto InvalidParams = -32602;
     constexpr auto OutsideHint =
         std::string_view { "; start `contour mcp` with --allow-all-tabs to reach it" };
+    constexpr auto DefaultRunTimeout = std::chrono::seconds { 120 };
+    constexpr auto DefaultMaxOutputBytes = uint32_t { 65536 };
     constexpr auto WouldCloseSelf = std::string_view { "would close this agent" };
 
     constexpr auto LenientOptions =
@@ -155,6 +199,26 @@ namespace
         return std::unexpected(found.error().message);
     }
 
+    /// Text cut to a byte budget.
+    struct Capped
+    {
+        std::string text;
+        vtcontrol::Truncation truncated;
+    };
+
+    /// Keeps the last @p maxBytes of @p text (never starting inside a UTF-8 sequence): the end of the output
+    /// is what an agent reads.
+    /// @param already What the daemon cut before.
+    Capped capTail(std::string text, size_t maxBytes, vtcontrol::Truncation already)
+    {
+        if (text.size() <= maxBytes)
+            return { .text = std::move(text), .truncated = already };
+        auto start = text.size() - maxBytes;
+        while (start < text.size() && (static_cast<unsigned char>(text[start]) & 0b1100'0000) == 0b1000'0000)
+            ++start;
+        return { .text = text.substr(start), .truncated = vtcontrol::Truncation::Head };
+    }
+
     template <typename Request>
     std::expected<Request, std::string> decodeArguments(std::string_view arguments)
     {
@@ -188,9 +252,9 @@ std::optional<std::string> McpServer::handleLine(std::string_view line)
 
     auto const request =
         Request { .id = envelope->id.text, .method = envelope->method, .params = envelope->params.text };
-    auto const result = dispatch(request);
     if (request.id.empty())
-        return std::nullopt; // a notification never gets an answer
+        return std::nullopt; // a notification gets no answer and runs nothing
+    auto const result = dispatch(request);
     if (!result)
         return errorReply(request.id, result.error().code, result.error().message);
     return reply(request.id, std::format(R"("result":{})", *result));
@@ -259,6 +323,8 @@ McpServer::RpcResult McpServer::onToolsCall(Request const& request)
             RpcError { .code = InvalidParams, .message = "unknown tool: " + params->name });
     auto const arguments = params->arguments.text.empty() ? std::string { "{}" } : params->arguments.text;
     auto const result = runTool(*row, arguments);
+    if (result.outcome == ToolOutcome::BadArguments)
+        return std::unexpected(RpcError { .code = InvalidParams, .message = result.text });
     return textResult(result.text, result.outcome == ToolOutcome::Ok ? "false" : "true");
 }
 
@@ -308,13 +374,17 @@ McpServer::ToolResult McpServer::runTool(ToolRow const& row, std::string_view ar
     // A catalog tool is a row here and a row in mcpToolRows(); composite tools join in the same way.
     static constexpr auto Handlers = std::to_array<Entry>({
         { "workspace_list", &McpServer::toolWorkspaceList },
-        { "pane_capture", &McpServer::toolOnPane<vtcontrol::CaptureRequest> },
+        { "pane_capture", &McpServer::toolPaneCapture },
         { "pane_close", &McpServer::toolPaneClose },
         { "tab_close", &McpServer::toolTabClose },
         { "object_setLabel", &McpServer::toolSetLabel },
         { "block_list", &McpServer::toolOnPane<vtcontrol::BlockListRequest> },
         { "block_read", &McpServer::toolBlockRead },
         { "daemon_info", &McpServer::toolDaemonInfo },
+        { "pane_split", &McpServer::toolPaneSplit },
+        { "pane_type", &McpServer::toolPaneType },
+        { "pane_run", &McpServer::toolPaneRun },
+        { "tab_create", &McpServer::toolTabCreate },
     });
 
     auto const refuse = [](std::string text) {
@@ -326,6 +396,8 @@ McpServer::ToolResult McpServer::runTool(ToolRow const& row, std::string_view ar
         return refuse(std::format("{} is not available: the server is read-only", row.name));
     if (row.requiredScope == TabScope::AllTabs && _options.scope != TabScope::AllTabs)
         return refuse(std::format("{} is not available{}", row.name, OutsideHint));
+    if (!isOffered(row, _grants, _options.access, _options.scope))
+        return refuse(std::format("{} is not available: the daemon's grants do not allow it", row.name));
     auto const entry = std::ranges::find(Handlers, row.name, &Entry::name);
     if (entry == Handlers.end())
         return refuse(std::format("{} is not available", row.name));
@@ -359,6 +431,154 @@ McpServer::ToolResult McpServer::toolOnPane(ToolRow const& row, std::string_view
         return { .outcome = ToolOutcome::Error, .text = pane.error().message };
     request->pane = *pane; // the resolved full id, never the agent's text
     return callDaemon(row.catalogMethod, vtcontrol::encodeJson(*request));
+}
+
+std::expected<std::string, McpServer::Failure> McpServer::resolveOwnedPane(std::string_view spec)
+{
+    auto const workspace = fetchWorkspace();
+    if (!workspace)
+        return std::unexpected(workspace.error());
+    return resolvePane(*workspace, _options.callerPane, spec, _options.scope)
+        .transform_error([](ScopeError const& error) { return error.message; });
+}
+
+McpServer::ToolResult McpServer::toolPaneCapture(ToolRow const& row, std::string_view arguments)
+{
+    auto request = decodeArguments<vtcontrol::CaptureRequest>(arguments);
+    if (!request)
+        return { .outcome = ToolOutcome::Error, .text = request.error() };
+    auto const pane = resolveOwnedPane(request->pane);
+    if (!pane)
+        return { .outcome = ToolOutcome::Error, .text = pane.error() };
+    request->pane = *pane;
+    auto result = callDaemon(row.catalogMethod, vtcontrol::encodeJson(*request));
+    if (result.outcome != ToolOutcome::Ok)
+        return result;
+    auto reply = vtcontrol::decodeJson<vtcontrol::CaptureReply>(result.text);
+    if (!reply)
+        return result; // not a reply we can cap: hand it on as the daemon sent it
+    auto capped = capTail(std::move(reply->text), DefaultMaxOutputBytes, reply->truncated);
+    reply->text = std::move(capped.text);
+    reply->truncated = capped.truncated;
+    return { .outcome = ToolOutcome::Ok, .text = vtcontrol::encodeJson(*reply) };
+}
+
+McpServer::ToolResult McpServer::toolPaneSplit(ToolRow const& /*row*/, std::string_view arguments)
+{
+    auto const args = decodeArguments<SplitArguments>(arguments);
+    if (!args)
+        return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
+    if (!args->direction)
+        return { .outcome = ToolOutcome::BadArguments, .text = "direction is required (right or below)" };
+    auto const pane = resolveOwnedPane(args->pane);
+    if (!pane)
+        return { .outcome = ToolOutcome::Error, .text = pane.error() };
+    auto const request = vtcontrol::SplitRequest { .pane = *pane,
+                                                   .direction = *args->direction,
+                                                   .ratioPercent = args->ratioPercent,
+                                                   .cwd = args->cwd,
+                                                   .command = args->command,
+                                                   .label = args->label,
+                                                   .focus = vtcontrol::FocusPolicy::Keep };
+    return callDaemon("pane.split", vtcontrol::encodeJson(request));
+}
+
+McpServer::ToolResult McpServer::toolPaneType(ToolRow const& /*row*/, std::string_view arguments)
+{
+    auto const args = decodeArguments<TypeArguments>(arguments);
+    if (!args)
+        return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
+    if (!args->text)
+        return { .outcome = ToolOutcome::BadArguments, .text = "text is required" };
+    auto const pane = resolveOwnedPane(args->pane);
+    if (!pane)
+        return { .outcome = ToolOutcome::Error, .text = pane.error() };
+    auto const request =
+        vtcontrol::SendRequest { .pane = *pane, .text = *args->text, .wait = vtcontrol::SendWait::None };
+    return callDaemon("pane.send", vtcontrol::encodeJson(request));
+}
+
+McpServer::ToolResult McpServer::toolPaneRun(ToolRow const& /*row*/, std::string_view arguments)
+{
+    auto const fail = [](std::string text) {
+        return ToolResult { .outcome = ToolOutcome::Error, .text = std::move(text) };
+    };
+    auto const args = decodeArguments<RunArguments>(arguments);
+    if (!args)
+        return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
+    if (!args->command)
+        return { .outcome = ToolOutcome::BadArguments, .text = "command is required" };
+    auto const pane = resolveOwnedPane(args->pane);
+    if (!pane)
+        return fail(pane.error());
+
+    // A command typed into a pane that is still running one would feed that program, not the shell.
+    auto const listed = callDaemon(
+        "block.list", vtcontrol::encodeJson(vtcontrol::BlockListRequest { .pane = *pane, .limit = 1 }));
+    if (listed.outcome != ToolOutcome::Ok)
+        return listed;
+    auto const blocks = vtcontrol::decodeJson<vtcontrol::BlockListReply>(listed.text);
+    if (!blocks)
+        return fail(blocks.error().message);
+    if (!blocks->blocks.empty() && blocks->blocks.front().state == vtcontrol::BlockState::Running)
+        return fail("the pane is busy running a command; use pane_type to talk to it, or wait");
+
+    auto const timeout = args->timeoutSeconds && *args->timeoutSeconds != 0
+                             ? std::chrono::seconds { *args->timeoutSeconds }
+                             : DefaultRunTimeout;
+    auto const sent = _channel.call(
+        "pane.send",
+        vtcontrol::encodeJson(vtcontrol::SendRequest {
+            .pane = *pane, .text = *args->command + "\r", .wait = vtcontrol::SendWait::CommandFinished }),
+        _options.callerPane,
+        std::chrono::duration_cast<std::chrono::milliseconds>(timeout));
+    if (!sent)
+    {
+        if (sent.error().failure == vthost::client::ControlFailure::TimedOut)
+            return { .outcome = ToolOutcome::Ok, .text = R"({"timedOut":true})" };
+        return fail(sent.error().message);
+    }
+    auto const sentReply = vtcontrol::decodeJson<vtcontrol::SendReply>(*sent);
+    if (!sentReply)
+        return fail(sentReply.error().message);
+    if (!sentReply->block)
+        return fail("the pane started no command block; is shell integration active there?");
+    auto const& started = *sentReply->block;
+    if (started.state == vtcontrol::BlockState::Superseded)
+        return fail(std::format("{} was superseded by another command before it finished", started.id));
+    if (!started.exitCode)
+        return fail(std::format("{} finished without an exit status", started.id));
+
+    auto const output =
+        callDaemon("block.read",
+                   vtcontrol::encodeJson(vtcontrol::BlockReadRequest {
+                       .block = started.id, .pane = *pane, .part = vtcontrol::BlockPart::Output }));
+    if (output.outcome != ToolOutcome::Ok)
+        return output;
+    auto const read = vtcontrol::decodeJson<vtcontrol::BlockReadReply>(output.text);
+    if (!read)
+        return fail(read.error().message);
+    auto capped =
+        capTail(read->output, args->maxOutputBytes.value_or(DefaultMaxOutputBytes), read->truncated);
+    auto const result =
+        RunResult { .exitCode = *started.exitCode,
+                    .output = std::move(capped.text),
+                    .durationMs = read->block.durationMs ? read->block.durationMs : started.durationMs,
+                    .blockId = started.id,
+                    .truncated = capped.truncated };
+    return { .outcome = ToolOutcome::Ok, .text = vtcontrol::encodeJson(result) };
+}
+
+McpServer::ToolResult McpServer::toolTabCreate(ToolRow const& /*row*/, std::string_view arguments)
+{
+    auto const args = decodeArguments<TabCreateArguments>(arguments);
+    if (!args)
+        return { .outcome = ToolOutcome::BadArguments, .text = args.error() };
+    auto const request = vtcontrol::CreateTabRequest { .cwd = args->cwd,
+                                                       .command = args->command,
+                                                       .label = args->label,
+                                                       .focus = vtcontrol::FocusPolicy::Keep };
+    return callDaemon("tab.create", vtcontrol::encodeJson(request));
 }
 
 McpServer::ToolResult McpServer::toolPaneClose(ToolRow const& row, std::string_view arguments)

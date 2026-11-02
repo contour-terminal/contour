@@ -71,6 +71,7 @@ class McpServer
     {
         Ok = 0,
         Error,
+        BadArguments, ///< The arguments do not fit the tool's schema: a JSON-RPC `-32602`.
     };
 
     /// A tool's result: text for the agent, and whether it is an error.
@@ -93,6 +94,11 @@ class McpServer
     [[nodiscard]] ToolResult runTool(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolWorkspaceList(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolDaemonInfo(ToolRow const& row, std::string_view arguments);
+    [[nodiscard]] ToolResult toolPaneCapture(ToolRow const& row, std::string_view arguments);
+    [[nodiscard]] ToolResult toolPaneSplit(ToolRow const& row, std::string_view arguments);
+    [[nodiscard]] ToolResult toolPaneType(ToolRow const& row, std::string_view arguments);
+    [[nodiscard]] ToolResult toolPaneRun(ToolRow const& row, std::string_view arguments);
+    [[nodiscard]] ToolResult toolTabCreate(ToolRow const& row, std::string_view arguments);
     template <typename Request>
     [[nodiscard]] ToolResult toolOnPane(ToolRow const& row, std::string_view arguments);
     [[nodiscard]] ToolResult toolPaneClose(ToolRow const& row, std::string_view arguments);
@@ -102,6 +108,9 @@ class McpServer
 
     /// @return The `workspace.list` snapshot, or why there is none (including a vanished caller pane).
     [[nodiscard]] std::expected<vtcontrol::ListReply, Failure> fetchWorkspace();
+    /// @param spec What the agent wrote for a pane; empty names the caller's pane.
+    /// @return The pane's full id under the scope rules, or why it cannot be used.
+    [[nodiscard]] std::expected<std::string, Failure> resolveOwnedPane(std::string_view spec);
     /// Calls @p method with @p params and the caller's pane as context.
     [[nodiscard]] ToolResult callDaemon(std::string_view method, std::string const& params);
     /// Learns the connection's grants from `daemon.info`, once.
