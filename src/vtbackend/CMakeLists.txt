@@ -284,8 +284,9 @@ target_link_libraries(vtbackend PUBLIC
     unicode::unicode
     vtparser
     vtpty
-    ZLIB::ZLIB
 )
+# PRIVATE: only the inflater (graphics/KittyInflate.cpp) includes zlib.h; no header of ours exposes it.
+target_link_libraries(vtbackend PRIVATE ZLIB::ZLIB)
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
@@ -440,7 +441,8 @@ if(LIBTERMINAL_TESTING)
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace)
+    # ZLIB::ZLIB for testing/Deflate.hpp, which compresses what the tests send.
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 
