@@ -54,6 +54,7 @@ TEST_CASE("KittyAnimation.advance", "[kitty]")
         std::vector<int32_t> gaps;
         AnimationState state;
         uint32_t loopCount;
+        uint32_t loopsDoneBefore = 0;                   ///< Loops already played when it is armed.
         uint32_t start;                                 ///< The frame armed on, at time zero.
         std::chrono::milliseconds now;                  ///< When advance() is called, after arming.
         uint32_t frame;                                 ///< The frame current afterwards.
@@ -185,6 +186,62 @@ TEST_CASE("KittyAnimation.advance", "[kitty]")
           .dueIn = 20ms,
           .changed = FrameChanged::Yes,
           .loopsDone = 0 },
+        // v=4 plays three loops and one is played already: one is skipped, and the walk plays the last.
+        { .name = "v=n with loops already played stops on the last frame",
+          .gaps = { 10, 10, 10 },
+          .state = AnimationState::Loop,
+          .loopCount = 4,
+          .loopsDoneBefore = 1,
+          .start = 1,
+          .now = 1000ms,
+          .frame = 3,
+          .dueIn = std::nullopt,
+          .changed = FrameChanged::Yes,
+          .loopsDone = 3 },
+        // v=2 plays one loop: none is skipped, the walk plays it and stops.
+        { .name = "v=2 plays its one loop to the last frame",
+          .gaps = { 10, 10, 10 },
+          .state = AnimationState::Loop,
+          .loopCount = 2,
+          .start = 1,
+          .now = 1000ms,
+          .frame = 3,
+          .dueIn = std::nullopt,
+          .changed = FrameChanged::Yes,
+          .loopsDone = 1 },
+        // A gapless current frame is left by a step before whole loops can be skipped: 1000 ms is 10 ms
+        // into the 30 ms loop of frames 2 and 3, the third frame's, shown until 1020 ms.
+        { .name = "a late call from a gapless frame steps, then skips whole loops",
+          .gaps = { -1, 10, 20 },
+          .state = AnimationState::Loop,
+          .loopCount = 0,
+          .start = 1,
+          .now = 1000ms,
+          .frame = 3,
+          .dueIn = 20ms,
+          .changed = FrameChanged::Yes,
+          .loopsDone = 33 },
+        { .name = "s=3 with only one frame with a gap holds",
+          .gaps = { 10, -1, -1 },
+          .state = AnimationState::Loop,
+          .loopCount = 0,
+          .start = 1,
+          .now = 1000ms,
+          .frame = 1,
+          .dueIn = std::nullopt,
+          .changed = FrameChanged::No,
+          .loopsDone = 0 },
+        // From a gapless frame onto the only one with a gap, which has nowhere to go from there.
+        { .name = "s=3 reaching its only frame with a gap holds there",
+          .gaps = { -1, -1, 10 },
+          .state = AnimationState::Loop,
+          .loopCount = 0,
+          .start = 1,
+          .now = 1000ms,
+          .frame = 3,
+          .dueIn = std::nullopt,
+          .changed = FrameChanged::Yes,
+          .loopsDone = 99 },
     };
 
     auto const origin = std::chrono::steady_clock::time_point {} + 1h;
@@ -193,6 +250,7 @@ TEST_CASE("KittyAnimation.advance", "[kitty]")
         DYNAMIC_SECTION(testCase.name)
         {
             auto animation = makeAnimation(testCase.gaps, testCase.state, testCase.loopCount, testCase.start);
+            animation.loopsDone = testCase.loopsDoneBefore;
             animation.arm(origin);
             auto const now = origin + testCase.now;
 
