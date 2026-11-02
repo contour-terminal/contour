@@ -1466,6 +1466,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void renderBufferUpdated() override;
     void extensionFramePublished() override;
     void screenUpdated() override;
+    /// A kitty animation frame advanced: raised by Terminal::tick() on the render thread, with no lock held.
+    /// Only asks for a redraw -- a frame is not output, and none of what screenUpdated() does for output
+    /// (input echo, activity, scrollbar marks) applies.
+    void kittyFrameAdvanced() override;
     /// Posts updateRunningStatusRefresh() to the session's thread: raised by the frame build, under the lock.
     void runningStatusChanged() override;
     /// Posts refreshStickyHeader() to the session's thread: raised by the frame build, under the lock.

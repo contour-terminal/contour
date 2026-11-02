@@ -1797,8 +1797,9 @@ void SessionHost::animationTickExpired(void* tick)
     if (auto const due = terminal.kittyAnimationDue(); due && *due <= now)
     {
         self.lastTick = now;
-        // With no lock held: tick() takes the terminal's own, and raises screenUpdated() -- what reaches
-        // every client -- once it released it, when a frame advanced.
+        // With no lock held: tick() takes the terminal's own, and raises kittyFrameAdvanced() -- which the
+        // session hears as screenUpdated(), what reaches every client -- once it released it, when a frame
+        // advanced.
         terminal.tick(now);
     }
     // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.

@@ -2014,15 +2014,40 @@ struct CountingTerm final: MockTerm<vtpty::MockPty>
     using MockTerm<vtpty::MockPty>::MockTerm;
     int screenUpdates = 0;
     int renderBufferUpdates = 0;
+    int framesAdvanced = 0;
     void screenUpdated() override { ++screenUpdates; }
     void renderBufferUpdated() override { ++renderBufferUpdates; }
+    void kittyFrameAdvanced() override { ++framesAdvanced; }
+};
+
+/// Hears only screenUpdated(), as a listener that leaves kittyFrameAdvanced() to its default does.
+struct ScreenCountingTerm final: MockTerm<vtpty::MockPty>
+{
+    using MockTerm<vtpty::MockPty>::MockTerm;
+    int screenUpdates = 0;
+    void screenUpdated() override { ++screenUpdates; }
 };
 } // namespace
 
-TEST_CASE("KittyGraphics.playback.tick_raises_screenUpdated_when_a_frame_advanced", "[kitty]")
+TEST_CASE("KittyGraphics.playback.tick_raises_kittyFrameAdvanced_when_a_frame_advanced", "[kitty]")
+{
+    // A frame is news of its own, not output: a display only redraws for it.
+    auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    mock.screenUpdates = 0;
+
+    tickAfter(mock, 5ms);
+    CHECK(mock.framesAdvanced == 0);
+    tickAfter(mock, 5ms);
+    CHECK(mock.framesAdvanced == 1);
+    CHECK(mock.screenUpdates == 0);
+}
+
+TEST_CASE("KittyGraphics.playback.kittyFrameAdvanced_is_screenUpdated_by_default", "[kitty]")
 {
     // The daemon hears of a frame through screenUpdated() alone: it never asks nextRender().
-    auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto mock = ScreenCountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
     placeThreeFrames(mock, 10, 20, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
     mock.screenUpdates = 0;
@@ -2033,7 +2058,7 @@ TEST_CASE("KittyGraphics.playback.tick_raises_screenUpdated_when_a_frame_advance
     CHECK(mock.screenUpdates == 1);
 }
 
-TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_screenUpdated", "[kitty]")
+TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_notification", "[kitty]")
 {
     // A due deadline that only ends a wait changed nothing on screen: the daemon would send a Delta for it.
     auto mock = CountingTerm { PageSize { LineCount(4), ColumnCount(8) } };
@@ -2046,6 +2071,7 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_scree
         tickAfter(mock, 20ms);
         REQUIRE(placedPixels(mock) == blue());
         mock.screenUpdates = 0;
+        mock.framesAdvanced = 0;
         tickAfter(mock, 30ms);
         CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
     }
@@ -2055,6 +2081,7 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_scree
         mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
         REQUIRE(placedPixels(mock).empty());
         mock.screenUpdates = 0;
+        mock.framesAdvanced = 0;
         tickAfter(mock, 10ms);
         CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
     }
@@ -2062,10 +2089,12 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_scree
     {
         mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
         mock.screenUpdates = 0;
+        mock.framesAdvanced = 0;
         tickAfter(mock, 600ms);
         REQUIRE(placedPixels(mock) == red());
         CHECK(dueIn(mock) == 10ms);
     }
+    CHECK(mock.framesAdvanced == 0);
     CHECK(mock.screenUpdates == 0);
 }
 

@@ -3232,7 +3232,7 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     // only when there is a frame: a due deadline that only ended a wait (s=2 out of frames, a placement gone,
     // a whole number of loops landing on the frame it started from) changed nothing on screen.
     if (shown == KittyFrameShown::Yes)
-        screenUpdated();
+        kittyFrameAdvanced();
 }
 
 optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept
@@ -5685,6 +5685,12 @@ void Terminal::screenReplayed()
 {
     if (markScreenChanged() == ScreenNotification::Due)
         _eventListener.screenReplayed();
+}
+
+void Terminal::kittyFrameAdvanced()
+{
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.kittyFrameAdvanced();
 }
 
 Terminal::ScreenNotification Terminal::markScreenChanged()

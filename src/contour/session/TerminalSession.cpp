@@ -1194,6 +1194,15 @@ void TerminalSession::renderBufferUpdated()
         _renderNotifyTarget->renderBufferUpdated();
 }
 
+void TerminalSession::kittyFrameAdvanced()
+{
+    // Through the mutex-guarded copy of _display, as renderBufferUpdated() does: the render thread may not
+    // read _display itself, which the GUI thread reassigns.
+    auto const lock = std::scoped_lock { _renderNotifyMutex };
+    if (_renderNotifyTarget != nullptr)
+        _renderNotifyTarget->scheduleRedraw();
+}
+
 void TerminalSession::executeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
 {
     switch (role)

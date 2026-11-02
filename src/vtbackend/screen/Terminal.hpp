@@ -589,6 +589,12 @@ class Terminal: public IStatusLinePublishTarget
         /// default: a display re-reads nextRender() on it, and a host that renders nothing itself (the
         /// daemon) can hear this alone.
         virtual void kittyAnimationDeadlineMoved() { renderBufferUpdated(); }
+        /// tick() advanced a kitty animation frame on the page on display. Raised on the thread that ticks --
+        /// the render thread, the daemon's loop -- with no lock held. Forwards to screenUpdated() by default,
+        /// which is all a host that renders nothing itself (the daemon) needs; a display that draws on its
+        /// own thread only has to schedule a redraw, and need not treat it as output the way screenUpdated()
+        /// is.
+        virtual void kittyFrameAdvanced() { screenUpdated(); }
 
         /// Whether the frame shows a running block's time changed (@see Terminal::hasVisibleRunningStatus):
         /// a time on display goes stale unless a frame is drawn again. Raised by the frame build -- on the
@@ -2444,7 +2450,7 @@ class Terminal: public IStatusLinePublishTarget
     /// thread's alone, before and after each frame, the daemon's frame timer's, and a test's: one ticker per
     /// terminal, so what it advances has one owner. Takes the state lock while a glide is armed or a frame is
     /// due, so it is never called with that lock held; after a frame that changed what a placement shows it
-    /// raises screenUpdated(), outside it.
+    /// raises kittyFrameAdvanced(), outside it.
     /// @param now The time of the frame.
     void tick(std::chrono::steady_clock::time_point now) noexcept;
     void tick(std::chrono::milliseconds delta) { tick(currentTime() + delta); }
@@ -3463,6 +3469,9 @@ class Terminal: public IStatusLinePublishTarget
     void screenUpdated();
     /// As screenUpdated(), for a mirror's full replay: the listener hears Events::screenReplayed().
     void screenReplayed();
+    /// As screenUpdated(), for a kitty animation frame tick() advanced: the listener hears
+    /// Events::kittyFrameAdvanced().
+    void kittyFrameAdvanced();
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
