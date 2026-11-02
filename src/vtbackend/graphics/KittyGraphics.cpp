@@ -123,13 +123,7 @@ namespace
                 command.deleteTarget = value[0];
                 break;
             }
-            case 'X': {
-                auto number = 0u;
-                (void) assignNumber(value, number);
-                command.compositionMode =
-                    number != 0 ? CompositionMode::Replace : CompositionMode::AlphaBlend;
-                break;
-            }
+            case 'X': (void) assignNumber(value, command.rawX); break;
             case 'Y': (void) assignNumber(value, command.frameBackground); break;
             default:
                 // Unknown key: ignore, see above.
@@ -192,6 +186,8 @@ std::expected<Command, Error> parseCommand(std::string_view apcPayload)
             command.baseFrame = std::exchange(command.columns, 0);
             command.targetFrame = std::exchange(command.rows, 0);
             command.frameGapMilliseconds = std::exchange(command.zIndex, 0);
+            command.compositionMode =
+                std::exchange(command.rawX, 0) != 0 ? CompositionMode::Replace : CompositionMode::AlphaBlend;
             break;
         case Action::Animate:
             // Animation control overloads two keys more than frame transmission does: `s` is the play
@@ -208,7 +204,18 @@ std::expected<Command, Error> parseCommand(std::string_view apcPayload)
                 default: command.animationState = AnimationState::Unset; break;
             }
             break;
-        case Action::Compose: break;
+        case Action::Compose:
+            // `C=` is the cursor policy elsewhere; here it picks overwrite over alpha blending.
+            command.composeSourceFrame = std::exchange(command.rows, 0);
+            command.composeDestinationFrame = std::exchange(command.columns, 0);
+            command.composeSourceX = std::exchange(command.rawX, 0);
+            command.composeSourceY = std::exchange(command.frameBackground, 0);
+            command.composeDestinationX = std::exchange(command.sourceX, 0);
+            command.composeDestinationY = std::exchange(command.sourceY, 0);
+            command.compositionMode = std::exchange(command.doNotMoveCursor, false)
+                                          ? CompositionMode::Replace
+                                          : CompositionMode::AlphaBlend;
+            break;
         case Action::Query:
         case Action::Transmit:
         case Action::TransmitAndDisplay:

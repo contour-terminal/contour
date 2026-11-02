@@ -34,6 +34,43 @@ TEST_CASE("KittyGraphics.parse.minimal_query", "[kitty]")
     CHECK(command->payload == "AAAA");
 }
 
+TEST_CASE("KittyGraphics.parse.compose_keys_are_frames_and_origins", "[kitty]")
+{
+    auto const command = parseCommand("a=c,i=1,r=7,c=9,w=23,h=27,X=4,Y=8,x=1,y=3"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->action == Action::Compose);
+    CHECK(command->composeSourceFrame == 7);
+    CHECK(command->composeDestinationFrame == 9);
+    CHECK(command->sourceWidth == 23);
+    CHECK(command->sourceHeight == 27);
+    CHECK(command->composeSourceX == 4);
+    CHECK(command->composeSourceY == 8);
+    CHECK(command->composeDestinationX == 1);
+    CHECK(command->composeDestinationY == 3);
+    CHECK(command->compositionMode == CompositionMode::AlphaBlend);
+    CHECK_FALSE(command->doNotMoveCursor);
+    CHECK(command->columns == 0);
+    CHECK(command->rows == 0);
+}
+
+TEST_CASE("KittyGraphics.parse.compose_C_selects_overwrite", "[kitty]")
+{
+    auto const command = parseCommand("a=c,i=1,r=7,c=9,w=23,h=27,X=4,Y=8,x=1,y=3,C=1"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->compositionMode == CompositionMode::Replace);
+    CHECK_FALSE(command->doNotMoveCursor);
+}
+
+TEST_CASE("KittyGraphics.parse.frame_X_and_Y_keep_their_meaning", "[kitty]")
+{
+    auto const command = parseCommand("a=f,i=1,X=1,Y=5,x=2,y=3"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->compositionMode == CompositionMode::Replace);
+    CHECK(command->frameBackground == 5);
+    CHECK(command->sourceX == 2);
+    CHECK(command->sourceY == 3);
+}
+
 TEST_CASE("KittyGraphics.parse.defaults", "[kitty]")
 {
     auto const command = parseCommand("i=1,s=1,v=1"sv);
