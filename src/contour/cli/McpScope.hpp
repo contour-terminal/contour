@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // `contour mcp`: which panes an agent may address. The agent runs inside one pane, and by default may
-// only reach the panes of that pane's tab; seeing or typing into any other tab needs `--allow-all-tabs`.
+// only act on the panes of that pane's tab (the workspace listing still shows every tab); acting on any other
+// tab needs `--allow-all-tabs`.
 #pragma once
 
 #include <cstdint>
