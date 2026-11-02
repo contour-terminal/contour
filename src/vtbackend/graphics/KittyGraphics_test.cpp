@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <new>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -2020,6 +2021,23 @@ struct CountingTerm final: MockTerm<vtpty::MockPty>
     void kittyFrameAdvanced() override { ++framesAdvanced; }
 };
 
+/// A listener out of memory once isOutOfMemory is set, as the daemon's is when its post to the loop fails.
+struct OutOfMemoryTerm final: MockTerm<vtpty::MockPty>
+{
+    using MockTerm<vtpty::MockPty>::MockTerm;
+    bool isOutOfMemory = false;
+    void kittyFrameAdvanced() override
+    {
+        if (isOutOfMemory)
+            throw std::bad_alloc();
+    }
+    void kittyAnimationDeadlineMoved() override
+    {
+        if (isOutOfMemory)
+            throw std::bad_alloc();
+    }
+};
+
 /// Hears only screenUpdated(), as a listener that leaves kittyFrameAdvanced() to its default does.
 struct ScreenCountingTerm final: MockTerm<vtpty::MockPty>
 {
@@ -2096,6 +2114,20 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_notif
     }
     CHECK(mock.framesAdvanced == 0);
     CHECK(mock.screenUpdates == 0);
+}
+
+TEST_CASE("KittyGraphics.playback.a_listener_out_of_memory_does_not_end_the_tick", "[kitty]")
+{
+    // tick() is noexcept: a notification that cannot be delivered is dropped, not let terminate.
+    auto mock = OutOfMemoryTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    mock.isOutOfMemory = true;
+
+    tickAfter(mock, 10ms);
+    CHECK(placedPixels(mock) == green());
+    // The deadline was stored before its notification failed.
+    CHECK(dueIn(mock) == 20ms);
 }
 
 TEST_CASE("KittyGraphics.playback.a_deadline_is_announced_only_when_it_moves", "[kitty]")

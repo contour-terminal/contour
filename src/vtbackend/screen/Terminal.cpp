@@ -3205,7 +3205,28 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     // as for the glide. Advanced at the frame's own time, which is what the display and the daemon pass.
     if (_kittyAnimationDue.load(std::memory_order_relaxed) > now)
         return;
-    auto shown = KittyFrameShown::No;
+    // tick() is noexcept, and the listener behind both notifications below may allocate (the daemon posts to
+    // its loop): one that fails is dropped rather than let terminate the process. Dropping either is benign.
+    // The deadline is stored before the listener hears of it, so the next frame's nextRender() still sees
+    // it, and a dropped frame notification is made up for by the next one.
+    enum class Notification : uint8_t
+    {
+        Delivered,
+        Dropped,
+    };
+    auto const notifying = [](auto&& notify) noexcept -> Notification {
+        try
+        {
+            notify();
+            return Notification::Delivered;
+        }
+        catch (std::bad_alloc const&)
+        {
+            return Notification::Dropped;
+        }
+    };
+
+    auto advance = KittyAdvance {};
     {
         auto const _ = std::scoped_lock { _ownStateLock };
         // Moved or dropped by the parser between the read above and the lock.
@@ -3214,25 +3235,22 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
         auto& page = displayedPage();
         try
         {
-            auto const advance = page.advanceKittyAnimations(now);
-            shown = advance.shown;
-            publishKittyAnimationDeadline(advance.nextDue);
+            advance = page.advanceKittyAnimations(now);
         }
         catch (std::bad_alloc const&)
         {
             // The frame could not be built. Stop rather than retry on every frame: a deadline left behind
-            // would be due again at once.
+            // would be due again at once. Another animation may have advanced before this one failed.
             page.stopKittyAnimations();
-            publishKittyAnimationDeadline(nullopt);
-            // Another animation may have advanced before this one failed.
-            shown = KittyFrameShown::Yes;
+            advance = KittyAdvance { .shown = KittyFrameShown::Yes, .nextDue = nullopt };
         }
+        std::ignore = notifying([&] { publishKittyAnimationDeadline(advance.nextDue); });
     }
     // Outside the lock, as it calls back into the frontend. The only news of the frame the daemon hears, and
     // only when there is a frame: a due deadline that only ended a wait (s=2 out of frames, a placement gone,
     // a whole number of loops landing on the frame it started from) changed nothing on screen.
-    if (shown == KittyFrameShown::Yes)
-        kittyFrameAdvanced();
+    if (advance.shown == KittyFrameShown::Yes)
+        std::ignore = notifying([this] { kittyFrameAdvanced(); });
 }
 
 optional<chrono::steady_clock::time_point> Terminal::kittyAnimationDue() const noexcept
