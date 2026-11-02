@@ -908,6 +908,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/WindowsAppearanceSources_test.cpp
             platform/WindowsSettings_test.cpp
             platform/AudioNote_test.cpp
+            platform/ControlsStyleProbe_test.cpp
             platform/FontFamilySource_test.cpp
             platform/GuiTheme_test.cpp
             platform/DBusGlobalShortcutsChannel_test.cpp
@@ -1420,6 +1421,7 @@ if(CONTOUR_TESTING)
         config/Actions_test.cpp
         config/BindingCollisions_test.cpp
         config/ChromeTokenGroups_test.cpp
+        config/ControlsStyle_test.cpp
         config/DefaultBindings_test.cpp
         config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp

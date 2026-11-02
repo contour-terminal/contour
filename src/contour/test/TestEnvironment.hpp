@@ -45,15 +45,6 @@ inline constexpr std::string_view ControlsStyleVariable = "CONTOUR_TEST_CONTROLS
 /// AllTestsSkippedExitCode, which a run whose every case SKIP()s returns: only a missing style is a skip.
 inline constexpr int ControlsStyleMissingExitCode = 77;
 
-/// Where a controls style's qmldir lies beneath a QML import path, as QQuickStyle resolves the style's name:
-/// a style of Qt's own (`QtQuick/Controls/<style>`), else a module of that name (ContourTui, ContourLinux).
-/// @param style The style's name.
-/// @return The two paths, relative to an import path, with `/` separators.
-[[nodiscard]] inline std::array<std::string, 2> controlsStyleQmldirs(std::string_view style)
-{
-    return { std::format("QtQuick/Controls/{}/qmldir", style), std::format("{}/qmldir", style) };
-}
-
 /// The variable Qt's FreeType font database reads its font directory from.
 inline constexpr std::string_view QtFontDirectoryVariable = "QT_QPA_FONTDIR";
 

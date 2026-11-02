@@ -8,6 +8,7 @@
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/ChromeTokenRows.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ControlsStyle.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/config/LaunchTarget.hpp>
@@ -26,6 +27,7 @@
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
+#include <contour/platform/ControlsStyleProbe.hpp>
 #include <contour/platform/FontFamilySource.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/LauncherMenu.hpp>
@@ -2777,8 +2779,8 @@ int ContourGuiApp::terminalGuiAction()
     // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
     // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
     _chromeStyle = config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform);
-    QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
-    QQuickStyle::setStyle(QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
+    constexpr auto FallbackControlsStyle = std::string_view { "Fusion" };
+    QQuickStyle::setFallbackStyle(QString::fromUtf8(FallbackControlsStyle));
 
     selectGraphicsApi();
 
@@ -2852,6 +2854,21 @@ int ContourGuiApp::terminalGuiAction()
                        core::platform::normalizePath(configHome / "ui"),
                        core::platform::normalizePath(uiModuleOverrideDirectory(configHome)));
         _qmlEngine->addImportPath(platform::toQString(configHome));
+
+        // The chrome row's style is pinned here, once the engine exists and before it loads any QML, so
+        // that the engine itself says where styles are searched. A style this Qt build does not ship
+        // (FluentWinUI3 on an older Qt, say) would fail the whole QML load with `module "<style>" is not
+        // installed`, so the row falls back to Fusion, with a warning.
+        auto const requestedControlsStyle = config::uiStyleTokens(_chromeStyle).quickControlsStyle;
+        auto const controlsStyle = config::chooseControlsStyle(
+            requestedControlsStyle, FallbackControlsStyle, [&](std::string_view style) {
+                return platform::isControlsStyleInstalled(style, _qmlEngine->importPathList());
+            });
+        if (controlsStyle.origin == config::ControlsStyleOrigin::FellBackToDefault)
+            errorLog()("The Qt Quick Controls style {} is not installed on this system; using {} instead.",
+                       requestedControlsStyle,
+                       controlsStyle.style);
+        QQuickStyle::setStyle(QString::fromStdString(controlsStyle.style));
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
