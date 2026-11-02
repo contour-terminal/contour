@@ -2,9 +2,10 @@
 #include <vtbackend/graphics/KittyInflate.hpp>
 
 #include <array>
-#include <bit>
 #include <limits>
 
+// Makes z_stream::next_in point to const, which is what inflate treats it as.
+#define ZLIB_CONST
 #include <zlib.h>
 
 namespace vtbackend::kitty_graphics
@@ -13,7 +14,7 @@ namespace vtbackend::kitty_graphics
 namespace
 {
     /// Bytes inflated per call; also the most a bomb can overshoot the cap by in scratch space.
-    constexpr auto ChunkSize = size_t { 16 * 1024 };
+    constexpr auto ChunkSize = size_t { 16 } * 1024;
 
     /// Owns an initialised inflate stream and releases it on every exit path.
     class InflateStream
@@ -46,9 +47,8 @@ std::expected<std::vector<uint8_t>, InflateError> inflateZlib(std::span<uint8_t 
     if (!inflater.initialised())
         return std::unexpected { InflateError::Corrupt };
 
-    // zlib's input pointer is not const-qualified, though it never writes through it.
     auto& stream = inflater.get();
-    stream.next_in = std::bit_cast<Bytef*>(compressed.data());
+    stream.next_in = compressed.data();
     stream.avail_in = static_cast<uInt>(compressed.size());
 
     auto output = std::vector<uint8_t> {};

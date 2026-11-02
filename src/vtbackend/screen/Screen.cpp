@@ -349,6 +349,30 @@ namespace // {{{ helper
         };
     }
 
+    /// The byte size of a raw @p width x @p height x @p bytesPerPixel buffer, if it is sane to hold.
+    ///
+    /// Dimensions come straight from the escape sequence, so the product can overflow `size_t`, and a
+    /// legitimate-looking one can still name more memory than the terminal is willing to keep.
+    ///
+    /// @param quota Largest size to accept.
+    /// @return The size, or nothing when the product overflows or exceeds @p quota.
+    [[nodiscard]] std::optional<size_t> boundedRawBytes(size_t width,
+                                                        size_t height,
+                                                        size_t bytesPerPixel,
+                                                        size_t quota) noexcept
+    {
+        constexpr auto Max = std::numeric_limits<size_t>::max();
+        if (height != 0 && width > Max / height)
+            return std::nullopt;
+        auto const area = width * height;
+        if (bytesPerPixel != 0 && area > Max / bytesPerPixel)
+            return std::nullopt;
+        auto const bytes = area * bytesPerPixel;
+        if (bytes > quota)
+            return std::nullopt;
+        return bytes;
+    }
+
     /// Base64-decodes a kitty graphics payload and, for `o=z`, inflates it.
     ///
     /// @param command The command carrying the payload.
@@ -6026,6 +6050,22 @@ void Screen::processKittyGraphics(std::string_view body)
     // bounded by what the quota still has room for instead.
     auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
                           * bytesPerPixel(command.transmissionFormat());
+    // Declared dimensions are attacker-chosen, so they bound an inflate only when they are sane: an
+    // overflowing or over-quota size is refused before a single byte is inflated.
+    auto inflateCap = expected;
+    if (command.compression != Compression::None && format != ImageFormat::PNG)
+    {
+        auto const bounded = boundedRawBytes(command.pixelWidth,
+                                             command.pixelHeight,
+                                             bytesPerPixel(command.transmissionFormat()),
+                                             _settings->kittyImageStorageQuota);
+        if (!bounded)
+        {
+            replyKittyGraphics(command, "EINVAL:image dimensions too large");
+            return;
+        }
+        inflateCap = *bounded;
+    }
     auto const quotaRemainder = [&] {
         auto const stored = storedKittyBytes() - storedKittyBytesOf(command.imageId);
         return stored < _settings->kittyImageStorageQuota ? _settings->kittyImageStorageQuota - stored
@@ -6034,7 +6074,7 @@ void Screen::processKittyGraphics(std::string_view body)
     auto payload =
         format == ImageFormat::PNG
             ? decodeKittyPayload(command, quotaRemainder(), "ENOSPC:image storage quota exceeded")
-            : decodeKittyPayload(command, expected, "EINVAL:payload size does not match dimensions");
+            : decodeKittyPayload(command, inflateCap, "EINVAL:payload size does not match dimensions");
     if (!payload)
     {
         replyKittyGraphics(command, payload.error());
@@ -6300,7 +6340,13 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
     // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and the
     // blend arithmetic below into nonsense.
-    auto const expectedBytes = rectWidth * rectHeight * bpp;
+    auto const bounded = boundedRawBytes(rectWidth, rectHeight, bpp, _settings->kittyImageStorageQuota);
+    if (!bounded)
+    {
+        replyKittyGraphics(command, "EINVAL:image dimensions too large");
+        return;
+    }
+    auto const expectedBytes = *bounded;
     auto const payload =
         decodeKittyPayload(command, expectedBytes, "EINVAL:payload size does not match dimensions");
     if (!payload)

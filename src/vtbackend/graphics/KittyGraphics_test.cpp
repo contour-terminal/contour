@@ -10,7 +10,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <bit>
 #include <cstdint>
 #include <format>
 #include <ranges>
@@ -1249,16 +1248,14 @@ namespace
 /// Deflates @p input into a zlib stream and base64-encodes it, as an application sending `o=z` would.
 [[nodiscard]] std::string zlibBase64(std::string_view input)
 {
-    auto out = std::string(compressBound(static_cast<uLong>(input.size())), '\0');
+    auto const source = std::vector<uint8_t>(input.begin(), input.end());
+    auto out = std::vector<uint8_t>(compressBound(static_cast<uLong>(source.size())));
     auto outSize = static_cast<uLongf>(out.size());
-    auto const status = compress2(std::bit_cast<Bytef*>(out.data()),
-                                  &outSize,
-                                  std::bit_cast<Bytef const*>(input.data()),
-                                  static_cast<uLong>(input.size()),
-                                  Z_BEST_COMPRESSION);
+    auto const status =
+        compress2(out.data(), &outSize, source.data(), static_cast<uLong>(source.size()), Z_BEST_COMPRESSION);
     REQUIRE(status == Z_OK);
     out.resize(outSize);
-    return core::base64::encode(out);
+    return core::base64::encode(out.begin(), out.end());
 }
 } // namespace
 
@@ -1311,4 +1308,47 @@ TEST_CASE("KittyGraphics.compression.corrupt_answers_EINVAL", "[kitty]")
     // Valid base64, but not a zlib stream.
     CHECK(replyTo(mock, "\033_Ga=T,f=32,s=1,v=1,i=3,o=z;AAAAAAAAAA==\033\\"sv)
           == "\033_Gi=3;EINVAL:corrupt compressed payload\033\\");
+}
+
+TEST_CASE("KittyGraphics.compression.dimensions_that_overflow_are_refused_before_inflating", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // The payload is a valid stream for one pixel: it is the declared size that is the problem, and a
+    // refusal that came from inflating (or from the size check after it) would not name that.
+    auto const pixel = zlibBase64("\x01\x02\x03\x04"sv);
+
+    // 2^32-1 squared times four wraps size_t.
+    CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=4294967295,v=4294967295,i=3,o=z;{}\033\\", pixel))
+          == "\033_Gi=3;EINVAL:image dimensions too large\033\\");
+    // 65536x65536 RGBA is exactly 16 GiB: representable, and far over the 128 MiB quota.
+    CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=65536,v=65536,i=3,o=z;{}\033\\", pixel))
+          == "\033_Gi=3;EINVAL:image dimensions too large\033\\");
+}
+
+TEST_CASE("KittyGraphics.compression.frame_bomb_answers_EINVAL", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // One RGB pixel declared, 4 MiB inflated.
+    auto const zeros = std::string(size_t { 4 } << 20, '\0');
+    CHECK(replyTo(mock,
+                  std::format("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1,o=z;{}\033\\", zlibBase64(zeros)))
+          == "\033_Gi=7;EINVAL:payload size does not match dimensions\033\\");
+}
+
+TEST_CASE("KittyGraphics.compression.chunked_transmission_is_inflated_once_reassembled", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    auto const pixels = "\xFF\x00\x00\xFF\x00\xFF\x00\xFF\x00\x00\xFF\xFF\xFF\xFF\xFF\xFF"s;
+    auto const encoded = zlibBase64(pixels);
+    // Split on a 4-character boundary so each chunk is valid base64 on its own.
+    auto const split = (encoded.size() / 2) / 4 * 4;
+    REQUIRE(split > 0);
+
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=3,o=z,m=1;{}\033\\", encoded.substr(0, split)));
+    mock.terminal.flushInput();
+    CHECK(replyTo(mock, std::format("\033_Gm=0;{}\033\\", encoded.substr(split))).contains("OK"));
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { pixels.begin(), pixels.end() });
 }
