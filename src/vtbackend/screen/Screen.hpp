@@ -625,6 +625,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void requestCharacterSize(RequestPixelSize area);
     void sixelImage(ImageSize pixelSize, Image::Data&& rgbaData);
 
+    /// Logs, the first time only, that an image was dropped because the cell size in pixels is unknown. In a
+    /// daemon session it never is: the daemon's terminal is not told the client's cell size.
+    /// @param kind What was dropped, for the message.
+    /// @param pixelSize The dropped image's size in pixels.
+    void logImageDroppedForUnknownCellSize(std::string_view kind, ImageSize pixelSize);
+
     /// Publishes the persistent ReGIS canvas to the grid as an overlay image. Invoked when a ReGIS
     /// DCS string drew anything.
     /// @param pixelSize The canvas pixel dimensions.
@@ -1735,6 +1741,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     std::unique_ptr<regis::ReGISRasterizer> _regisCanvas;
     std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer;
     std::unique_ptr<regis::ReGISEvents> _regisEvents;
+
+    /// Whether the drop of an image for want of a cell size has been logged yet: a stream of images (a sixel
+    /// video) would otherwise write a line for every frame.
+    enum class CellSizeDropLog : uint8_t
+    {
+        NotYetLogged,
+        Logged,
+    };
+    CellSizeDropLog _cellSizeDropLog = CellSizeDropLog::NotYetLogged;
 
 #ifdef LIBTERMINAL_LOG_TRACE
     std::atomic<bool> _logCharTrace = true;
