@@ -173,6 +173,13 @@ notcurses, FreeBSD and the full-tree clang-tidy. The `release` branch's pull req
 those except FreeBSD and the full-tree clang-tidy (both are `github.event_name != 'pull_request'`);
 the static build runs on master pushes and the `release` pull request, never in the merge queue.
 
+The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
+`contour-daemon` .deb) runs on every pull request, for 24.04 alone, and for 24.04 and 26.04 otherwise:
+it is the only job that builds the GUI-less configuration, so it cannot wait for master. The RPMs
+(`package_for_Fedora`: `contour` and `contour-daemon` from one spec, on current Fedora and rawhide) are
+ordinary packaging and run on master pushes, the merge queue and the `release` pull request only;
+rawhide never blocks a release.
+
 A required status check is never gated off pull requests. `tests matrix` and
 `Ubuntu Linux 24.04 post-check` always run and treat a skipped dependency as passed (a failed or
 cancelled one still fails them). `scripts/check-workflows.py` enforces both rules, and its

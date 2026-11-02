@@ -58,7 +58,9 @@ env:
 # `if: github.event_name != 'pull_request' || github.head_ref == 'release'`. Exceptions: FreeBSD and
 # the full-tree clang-tidy use `github.event_name != 'pull_request'` and skip even the `release`
 # pull request, and the static build (`github.ref == 'refs/heads/master' || head_ref == 'release'`)
-# never runs in the merge queue.
+# never runs in the merge queue. The daemon packages: the Debian one (`package_daemon_for_Ubuntu`) runs
+# on every pull request, for 24.04 alone (both releases otherwise), because it is the only job that
+# builds the GUI-less configuration; the RPMs (`package_for_Fedora`) follow the packaging rule above.
 # A required status check is never gated that way: it always runs and judges a skipped job as passed
 # (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 
@@ -336,9 +338,10 @@ jobs:
     # clang-release (the GUI packaging job turns -Werror off as well). The clang-debug jobs keep
     # enforcing zero warnings; a release-only warning must not block packaging.
     #
-    # CONTOUR_PACKAGE_TERMINFO=OFF, like the GUI package: the contour terminfo entry is already shipped
-    # by the distribution's ncurses packages, so packaging it again risks a file conflict on install.
-    # (Inferred: the commit that added the option, 0955d59c8, gives no reason.)
+    # CONTOUR_PACKAGE_TERMINFO=OFF, like the GUI .deb: the contour terminfo entry is probably shipped by
+    # the distribution's ncurses packages already, and packaging it again would risk a file conflict on
+    # install. (Inferred, not verified: the commit that added the option, 0955d59c8, gives no reason.
+    # A host lacking the entry falls back to TERM=xterm-256color per Config.cpp, so the downside is mild.)
     - name: "cmake"
       run: |
         cmake \
@@ -728,9 +731,11 @@ jobs:
   # EPEL for yaml-cpp and libutempter), and a job that can never be run by hand first -- the EL10 package
   # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
   #
-  # Nothing but the artifact upload is conditional: the build and the install tests run on every pull
-  # request, like the Ubuntu daemon job.
+  # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
+  # merge queue and on the `release` pull request, not on ordinary pull requests: the Ubuntu daemon job
+  # already builds the GUI-less configuration on every one.
   package_for_Fedora:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
     strategy:
       fail-fast: false
@@ -861,7 +866,6 @@ jobs:
           rpm -q contour
         '
     - name: "Uploading Fedora RPM package: contour"
-      if: github.event_name != 'pull_request' || github.head_ref == 'release'
       uses: actions/upload-artifact@v4
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
@@ -872,7 +876,6 @@ jobs:
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package: contour-daemon"
-      if: github.event_name != 'pull_request' || github.head_ref == 'release'
       uses: actions/upload-artifact@v4
       with:
         name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"

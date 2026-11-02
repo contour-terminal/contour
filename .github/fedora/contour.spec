@@ -99,14 +99,18 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 # crates.io, and mock/koji build offline. Vendoring the crates into the SRPM is a packaging follow-up;
 # until then the package ships the extension runtime without the bundled modules.
 #
-# CONTOUR_PACKAGE_TERMINFO=OFF, like the Debian packages: the contour terminfo entry is shipped by the
-# distribution's ncurses packages, and packaging it again risks a file conflict on install.
+# The daemon build mirrors the Debian daemon package: no terminfo entry (CONTOUR_PACKAGE_TERMINFO=OFF;
+# the reason there is inferred, not verified for Fedora -- the ncurses packages may already ship it and a
+# second copy would conflict on install; a host without the entry falls back to TERM=xterm-256color per
+# Config.cpp, so the downside is mild), and one link at a time (CONTOUR_LINK_JOBS=1), after linking
+# shut down the Debian job's runner for lack of memory. The GUI package is built as it always was.
 cmake . \
 %if %{with daemon}
     -DCONTOUR_FRONTEND_GUI=OFF \
     -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
-%endif
     -DCONTOUR_PACKAGE_TERMINFO=OFF \
+    -DCONTOUR_LINK_JOBS=1 \
+%endif
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DPEDANTIC_COMPILER=ON \
@@ -116,7 +120,12 @@ cmake . \
     -B build \
     -GNinja
 cd build
+%if %{with daemon}
+# Explicit targets, not ALL: the targets the Debian daemon job builds, plus the two suites %check runs.
+%ninja_build contour contour_test crispy_test vtbackend_test
+%else
 %ninja_build
+%endif
 
 
 %install
