@@ -18,7 +18,9 @@ namespace contour::input
 /// @return The captured event.
 [[nodiscard]] NativeKeyEvent captureKeyEvent(QKeyEvent const& event, vtbackend::KeyboardEventType type);
 
-/// Captures text committed by an input method as an unmodified, text-only event.
+/// Captures text committed by an input method as an unmodified, text-only event. Its native modifiers are
+/// the lock state alone, sampled as captureKeyEvent() samples it (only Windows has any to sample; elsewhere
+/// they are zero).
 /// @param commit The committed text.
 /// @return The captured event, with origin KeyEventOrigin::InputMethodCommit.
 [[nodiscard]] NativeKeyEvent captureInputMethodCommit(QString const& commit);

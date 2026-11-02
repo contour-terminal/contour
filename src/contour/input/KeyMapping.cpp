@@ -51,17 +51,11 @@ CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text
                                                                      : CtrlAltRole::Chord;
 }
 
-vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
-                                           quint32 nativeModifiers,
-                                           [[maybe_unused]] CtrlAltRole ctrlAltRole)
+vtbackend::Modifiers chordOf(Qt::KeyboardModifiers qtModifiers) noexcept
 {
-    using vtbackend::LockKey;
     using vtbackend::Modifier;
-    using vtbackend::Modifiers;
 
-    Modifiers chord {};
-
-    // Standard modifiers from Qt
+    auto chord = vtbackend::Modifiers {};
     if (qtModifiers & Qt::AltModifier)
         chord |= Modifier::Alt;
     if (qtModifiers & Qt::ShiftModifier)
@@ -70,10 +64,21 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
         chord |= Modifier::Control;
     if (qtModifiers & Qt::MetaModifier)
         chord |= Modifier::Super;
+    return chord;
+}
 
+vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
+                                           quint32 nativeModifiers,
+                                           [[maybe_unused]] CtrlAltRole ctrlAltRole)
+{
+    auto chord = chordOf(qtModifiers);
     vtbackend::LockKeys locks {};
 
 #ifdef _WIN32
+    using vtbackend::LockKey;
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+
     // Windows: Handle AltGr (Ctrl+Alt combination). When it selected the character, Ctrl and Alt
     // must not reach the encoders as modifiers -- they would Ctrl-map an AltGr '[' into ESC.
     if (ctrlAltRole == CtrlAltRole::AltGr)
@@ -94,23 +99,9 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
         locks |= LockKey::NumLock;
 
 #elifdef __APPLE__
-    // macOS: NSEventModifierFlagCapsLock = 0x00010000
-    constexpr quint32 MacCapsLock = 0x00010000;
-    if (nativeModifiers & MacCapsLock)
-        locks |= LockKey::CapsLock;
-    // NumLock doesn't exist on standard macOS keyboards
-
+    locks = macLockKeysOf(nativeModifiers);
 #else
-    // Linux (X11/Wayland): XCB/XKB modifier masks
-    // CapsLock = XCB_MOD_MASK_LOCK (bit 1, value 0x02) - fixed by X11 protocol
-    // NumLock = XCB_MOD_MASK_2 (bit 4, value 0x10) - conventional mapping
-    constexpr quint32 XcbCapsLock = 0x02;
-    constexpr quint32 XcbNumLock = 0x10;
-
-    if (nativeModifiers & XcbCapsLock)
-        locks |= LockKey::CapsLock;
-    if (nativeModifiers & XcbNumLock)
-        locks |= LockKey::NumLock;
+    locks = xcbLockKeysOf(nativeModifiers);
 #endif
 
     return { chord, locks };

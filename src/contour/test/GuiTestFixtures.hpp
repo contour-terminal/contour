@@ -7,6 +7,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/Notifier.hpp>
@@ -424,6 +425,31 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
                                                                std::nullopt,
                                                                notifier ? std::move(notifier)
                                                                         : makeTestNotifier());
+}
+
+/// A TerminalSession a test builds itself, decoding keys with the platforms @p keyboardPlatforms builds
+/// rather than the build host's: what lets every platform's key path run on any machine.
+/// @param manager           The manager it reports to.
+/// @param pty               Its PTY (owned from here on).
+/// @param app               The application it runs in.
+/// @param keyboardPlatforms Builds the session's keyboard platform for its profile's policy.
+/// @return The session; the caller owns it.
+[[nodiscard]] inline std::unique_ptr<contour::session::TerminalSession> makeTestSession(
+    contour::session::TerminalSessionManager* manager,
+    std::unique_ptr<vtpty::Pty> pty,
+    contour::ContourGuiApp& app,
+    contour::input::KeyboardPlatformFactory keyboardPlatforms)
+{
+    return std::make_unique<contour::session::TerminalSession>(manager,
+                                                               std::move(pty),
+                                                               app,
+                                                               std::string {},
+                                                               std::nullopt,
+                                                               std::nullopt,
+                                                               makeTestNotifier(),
+                                                               contour::session::SessionRole::Shell,
+                                                               contour::session::SessionHosting::Local,
+                                                               std::move(keyboardPlatforms));
 }
 
 /// A real session factory with every call passed through, except that a session it would hand the

@@ -3,6 +3,7 @@
 // Tests for the plain-data key event: its recording format and its capture from Qt.
 
 #include <contour/config/KeyboardPlatformKind.hpp>
+#include <contour/input/KeyMapping.hpp>
 #include <contour/input/NativeKeyEvent.hpp>
 #include <contour/input/QtKeyCapture.hpp>
 
@@ -42,7 +43,7 @@ TEST_CASE("recorded native key events round-trip", "[input][capture]")
     {
         auto const line = formatRecorded(row);
         INFO(line);
-        CHECK(line.find('\n') == std::string::npos);
+        CHECK_FALSE(line.contains('\n'));
         auto const parsed = parseRecorded(line);
         REQUIRE(parsed.has_value());
         CHECK(*parsed == row);
@@ -102,4 +103,7 @@ TEST_CASE("captureInputMethodCommit is an unmodified text-only event", "[input][
     CHECK(captured.qtKey == 0);
     CHECK(captured.qtModifiers == 0);
     CHECK(captured.text == U"日本");
+    // The lock toggles are sampled as for a key -- live on Windows, zero elsewhere -- so the commit's text
+    // carries them as typed text would.
+    CHECK(captured.nativeModifiers == contour::input::nativeModifiersWithLockState(0));
 }

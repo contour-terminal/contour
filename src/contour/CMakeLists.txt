@@ -381,6 +381,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/NoticeModel.cpp
         window/QuickTerminalController.cpp
         session/TerminalSession.cpp
+        session/TerminalSessionKeyInput.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
         display/LatencyProbeDriver.cpp
@@ -933,6 +934,9 @@ if(CONTOUR_FRONTEND_GUI)
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
             input/NativeKeyEvent_test.cpp
+            input/KeyboardPlatform_test.cpp
+            input/KeyRouter_test.cpp
+            input/MacKeyboardPlatform_test.cpp
             session/KeyCharacterization_test.cpp
             display/ImeQueryRect_test.cpp
             display/ShortcutOverride_test.cpp
@@ -1005,10 +1009,12 @@ if(CONTOUR_FRONTEND_GUI)
             display/CommandBlockRendering_test.cpp
             display/TerminalAccessible_test.cpp
             display/TerminalDisplayIme_test.cpp
+            display/TerminalDisplayInput_test.cpp
             remote/TmuxController_test.cpp
             session/FocusRouting_test.cpp
             session/FontControl_test.cpp
             session/SessionInput_test.cpp
+            session/TerminalSessionKeyInput_test.cpp
             session/TabSizeInheritance_test.cpp
             test/ContourGuiApp_test.cpp
             test/MainWindowQml_test.cpp

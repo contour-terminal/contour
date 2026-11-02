@@ -7,6 +7,17 @@
 namespace contour::input
 {
 
+/// What the windowing system calls a physical key: the two native identifiers a key event carries.
+///
+/// Which of them means anything is the platform's business: X11 and Wayland report a keysym in
+/// `virtualKey` and the XKB keycode in `scanCode`; Win32 a virtual-key code and a scan code; macOS a
+/// Carbon key code in `virtualKey`.
+struct NativeKeyCode
+{
+    uint32_t virtualKey = 0; ///< QKeyEvent::nativeVirtualKey().
+    uint32_t scanCode = 0;   ///< QKeyEvent::nativeScanCode().
+};
+
 /// Translates a windowing system's native key identifier into the vocabularies the keyboard
 /// protocols transmit — neither of which it is.
 ///
@@ -23,17 +34,17 @@ class KeyboardLayout
   public:
     virtual ~KeyboardLayout() = default;
 
-    /// @param nativeVirtualKey QKeyEvent::nativeVirtualKey() for the event in question. What that
-    ///                         value means is the platform's business and this method's to know.
+    /// @param key The native identifiers of the event in question. What they mean is the platform's
+    ///            business and this method's to know.
     /// @return The codepoint the key produces unmodified, or 0 when it cannot be determined —
     ///         in which case the caller falls back to deriving it from the character.
-    [[nodiscard]] virtual char32_t unshiftedKeyOf(uint32_t nativeVirtualKey) const noexcept = 0;
+    [[nodiscard]] virtual char32_t unshiftedKeyOf(NativeKeyCode key) const noexcept = 0;
 
-    /// @param nativeVirtualKey QKeyEvent::nativeVirtualKey() for the event in question.
+    /// @param key The native identifiers of the event in question.
     /// @return The Win32 virtual-key code (`VK_*`) for the key, or 0 where there is none to give.
     ///         Only Windows has one; everywhere else this is 0, so that a native key identifier
     ///         cannot reach ConPTY's win32-input-mode disguised as a VK code.
-    [[nodiscard]] virtual uint32_t win32VirtualKeyOf(uint32_t nativeVirtualKey) const noexcept = 0;
+    [[nodiscard]] virtual uint32_t win32VirtualKeyOf(NativeKeyCode key) const noexcept = 0;
 };
 
 /// @return The KeyboardLayout implementation for the platform this build targets.

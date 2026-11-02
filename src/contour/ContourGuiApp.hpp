@@ -7,10 +7,13 @@
 #include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DesktopButtonLayout.hpp>
+#include <contour/config/KeyboardPlatformKind.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/input/KeyboardLayout.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/ShellRcEditor.hpp>
@@ -472,6 +475,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// to it, so one instance is shared rather than one per pane.
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+
+    /// How a session builds its keyboard platform: the build host's kind, over the app-wide layout. The one
+    /// place the build host is named for keyboard purposes.
+    /// @return The factory; the platforms it builds hold the layout by reference, which the app outlives.
+    [[nodiscard]] input::KeyboardPlatformFactory keyboardPlatformFactory() const
+    {
+        return input::makeKeyboardPlatformFactory(config::BuildKeyboardPlatformKind, *_keyboardLayout);
+    }
 
     /// @return The machine's GPUs, listed without waking any; never null.
     [[nodiscard]] std::shared_ptr<display::IGpuInventory const> const& gpuInventory() const noexcept
@@ -1229,6 +1240,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     core::async::ThreadPoolExecutor _linkProbeExecutor;
     /// The link detection services a test handed in; absent, linkDetectionServices() assembles the app's own.
     std::optional<vtbackend::LinkDetectionServices> _injectedLinkServices;
+    // Shared by every session's keyboard platform, which holds it by reference; @see keyboardLayout() and
+    // keyboardPlatformFactory(). Declared before _sessionManager, so that it outlives every session and the
+    // platform each one holds. It needs no Qt application, so it is built eagerly with the app.
+    std::unique_ptr<input::KeyboardLayout> _keyboardLayout = input::makePlatformKeyboardLayout();
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
@@ -1296,9 +1311,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<window::DragEndProbe> _dragEndProbe;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
-    // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
-    // provider this needs no Qt application, so it is built eagerly with the app.
-    std::unique_ptr<input::KeyboardLayout> _keyboardLayout = input::makePlatformKeyboardLayout();
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;

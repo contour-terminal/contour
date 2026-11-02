@@ -275,10 +275,10 @@ namespace helper
 
 /// Folds @p ch into the case that character bindings are stored and matched in (uppercase).
 ///
-/// WHICH case a letter reaches a binding in is decided by the route contour::sendKeyEvent() took,
-/// not by the user: the CharMappings table and the Ctrl branch both report the UPPERCASE key label,
-/// event->text() reports whatever the layout produced (lowercase for an unmodified press), and on
-/// macOS the option-as-Alt branch picks the case from Shift XOR CapsLock. Since the chord carries
+/// WHICH case a letter reaches a binding in is decided by the route the keyboard platform took, not by
+/// the user: the CharMappings table and the Ctrl+ASCII rule both report the UPPERCASE key label, the
+/// text route reports whatever the layout produced (lowercase for an unmodified press), and on macOS
+/// an Option key acting as Alt picks the case from Shift XOR CapsLock. Since the chord carries
 /// Shift separately, a letter's case says nothing the modifiers do not already say, so it is
 /// normalized away on both sides -- when a binding is parsed, and when a key event is looked up.
 ///

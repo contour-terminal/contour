@@ -178,28 +178,46 @@ enum class CtrlAltRole : uint8_t
 ///         else Chord.
 [[nodiscard]] CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text) noexcept;
 
-/// The bit of macOS's device-dependent modifier flags (`NX_DEVICELALTKEYMASK`) set while the left Option key
-/// is down. Qt hands the flags over as QKeyEvent::nativeModifiers().
-inline constexpr quint32 MacLeftOptionBit = 0x00000020;
+/// The chord a key or mouse event holds, as Qt reports it: Alt, Shift, Control, and Meta as Super.
+/// Lock keys and the keypad flag are not part of a chord.
+/// @param qtModifiers The event's Qt modifiers.
+/// @return The chord.
+[[nodiscard]] vtbackend::Modifiers chordOf(Qt::KeyboardModifiers qtModifiers) noexcept;
 
-/// The bit of macOS's device-dependent modifier flags (`NX_DEVICERALTKEYMASK`) set while the right Option key
-/// is down.
-inline constexpr quint32 MacRightOptionBit = 0x00000040;
+/// The bit of X11's core modifier mask (`XCB_MOD_MASK_LOCK`) set while CapsLock is latched. Fixed by the X11
+/// protocol; Wayland's Qt plugin reports the same mask.
+inline constexpr quint32 XcbCapsLockBit = 0x02;
 
-/// Which Option keys are down, as macOS's device-dependent modifier flags report them.
-/// A pure function of the bits on every host, so that it is tested everywhere; only the macOS key path
-/// consults it. The device-independent Option flag (`0x80000`) says Option is held but not which one, and
-/// is ignored here.
+/// The bit of X11's core modifier mask (`XCB_MOD_MASK_2`) set while NumLock is latched -- the conventional
+/// mapping, which every desktop keymap follows.
+inline constexpr quint32 XcbNumLockBit = 0x10;
+
+/// The lock keys an X11 or Wayland key event says are latched.
 /// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
-/// @return The keys whose bit is set; None when neither is.
-[[nodiscard]] constexpr config::OptionKeySide optionKeySideOf(quint32 nativeModifiers) noexcept
+/// @return CapsLock and NumLock, as their XCB mask bits say.
+[[nodiscard]] constexpr vtbackend::LockKeys xcbLockKeysOf(quint32 nativeModifiers) noexcept
 {
-    auto bits = uint8_t { 0 };
-    if ((nativeModifiers & MacLeftOptionBit) != 0)
-        bits |= static_cast<uint8_t>(config::OptionKeySide::Left);
-    if ((nativeModifiers & MacRightOptionBit) != 0)
-        bits |= static_cast<uint8_t>(config::OptionKeySide::Right);
-    return static_cast<config::OptionKeySide>(bits);
+    auto locks = vtbackend::LockKeys {};
+    if ((nativeModifiers & XcbCapsLockBit) != 0)
+        locks |= vtbackend::LockKey::CapsLock;
+    if ((nativeModifiers & XcbNumLockBit) != 0)
+        locks |= vtbackend::LockKey::NumLock;
+    return locks;
+}
+
+/// The bit of macOS's modifier flags (`NSEventModifierFlagCapsLock`) set while CapsLock is latched. A Mac
+/// keyboard has no NumLock.
+inline constexpr quint32 MacCapsLockBit = 0x00010000;
+
+/// The lock keys a macOS key event says are latched.
+/// @param nativeModifiers The value of QKeyEvent::nativeModifiers().
+/// @return CapsLock when its flag is set.
+[[nodiscard]] constexpr vtbackend::LockKeys macLockKeysOf(quint32 nativeModifiers) noexcept
+{
+    auto locks = vtbackend::LockKeys {};
+    if ((nativeModifiers & MacCapsLockBit) != 0)
+        locks |= vtbackend::LockKey::CapsLock;
+    return locks;
 }
 
 /// Creates the VT keyboard modifier state from Qt modifiers and native platform modifiers.

@@ -39,3 +39,4 @@ src/vthost/Transport.hpp !src/vthost/Daemon.hpp
 src/vthost/DaemonStarter.hpp !src/vthost/Daemon.hpp
 src/vthost/DaemonSpawn.hpp !src/vthost/Daemon.hpp
 src/vthost/SessionHost.hpp !src/vtcontrol/ControlApi.hpp
+src/contour/input/KeyboardPlatform.hpp !src/contour/config/Config.hpp

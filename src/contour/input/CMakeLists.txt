@@ -6,12 +6,18 @@
 # its arguments, and therefore testable without a window, a session or the machine's live lock state.
 add_library(contour_input STATIC
     HorizontalWheelGesture.hpp
+    KeyEvent.hpp
     KeyMapping.cpp KeyMapping.hpp
+    KeyRouter.cpp KeyRouter.hpp
+    KeyTranslation.hpp
     KeyboardLayout.cpp KeyboardLayout.hpp
+    KeyboardPlatform.cpp KeyboardPlatform.hpp
     Logging.hpp
+    MacKeyboardPlatform.cpp
     MouseMapping.cpp MouseMapping.hpp
     NativeKeyEvent.cpp NativeKeyEvent.hpp
     QtKeyCapture.cpp QtKeyCapture.hpp
+    XkbKeyboardPlatform.cpp
 )
 
 target_link_libraries(contour_input PUBLIC
