@@ -41,6 +41,7 @@ struct ToolRow
     vtcontrol::ControlGrants needs; ///< Every permission the tool needs.
     std::string_view summary;       ///< Description (composite rows); catalog rows read it from the API.
     std::string_view inputSchema;   ///< JSON Schema (composite rows); catalog rows read it from the API.
+    TabScope requiredScope = TabScope::OwnTab; ///< The scope under which the tool is listed at all.
 };
 
 /// @return Every tool in table order.

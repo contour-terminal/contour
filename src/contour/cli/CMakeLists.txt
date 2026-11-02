@@ -49,7 +49,7 @@ add_library(contour_cli STATIC
     ControlVerbs.cpp ControlVerbs.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     McpScope.cpp McpScope.hpp
-    McpTools.cpp McpTools.hpp
+    McpTools.cpp McpTools.hpp McpToolsDetail.hpp
     ExitStatus.hpp
     Hosting.hpp
     HostTransport.cpp HostTransport.hpp
