@@ -235,7 +235,7 @@ inline constexpr auto Methods = std::tuple {
         Permission::Read,
         Exposure::Everywhere,
         R"({})",
-        R"({"version":"0.9.0","protocolVersion":1,"platform":"linux","hostname":"devbox","uptimeSeconds":3600})",
+        R"({"version":"0.9.0","protocolVersion":1,"platform":"linux","hostname":"devbox","uptimeSeconds":3600,"grants":["read","screen","input","write"]})",
     },
     Method<ListRequest, ListReply> {
         "workspace.list",

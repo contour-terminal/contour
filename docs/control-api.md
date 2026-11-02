@@ -136,7 +136,8 @@ or one that was superseded, exits 1 with a note on standard error.
 A daemon's TCP tokens carry grants (`contour daemon --access-file`): `read` for listing, `screen` for
 capturing, reading blocks and program status (`pane.programStatusChanged`, and the `programStatus` of
 `contour ls --json`), `input` for typing, and `write` for changing the workspace. A call outside the
-token's grants is refused as forbidden (exit status 1). The daemon's socket grants everything to its owner.
+token's grants is refused as forbidden (exit status 1). The daemon's socket grants everything to its owner. `daemon.info` reports the connection's own grants in
+its `grants` array (by name, in the order above), so a client can tell what it may call before it tries.
 A connection holds at most 64 subscriptions and 256 pending waits; one more is refused as `limitReached`
 (exit status 1). Each verb opens a connection of its own, so only a script driving `contour api call` over one
 connection meets it.

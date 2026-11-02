@@ -16,6 +16,7 @@ interface types {
         platform: string,
         hostname: string,
         uptime-seconds: u32,
+        grants: list<string>,
     }
 
     record list-request {
