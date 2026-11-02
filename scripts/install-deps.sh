@@ -587,6 +587,7 @@ install_deps_fedora() {
         packages="$packages
             qt6-qt5compat-devel
             qt6-qtbase-devel
+            qt6-qtbase-private-devel
             qt6-qtbase-gui
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
