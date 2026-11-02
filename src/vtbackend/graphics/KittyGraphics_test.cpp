@@ -4,24 +4,25 @@
 // commands that place an image.
 
 #include <vtbackend/graphics/KittyGraphics.hpp>
+#include <vtbackend/testing/Deflate.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
 #include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
-
-#include <zlib.h>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -826,32 +827,24 @@ void seedComposableFrames(MockTerm<vtpty::MockPty>& mock)
 // (https://sw.kovidgoyal.net/kitty/graphics-protocol/#composing-animation-frames) and are the same
 // numbers the a=f tests above pin down. They could not be measured against kitty 0.49.2 itself: that
 // needs a GUI session, and this environment has none to drive it.
-TEST_CASE("KittyGraphics.compose.alpha_blends_a_rectangle", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    seedComposableFrames(mock);
-
-    // Frame 2's first pixel (0,0,255,128) over frame 1's second pixel, opaque green (0,255,0,255):
-    //   alpha = 128 + 255*(255-128)/255 = 255
-    //   G = (0*128 + 255*255*127/255) / 255 = 127,  B = (255*128 + 0) / 255 = 128
-    CHECK(replyTo(mock, "\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1\033\\"sv) == "\033_Gi=7;OK\033\\");
-    // Frame 1 is the one on display, so the composition shows at once.
-    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
-}
-
 TEST_CASE("KittyGraphics.compose.matches_the_blend_a_f_uses", "[kitty]")
 {
     // The same source pixel over the same destination pixel, once through a=c and once as an a=f
     // payload: one blend implementation, so the bytes must agree.
     auto viaCompose = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     seedComposableFrames(viaCompose);
-    viaCompose.writeToScreen("\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1\033\\"sv);
+    // Frame 2's first pixel (0,0,255,128) over frame 1's second pixel, opaque green (0,255,0,255):
+    //   alpha = 128 + 255*(255-128)/255 = 255
+    //   G = (0*128 + 255*255*127/255) / 255 = 127,  B = (255*128 + 0) / 255 = 128
+    CHECK(replyTo(viaCompose, "\033_Ga=c,i=7,r=2,c=1,X=0,Y=0,x=1,y=0,w=1,h=1\033\\"sv)
+          == "\033_Gi=7;OK\033\\");
 
     auto viaFrame = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     viaFrame.writeToScreen("\033_Ga=T,f=32,i=7,s=2,v=1;/wAA/wD/AP8=\033\\"sv);
     viaFrame.writeToScreen("\033_Ga=f,i=7,r=1,c=1,x=1,y=0,s=1,v=1;AAD/gA==\033\\"sv);
 
     REQUIRE(placedPixels(viaFrame) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
+    // Frame 1 is the one on display, so the composition shows at once.
     CHECK(placedPixels(viaCompose) == placedPixels(viaFrame));
 }
 
@@ -1435,21 +1428,7 @@ TEST_CASE("KittyGraphics.storage.freeing_an_image_frees_its_frames", "[kitty]")
 }
 // }}}
 
-namespace
-{
-/// Deflates @p input into a zlib stream and base64-encodes it, as an application sending `o=z` would.
-[[nodiscard]] std::string zlibBase64(std::string_view input)
-{
-    auto const source = std::vector<uint8_t>(input.begin(), input.end());
-    auto out = std::vector<uint8_t>(compressBound(static_cast<uLong>(source.size())));
-    auto outSize = static_cast<uLongf>(out.size());
-    auto const status =
-        compress2(out.data(), &outSize, source.data(), static_cast<uLong>(source.size()), Z_BEST_COMPRESSION);
-    REQUIRE(status == Z_OK);
-    out.resize(outSize);
-    return core::base64::encode(out.begin(), out.end());
-}
-} // namespace
+using vtbackend::test::zlibBase64;
 
 TEST_CASE("KittyGraphics.compression.transmit_with_o_z_displays_the_image", "[kitty]")
 {
@@ -1465,7 +1444,6 @@ TEST_CASE("KittyGraphics.compression.frame_with_o_z_is_composited", "[kitty]")
 {
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
-    mock.terminal.flushInput();
 
     // Frame 2: the second pixel replaced by blue.
     auto const blue = "\x00\x00\xFF"s;
@@ -1476,30 +1454,54 @@ TEST_CASE("KittyGraphics.compression.frame_with_o_z_is_composited", "[kitty]")
     CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
 }
 
-TEST_CASE("KittyGraphics.compression.raw_bomb_answers_EINVAL", "[kitty]")
+TEST_CASE("KittyGraphics.compression.refused_payloads_answer_why", "[kitty]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    // Declares 1x1 RGBA (4 bytes) but inflates to 4 MiB: refused at the declared size, not inflated.
-    auto const zeros = std::string(size_t { 4 } << 20, '\0');
-    CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=1,v=1,i=3,o=z;{}\033\\", zlibBase64(zeros)))
-          == "\033_Gi=3;EINVAL:payload size does not match dimensions\033\\");
-}
-
-TEST_CASE("KittyGraphics.compression.png_bomb_answers_ENOSPC", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    mock.terminal.settings().kittyImageStorageQuota = 4096;
-    auto const zeros = std::string(size_t { 4 } << 20, '\0');
-    CHECK(replyTo(mock, std::format("\033_Ga=T,f=100,i=3,o=z;{}\033\\", zlibBase64(zeros)))
-          == "\033_Gi=3;ENOSPC:image storage quota exceeded\033\\");
-}
-
-TEST_CASE("KittyGraphics.compression.corrupt_answers_EINVAL", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    // Valid base64, but not a zlib stream.
-    CHECK(replyTo(mock, "\033_Ga=T,f=32,s=1,v=1,i=3,o=z;AAAAAAAAAA==\033\\"sv)
-          == "\033_Gi=3;EINVAL:corrupt compressed payload\033\\");
+    // Inflates to 4 MiB: a bomb, whichever size the command declares.
+    auto const bomb = zlibBase64(std::string(size_t { 4 } << 20, '\0'));
+    struct Case
+    {
+        std::string_view name;
+        std::function<void(MockTerm<vtpty::MockPty>&)> setup;
+        std::string command;
+        std::string_view reply;
+    };
+    auto const noSetup = [](MockTerm<vtpty::MockPty>&) {
+    };
+    auto const cases = std::vector<Case> {
+        // Declares 1x1 RGBA (4 bytes): refused at the declared size, not inflated.
+        { .name = "raw_bomb_answers_EINVAL",
+          .setup = noSetup,
+          .command = std::format("\033_Ga=T,f=32,s=1,v=1,i=3,o=z;{}\033\\", bomb),
+          .reply = "\033_Gi=3;EINVAL:payload size does not match dimensions\033\\" },
+        // A PNG states its size only once decoded, so it is bounded by the quota.
+        { .name = "png_bomb_answers_ENOSPC",
+          .setup =
+              [](MockTerm<vtpty::MockPty>& mock) { mock.terminal.settings().kittyImageStorageQuota = 4096; },
+          .command = std::format("\033_Ga=T,f=100,i=3,o=z;{}\033\\", bomb),
+          .reply = "\033_Gi=3;ENOSPC:image storage quota exceeded\033\\" },
+        // Valid base64, but not a zlib stream.
+        { .name = "corrupt_answers_EINVAL",
+          .setup = noSetup,
+          .command = "\033_Ga=T,f=32,s=1,v=1,i=3,o=z;AAAAAAAAAA==\033\\",
+          .reply = "\033_Gi=3;EINVAL:corrupt compressed payload\033\\" },
+        // One RGB pixel declared for a frame.
+        { .name = "frame_bomb_answers_EINVAL",
+          .setup =
+              [](MockTerm<vtpty::MockPty>& mock) {
+                  mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+              },
+          .command = std::format("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1,o=z;{}\033\\", bomb),
+          .reply = "\033_Gi=7;EINVAL:payload size does not match dimensions\033\\" },
+    };
+    for (auto const& testCase: cases)
+    {
+        DYNAMIC_SECTION(testCase.name)
+        {
+            auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+            testCase.setup(mock);
+            CHECK(replyTo(mock, testCase.command) == testCase.reply);
+        }
+    }
 }
 
 TEST_CASE("KittyGraphics.compression.dimensions_that_overflow_are_refused_before_inflating", "[kitty]")
@@ -1515,19 +1517,6 @@ TEST_CASE("KittyGraphics.compression.dimensions_that_overflow_are_refused_before
     // 65536x65536 RGBA is exactly 16 GiB: representable, and far over the 128 MiB quota.
     CHECK(replyTo(mock, std::format("\033_Ga=T,f=32,s=65536,v=65536,i=3,o=z;{}\033\\", pixel))
           == "\033_Gi=3;EINVAL:image dimensions too large\033\\");
-}
-
-TEST_CASE("KittyGraphics.compression.frame_bomb_answers_EINVAL", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
-    mock.terminal.flushInput();
-
-    // One RGB pixel declared, 4 MiB inflated.
-    auto const zeros = std::string(size_t { 4 } << 20, '\0');
-    CHECK(replyTo(mock,
-                  std::format("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1,o=z;{}\033\\", zlibBase64(zeros)))
-          == "\033_Gi=7;EINVAL:payload size does not match dimensions\033\\");
 }
 
 TEST_CASE("KittyGraphics.compression.chunked_transmission_is_inflated_once_reassembled", "[kitty]")
@@ -1551,6 +1540,7 @@ namespace
 using namespace std::chrono_literals;
 
 /// The single pixel of each frame placeThreeFrames() builds, as placedPixels() reads it back.
+/// Functions rather than namespace-scope vectors, whose initialisation could throw before main().
 [[nodiscard]] std::vector<uint8_t> red()
 {
     return { 255, 0, 0 };
@@ -1806,64 +1796,61 @@ TEST_CASE("KittyGraphics.playback.alternate_screen_switch_pauses_and_resumes", "
     CHECK(placedPixels(mock) == green());
 }
 
-TEST_CASE("KittyGraphics.playback.a_display_asleep_for_more_than_a_loop_resumes", "[kitty]")
+TEST_CASE("KittyGraphics.playback.a_late_tick_lands_on_the_frame_its_time_shows", "[kitty]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    placeThreeFrames(mock, 10, 20, 30);
-    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-
-    // Many loops in one tick (a minimised window): it lands on the frame its time shows -- 1000 ms is 40 ms
-    // into the 60 ms loop, the third frame's -- and keeps playing from there.
-    advance(mock, 1000ms);
-    CHECK(placedPixels(mock) == blue());
-    CHECK(dueIn(mock) == 20ms);
-    advance(mock, 20ms);
-    CHECK(placedPixels(mock) == red());
-    CHECK(mock.terminal.kittyAnimationDue().has_value());
-}
-
-TEST_CASE("KittyGraphics.playback.a_tick_late_by_more_than_a_loop_lands_on_the_frame_by_time", "[kitty]")
-{
-    // A loop shorter than the gap between two ticks -- the daemon's throttle -- still plays: each tick lands
-    // on the frame its time shows, not on the one it started from.
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    placeThreeFrames(mock, 10, 10, 10);
-    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-
-    // 100 ms is 10 ms into the 30 ms loop: the second frame, shown until 110 ms.
-    advance(mock, 100ms);
-    CHECK(placedPixels(mock) == green());
-    CHECK(dueIn(mock) == 10ms);
-    advance(mock, 100ms);
-    CHECK(placedPixels(mock) == blue());
-    CHECK(dueIn(mock) == 10ms);
-}
-
-TEST_CASE("KittyGraphics.playback.a_tick_on_an_exact_multiple_of_the_loop_lands_on_its_start", "[kitty]")
-{
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    placeThreeFrames(mock, 10, 20, 30);
-    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-
-    // Ten 60 ms loops to the millisecond: the first frame again, with its whole gap ahead.
-    advance(mock, 600ms);
-    CHECK(placedPixels(mock) == red());
-    CHECK(dueIn(mock) == 10ms);
-    advance(mock, 10ms);
-    CHECK(placedPixels(mock) == green());
-}
-
-TEST_CASE("KittyGraphics.playback.v_n_stops_on_the_last_frame_after_a_long_sleep", "[kitty]")
-{
-    // The loops a long tick skips count towards `v=`: v=3 plays two 30 ms loops, so one tick a second later
-    // rests on the last frame rather than playing on.
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
-    placeThreeFrames(mock, 10, 10, 10);
-    mock.writeToScreen("\033_Ga=a,i=7,s=3,v=3\033\\"sv);
-
-    advance(mock, 1000ms);
-    CHECK(placedPixels(mock) == blue());
-    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
+    // A tick late by more than a loop -- a minimised window, the daemon's throttle -- lands on the frame its
+    // time shows, not on the one it started from, and keeps playing from there.
+    struct Step
+    {
+        std::chrono::milliseconds advance;
+        std::vector<uint8_t> pixel;
+        std::optional<std::chrono::milliseconds> dueIn; ///< nullopt: no deadline left.
+    };
+    struct Case
+    {
+        std::string_view name;
+        std::array<int, 3> gaps;
+        std::string_view start;
+        std::vector<Step> steps;
+    };
+    auto const cases = std::vector<Case> {
+        // 1000 ms is 40 ms into the 60 ms loop: the third frame's.
+        { .name = "a_display_asleep_for_more_than_a_loop_resumes",
+          .gaps = { 10, 20, 30 },
+          .start = "\033_Ga=a,i=7,s=3\033\\",
+          .steps = { { 1000ms, blue(), 20ms }, { 20ms, red(), 10ms } } },
+        // 100 ms is 10 ms into the 30 ms loop: the second frame, shown until 110 ms.
+        { .name = "a_tick_late_by_more_than_a_loop_lands_on_the_frame_by_time",
+          .gaps = { 10, 10, 10 },
+          .start = "\033_Ga=a,i=7,s=3\033\\",
+          .steps = { { 100ms, green(), 10ms }, { 100ms, blue(), 10ms } } },
+        // Ten 60 ms loops to the millisecond: the first frame again, with its whole gap ahead.
+        { .name = "a_tick_on_an_exact_multiple_of_the_loop_lands_on_its_start",
+          .gaps = { 10, 20, 30 },
+          .start = "\033_Ga=a,i=7,s=3\033\\",
+          .steps = { { 600ms, red(), 10ms }, { 10ms, green(), 20ms } } },
+        // The loops a long tick skips count towards `v=`: v=3 plays two 30 ms loops, so one tick a second
+        // later rests on the last frame rather than playing on.
+        { .name = "v_n_stops_on_the_last_frame_after_a_long_sleep",
+          .gaps = { 10, 10, 10 },
+          .start = "\033_Ga=a,i=7,s=3,v=3\033\\",
+          .steps = { { 1000ms, blue(), std::nullopt } } },
+    };
+    for (auto const& testCase: cases)
+    {
+        DYNAMIC_SECTION(testCase.name)
+        {
+            auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+            placeThreeFrames(mock, testCase.gaps[0], testCase.gaps[1], testCase.gaps[2]);
+            mock.writeToScreen(testCase.start);
+            for (auto const& step: testCase.steps)
+            {
+                advance(mock, step.advance);
+                CHECK(placedPixels(mock) == step.pixel);
+                CHECK(dueIn(mock) == step.dueIn);
+            }
+        }
+    }
 }
 
 TEST_CASE("KittyGraphics.playback.s3_with_one_frame_plays_once_frames_arrive", "[kitty]")

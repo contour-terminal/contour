@@ -3326,12 +3326,6 @@ namespace
 /// mirror counting the screen updates a client would be sent.
 struct PlaybackHarness
 {
-    struct Mirror final: vthost::SessionStreamEvents
-    {
-        int updates = 0;
-        void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
-    };
-
     /// @param initial The emulation settings the host spawns its session with.
     explicit PlaybackHarness(vtbackend::Settings initial = {}): settings { std::move(initial) }
     {
@@ -3383,8 +3377,11 @@ struct PlaybackHarness
                 std::format("\033_Ga=f,i=7,X=1,s=1,v=1,z={};{}\033\\", gap.count(), pixel(frame)));
         terminal->writeToScreen("\033_Ga=a,i=7,s=3\033\\");
         turn();
-        mirror.updates = 0;
+        mirror.screens.clear();
     }
+
+    /// @return How many screen updates the mirror heard since placeLoopingFrames() started playback.
+    [[nodiscard]] int updates() const { return static_cast<int>(mirror.screens.size()); }
 
     /// @return The frame the placed image shows, by the red channel placeLoopingFrames() gave it; nullopt
     ///         for none placed.
@@ -3419,7 +3416,7 @@ struct PlaybackHarness
                                                        .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
     vtworkspace::SessionId session {};
     vtbackend::Terminal* terminal = nullptr;
-    Mirror mirror;
+    StreamRecorder mirror; ///< What one attached client hears: a screen update per frame it is sent.
 };
 
 /// The most screen updates a session's playback may raise over @p duration: one per minimum frame interval,
@@ -3443,7 +3440,7 @@ TEST_CASE("daemon.playback_advances_frames_for_a_hosted_session", "[vthost][host
 
     // The second frame is on the session's screen, and the clients were told.
     CHECK(h.shownFrame() == 1);
-    CHECK(h.mirror.updates > 0);
+    CHECK(h.updates() > 0);
     // Still playing: the timer is armed for the third.
     CHECK(h.host.ticksKittyAnimations(h.session));
 
@@ -3472,8 +3469,7 @@ TEST_CASE("daemon.playback_is_throttled_to_the_minimum_interval", "[vthost][host
     CHECK(std::ranges::all_of(timesShown, [](int times) { return times > 0; }));
     auto constexpr Most = mostFramesIn(Duration);
     // Every tick lands on another frame (100 ms is a third of a loop on), so each is a screen update.
-    CHECK(h.mirror.updates == Most - 1);
-    CHECK(h.mirror.updates <= Most);
+    CHECK(h.updates() == Most - 1);
     // The first frame is due at 10 ms, every later tick a minimum interval after the one before: the last
     // within the second is at 910 ms, which is 10 ms into the 30 ms loop -- the second frame. Skipped, not
     // queued: a hundred frames were due meanwhile.
@@ -3485,18 +3481,18 @@ TEST_CASE("daemon.two_clients_do_not_double_the_rate", "[vthost][host][kitty]")
     // The throttle is the session's: a frame advanced once is sent to every client, so a second client
     // attached costs the session no second tick.
     auto h = PlaybackHarness {};
-    auto second = PlaybackHarness::Mirror {};
+    auto second = StreamRecorder {};
     h.host.subscribeStream(&second);
     h.placeLoopingFrames(3, std::chrono::milliseconds { 10 });
-    second.updates = 0;
+    second.screens.clear();
 
     auto constexpr Duration = std::chrono::milliseconds { 1000 };
     h.play(Duration, std::chrono::milliseconds { 10 });
 
     auto constexpr Most = mostFramesIn(Duration);
-    CHECK(h.mirror.updates > 0);
-    CHECK(h.mirror.updates <= Most);
-    CHECK(second.updates == h.mirror.updates);
+    CHECK(h.updates() > 0);
+    CHECK(h.updates() <= Most);
+    CHECK(second.screens.size() == h.mirror.screens.size());
     h.host.unsubscribeStream(&second);
 }
 
@@ -3517,12 +3513,12 @@ TEST_CASE("daemon.idle_session_with_blinking_text_arms_no_animation_timer", "[vt
     REQUIRE(h.host.ticksKittyAnimations(h.session));
     h.terminal->writeToScreen("\033_Ga=a,i=7,s=1\033\\");
     h.turn();
-    h.mirror.updates = 0;
+    h.mirror.screens.clear();
 
     CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
     h.play(std::chrono::milliseconds { 1000 }, std::chrono::milliseconds { 10 });
     CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
-    CHECK(h.mirror.updates == 0);
+    CHECK(h.updates() == 0);
 }
 
 TEST_CASE("daemon.closing_a_session_drops_its_animation_timer", "[vthost][host][kitty]")
@@ -3535,7 +3531,7 @@ TEST_CASE("daemon.closing_a_session_drops_its_animation_timer", "[vthost][host][
     CHECK_FALSE(h.host.ticksKittyAnimations(h.session));
     // Its deadline passes with the terminal gone: nothing is ticked.
     h.play(std::chrono::milliseconds { 1000 }, std::chrono::milliseconds { 100 });
-    CHECK(h.mirror.updates == 0);
+    CHECK(h.updates() == 0);
 }
 
 TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost][host][kitty][threading]")
@@ -3560,7 +3556,7 @@ TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost]
     writer.join();
     h.turn();
 
-    CHECK(h.mirror.updates > 0);
+    CHECK(h.updates() > 0);
     CHECK(h.shownFrame().has_value());
     CHECK(h.host.ticksKittyAnimations(h.session));
 }

@@ -15,6 +15,7 @@ set(vtbackend_HEADERS
     screen/AsciiText.hpp
     vt/Capabilities.hpp
     testing/CatchStringMakers.hpp
+    testing/Deflate.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
     testing/InMemoryGitFileSystem.hpp

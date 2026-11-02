@@ -3,32 +3,20 @@
 // Unit tests for the kitty graphics `o=z` inflater and its output cap.
 
 #include <vtbackend/graphics/KittyInflate.hpp>
+#include <vtbackend/testing/Deflate.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <ranges>
-#include <span>
 #include <vector>
 
-#include <zlib.h>
-
 using namespace vtbackend::kitty_graphics;
+using vtbackend::test::deflateZlib;
 
 namespace
 {
-/// Deflates @p input into a zlib stream, as an application sending `o=z` would.
-[[nodiscard]] std::vector<uint8_t> deflateZlib(std::span<uint8_t const> input)
-{
-    auto out = std::vector<uint8_t>(compressBound(static_cast<uLong>(input.size())));
-    auto outSize = static_cast<uLongf>(out.size());
-    auto const status =
-        compress2(out.data(), &outSize, input.data(), static_cast<uLong>(input.size()), Z_BEST_SPEED);
-    REQUIRE(status == Z_OK);
-    out.resize(outSize);
-    return out;
-}
-
 [[nodiscard]] std::vector<uint8_t> patterned(size_t size)
 {
     auto data = std::vector<uint8_t>(size);
@@ -47,25 +35,35 @@ TEST_CASE("inflate.roundtrip", "[kitty]")
     CHECK(*result == original);
 }
 
-TEST_CASE("inflate.corrupt_stream_is_Corrupt", "[kitty]")
+TEST_CASE("inflate.an_incomplete_stream_is_Corrupt", "[kitty]")
 {
-    auto const original = patterned(4096);
-    auto compressed = deflateZlib(original);
-    // The header's check bits make a flipped first byte a certain failure.
-    compressed.front() ^= 0xFF;
-    auto const result = inflateZlib(compressed, original.size());
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error() == InflateError::Corrupt);
-}
-
-TEST_CASE("inflate.truncated_stream_is_Corrupt", "[kitty]")
-{
-    auto const original = patterned(size_t { 1 } << 16);
-    auto compressed = deflateZlib(original);
-    compressed.resize(compressed.size() / 2);
-    auto const result = inflateZlib(compressed, original.size());
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error() == InflateError::Corrupt);
+    struct Case
+    {
+        char const* name;
+        size_t originalSize;
+        std::function<void(std::vector<uint8_t>&)> damage;
+    };
+    auto const cases = std::vector<Case> {
+        // The header's check bits make a flipped first byte a certain failure.
+        { .name = "corrupt stream",
+          .originalSize = 4096,
+          .damage = [](std::vector<uint8_t>& stream) { stream.front() ^= 0xFF; } },
+        { .name = "truncated stream",
+          .originalSize = size_t { 1 } << 16,
+          .damage = [](std::vector<uint8_t>& stream) { stream.resize(stream.size() / 2); } },
+        { .name = "empty input",
+          .originalSize = 4096,
+          .damage = [](std::vector<uint8_t>& stream) { stream.clear(); } },
+    };
+    for (auto const& testCase: cases)
+    {
+        INFO(testCase.name);
+        auto stream = deflateZlib(patterned(testCase.originalSize));
+        testCase.damage(stream);
+        auto const result = inflateZlib(stream, testCase.originalSize);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == InflateError::Corrupt);
+    }
 }
 
 TEST_CASE("inflate.output_over_cap_is_TooLarge_without_allocating_it", "[kitty]")
@@ -91,13 +89,6 @@ TEST_CASE("inflate.output_exactly_at_cap_is_accepted", "[kitty]")
     auto const tooSmall = inflateZlib(compressed, original.size() - 1);
     REQUIRE_FALSE(tooSmall.has_value());
     CHECK(tooSmall.error() == InflateError::TooLarge);
-}
-
-TEST_CASE("inflate.empty_input_is_Corrupt", "[kitty]")
-{
-    auto const result = inflateZlib({}, 4096);
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error() == InflateError::Corrupt);
 }
 
 TEST_CASE("inflate.bytes_after_the_stream_end_are_ignored", "[kitty]")
