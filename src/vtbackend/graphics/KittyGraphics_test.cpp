@@ -1570,7 +1570,7 @@ void placeThreeFrames(MockTerm<vtpty::MockPty>& mock, int first, int second, int
 }
 
 /// Moves the test's clock on by @p delta and lets the display tick at the new time, as it does each frame.
-void advance(MockTerm<vtpty::MockPty>& mock, std::chrono::milliseconds delta)
+void tickAfter(MockTerm<vtpty::MockPty>& mock, std::chrono::milliseconds delta)
 {
     mock.steadyClock.advance(delta);
     mock.terminal.tick(mock.steadyClock.now());
@@ -1594,13 +1594,13 @@ TEST_CASE("KittyGraphics.playback.s3_advances_frames_by_their_gaps", "[kitty]")
     REQUIRE(placedPixels(mock) == red());
 
     // Each frame is shown for its own gap, measured from when it came up -- not a moment less.
-    advance(mock, 9ms);
+    tickAfter(mock, 9ms);
     CHECK(placedPixels(mock) == red());
-    advance(mock, 1ms);
+    tickAfter(mock, 1ms);
     CHECK(placedPixels(mock) == green());
-    advance(mock, 19ms);
+    tickAfter(mock, 19ms);
     CHECK(placedPixels(mock) == green());
-    advance(mock, 1ms);
+    tickAfter(mock, 1ms);
     CHECK(placedPixels(mock) == blue());
 }
 
@@ -1610,12 +1610,12 @@ TEST_CASE("KittyGraphics.playback.s3_wraps_to_frame_1", "[kitty]")
     placeThreeFrames(mock, 10, 20, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
 
-    advance(mock, 10ms);
-    advance(mock, 20ms);
+    tickAfter(mock, 10ms);
+    tickAfter(mock, 20ms);
     REQUIRE(placedPixels(mock) == blue());
-    advance(mock, 30ms);
+    tickAfter(mock, 30ms);
     CHECK(placedPixels(mock) == red());
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK(placedPixels(mock) == green());
     CHECK(dueIn(mock) == 20ms);
 }
@@ -1627,19 +1627,19 @@ TEST_CASE("KittyGraphics.playback.v_n_stops_after_n_minus_1_loops", "[kitty]")
     // v=3: two loops, then rest on the last frame.
     mock.writeToScreen("\033_Ga=a,i=7,s=3,v=3\033\\"sv);
 
-    advance(mock, 10ms);
-    advance(mock, 20ms);
+    tickAfter(mock, 10ms);
+    tickAfter(mock, 20ms);
     REQUIRE(placedPixels(mock) == blue());
-    advance(mock, 30ms);
+    tickAfter(mock, 30ms);
     REQUIRE(placedPixels(mock) == red());
-    advance(mock, 10ms);
-    advance(mock, 20ms);
+    tickAfter(mock, 10ms);
+    tickAfter(mock, 20ms);
     REQUIRE(placedPixels(mock) == blue());
 
-    advance(mock, 30ms);
+    tickAfter(mock, 30ms);
     CHECK(placedPixels(mock) == blue());
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 1000ms);
+    tickAfter(mock, 1000ms);
     CHECK(placedPixels(mock) == blue());
 }
 
@@ -1649,9 +1649,9 @@ TEST_CASE("KittyGraphics.playback.s2_holds_at_last_frame_then_continues_on_new_f
     placeThreeFrames(mock, 10, 20, 30);
     CHECK(replyTo(mock, "\033_Ga=a,i=7,s=2\033\\"sv) == "\033_Gi=7;OK\033\\");
 
-    advance(mock, 10ms);
-    advance(mock, 20ms);
-    advance(mock, 30ms);
+    tickAfter(mock, 10ms);
+    tickAfter(mock, 20ms);
+    tickAfter(mock, 30ms);
     // Out of frames: it waits on the last one, and nothing need wake the display for it meanwhile.
     CHECK(placedPixels(mock) == blue());
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
@@ -1659,9 +1659,9 @@ TEST_CASE("KittyGraphics.playback.s2_holds_at_last_frame_then_continues_on_new_f
     // A new frame ends the wait at once: the last one has had its gap already.
     CHECK(replyTo(mock, "\033_Ga=f,i=7,X=1,s=1,v=1,z=10;////\033\\"sv) == "\033_Gi=7;OK\033\\");
     CHECK(dueIn(mock) == 0ms);
-    advance(mock, 0ms);
+    tickAfter(mock, 0ms);
     CHECK(placedPixels(mock) == white());
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK(placedPixels(mock) == white());
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
 }
@@ -1671,12 +1671,12 @@ TEST_CASE("KittyGraphics.playback.s1_stops_on_current_frame", "[kitty]")
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     placeThreeFrames(mock, 10, 20, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     REQUIRE(placedPixels(mock) == green());
 
     CHECK(replyTo(mock, "\033_Ga=a,i=7,s=1\033\\"sv) == "\033_Gi=7;OK\033\\");
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 1000ms);
+    tickAfter(mock, 1000ms);
     CHECK(placedPixels(mock) == green());
 }
 
@@ -1686,9 +1686,9 @@ TEST_CASE("KittyGraphics.playback.gapless_frames_are_skipped", "[kitty]")
     placeThreeFrames(mock, 10, -1, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
 
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK(placedPixels(mock) == blue());
-    advance(mock, 30ms);
+    tickAfter(mock, 30ms);
     CHECK(placedPixels(mock) == red());
 }
 
@@ -1700,9 +1700,9 @@ TEST_CASE("KittyGraphics.playback.zero_gap_uses_the_default", "[kitty]")
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
 
     auto const defaultGap = std::chrono::milliseconds(DefaultFrameGapMilliseconds);
-    advance(mock, defaultGap - 1ms);
+    tickAfter(mock, defaultGap - 1ms);
     CHECK(placedPixels(mock) == red());
-    advance(mock, 1ms);
+    tickAfter(mock, 1ms);
     CHECK(placedPixels(mock) == green());
 }
 
@@ -1714,7 +1714,7 @@ TEST_CASE("KittyGraphics.playback.all_gapless_holds_without_a_deadline", "[kitty
 
     // Nothing to show for any time at all: a deadline would spin the display for no frame.
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 1000ms);
+    tickAfter(mock, 1000ms);
     CHECK(placedPixels(mock) == red());
 }
 
@@ -1723,7 +1723,7 @@ TEST_CASE("KittyGraphics.playback.explicit_frame_selection_works_while_playing",
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     placeThreeFrames(mock, 10, 20, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     REQUIRE(placedPixels(mock) == green());
 
     mock.writeToScreen("\033_Ga=a,i=7,c=3\033\\"sv);
@@ -1733,7 +1733,7 @@ TEST_CASE("KittyGraphics.playback.explicit_frame_selection_works_while_playing",
 
     // ... and playback goes on from the frame selected, for that frame's whole gap.
     CHECK(dueIn(mock) == 10ms);
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK(placedPixels(mock) == green());
 }
 
@@ -1758,7 +1758,7 @@ TEST_CASE("KittyGraphics.playback.scrolled_off_placement_holds_no_deadline", "[k
     // Off the page and into the history: nothing on display to advance, so nothing to wake up for.
     mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
     REQUIRE(placedPixels(mock).empty());
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
 
     // A placement on the page plays again.
@@ -1787,12 +1787,12 @@ TEST_CASE("KittyGraphics.playback.alternate_screen_switch_pauses_and_resumes", "
     // The primary screen's animation is not on display behind the alternate screen.
     mock.writeToScreen("\033[?1049h"sv);
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 10ms);
+    tickAfter(mock, 10ms);
     CHECK(placedPixels(mock) == red());
 
     mock.writeToScreen("\033[?1049l"sv);
     CHECK(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 0ms);
+    tickAfter(mock, 0ms);
     CHECK(placedPixels(mock) == green());
 }
 
@@ -1845,7 +1845,7 @@ TEST_CASE("KittyGraphics.playback.a_late_tick_lands_on_the_frame_its_time_shows"
             mock.writeToScreen(testCase.start);
             for (auto const& step: testCase.steps)
             {
-                advance(mock, step.advance);
+                tickAfter(mock, step.advance);
                 CHECK(placedPixels(mock) == step.pixel);
                 CHECK(dueIn(mock) == step.dueIn);
             }
@@ -1865,12 +1865,12 @@ TEST_CASE("KittyGraphics.playback.s3_with_one_frame_plays_once_frames_arrive", "
     // The application streams its frames after starting playback, as it may: they play without another a=a.
     mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=20;AP8A\033\\"sv);
     REQUIRE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 0ms);
+    tickAfter(mock, 0ms);
     CHECK(placedPixels(mock) == green());
     mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=30;AAD/\033\\"sv);
-    advance(mock, 20ms);
+    tickAfter(mock, 20ms);
     CHECK(placedPixels(mock) == blue());
-    advance(mock, 30ms);
+    tickAfter(mock, 30ms);
     CHECK(placedPixels(mock) == red());
 }
 
@@ -1887,7 +1887,7 @@ TEST_CASE("KittyGraphics.playback.s2_resumes_past_appended_gapless_frames", "[ki
     CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
     mock.writeToScreen("\033_Ga=f,i=7,X=1,s=1,v=1,z=10;AAD/\033\\"sv);
     REQUIRE(mock.terminal.kittyAnimationDue().has_value());
-    advance(mock, 0ms);
+    tickAfter(mock, 0ms);
     CHECK(placedPixels(mock) == blue());
 }
 
@@ -1923,9 +1923,9 @@ TEST_CASE("KittyGraphics.playback.tick_raises_screenUpdated_when_a_frame_advance
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
     mock.screenUpdates = 0;
 
-    advance(mock, 5ms);
+    tickAfter(mock, 5ms);
     CHECK(mock.screenUpdates == 0);
-    advance(mock, 5ms);
+    tickAfter(mock, 5ms);
     CHECK(mock.screenUpdates == 1);
 }
 
@@ -1938,11 +1938,11 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_scree
     SECTION("s=2 out of frames")
     {
         mock.writeToScreen("\033_Ga=a,i=7,s=2\033\\"sv);
-        advance(mock, 10ms);
-        advance(mock, 20ms);
+        tickAfter(mock, 10ms);
+        tickAfter(mock, 20ms);
         REQUIRE(placedPixels(mock) == blue());
         mock.screenUpdates = 0;
-        advance(mock, 30ms);
+        tickAfter(mock, 30ms);
         CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
     }
     SECTION("no placement on the page")
@@ -1951,14 +1951,14 @@ TEST_CASE("KittyGraphics.playback.a_tick_that_shows_no_new_frame_raises_no_scree
         mock.writeToScreen("\033[4;1H\n\n\n\n"sv);
         REQUIRE(placedPixels(mock).empty());
         mock.screenUpdates = 0;
-        advance(mock, 10ms);
+        tickAfter(mock, 10ms);
         CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
     }
     SECTION("whole loops landing on the frame they started from")
     {
         mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
         mock.screenUpdates = 0;
-        advance(mock, 600ms);
+        tickAfter(mock, 600ms);
         REQUIRE(placedPixels(mock) == red());
         CHECK(dueIn(mock) == 10ms);
     }
@@ -1994,7 +1994,7 @@ TEST_CASE("KittyGraphics.playback.tick_and_parser_do_not_race", "[kitty][threadi
     auto stop = std::atomic<bool> { false };
     auto ticker = std::thread { [&]() {
         while (!stop.load(std::memory_order_acquire))
-            advance(mock, 1ms);
+            tickAfter(mock, 1ms);
     } };
 
     for (auto const round: std::views::iota(0, 200))
