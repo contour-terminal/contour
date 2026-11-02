@@ -20,6 +20,7 @@ add_library(contour_config STATIC
     ConfigEnumInfo.hpp
     ConfigEnumReader.hpp
     ConfigReader.hpp
+    DefaultBindings.cpp DefaultBindings.hpp
     DefaultsEdition.hpp
     DesktopButtonLayout.cpp DesktopButtonLayout.hpp
     FileOpenerTemplate.cpp FileOpenerTemplate.hpp
@@ -31,6 +32,7 @@ add_library(contour_config STATIC
     HostSideFile.cpp HostSideFile.hpp
     HostUrl.cpp HostUrl.hpp
     HotkeyChord.hpp
+    KeyboardPlatformKind.hpp
     LaunchTarget.cpp LaunchTarget.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp

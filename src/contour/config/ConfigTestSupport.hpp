@@ -44,6 +44,17 @@ using namespace std::string_view_literals;
     return config;
 }
 
+/// Loads a config from inline YAML as the keyboard platform @p kind reads it: `Primary` resolves for it, and
+/// the default bindings are its own.
+[[nodiscard]] inline contour::config::Config loadFromYaml(QTemporaryDir& dir,
+                                                          std::string_view yaml,
+                                                          contour::config::KeyboardPlatformKind kind)
+{
+    auto config = contour::config::Config { .keyboardPlatformKind = kind };
+    contour::config::loadConfigFromFile(config, writeConfig(dir, yaml));
+    return config;
+}
+
 /// The main profile's color scheme, which @p config must give as a single scheme rather than a dark/light
 /// pair.
 [[nodiscard]] inline vtbackend::ColorPalette schemeOf(contour::config::Config const& config)

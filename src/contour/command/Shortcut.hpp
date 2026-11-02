@@ -34,7 +34,9 @@ enum class ShortcutStyle : uint8_t
     MacGlyphs, ///< Apple's modifier and key glyphs, unseparated: "⇧⌘P".
 };
 
-/// The style @p host's users expect: glyphs on macOS, spelled-out text elsewhere.
+/// The style @p host's users expect: glyphs on macOS, spelled-out text elsewhere. For where the HOST's look
+/// is meant (the window controls' chrome); the keyboard's own spelling is the KeyboardPlatformKind
+/// overload's.
 /// @param host The host to spell shortcuts for.
 /// @return That host's shortcut style.
 [[nodiscard]] constexpr ShortcutStyle shortcutStyleFor(config::HostPlatform host) noexcept
@@ -49,17 +51,27 @@ enum class ShortcutStyle : uint8_t
     return ShortcutStyle::Text;
 }
 
+/// The style @p kind's users expect: glyphs on macOS, spelled-out text elsewhere. For a decision that is
+/// about the KEYBOARD (how its chords are spelled), not the window controls' look: that one is the
+/// HostPlatform overload's.
+/// @param kind The keyboard platform to spell shortcuts for.
+/// @return That platform's shortcut style.
+[[nodiscard]] constexpr ShortcutStyle shortcutStyleFor(config::KeyboardPlatformKind kind) noexcept
+{
+    switch (kind)
+    {
+        case config::KeyboardPlatformKind::Mac: return ShortcutStyle::MacGlyphs;
+        case config::KeyboardPlatformKind::Win32:
+        case config::KeyboardPlatformKind::Xkb: break;
+    }
+    return ShortcutStyle::Text;
+}
+
 /// The style the platform this was built for expects. @see shortcutStyleFor.
 /// @return The platform's shortcut style.
 [[nodiscard]] constexpr ShortcutStyle platformShortcutStyle() noexcept
 {
-#ifdef __APPLE__
-    return shortcutStyleFor(config::HostPlatform::MacOS);
-#elifdef _WIN32
-    return shortcutStyleFor(config::HostPlatform::Windows);
-#else
-    return shortcutStyleFor(config::HostPlatform::Other);
-#endif
+    return shortcutStyleFor(config::BuildKeyboardPlatformKind);
 }
 
 /// Which of a command's chords a view shows, where the command has more than one.
@@ -84,17 +96,25 @@ enum class ChordPreference : uint8_t
     return ChordPreference::FirstBound;
 }
 
+/// The preference @p kind's users expect: the ⌘ chord on macOS, the first bound elsewhere.
+/// @param kind The keyboard platform the chords are shown on.
+/// @return That platform's preference.
+[[nodiscard]] constexpr ChordPreference chordPreferenceFor(config::KeyboardPlatformKind kind) noexcept
+{
+    switch (kind)
+    {
+        case config::KeyboardPlatformKind::Mac: return ChordPreference::CommandKey;
+        case config::KeyboardPlatformKind::Win32:
+        case config::KeyboardPlatformKind::Xkb: break;
+    }
+    return ChordPreference::FirstBound;
+}
+
 /// The preference the platform this was built for expects. @see chordPreferenceFor.
 /// @return The platform's chord preference.
 [[nodiscard]] constexpr ChordPreference platformChordPreference() noexcept
 {
-#ifdef __APPLE__
-    return chordPreferenceFor(config::HostPlatform::MacOS);
-#elifdef _WIN32
-    return chordPreferenceFor(config::HostPlatform::Windows);
-#else
-    return chordPreferenceFor(config::HostPlatform::Other);
-#endif
+    return chordPreferenceFor(config::BuildKeyboardPlatformKind);
 }
 
 /// One chord modifier and the name a UI shows it under.
@@ -236,8 +256,12 @@ using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
 ///
 /// Then the enabled built-in fallback rows @p config leaves unbound, as shortcutIndex(config, style) does.
 /// @param config The configuration.
-[[nodiscard]] ChordIndex chordIndex(config::Config const& config,
-                                    ChordPreference preference = platformChordPreference());
+[[nodiscard]] ChordIndex chordIndex(config::Config const& config, ChordPreference preference);
+
+/// @copydoc chordIndex(config::Config const&, ChordPreference)
+/// The preference is the one the configuration's own keyboard platform expects (@see chordPreferenceFor), and
+/// the built-in fallback rows are that platform's: a Primary row shows as ⌘ on macOS, Ctrl+Shift elsewhere.
+[[nodiscard]] ChordIndex chordIndex(config::Config const& config);
 
 /// Indexes every key/char binding in @p mappings by the id of the command it runs, so a view can ask
 /// "what is the shortcut for this command?" in one lookup rather than re-scanning the bindings.

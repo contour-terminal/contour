@@ -11,6 +11,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
 #include <contour/input/MouseMapping.hpp>
+#include <contour/input/QtKeyCapture.hpp>
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/BlurBehind.hpp>
 #include <contour/platform/QtInvoke.hpp>
@@ -61,6 +62,7 @@
 #include <mutex>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -1385,21 +1387,22 @@ void TerminalDisplay::destroyRenderer()
 // display with no session has nothing to route input to, so early-out.
 void TerminalDisplay::keyPressEvent(QKeyEvent* keyEvent)
 {
+    // The keystroke the ShortcutOverride was about has arrived: the input method is asked about no other.
+    _pendingInputMethodRoute = input::InputMethodRoute::ToInputMethod;
     if (!_session)
         return;
     session::sendKeyEvent(keyEvent,
                           keyEvent->isAutoRepeat() ? vtbackend::KeyboardEventType::Repeat
                                                    : vtbackend::KeyboardEventType::Press,
-                          *_session,
-                          _session->keyboardLayout());
+                          *_session);
 }
 
 void TerminalDisplay::keyReleaseEvent(QKeyEvent* keyEvent)
 {
+    _pendingInputMethodRoute = input::InputMethodRoute::ToInputMethod;
     if (!_session || keyEvent->isAutoRepeat())
         return;
-    session::sendKeyEvent(
-        keyEvent, vtbackend::KeyboardEventType::Release, *_session, _session->keyboardLayout());
+    session::sendKeyEvent(keyEvent, vtbackend::KeyboardEventType::Release, *_session);
 }
 
 void TerminalDisplay::wheelEvent(QWheelEvent* event)
@@ -1494,6 +1497,8 @@ void TerminalDisplay::focusInEvent(QFocusEvent* event)
 
 void TerminalDisplay::focusOutEvent(QFocusEvent* event)
 {
+    // A keystroke whose press goes elsewhere must not leave the input method off here.
+    _pendingInputMethodRoute = input::InputMethodRoute::ToInputMethod;
     QQuickItem::focusOutEvent(event);
     // A focus loss clears VT focus, but only if this session still holds it: when focus moved to
     // another pane/tab the model already re-pointed it, and this stale focus-out must not cancel that.
@@ -1516,11 +1521,16 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
     // Composing scrolls the viewport to the cursor first, which may move the cell the platform has.
     reannounceInputMethodRectangle();
 
+    // Committed text enters the key pipeline as the text a key would have typed: unmodified, and routed per
+    // codepoint through the bindings, as on macOS ordinary typing can arrive this way and modal bindings
+    // (vi normal mode) must keep seeing it.
     if (!event->commitString().isEmpty())
     {
         assert(event->preeditString().isEmpty());
-        QKeyEvent keyEvent(QEvent::KeyPress, 0, Qt::NoModifier, event->commitString());
-        keyPressEvent(&keyEvent);
+        auto const captured = input::captureInputMethodCommit(event->commitString());
+        input::logRecorded(captured);
+        std::ignore = _session->sendKeyboardEvent(_session->keyboardPlatform().normalize(captured),
+                                                  std::chrono::steady_clock::now());
     }
 
     event->accept();
@@ -1529,6 +1539,11 @@ void TerminalDisplay::inputMethodEvent(QInputMethodEvent* event)
 
 QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
 {
+    // Off for the one keystroke the keyboard platform keeps from the input method (@see
+    // _pendingInputMethodRoute), and as the base class answers otherwise.
+    if (query == Qt::ImEnabled && _pendingInputMethodRoute == input::InputMethodRoute::Bypass)
+        return false;
+
     // Qt may query while the pane is still wiring up (or tearing down); without a renderer or
     // session there is no grid to answer from.
     if (!_renderer || !_session)
@@ -1633,12 +1648,18 @@ bool TerminalDisplay::event(QEvent* event)
         // A chord the terminal keeps is accepted here, ahead of every shortcut and menu; only a chord a
         // global menu bar owns is left ignored for the menu. The placement is read through the session
         // rather than injected, because QML constructs this item (the framework-constructed carve-out).
+        //
+        // A chord the terminal keeps also tells whether its keystroke may reach the input method: an Option
+        // key acting as Alt must not, where it would start a dead key instead of sending ESC and the letter.
+        // Qt asks Qt::ImEnabled between this event and the press, so the answer is recorded for that query.
         if (event->type() == QEvent::ShortcutOverride && _session)
         {
             auto* const keyEvent = static_cast<QKeyEvent*>(event);
             if (shortcutOverrideClaim(*keyEvent, _session->app().menuBarPlacement())
                 == ShortcutOverrideClaim::Terminal)
             {
+                _pendingInputMethodRoute =
+                    _session->keyboardPlatform().inputMethodRouteFor(keyEvent->nativeModifiers());
                 keyEvent->accept();
                 return true;
             }

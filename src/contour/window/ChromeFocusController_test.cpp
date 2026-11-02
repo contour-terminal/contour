@@ -50,8 +50,8 @@ struct ChromeFixture
     {
         // Built afresh and moved in: copy-assigning the cached defaults instantiates the Action variant's
         // copy assignment, for which GCC at -O2 -g needs some 7 GB more memory and six times the time.
-        app->app().config().inputMappings.value() =
-            contour::config::makeDefaultInputMappings(contour::config::DefaultsEdition::Native2026);
+        app->app().config().inputMappings.value() = contour::config::makeDefaultInputMappings(
+            contour::config::DefaultsEdition::Native2026, contour::config::BuildKeyboardPlatformKind);
         if (extraBindings != nullptr)
             extraBindings(app->app().config().inputMappings.value());
         tabs = contour::test::createSessionTabs(app->manager(), **window, tabCount);
@@ -536,7 +536,8 @@ TEST_CASE("an application binding works while the chrome has focus", "[windowcon
 
     SECTION("Ctrl+Shift+P opens the command palette, and the chrome keeps its focus")
     {
-        CHECK(f.chromeKey(Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier));
+        // Ctrl+Shift+P on the desktop, Command+Shift+P on a Mac.
+        CHECK(f.chromeKey(Qt::Key_P, contour::test::hostPrimaryQt(Qt::ShiftModifier)));
         CHECK(palette.count() == 1);
         CHECK(f.area() == ChromeArea::Tabs);
     }

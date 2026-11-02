@@ -1,0 +1,195 @@
+# defaults classic
+key modes=[Any] mods=[Alt] input=Enter clicks=- -> ToggleFullscreen declined=pass gated=no
+key modes=[Insert|Select] mods=[] input=Escape clicks=- -> CancelSelection declined=pass gated=no
+key modes=[Any] mods=[Shift] input=DownArrow clicks=- -> ScrollOneDown declined=pass gated=no
+key modes=[Any] mods=[Shift] input=End clicks=- -> ScrollToBottom declined=pass gated=no
+key modes=[Any] mods=[Shift] input=Home clicks=- -> ScrollToTop declined=pass gated=no
+key modes=[Any] mods=[Shift] input=PageDown clicks=- -> ScrollPageDown declined=pass gated=no
+key modes=[Any] mods=[Shift] input=PageUp clicks=- -> ScrollPageUp declined=pass gated=no
+key modes=[Any] mods=[Shift] input=UpArrow clicks=- -> ScrollOneUp declined=pass gated=no
+key modes=[Search] mods=[] input=F3 clicks=- -> FocusNextSearchMatch declined=pass gated=no
+key modes=[Search] mods=[Shift] input=F3 clicks=- -> FocusPreviousSearchMatch declined=pass gated=no
+key modes=[Any] mods=[Shift] input=LeftArrow clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Shift] input=RightArrow clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[Shift] input=F10 clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[] input=Enter clicks=- -> ToggleFold declined=pass gated=no
+key modes=[~Select|BlockFocus] mods=[] input=Escape clicks=- -> ClearCommandBlockFocus declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
+char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0032 clicks=- -> SwitchToTab, position: 2 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0033 clicks=- -> SwitchToTab, position: 3 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0034 clicks=- -> SwitchToTab, position: 4 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0035 clicks=- -> SwitchToTab, position: 5 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0036 clicks=- -> SwitchToTab, position: 6 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0037 clicks=- -> SwitchToTab, position: 7 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+char modes=[Insert|Select] mods=[Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
+char modes=[Insert|Select] mods=[Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) + CancelSelection declined=pass gated=no
+char modes=[Insert] mods=[Shift|Control] input=U+0020 clicks=- -> ViNormalMode declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002C clicks=- -> OpenConfiguration declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004F clicks=- -> SplitHorizontal declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004B clicks=- -> NewWindowTo declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=Left clicks=- -> FollowHyperlink declined=pass gated=no
+mouse modes=[Any] mods=[] input=Middle clicks=- -> PasteSelection declined=pass gated=no
+mouse modes=[Any] mods=[] input=WheelDown clicks=- -> ScrollDown declined=pass gated=no
+mouse modes=[Any] mods=[] input=WheelUp clicks=- -> ScrollUp declined=pass gated=no
+mouse modes=[Any] mods=[Alt] input=WheelDown clicks=- -> DecreaseOpacity declined=pass gated=no
+mouse modes=[Any] mods=[Alt] input=WheelUp clicks=- -> IncreaseOpacity declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=WheelDown clicks=- -> DecreaseFontSize declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=WheelUp clicks=- -> IncreaseFontSize declined=pass gated=no
+mouse modes=[Any] mods=[Shift] input=WheelDown clicks=- -> ScrollPageDown declined=pass gated=no
+mouse modes=[Any] mods=[Shift] input=WheelUp clicks=- -> ScrollPageUp declined=pass gated=no
+# defaults native2026
+key modes=[Any] mods=[Alt] input=Enter clicks=- -> ToggleFullscreen declined=pass gated=no
+key modes=[Insert|Select] mods=[] input=Escape clicks=- -> CancelSelection declined=pass gated=no
+key modes=[Any] mods=[Shift] input=DownArrow clicks=- -> ScrollOneDown declined=pass gated=no
+key modes=[Any] mods=[Shift] input=End clicks=- -> ScrollToBottom declined=pass gated=no
+key modes=[Any] mods=[Shift] input=Home clicks=- -> ScrollToTop declined=pass gated=no
+key modes=[Any] mods=[Shift] input=PageDown clicks=- -> ScrollPageDown declined=pass gated=no
+key modes=[Any] mods=[Shift] input=PageUp clicks=- -> ScrollPageUp declined=pass gated=no
+key modes=[Any] mods=[Shift] input=UpArrow clicks=- -> ScrollOneUp declined=pass gated=no
+key modes=[Search] mods=[] input=F3 clicks=- -> FocusNextSearchMatch declined=pass gated=no
+key modes=[Search] mods=[Shift] input=F3 clicks=- -> FocusPreviousSearchMatch declined=pass gated=no
+key modes=[Any] mods=[Shift] input=LeftArrow clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Shift] input=RightArrow clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=LeftArrow clicks=- -> SwapPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=RightArrow clicks=- -> SwapPaneRight declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=UpArrow clicks=- -> SwapPaneUp declined=pass gated=no
+key modes=[Any] mods=[Alt|Control] input=DownArrow clicks=- -> SwapPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=LeftArrow clicks=- -> ResizePane, direction: Left, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=RightArrow clicks=- -> ResizePane, direction: Right, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=UpArrow clicks=- -> ResizePane, direction: Up, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt|Control] input=DownArrow clicks=- -> ResizePane, direction: Down, percent: 5 declined=pass gated=no
+key modes=[Any] mods=[Control] input=F6 clicks=- -> FocusNextArea declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=F6 clicks=- -> FocusPreviousArea declined=pass gated=no
+key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[Shift] input=F10 clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[] input=Enter clicks=- -> ToggleFold declined=pass gated=no
+key modes=[~Select|BlockFocus] mods=[] input=Escape clicks=- -> ClearCommandBlockFocus declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
+char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005C clicks=- -> ToggleSplitOrientation declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0032 clicks=- -> SwitchToTab, position: 2 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0033 clicks=- -> SwitchToTab, position: 3 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0034 clicks=- -> SwitchToTab, position: 4 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0035 clicks=- -> SwitchToTab, position: 5 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0036 clicks=- -> SwitchToTab, position: 6 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0037 clicks=- -> SwitchToTab, position: 7 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
+char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+char modes=[Insert|Select] mods=[Control] input=U+0043 clicks=- -> CopySelection + CancelSelection declined=pass gated=no
+char modes=[Insert|Select] mods=[Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) + CancelSelection declined=pass gated=no
+char modes=[Insert] mods=[Shift|Control] input=U+0020 clicks=- -> ViNormalMode declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+002C clicks=- -> OpenConfiguration declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
+char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
+char modes=[Any] mods=[Alt|Control] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004F clicks=- -> SplitHorizontal declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004B clicks=- -> NewWindowTo declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=Left clicks=- -> FollowHyperlink declined=pass gated=no
+mouse modes=[Any] mods=[] input=Middle clicks=- -> PasteSelection declined=pass gated=no
+mouse modes=[Any] mods=[] input=WheelDown clicks=- -> ScrollDown declined=pass gated=no
+mouse modes=[Any] mods=[] input=WheelUp clicks=- -> ScrollUp declined=pass gated=no
+mouse modes=[Any] mods=[Alt] input=WheelDown clicks=- -> DecreaseOpacity declined=pass gated=no
+mouse modes=[Any] mods=[Alt] input=WheelUp clicks=- -> IncreaseOpacity declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=WheelDown clicks=- -> DecreaseFontSize declined=pass gated=no
+mouse modes=[Any] mods=[Control] input=WheelUp clicks=- -> IncreaseFontSize declined=pass gated=no
+mouse modes=[Any] mods=[Shift] input=WheelDown clicks=- -> ScrollPageDown declined=pass gated=no
+mouse modes=[Any] mods=[Shift] input=WheelUp clicks=- -> ScrollPageUp declined=pass gated=no
+# fallbacks
+key modes=[Any] mods=[Control] input=PageUp clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[Any] mods=[Control] input=PageDown clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Control] input=Tab clicks=- -> SwitchToTabRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=Tab clicks=- -> SwitchToTabLeft declined=pass gated=no
+key modes=[~AltScreen] mods=[Shift|Control] input=UpArrow clicks=- -> ScrollMarkUp declined=pass gated=no
+key modes=[~AltScreen] mods=[Shift|Control] input=DownArrow clicks=- -> ScrollMarkDown declined=pass gated=no
+key modes=[BlockFocus] mods=[Control] input=Enter clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[Shift] input=F10 clicks=- -> OpenBlockMenu declined=pass gated=no
+key modes=[BlockFocus] mods=[] input=Enter clicks=- -> ToggleFold declined=pass gated=no
+key modes=[~Select|BlockFocus] mods=[] input=Escape clicks=- -> ClearCommandBlockFocus declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=LeftArrow clicks=- -> FocusPaneLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=RightArrow clicks=- -> FocusPaneRight declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=UpArrow clicks=- -> FocusPaneUp declined=pass gated=no
+key modes=[Any] mods=[Shift|Alt] input=DownArrow clicks=- -> FocusPaneDown declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageUp clicks=- -> MoveTabToLeft declined=pass gated=no
+key modes=[Any] mods=[Shift|Control] input=PageDown clicks=- -> MoveTabToRight declined=pass gated=no
+char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no
+char modes=[Any] mods=[Shift|Control] input=U+0045 clicks=- -> SplitVertical declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004F clicks=- -> SplitHorizontal declined=pass gated=no
+char modes=[Any] mods=[Shift|Control] input=U+004B clicks=- -> NewWindowTo declined=pass gated=no
+mouse modes=[Any] mods=[] input=Right clicks=- -> OpenContextMenu declined=pass gated=no
+mouse modes=[Any] mods=[] input=WheelLeft clicks=- -> SwitchToTabLeft declined=pass gated=yes
+mouse modes=[Any] mods=[] input=WheelRight clicks=- -> SwitchToTabRight declined=pass gated=yes
+mouse modes=[~AltScreen] mods=[Control] input=Left clicks=3 -> SelectCommandBlock, target: pointer, part: output declined=pass gated=no

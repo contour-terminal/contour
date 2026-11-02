@@ -1,0 +1,63 @@
+[defaults classic] char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0032 clicks=- -> SwitchToTab, position: 2 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0033 clicks=- -> SwitchToTab, position: 3 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0034 clicks=- -> SwitchToTab, position: 4 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0035 clicks=- -> SwitchToTab, position: 5 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0036 clicks=- -> SwitchToTab, position: 6 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0037 clicks=- -> SwitchToTab, position: 7 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
+[defaults classic] char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
+[defaults classic] char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt|Control] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Alt|Control] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
+[defaults classic] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+002C clicks=- -> ToggleInputMethodHandling declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+002D clicks=- -> DecreaseFontSize declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+005F clicks=- -> DecreaseFontSize declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+004E clicks=- -> NewTerminal declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+0056 clicks=- -> PasteClipboard(strip=yes) declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0056 clicks=- -> PasteClipboard(strip=no) declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+0053 clicks=- -> ScreenshotVT declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Control] input=U+0030 clicks=- -> ResetFontSize declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0054 clicks=- -> CreateNewTab declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0053 clicks=- -> SpeakSelection declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0058 clicks=- -> ClosePane declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0050 clicks=- -> OpenCommandPalette declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+005A clicks=- -> TogglePaneZoom declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0031 clicks=- -> SwitchToTab, position: 1 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0032 clicks=- -> SwitchToTab, position: 2 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0033 clicks=- -> SwitchToTab, position: 3 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0034 clicks=- -> SwitchToTab, position: 4 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0035 clicks=- -> SwitchToTab, position: 5 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0036 clicks=- -> SwitchToTab, position: 6 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0037 clicks=- -> SwitchToTab, position: 7 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0038 clicks=- -> SwitchToTab, position: 8 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0039 clicks=- -> SwitchToTab, position: 9 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt] input=U+0030 clicks=- -> SwitchToTab, position: 10 declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0051 clicks=- -> Quit declined=pass gated=no
+[defaults native2026] char modes=[~AltScreen] mods=[Alt|Control] input=U+004B clicks=- -> ScrollMarkUp declined=pass gated=no
+[defaults native2026] char modes=[~AltScreen] mods=[Alt|Control] input=U+004A clicks=- -> ScrollMarkDown declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+004F clicks=- -> OpenFileManager declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Alt|Control] input=U+002E clicks=- -> ToggleStatusLine declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0046 clicks=- -> SearchReverse declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0048 clicks=- -> NoSearchHighlight declined=pass gated=no
+[defaults native2026] char modes=[Any] mods=[Shift|Control] input=U+0055 clicks=- -> HintMode(url, 1) declined=pass gated=no
+[fallbacks] char modes=[~AltScreen] mods=[Shift|Control] input=U+0047 clicks=- -> OpenCommandOutput, target: last, placement: split declined=consume gated=no

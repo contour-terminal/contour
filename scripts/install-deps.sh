@@ -222,6 +222,8 @@ install_deps_popos() {
         libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
+        libxkbcommon-dev
+        libxkbcommon-x11-dev
         libyaml-cpp-dev
         make
         ninja-build
@@ -264,6 +266,8 @@ install_deps_ubuntu() {
         libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
+        libxkbcommon-dev
+        libxkbcommon-x11-dev
         libyaml-cpp-dev
         make
         ninja-build
@@ -406,6 +410,7 @@ install_deps_FreeBSD() {
         qt6-multimedia \
         qt6-svg \
         qt6-tools \
+        libxkbcommon \
         xcb \
         yaml-cpp
     "
@@ -432,6 +437,7 @@ install_deps_OpenBSD() {
         qt6-qtdeclarative \
         qt6-qtmultimedia \
         qt6-qttools \
+        libxkbcommon \
         xcb
     "
 }
@@ -450,6 +456,8 @@ install_deps_arch() {
         harfbuzz \
         libssh2 \
         libxcb \
+        libxkbcommon \
+        libxkbcommon-x11 \
         microsoft-gsl \
         ninja \
         openssl \
@@ -500,6 +508,8 @@ install_deps_suse() {
         harfbuzz-devel
         utempter-devel
         libxcb-devel
+        libxkbcommon-devel
+        libxkbcommon-x11-devel
         libopenssl-devel
         libssh2-devel
         ncurses-devel
@@ -557,6 +567,8 @@ install_deps_fedora() {
         harfbuzz-devel
         libssh2-devel
         libxcb-devel
+        libxkbcommon-devel
+        libxkbcommon-x11-devel
         ninja-build
         openssl-devel
         pkgconf

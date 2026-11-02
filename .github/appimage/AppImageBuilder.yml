@@ -65,6 +65,8 @@ AppDir:
     - libxcb-sync1
     - libxcb-xinerama0
     - libxcb-xkb1
+    - libxkbcommon0
+    - libxkbcommon-x11-0
     - libxcursor1
     - gstreamer1.0-plugins-base
     - gstreamer1.0-plugins-good

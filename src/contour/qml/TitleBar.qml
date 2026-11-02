@@ -165,7 +165,7 @@ Item {
     // that uses a key (the button's Return and Space) accepts it first, the rest arrive here.
     Keys.onPressed: (event) => {
         if (root.controller && root.controller.chromeKey)
-            event.accepted = root.controller.chromeKey(event.key, event.modifiers)
+            event.accepted = root.controller.chromeKey(event.key, event.modifiers, event.text)
     }
 
     // Live OS palette handle: re-emits paletteChanged on an OS dark/light switch so the bar recolors

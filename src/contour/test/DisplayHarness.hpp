@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/AppFixture.hpp>
@@ -84,9 +85,11 @@ struct DisplayHarness
     /// @param configure Adjusts the application's configuration before the session is born from it.
     /// @param seed Fills the session's terminal before the display is attached, as a restored session is
     ///        filled before any window draws it; the display's first frame is the first one to show it.
+    /// @param keyboardPlatforms Builds the session's keyboard platform; empty takes the build host's.
     explicit DisplayHarness(HarnessWindow mode = HarnessWindow::Shown,
                             std::function<void(contour::config::Config&)> const& configure = {},
-                            std::function<void(contour::session::TerminalSession&)> const& seed = {}):
+                            std::function<void(contour::session::TerminalSession&)> const& seed = {},
+                            contour::input::KeyboardPlatformFactory keyboardPlatforms = {}):
         windowMode(mode), display(std::make_unique<contour::display::TerminalDisplay>())
     {
         if (configure)
@@ -95,7 +98,12 @@ struct DisplayHarness
         auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
             vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
         pty = ptyOwned.get();
-        session = makeTestSession(&testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
+        session = keyboardPlatforms
+                      ? makeTestSession(&testApp.app().sessionsManager(),
+                                        std::move(ptyOwned),
+                                        testApp.app(),
+                                        std::move(keyboardPlatforms))
+                      : makeTestSession(&testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
         if (seed)
             seed(*session);
 

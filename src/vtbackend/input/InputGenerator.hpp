@@ -162,12 +162,6 @@ struct KeyboardModifiers
 /// @returns CSI parameter for given function key modifier
 constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
 {
-#ifdef __APPLE__
-    // Use option key as a control modifier to use
-    // Ctrl-Left[Right]Arrow for word navigation.
-    if (modifier == Modifier::Alt)
-        return 1 + Modifier::Control;
-#endif
     return 1 + modifier.value();
 }
 

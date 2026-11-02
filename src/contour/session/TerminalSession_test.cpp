@@ -1577,8 +1577,9 @@ TEST_CASE("TerminalSession: a modifier-bound char dispatches its action instead 
 {
     // Ctrl+0 is bound to ResetFontSize in the default char mappings with no mode restriction, so
     // sending it runs the char keybinding-dispatch path (apply -> executeAllActions) and
-    // consumes the character: nothing reaches the PTY.
+    // consumes the character: nothing reaches the PTY. The desktop's binding: a Mac resets with Command+0.
     TestApp testApp;
+    contour::test::useDesktopBindings(testApp.app().config());
     auto session = makeDisplaylessSession(testApp.app());
     auto const now = std::chrono::steady_clock::now();
 

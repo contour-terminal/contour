@@ -7,6 +7,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/input/KeyboardPlatform.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/Notifier.hpp>
@@ -84,6 +85,26 @@ class ContourGuiApp;
 
 namespace contour::test
 {
+
+/// The Qt modifier flags of the host's Primary chord, plus @p extra: Control and Shift on the desktop, and
+/// Meta -- the Command key, as Qt reports it with its Control/Meta swap off -- on a Mac. So a test that
+/// presses the chord that opens a tab or the palette presses the one the host binds.
+/// @param extra Further flags the chord holds.
+/// @return The flags.
+[[nodiscard]] inline Qt::KeyboardModifiers hostPrimaryQt(Qt::KeyboardModifiers extra = {})
+{
+    auto flags = extra;
+    auto const primary = hostPrimary();
+    if (primary.contains(vtbackend::Modifier::Control))
+        flags |= Qt::ControlModifier;
+    if (primary.contains(vtbackend::Modifier::Shift))
+        flags |= Qt::ShiftModifier;
+    if (primary.contains(vtbackend::Modifier::Alt))
+        flags |= Qt::AltModifier;
+    if (primary.contains(vtbackend::Modifier::Super))
+        flags |= Qt::MetaModifier;
+    return flags;
+}
 
 /// The notifier every session a test makes raises through, unless the test wants another.
 ///
@@ -424,6 +445,31 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
                                                                std::nullopt,
                                                                notifier ? std::move(notifier)
                                                                         : makeTestNotifier());
+}
+
+/// A TerminalSession a test builds itself, decoding keys with the platforms @p keyboardPlatforms builds
+/// rather than the build host's: what lets every platform's key path run on any machine.
+/// @param manager           The manager it reports to.
+/// @param pty               Its PTY (owned from here on).
+/// @param app               The application it runs in.
+/// @param keyboardPlatforms Builds the session's keyboard platform for its profile's policy.
+/// @return The session; the caller owns it.
+[[nodiscard]] inline std::unique_ptr<contour::session::TerminalSession> makeTestSession(
+    contour::session::TerminalSessionManager* manager,
+    std::unique_ptr<vtpty::Pty> pty,
+    contour::ContourGuiApp& app,
+    contour::input::KeyboardPlatformFactory keyboardPlatforms)
+{
+    return std::make_unique<contour::session::TerminalSession>(manager,
+                                                               std::move(pty),
+                                                               app,
+                                                               std::string {},
+                                                               std::nullopt,
+                                                               std::nullopt,
+                                                               makeTestNotifier(),
+                                                               contour::session::SessionRole::Shell,
+                                                               contour::session::SessionHosting::Local,
+                                                               std::move(keyboardPlatforms));
 }
 
 /// A real session factory with every call passed through, except that a session it would hand the

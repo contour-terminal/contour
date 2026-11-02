@@ -36,8 +36,11 @@ namespace contour::test
 /// first), so a test asserts what a real user's configuration would parse to — including the
 /// sibling-layouts merge and every fallback loadConfigFromFile applies.
 /// @param yaml The inline configuration document.
+/// @param kind The keyboard platform the document is read as: the host's unless a test pins one.
 /// @return The parsed configuration.
-[[nodiscard]] inline contour::config::Config loadConfigFromYaml(std::string_view yaml)
+[[nodiscard]] inline contour::config::Config loadConfigFromYaml(
+    std::string_view yaml,
+    contour::config::KeyboardPlatformKind kind = contour::config::BuildKeyboardPlatformKind)
 {
     TempDir const dir;
     REQUIRE(dir.isValid());
@@ -46,9 +49,29 @@ namespace contour::test
         auto out = std::ofstream(path);
         out << yaml;
     }
-    auto config = contour::config::Config {};
+    auto config = contour::config::Config { .keyboardPlatformKind = kind };
     contour::config::loadConfigFromFile(config, path);
     return config;
+}
+
+/// Gives @p config the desktop's built-in bindings and fallbacks whatever the host: for a test of a chord
+/// only the desktop binds (Ctrl+Shift+G, ClosePane, Ctrl+0), which a Mac's defaults leave to the shell or
+/// move to Command. The keyboard platform is fixed when a Config is built, so this swaps both it and the
+/// table.
+/// @param config The configuration to pin.
+inline void useDesktopBindings(contour::config::Config& config)
+{
+    config.keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb;
+    config.inputMappings = contour::config::makeDefaultInputMappings(
+        config.defaultsEdition, contour::config::KeyboardPlatformKind::Xkb);
+}
+
+/// The modifiers of the host's Primary chord, plus @p extra: Ctrl+Shift on the desktop, Command on a Mac.
+/// @param extra Further modifiers the chord holds.
+/// @return The chord's modifiers.
+[[nodiscard]] inline vtbackend::Modifiers hostPrimary(vtbackend::Modifiers extra = {})
+{
+    return extra | contour::config::primaryModifiers(contour::config::BuildKeyboardPlatformKind);
 }
 
 /// The text a shortcut column shows for a pane character chord (the split chords) on the host this was
@@ -56,13 +79,15 @@ namespace contour::test
 /// formatter the code under test uses -- so a test names no literal that differs between hosts.
 /// @param action The action the chord runs, e.g. actions::SplitVertical {}.
 /// @param style  How to spell it; Text unless the code under test renders glyphs.
+/// @param kind   The keyboard platform whose table to read; the host's unless a test pins one.
 /// @return The chord's text, e.g. "Ctrl+Shift+E" on Linux and "Super+D" on macOS.
 [[nodiscard]] inline std::string paneChordText(
     contour::actions::Action const& action,
-    contour::command::ShortcutStyle style = contour::command::ShortcutStyle::Text)
+    contour::command::ShortcutStyle style = contour::command::ShortcutStyle::Text,
+    contour::config::KeyboardPlatformKind kind = contour::config::BuildKeyboardPlatformKind)
 {
     auto const wanted = contour::command::commandId(action);
-    for (auto const& row: contour::config::paneCharChords(contour::config::BuildPaneChordHost))
+    for (auto const& row: contour::config::builtinFallbackCharMappings(kind))
         if (row.mapping.binding.size() == 1
             && contour::command::commandId(row.mapping.binding.front()) == wanted)
             return contour::command::shortcutText(

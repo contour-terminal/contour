@@ -993,7 +993,9 @@ TEST_CASE("Config: Ctrl+Shift+G opens the last command's output by default", "[c
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
 
-    auto const config = contour::config::Config {};
+    // The desktop's chord: the macOS defaults leave Ctrl+Shift+G to the shell and use Command+G to find.
+    auto const config =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
     auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
 
     auto const* bound = contour::config::applyBuiltinFallback(config, U'G', ctrlShift, uint8_t { 0 });
@@ -1947,13 +1949,12 @@ TEST_CASE("Config: sessionSettings hands the terminal the profile's compiled lin
 TEST_CASE("Config: the follow gesture's modifiers come from the mouse bindings", "[config][links]")
 {
     auto const defaults = contour::config::Config {};
-#ifdef __APPLE__
-    CHECK(contour::config::followHyperlinkModifiers(defaults)
-          == vtbackend::Modifiers { vtbackend::Modifier::Super }); // Command, under the Native2026 defaults
-#else
-    CHECK(contour::config::followHyperlinkModifiers(defaults)
-          == vtbackend::Modifiers { vtbackend::Modifier::Control });
-#endif
+    // Command on a Mac under the Native2026 defaults, Control on the desktop.
+    auto const expected =
+        contour::config::BuildKeyboardPlatformKind == contour::config::KeyboardPlatformKind::Mac
+            ? vtbackend::Modifier::Super
+            : vtbackend::Modifier::Control;
+    CHECK(contour::config::followHyperlinkModifiers(defaults) == vtbackend::Modifiers { expected });
     auto const classic =
         contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
     CHECK(contour::config::followHyperlinkModifiers(classic)
@@ -2299,7 +2300,10 @@ TEST_CASE("Config: the find chords follow the platform", "[config][input-mapping
 
     // Fallbacks rather than defaults (F12): every edition, an existing config included, gets them, and an
     // explicit binding of the same chord still wins. In every mode, so ⌘G with no search reaches the session.
-    auto const config = contour::config::Config {};
+    auto const mac =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
+    auto const desktop =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
     auto const super = Modifiers { Modifier::Super };
     auto const shiftSuper = Modifiers { Modifier::Super, Modifier::Shift };
     auto const rows = std::array {
@@ -2308,20 +2312,16 @@ TEST_CASE("Config: the find chords follow the platform", "[config][input-mapping
         std::tuple { shiftSuper, U'G', actions::Action { actions::FocusPreviousSearchMatch {} } },
         std::tuple { super, U'E', actions::Action { actions::SearchSelection {} } },
     };
-    REQUIRE(contour::config::macFindChords().size() == rows.size());
     for (auto const& [modifiers, input, action]: rows)
     {
         INFO(std::format("{}", static_cast<uint32_t>(input)));
         for (auto const modeFlags: { uint8_t { 0 }, static_cast<uint8_t>(0xFF) })
         {
-            auto const* bound = contour::config::applyBuiltinFallback(config, input, modifiers, modeFlags);
-#ifdef __APPLE__
+            auto const* bound = contour::config::applyBuiltinFallback(mac, input, modifiers, modeFlags);
             REQUIRE(bound != nullptr);
             REQUIRE(bound->size() == 1);
             CHECK(bound->front().index() == action.index());
-#else
-            CHECK(bound == nullptr);
-#endif
+            CHECK(contour::config::applyBuiltinFallback(desktop, input, modifiers, modeFlags) == nullptr);
         }
     }
 
@@ -2329,7 +2329,8 @@ TEST_CASE("Config: the find chords follow the platform", "[config][input-mapping
     for (auto const edition:
          { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
     {
-        auto const mappings = contour::config::defaultInputMappings(edition);
+        auto const mappings =
+            contour::config::defaultInputMappings(edition, contour::config::KeyboardPlatformKind::Xkb);
         CHECK(std::ranges::any_of(mappings.charMappings, [](auto const& m) {
             return m.input == U'F' && m.modifiers == Modifiers { Modifier::Control, Modifier::Shift }
                    && std::holds_alternative<actions::SearchReverse>(m.binding.front());
@@ -2346,7 +2347,10 @@ TEST_CASE("Config: the tab chords follow the platform", "[config][input-mapping]
     using vtbackend::Modifiers;
     namespace actions = contour::actions;
 
-    auto const config = contour::config::Config {};
+    auto const mac =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
+    auto const desktop =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
     auto const super = Modifiers { Modifier::Super };
     auto const shiftSuper = Modifiers { Modifier::Super, Modifier::Shift };
 
@@ -2356,15 +2360,15 @@ TEST_CASE("Config: the tab chords follow the platform", "[config][input-mapping]
         { shiftSuper, U'[', actions::SwitchToTabLeft {} },
         { shiftSuper, U']', actions::SwitchToTabRight {} },
     };
-    for (auto const position: std::views::iota(1, contour::config::MacTabPositionCount + 1))
+    for (auto const position: std::views::iota(1, 10))
         rows.emplace_back(super, static_cast<char32_t>(U'0' + position), actions::SwitchToTab { position });
-    REQUIRE(contour::config::macTabChords().size() == rows.size());
 
     for (auto const& [modifiers, input, action]: rows)
     {
         INFO(std::format("{}", static_cast<uint32_t>(input)));
-        // The table itself, on every host.
-        auto const& table = contour::config::macTabChords();
+        // The table itself.
+        auto const& table =
+            contour::config::builtinFallbackCharMappings(contour::config::KeyboardPlatformKind::Mac);
         auto const found = std::ranges::find_if(table, [&](auto const& row) {
             return row.mapping.input == input && row.mapping.modifiers == modifiers;
         });
@@ -2376,14 +2380,11 @@ TEST_CASE("Config: the tab chords follow the platform", "[config][input-mapping]
                   == wanted->position);
 
         // The built-in lookup, which holds the rows on macOS only.
-        auto const* bound = contour::config::applyBuiltinFallback(config, input, modifiers, uint8_t { 0 });
-#ifdef __APPLE__
+        auto const* bound = contour::config::applyBuiltinFallback(mac, input, modifiers, uint8_t { 0 });
         REQUIRE(bound != nullptr);
         REQUIRE(bound->size() == 1);
         CHECK(bound->front().index() == action.index());
-#else
-        CHECK(bound == nullptr);
-#endif
+        CHECK(contour::config::applyBuiltinFallback(desktop, input, modifiers, uint8_t { 0 }) == nullptr);
     }
 }
 
@@ -2416,7 +2417,8 @@ TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][
 
     // The same four rows serve a freshly written configuration (the defaults) and one that predates them
     // (the fallbacks), in both editions.
-    auto const config = contour::config::Config {};
+    auto const config =
+        contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Xkb };
     for (auto const& chord: chords)
     {
         INFO(std::format("key {}", static_cast<int>(chord.key)));
@@ -2440,7 +2442,8 @@ TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][
     for (auto const edition:
          { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
     {
-        auto const mappings = contour::config::defaultInputMappings(edition);
+        auto const mappings =
+            contour::config::defaultInputMappings(edition, contour::config::KeyboardPlatformKind::Xkb);
         for (auto const& chord: chords)
         {
             auto const row = std::ranges::find_if(mappings.keyMappings, [&](auto const& m) {
@@ -2462,23 +2465,23 @@ TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][
             Chord { shiftSuper, Key::UpArrow, actions::Action { actions::SelectPreviousCommandOutput {} } },
             Chord { shiftSuper, Key::DownArrow, actions::Action { actions::SelectNextCommandOutput {} } },
         };
-        REQUIRE(contour::config::macBlockChords().size() == rows.size());
+        auto const mac =
+            contour::config::Config { .keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac };
         for (auto const& chord: rows)
         {
             INFO(std::format("key {}", static_cast<int>(chord.key)));
             auto const alternate = static_cast<uint8_t>(MatchModes::AlternateScreen);
             auto const* const primary =
-                contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, unfocused);
+                contour::config::applyBuiltinFallback(mac, chord.key, chord.modifiers, unfocused);
             auto const* const onAlternate =
-                contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, alternate);
+                contour::config::applyBuiltinFallback(mac, chord.key, chord.modifiers, alternate);
             CHECK(onAlternate == nullptr); // vim keeps it
-#ifdef __APPLE__
             REQUIRE(primary != nullptr);
             REQUIRE(primary->size() == 1);
             CHECK(primary->front().index() == chord.action.index());
-#else
-            CHECK(primary == nullptr); // no default mapping carries Super with Up or Down elsewhere
-#endif
+            // No default mapping carries Super with Up or Down elsewhere.
+            CHECK(contour::config::applyBuiltinFallback(config, chord.key, chord.modifiers, unfocused)
+                  == nullptr);
         }
     }
 }
@@ -2486,19 +2489,17 @@ TEST_CASE("Config: the block chords need block focus", "[config][input-mapping][
 TEST_CASE("Config: a fresh macOS configuration carries the Command pane chords and not Control+Shift+E/O",
           "[config][panes]")
 {
-    using contour::config::PaneChordHost;
+    using contour::config::KeyboardPlatformKind;
     using vtbackend::Modifier;
     using vtbackend::Modifiers;
 
     // What first start writes, with the macOS host injected: the writer and the reader are the production
     // ones, only the host that picks the pane rows is not the build's.
-    auto config = contour::config::Config {};
-    config.inputMappings = contour::config::makeDefaultInputMappings(
-        contour::config::DefaultsEdition::Native2026, PaneChordHost::Mac);
+    auto const config = contour::config::Config { .keyboardPlatformKind = KeyboardPlatformKind::Mac };
     auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
 
     QTemporaryDir dir;
-    auto const reloaded = loadFromYaml(dir, written);
+    auto const reloaded = loadFromYaml(dir, written, KeyboardPlatformKind::Mac);
     auto const& mappings = reloaded.inputMappings.value();
 
     auto const charBinding = [&](Modifiers modifiers, char32_t input) -> contour::config::ActionList const* {
