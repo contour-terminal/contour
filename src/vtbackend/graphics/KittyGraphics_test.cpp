@@ -1407,7 +1407,7 @@ TEST_CASE("KittyGraphics.frames.a_delta_frame_transmits_only_its_rectangle", "[k
     for (auto const row: std::views::iota(PatchOrigin, PatchOrigin + PatchSide))
         for (auto const column: std::views::iota(PatchOrigin, PatchOrigin + PatchSide))
             for (auto const channel: std::views::iota(size_t { 0 }, BytesPerPixel))
-                expected[(row * ImageSide + column) * BytesPerPixel + channel] = 0xE0;
+                expected[(((row * ImageSide) + column) * BytesPerPixel) + channel] = 0xE0;
     mock.writeToScreen(std::format("\033_Ga=a,i=7,c={}\033\\", FrameCount + 1));
     CHECK(placedPixels(mock) == expected);
 }
