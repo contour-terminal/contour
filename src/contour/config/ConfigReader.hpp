@@ -498,7 +498,7 @@ struct YAMLConfigReader
     }
 
     std::optional<actions::Action> parseAction(YAML::Node const& node);
-    std::optional<vtbackend::Modifiers> parseModifierKey(std::string const& key);
+    std::optional<vtbackend::Modifiers> parseModifierKey(std::string const& key) const;
     std::optional<vtbackend::Modifiers> parseModifier(YAML::Node const& nodeYAML);
     static std::optional<vtbackend::MatchModes> parseMatchModes(YAML::Node const& nodeYAML);
     std::optional<vtbackend::Key> parseKey(std::string const& name);

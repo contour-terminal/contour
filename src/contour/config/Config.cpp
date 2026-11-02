@@ -4722,7 +4722,7 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifier(YAML::Node c
     return mods;
 }
 
-std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::string const& key)
+std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::string const& key) const
 {
     if (auto const modifiers = parseModifierSpelling(key, keyboardPlatform))
         return modifiers;
