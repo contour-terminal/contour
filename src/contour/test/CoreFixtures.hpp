@@ -62,7 +62,8 @@ namespace contour::test
     contour::command::ShortcutStyle style = contour::command::ShortcutStyle::Text)
 {
     auto const wanted = contour::command::commandId(action);
-    for (auto const& row: contour::config::paneCharChords(contour::config::BuildPaneChordHost))
+    for (auto const& row:
+         contour::config::builtinFallbackCharMappings(contour::config::BuildKeyboardPlatformKind))
         if (row.mapping.binding.size() == 1
             && contour::command::commandId(row.mapping.binding.front()) == wanted)
             return contour::command::shortcutText(

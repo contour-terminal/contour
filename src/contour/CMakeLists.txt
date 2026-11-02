@@ -1419,6 +1419,7 @@ if(CONTOUR_TESTING)
         config/Actions_test.cpp
         config/BindingCollisions_test.cpp
         config/ChromeTokenGroups_test.cpp
+        config/DefaultBindings_test.cpp
         config/HighlightPair_test.cpp
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
@@ -1552,7 +1553,8 @@ if(CONTOUR_TESTING)
     # skill's; the tests compare against the files themselves.
     target_compile_definitions(contour_test PRIVATE
         CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
-        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md")
+        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md"
+        CONTOUR_CONFIG_TESTDATA="${CMAKE_CURRENT_SOURCE_DIR}/config/testdata")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)

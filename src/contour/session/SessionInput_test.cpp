@@ -6,6 +6,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/ConfigFwd.hpp>
 #include <contour/input/KeyMapping.hpp>
+#include <contour/input/KeyRouter.hpp>
 #include <contour/input/KeyboardLayout.hpp>
 #include <contour/input/KeyboardPlatform.hpp>
 #include <contour/input/MouseMapping.hpp>
@@ -94,6 +95,15 @@ TEST_CASE("a mouse chord keeps Ctrl+Alt as Ctrl+Alt", "[session][input]")
           == vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Alt });
 }
 
+namespace
+{
+/// The built-in character rows macOS carries: its tab, find and pane chords among them.
+[[nodiscard]] std::vector<contour::config::FallbackCharMapping> const& macTable()
+{
+    return contour::config::builtinFallbackCharMappings(contour::config::KeyboardPlatformKind::Mac);
+}
+} // namespace
+
 TEST_CASE("macOS Command chords reach the tab actions as Qt delivers them", "[session][input]")
 {
     // The macOS host: Qt's Control/Meta swap is off, so Command is Qt::MetaModifier, which chordOf()
@@ -105,13 +115,13 @@ TEST_CASE("macOS Command chords reach the tab actions as Qt delivers them", "[se
     auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
         auto const modifiers = contour::input::chordOf(qtModifiers);
         auto const folded = contour::config::foldedBindingCodepoint(input);
-        auto const& table = contour::config::macTabChords();
-        return std::ranges::find_if(table, [&](auto const& row) {
+        auto const& rows = macTable();
+        return std::ranges::find_if(rows, [&](auto const& row) {
             return row.mapping.input == contour::input::unshiftedCodepoint(folded)
                    && row.mapping.modifiers == modifiers;
         });
     };
-    auto const& table = contour::config::macTabChords();
+    auto const& table = macTable();
 
     auto const newTab = lookUp(command, U't');
     REQUIRE(newTab != table.end());
@@ -134,16 +144,15 @@ TEST_CASE("macOS Command+D and Command+Shift+D reach the split actions as Qt del
 {
     // Command is Qt::MetaModifier on macOS, which chordOf() reads as Super; the letter arrives folded,
     // as TerminalSession folds it before the lookup.
-    using contour::config::PaneChordHost;
     auto const lookUp = [](Qt::KeyboardModifiers qtModifiers, char32_t input) {
         auto const modifiers = contour::input::chordOf(qtModifiers);
         auto const folded = contour::config::foldedBindingCodepoint(input);
-        auto const table = contour::config::paneCharChords(PaneChordHost::Mac);
-        return std::ranges::find_if(table, [&](auto const& row) {
+        auto const& rows = macTable();
+        return std::ranges::find_if(rows, [&](auto const& row) {
             return row.mapping.input == folded && row.mapping.modifiers == modifiers;
         });
     };
-    auto const table = contour::config::paneCharChords(PaneChordHost::Mac);
+    auto const& table = macTable();
 
     auto const side = lookUp(Qt::MetaModifier, U'd');
     REQUIRE(side != table.end());
@@ -938,4 +947,193 @@ TEST_CASE("toQString decodes a path in the encoding it is actually stored in", "
           == QStringLiteral("C:/Users/J\u00fcrgen/AppData/Roaming/contour/Contour/Ui"));
 
     CHECK(contour::platform::toQString(std::filesystem::path {}).isEmpty());
+}
+
+namespace
+{
+/// A session on the macOS key path: its normalizer, and the default bindings it carries, are the Mac's, so
+/// that the chords macOS users press can be driven through the real key path on any machine.
+/// @param app The test application whose configuration the session reads.
+/// @param option Which Option keys act as Alt.
+/// @return The session; its PTY is a MockPty.
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeMacSession(
+    contour::test::TestApp& app, contour::config::OptionAsAlt option = contour::config::OptionAsAlt::Off)
+{
+    auto& config = app.app().config();
+    config.keyboardPlatformKind = contour::config::KeyboardPlatformKind::Mac;
+    config.inputMappings.value() = contour::config::makeDefaultInputMappings(
+        config.defaultsEdition, contour::config::KeyboardPlatformKind::Mac);
+    config.profile().optionAsAlt.value() = option;
+    return contour::test::makeTestSession(
+        &app.app().sessionsManager(),
+        std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }),
+        app.app(),
+        contour::input::makeKeyboardPlatformFactory(contour::config::KeyboardPlatformKind::Mac,
+                                                    macUsAnsiLayout()));
+}
+
+/// The name of the first action the session would run for @p event, as the router resolves it.
+/// @param session The session whose live configuration and binding modes decide.
+/// @param event The event, as Qt delivered it.
+/// @return The action's name, or nullopt when nothing binds the event.
+[[nodiscard]] std::optional<std::string> resolvedAction(contour::session::TerminalSession const& session,
+                                                        QKeyEvent const& event)
+{
+    auto const normalized = session.keyboardPlatform().normalize(
+        contour::input::captureKeyEvent(event, vtbackend::KeyboardEventType::Press));
+    auto const context =
+        contour::input::RouteContext { .config = session.config(),
+                                       .modes = session.terminal().bindingModes(),
+                                       .superEncoding = contour::input::SuperEncoding::Unrepresentable };
+    auto const route = [&] {
+        if (normalized.key)
+            return contour::input::routeKey(
+                *normalized.key, normalized.modifiers, normalized.appModifier, context);
+        return contour::input::routeChar(normalized.text.front(),
+                                         normalized.identity,
+                                         normalized.modifiers,
+                                         normalized.appModifier,
+                                         context);
+    }();
+    auto const* bound = route.user.actions != nullptr ? route.user.actions : route.fallback.actions;
+    if (bound == nullptr || bound->empty())
+        return std::nullopt;
+    return std::string { contour::actions::name(bound->front()) };
+}
+
+/// A Cocoa key press with the Carbon key code @p carbon and the text @p text.
+[[nodiscard]] QKeyEvent cocoaPress(Qt::Key key,
+                                   Qt::KeyboardModifiers modifiers,
+                                   quint32 carbon,
+                                   QString const& text,
+                                   quint32 nativeModifiers = 0)
+{
+    return { QEvent::KeyPress, key, modifiers, 0, carbon, nativeModifiers, text };
+}
+} // namespace
+
+TEST_CASE("macOS chords reach their actions as Qt delivers them", "[session][input][macos]")
+{
+    constexpr auto Command = Qt::MetaModifier;
+    constexpr auto OptionBits = uint32_t { 0x80000 | contour::input::MacLeftOptionBit };
+
+    struct Row
+    {
+        std::string_view name;
+        Qt::Key key;
+        Qt::KeyboardModifiers modifiers;
+        quint32 carbon;
+        QString text;
+        quint32 nativeModifiers;
+        std::string_view action;
+        std::string_view written; ///< What the action puts on the PTY; empty for those that write nothing.
+    };
+    auto const rows = std::vector<Row> {
+        { "Command+C", Qt::Key_C, Command, 0x08, "c", 0, "CopySelection", "" },
+        { "Command+V", Qt::Key_V, Command, 0x09, "v", 0, "PasteClipboard", "" },
+        { "Command+K", Qt::Key_K, Command, 0x28, "k", 0, "ClearHistoryAndReset", "" },
+        { "Command+comma", Qt::Key_Comma, Command, 0x2B, ",", 0, "OpenConfiguration", "" },
+        { "Command+N", Qt::Key_N, Command, 0x2D, "n", 0, "NewTerminal", "" },
+        { "Command+equal", Qt::Key_Equal, Command, 0x18, "=", 0, "IncreaseFontSize", "" },
+        // The plus sign is Shift+equal on a US layout: it arrives as '+' with Shift, retried under '='.
+        { "Command+plus", Qt::Key_Plus, Command | Qt::ShiftModifier, 0x18, "+", 0, "IncreaseFontSize", "" },
+        { "Command+minus", Qt::Key_Minus, Command, 0x1B, "-", 0, "DecreaseFontSize", "" },
+        { "Command+0", Qt::Key_0, Command, 0x1D, "0", 0, "ResetFontSize", "" },
+        { "Option+Left", Qt::Key_Left, Qt::AltModifier, 0x7B, "", OptionBits, "SendChars", "\033b" },
+        { "Option+Right", Qt::Key_Right, Qt::AltModifier, 0x7C, "", OptionBits, "SendChars", "\033f" },
+        { "Command+Left", Qt::Key_Left, Command, 0x7B, "", 0, "SendChars", "\001" },
+        { "Command+Right", Qt::Key_Right, Command, 0x7C, "", 0, "SendChars", "\005" },
+        { "Command+Backspace", Qt::Key_Backspace, Command, 0x33, "", 0, "SendChars", "\025" },
+    };
+
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+
+    for (auto const& row: rows)
+    {
+        DYNAMIC_SECTION(row.name)
+        {
+            auto event = cocoaPress(row.key, row.modifiers, row.carbon, row.text, row.nativeModifiers);
+            CHECK(resolvedAction(*session, event) == std::optional { std::string { row.action } });
+
+            // Only the actions that write bytes are run: the others open windows and dialogs.
+            if (row.action == "SendChars")
+            {
+                pty.stdinBuffer().clear();
+                CHECK(contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session));
+                CHECK(pty.stdinBuffer() == row.written);
+            }
+        }
+    }
+}
+
+TEST_CASE("Command+C with nothing selected writes nothing", "[session][input][macos]")
+{
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+
+    // Declined, and consumed: the chord never reaches the application as a bare "c".
+    auto event = cocoaPress(Qt::Key_C, Qt::MetaModifier, 0x08, "c");
+    pty.stdinBuffer().clear();
+    CHECK(contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session));
+    CHECK(pty.stdinBuffer().empty());
+}
+
+TEST_CASE("Option+Left writes ESC b with option_as_alt off", "[session][input][macos]")
+{
+    constexpr auto OptionBits = uint32_t { 0x80000 | contour::input::MacLeftOptionBit };
+
+    contour::test::TestApp app;
+    auto session = makeMacSession(app, contour::config::OptionAsAlt::Off);
+    auto& pty = mockPtyOf(*session);
+    auto event = cocoaPress(Qt::Key_Left, Qt::AltModifier, 0x7B, "", OptionBits);
+
+    SECTION("on the primary screen it is the shell's backward word")
+    {
+        pty.stdinBuffer().clear();
+        CHECK(contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session));
+        CHECK(pty.stdinBuffer() == "\033b");
+    }
+
+    SECTION("on the alternate screen the application gets the chord, as Alt+Left")
+    {
+        session->terminal().writeToScreen("\033[?1049h");
+        pty.stdinBuffer().clear();
+        CHECK(contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session));
+        CHECK(pty.stdinBuffer() == "\033[1;3D");
+    }
+}
+
+TEST_CASE("Command+X and Command+S are bound to nothing on macOS and are consumed", "[session][input][macos]")
+{
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+
+    auto cut = cocoaPress(Qt::Key_X, Qt::MetaModifier, 0x07, "x");
+    auto save = cocoaPress(Qt::Key_S, Qt::MetaModifier, 0x01, "s");
+    for (auto* event: { &cut, &save })
+    {
+        CHECK_FALSE(resolvedAction(*session, *event).has_value());
+        // Consumed rather than typed: an unbound Command chord never reaches the application as a letter.
+        pty.stdinBuffer().clear();
+        std::ignore = contour::session::sendKeyEvent(event, vtbackend::KeyboardEventType::Press, *session);
+        CHECK(pty.stdinBuffer().empty());
+    }
+}
+
+TEST_CASE("Command+Backspace on the alternate screen is the application's", "[session][input][macos]")
+{
+    contour::test::TestApp app;
+    auto session = makeMacSession(app);
+    auto& pty = mockPtyOf(*session);
+    auto event = cocoaPress(Qt::Key_Backspace, Qt::MetaModifier, 0x33, "");
+
+    session->terminal().writeToScreen("\033[?1049h");
+    CHECK_FALSE(resolvedAction(*session, event).has_value());
+    pty.stdinBuffer().clear();
+    std::ignore = contour::session::sendKeyEvent(&event, vtbackend::KeyboardEventType::Press, *session);
+    CHECK(pty.stdinBuffer() != "\025");
 }

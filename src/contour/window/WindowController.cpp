@@ -103,7 +103,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                                      &_hostCommands,
                                                      &_boundCommands,
                                                      &_actionCommands },
-        command::platformShortcutStyle(),
+        command::shortcutStyleFor(manager.app().config().keyboardPlatformKind),
         this) },
     _menuPresentation { menuPresentation },
     _nativeMenus { manager.app().nativeMenuPresenter() },
@@ -165,8 +165,8 @@ void WindowController::openCommandPalette()
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all. Also
     // re-queries the sources (so the tab rows track the tabs that exist now) and returns to the top level
     // with an empty filter.
-    _commandPalette->refresh(
-        command::shortcutIndex(_manager.app().config(), command::platformShortcutStyle()));
+    _commandPalette->refresh(command::shortcutIndex(
+        _manager.app().config(), command::shortcutStyleFor(_manager.app().config().keyboardPlatformKind)));
 
     emit commandPaletteRequested();
 }

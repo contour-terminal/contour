@@ -14,6 +14,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <string>
+#include <string_view>
 #include <utility>
 
 using namespace contour;
@@ -218,16 +220,52 @@ TEST_CASE("Shortcut.keyGlyphTable", "[command]")
 
 TEST_CASE("Shortcut.indexAndLinkGestureFollowStyle", "[command]")
 {
-    auto const index = shortcutIndex(config::defaultInputMappings(), ShortcutStyle::MacGlyphs);
+    auto const index = shortcutIndex(
+        config::defaultInputMappings(config::DefaultsEdition::Native2026, config::KeyboardPlatformKind::Xkb),
+        ShortcutStyle::MacGlyphs);
     CHECK(index.at("CreateNewTab") == "⌃⇧T");
     auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
     CHECK(describeLinkGesture(classic, ShortcutStyle::MacGlyphs)
           == "⌃Click (⌃⇧Click inside applications that use the mouse)");
-#ifdef __APPLE__
     // The Native2026 defaults follow links with Command on macOS.
-    CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
+    CHECK(describeLinkGesture(config::Config { .keyboardPlatformKind = config::KeyboardPlatformKind::Mac },
+                              ShortcutStyle::MacGlyphs)
           == "⌘Click (⇧⌘Click inside applications that use the mouse)");
-#endif
+}
+
+TEST_CASE("a Primary row renders per platform", "[command][shortcut]")
+{
+    using config::KeyboardPlatformKind;
+    auto const spelled = [](KeyboardPlatformKind kind, std::string_view command) {
+        auto const configuration = config::Config { .keyboardPlatformKind = kind };
+        auto const chords = chordIndex(configuration);
+        auto const found = chords.find(std::string { command });
+        REQUIRE(found != chords.end());
+        return shortcutText(found->second, shortcutStyleFor(kind));
+    };
+
+    SECTION("macOS spells Primary as Command, in glyphs")
+    {
+        CHECK(spelled(KeyboardPlatformKind::Mac, "CreateNewTab") == "⌘T");
+        CHECK(spelled(KeyboardPlatformKind::Mac, "OpenCommandPalette") == "⇧⌘P");
+    }
+
+    SECTION("the desktop spells Primary as Ctrl+Shift, in words")
+    {
+        CHECK(spelled(KeyboardPlatformKind::Xkb, "CreateNewTab") == "Ctrl+Shift+T");
+        CHECK(spelled(KeyboardPlatformKind::Win32, "CreateNewTab") == "Ctrl+Shift+T");
+        CHECK(spelled(KeyboardPlatformKind::Xkb, "OpenCommandPalette") == "Ctrl+Shift+P");
+    }
+
+    SECTION("the keyboard's style is the platform's, the window controls' the host's")
+    {
+        CHECK(shortcutStyleFor(KeyboardPlatformKind::Mac) == ShortcutStyle::MacGlyphs);
+        CHECK(shortcutStyleFor(KeyboardPlatformKind::Xkb) == ShortcutStyle::Text);
+        CHECK(shortcutStyleFor(KeyboardPlatformKind::Win32) == ShortcutStyle::Text);
+        CHECK(shortcutStyleFor(config::HostPlatform::MacOS) == ShortcutStyle::MacGlyphs);
+        CHECK(chordPreferenceFor(KeyboardPlatformKind::Mac) == ChordPreference::CommandKey);
+        CHECK(chordPreferenceFor(KeyboardPlatformKind::Xkb) == ChordPreference::FirstBound);
+    }
 }
 
 TEST_CASE("shortcutIndex is the chord index rendered", "[contour][palette]")

@@ -130,22 +130,13 @@ TEST_CASE("key characterization", "[input][characterization]")
     {
         DYNAMIC_SECTION(row.name)
         {
-            if (row.kind != contour::config::BuildKeyboardPlatformKind)
-            {
-                switch (row.host)
-                {
-                    case contour::test::RowHost::AnyHost: break;
-                    case contour::test::RowHost::OwnFallbackTable:
-                        SKIP("the binding's table is built on its own host only, until Task 12");
-                        break;
-                    case contour::test::RowHost::OwnHostEncoder:
-                        SKIP("the encoder's macOS Alt-as-Ctrl rule is compiled on macOS hosts only");
-                        break;
-                }
-            }
-
             contour::test::TestApp app;
-            app.app().config().profile().optionAsAlt.value() = row.optionAsAlt;
+            // The row's platform also decides which default bindings the configuration carries.
+            auto& config = app.app().config();
+            config.keyboardPlatformKind = row.kind;
+            config.inputMappings.value() =
+                contour::config::makeDefaultInputMappings(config.defaultsEdition, row.kind);
+            config.profile().optionAsAlt.value() = row.optionAsAlt;
             auto pty = std::make_unique<vtpty::MockPty>(
                 vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
             // The row's platform, whatever the host: every kind's rules run on every machine.
@@ -158,6 +149,8 @@ TEST_CASE("key characterization", "[input][characterization]")
 
             if (row.mode == contour::test::KeyMode::SelectionActive)
                 core::locked(session->terminal(), [&] { session->terminal().selectAll(); });
+            if (row.mode == contour::test::KeyMode::AlternateScreen)
+                session->terminal().writeToScreen("\033[?1049h");
 
             // A binding is proven by name: the chord must resolve, in the session's live configuration and
             // mode, to the action the row names -- not merely leave the PTY empty.

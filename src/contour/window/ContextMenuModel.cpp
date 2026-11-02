@@ -106,7 +106,8 @@ QVariantList toContextMenuModel(std::span<command::MenuNode const> nodes)
 command::MenuTree resolveMenuTree(std::span<command::ContextMenuEntry const> entries,
                                   config::Config const& config)
 {
-    return command::buildMenuTree(entries, command::chordIndex(config), command::platformShortcutStyle());
+    return command::buildMenuTree(
+        entries, command::chordIndex(config), command::shortcutStyleFor(config.keyboardPlatformKind));
 }
 
 } // namespace contour::window

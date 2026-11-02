@@ -50,8 +50,8 @@ struct ChromeFixture
     {
         // Built afresh and moved in: copy-assigning the cached defaults instantiates the Action variant's
         // copy assignment, for which GCC at -O2 -g needs some 7 GB more memory and six times the time.
-        app->app().config().inputMappings.value() =
-            contour::config::makeDefaultInputMappings(contour::config::DefaultsEdition::Native2026);
+        app->app().config().inputMappings.value() = contour::config::makeDefaultInputMappings(
+            contour::config::DefaultsEdition::Native2026, contour::config::BuildKeyboardPlatformKind);
         if (extraBindings != nullptr)
             extraBindings(app->app().config().inputMappings.value());
         tabs = contour::test::createSessionTabs(app->manager(), **window, tabCount);

@@ -4,6 +4,8 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/ConfigEnumReader.hpp>
+#include <contour/config/KeyboardPlatformKind.hpp>
+#include <contour/config/ModifierNames.hpp>
 
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
@@ -34,15 +36,19 @@ struct YAMLConfigReader
     YAML::Node doc;
     core::log::Category const& logger;
     VariableReplacer variableReplacer;
+    /// The keyboard platform the document is read for: what `Primary` in a `mods:` entry resolves against.
+    KeyboardPlatformKind keyboardPlatform;
 
     /// @param filename The document to parse.
     /// @param log      Where parse diagnostics go.
     /// @param env      The environment `${VAR}` expands against. It must outlive this reader: the
     ///                 default replacer holds a reference to it.
+    /// @param kind     The keyboard platform `Primary` resolves against.
     /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
     YAMLConfigReader(std::filesystem::path const& filename,
                      core::log::Category const& log,
                      core::Environment const& env,
+                     KeyboardPlatformKind kind,
                      VariableReplacer replacer = {});
 
     /// Reads a document the caller has parsed already, so that a file it has to parse anyway, to tell
@@ -52,11 +58,13 @@ struct YAMLConfigReader
     /// @param log      Where diagnostics go.
     /// @param env      The environment `${VAR}` expands against. It must outlive this reader: the
     ///                 default replacer holds a reference to it.
+    /// @param kind     The keyboard platform `Primary` resolves against.
     /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
     YAMLConfigReader(std::filesystem::path filename,
                      YAML::Node const& document,
                      core::log::Category const& log,
                      core::Environment const& env,
+                     KeyboardPlatformKind kind,
                      VariableReplacer replacer = {});
 
     /// Expands `${VAR}` tokens in @p input using the configured variable replacer.
@@ -531,7 +539,17 @@ struct YAMLConfigReader
 
 struct Writer
 {
+    /// @param kind The keyboard platform the document is written for: what decides whether a binding's
+    ///             modifiers are spelled `Primary`.
+    explicit Writer(KeyboardPlatformKind kind): keyboardPlatform { kind } {}
+    Writer(Writer const&) = default;
+    Writer(Writer&&) = default;
+    Writer& operator=(Writer const&) = default;
+    Writer& operator=(Writer&&) = default;
     virtual ~Writer() = default;
+
+    /// The keyboard platform the document is written for.
+    KeyboardPlatformKind keyboardPlatform;
 
     struct Offset
     {
@@ -608,25 +626,15 @@ struct Writer
         return result;
     }
 
-    [[nodiscard]] std::string static format(vtbackend::Modifiers const& flags)
+    /// Spells @p flags as a `mods:` list body: `Primary` for the host's Primary set (@see
+    /// canonicalModifierSpellings), then every other modifier by name.
+    /// @param flags The chord's modifiers.
+    /// @return The comma-separated spellings.
+    [[nodiscard]] std::string format(vtbackend::Modifiers const& flags) const
     {
-        std::string result;
-        for (auto i = 0u; i < sizeof(vtbackend::Modifier) * 8; ++i)
-        {
-            auto const flag = static_cast<vtbackend::Modifier>(1 << i);
-            if (!flags.test(flag))
-                continue;
-
-            // We assume that only valid enum values resulting into non-empty strings.
-            auto const element = std::format("{}", flag);
-            if (element.empty())
-                continue;
-
-            if (!result.empty())
-                result += ',';
-
-            result += element;
-        }
+        auto result = std::string {};
+        result.append(canonicalModifierSpellings(flags, keyboardPlatform)
+                      | core::views::joinWith(std::string_view(",")));
         return result;
     }
 
@@ -1085,6 +1093,7 @@ std::string documentationProfileConfig(Config const& c);
 
 struct YAMLConfigWriter: Writer
 {
+    using Writer::Writer;
 
     constexpr static std::string_view FormatTemplate = "{}";
     std::string replaceCommentPlaceholder(std::string const& docString) override
@@ -1170,6 +1179,7 @@ struct YAMLConfigWriter: Writer
 
 struct DocumentationWriter: Writer
 {
+    using Writer::Writer;
     constexpr static std::string_view FormatTemplate = "{}";
     std::string replaceCommentPlaceholder(std::string const& docString) override
     {
@@ -1234,6 +1244,7 @@ struct DocumentationWriter: Writer
 // Will ignore documentation
 struct PlainWriter: Writer
 {
+    using Writer::Writer;
     constexpr static std::string_view FormatTemplate = "{}";
     std::string replaceCommentPlaceholder(std::string const& docString) override
     {

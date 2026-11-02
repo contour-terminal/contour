@@ -288,17 +288,10 @@ TEST_CASE("InputGenerator.Modifier+ArrowKeys", "[terminal,input]")
         Mapping { .modifiers = Shift, .key = Key::DownArrow, .expected = "\033[1;2B"sv },
         Mapping { .modifiers = Shift, .key = Key::RightArrow, .expected = "\033[1;2C"sv },
         Mapping { .modifiers = Shift, .key = Key::LeftArrow, .expected = "\033[1;2D"sv },
-#ifdef __APPLE__
-        Mapping { .modifiers = Alt, .key = Key::UpArrow, .expected = "\033[1;5A"sv },
-        Mapping { .modifiers = Alt, .key = Key::DownArrow, .expected = "\033[1;5B"sv },
-        Mapping { .modifiers = Alt, .key = Key::RightArrow, .expected = "\033[1;5C"sv },
-        Mapping { .modifiers = Alt, .key = Key::LeftArrow, .expected = "\033[1;5D"sv },
-#else
         Mapping { .modifiers = Alt, .key = Key::UpArrow, .expected = "\033[1;3A"sv },
         Mapping { .modifiers = Alt, .key = Key::DownArrow, .expected = "\033[1;3B"sv },
         Mapping { .modifiers = Alt, .key = Key::RightArrow, .expected = "\033[1;3C"sv },
         Mapping { .modifiers = Alt, .key = Key::LeftArrow, .expected = "\033[1;3D"sv },
-#endif
         Mapping { .modifiers = Control, .key = Key::UpArrow, .expected = "\033[1;5A"sv },
         Mapping { .modifiers = Control, .key = Key::DownArrow, .expected = "\033[1;5B"sv },
         Mapping { .modifiers = Control, .key = Key::RightArrow, .expected = "\033[1;5C"sv },
