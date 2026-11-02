@@ -53,6 +53,7 @@ set(vtbackend_HEADERS
     screen/Gutter.hpp
     screen/PreeditPlacement.hpp
     screen/GutterSettings.hpp
+    vt/Base64Validation.hpp
     vt/HierarchicalContext.hpp
     vt/ProgramStatus.hpp
     vt/SemanticBlockQuery.hpp
