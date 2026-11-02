@@ -127,16 +127,13 @@ auto inline const vtCaptureBufferLog = core::log::Category("vt.ext.capturebuffer
 namespace // {{{ helper
 {
     /// The cells, rounded up, that an image of @p pixels covers when a cell is @p cell pixels large.
-    /// An image is laid out in cells, which cannot be done before the display has reported how large one is
-    /// (a headless or daemon session never does): dividing by that zero would give infinite line and column
-    /// counts, and a walk over them that never ends.
     /// @param pixels The image's size in pixels.
-    /// @param cell The size of a cell in pixels.
-    /// @return The extent in cells, or nothing while @p cell is not known.
-    [[nodiscard]] std::optional<GridSize> cellsCovering(ImageSize pixels, ImageSize cell)
+    /// @param cell The size of a cell in pixels; neither extent may be zero (see
+    /// Terminal::imageCellPixelSize()),
+    ///             as dividing by it would give infinite line and column counts.
+    /// @return The extent in cells.
+    [[nodiscard]] GridSize cellsCovering(ImageSize pixels, ImageSize cell)
     {
-        if (cell.area() == 0)
-            return std::nullopt;
         return GridSize {
             .lines = LineCount::cast_from(std::ceil(pixels.height.as<double>() / cell.height.as<double>())),
             .columns = ColumnCount::cast_from(std::ceil(pixels.width.as<double>() / cell.width.as<double>()))
@@ -3047,23 +3044,9 @@ void Screen::singleShiftSelect(CharsetTable table)
     _cursor.charsets.singleShift(table);
 }
 
-void Screen::logImageDroppedForUnknownCellSize(std::string_view kind, ImageSize pixelSize)
-{
-    if (std::exchange(_cellSizeDropLog, CellSizeDropLog::Logged) == CellSizeDropLog::Logged)
-        return;
-    errorLog()(
-        "Dropping a {} image of {}: the cell size in pixels is not known (logged once).", kind, pixelSize);
-}
-
 void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
 {
-    // Dropped while the cell size is not known, and the log says so.
-    auto const extent = cellsCovering(pixelSize, _terminal->cellPixelSize());
-    if (!extent)
-    {
-        logImageDroppedForUnknownCellSize("sixel", pixelSize);
-        return;
-    }
+    auto const extent = cellsCovering(pixelSize, _terminal->imageCellPixelSize());
     auto const autoScrollAtBottomMargin = !_terminal->isModeEnabled(DECMode::NoSixelScrolling);
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
@@ -3076,7 +3059,7 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
     shared_ptr<Image const> const imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
     renderImage(imageRef,
                 topLeft,
-                *extent,
+                extent,
                 imageOffset,
                 imageSize,
                 alignmentPolicy,
@@ -3126,7 +3109,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
                                                               resizePolicy,
                                                               gapColor,
                                                               gridSize,
-                                                              _terminal->cellPixelSize(),
+                                                              _terminal->imageCellPixelSize(),
                                                               layer,
                                                               imageOffset,
                                                               imageSize);
@@ -3144,12 +3127,12 @@ void Screen::renderImage(shared_ptr<Image const> image,
             auto const lastSixelBand = unbox(imageSize.height) % 6;
             auto lineOffset =
                 LineOffset::cast_from(std::ceil((imageSize.height - lastSixelBand).as<double>()
-                                                / _terminal->cellPixelSize().height.as<double>()))
+                                                / _terminal->imageCellPixelSize().height.as<double>()))
                 - 1 * (lastSixelBand == 0);
             auto const h = unbox(imageSize.height) - 1;
             // VT340 quirk: for some heights the text cursor is placed one row too high.
             // See: https://github.com/hackerb9/vt340test/blob/main/glitches.md
-            if (h % 6 > h % unbox(_terminal->cellPixelSize().height))
+            if (h % 6 > h % unbox(_terminal->imageCellPixelSize().height))
                 lineOffset = lineOffset - 1;
             return lineOffset;
         }
@@ -3333,9 +3316,12 @@ void Screen::requestPixelSize(RequestPixelSize area)
         case RequestPixelSize::ScreenArea:
             reply("\033[5;{};{}t", _terminal->screenPixelSize().height, _terminal->screenPixelSize().width);
             break;
-        case RequestPixelSize::CellArea:
-            reply("\033[6;{};{}t", _terminal->cellPixelSize().height, _terminal->cellPixelSize().width);
-            break;
+        case RequestPixelSize::CellArea: {
+            // The cell images are laid out on: an application sizes its canvas from this reply.
+            auto const cell = _terminal->imageCellPixelSize();
+            reply("\033[6;{};{}t", cell.height, cell.width);
+        }
+        break;
     }
 }
 
@@ -3672,7 +3658,7 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
                     // main page: Terminal::pixelSize() would span totalPageSize(), which includes
                     // the indicator status line, so an application honouring this reply would
                     // overshoot the grid by one row.
-                    auto const paintableSize = _terminal->cellPixelSize() * pageSize();
+                    auto const paintableSize = _terminal->imageCellPixelSize() * pageSize();
                     auto const size = vtpty::min(paintableSize, _terminal->maxImageSize());
                     reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                 }
@@ -6778,14 +6764,14 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
 void Screen::renderKittyImage(kitty_graphics::Command const& command,
                               std::shared_ptr<Image const> const& image)
 {
-    auto const cellSize = _terminal->cellPixelSize();
+    auto const cellSize = _terminal->imageCellPixelSize();
     auto const pixels = image->size();
 
     // `c=`/`r=` state the display size in cells; without them it follows from the pixel size, rounded
     // up so that a partial cell is still drawn rather than clipped away. Both arrive off the wire as
     // unsigned and are clamped to the page for the reason clampToPage() documents.
-    auto const cellWidth = std::max(unbox<int>(cellSize.width), 1);
-    auto const cellHeight = std::max(unbox<int>(cellSize.height), 1);
+    auto const cellWidth = unbox<int>(cellSize.width);
+    auto const cellHeight = unbox<int>(cellSize.height);
     auto const columns = command.columns != 0
                              ? ColumnCount::cast_from(clampToPage(command.columns, pageSize().columns))
                              : ColumnCount::cast_from((unbox<int>(pixels.width) + cellWidth - 1) / cellWidth);
@@ -9460,18 +9446,12 @@ bool Screen::renderImage(ImageFormat format,
 
     // Without a grid size of its own the image is sized in cells, which needs the cell size in pixels.
     auto const needsCellSize = !(*gridSize.lines && *gridSize.columns);
-    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> std::optional<GridSize> {
+    auto const computeGridSize = [&](ImageSize decodedPixelSize) -> GridSize {
         if (!needsCellSize)
             return gridSize;
-        auto const covered = cellsCovering(decodedPixelSize, _terminal->cellPixelSize());
-        if (!covered)
-            return std::nullopt;
-        return GridSize { .lines = *gridSize.lines ? gridSize.lines : covered->lines,
-                          .columns = *gridSize.columns ? gridSize.columns : covered->columns };
-    };
-    auto const dropForWantOfCellSize = [&](ImageSize size) {
-        logImageDroppedForUnknownCellSize("inline", size);
-        return false;
+        auto const covered = cellsCovering(decodedPixelSize, _terminal->imageCellPixelSize());
+        return GridSize { .lines = *gridSize.lines ? gridSize.lines : covered.lines,
+                          .columns = *gridSize.columns ? gridSize.columns : covered.columns };
     };
 
     if (format == ImageFormat::PNG)
@@ -9480,12 +9460,10 @@ bool Screen::renderImage(ImageFormat format,
         if (auto decodedData = decodePng(pixmap, decodedSize))
         {
             auto const effectiveGridSize = computeGridSize(decodedSize);
-            if (!effectiveGridSize)
-                return dropForWantOfCellSize(decodedSize);
             auto const imageRef = uploadImage(ImageFormat::RGBA, decodedSize, std::move(*decodedData));
             renderImage(imageRef,
                         topLeft,
-                        *effectiveGridSize,
+                        effectiveGridSize,
                         PixelOffset,
                         PixelSize,
                         alignmentPolicy,
@@ -9500,13 +9478,11 @@ bool Screen::renderImage(ImageFormat format,
     }
 
     auto const effectiveGridSize = computeGridSize(imageSize);
-    if (!effectiveGridSize)
-        return dropForWantOfCellSize(imageSize);
     auto const imageRef = uploadImage(format, imageSize, std::move(pixmap));
 
     renderImage(imageRef,
                 topLeft,
-                *effectiveGridSize,
+                effectiveGridSize,
                 PixelOffset,
                 PixelSize,
                 alignmentPolicy,

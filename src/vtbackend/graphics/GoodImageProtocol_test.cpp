@@ -661,6 +661,27 @@ TEST_CASE("GoodImageProtocol.Oneshot.InvalidFormat", "[GIP]")
     (void) cell.imageFragment(); // no crash is the primary assertion
 }
 
+TEST_CASE("GoodImageProtocol.Oneshot.UnknownCellSize", "[GIP]")
+{
+    // Without c=/r= the cell extent follows from the pixel size; with no cell size known yet it used to
+    // be ceil(pixels / 0), an infinite count cast to an integer. It is laid out on the VT340's 10x20
+    // text cell instead, so a 20x40 image covers 2 columns by 2 lines.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    REQUIRE(mock.terminal.cellPixelSize() == ImageSize {});
+
+    mock.writeToScreen(gipOneshot("f=3,w=20,h=40", makeRGBA(20, 40, 0xFF, 0x00, 0x00, 0xFF)));
+
+    for (auto const line: std::views::iota(0, 3))
+    {
+        for (auto const column: std::views::iota(0, 3))
+        {
+            INFO(std::format("line {} column {}", line, column));
+            auto const& cell = mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column));
+            CHECK((cell.imageFragment() != nullptr) == (line < 2 && column < 2));
+        }
+    }
+}
+
 // ==================== Sub-Region Render Tests ====================
 
 TEST_CASE("GoodImageProtocol.Render.SubRegion", "[GIP]")

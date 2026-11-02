@@ -1393,8 +1393,21 @@ class Terminal: public IStatusLinePublishTarget
     }
     // }}}
 
+    /// @return The size of one text cell in pixels, as the frontend last reported it; zero in either extent
+    ///         while none has (a GUI before its first layout, or a daemon, which no client tells).
     [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _cellPixelSize; }
     constexpr void setCellPixelSize(ImageSize cellPixelSize) { _cellPixelSize = cellPixelSize; }
+
+    /// The VT340's text cell, the geometry sixel graphics were designed against.
+    static constexpr ImageSize FallbackCellPixelSize = ImageSize { Width(10), Height(20) };
+
+    /// @return The cell size images are laid out against, and reported to applications as: cellPixelSize()
+    ///         once it is known, otherwise FallbackCellPixelSize -- as a whole, since a cell with one zero
+    ///         extent is no cell. Neither extent is ever zero, so every image path may divide by it.
+    [[nodiscard]] constexpr ImageSize imageCellPixelSize() const noexcept
+    {
+        return _cellPixelSize.area() > 0 ? _cellPixelSize : FallbackCellPixelSize;
+    }
 
     /// @return Where and how the window sits on the screen, as the frontend last reported it.
     [[nodiscard]] constexpr WindowState const& windowState() const noexcept { return _windowState; }

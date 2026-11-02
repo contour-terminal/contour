@@ -91,23 +91,21 @@ TEST_CASE("Screen.binaryInput.sixelWithoutCellPixelSize", "[screen][regression]"
     auto mc = makeTerminal();
     mc.writeToScreen("\033Pq#0;2;0;0;0#0!8~-\033\\"sv);
 
-    // Dropped: no cell can hold a piece of it, and the cursor has not moved.
-    CHECK_FALSE(pageHoldsAnImage(mc));
-    CHECK(mc.terminal.primaryScreen().cursor().position == CellLocation {});
+    // Laid out on the VT340's 10x20 cell, which stands in until the frontend reports the real one.
+    CHECK(pageHoldsAnImage(mc));
     CHECK(firstLineAfterReset(mc).starts_with("alive"));
 }
 
 TEST_CASE("Screen.binaryInput.contourImageWithoutCellPixelSize", "[screen][regression]")
 {
     // A Contour-protocol image that is sized in cells divides by the cell size, too. With no cell size it is
-    // dropped; one that brings its own grid size does not need it, and is drawn.
+    // laid out on the VT340's 10x20 cell; one that brings its own grid size does not need it. Both are drawn.
     constexpr auto Pixels = "AAAAAAAAAAAAAAAAAAAAAA=="sv;
     static_assert(Pixels.size() % 4 == 0);
 
     auto mc = makeTerminal();
     mc.writeToScreen(std::format("\033P!go=s,f=3,w=2,h=2;!{}\033\\", Pixels));
-    CHECK_FALSE(pageHoldsAnImage(mc));
-    CHECK(mc.terminal.primaryScreen().cursor().position == CellLocation {});
+    CHECK(pageHoldsAnImage(mc));
     CHECK(firstLineAfterReset(mc).starts_with("alive"));
 
     auto sized = makeTerminal();

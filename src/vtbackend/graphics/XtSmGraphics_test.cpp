@@ -71,6 +71,19 @@ TEST_CASE("XtSmGraphics.SixelGeometry.Read", "[screen][xtsmgraphics]")
     }
 }
 
+TEST_CASE("XtSmGraphics.SixelGeometry.Read reports the cell images are laid out on", "[screen][xtsmgraphics]")
+{
+    // With no cell size known yet, sixels are laid out on the VT340's 10x20 cell; the reply says so,
+    // rather than advertise a 0x0 canvas an application would size its image to.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };
+    mock.terminal.setImageCanvasCeiling(ImageSize { Width(1920), Height(1080) });
+    REQUIRE(mock.terminal.cellPixelSize() == ImageSize {});
+
+    mock.writeToScreen("\033[?2;1S");
+
+    CHECK(mock.terminal.peekInput() == "\033[?2;0;110;100S"sv);
+}
+
 TEST_CASE("XtSmGraphics.SixelGeometry.ReadLimit reports the ceiling", "[screen][xtsmgraphics]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(11) } };

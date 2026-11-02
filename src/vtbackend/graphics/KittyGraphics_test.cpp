@@ -178,6 +178,26 @@ TEST_CASE("KittyGraphics.query_validates_what_a_transmission_would_reject", "[ki
     }
 }
 
+TEST_CASE("KittyGraphics.unknown_cell_size_lays_out_on_the_vt340_cell", "[kitty]")
+{
+    // Without c=/r= the extent follows from the pixel size. With no cell size known yet -- a daemon's
+    // terminal, or a GUI's before its first layout -- it is laid out on the VT340's 10x20 cell, so a
+    // 20x40 image covers 2 columns by 2 lines.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    REQUIRE(mock.terminal.cellPixelSize() == ImageSize {});
+
+    auto pixels = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 20 * 40))
+        pixels += "\xFF\x00\x00\xFF"sv;
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=20,v=40,i=1;{}\033\\", core::base64::encode(pixels)));
+
+    auto const& screen = mock.terminal.primaryScreen();
+    for (auto const line: std::views::iota(0, 3))
+        for (auto const column: std::views::iota(0, 3))
+            CHECK((screen.at(LineOffset(line), ColumnOffset(column)).imageFragment() != nullptr)
+                  == (line < 2 && column < 2));
+}
+
 TEST_CASE("KittyGraphics.lower_case_delete_keeps_the_image_data", "[kitty]")
 {
     // In the protocol the CASE of `d=` decides how far the delete reaches: lower case removes

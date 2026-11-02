@@ -4969,6 +4969,47 @@ TEST_CASE("Sixel.status_line", "[screen]")
     }
 }
 
+TEST_CASE("Sixel.unknown_cell_size", "[screen]")
+{
+    // A terminal no frontend has laid out yet -- the daemon's, which no client ever tells a pixel
+    // size, or a GUI's before its first layout -- has a zero cell size. A sixel arriving then used to
+    // divide by that zero and take the whole process down with SIGFPE. It is laid out on the VT340's
+    // own 10x20 text cell instead: the 100x100 chess board covers 10 columns by 5 lines.
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(20) };
+    auto mock = MockTerm { pageSize, LineCount(10) };
+    REQUIRE(mock.terminal.cellPixelSize() == ImageSize {});
+
+    mock.writeToScreen(ChessBoard);
+
+    for (auto const line: std::views::iota(0, 7))
+    {
+        for (auto const column: std::views::iota(0, 12))
+        {
+            INFO(std::format("line {} column {}", line, column));
+            auto const& cell = mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(column));
+            CHECK((cell.imageFragment() != nullptr) == (line < 5 && column < 10));
+        }
+    }
+}
+
+TEST_CASE("XTWINOPS.CellArea.reports_the_cell_images_are_laid_out_on", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("the VT340 cell while none is known")
+    {
+        mock.writeToScreen("\033[16t");
+        CHECK(e(mock.terminal.peekInput()) == e("\033[6;20;10t"));
+    }
+
+    SECTION("the frontend's once reported")
+    {
+        mock.terminal.setCellPixelSize(ImageSize { Width(8), Height(16) });
+        mock.writeToScreen("\033[16t");
+        CHECK(e(mock.terminal.peekInput()) == e("\033[6;16;8t"));
+    }
+}
+
 TEST_CASE("SGRSAVE and SGRRESTORE", "[screen]")
 {
     auto mock = MockTerm { ColumnCount(8), LineCount(4) };
