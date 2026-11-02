@@ -1627,9 +1627,25 @@ if(CONTOUR_TESTING)
     # one none of them and no Qt in its Depends. Read off the generated install rules and CPack config,
     # so it needs neither a package build nor dpkg; CI's daemon-package job installs the real .deb.
     if(UNIX AND NOT APPLE)
+        # Which optional rules the install block emits, from the conditions that gate them there.
+        set(_packaging_systemd OFF)
+        if(LINUX AND CONTOUR_WITH_SYSTEMD AND NOT EXISTS "/.flatpak-info")
+            set(_packaging_systemd ON)
+        endif()
+        set(_packaging_extensions OFF)
+        if(CONTOUR_BUNDLED_EXTENSIONS)
+            set(_packaging_extensions ON)
+        endif()
+        set(_packaging_terminfo OFF)
+        if(CONTOUR_PACKAGE_TERMINFO)
+            set(_packaging_terminfo ON)
+        endif()
         add_test(NAME contour_e2e_packaging_rules
             COMMAND ${CMAKE_COMMAND}
                     -D "FRONTEND=${_frontend_kind}"
+                    -D "WITH_SYSTEMD_UNITS=${_packaging_systemd}"
+                    -D "WITH_EXTENSIONS=${_packaging_extensions}"
+                    -D "WITH_TERMINFO=${_packaging_terminfo}"
                     -D "INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
                     -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/PackagingRules.cmake)
