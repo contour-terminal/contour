@@ -3332,7 +3332,8 @@ struct PlaybackHarness
         void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
     };
 
-    PlaybackHarness()
+    /// @param initial The emulation settings the host spawns its session with.
+    explicit PlaybackHarness(vtbackend::Settings initial = {}): settings { std::move(initial) }
     {
         auto const* tab = host.createTab();
         REQUIRE(tab != nullptr);
@@ -3404,11 +3405,12 @@ struct PlaybackHarness
     core::platform::ManualClock clock {};
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
     core::net::EventLoop loop { *source, clock };
+    vtbackend::Settings settings; ///< Set by the constructor, before `host` reads it.
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
-                       vtbackend::Settings {},
+                       settings,
                        core::defaultEnvironment(),
                        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                                    .clocks = vtbackend::TerminalClocks {
@@ -3452,21 +3454,30 @@ TEST_CASE("daemon.playback_advances_frames_for_a_hosted_session", "[vthost][host
 
 TEST_CASE("daemon.playback_is_throttled_to_the_minimum_interval", "[vthost][host][kitty]")
 {
-    // Twelve frames 10 ms apart: a loop of 120 ms, longer than the throttle, so a throttled tick catches up
-    // within one loop and lands on the frame its time shows.
+    // Three frames 10 ms apart: a 30 ms loop, shorter than the throttle, so every tick skips whole loops and
+    // must still land on the frame its time shows rather than freeze on the one it started from.
     auto h = PlaybackHarness {};
-    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 10 });
 
     auto constexpr Duration = std::chrono::milliseconds { 1000 };
-    h.play(Duration, std::chrono::milliseconds { 10 });
+    auto timesShown = std::vector<int>(3, 0);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 100))
+    {
+        h.play(std::chrono::milliseconds { 10 }, std::chrono::milliseconds { 10 });
+        if (auto const frame = h.shownFrame(); frame && *frame >= 0 && *frame < 3)
+            ++timesShown[static_cast<std::size_t>(*frame)];
+    }
 
+    // Each frame comes up in turn: a loop shorter than the throttle does not freeze on one frame.
+    CHECK(std::ranges::all_of(timesShown, [](int times) { return times > 0; }));
     auto constexpr Most = mostFramesIn(Duration);
-    CHECK(h.mirror.updates > 0);
+    // Every tick lands on another frame (100 ms is a third of a loop on), so each is a screen update.
+    CHECK(h.mirror.updates == Most - 1);
     CHECK(h.mirror.updates <= Most);
     // The first frame is due at 10 ms, every later tick a minimum interval after the one before: the last
-    // within the second is at 910 ms, which is 70 ms into the 120 ms loop -- the eighth frame. Skipped, not
+    // within the second is at 910 ms, which is 10 ms into the 30 ms loop -- the second frame. Skipped, not
     // queued: a hundred frames were due meanwhile.
-    CHECK(h.shownFrame() == (910 % 120) / 10);
+    CHECK(h.shownFrame() == (910 % 30) / 10);
 }
 
 TEST_CASE("daemon.two_clients_do_not_double_the_rate", "[vthost][host][kitty]")
@@ -3476,7 +3487,7 @@ TEST_CASE("daemon.two_clients_do_not_double_the_rate", "[vthost][host][kitty]")
     auto h = PlaybackHarness {};
     auto second = PlaybackHarness::Mirror {};
     h.host.subscribeStream(&second);
-    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 10 });
     second.updates = 0;
 
     auto constexpr Duration = std::chrono::milliseconds { 1000 };
@@ -3491,10 +3502,20 @@ TEST_CASE("daemon.two_clients_do_not_double_the_rate", "[vthost][host][kitty]")
 
 TEST_CASE("daemon.idle_session_with_blinking_text_arms_no_animation_timer", "[vthost][host][kitty]")
 {
-    // Blinking text has the display tick the terminal (nextRender()), but the daemon draws no blink: it arms
-    // from the kitty deadline alone, so a session showing blinking text stays idle.
-    auto h = PlaybackHarness {};
+    // Blink has the display tick the terminal (nextRender()), but the daemon draws none: it arms from the
+    // kitty deadline alone, so a session that blinks stays idle. Blinking text reaches nextRender() only
+    // through a render pass, which the daemon never runs; a blinking cursor reaches it always, so it carries
+    // the case.
+    auto settings = vtbackend::Settings {};
+    settings.cursorDisplay = vtbackend::CursorDisplay::Blink;
+    auto h = PlaybackHarness { std::move(settings) };
     h.terminal->writeToScreen("\033[5mblinking\033[m");
+    REQUIRE(h.terminal->nextRender().has_value());
+    // An animation started and stopped while the text blinks: each publishes a deadline change, so the host
+    // arms -- or, as here, drops -- its timer with the blink pending. Armed from nextRender(), it would tick.
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 200 });
+    REQUIRE(h.host.ticksKittyAnimations(h.session));
+    h.terminal->writeToScreen("\033_Ga=a,i=7,s=1\033\\");
     h.turn();
     h.mirror.updates = 0;
 
@@ -3523,7 +3544,7 @@ TEST_CASE("daemon.playback_ticks_on_the_loop_while_the_parser_writes", "[vthost]
     // does: the tick takes the terminal's lock itself, and a deadline a parse moves reaches the loop through
     // a post, read nowhere but there.
     auto h = PlaybackHarness {};
-    h.placeLoopingFrames(12, std::chrono::milliseconds { 10 });
+    h.placeLoopingFrames(3, std::chrono::milliseconds { 10 });
 
     auto writer = std::thread { [&] {
         for (auto const line: std::views::iota(0, 200))

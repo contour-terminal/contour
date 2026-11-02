@@ -6257,6 +6257,34 @@ std::optional<uint32_t> Screen::KittyAnimation::successor() const noexcept
     return std::nullopt;
 }
 
+std::chrono::milliseconds Screen::KittyAnimation::loopDuration() const noexcept
+{
+    auto total = std::chrono::milliseconds::zero();
+    for (auto const number: std::views::iota(uint32_t { 1 }, static_cast<uint32_t>(frames.size()) + 1))
+        total += shownFor(number);
+    return total;
+}
+
+void Screen::KittyAnimation::skipWholeLoops(std::chrono::steady_clock::time_point now,
+                                            std::chrono::milliseconds loop) noexcept
+{
+    // Only `s=3` loops, and only from a frame inside the loop: a gapless current frame is left by a step
+    // first. A loop of no time at all (every frame gapless) has nowhere to go and holds instead.
+    if (state != kitty_graphics::AnimationState::Loop || nextFrameDue > now || loop <= loop.zero()
+        || frames[currentFrame - 1].gapMilliseconds < 0)
+        return;
+    auto loops = static_cast<uint64_t>((now - nextFrameDue) / loop);
+    if (loopCount > 1)
+    {
+        // `v=n` plays n-1 loops. Skip at most to one short of that, so the walk plays the last to its end
+        // and stops there, on the last frame.
+        auto const left = uint64_t { loopCount - 1 } - std::min<uint64_t>(loopsDone, loopCount - 1);
+        loops = std::min(loops, left > 0 ? left - 1 : 0);
+    }
+    nextFrameDue += static_cast<int64_t>(loops) * loop;
+    loopsDone += static_cast<uint32_t>(loops);
+}
+
 void Screen::KittyAnimation::arm(std::chrono::steady_clock::time_point now) noexcept
 {
     nextFrameDue = isPlaying() && successor() ? now + shownFor(currentFrame)
@@ -6274,9 +6302,11 @@ std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimati
             continue;
 
         auto const showing = animation.currentImage();
-        // At most one loop's worth of frames: each is shown only to be replaced in the same breath.
+        auto const loop = animation.loopDuration();
+        // Whole loops are skipped in one go, so what is left to walk frame by frame is less than one loop.
         for ([[maybe_unused]] auto const step: std::views::iota(size_t { 0 }, animation.frames.size()))
         {
+            animation.skipWholeLoops(now, loop);
             if (animation.nextFrameDue > now)
                 break;
             auto const next = animation.successor();
@@ -6302,12 +6332,13 @@ std::optional<std::chrono::steady_clock::time_point> Screen::advanceKittyAnimati
             // From the deadline rather than from now, so a late tick does not stretch every later frame.
             animation.nextFrameDue += animation.shownFor(*next);
         }
-        // Still behind after a whole loop: the display slept. Resume from now rather than replay the rest.
+        // Not reached once whole loops are skipped; kept so no deadline is ever left in the past.
         if (animation.nextFrameDue <= now)
             animation.nextFrameDue = now + animation.shownFor(animation.currentFrame);
 
-        // A catch-up of a whole loop can land on the frame it started from: nothing to show, and no reason to
-        // look for a placement -- an unchanged frame says nothing about whether one is on the page.
+        // A tick can land on the frame it started from (a whole number of loops later): nothing to show, and
+        // no reason to look for a placement -- an unchanged frame says nothing about whether one is on the
+        // page.
         auto const landed = animation.currentImage();
         if (landed == showing)
             continue;

@@ -734,7 +734,8 @@ struct SessionHostConfig
     vtbackend::HostIdentity identity {};
     /// The clocks every session it spawns reads: command durations, record and row times, and the session
     /// epoch, all of which travel to the clients. Borrowed: they must outlive the host. The default is the
-    /// system's; tests pass manual ones to drive time.
+    /// system's; tests pass manual ones to drive time. Its steady clock must be the one the host's EventLoop
+    /// reads, as the kitty frame timer compares the loop's time with deadlines the terminals stamp on it.
     vtbackend::TerminalClocks clocks = vtbackend::TerminalClocks::system();
     /// Where every session it spawns looks up the paths printed on its screen. Borrowed: it must outlive
     /// the host. The default is the machine's own.

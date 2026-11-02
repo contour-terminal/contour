@@ -1759,14 +1759,58 @@ TEST_CASE("KittyGraphics.playback.a_display_asleep_for_more_than_a_loop_resumes"
     placeThreeFrames(mock, 10, 20, 30);
     mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
 
-    // A whole loop and more in one tick (a minimised window): the catch-up lands on the frame it started
-    // from. That frame is unchanged, not missing -- the image is still on the page and keeps playing.
+    // Many loops in one tick (a minimised window): it lands on the frame its time shows -- 1000 ms is 40 ms
+    // into the 60 ms loop, the third frame's -- and keeps playing from there.
     advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == blue());
+    CHECK(dueIn(mock) == 20ms);
+    advance(mock, 20ms);
     CHECK(placedPixels(mock) == red());
     CHECK(mock.terminal.kittyAnimationDue().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.a_tick_late_by_more_than_a_loop_lands_on_the_frame_by_time", "[kitty]")
+{
+    // A loop shorter than the gap between two ticks -- the daemon's throttle -- still plays: each tick lands
+    // on the frame its time shows, not on the one it started from.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 10, 10);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    // 100 ms is 10 ms into the 30 ms loop: the second frame, shown until 110 ms.
+    advance(mock, 100ms);
+    CHECK(placedPixels(mock) == green());
+    CHECK(dueIn(mock) == 10ms);
+    advance(mock, 100ms);
+    CHECK(placedPixels(mock) == blue());
+    CHECK(dueIn(mock) == 10ms);
+}
+
+TEST_CASE("KittyGraphics.playback.a_tick_on_an_exact_multiple_of_the_loop_lands_on_its_start", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 20, 30);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+
+    // Ten 60 ms loops to the millisecond: the first frame again, with its whole gap ahead.
+    advance(mock, 600ms);
+    CHECK(placedPixels(mock) == red());
+    CHECK(dueIn(mock) == 10ms);
     advance(mock, 10ms);
     CHECK(placedPixels(mock) == green());
-    CHECK(mock.terminal.kittyAnimationDue().has_value());
+}
+
+TEST_CASE("KittyGraphics.playback.v_n_stops_on_the_last_frame_after_a_long_sleep", "[kitty]")
+{
+    // The loops a long tick skips count towards `v=`: v=3 plays two 30 ms loops, so one tick a second later
+    // rests on the last frame rather than playing on.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    placeThreeFrames(mock, 10, 10, 10);
+    mock.writeToScreen("\033_Ga=a,i=7,s=3,v=3\033\\"sv);
+
+    advance(mock, 1000ms);
+    CHECK(placedPixels(mock) == blue());
+    CHECK_FALSE(mock.terminal.kittyAnimationDue().has_value());
 }
 
 TEST_CASE("KittyGraphics.playback.s3_with_one_frame_plays_once_frames_arrive", "[kitty]")

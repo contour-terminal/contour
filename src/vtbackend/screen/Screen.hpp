@@ -254,9 +254,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void processAPC(std::string_view body) override;
 
     // {{{ kitty animation playback
-    /// Advances every playing kitty animation whose next frame is due at @p now, as many frames as are due
-    /// but at most one full loop -- a display that slept through more resumes from @p now rather than replay
-    /// what it missed. Under the state lock.
+    /// Advances every playing kitty animation whose next frame is due at @p now to the frame @p now shows:
+    /// whole loops a late tick (a sleeping display, the daemon's throttle) missed are skipped at once and
+    /// counted towards `v=`, the rest walked frame by frame. Under the state lock.
     /// @param now The time to advance to: the frame's, as Terminal::tick() was given it.
     /// @return The earliest deadline left, or nullopt when no animation on this page is due to advance.
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> advanceKittyAnimations(
@@ -323,6 +323,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         /// @return the frame playback moves to from the current one -- the next with a gap, returning to
         ///         the first under `s=3` -- or nullopt when there is none to move to.
         [[nodiscard]] std::optional<uint32_t> successor() const noexcept;
+
+        /// @return how long one loop takes: every frame's shownFor(), gapless ones counting nothing.
+        [[nodiscard]] std::chrono::milliseconds loopDuration() const noexcept;
+
+        /// Skips, under `s=3`, as many whole loops as fit between the deadline and @p now, counting them
+        /// towards `v=` -- but never the last one `v=` allows, which the caller plays to its end and stops
+        /// on. Leaves the current frame as it is: a whole loop ends where it began.
+        /// @param now The time playback is advanced to.
+        /// @param loop The animation's loopDuration().
+        void skipWholeLoops(std::chrono::steady_clock::time_point now,
+                            std::chrono::milliseconds loop) noexcept;
 
         /// Starts the current frame's gap at @p now, or holds when playback has nowhere to go.
         void arm(std::chrono::steady_clock::time_point now) noexcept;
