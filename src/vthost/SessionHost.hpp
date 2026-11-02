@@ -682,8 +682,9 @@ inline constexpr auto InitialInputFallback = std::chrono::seconds { 2 };
 
 /// The shortest gap between two kitty animation frames a hosted session advances. Every advanced frame is a
 /// whole image on the wire to every client, so the daemon plays no faster than this; a frame due sooner is
-/// skipped, not queued -- the next tick lands on the frame its time shows (or, further behind than a whole
-/// loop, catches up one loop and resumes from then). Local playback is not throttled.
+/// skipped, not queued -- the next tick lands on the frame its time shows, however far behind it is: whole
+/// loops are skipped at once (counted towards `v=`), the rest walked frame by frame from the deadline. Local
+/// playback is not throttled.
 /// Measured on the loop's injected clock.
 inline constexpr std::chrono::milliseconds DaemonMinimumFrameInterval { 100 };
 
