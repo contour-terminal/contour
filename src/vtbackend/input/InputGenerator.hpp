@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Flags.hpp>
@@ -12,12 +13,15 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <expected>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace vtbackend
 {
@@ -423,6 +427,28 @@ class KeyboardInputGenerator
     virtual bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) = 0;
 };
 
+/// What a StandardKeyboardInputGenerator holds, as plain data.
+struct StandardKeyboardState
+{
+    KeyMode cursorKeysMode = KeyMode::Normal; ///< DECCKM.
+    KeyMode numpadKeysMode = KeyMode::Normal; ///< DECNKM.
+    bool automaticNewLine = false;            ///< LNM.
+    bool backarrowKey = false;                ///< DECBKM.
+    std::string pendingSequence {};           ///< Encoded keys not yet taken.
+
+    bool operator==(StandardKeyboardState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.cursorKeysMode);
+        visitor(2, self.numpadKeysMode);
+        visitor(3, self.automaticNewLine);
+        visitor(4, self.backarrowKey);
+        visitor(5, self.pendingSequence);
+    }
+};
+
 class StandardKeyboardInputGenerator: public KeyboardInputGenerator
 {
   public:
@@ -439,6 +465,26 @@ class StandardKeyboardInputGenerator: public KeyboardInputGenerator
     [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
     void setCursorKeysMode(KeyMode mode) { _cursorKeysMode = mode; }
     void setNumpadKeysMode(KeyMode mode) { _numpadKeysMode = mode; }
+
+    /// @return The modes and the encoded keys not yet taken.
+    [[nodiscard]] StandardKeyboardState captureState() const
+    {
+        return StandardKeyboardState { .cursorKeysMode = _cursorKeysMode,
+                                       .numpadKeysMode = _numpadKeysMode,
+                                       .automaticNewLine = _automaticNewLine,
+                                       .backarrowKey = _backarrowKey,
+                                       .pendingSequence = _pendingSequence };
+    }
+
+    /// Replaces the modes and the pending keys with @p state.
+    void restoreState(StandardKeyboardState const& state)
+    {
+        _cursorKeysMode = state.cursorKeysMode;
+        _numpadKeysMode = state.numpadKeysMode;
+        _automaticNewLine = state.automaticNewLine;
+        _backarrowKey = state.backarrowKey;
+        _pendingSequence = state.pendingSequence;
+    }
     void setApplicationKeypadMode(bool enable)
     {
         _numpadKeysMode = enable ? KeyMode::Application : KeyMode::Normal;
@@ -525,11 +571,35 @@ enum class KeyboardEventFlag : uint8_t
 
 using KeyboardEventFlags = core::Flags<KeyboardEventFlag>;
 
+/// How deep the kitty keyboard flag stack goes.
+inline constexpr size_t KittyKeyboardStackDepth = 32;
+
+/// What an ExtendedKeyboardInputGenerator holds, as plain data: the standard state and the whole kitty
+/// keyboard flag stack.
+struct ExtendedKeyboardState
+{
+    StandardKeyboardState standard {}; ///< The legacy modes and pending keys.
+    /// Every entry of the kitty flag stack, as its flag bits: the protocol's own (`CSI > flags u`), so
+    /// stable.
+    std::array<uint8_t, KittyKeyboardStackDepth> flags {};
+    uint64_t currentStackTop = 0; ///< Index of the entry in force.
+
+    bool operator==(ExtendedKeyboardState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.standard);
+        visitor(2, self.flags);
+        visitor(3, self.currentStackTop);
+    }
+};
+
 // Implements extended CSIu keyboard input mode.
 class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
 {
   public:
-    static constexpr size_t MaxStackDepth = 32;
+    static constexpr size_t MaxStackDepth = KittyKeyboardStackDepth;
 
     constexpr void enter(KeyboardEventFlags flags) noexcept
     {
@@ -564,6 +634,27 @@ class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerato
     }
 
     constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
+
+    /// @return The legacy modes, the pending keys and the whole kitty flag stack, not only its top.
+    [[nodiscard]] ExtendedKeyboardState captureExtendedState() const
+    {
+        auto state = ExtendedKeyboardState { .standard = StandardKeyboardInputGenerator::captureState(),
+                                             .flags = {},
+                                             .currentStackTop = _currentStackTop };
+        for (auto const index: std::views::iota(size_t { 0 }, _flags.size()))
+            state.flags[index] = _flags[index].value();
+        return state;
+    }
+
+    /// @return Nothing, or InvalidValue when @p state names a stack top outside the stack or a flag the
+    ///         protocol does not define.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateExtendedState(
+        ExtendedKeyboardState const& state);
+
+    /// Replaces the generator's state with @p state.
+    /// @return Nothing, or what validateExtendedState() refuses; the generator is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreExtendedState(
+        ExtendedKeyboardState const& state);
 
     /// Empties the CSIu flag stack and clears the flags on its remaining bottom entry.
     ///
@@ -646,6 +737,57 @@ class InputGenerator
         // mouse wheel generates application cursor key events
         ApplicationCursorKeys
     };
+
+    /// Everything an InputGenerator holds, as plain data.
+    struct State
+    {
+        bool bracketedPaste = false;                   ///< DECSET 2004.
+        bool generateFocusEvents = false;              ///< DECSET 1004.
+        bool win32InputMode = false;                   ///< DECSET 9001.
+        std::optional<MouseProtocol> mouseProtocol {}; ///< The mouse tracking protocol in force.
+        bool passiveMouseTracking = false;             ///< @see InputGenerator::setPassiveMouseTracking
+        MouseTransport mouseTransport = MouseTransport::Default; ///< How mouse events are encoded.
+        MouseWheelMode mouseWheelMode = MouseWheelMode::Default; ///< What the wheel does.
+        unsigned mouseWheelScrollMultiplier = 1;                 ///< Lines per wheel notch.
+        int modifyOtherKeys = 0;                                 ///< XTMODKEYS level.
+        std::string pendingSequence {};                          ///< Encoded input not yet taken.
+        int consumedBytes = 0;                                   ///< How much of it was taken.
+        std::vector<MouseButton> pressedMouseButtons {};         ///< The buttons held, ascending.
+        CellLocation currentMousePosition {}; ///< The last position a mouse event reported.
+        ExtendedKeyboardState keyboard {};    ///< The keyboard generator, kitty stack included.
+
+        bool operator==(State const&) const = default;
+
+        /// Lists the fields for the state codec.
+        void visitFields(this auto& self, auto& visitor)
+        {
+            visitor(1, self.bracketedPaste);
+            visitor(2, self.generateFocusEvents);
+            visitor(3, self.win32InputMode);
+            visitor(4, self.mouseProtocol);
+            visitor(5, self.passiveMouseTracking);
+            visitor(6, self.mouseTransport);
+            visitor(7, self.mouseWheelMode);
+            visitor(8, self.mouseWheelScrollMultiplier);
+            visitor(9, self.modifyOtherKeys);
+            visitor(10, self.pendingSequence);
+            visitor(11, self.consumedBytes);
+            visitor(12, self.pressedMouseButtons);
+            visitor(13, self.currentMousePosition);
+            visitor(14, self.keyboard);
+        }
+    };
+
+    /// @return Every mode, the buttons held, and the input not yet taken. Defined in state/TerminalState.cpp.
+    [[nodiscard]] State captureState() const;
+
+    /// @return Nothing, or InvalidValue when @p state names a kitty stack top outside the stack, or marks
+    ///         more of its pending input taken than there is. Defined in state/TerminalState.cpp.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateState(State const& state);
+
+    /// Replaces the generator's state with @p state, bypassing the setters' side effects.
+    /// @return Nothing, or what validateState() refuses; the generator is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(State const& state);
 
     void setMouseWheelMode(MouseWheelMode mode) noexcept;
     [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return _mouseWheelMode; }

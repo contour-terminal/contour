@@ -400,7 +400,12 @@ size_t Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char co
     if (_bulkScan == BulkScan::Disabled)
     {
         while (input < _fragmentEnd)
-            processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+        {
+            auto const* const byte = input++;
+            processOnceViaStateMachine(static_cast<uint8_t>(*byte));
+            noteSequenceStart(byte);
+        }
+        finishInFlightSequence(input);
         return static_cast<size_t>(std::distance(data.data(), input));
     }
 
@@ -421,12 +426,43 @@ size_t Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char co
                 default: return 0;
             }
         }();
+        // A bulk scanner never begins a sequence: none enters Escape.
         if (processedByteCount != 0)
             input += processedByteCount;
         else
-            processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+        {
+            auto const* const byte = input++;
+            processOnceViaStateMachine(static_cast<uint8_t>(*byte));
+            noteSequenceStart(byte);
+        }
     }
+    finishInFlightSequence(input);
     return static_cast<size_t>(std::distance(data.data(), input));
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+std::string Parser<EventListener, TraceStateChanges>::pendingCharacterBytes() const
+{
+    auto const& decoder = _scanState.utf8;
+    if (isDecoderIdle(decoder))
+        return {};
+
+    // The lead byte announces the length and carries the top bits; every later byte six more. Decoding
+    // these from idle accumulates the same character, length and progress (unicode::from_utf8()).
+    constexpr auto PayloadBits = 6U;
+    constexpr auto ContinuationPrefix = uint8_t { 0x80 };
+    constexpr auto PayloadMask = char32_t { 0x3F };
+    constexpr auto LeadPrefixes = std::array<uint8_t, 5> { 0x00, 0x00, 0xC0, 0xE0, 0xF0 };
+    auto bytes = std::string {};
+    for (auto const index: std::views::iota(0U, decoder.currentLength))
+    {
+        auto const shift = PayloadBits * (decoder.currentLength - 1 - index);
+        auto const bits = decoder.character >> shift;
+        bytes.push_back(static_cast<char>(
+            index == 0 ? LeadPrefixes.at(decoder.expectedLength) | static_cast<uint8_t>(bits)
+                       : ContinuationPrefix | static_cast<uint8_t>(bits & PayloadMask)));
+    }
+    return bytes;
 }
 
 /// True for the states that collect a string body (OSC/APC/PM/SOS/DCS), where an 8-bit ST must be
@@ -632,6 +668,8 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         handle(ActionClass::Leave, Table.exitEvents[s], ch);
         handle(ActionClass::Transition, Table.events[s][static_cast<size_t>(ch)], ch);
         _state = t;
+        if (t == State::Escape)
+            _sequenceStart = SequenceStart::AtLastByte;
         handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(t)], ch);
     }
     else if (Action const a = Table.events[s][ch]; a != Action::Undefined)
@@ -649,6 +687,7 @@ bool Parser<EventListener, TraceStateChanges>::processVT52(uint8_t ch)
             if (ch == 0x1B) // ESC begins a VT52 command.
             {
                 _vt52State = Vt52State::Escape;
+                _sequenceStart = SequenceStart::AtLastByte;
                 return true;
             }
             return false; // printable text or a C0 control: handle it as in ANSI ground.

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -23,6 +24,13 @@ struct StableLine
     uint64_t generation = 0; ///< The stable-id generation @ref id is one of.
 
     bool operator==(StableLine const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.id);
+        visitor(2, self.generation);
+    }
 };
 
 /// Where the input that begins on a line of the prompt ends.
@@ -90,15 +98,32 @@ class LivePromptMarks
     /// Forgets every mark: a new prompt starts.
     void clear() noexcept { _lines.clear(); }
 
-  private:
     /// The marks of one line.
     struct LineMarks
     {
-        StableLine line;
-        std::optional<ColumnOffset> rightPrompt {};
-        InputEnd inputEnd = InputEnd::AtOutputStart;
+        StableLine line;                             ///< The line.
+        std::optional<ColumnOffset> rightPrompt {};  ///< Where its right prompt begins.
+        InputEnd inputEnd = InputEnd::AtOutputStart; ///< Where its input ends.
+
+        bool operator==(LineMarks const&) const = default;
+
+        /// Lists the fields for the state codec.
+        void visitFields(this auto& self, auto& visitor)
+        {
+            visitor(1, self.line);
+            visitor(2, self.rightPrompt);
+            visitor(3, self.inputEnd);
+        }
     };
 
+    /// @return Every line's marks, in the order they were first marked.
+    [[nodiscard]] std::vector<LineMarks> const& entries() const noexcept { return _lines; }
+
+    /// Replaces every mark with @p entries.
+    /// @param entries The marks, in the order they were first marked.
+    void restore(std::vector<LineMarks> entries) { _lines = std::move(entries); }
+
+  private:
     /// @return The marks of @p line, if it has any.
     [[nodiscard]] LineMarks const* find(StableLine line) const noexcept;
 

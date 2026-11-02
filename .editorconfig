@@ -32,6 +32,11 @@ indent_size = 2
 trim_trailing_whitespace = false
 end_of_line = unset
 
+# The text a terminal-state golden must restore to: a rendered page, padded to its width with
+# spaces, which are as much a part of the recording as the characters.
+[src/vtbackend/state/golden/*.txt]
+trim_trailing_whitespace = false
+
 # VT payloads carrying a literal ESC (0x1b): a sixel image, and the one header that embeds a sixel
 # fixture in a raw string literal. Both are plain ASCII, but a control byte that dense makes
 # editorconfig-checker's charset heuristic read them as ISO-8859-1, which it stopped accepting for

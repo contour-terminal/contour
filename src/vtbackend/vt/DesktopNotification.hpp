@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/StateDecodeError.hpp>
+
 #include <crispy/LRUCache.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,6 +100,25 @@ struct DesktopNotification
     bool base64Encoded = false;       ///< Payload is base64-encoded (`e=1`).
     NotificationPayloadType currentPayload =
         NotificationPayloadType::Title; ///< Current payload target (`p=`).
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.identifier);
+        visitor(2, self.title);
+        visitor(3, self.body);
+        visitor(4, self.applicationName);
+        visitor(5, self.urgency);
+        visitor(6, self.occasion);
+        visitor(7, self.sound);
+        visitor(8, self.timeout);
+        visitor(9, self.closeEventRequested);
+        visitor(10, self.focusOnActivation);
+        visitor(11, self.reportOnActivation);
+        visitor(12, self.done);
+        visitor(13, self.base64Encoded);
+        visitor(14, self.currentPayload);
+    }
 };
 
 /// Parses the raw OSC 99 payload (everything after "99;") into a DesktopNotification.
@@ -151,6 +173,21 @@ struct DesktopNotificationLimits
 inline constexpr auto NotificationLimits = DesktopNotificationLimits {};
 
 /// Manages OSC 99 desktop notification state including chunking and active notification tracking.
+/// What a DesktopNotificationManager holds, as plain data.
+struct DesktopNotificationsState
+{
+    std::vector<DesktopNotification>
+        pending;                     ///< Chunked notifications awaiting their last chunk, newest first.
+    std::vector<std::string> active; ///< The identifiers `p=alive` reports, newest first.
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.pending);
+        visitor(2, self.active);
+    }
+};
+
 class DesktopNotificationManager
 {
   public:
@@ -172,6 +209,18 @@ class DesktopNotificationManager
 
     /// @return The identifiers of the chunked notifications still being assembled, newest first.
     [[nodiscard]] std::vector<std::string> pendingNotifications() const;
+
+    /// @return The notifications in flight and those alive, in recency order.
+    [[nodiscard]] DesktopNotificationsState captureState() const;
+
+    /// @return Nothing, or InvalidValue when @p state holds more than the manager keeps, or an identifier
+    ///         twice.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateState(
+        DesktopNotificationsState const& state);
+
+    /// Replaces what the manager holds with @p state, recency included.
+    /// @return Nothing, or what validateState() refuses; the manager is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(DesktopNotificationsState const& state);
 
   private:
     /// What the active list holds per identifier: nothing, for the identifier is all `p=alive` reports.

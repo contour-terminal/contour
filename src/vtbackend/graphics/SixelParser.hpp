@@ -438,6 +438,18 @@ class SixelColorPalette
     void setColor(unsigned int index, RGBColor const& color);
     [[nodiscard]] RGBColor at(unsigned int index) const noexcept;
 
+    /// @return Every register, in index order.
+    [[nodiscard]] std::vector<RGBColor> const& registers() const noexcept { return _palette; }
+
+    /// Replaces every register and the size ceiling.
+    /// @param registers The registers, in index order.
+    /// @param maxSize   The ceiling.
+    void restore(std::vector<RGBColor> registers, unsigned int maxSize)
+    {
+        _palette = std::move(registers);
+        _maxSize = maxSize;
+    }
+
   private:
     std::vector<RGBColor> _palette;
     unsigned int _maxSize;

@@ -26,6 +26,8 @@ enum class JumpOver : uint8_t
 /**
  * Implements the Vi commands for a Terminal as emitted by ViInputHandler.
  */
+struct ViCommandsState;
+
 class ViCommands: public ViInputHandler::Executor
 {
   public:
@@ -120,6 +122,18 @@ class ViCommands: public ViInputHandler::Executor
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept;
     void addLineOffsetToJumpHistory(LineOffset offset) { _jumpHistory.addOffset(offset); }
+    /// @return The cursor, the last-character motion and the jump history. Defined in
+    ///         state/InteractionState.cpp.
+    [[nodiscard]] ViCommandsState captureState() const;
+
+    /// @return Nothing, or InvalidValue when @p state is not one a vi session can have. Defined in
+    ///         state/InteractionState.cpp.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateState(ViCommandsState const& state);
+
+    /// Puts the vi cursor and the memory of its last motions back. Defined in state/InteractionState.cpp.
+    /// @return Nothing, or what validateState() refuses; the session is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(ViCommandsState const& state);
+
     // Cursor offset into the grid.
     CellLocation cursorPosition {};
 

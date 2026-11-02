@@ -167,6 +167,8 @@ using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 /**
  * ViInputHandler provides Vi-input handling.
  */
+struct ViInputHandlerState;
+
 class ViInputHandler: public InputHandler
 {
   public:
@@ -218,6 +220,13 @@ class ViInputHandler: public InputHandler
     void setMode(ViMode mode);
     void toggleMode(ViMode mode);
     [[nodiscard]] ViMode mode() const noexcept { return _viMode; }
+
+    /// @return The mode, the command typed so far and its count. Defined in state/InteractionState.cpp.
+    [[nodiscard]] ViInputHandlerState captureState() const;
+
+    /// Puts the mode and the half-typed command back without telling the executor: a restore replaces
+    /// what the executor reacts to as well. Defined in state/InteractionState.cpp.
+    void restoreState(ViInputHandlerState const& state);
 
     [[nodiscard]] bool isVisualMode() const noexcept
     {

@@ -162,4 +162,30 @@ inline constexpr auto Workloads = std::array {
     return out;
 }
 
+/// How many text lines pass between two Sixel images in the handover workload.
+constexpr auto HandoverLinesPerImage = 1000;
+
+/// The scrollback session a state handover is measured on: @p lines of coloured text, a small Sixel image
+/// after every HandoverLinesPerImage of them, from the same fixed seed as every workload.
+/// @param lines How many lines of text to write.
+/// @return The same bytes for the same argument, on every run and every machine.
+[[nodiscard]] inline std::string makeHandoverWorkload(size_t lines)
+{
+    auto seeds = std::seed_seq { WorkloadSeed };
+    auto rng = std::mt19937 { seeds };
+    auto out = std::string {};
+    for (auto const line: std::views::iota(size_t { 1 }, lines + 1))
+    {
+        detail::writeColoredLine(out, rng);
+        if (line % HandoverLinesPerImage == 0)
+        {
+            auto const color = drawBetween(rng, 0, 100);
+            out += std::format("\033Pq\"1;1;16;12#1;2;{};{};0#1~~~~~~~~~~~~~~~~-~~~~~~~~~~~~~~~~\033\\\r\n",
+                               color,
+                               100 - color);
+        }
+    }
+    return out;
+}
+
 } // namespace vtbackend::test

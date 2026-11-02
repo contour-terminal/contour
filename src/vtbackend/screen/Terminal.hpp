@@ -8,10 +8,12 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/InFlightTail.hpp>
 #include <vtbackend/core/PasteStrip.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/grid/Grid.hpp>
@@ -104,6 +106,10 @@
 
 namespace vtbackend
 {
+
+struct TerminalState;
+struct StagedScreen;
+class RestoredImageTable;
 
 class Screen;
 
@@ -198,6 +204,28 @@ struct InputMethodData
 };
 
 // {{{ Modes
+/// Everything the terminal's modes hold, as plain data, each mode named by its protocol number (the `Ps` of
+/// SM/RM and DECSET/DECRST) rather than by where it sits in memory: which are set, which DEC modes are
+/// frozen, and the XTSAVE stacks.
+struct ModesState
+{
+    std::vector<unsigned> ansi {};                     ///< The ANSI modes set, ascending.
+    std::vector<unsigned> dec {};                      ///< The DEC modes set, ascending.
+    std::vector<unsigned> frozen {};                   ///< The DEC modes frozen to permanently set/reset.
+    std::map<unsigned, std::vector<uint8_t>> saved {}; ///< XTSAVE stacks, bottom first; 1 = was set.
+
+    bool operator==(ModesState const&) const = default;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.ansi);
+        visitor(2, self.dec);
+        visitor(3, self.frozen);
+        visitor(4, self.saved);
+    }
+};
+
 /// API for setting/querying terminal modes.
 ///
 /// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
@@ -276,6 +304,77 @@ class Modes
                 saved.pop_back();
             }
         }
+    }
+
+    /// @return The modes set, the frozen set and the saved stacks, by mode number.
+    [[nodiscard]] ModesState captureState() const
+    {
+        auto state = ModesState {};
+        for (auto const mode: AnsiModes)
+            if (enabled(mode))
+                state.ansi.push_back(toAnsiModeNum(mode));
+        for (auto const& row: DECModeNumbers)
+        {
+            if (enabled(row.mode))
+                state.dec.push_back(row.number);
+            if (frozen(row.mode))
+                state.frozen.push_back(row.number);
+        }
+        std::ranges::sort(state.dec);
+        std::ranges::sort(state.frozen);
+        for (auto const& [mode, stack]: _savedModes)
+            state.saved[toDECModeNum(mode)] = std::vector<uint8_t>(stack.begin(), stack.end());
+        return state;
+    }
+
+    /// @return Nothing, or InvalidValue when @p state names a mode this build does not have.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateState(ModesState const& state)
+    {
+        auto const isAnsi = [](unsigned number) {
+            return std::ranges::contains(
+                AnsiModes, number, [](AnsiMode mode) { return toAnsiModeNum(mode); });
+        };
+        auto const isDec = [](unsigned number) {
+            return isValidDECMode(number);
+        };
+        auto const isStack = [](std::vector<uint8_t> const& stack) {
+            return std::ranges::all_of(stack, [](uint8_t bit) { return bit <= 1; });
+        };
+        if (!std::ranges::all_of(state.ansi, isAnsi) || !std::ranges::all_of(state.dec, isDec)
+            || !std::ranges::all_of(state.frozen, isDec)
+            || !std::ranges::all_of(state.saved | std::views::keys, isDec)
+            || !std::ranges::all_of(state.saved | std::views::values, isStack))
+            return std::unexpected { StateDecodeError::InvalidValue };
+        return {};
+    }
+
+    /// Replaces every mode with @p state, setting the raw words rather than going through set(): a frozen
+    /// mode is restored as it was, and nothing is reported or logged.
+    /// @param state A captured set of modes.
+    /// @return Nothing, or what validateState() refuses; the modes are then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(ModesState const& state)
+    {
+        if (auto const valid = validateState(state); !valid)
+            return valid;
+        auto ansi = uint32_t { 0 };
+        for (auto const mode: AnsiModes)
+            if (std::ranges::contains(state.ansi, toAnsiModeNum(mode)))
+                ansi |= bitOf(mode);
+        _ansi.store(ansi, std::memory_order_relaxed);
+        for (auto& word: _dec)
+            word.store(0, std::memory_order_relaxed);
+        _decFrozen.reset();
+        for (auto const number: state.dec)
+        {
+            auto const mode = *fromDECModeNum(number);
+            _dec[wordOf(mode)].fetch_or(bitOf(mode), std::memory_order_relaxed);
+        }
+        for (auto const number: state.frozen)
+            _decFrozen.set(static_cast<size_t>(*fromDECModeNum(number)), true);
+        _savedModes.clear();
+        for (auto const& [number, stack]: state.saved)
+            _savedModes[*fromDECModeNum(number)] = std::vector<bool>(stack.begin(), stack.end());
+        return {};
     }
 
     /// Resets every mode, and forgets which were frozen and which saved: what a hard reset leaves.
@@ -1071,6 +1170,15 @@ class Terminal: public IStatusLinePublishTarget
     /// Whether a macro body is being run right now.
     [[nodiscard]] bool isMacroRunning() const noexcept { return !_runningMacros.empty(); }
 
+    /// Where a DCS hooking now is hooked: in a macro body while one runs -- or, while the in-flight tail of a
+    /// state handover is replayed, where the DCS it carries was hooked first.
+    [[nodiscard]] HookOrigin hookOrigin() const noexcept
+    {
+        if (_tailReplay == TailReplay::Replaying) [[unlikely]]
+            return _inFlightHookOrigin;
+        return isMacroRunning() ? HookOrigin::MacroBody : HookOrigin::Stream;
+    }
+
     /// Clears all defined macros. The macro bodies running meanwhile end there, every one of them: Windows
     /// Terminal's ClearMacrosIfInUse voids them along with the definitions.
     void clearMacros() noexcept;
@@ -1123,11 +1231,22 @@ class Terminal: public IStatusLinePublishTarget
         int width = 0;               ///< Glyph width in pixels
         int height = 0;              ///< Glyph height in pixels
         std::vector<uint8_t> bitmap; ///< Row-major pixel data (1=set, 0=clear)
+
+        /// Lists the fields for the state codec.
+        void visitFields(this auto& self, auto& visitor)
+        {
+            visitor(1, self.width);
+            visitor(2, self.height);
+            visitor(3, self.bitmap);
+        }
     };
 
     struct DRCSCharset
     {
         std::unordered_map<int, DRCSGlyph> glyphs; ///< Position (0x21-0x7E) → glyph data
+
+        /// Lists the fields for the state codec.
+        void visitFields(this auto& self, auto& visitor) { visitor(1, self.glyphs); }
     };
 
     /// Defines DRCS glyphs from DECDLD DCS payload.
@@ -1192,6 +1311,15 @@ class Terminal: public IStatusLinePublishTarget
         LocatorCoordUnit coordUnit = LocatorCoordUnit::CharacterCells;
         bool reportButtonDown = true;
         bool reportButtonUp = true;
+
+        /// Lists the fields for the state codec.
+        void visitFields(this auto& self, auto& visitor)
+        {
+            visitor(1, self.reporting);
+            visitor(2, self.coordUnit);
+            visitor(3, self.reportButtonDown);
+            visitor(4, self.reportButtonUp);
+        }
     };
 
     /// DECELR: enables or disables DEC Locator reporting, in the unit it selects. An undefined Ps or Pu
@@ -4161,8 +4289,16 @@ class Terminal: public IStatusLinePublishTarget
 
     void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
     {
+        _inFlightHookOrigin = hookOrigin();
         _sequenceBuilder.hookParser(std::move(parserExtension));
     }
+
+    /// Keeps the shared sixel palette as a sixel string drawing with it hooks: the string redefines registers
+    /// as it goes, so a replay of it after a state handover must start from them as they were here.
+    void keepSixelRegistersAtHook();
+
+    /// Forgets what keepSixelRegistersAtHook() kept, as the sixel string ends.
+    void dropSixelRegistersAtHook() noexcept { _sixelRegistersAtHook.reset(); }
 
     constexpr void resetInstructionCounter() noexcept { _instructionCounter = 0; }
     constexpr void incrementInstructionCounter(size_t n = 1) noexcept { _instructionCounter += n; }
@@ -4254,6 +4390,37 @@ class Terminal: public IStatusLinePublishTarget
     void setGuiTabInfoForStatusLine(TabsInfo&& info);
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
+
+    /// The most palettes XTPUSHCOLORS keeps.
+    static constexpr size_t MaxColorPaletteSaveStackSize = 10;
+
+    // {{{ Live upgrade
+    /// Everything this terminal holds that a later byte or input could observe, for a new process to resume
+    /// from. The caller holds the terminal lock. Defined in state/TerminalState.cpp.
+    /// @return The state; its image references are keyed into its own image table.
+    [[nodiscard]] TerminalState captureState() const;
+
+    /// Replaces this terminal's state with @p state, all or nothing. Defined in state/TerminalState.cpp.
+    ///
+    /// Only for a freshly constructed terminal, built from settingsFor(@p state, ...), before any byte or
+    /// input reached it (asserted). Everything that can be refused is refused before anything changes: on
+    /// failure the terminal is exactly as it was constructed. On success every memo is invalidated, the
+    /// screen is marked dirty, and the listener is told what the restore changed (titles, screen, pointer
+    /// shape, progress, working directory, context, vi mode), as the setters a restore bypasses would have.
+    /// @param state A captured terminal.
+    /// @return Nothing, or why @p state is not a state of this terminal.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(TerminalState const& state);
+
+    /// Whether this terminal holds every byte of the escape sequence in flight, which a state handover
+    /// replays: not once the sequence outgrew Settings::inFlightTailLimit, until it ends.
+    [[nodiscard]] TailCompleteness inFlightTailCompleteness() const noexcept
+    {
+        return _inFlightTailCompleteness;
+    }
+
+    /// @return How many bytes the buffer of the in-flight tail holds on to, in use or not.
+    [[nodiscard]] size_t inFlightTailCapacity() const noexcept { return _inFlightTail.capacity(); }
+    // }}}
 
   private:
     /// Whether a changed screen is announced to the listener now.
@@ -4837,19 +5004,24 @@ class Terminal: public IStatusLinePublishTarget
     // private data
     //
 
+    /// Not captured: wiring to the frontend.
     Events& _eventListener;
 
     /// The user's home directory, for abbreviating and expanding `~` in the paths this terminal
     /// recognizes on screen. Empty when the environment names none.
+    /// Not captured: wiring; fixed at construction.
     std::string _homeDirectory;
 
     /// Where the paths this terminal recognizes on screen are looked up. @see Terminal()
+    /// Not captured: wiring; injected at construction.
     core::platform::FileSystem const& _fileSystem;
 
     /// What passive link detection runs on; nullopt detects nothing. Fixed at construction.
+    /// Not captured: wiring; injected at construction.
     std::optional<LinkDetectionServices> _linkServices;
 
     /// The terminal as _linkDetector reads it.
+    /// Not captured: wiring; reads the live terminal.
     TerminalLinkSource _linkSource { *this };
 
     /// Whether a reply the parser raises is flushed to the PTY as soon as the parse lets go of the state
@@ -4858,7 +5030,10 @@ class Terminal: public IStatusLinePublishTarget
     bool _syncPtyOutput;
 
     // configuration state
+    /// Not captured: configuration; what control sequences changed in _settings is captured in ProfileState.
     Settings _factorySettings;
+    /// Not captured: configuration, supplied at construction; the fields control sequences write are captured
+    /// in ProfileState.
     Settings _settings;
 
     /// Lock-free mirror of _settings.pageSize for the render thread.
@@ -4867,6 +5042,7 @@ class Terminal: public IStatusLinePublishTarget
     /// by the render thread (renderImpl() -> totalPageSize()) without that lock. PageSize is two ints, so a
     /// plain read concurrent with the write can tear (columns from one value, lines from another). This
     /// atomic, written in lockstep with _settings.pageSize, gives the render thread a consistent snapshot.
+    /// Not captured: re-derived from the settings.
     std::atomic<PageSize> _atomicTotalPageSize { _settings.pageSize };
 
     // synchronization
@@ -4895,6 +5071,7 @@ class Terminal: public IStatusLinePublishTarget
 
     /// What the current hold keeps back. Written by its holder as it takes the lock, and read only by its
     /// holder: holdsBack() asks for the holder first.
+    /// Not captured: locking wiring.
     mutable HoldBack _stateHoldBack = HoldBack::No;
 
     /// Whether the terminal's own hold of the state lock owes a flush once it is released.
@@ -4906,6 +5083,7 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Written by flushInput() under the terminal's own hold, and read and cleared as it is released: by the
     /// holder only. A reader's hold asks for no flush, as it changes nothing.
+    /// Not captured: locking wiring.
     OwedFlush _owedFlush = OwedFlush::None;
 
     /// Whether the calling thread holds the state lock.
@@ -4967,21 +5145,25 @@ class Terminal: public IStatusLinePublishTarget
     // Held only to queue, to copy the queue's head and to consume what was written -- never across the PTY
     // write, so that a thread that only queues, as a daemon's loop thread does reporting a resize, never
     // waits for a write the application leaves parked. @see _flushMutex
+    /// Not captured: wiring.
     mutable crispy::LifetimeAnnotatedMutex _inputMutex;
 
     // Admits one flushInput() at a time from taking the queue's head through consuming what was written, so
     // that no two flushes send the same bytes. Held across the PTY write, which UnixPty::write() turns
     // blocking once a write comes up short; never with _stateMutex held (@see flushInput()), and never across
     // echoLocally(), which parses and can therefore reply.
+    /// Not captured: wiring.
     crispy::LifetimeAnnotatedMutex _flushMutex;
 
     /// The terminal's clock: the time the frame being built is built at. Set by the render thread's tick(),
     /// before and after each frame, and by the parser thread where a synchronized update ends, as the frame
     /// it builds there is built at that time. Atomic, as the frames built on both threads read it.
+    /// Not captured: the render clock; re-driven by the frontend.
     std::atomic<std::chrono::steady_clock::time_point> _currentTime;
 
     /// The clocks this terminal reads -- never std::chrono::*::now() directly, so a test drives them all.
     /// @see TerminalClocks
+    /// Not captured: wiring; injected at construction.
     TerminalClocks _clocks;
 
     /// What the wall clock read when this terminal was built, floored to the second. Line::bornAt() counts
@@ -4996,45 +5178,63 @@ class Terminal: public IStatusLinePublishTarget
 
     /// What this terminal replicates, as the mirror bound it. Atomic, as fileUrlLocalHost() reads it without
     /// the lock. @see bindReplica
+    /// Not captured: set by the host that attaches a replica; a daemon-hosted terminal is never one.
     std::atomic<ReplicaRole> _replicaRole { ReplicaRole::None };
     /// This machine's identity as a daemon's replicated contexts spell machines, as the mirror bound it:
     /// what a ReplicaRole::SameMachine replica judges a context against. @see bindReplica
+    /// Not captured: set by the host that attaches a replica.
     HostIdentity _replicaIdentity;
 
     // {{{ PTY and PTY read buffer management
+    /// Not captured: buffer wiring.
     crispy::BufferObjectPool<char> _ptyBufferPool;
     /// The reader thread's alone: it reads into it unlocked.
+    /// Not captured: buffer wiring.
     crispy::BufferObjectPtr<char> _currentPtyBuffer;
     /// What writeToScreen() parses out of, under the state lock, on whichever thread calls it. Never the
     /// reader's: its text would land where the reader's next read lands, and one would overwrite the other.
     /// Allocated on the first write.
+    /// Not captured: buffer wiring.
     crispy::BufferObjectPtr<char> _screenWriteBuffer;
+    /// Not captured: buffer wiring.
     crispy::BufferObjectPtr<char> _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
+    /// Not captured: wiring; fixed at construction.
     size_t _ptyReadBufferSize;
 
     /// The thread that last read the PTY: under InputWriter::ReaderThread, the only one that writes to it
     /// once set. No thread until the first read. @see flushInput()
+    /// Not captured: thread wiring.
     std::atomic<std::thread::id> _readerThread {};
+    /// Not captured: wiring; the new process owns its own PTY.
     std::unique_ptr<vtpty::Pty> _pty;
     // }}}
 
     // {{{ mouse related state (helpers for detecting double/triple clicks)
+    /// Not captured: frontend pointer gesture state; the frontend re-feeds events.
     ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
+    /// Not captured: frontend pointer state.
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
     /// What every cell position reported to the application is offset by. @see setReportedCellOrigin
+    /// Not captured: frontend pointer state.
     vtbackend::CellLocation _reportedCellOrigin {};
     /// Where the pointer is in device pixels, from the grid's top left, as of the last move or press: what a
     /// DEC locator report gives while DECELR selects device pixels. xterm's pixel origin is its VT window,
     /// internal border included; the grid's is the sounder one, as the cells count from it too.
+    /// Not captured: frontend pointer state.
     PixelCoordinate _currentMousePixelPosition {};
     /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid. Off
     /// until a pointer event names a cell: until then the position is only its default, not the pointer's.
+    /// Not captured: frontend pointer state.
     PointerPlacement _pointerPlacement = PointerPlacement::OffGrid;
+    /// Not captured: frontend pointer state.
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
+    /// Not captured: frontend pointer state.
     LeftButtonPress _leftButtonPress = LeftButtonPress::Released; ///< What the held left button does.
     /// Moves on whenever a selection is installed or cleared, so a release can tell whether the action a
     /// claimed press ran selected anything.
+    /// Not captured: a change counter for pointer claims; restarts with the frontend.
     uint64_t _selectionGeneration = 0;
+    /// Not captured: frontend pointer state.
     uint64_t _claimedPressGeneration = 0; ///< _selectionGeneration as a claimed press found it.
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     bool _isAutoScrolling = false;        // suppresses extendSelectionAfterScroll during performAutoScroll
@@ -5074,6 +5274,7 @@ class Terminal: public IStatusLinePublishTarget
     /// GUI thread and the render thread advances it as it ticks, neither under the state lock. Kept apart, a
     /// tick that read the time before the key wrote both would flip the phase the key had just set, hiding
     /// the cursor for a whole interval right after the key.
+    /// Not captured: animation phase; restarts shown.
     mutable std::atomic<int64_t> _cursorBlink;
 
     /// @return The cursor's blink, as last published.
@@ -5115,7 +5316,9 @@ class Terminal: public IStatusLinePublishTarget
             return (inPeriod < halfPeriod) ? (halfPeriod - inPeriod) : (period - inPeriod);
         }
     };
+    /// Not captured: animation.
     BlinkerState _slowBlinker { .period = std::chrono::milliseconds { 1000 } };
+    /// Not captured: animation.
     BlinkerState _rapidBlinker { .period = std::chrono::milliseconds { 600 } };
     // }}}
 
@@ -5132,6 +5335,7 @@ class Terminal: public IStatusLinePublishTarget
     /// Guarded by _stateMutex. Started where the screens switch (the parser thread), advanced and ended by
     /// the render-buffer fill (the render thread, or the parser thread where a synchronized update ends), and
     /// ended on a resize (the GUI thread). nextRender() reads _animationsEnd instead.
+    /// Not captured: animation.
     ScreenTransitionState _screenTransition;
     // }}}
 
@@ -5158,6 +5362,7 @@ class Terminal: public IStatusLinePublishTarget
     /// Guarded by _stateMutex. Started, advanced and ended by the render-buffer fill, on whichever thread
     /// builds the frame, and cancelled where the page switches (the parser thread) or resizes (the GUI
     /// thread). nextRender() reads _animationsEnd instead.
+    /// Not captured: animation.
     CursorMotionState _cursorMotion;
 
     // {{{ Line flash state
@@ -5180,12 +5385,14 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Guarded by _stateMutex. Started by a jump (the GUI thread), advanced and ended by the render-buffer
     /// fill. nextRender() reads _animationsEnd instead.
+    /// Not captured: animation.
     LineFlashState _lineFlash;
     // }}}
 
     /// When the last of the cursor motion, the screen transition and the line flash ends, as the state lock
     /// last left them; min() while none runs. Atomic, for nextRender() to read on the render thread without
     /// that lock.
+    /// Not captured: animation.
     std::atomic<std::chrono::steady_clock::time_point> _animationsEnd =
         std::chrono::steady_clock::time_point::min();
 
@@ -5196,6 +5403,7 @@ class Terminal: public IStatusLinePublishTarget
     /// When link detection's next scan is due, as the last frame of the display's left it; max() while none
     /// is. Atomic, for nextRender() to read on the render thread without the state lock, under which a reload
     /// replaces the detector.
+    /// Not captured: render scheduling.
     std::atomic<std::chrono::steady_clock::time_point> _linkScanDue =
         std::chrono::steady_clock::time_point::max();
 
@@ -5279,12 +5487,15 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Guarded by _stateMutex, as the view a glide moves is: armed on the GUI thread, advanced by the render
     /// thread's tick(), and cancelled by whichever thread resets the view.
+    /// Not captured: animation.
     ScrollMomentumState _scrollMomentum;
+    /// Not captured: animation.
     VelocityTracker _scrollVelocityTracker;
 
     /// Whether a glide is armed: _scrollMomentum.active, published for what reads it without the state lock.
     /// tick() takes that lock to advance a glide only while this is set, so a frame without one takes none;
     /// nextRender() and the GUI thread's wheel handling read it as well.
+    /// Not captured: animation.
     std::atomic<bool> _isGliding = false;
 
     /// Starts (or reseeds) a momentum glide at @p velocity with the given @p tuning and wakes the
@@ -5335,15 +5546,19 @@ class Terminal: public IStatusLinePublishTarget
         std::array<PageIndex, 2> { PageIndex { 0 }, AlternateScreenPageIndex };
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
+    /// Not captured: re-derived from the paging state.
     gsl::not_null<Screen*> _currentScreen;
+    /// Not captured: captured as the scroll offset; the part-row pixel offset restarts at zero.
     Viewport _viewport;
     /// The page on display's Screen::linesScrolledIntoHistory() as followOutput() last read it, or as the
     /// page came on display (showPage()): what it scrolled since is the output to follow. Under the state
     /// lock.
     uint64_t _displayedPageLinesFollowed = 0;
+    /// Not captured: configuration pushed by the frontend.
     StatusLineDefinition _indicatorStatusLineDefinition;
 
     // {{{ tabs info
+    /// Not captured: pushed by the frontend.
     TabsInfo _guiTabInfoForStatusLine;
     /// When the currently open synchronized-output block began.
     ///
@@ -5357,84 +5572,118 @@ class Terminal: public IStatusLinePublishTarget
     /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
     /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
     /// thread during output bursts. Held only for the small copy in the accessor/mutator.
+    /// Not captured: wiring.
     crispy::LifetimeAnnotatedMutex mutable _guiTabInfoMutex;
     // }}}
 
     // {{{ selection states
+    /// Not captured: captured as a SelectionState.
     std::unique_ptr<Selection> _selection;
+    /// Not captured: wiring; the selection kind is captured.
     TheSelectionHelper _selectionHelper;
+    /// Not captured: wiring; the selection kind is captured.
     TheSelectionHelper _extendedSelectionHelper;
+    /// Not captured: wiring; its delimiters are captured as _customWordDelimiters.
     TheSelectionHelper _customSelectionHelper;
+    /// The delimiters _customSelectionHelper measures words with: kept as text because the helper holds them
+    /// inside a callable, and a restore has to rebuild it.
+    std::string _customWordDelimiters;
+    /// Makes @p delimiters the word delimiters of _customSelectionHelper.
+    /// @param delimiters The delimiter characters, UTF-8.
+    void setCustomWordDelimiters(std::string const& delimiters);
     // }}}
 
     // {{{ Render buffer state
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
+    /// Not captured: render change counter.
     mutable std::atomic<uint64_t> _changes { 0 };
     // Atomic because both threads touch it without a common lock: the parser thread sets it from
     // screenUpdated(), which runs OUTSIDE _stateMutex on purpose (it calls back into the GUI), while
     // the GUI/render thread reads and clears it in readFromPty()/fillRenderFrame(), the latter for link
     // detection.
+    /// Not captured: render; a restore marks the screen dirty.
     std::atomic<bool> _screenDirty = false; // TODO: just inc _changes and delete this instead.
     /// The time between two frames. Set by the frontend as the display's refresh rate is known, and read by
     /// the render thread as it asks when the next frame is due and by the parser thread as it refreshes the
     /// render buffer, none under the state lock. @see RelaxedAtomic
+    /// Not captured: pushed by the frontend.
     RelaxedAtomic<RefreshInterval> _refreshInterval;
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
     /// Wakes the reader to swap in a frame the display held up, as it lets go (@see onFrontBufferReleased).
     RenderDoubleBuffer _renderBuffer { [this] { onFrontBufferReleased(); } };
 #else
+    /// Not captured: render cache.
     RenderDoubleBuffer _renderBuffer {};
 #endif
+    /// Not captured: render cache.
     std::atomic<uint64_t> _lastFrameID = 0;
     /// What the last frame built found on screen. Atomic: written by the fill on whichever thread builds the
     /// frame, and read by nextRender() on the render thread without the state lock.
+    /// Not captured: render cache.
     std::atomic<RenderPassHints> _lastRenderPassHints {};
     // }}}
 
+    /// Not captured: pushed by the frontend.
     InputMethodData _inputMethodData {};
 
     /// Guards _inputMethodData. The GUI thread writes the composition as it changes, without the state lock,
     /// which composing does not wait for, as typing does not; the fill copies it under that lock.
+    /// Not captured: wiring.
     mutable crispy::LifetimeAnnotatedMutex _inputMethodMutex;
 
     /// @return A copy of the composition, taken under _inputMethodMutex.
     [[nodiscard]] InputMethodData inputMethodData() const;
+    /// Not captured: derived from the pointer.
     std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
     /// The detected link under the pointer as of the last pointer event, or the last frame that changed the
     /// index (@see hoveringLinkId, refreshHoveredLink).
+    /// Not captured: derived from the pointer.
     std::atomic<LinkId> _hoveringLinkId = LinkId {};
+    /// Not captured: pushed by the frontend.
     Modifiers
         _heldModifiers {}; ///< The chord the frontend last reported held. Read and written under the lock.
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
+    /// Not captured: a transient flash.
     std::optional<HighlightRange> _highlightRange = std::nullopt;
+    /// Not captured: static table.
     SupportedSequences _supportedVTSequences;
 
     /// The binding modes that are not atomic themselves -- the screen, DECCKM, DECNKM, the selection and the
     /// search -- as publishBindingModes() last read them. @see bindingModes()
+    /// Not captured: re-derived by publishBindingModes().
     std::atomic<uint8_t> _publishedBindingModes = 0;
 
     // Execution Trace mode
+    /// Not captured: debugging.
     std::atomic<ExecutionMode> _executionMode = ExecutionMode::Normal;
+    /// Not captured: debugging wiring.
     crispy::LifetimeAnnotatedMutex _breakMutex;
+    /// Not captured: debugging wiring.
     std::condition_variable _breakCondition;
+    /// Not captured: debugging.
     TraceHandler _traceHandler;
 
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
+    /// Not captured: pushed by the frontend.
     ImageSize _cellPixelSize;
 
     /// Where and how the window sits on the screen. Owned by the frontend, which pushes it in; the
     /// terminal only reports it back. @see setWindowState().
+    /// Not captured: pushed by the frontend.
     WindowState _windowState {};
 
+    /// Not captured: configuration.
     ColorPalette _defaultColorPalette;
     ColorPalette _colorPalette;
     /// The default background last announced to the frontend. @see refreshDefaultBackground.
+    /// Not captured: re-announced by refreshDefaultBackground() on restore.
     DefaultBackground _announcedBackground;
     std::vector<ColorPalette> _savedColorPalettes;
     size_t _lastSavedColorPalette = 0;
 
     /// Whether this terminal currently has focus. Seeded from Settings::focused (NOT defaulted here, so
     /// there is one source of truth) and thereafter written only by sendFocus{In,Out}Event.
+    /// Not captured: pushed by the frontend.
     bool _focused;
 
     /// The terminal identity DA1/DA2 report, and the conformance level in force. Both seeded from
@@ -5525,15 +5774,18 @@ class Terminal: public IStatusLinePublishTarget
     /// terminal's own default. A pop landing there restores the former and signals a reset only for
     /// the latter. @see popPointerShape.
     bool _pointerShapeBaseSetByApplication = false;
+    /// Not captured: wiring.
     ImageDecoderCallback _imageDecoder;
 
     std::vector<ColumnOffset> _tabs;
 
     /// Switched by the parser thread under the state lock, and read without it by the renderer each frame.
     /// @see RelaxedAtomic
+    /// Not captured: re-derived from the cursor page.
     RelaxedAtomic<ScreenType> _currentScreenType = ScreenType::Primary;
     /// The screen type of the page on display, published by showPage() under the state lock, and read without
     /// it by the frontend: its wheel path, its scrollbar and its pointer shape. @see RelaxedAtomic
+    /// Not captured: re-derived from the displayed page.
     RelaxedAtomic<ScreenType> _displayedScreenType = ScreenType::Primary;
     /// Set by DECSSDT and the frontend under the state lock, and read without it by the render thread as it
     /// asks when the indicator's clock is due next. @see RelaxedAtomic
@@ -5572,6 +5824,7 @@ class Terminal: public IStatusLinePublishTarget
 
     Search _search;
     /// @see searchMatchMemo
+    /// Not captured: derived cache.
     mutable SearchMatchMemo _searchMatchMemo;
 
     /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
@@ -5600,7 +5853,7 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The program-status records (OSC 7501). Terminal-global, not per screen: an alternate-screen switch
     /// and DECSTR leave it alone; RIS empties it. Written under _stateMutex. @see programStatus().
-    ProgramStatusSet _programStatus {};
+    ProgramStatusSet _programStatus { _settings.maxProgramStatusRecords };
 
     /// The icon (or tab) title. Set by `OSC 0` and `OSC 1`, reported by `CSI 20 t`.
     std::string _iconTitle {};
@@ -5615,6 +5868,9 @@ class Terminal: public IStatusLinePublishTarget
         Terminal& terminal;
         void executeControlCode(char controlCode)
         {
+            // Only a C0 control inside a sequence executes while a tail is replayed, and it executed already.
+            if (terminal._tailReplay == TailReplay::Replaying) [[unlikely]]
+                return;
             terminal.sequenceHandler().executeControlCode(controlCode);
         }
         void processSequence(Sequence const& sequence)
@@ -5643,8 +5899,68 @@ class Terminal: public IStatusLinePublishTarget
 
     using StandardSequenceBuilder = SequenceBuilder<ModeDependantSequenceHandler, TerminalInstructionCounter>;
 
+    /// Not captured: wiring.
     StandardSequenceBuilder _sequenceBuilder;
+    /// Not captured: what follows from the bytes it consumed is, with those still in flight
+    /// (_inFlightTail) and what it keeps past a sequence: its grammar and the character REP repeats.
     vtparser::Parser<StandardSequenceBuilder, false> _parser;
+
+    /// The bytes of the escape sequence in flight (vtparser::Parser::inFlightSequenceLength()). Empty at
+    /// rest, and once the sequence outgrew Settings::inFlightTailLimit (_inFlightTailCompleteness). Captured
+    /// with the half-decoded character ahead of them (TerminalState::inFlightTail).
+    std::string _inFlightTail;
+
+    /// Whether _inFlightTail holds the whole sequence in flight.
+    TailCompleteness _inFlightTailCompleteness = TailCompleteness::Complete;
+
+    /// Where the last DCS was hooked. Captured: a replay hooks the DCS in flight as it was hooked first.
+    HookOrigin _inFlightHookOrigin = HookOrigin::Stream;
+
+    /// The shared sixel palette as the sixel string in flight hooked; empty outside one. Captured.
+    std::optional<std::vector<RGBColor>> _sixelRegistersAtHook;
+
+    /// Whether the parser is replaying a captured in-flight tail, whose bytes have had their effects already.
+    enum class TailReplay : uint8_t
+    {
+        Off = 0,   ///< Parsing what the host sends.
+        Replaying, ///< Rebuilding the parser's state from a captured tail.
+    };
+
+    /// Not captured: only set while restoreState() replays a tail.
+    TailReplay _tailReplay = TailReplay::Off;
+
+    /// Keeps the part of @p consumed that is in flight once the parser has consumed it. Called after every
+    /// parseFragment() of the main parser; costs a compare at rest.
+    /// @param consumed The bytes the parser just consumed.
+    void recordInFlightTail(std::string_view consumed);
+
+    /// Makes @p bytes the whole in-flight tail, letting a long sequence's buffer go.
+    /// @param bytes The tail.
+    void keepInFlightTail(std::string_view bytes);
+
+    /// Checks everything of @p state a restore can check without building anything. Defined in
+    /// state/TerminalState.cpp.
+    /// @return Nothing, or why @p state is not a state of this terminal.
+    [[nodiscard]] std::expected<void, StateDecodeError> validateRestore(TerminalState const& state) const;
+
+    /// Puts what restoreState() checked and built in place. Cannot fail. Defined in state/TerminalState.cpp.
+    /// @param state   The state, validated.
+    /// @param images  Its image table, built.
+    /// @param screens Its sixteen pages, then the host-writable and the indicator status line, staged.
+    void commitRestore(TerminalState const& state,
+                       RestoredImageTable const& images,
+                       std::span<StagedScreen> screens);
+
+    /// Tells the listener every fact it keeps a copy of, as a restore replaced them all. Defined in
+    /// state/TerminalState.cpp.
+    void announceRestoredState();
+
+    /// Feeds @p tail to the parser, as restoreState() does to resume the sequence in flight: hooking a DCS
+    /// as it was hooked first, and executing none of the C0 controls inside it again. Defined in
+    /// state/TerminalState.cpp.
+    /// @param tail The captured tail.
+    void replayInFlightTail(std::string_view tail);
+
     uint64_t _instructionCounter = 0;
 
     InputGenerator _inputGenerator {};
@@ -5664,11 +5980,22 @@ class Terminal: public IStatusLinePublishTarget
         void onHintModeExited() override;
         void requestRedraw() override;
     };
+    /// Wiring; its previousViMode is captured with the hint session (HintSessionState).
     HintModeExecutor _hintModeExecutor { *this };
+    /// Captured as HintSessionState while a session is open; its resolver is rebuilt by hintResolver().
     HintModeHandler _hintModeHandler { _hintModeExecutor };
 
     /// The scope the active hint session was activated with; decides whether a scroll re-scans.
     HintScope _hintScope = HintScope::Visible;
+
+    /// The directory the open hint session resolves paths against, as it was when the session opened; none
+    /// where terminalDirectory() refused one. Kept so a restored session resolves as the captured one did.
+    std::optional<TerminalDirectory> _hintDirectory;
+
+    /// What a hint session's patterns resolve a match with.
+    /// @param here The directory paths resolve against; none: a path resolves to nothing.
+    /// @return The resolver, with an empty memo of the path bases of the blocks it meets.
+    [[nodiscard]] HintResolver hintResolver(std::optional<TerminalDirectory> here);
 
     /// Gathers the rows hint mode scans under @p scope, extended past the labelable range to whole
     /// logical lines so a pattern wrapped across the boundary is still matched in full.
@@ -5735,15 +6062,19 @@ class Terminal: public IStatusLinePublishTarget
     void dropSearchMatchRows() noexcept;
 
     /// @see SearchMatchRows
+    /// Not captured: derived cache.
     SearchMatchRows _searchMatchRows {};
 
     /// Moves whenever _searchMatchRows changes; scrollbarMarksRevision() folds it in.
+    /// Not captured: cache stamp.
     uint64_t _searchMatchRowsRevision = 0;
 
     /// @see scrollbarMarksRevision
+    /// Not captured: cache.
     mutable ScrollbarMarksInputs _scrollbarMarksInputs {};
 
     /// @see scrollbarMarksRevision
+    /// Not captured: cache stamp.
     mutable uint64_t _scrollbarMarksRevision = 0;
 
     /// The Grid::stableIdGeneration() the heads in _commandBlocks were last recorded in.
@@ -5815,10 +6146,13 @@ class Terminal: public IStatusLinePublishTarget
 
     // Cached, because computeFoldRanges walks the scrollback: valid until the grid moves underneath it.
     // Empty key means never computed -- an all-zero key would compare equal to a fresh grid's.
+    /// Not captured: cache, rebuilt on demand.
     mutable std::vector<FoldRange> _foldRanges;
+    /// Not captured: cache key.
     mutable std::optional<FoldRangesKey> _foldRangesKey;
 
     /// Bumped whenever a shell mark is stamped or cleared (@see invalidateFoldRanges).
+    /// Not captured: cache stamp; bumped by a restore.
     uint64_t _semanticMarkRevision = 0;
 
     /// Everything the projection is a function of. Cached as one key rather than rebuilt per call,
@@ -5979,26 +6313,33 @@ class Terminal: public IStatusLinePublishTarget
     /// @return A position on the current screen's grid.
     [[nodiscard]] CellLocation gridCursorPosition() const noexcept;
 
+    /// Not captured: cache.
     mutable std::vector<LineOffset> _foldProjection;
 
     /// The hidden runs the projection was built from, kept rather than discarded: the fold-aware Vi
     /// motions ask for them on every keystroke, and they are a function of the very same cache key.
+    /// Not captured: cache.
     mutable std::vector<HiddenInterval> _hiddenIntervals;
 
+    /// Not captured: cache.
     mutable LineCount _hiddenLineCount = LineCount(0);
+    /// Not captured: cache key.
     mutable std::optional<FoldProjectionKey> _foldProjectionKey;
 
     /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
+    /// Not captured: pointer state.
     std::optional<LineOffset> _gutterHoverLine;
 
     /// Whether the last frame showed a running block's time -- a chip, or the sticky header's --, which goes
     /// stale unless a frame is drawn again. Written by the frame build, under the lock; read lock-free by a
     /// frontend's timer (@see hasVisibleRunningStatus).
+    /// Not captured: render state.
     std::atomic<RunningStatus> _runningStatus { RunningStatus::Hidden };
 
     /// What the last frame's sticky header in the chrome showed, hashed (@see chromeStickyHeaderKey); zero
     /// for none. Written by the frame build, under the lock, to raise chromeStickyHeaderChanged() once per
     /// change rather than once per frame.
+    /// Not captured: render state.
     uint64_t _chromeStickyHeaderKey = 0;
 
     /// The block the pointer hovers over its rows, if any (@see setHoveredCommandBlock). Domain state.
@@ -6018,6 +6359,7 @@ class Terminal: public IStatusLinePublishTarget
     bool setCommandBlockFocus(std::optional<CommandBlockId> block);
 
     /// The UI font's label advances, by which a native row's pills are placed (@see setPillLabelMetrics).
+    /// Not captured: pushed by the frontend.
     PillLabelMetrics _pillLabelMetrics {};
 
     /// The columns a chip of @p style saying @p text covers: the measured pill on a native row (the block
@@ -6047,6 +6389,7 @@ class Terminal: public IStatusLinePublishTarget
     /// The frame's block of each drawn row and of the rows beyond the page's two edges
     /// (fillDrawnRowBlocks()), which the rail, the chips and the hover read. A member so a frame reuses its
     /// storage; written only while a frame is built, under the lock.
+    /// Not captured: per-frame scratch.
     mutable std::vector<CommandBlockRecord const*> _railBlocks;
 
     /// Looks up the block of each drawn row, and of the rows just beyond the page's edges, into _railBlocks:
@@ -6125,23 +6468,28 @@ class Terminal: public IStatusLinePublishTarget
     uint64_t _userMarkChanges = 0;
     // }}}
 
+    /// Not captured: a soft cache of recent notifications.
     DesktopNotificationManager _desktopNotificationManager;
 
     /// The status-line extensions; null without extension services. Fixed at construction; what it forwards
     /// to may change, which statusLineExtensionsReplaced() is told of.
+    /// Not captured: wiring.
     IStatusLineExtensions* _extensions;
 
     /// Where the extensions' workers tell of a published frame; null without extension services. Attached
     /// to this terminal in the constructor, revoked in the destructor.
+    /// Not captured: wiring.
     StatusLinePublishSink* _publishSink;
 
     /// The event kinds newly subscribed to whose current state the extensions are yet to be told. Set by
     /// statusLineExtensionsPublished() on an extension worker, which reads no terminal state; drained by the
     /// next frame refresh, under the state lock (@see replayStatusLineState).
+    /// Not captured: extension wiring; the host re-subscribes.
     std::atomic<StatusLineEventKinds::value_type> _extensionReplay = 0;
 
     /// What every hook posts through. Refreshed by statusLineExtensionsPublished(), on an extension worker;
     /// subscribed to nothing, forever, without extension services.
+    /// Not captured: extension wiring.
     StatusLineEventGate _extensionEvents;
 
     /// A user variable a program set, and its latest decoded value.
@@ -6156,44 +6504,55 @@ class Terminal: public IStatusLinePublishTarget
     /// What the extensions are told again when they newly follow it, since no host repeats it: the
     /// foreground process its host last told of (empty for none). Kept only with extension services --
     /// without them the hook skips it in one untaken branch. Guarded by the state lock.
+    /// Not captured: told again by the host.
     std::string _foregroundProcessName;
 
     /// The font metrics the extensions were last told; empty until the host first tells them. Guarded by
     /// the state lock.
+    /// Not captured: told again by the host.
     StatusLineFontMetrics _statusLineFont {};
 
     /// How many user variables a newly following extension is told: StatusLineExtensionServices::maxUserVars;
     /// 0 without extension services. Fixed at construction.
+    /// Not captured: configuration; fixed at construction.
     std::size_t _maxReplayedUserVars;
 
     /// The extension drawing the whole indicator row instead of its template; read at construction and by
     /// statusLineExtensionsReplaced(). Guarded by the state lock once constructed.
+    /// Not captured: extension wiring.
     std::optional<std::string> _takeOverName;
 
     /// The take-over frame the indicator row was last built from, and that row: an unchanged frame is not
     /// re-created in the image pool on every repaint. Guarded by the state lock.
+    /// Not captured: cache of an extension frame.
     std::shared_ptr<StatusLineExtensionSnapshot const> _takeOverSource;
+    /// Not captured: cache of an extension frame.
     Line _takeOverRow;
 
     /// The status-line size the extensions were last told. Guarded by the state lock.
+    /// Not captured: extension wiring.
     PageSize _extensionSurfaceSize {};
 
     /// The row a mirror's host drew, shown as the indicator status line instead of this terminal's own;
     /// none but in a mirror. Guarded by the state lock. @see setMirroredIndicatorStatusLine()
+    /// Not captured: set by a mirror host.
     std::optional<Line> _mirroredIndicatorRow;
 
     /// The frames of the repaint in progress; null outside updateIndicatorStatusLine(). Guarded by the state
     /// lock; mutable because statusLineExtensionText() is a const read that fills it.
+    /// Not captured: scratch of one repaint.
     mutable StatusLineExtensionFrame* _extensionFrame = nullptr;
 
     /// Runs the indicator's `{Command}` items off thread; null without command services. Keep this the last
     /// data member but _linkDetector: its refresh callback touches _eventListener, _pty, _changes and
     /// _renderBuffer, and being destroyed before them guarantees no callback fires once the members declared
     /// before it are gone (runs still in flight keep their own state alive and merely find nobody to notify).
+    /// Not captured: wiring.
     std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
 
     /// Looks up the `{Git}` branch off thread; null without Git services, which then shows none. Declared
     /// after what its redraw request touches, as _statusLineCommands is, for the same reason.
+    /// Not captured: wiring.
     std::unique_ptr<GitHeadCache> _gitHead;
 
     /// Finds links in output once it goes quiet; null without detection services, with no clickable pattern,
@@ -6202,6 +6561,7 @@ class Terminal: public IStatusLinePublishTarget
     /// member, so that it is destroyed first: its redraw request reaches _eventListener, _pty, _changes and
     /// _renderBuffer, and ~LinkDetector cuts that request off before any of them goes (jobs still in flight
     /// keep their own state alive and merely find nobody to notify).
+    /// Not captured: wiring.
     std::unique_ptr<LinkDetector> _linkDetector;
 };
 

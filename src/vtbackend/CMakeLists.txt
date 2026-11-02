@@ -100,6 +100,7 @@ set(vtbackend_HEADERS
     input/MatchModes.hpp
     graphics/MessageParser.hpp
     testing/MockTerm.hpp
+    testing/StateHandover.hpp
     vt/ModifyKeys.hpp
     vt/PointerShape.hpp
     core/Primitives.hpp
@@ -116,6 +117,19 @@ set(vtbackend_HEADERS
     links/ScanText.hpp
     screen/Screen.hpp
     screen/ScreenTestFixtures.hpp
+    state/GridState.hpp
+    state/ImageRefs.hpp
+    state/ImageState.hpp
+    core/InFlightTail.hpp
+    core/StateDecodeError.hpp
+    state/InteractionState.hpp
+    state/ScreenState.hpp
+    state/ShellState.hpp
+    state/StateCodec.hpp
+    state/StateFields.hpp
+    state/TerminalState.hpp
+    state/TerminalStateCodec.hpp
+    state/StateValues.hpp
     shell/ScrollbarMarks.hpp
     input/vi/Selector.hpp
     shell/SemanticBlockTracker.hpp
@@ -160,6 +174,7 @@ set(vtbackend_HEADERS
     graphics/regis/ReGISFont.hpp
     graphics/regis/ReGISParser.hpp
     graphics/regis/ReGISRasterizer.hpp
+    graphics/regis/ReGISState.hpp
     graphics/regis/ReGISTables.hpp
     graphics/regis/ReGISTextRasterizer.hpp
 )
@@ -223,6 +238,14 @@ set(vtbackend_SOURCES
     links/ScanText.cpp
     screen/PrintedLinks.cpp
     screen/Screen.cpp
+    state/GridState.cpp
+    state/ImageState.cpp
+    state/InteractionState.cpp
+    state/ScreenState.cpp
+    state/ShellState.cpp
+    state/StateCodec.cpp
+    state/TerminalState.cpp
+    state/TerminalStateCodec.cpp
     screen/SearchQuery.cpp
     screen/SearchTallyWalk.cpp
     shell/SemanticBlockTracker.cpp
@@ -440,12 +463,28 @@ if(LIBTERMINAL_TESTING)
         graphics/regis/ReGISTextRasterizer_test.cpp
         graphics/regis/ReGISParser_test.cpp
         input/vi/ViCommands_test.cpp
+        state/Golden_test.cpp
+        state/Handover_test.cpp
+        state/GridState_test.cpp
+        state/ImageState_test.cpp
+        state/InFlightTail_test.cpp
+        state/ScreenState_test.cpp
+        state/TerminalState_test.cpp
+        state/StateCodec_test.cpp
+        state/StateRoundTrip_test.cpp
         testing/CounterColumns_test.cpp
         testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
     # ZLIB::ZLIB for testing/Deflate.hpp, which compresses what the tests send.
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend contour_test_trace ZLIB::ZLIB)
+    # Where the checked-in terminal-state goldens live.
+    target_compile_definitions(vtbackend_test PRIVATE
+        VTBACKEND_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/state/golden")
+
+    # Regenerates the golden of the format this build writes: `vtbackend_make_golden state/golden`.
+    add_executable(vtbackend_make_golden state/golden/MakeGolden.cpp)
+    target_link_libraries(vtbackend_make_golden vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
     vtbackend_force_include_test_printers(vtbackend_test)
 
@@ -501,11 +540,13 @@ if(LIBTERMINAL_TESTING)
                  COMMAND bench-headless throughput size 16 runs 1 kinds ascii screens primary pty refresh-hz 60 links)
         set_tests_properties(bench_headless_throughput_links_smoke PROPERTIES PASS_REGULAR_EXPRESSION
                              "link detection: on\r?\nCPU counters: not measured through a PTY\r?\nascii +primary +[0-9.]+ MiB/s +[0-9]+ bytes/read( +[0-9.]+% arrived)? +[0-9]+ match jobs in the run, +[0-9]+ after it, +[0-9]+ links(  \\(under [0-9]+ ms, detection's longest wait: it could not scan inside the measurement\\))?\r?\n")
+        add_test(NAME bench_headless_handover_smoke COMMAND bench-headless handover lines 2000 runs 1)
         add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
         set(BENCH_HEADLESS_SMOKE_TESTS
             bench_headless_throughput_smoke
             bench_headless_throughput_rejects_unknown_kind
             bench_headless_snapshot_smoke
+            bench_headless_handover_smoke
             bench_headless_throughput_pty_smoke
             bench_headless_throughput_links_smoke
             bench_headless_keypress_smoke)

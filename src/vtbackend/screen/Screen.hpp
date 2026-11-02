@@ -62,8 +62,13 @@
 namespace vtbackend
 {
 
+class ImageFragmentResolver;
+class ImageTableBuilder;
 class SixelImageBuilder;
 class Terminal;
+struct KittyScreenState;
+struct ScreenState;
+struct StagedScreen;
 struct CommandBlockRecord;
 struct Settings;
 
@@ -352,11 +357,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return the number of frames the image stored under @p imageId has: one, its root, until a
     ///         frame is added, and zero if there is no such image.
     [[nodiscard]] uint32_t kittyFrameCount(uint32_t imageId) const;
-
-    /// @return the image of 1-based frame @p number of @p imageId, or nullptr if there is none.
-    ///         Unlike kittyAnimationFor(), this creates no animation, so a command may consult it
-    ///         before it has decided to succeed.
-    [[nodiscard]] std::shared_ptr<Image const> kittyFrameImage(uint32_t imageId, uint32_t number) const;
 
     /// What one walk of the page shows instead of an image a fragment holds.
     struct KittyFrameSwap
@@ -1203,6 +1203,65 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] Grid const& grid() const noexcept { return _grid; }
     [[nodiscard]] Grid& grid() noexcept { return _grid; }
 
+    /// @param id The image's kitty id (`i=`).
+    /// @return The image transmitted under @p id and not yet deleted, or null.
+    [[nodiscard]] std::shared_ptr<Image const> kittyImage(uint32_t id) const
+    {
+        auto const it = _kittyImages.find(id);
+        return it != _kittyImages.end() ? it->second : nullptr;
+    }
+
+    /// @return the image of 1-based frame @p number of @p imageId, or nullptr if there is none.
+    ///         Unlike kittyAnimationFor(), this creates no animation, so a command may consult it
+    ///         before it has decided to succeed.
+    [[nodiscard]] std::shared_ptr<Image const> kittyFrameImage(uint32_t imageId, uint32_t number) const;
+
+    /// Everything this screen holds that a later byte or key could observe. The caller holds the terminal
+    /// lock. Defined in state/ScreenState.cpp.
+    /// @param images Collects the images the grid, the kitty tables and the animations refer to; the
+    ///               caller finishes it into the image table the state's references resolve against.
+    /// @return The screen's state, its image references named by @p images.
+    [[nodiscard]] ScreenState captureState(ImageTableBuilder& images) const;
+
+    /// Checks and builds the screen @p state describes, without changing this one: everything a restore can
+    /// refuse is refused here. Defined in state/ScreenState.cpp.
+    /// @param state    A captured screen; must outlive the result.
+    /// @param resolver Turns the state's image references back into the shared objects; must outlive the
+    ///                 result.
+    /// @return What commitRestore() puts in place, or why @p state is not a state of this screen.
+    [[nodiscard]] std::expected<StagedScreen, StateDecodeError> stageRestore(
+        ScreenState const& state, ImageFragmentResolver const& resolver) const;
+
+    /// Replaces this screen's state with what stageRestore() built. Cannot fail. The grid takes the page size
+    /// of the state, and the in-flight sixel builder is left empty. Defined in state/ScreenState.cpp.
+    /// @param staged What stageRestore() built.
+    void commitRestore(StagedScreen staged);
+
+    /// stageRestore() then commitRestore(). Defined in state/ScreenState.cpp.
+    /// @return Nothing, or why @p state is not a state of this screen; the screen is then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(ScreenState const& state,
+                                                                     ImageFragmentResolver const& resolver);
+
+    /// Captures the kitty graphics tables: the transmitted images, their animations and a chunked
+    /// transmission in flight. Defined in state/ImageState.cpp.
+    /// @param images Collects the images the tables refer to.
+    /// @return The tables, with every image named by id.
+    [[nodiscard]] KittyScreenState captureKittyState(ImageTableBuilder& images) const;
+
+    /// Checks captured kitty tables against the images a restore has. Defined in state/ImageState.cpp.
+    /// @return Nothing, or InvalidValue when @p state names an image the resolver does not know, or a kitty
+    /// id
+    ///         twice.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateKittyState(
+        KittyScreenState const& state, ImageFragmentResolver const& resolver);
+
+    /// Replaces the kitty graphics tables with captured ones. Defined in state/ImageState.cpp.
+    /// @param state    The captured tables.
+    /// @param resolver Resolves the image ids to the restored images.
+    /// @return Nothing, or what validateKittyState() refuses; the tables are then unchanged.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreKittyState(
+        KittyScreenState const& state, ImageFragmentResolver const& resolver);
+
     /// How many times a row of a command block was changed in what it tells its head, in place: an erase took
     /// the row out of the block or a mark a head is found by (BlockHeadLineFlags) off it, or a new prompt
     /// relabelled it to its own block.
@@ -1762,8 +1821,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///        when there are none.
     void replyWithBlocks(std::span<CommandBlockRecord const* const> newestFirst);
 
+    /// Not captured: wiring.
     gsl::not_null<Terminal*> _terminal;
+    /// Not captured: wiring.
     gsl::not_null<Settings*> _settings;
+    /// Not captured: wiring; the terminal captures the margins.
     gsl::not_null<Margin*> _margin;
     Grid _grid;
 
@@ -1787,6 +1849,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Scratch for the OSC 3008 decoder, owned here so the per-prompt hot path allocates once per
     /// session rather than once per sequence. @see parseContextSequence.
+    /// Not captured: scratch.
     std::string _contextScratch {};
 
     /// What the shell said about the lines of the prompt in progress that no row records, for
@@ -1824,15 +1887,20 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @see linesScrolledIntoHistory()
     uint64_t _linesScrolledIntoHistory = 0;
 
+    /// Not captured: re-derived from the cursor on restore.
     Line* _currentLine = nullptr;
+    /// Not captured: a sixel string in flight, rebuilt by replaying the terminal's in-flight tail.
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
 
     // Persistent ReGIS interpreter state and canvas: ReGIS state and pixels survive across DCS
     // strings, so these live on the Screen and a fresh parser references them each hook.
     std::unique_ptr<regis::ReGISContext> _regisContext;
     std::unique_ptr<regis::ReGISRasterizer> _regisCanvas;
-    std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer;
-    std::unique_ptr<regis::ReGISEvents> _regisEvents;
+    std::shared_ptr<regis::ReGISTextRasterizer> _regisTextRasterizer; ///< Wiring: injected by the display.
+    std::unique_ptr<regis::ReGISEvents> _regisEvents;                 ///< Wiring: callbacks into this screen.
+
+    /// Creates the ReGIS context, canvas and event callbacks if no ReGIS string has hooked yet.
+    void ensureReGIS();
 
     /// Whether the drop of an image for want of a cell size has been logged yet: a stream of images (a sixel
     /// video) would otherwise write a line for every frame.
@@ -1844,10 +1912,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     CellSizeDropLog _cellSizeDropLog = CellSizeDropLog::NotYetLogged;
 
 #ifdef LIBTERMINAL_LOG_TRACE
+    /// Not captured: debug tracing.
     std::atomic<bool> _logCharTrace = true;
     std::string _pendingCharTraceLog;
 #endif
 
+    /// Not captured: a constant.
     std::string_view _name;
 
     /// Controls whether DECCARA/DECRARA operate on the full rectangle (true) or stream (false).

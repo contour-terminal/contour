@@ -230,6 +230,17 @@ TEST_CASE("Parser.PM")
     CHECK(listener.text == "ABCDEF");
 }
 
+TEST_CASE("Parser.DCS_Ignore prints none of its payload", "[Parser]")
+{
+    // A ':' among a DCS's parameters makes it one to ignore: everything up to its ST is dropped, UTF-8
+    // text included, and an 8-bit ST inside a character's bytes does not end it.
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("A\033P1:2q\xC3\xA9 \xE2\x9C\x85 x\033\\B"sv);
+    CHECK(p.state() == vtparser::State::Ground);
+    CHECK(listener.text == "AB");
+}
+
 namespace
 {
 /// Records the character REP would repeat whenever a CSI is dispatched.
@@ -258,15 +269,78 @@ TEST_CASE("Parser.precedingGraphicCharacter is the last character printed in bul
     CHECK(listener.preceding == expected);
 }
 
-TEST_CASE("Parser.DCS_Ignore prints none of its payload", "[Parser]")
+TEST_CASE("Parser.isAtRest and the sequence in flight", "[Parser]")
 {
-    // A ':' among a DCS's parameters makes it one to ignore: everything up to its ST is dropped, UTF-8
-    // text included, and an 8-bit ST inside a character's bytes does not end it.
     MockParserEvents listener;
     auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
-    p.parseFragment("A\033P1:2q\xC3\xA9 \xE2\x9C\x85 x\033\\B"sv);
-    CHECK(p.state() == vtparser::State::Ground);
-    CHECK(listener.text == "AB");
+    CHECK(p.isAtRest());
+
+    p.parseFragment("text\r\n"sv);
+    CHECK(p.isAtRest());
+    CHECK(p.inFlightSequenceLength() == 0);
+
+    // A sequence split across fragments is in flight from its ESC on, a C0 executed inside it included.
+    p.parseFragment("ab\033[1"sv);
+    CHECK_FALSE(p.isAtRest());
+    CHECK(p.inFlightSequenceLength() == 3);
+    p.parseFragment(";2\n3"sv);
+    CHECK(p.inFlightSequenceLength() == 7);
+    p.parseFragment("Hcd"sv);
+    CHECK(p.isAtRest());
+    CHECK(p.inFlightSequenceLength() == 0);
+
+    // A DCS payload taken in bulk counts as the bytes it is.
+    p.parseFragment("\033Pq#0;2;0;0;0~~~~~~"sv);
+    CHECK(p.inFlightSequenceLength() == 19);
+    p.parseFragment("\033\\"sv);
+    CHECK(p.isAtRest());
+
+    // The ESC that ends a string has ended it already: what is in flight begins there.
+    p.parseFragment("\033]2;a title\033"sv);
+    CHECK(p.inFlightSequenceLength() == 1);
+    p.parseFragment("\\"sv);
+    CHECK(p.isAtRest());
+
+    // A half-decoded character is not at rest, but no sequence is in flight.
+    p.parseFragment("\xE2\x9C"sv);
+    CHECK_FALSE(p.isAtRest());
+    CHECK(p.inFlightSequenceLength() == 0);
+    p.parseFragment("\x85"sv);
+    CHECK(p.isAtRest());
+
+    // A VT52 command half-read is in flight too.
+    p.setVT52Mode(true);
+    p.parseFragment("\033Y"sv);
+    CHECK_FALSE(p.isAtRest());
+    CHECK(p.inFlightSequenceLength() == 2);
+    p.parseFragment("  "sv);
+    CHECK(p.isAtRest());
+}
+
+TEST_CASE("Parser.pendingCharacterBytes brings a fresh decoder to the same half-decoded character",
+          "[Parser]")
+{
+    auto const character = GENERATE("\xC3\xA9"sv, "\xE2\x9C\x85"sv, "\xF0\x9F\x98\x80"sv);
+    for (auto const split: std::views::iota(size_t { 1 }, character.size()))
+    {
+        INFO(std::format("split after {} of {} bytes", split, character.size()));
+        MockParserEvents original;
+        auto p = vtparser::Parser<vtparser::ParserEvents>(original);
+        p.parseFragment(character.substr(0, split));
+        auto const pending = p.pendingCharacterBytes();
+        CHECK(pending == character.substr(0, split));
+
+        MockParserEvents resumed;
+        auto q = vtparser::Parser<vtparser::ParserEvents>(resumed);
+        q.parseFragment(pending);
+        CHECK_FALSE(q.isAtRest());
+        q.parseFragment(character.substr(split));
+        p.parseFragment(character.substr(split));
+        CHECK(resumed.text == original.text);
+        CHECK(q.isAtRest());
+    }
+    MockParserEvents idle;
+    CHECK(vtparser::Parser<vtparser::ParserEvents>(idle).pendingCharacterBytes().empty());
 }
 
 TEST_CASE("Parser.APC")

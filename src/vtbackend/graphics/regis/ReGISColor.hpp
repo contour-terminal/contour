@@ -55,6 +55,9 @@ class ReGISColorRegisters
     /// existing register rather than allocating, matching xterm's behaviour.
     [[nodiscard]] unsigned findClosest(RGBColor color) const noexcept;
 
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor) { visitor(1, self._registers); }
+
   private:
     std::array<RGBColor, ColorRegisterCount> _registers {};
 };

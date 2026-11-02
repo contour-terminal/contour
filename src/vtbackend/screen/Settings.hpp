@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/InFlightTail.hpp>
 #include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/MouseForwarding.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -14,6 +15,7 @@
 #include <vtbackend/shell/MarkArbiter.hpp>
 #include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/vt/Charset.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/UserVar.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -319,6 +321,14 @@ struct Settings
     /// Whether the VT parser may skip its state machine for runs of bytes it would only pass on.
     /// Always Enabled in production. Disabled is the per-byte reference the tests compare against.
     vtparser::BulkScan parserBulkScan = vtparser::BulkScan::Enabled;
+    /// How many bytes of the escape sequence in flight the terminal keeps for a state handover: one longer
+    /// than this is dropped, and the handover waits for it to end. @see TailCompleteness
+    size_t inFlightTailLimit = DefaultInFlightTailLimit;
+    /// How many OSC 8 links the terminal keeps, least recently used dropped first. Read once, at
+    /// construction.
+    size_t hyperlinkCacheCapacity = 1024;
+    /// How many OSC 7501 program status records the terminal keeps. Read once, at construction.
+    size_t maxProgramStatusRecords = MaxProgramStatusRecords;
     std::u32string wordDelimiters = U" ";         ///< What ends a word a double click selects.
     std::u32string extendedWordDelimiters = U" "; ///< What ends a word a triple click selects.
     Modifiers mouseProtocolBypassModifiers = Modifier::Shift;

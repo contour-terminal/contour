@@ -75,6 +75,15 @@ struct SelectionExtent
  * Third mouse press AND on same coordinate as prior mouse presses -> reselects line
  * Mouse moves -> resets last recorded mouse press coordinate
  */
+/// The shape of a selection, from which its class and its mode follow.
+enum class SelectionKind : uint8_t
+{
+    Linear = 0,  ///< Character by character.
+    Rectangular, ///< A block.
+    WordWise,    ///< Word by word.
+    FullLine,    ///< Whole lines.
+};
+
 class Selection
 {
   public:
@@ -107,6 +116,9 @@ class Selection
 
     virtual ~Selection() = default;
 
+    /// @return The shape of this selection.
+    [[nodiscard]] virtual SelectionKind kind() const noexcept { return SelectionKind::Linear; }
+
     constexpr CellLocation from() const noexcept { return _from; }
     constexpr CellLocation to() const noexcept { return _to; }
 
@@ -138,6 +150,21 @@ class Selection
     /// Marks the selection as completed.
     void complete();
 
+    /// @return The helper this selection measures the grid with.
+    [[nodiscard]] SelectionHelper const& helper() const noexcept { return _helper; }
+
+    /// Puts the selection back at @p from, @p to and @p state, as a restore of a captured one does, without
+    /// extending or announcing anything.
+    /// @param from  Where it started.
+    /// @param to    Where it reaches.
+    /// @param state How far the gesture got.
+    void restoreRange(CellLocation from, CellLocation to, State state) noexcept
+    {
+        _from = from;
+        _to = to;
+        _state = state;
+    }
+
     /// Applies any scroll action to the line offsets.
     void applyScroll(LineOffset value, LineCount historyLineCount);
 
@@ -163,6 +190,7 @@ class RectangularSelection: public Selection
     RectangularSelection(SelectionHelper const& helper,
                          CellLocation start,
                          OnSelectionUpdated onSelectionUpdated);
+    [[nodiscard]] SelectionKind kind() const noexcept override { return SelectionKind::Rectangular; }
     [[nodiscard]] bool contains(CellLocation coord) const noexcept override;
     [[nodiscard]] bool intersects(Rect area) const noexcept override;
     [[nodiscard]] std::vector<Range> ranges() const override;
@@ -187,6 +215,8 @@ class WordWiseSelection final: public Selection
                       CellLocation start,
                       OnSelectionUpdated onSelectionUpdated);
 
+    [[nodiscard]] SelectionKind kind() const noexcept override { return SelectionKind::WordWise; }
+
     bool extend(CellLocation to) override;
 
     [[nodiscard]] CellLocation extendSelectionBackward(CellLocation pos) const noexcept;
@@ -199,6 +229,8 @@ class FullLineSelection final: public Selection
     explicit FullLineSelection(SelectionHelper const& helper,
                                CellLocation start,
                                OnSelectionUpdated onSelectionUpdated);
+
+    [[nodiscard]] SelectionKind kind() const noexcept override { return SelectionKind::FullLine; }
     bool extend(CellLocation to) override;
 };
 

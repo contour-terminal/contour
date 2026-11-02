@@ -202,8 +202,6 @@ namespace
         return path.find_first_of("/\\") == std::string_view::npos;
     }
 
-    constexpr size_t MaxColorPaletteSaveStackSize = 10;
-
     void trimSpaceRight(string& value)
     {
         while (!value.empty() && value.back() == ' ')
@@ -363,7 +361,7 @@ Terminal::Terminal(Events& eventListener,
     _sixelColorPalette { std::make_shared<SixelColorPalette>(_maxSixelColorRegisters,
                                                              _maxSixelColorRegisters) },
     _imagePool { [this](Image const* image) { discardImage(*image); } },
-    _hyperlinks { .cache = HyperlinkCache { 1024 } },
+    _hyperlinks { .cache = HyperlinkCache { _settings.hyperlinkCacheCapacity } },
     _sequenceBuilder { ModeDependantSequenceHandler { *this }, TerminalInstructionCounter { *this } },
     _parser { std::ref(_sequenceBuilder), _settings.parserBulkScan },
     _viCommands { *this },
@@ -2270,13 +2268,19 @@ void Terminal::triggerWordWiseSelectionWithCustomDelimiters(string const& delimi
     auto const startPos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
+    setCustomWordDelimiters(delimiters);
+
+    triggerWordWiseSelection(startPos, _customSelectionHelper);
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::setCustomWordDelimiters(string const& delimiters)
+{
+    _customWordDelimiters = delimiters;
     _customSelectionHelper.wordDelimited = [wordDelimiters = unicode::from_utf8(delimiters),
                                             this](CellLocation const& pos) {
         return this->wordDelimited(pos, wordDelimiters);
     };
-
-    triggerWordWiseSelection(startPos, _customSelectionHelper);
-    breakLoopAndRefreshRenderBuffer();
 }
 
 void Terminal::setSelector(std::unique_ptr<Selection> selector)
@@ -2697,12 +2701,86 @@ void Terminal::processPendingLocalEcho()
     }
 }
 
+namespace
+{
+    /// What a parser ignoring a control string to its ST needs to be fed to stand where it stands: the
+    /// payload that went by does nothing, so the shortest bytes into the same state are the whole of its
+    /// tail.
+    struct IgnoringTail
+    {
+        vtparser::State state;  ///< The ignoring state.
+        std::string_view bytes; ///< The bytes that enter it from Ground.
+    };
+
+    constexpr auto IgnoringTails = std::array {
+        IgnoringTail { .state = vtparser::State::DCS_Ignore, .bytes = "\033P:" },   // a malformed DCS
+        IgnoringTail { .state = vtparser::State::IgnoreUntilST, .bytes = "\033X" }, // SOS
+    };
+} // namespace
+
+void Terminal::keepInFlightTail(std::string_view bytes)
+{
+    // A long sequence's buffer is let go once it is not needed, rather than kept for the rest of the
+    // session: an image a program sent once is no reason to hold its size in memory forever.
+    // A swap, not an assignment: assigning a short string keeps the buffer it is assigned into.
+    if (_inFlightTail.capacity() > InFlightTailRetainedCapacity
+        && bytes.size() <= InFlightTailRetainedCapacity)
+        std::string { bytes }.swap(_inFlightTail);
+    else
+        _inFlightTail.assign(bytes);
+    _inFlightTailCompleteness = TailCompleteness::Complete;
+}
+
+void Terminal::recordInFlightTail(std::string_view consumed)
+{
+    auto const inFlight = _parser.inFlightSequenceLength();
+    if (inFlight == 0) [[likely]]
+    {
+        if (!_inFlightTail.empty() || _inFlightTailCompleteness != TailCompleteness::Complete) [[unlikely]]
+            keepInFlightTail({});
+        return;
+    }
+
+    // A control string the parser ignores keeps the bytes that bring a parser there, not its payload.
+    if (auto const ignoring = std::ranges::find(IgnoringTails, _parser.state(), &IgnoringTail::state);
+        ignoring != IgnoringTails.end()) [[unlikely]]
+    {
+        if (_inFlightTail != ignoring->bytes)
+            keepInFlightTail(ignoring->bytes);
+        return;
+    }
+
+    // Too long to keep: dropped, and so is a handover until the sequence ends.
+    if (inFlight > _settings.inFlightTailLimit) [[unlikely]]
+    {
+        std::string {}.swap(_inFlightTail);
+        _inFlightTailCompleteness = TailCompleteness::Overflowed;
+        return;
+    }
+
+    // Begun among these bytes: they hold all of it. Otherwise it goes on from the bytes kept before -- all of
+    // them, as it would have outgrown the limit by now if it had begun before a sequence that overflowed, or
+    // gone into an ignoring state, which it never leaves for another inside the same sequence.
+    if (inFlight <= consumed.size())
+        keepInFlightTail(consumed.substr(consumed.size() - inFlight));
+    else
+        _inFlightTail.append(consumed);
+    assert(_inFlightTail.size() == inFlight);
+}
+
+void Terminal::keepSixelRegistersAtHook()
+{
+    _sixelRegistersAtHook = _sixelColorPalette->registers();
+}
+
 void Terminal::parseExpandingMacros(std::string_view input)
 {
     auto const parseGuard = ParseDepthGuard {};
     do
     {
-        input.remove_prefix(_parser.parseFragment(input));
+        auto const consumed = _parser.parseFragment(input);
+        recordInFlightTail(input.substr(0, consumed));
+        input.remove_prefix(consumed);
         if (auto const invocation = std::exchange(_pendingMacroInvocation, std::nullopt))
             runMacro(*invocation);
     } while (!input.empty() && !(isMacroRunning() && _areRunningMacrosVoid));
@@ -6083,11 +6161,8 @@ void Terminal::refreshHints()
     _hintModeHandler.refresh(collectHintScanArea(HintScope::Visible, LineCount(0)));
 }
 
-void Terminal::activateHintMode(HintModeRequest request)
+HintResolver Terminal::hintResolver(std::optional<TerminalDirectory> here)
 {
-    _hintScope = request.scope;
-    auto const area = collectHintScanArea(request.scope, request.scrollbackLimit);
-
     // A path resolves against the directory of the command that printed it, and outside any block against the
     // working directory for opening locally (localPathBaseAt()), decided per row as the mouse decides it, and
     // is classified as detection and a click classify it (classifyPrintedLink()). A row whose paths name
@@ -6097,12 +6172,10 @@ void Terminal::activateHintMode(HintModeRequest request)
     // once, as hint mode is user-initiated (§12), through the probe where detection runs, which fills its
     // cache, and in the terminal's filesystem otherwise. What a block's rows resolve against is worked out
     // once per activation.
-    auto mutablePatterns = std::move(request.patterns);
-    mutablePatterns.resolve =
-        [this,
-         here = terminalDirectory(),
-         blocks = std::make_shared<std::map<CommandBlockId, std::expected<PathBases, PathRefusal>>>()](
-            LinkCandidate const& candidate, LineOffset row) -> std::optional<LinkTarget> {
+    return [this,
+            here = std::move(here),
+            blocks = std::make_shared<std::map<CommandBlockId, std::expected<PathBases, PathRefusal>>>()](
+               LinkCandidate const& candidate, LineOffset row) -> std::optional<LinkTarget> {
         auto printed = printedLinkTarget(candidate);
         // A URL or a custom link is as it opens; a file:// URL is the path it names (§7.6), and goes on as
         // one.
@@ -6145,6 +6218,17 @@ void Terminal::activateHintMode(HintModeRequest request)
             },
             classified);
     };
+}
+
+void Terminal::activateHintMode(HintModeRequest request)
+{
+    _hintScope = request.scope;
+    auto const area = collectHintScanArea(request.scope, request.scrollbackLimit);
+
+    auto here = terminalDirectory();
+    _hintDirectory = here ? std::optional { std::move(*here) } : std::nullopt;
+    auto mutablePatterns = std::move(request.patterns);
+    mutablePatterns.resolve = hintResolver(_hintDirectory);
 
     _hintModeHandler.activate(area, std::move(mutablePatterns), request.action);
     _inputHandler.setMode(ViMode::Hint);
@@ -9899,6 +9983,9 @@ void Terminal::popColorPalette(size_t slot)
         return;
 
     auto const index = slot == MagicStackTopId ? _savedColorPalettes.size() - 1 : slot - 1;
+    // A slot above the stack names nothing: it is ignored, as xterm does.
+    if (index >= _savedColorPalettes.size())
+        return;
 
     setColorPalette(_savedColorPalettes[index]);
     if (slot == MagicStackTopId)

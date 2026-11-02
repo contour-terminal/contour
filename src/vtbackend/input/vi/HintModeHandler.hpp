@@ -94,6 +94,8 @@ struct HintMatch
     CellLocation end;   ///< End position in the grid (inclusive).
 };
 
+struct HintSessionState;
+
 /// Handles hint mode logic: scanning visible text for regex matches,
 /// assigning alphabetic labels, and progressively filtering by typed input.
 class HintModeHandler
@@ -167,6 +169,17 @@ class HintModeHandler
 
     /// Returns the hint action for the current session.
     [[nodiscard]] HintAction action() const noexcept { return _action; }
+
+    /// @return The open session's action, pattern names, matches and filter; the terminal's part of the
+    ///         state (scope, the mode to return to, the directory) is left default. Defined in
+    ///         state/InteractionState.cpp.
+    [[nodiscard]] HintSessionState captureState() const;
+
+    /// Reopens a captured session without telling the executor: a restore puts back the mode the executor
+    /// would have switched as well.
+    /// @param state    The session.
+    /// @param patterns The table and resolver to re-scan with; its names are replaced by @p state's.
+    void restoreState(HintSessionState const& state, HintPatternSet patterns);
 
   private:
     /// Core scanning logic shared by activate() and refresh().

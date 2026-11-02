@@ -23,6 +23,15 @@ struct AddressWindow
     double y0 = 0.0;
     double x1 = static_cast<double>(DefaultAddressWidth) - 1.0;
     double y1 = static_cast<double>(DefaultAddressHeight) - 1.0;
+
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.x0);
+        visitor(2, self.y0);
+        visitor(3, self.x1);
+        visitor(4, self.y1);
+    }
 };
 
 /// The persistent state of a ReGIS interpreter.
@@ -81,6 +90,34 @@ struct ReGISContext
     std::unordered_map<char, std::string> macrographs {}; ///< Stored command-string macros by letter.
 
     /// Restores every field to its VT340 power-up default and clears the stacks.
+    /// Lists the fields for the state codec.
+    void visitFields(this auto& self, auto& visitor)
+    {
+        visitor(1, self.position);
+        visitor(2, self.window);
+        visitor(3, self.canvasSize);
+        visitor(4, self.supersample);
+        visitor(5, self.writingMode);
+        visitor(6, self.foregroundRegister);
+        visitor(7, self.backgroundRegister);
+        visitor(8, self.pattern);
+        visitor(9, self.negativePattern);
+        visitor(10, self.patternMultiplier);
+        visitor(11, self.pixelVectorMultiplier);
+        visitor(12, self.lineWidth);
+        visitor(13, self.shadingEnabled);
+        visitor(14, self.shadingVertical);
+        visitor(15, self.shadingReference);
+        visitor(16, self.textCellWidth);
+        visitor(17, self.textCellHeight);
+        visitor(18, self.textDirection);
+        visitor(19, self.textSlant);
+        visitor(20, self.registers);
+        visitor(21, self.backgroundOpaque);
+        visitor(22, self.positionStack);
+        visitor(23, self.macrographs);
+    }
+
     void reset();
 
     /// Maps a user coordinate to a canvas pixel through the current addressing window.

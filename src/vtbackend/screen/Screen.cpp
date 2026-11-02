@@ -8795,6 +8795,11 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
 
     auto const transparentBackground = pb == 1;
 
+    // A string drawing with the shared registers redefines them as it goes: a replay of it after a state
+    // handover starts from them as they are now.
+    if (!_terminal->usePrivateColorRegisters())
+        _terminal->keepSixelRegistersAtHook();
+
     _sixelImageBuilder = make_unique<SixelImageBuilder>(
         _terminal->maxImageSize(),
         SixelAspectRatio { .vertical = sixelAspectVertical(pa), .horizontal = 1 },
@@ -8805,13 +8810,12 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
             : _terminal->sixelColorPalette());
 
     return make_unique<SixelParser>(*_sixelImageBuilder, [this]() {
-        {
-            sixelImage(_sixelImageBuilder->size(), std::move(_sixelImageBuilder->data()));
-        }
+        _terminal->dropSixelRegistersAtHook();
+        sixelImage(_sixelImageBuilder->size(), std::move(_sixelImageBuilder->data()));
     });
 }
 
-unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
+void Screen::ensureReGIS()
 {
     // ReGIS state persists across DCS strings, so the interpreter context and canvas live on the
     // Screen and are created once, lazily. A fresh, lightweight parser references them each hook.
@@ -8850,6 +8854,11 @@ unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
                                              static_cast<int>(std::lround(userY)) };
             });
     }
+}
+
+unique_ptr<ParserExtension> Screen::hookReGIS(Sequence const& seq)
+{
+    ensureReGIS();
     // Use the embedded font unless the display injected a text_shaper-backed rasterizer.
     if (!_regisTextRasterizer)
         _regisTextRasterizer = make_shared<regis::EmbeddedReGISTextRasterizer>();
@@ -9069,7 +9078,7 @@ unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
 
     // DEC STD 070: "Macro definitions cannot be nested." One that starts in a running macro body is ignored
     // whole, deleting nothing either, as Windows Terminal has it.
-    if (_terminal->isMacroRunning())
+    if (_terminal->hookOrigin() == HookOrigin::MacroBody)
         return nullptr;
 
     // A parameter out of range has the control ignored whole as well, Pdt's deletion included.

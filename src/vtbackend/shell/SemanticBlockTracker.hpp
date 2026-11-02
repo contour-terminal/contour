@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/StateDecodeError.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <random>
@@ -63,11 +65,25 @@ struct SBQueryType
 /// mode 2034 is on; this decides only what the protocol may report. A reader sees the blocks whose command
 /// had not started when it enabled the mode -- the prompt on screen then, and every block after it -- so
 /// enabling 2034 is never a way to read back commands that ran before.
+struct SemanticBlockTrackerState;
+
 class SemanticBlockTracker
 {
   public:
     /// 64-bit session token represented as 4 x uint16_t for CSI parameter encoding.
     using Token = SemanticBlockToken;
+
+    /// @return The session token and which blocks the session hides. Defined in state/ShellState.cpp.
+    [[nodiscard]] SemanticBlockTrackerState captureState() const;
+
+    /// Resumes the session @p state describes, with the very token the reader was handed (nothing is
+    /// minted). Defined in state/ShellState.cpp.
+    /// @return Nothing, or InvalidValue when a token part is not one a session can hold.
+    [[nodiscard]] std::expected<void, StateDecodeError> restoreState(SemanticBlockTrackerState const& state);
+
+    /// @return Nothing, or InvalidValue when @p state holds a token part out of range.
+    [[nodiscard]] static std::expected<void, StateDecodeError> validateState(
+        SemanticBlockTrackerState const& state);
 
     /// @param tokens Where each session's token comes from; drawn once per enable().
     explicit SemanticBlockTracker(SemanticBlockTokenSource tokens);
