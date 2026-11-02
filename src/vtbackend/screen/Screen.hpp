@@ -369,6 +369,19 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///         is stored under that id.
     [[nodiscard]] KittyAnimation* kittyAnimationFor(uint32_t imageId);
 
+    /// Stores @p frame as 1-based frame @p target of the image stored under @p imageId -- appended when
+    /// @p target is one past the last frame -- and shows it where it is the frame on display. Shared by
+    /// `a=f` and `a=c`, which differ only in how the frame's pixels are made.
+    /// @param imageId The stored image the frame belongs to; it must exist.
+    /// @param target The frame to replace, or one past the last to append one.
+    /// @param frame The frame's pixels.
+    /// @param previous The image frame @p target showed until now, which its placements are moved off.
+    /// @return The animation the frame was stored in.
+    KittyAnimation& storeKittyFrame(uint32_t imageId,
+                                    uint32_t target,
+                                    std::shared_ptr<Image const> frame,
+                                    std::shared_ptr<Image const> const& previous);
+
     /// @return the number of frames the image stored under @p imageId has: one, its root, until a
     ///         frame is added, and zero if there is no such image.
     [[nodiscard]] uint32_t kittyFrameCount(uint32_t imageId) const;
@@ -384,8 +397,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// scroll, are inserted or deleted, are erased or are reflowed -- if the image is no longer
     /// there, there is nothing to find and nothing happens.
     /// @return whether any fragment was replaced: playback holds no deadline for an image not on the page.
-    [[nodiscard]] Placed showKittyFrame(std::shared_ptr<Image const> const& previous,
-                                        std::shared_ptr<Image const> const& next);
+    ///         Only playback needs to know; every other caller shows a frame and is done.
+    Placed showKittyFrame(std::shared_ptr<Image const> const& previous,
+                          std::shared_ptr<Image const> const& next);
 
     /// Publishes this page's next kitty animation deadline to the terminal, if this is the page on display.
     void publishKittyAnimationDue();

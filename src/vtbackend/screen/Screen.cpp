@@ -5882,7 +5882,7 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
             // than the base -- the current one, since every advance replaces the frame before it --
             // so put the base back under it before the frames go.
             if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
-                std::ignore = showKittyFrame(animation->second.currentImage(), stored->second);
+                showKittyFrame(animation->second.currentImage(), stored->second);
             _kittyAnimations.erase(animation);
             return {};
         }
@@ -6173,6 +6173,33 @@ uint32_t Screen::kittyFrameCount(uint32_t imageId) const
     if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
         return static_cast<uint32_t>(animation->second.frames.size());
     return _kittyImages.contains(imageId) ? 1 : 0;
+}
+
+Screen::KittyAnimation& Screen::storeKittyFrame(uint32_t imageId,
+                                                uint32_t target,
+                                                std::shared_ptr<Image const> frame,
+                                                std::shared_ptr<Image const> const& previous)
+{
+    auto* animation = kittyAnimationFor(imageId);
+    Require(animation != nullptr); // The caller found the image.
+    if (target > animation->frames.size())
+        animation->frames.push_back(
+            { .image = std::move(frame), .gapMilliseconds = kitty_graphics::DefaultFrameGapMilliseconds });
+    else
+        animation->frames[target - 1].image = std::move(frame);
+
+    // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
+    // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
+    // quota for as long as the image exists.
+    if (target == 1)
+        _kittyImages[imageId] = animation->frames[0].image;
+
+    // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
+    // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
+    // while every later delta is silently accepted.
+    if (target == animation->currentFrame)
+        showKittyFrame(previous, animation->frames[target - 1].image);
+    return *animation;
 }
 
 std::shared_ptr<Image const> Screen::kittyFrameImage(uint32_t imageId, uint32_t number) const
@@ -6589,35 +6616,16 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
 
-    auto* animation = kittyAnimationFor(command.imageId);
-    Require(animation != nullptr); // The image was found above.
-    if (target > animation->frames.size())
-        animation->frames.push_back(
-            { .image = std::move(frame), .gapMilliseconds = DefaultFrameGapMilliseconds });
-    else
-        animation->frames[target - 1].image = std::move(frame);
-
-    // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
-    // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
-    // quota for as long as the image exists.
-    if (target == 1)
-        _kittyImages[command.imageId] = animation->frames[0].image;
-
+    auto& animation = storeKittyFrame(command.imageId, target, std::move(frame), superseded);
     if (command.frameGapMilliseconds != 0)
-        animation->frames[target - 1].gapMilliseconds = command.frameGapMilliseconds;
-
-    // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
-    // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
-    // while every later delta is silently accepted.
-    if (target == animation->currentFrame)
-        std::ignore = showKittyFrame(superseded, animation->frames[target - 1].image);
+        animation.frames[target - 1].gapMilliseconds = command.frameGapMilliseconds;
 
     // A playing animation that held for want of somewhere to go -- `s=2` out of frames, `s=3` with only one
     // frame with a gap -- goes on now that this frame gives it one. At once: the frame it held on has been
     // shown since the hold began.
-    if (animation->isPlaying() && animation->nextFrameDue == std::chrono::steady_clock::time_point::max()
-        && animation->successor())
-        animation->nextFrameDue = _terminal->steadyTimeNow();
+    if (animation.isPlaying() && animation.nextFrameDue == std::chrono::steady_clock::time_point::max()
+        && animation.successor())
+        animation.nextFrameDue = _terminal->steadyTimeNow();
 
     replyKittyGraphics(command, "OK");
 }
@@ -6710,19 +6718,7 @@ void Screen::composeKittyFrames(kitty_graphics::Command const& command)
     // is unchanged, which is why this needs no quota check (unlike a=f, which can grow the total).
     auto frame = _terminal->imagePool().create(destination->format(), destination->size(), std::move(data));
 
-    auto* animation = kittyAnimationFor(command.imageId);
-    Require(animation != nullptr); // The image was found above.
-    auto const target = command.composeDestinationFrame;
-    animation->frames[target - 1].image = std::move(frame);
-
-    // As for a=f: the root frame is also the stored image, which must move along with it.
-    if (target == 1)
-        _kittyImages[command.imageId] = animation->frames[0].image;
-
-    // The frame on display changed, so its placements must show the new pixels.
-    if (target == animation->currentFrame)
-        std::ignore = showKittyFrame(destination, animation->frames[target - 1].image);
-
+    storeKittyFrame(command.imageId, command.composeDestinationFrame, std::move(frame), destination);
     replyKittyGraphics(command, "OK");
 }
 
@@ -6766,7 +6762,7 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
     {
         auto const showing = animation->currentImage();
         animation->currentFrame = command.currentFrame;
-        std::ignore = showKittyFrame(showing, animation->currentImage());
+        showKittyFrame(showing, animation->currentImage());
     }
 
     auto const stateChanged =
