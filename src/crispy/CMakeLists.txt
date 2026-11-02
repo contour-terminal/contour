@@ -138,6 +138,7 @@ if(CRISPY_TESTING)
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
+        AlignedAllocator_test.cpp
         Animation_test.cpp
         Compose_test.cpp
         InterpolatedString_test.cpp

@@ -7,6 +7,10 @@
 #include <new>
 #include <vector>
 
+#ifdef _WIN32
+    #include <malloc.h>
+#endif
+
 namespace crispy
 {
 
@@ -37,13 +41,19 @@ class AlignedAllocator
             throw std::bad_alloc();
 
         auto const byteCount = n * sizeof(T);
-        // Round up to a multiple of Alignment (required by aligned_alloc).
+        if (byteCount > std::numeric_limits<std::size_t>::max() - (Alignment - 1))
+            throw std::bad_alloc(); // rounding up would wrap
+        // Round up to a multiple of Alignment (keeps the block size a whole number of cache lines).
         auto const alignedSize = (byteCount + Alignment - 1) & ~(Alignment - 1);
 
-#ifdef _MSC_VER
+#ifdef _WIN32
         auto* ptr = static_cast<T*>(_aligned_malloc(alignedSize, Alignment));
 #else
-        auto* ptr = static_cast<T*>(std::aligned_alloc(Alignment, alignedSize));
+        // posix_memalign is available on every POSIX system (std::aligned_alloc is not, e.g. older macOS).
+        void* raw = nullptr;
+        if (posix_memalign(&raw, Alignment, alignedSize) != 0)
+            raw = nullptr;
+        auto* ptr = static_cast<T*>(raw);
 #endif
         if (!ptr)
             throw std::bad_alloc();
@@ -54,7 +64,7 @@ class AlignedAllocator
     {
         if (!p)
             return;
-#ifdef _MSC_VER
+#ifdef _WIN32
         _aligned_free(p);
 #else
         std::free(p);
