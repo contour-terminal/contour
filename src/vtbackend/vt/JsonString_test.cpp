@@ -39,6 +39,19 @@ constexpr auto JsonStringCases = std::array {
                              "b",
                      .expected = "\"a\xEF\xBF\xBD"
                                  "b\"" },
+    JsonStringCase { .name = "an overlong ESC is not an ESC: one U+FFFD per byte",
+                     .text = "a\xC0\x9B"
+                             "b",
+                     .expected = "\"a\xEF\xBF\xBD\xEF\xBF\xBD"
+                                 "b\"" },
+    JsonStringCase { .name = "a surrogate is not decoded",
+                     .text = "\xED\xA0\x80",
+                     .expected = "\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"" },
+    JsonStringCase { .name = "a lead byte cut off by ASCII keeps the ASCII",
+                     .text = "\xE4\xB8"
+                             "x",
+                     .expected = "\"\xEF\xBF\xBD"
+                                 "x\"" },
     JsonStringCase { .name = "nothing", .text = "", .expected = R"("")" },
 };
 

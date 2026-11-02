@@ -851,10 +851,11 @@ class Parser
     BulkScan _bulkScan = BulkScan::Enabled;
     unicode::scan_state _scanState {};
 
-    /// UTF-8 continuation bytes still expected while collecting a string (OSC/APC/PM/DCS/SOS). String
-    /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is zero -- at a
-    /// character boundary; otherwise 0x9C is a legitimate continuation byte (e.g. inside U+2705).
-    unsigned _stringUtf8Pending = 0;
+    /// The UTF-8 character being collected while collecting a string (OSC/APC/PM/DCS/SOS). String
+    /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is idle -- at a
+    /// character boundary; otherwise 0x9C is a legitimate continuation byte (e.g. inside U+2705), unless
+    /// the lead byte does not allow it as its second byte (E0 9C is not a character).
+    unicode::utf8_decoder_state _stringUtf8 {};
 
     /// The start of the fragment parseFragment() is parsing, or was parsing last.
     char const* _fragmentBegin = nullptr;

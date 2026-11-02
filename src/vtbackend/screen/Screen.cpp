@@ -713,16 +713,10 @@ void Screen::appendToLastCluster(char32_t codepoint)
 
 void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
 {
-    // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
-    // on inside its run, and it must become the same U+FFFD here that it becomes there.
+    // Decoded as the state machine decodes text, from an idle decoder: @p text is cut only at character
+    // boundaries, and a byte that is not well-formed UTF-8 becomes the same U+FFFD here that it does there.
     auto utf8 = unicode::utf8_decoder_state {};
-    for (auto const byte: text)
-    {
-        auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));
-        if (!decoded)
-            continue;
-        auto const rawCp = *decoded;
-
+    auto const writeCodepoint = [&](char32_t const rawCp) {
         // A wrap can scroll a different line under the cell the last write ended in, which makes the
         // run's state stale: seed again after it, as writeTextInternal does.
         auto const wrapPending = _cursor.wrapPending;
@@ -736,7 +730,7 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
             // What seeding from the glyph's cell would replay: a space, alone.
             run.previousCodepoint = U' ';
             unicode::grapheme_process_init(U' ', run.segmenter);
-            continue;
+            return;
         }
 
         auto const codepoint = _cursor.charsets.map(rawCp);
@@ -745,7 +739,9 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
         else
             appendToLastCluster(codepoint);
         _terminal->resetInstructionCounter();
-    }
+    };
+    for (auto const byte: text)
+        vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte), writeCodepoint);
 }
 
 void Screen::writeTextEnd()

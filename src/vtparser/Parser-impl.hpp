@@ -11,6 +11,7 @@
 #include <iterator>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 
 #include <tracy/Tracy.hpp>
 
@@ -472,7 +473,7 @@ auto Parser<EventListener, TraceStateChanges>::takePlainStringRun(char const* be
     // Every byte of the run is ASCII, and the state machine abandons a pending multi-byte sequence
     // at any byte that is not a continuation byte. Skipping it must not skip that, or an 8-bit ST
     // after the run would still be taken for a continuation byte and the string would never end.
-    _stringUtf8Pending = 0;
+    _stringUtf8 = {};
 
     putPayload(std::string_view { begin, byteCount });
     return byteCount;
@@ -574,11 +575,11 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
     ParserTable static constexpr Table = ParserTable::get();
 
     // A character left incomplete ends at the first byte that cannot continue it -- a C0 control, ESC, ASCII,
-    // or the lead byte of the next character -- printing U+FFFD for what there was; the byte itself is then
-    // judged on its own, from an idle decoder. Without this the pending state outlives control functions and
+    // the lead byte of the next character, or a continuation byte its lead does not allow -- printing U+FFFD
+    // for what there was; the byte itself is then judged on its own, from an idle decoder (an 8-bit CSI after
+    // a cut-off character is still a CSI). Without this the pending state outlives control functions and
     // even a reset, and the next printable byte is taken as the old character's continuation.
-    if (auto const isContinuationByte = isUtf8ContinuationByte(ch);
-        !isContinuationByte && !isDecoderIdle(_scanState.utf8))
+    if (!isDecoderIdle(_scanState.utf8) && !canContinueUtf8(_scanState.utf8, ch))
     {
         _scanState.utf8 = {};
         _eventListener.print(vtparser::ReplacementCharacter);
@@ -597,17 +598,17 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
     // told apart from the content.
     if (isStringCollectingState(_state))
     {
-        // A byte only advances an in-progress multi-byte sequence when it is a genuine UTF-8
-        // continuation byte (0x80-0xBF). Trusting the pending count alone is a desync bug: a malformed
-        // lead (a lead byte not followed by continuation bytes) would keep the count > 0 and let it
-        // mask a following 8-bit ST as content, so the string would never terminate. On any
-        // non-continuation byte, abandon the sequence and judge this byte on its own.
-        auto const isContinuationByte = isUtf8ContinuationByte(ch);
-        if (_stringUtf8Pending != 0 && isContinuationByte)
-            --_stringUtf8Pending; // a continuation byte; fall through to collect it
+        // A byte only advances an in-progress multi-byte sequence when it can continue it: a genuine UTF-8
+        // continuation byte (0x80-0xBF), in the range its position allows. Trusting a pending count alone
+        // is a desync bug: a malformed lead (a lead byte not followed by continuation bytes, or by one its
+        // lead does not allow, such as E0 9C) would mask a following 8-bit ST as content, so the string
+        // would never terminate. On any other byte, abandon the sequence and judge this byte on its own.
+        if (!isDecoderIdle(_stringUtf8) && canContinueUtf8(_stringUtf8, ch))
+            std::ignore =
+                unicode::from_utf8(_stringUtf8, ch); // a continuation byte; fall through to collect it
         else
         {
-            _stringUtf8Pending = 0;
+            _stringUtf8 = {};
             if (ch == 0x9C)
             {
                 // 8-bit ST at a character boundary: leave the string exactly as the 7-bit ESC \ does.
@@ -616,12 +617,9 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
                 handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(State::Ground)], ch);
                 return;
             }
-            if (ch >= 0xF0)
-                _stringUtf8Pending = 3; // start of a 4-byte UTF-8 sequence
-            else if (ch >= 0xE0)
-                _stringUtf8Pending = 2; // 3-byte
-            else if (ch >= 0xC0)
-                _stringUtf8Pending = 1; // 2-byte
+            if (ch >= 0xC0)
+                // A lead byte begins a character; one that no well-formed text has leaves the decoder idle.
+                std::ignore = unicode::from_utf8(_stringUtf8, ch);
         }
     }
 
@@ -826,12 +824,18 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
         return;
     }
 
-    auto const codepoint = decodeUtf8Byte(_scanState.utf8, byte);
-    if (!codepoint)
+    // The common byte, ASCII at a character boundary, needs no decoding.
+    if (byte < 0x80 && isDecoderIdle(_scanState.utf8)) [[likely]]
+    {
+        _eventListener.print(static_cast<char32_t>(byte));
+        _scanState.lastCodepointHint = byte;
         return;
+    }
 
-    _eventListener.print(*codepoint);
-    _scanState.lastCodepointHint = *codepoint;
+    decodeUtf8Byte(_scanState.utf8, byte, [this](char32_t codepoint) {
+        _eventListener.print(codepoint);
+        _scanState.lastCodepointHint = codepoint;
+    });
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -846,7 +850,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
     {
         case Action::GroundStart:
             _scanState.lastCodepointHint = 0;
-            _stringUtf8Pending = 0; // a string can only start from Ground, so this is a clean slate
+            _stringUtf8 = {}; // a string can only start from Ground, so this is a clean slate
             break;
         case Action::Clear: _eventListener.clear(); break;
         case Action::CollectLeader: _eventListener.collectLeader(ch); break;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/grid/SoAClusterWriter.hpp>
 
+#include <vtparser/Utf8Decoding.hpp>
+
 #include <libunicode/convert.h>
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/utf8.h>
@@ -93,28 +95,26 @@ namespace
         unicode::grapheme_segmenter_state graphemeState {};
         char32_t prevCodepoint = 0;
 
-        for (auto const byte: text)
-        {
-            auto const result = unicode::from_utf8(utf8State, static_cast<uint8_t>(byte));
-
-            if (std::holds_alternative<unicode::Incomplete>(result))
-                continue;
-
-            if (std::holds_alternative<unicode::Invalid>(result))
+        auto const writeReplacement = [&] {
+            if (col < maxCols)
             {
-                // Invalid UTF-8: write replacement character
-                if (col < maxCols)
-                {
-                    writeCellToSoA(line, col, U'\uFFFD', 1, attrs, hyperlink);
-                    ++col;
-                }
-                utf8State = {};
-                graphemeState = {};
-                prevCodepoint = 0;
-                continue;
+                writeCellToSoA(line, col, U'\uFFFD', 1, attrs, hyperlink);
+                ++col;
+            }
+            graphemeState = {};
+            prevCodepoint = 0;
+        };
+
+        auto full = false; // the line has no room for another cell
+        auto const writeCodepoint = [&](char32_t const codepoint, vtparser::Utf8Outcome const outcome) {
+            if (outcome == vtparser::Utf8Outcome::Replaced)
+            {
+                // Invalid UTF-8: write a replacement character. A literal U+FFFD is a character like any
+                // other.
+                writeReplacement();
+                return;
             }
 
-            auto const codepoint = std::get<unicode::Success>(result).value;
             auto const charWidth = static_cast<uint8_t>(std::max(1u, unicode::width(codepoint)));
 
             // Determine if this codepoint starts a new grapheme cluster
@@ -131,7 +131,10 @@ namespace
             {
                 // Start a new cell
                 if (col >= maxCols)
-                    break;
+                {
+                    full = true;
+                    return;
+                }
 
                 writeCellToSoA(line, col, codepoint, charWidth, attrs, hyperlink);
 
@@ -187,6 +190,13 @@ namespace
             }
 
             prevCodepoint = codepoint;
+        };
+
+        for (auto const byte: text)
+        {
+            vtparser::decodeUtf8ByteTagged(utf8State, static_cast<uint8_t>(byte), writeCodepoint);
+            if (full)
+                break;
         }
 
         return col - startCol;

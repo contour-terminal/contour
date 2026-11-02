@@ -59,8 +59,8 @@ std::string jsonString(std::string_view text)
     json.reserve(text.size() + 2);
     auto decoder = unicode::utf8_decoder_state {};
     for (auto const ch: text)
-        if (auto const codePoint = vtparser::decodeUtf8Byte(decoder, static_cast<uint8_t>(ch)))
-            appendCodePoint(json, *codePoint);
+        vtparser::decodeUtf8Byte(
+            decoder, static_cast<uint8_t>(ch), [&](char32_t codePoint) { appendCodePoint(json, codePoint); });
     json += '"';
     return json;
 }

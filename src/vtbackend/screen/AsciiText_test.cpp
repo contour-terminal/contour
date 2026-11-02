@@ -82,68 +82,6 @@ TEST_CASE("asciiPrefixLength.stopsAtTheFirstHighByte", "[AsciiText]")
     CHECK(misses.empty());
 }
 
-TEST_CASE("isDecoderIdleAt.knownBytes", "[AsciiText]")
-{
-    struct Row
-    {
-        std::string_view text; ///< Decoded from its first byte; asked about its end.
-        bool idle;             ///< Whether the decoder is idle after all of it.
-    };
-    auto const rows = std::array {
-        Row { .text = ""sv, .idle = true },
-        Row { .text = "a"sv, .idle = true },
-        Row { .text = "\xC3"sv, .idle = false },            // a two-byte lead
-        Row { .text = "\xC3\xA4"sv, .idle = true },         // ... and its continuation
-        Row { .text = "\xE2\x94"sv, .idle = false },        // a three-byte character, one short
-        Row { .text = "\xE2\x94\x82"sv, .idle = true },     // ... complete
-        Row { .text = "\xF0\x9F\x98"sv, .idle = false },    // a four-byte character, one short
-        Row { .text = "\xF0\x9F\x98\x80"sv, .idle = true }, // ... complete
-        Row { .text = "\xF0"
-                      "ab"sv,
-              .idle = false }, // ASCII taken as continuation bytes
-        Row { .text = "\xF0"
-                      "abc"sv,
-              .idle = true },                           // ... until the character is complete
-        Row { .text = "\xFF"sv, .idle = true },         // never a lead byte
-        Row { .text = "\x80"sv, .idle = true },         // a stray continuation byte
-        Row { .text = "\xC3\xE2"sv, .idle = false },    // a lead byte starts over
-        Row { .text = "\xE2\xC3\xA4"sv, .idle = true }, // ... and completes on its own
-        Row { .text = "abc\xE2\x94\x82"
-                      "d"sv,
-              .idle = true },
-    };
-    for (auto const& row: rows)
-    {
-        INFO(std::format("text \"{}\"", core::escape(row.text)));
-        CHECK(isDecoderIdleAt(row.text, row.text.size()) == row.idle);
-    }
-}
-
-TEST_CASE("isDecoderIdleAt.agreesWithTheDecoderAtEveryOffset", "[AsciiText]")
-{
-    // Random bytes, biased towards lead and continuation bytes, against the decoder the text paths
-    // decode with: after every prefix, idle exactly when the parser's own test says so.
-    constexpr auto Alphabet = std::string_view { "ab\x80\xA4\xBF\xC3\xD8\xE2\xEF\xF0\xF7\xF8\xFF" };
-    auto misses = std::vector<std::string> {};
-    for (auto const seed: std::views::iota(1u, 2001u))
-    {
-        auto rng = std::mt19937 { seed };
-        auto text = std::string {};
-        for ([[maybe_unused]] auto const byte: std::views::iota(0, test::drawBetween(rng, 1, 12)))
-            text += Alphabet[static_cast<size_t>(
-                test::drawBetween(rng, 0, static_cast<int>(Alphabet.size()) - 1))];
-        auto decoder = unicode::utf8_decoder_state {};
-        for (auto const offset: std::views::iota(size_t { 0 }, text.size() + 1))
-        {
-            if (isDecoderIdleAt(text, offset) != vtparser::isDecoderIdle(decoder))
-                misses.push_back(std::format("seed {}: \"{}\" at {}", seed, core::escape(text), offset));
-            if (offset < text.size())
-                std::ignore = vtparser::decodeUtf8Byte(decoder, static_cast<uint8_t>(text[offset]));
-        }
-    }
-    CHECK(misses.empty());
-}
-
 TEST_CASE("isTooDenseForBulkAscii.rowsAtTheBoundary", "[AsciiText]")
 {
     struct Row
@@ -232,28 +170,29 @@ TEST_CASE("forEachBulkAsciiInterior.findsTheInteriors", "[AsciiText]")
               .text = "abcdefgh\xEF\xB8\x8F"sv,
               .cellCount = 0,
               .interiors = "1-8"sv },
-        Row { .name = "a two-byte lead right before a stretch",
+        Row { .name = "a two-byte lead cut off by a stretch: its first byte ends the character",
               .text = "\xC3"
                       "abcdefgh"sv,
               .cellCount = 0,
-              .interiors = ""sv },
+              .interiors = "2-9"sv },
         Row { .name = "a three-byte character one byte short before a stretch",
               .text = "\xE2\x94"
                       "abcdefgh"sv,
               .cellCount = 0,
-              .interiors = ""sv },
+              .interiors = "3-10"sv },
         Row { .name = "a four-byte character one byte short before a stretch",
               .text = "\xF0\x9F\x98"
                       "abcdefgh"sv,
               .cellCount = 0,
-              .interiors = ""sv },
-        Row { .name = "a stretch whose first byte completes a character",
+              .interiors = "4-11"sv },
+        Row { .name = "a stretch after a lead byte that its first byte broke off",
               .text = "\xF0"
                       "a\x80"
                       "bcdefghij"sv,
               .cellCount = 0,
-              .interiors = ""sv },
-        Row { .name = "a stretch after a character that ASCII completed",
+              .interiors = "4-12"sv },
+        Row { .name =
+                  "a stretch after a lead byte, an ASCII byte that ended it, and a stray continuation byte",
               .text = "\xF0"
                       "ab\x80"
                       "cdefghij"sv,

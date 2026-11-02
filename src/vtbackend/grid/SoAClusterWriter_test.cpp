@@ -6,10 +6,59 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <ranges>
+#include <string>
 #include <string_view>
+#include <vector>
 
 using namespace vtbackend;
 using namespace std::string_view_literals;
+
+TEST_CASE("writeTextToSoA.ill_formed_utf8_is_replaced_and_the_byte_that_ended_it_is_kept", "[SoAWriter]")
+{
+    // A byte that cannot continue a pending character ends it with one U+FFFD, and is decoded afresh: an
+    // ASCII byte stays itself, and the lead byte of the next character starts it.
+    struct Row
+    {
+        std::string_view text;
+        std::u32string expected;
+    };
+    auto const rows = std::vector<Row> {
+        { "\xC3"
+          "A"sv,
+          U"\uFFFDA" },
+        { "\xE2\x94"
+          "A"sv,
+          U"\uFFFDA" },
+        { "\xE0\x80"
+          "A"sv,
+          U"\uFFFD\uFFFDA" },
+        { "\xE2\x94\xC3\xB6"sv, U"\uFFFD\u00F6" },
+        { "\xC0\x9B"sv, U"\uFFFD\uFFFD" },
+    };
+    for (auto const& row: rows)
+    {
+        LineSoA line;
+        initializeLineSoA(line, ColumnCount(8));
+        (void) writeTextToSoA(line, 0, row.text, GraphicsAttributes {}, HyperlinkId {}, /*asciiHint=*/false);
+        auto written = std::u32string {};
+        for (auto const column: std::views::iota(size_t { 0 }, row.expected.size()))
+            written += line.codepoints[column];
+        CHECK(written == row.expected);
+    }
+}
+
+TEST_CASE("writeTextToSoA.a_literal_replacement_character_is_a_character_like_any_other", "[SoAWriter]")
+{
+    // A well-formed U+FFFD in the text is not an ill-formed byte: a combining mark after it joins its cell.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(8));
+    (void) writeTextToSoA(
+        line, 0, "\xEF\xBF\xBD\xCC\x81"sv, GraphicsAttributes {}, HyperlinkId {}, /*asciiHint=*/false);
+
+    CHECK(line.codepoints[0] == U'\uFFFD');
+    CHECK(line.clusterSize[0] == 2);
+    CHECK(line.codepoints[1] == 0);
+}
 
 // =============================================================================
 // writeTextToSoA — ASCII fast path
