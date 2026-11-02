@@ -138,7 +138,7 @@ debug info compresses well. `max-size` is about 1.3x the tree:
 | Packaging, Ubuntu 26.04 | `ccache-ubuntu-26.04` | 1200 MB |
 | `check_clang_tidy` (push/merge group) | `ccache-ubuntu2404-clang-tidy` | 700 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 700 MB |
-| `package_daemon_for_Ubuntu` | `ccache-ubuntu2404-headless` | 500 MB |
+| `package_daemon_for_Ubuntu` (24.04; also 26.04 off pull requests) | `ccache-ubuntu<rel>-headless` | 500 MB each |
 | macOS (arm) | `ccache-macosArm-r1` | 800 MB |
 | Windows (MSVC) | `ccache-windows-msvc-release` | 1500 MB |
 

@@ -282,10 +282,17 @@ jobs:
   # Clang only, since this gates a build configuration and not a toolchain. RelWithDebInfo rather than
   # Debug, because the product is a package: it is what a user installs, and what carries a -dbgsym.
   package_daemon_for_Ubuntu:
-    name: "Ubuntu Linux (contour-daemon package)"
-    runs-on: ubuntu-24.04
+    name: "Ubuntu Linux (contour-daemon package, ${{ matrix.os_version }})"
+    # 24.04 is the oldest release the package is built for and runs on every pull request. 26.04 is the
+    # release the GUI package is built on, so the swap job below can install both from one release; it is
+    # a second full build, hence not on ordinary pull requests.
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '["24.04"]' || '["24.04","26.04"]') }}
+    runs-on: ubuntu-${{ matrix.os_version }}
     env:
-      OS_VERSION: "24.04"
+      OS_VERSION: ${{ matrix.os_version }}
     steps:
     - uses: actions/checkout@v4
     - name: "update APT database"
@@ -300,7 +307,7 @@ jobs:
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: "ccache-ubuntu2404-headless"
+        key: "ccache-ubuntu${{ matrix.os_version }}-headless"
         max-size: 500M
         save: ${{ github.event_name == 'push' }}
         evict-old-files: job
@@ -324,6 +331,14 @@ jobs:
     # reported from a machine where Qt6 does not exist at all.
     #
     # CMAKE_INSTALL_PREFIX=/usr: the package installs under /usr, like the GUI one.
+    #
+    # PEDANTIC_COMPILER_WERROR=OFF: this is a release/packaging build, and no other job builds
+    # clang-release (the GUI packaging job turns -Werror off as well). The clang-debug jobs keep
+    # enforcing zero warnings; a release-only warning must not block packaging.
+    #
+    # CONTOUR_PACKAGE_TERMINFO=OFF, like the GUI package: the contour terminfo entry is already shipped
+    # by the distribution's ncurses packages, so packaging it again risks a file conflict on install.
+    # (Inferred: the commit that added the option, 0955d59c8, gives no reason.)
     - name: "cmake"
       run: |
         cmake \
@@ -334,6 +349,8 @@ jobs:
               -D CONTOUR_WAYLAND=OFF \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
+              -D CONTOUR_PACKAGE_TERMINFO=OFF \
+              -D PEDANTIC_COMPILER_WERROR=OFF \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
               -D CONTOUR_LINK_JOBS=1 \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
@@ -384,7 +401,9 @@ jobs:
     - name: "CPack: Creating DEB package"
       run: |
         set -eu
-        cpack --config build/CPackConfig.cmake
+        # -G DEB: nothing on Linux sets CPACK_GENERATOR (the GUI job gets DEB from the gcc-release
+        # package preset), and without it cpack builds tarballs. It also writes the -dbgsym .ddeb.
+        cpack -G DEB --config build/CPackConfig.cmake
         ls -la build
         pick() {
           # pick <glob-pattern> <what>: print the single file under build/ matching it.
@@ -419,11 +438,11 @@ jobs:
     # toolchain and more. So the package is installed into a bare ubuntu image. `apt-get install ./file`
     # resolves its Depends from the archive, which is the point: nothing Qt may come with it. The script
     # runs as root inside the container; the repository checkout is mounted read-only.
-    - name: "Install the package in a clean ubuntu:24.04"
+    - name: "Install the package in a clean ubuntu:${{ matrix.os_version }}"
       run: |
-        docker run --rm -v "$PWD:/pkg:ro" ubuntu:24.04 bash -euxc '
+        docker run --rm -e DEBIAN_FRONTEND=noninteractive -v "$PWD:/pkg:ro" ubuntu:${{ matrix.os_version }} bash -euxc '
           apt-get update
-          apt-get install -y "/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+          apt-get install -y "/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           dpkg -s contour-daemon
           if dpkg -s contour-daemon | grep "^Depends:" | grep -Eiq "qt|qml"; then echo "Qt in Depends"; exit 1; fi
           if dpkg -l | grep -Ei "libqt|qml6|qt6"; then echo "a Qt package was pulled in"; exit 1; fi
@@ -441,10 +460,10 @@ jobs:
       if: github.event_name != 'pull_request' || github.head_ref == 'release'
       uses: actions/upload-artifact@v4
       with:
-        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb"
+        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
         path: |
-          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
-          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.ddeb
+          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
+          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
         if-no-files-found: error
         retention-days: 7
 
@@ -454,9 +473,11 @@ jobs:
   # requests), so this job needs both packaging jobs, downloads their artifacts, and runs where they
   # exist. On a pull request the daemon-only install test above is what runs.
   #
-  # ubuntu:26.04, because that is the release the GUI package was built for: its Qt dependencies
-  # resolve there. The daemon package, built on 24.04, has no such dependency on the release it ran on,
-  # which is what this also exercises -- a package built a release earlier installing on a later one.
+  # ubuntu:26.04, the release the GUI package is built for, with the daemon package built on that same
+  # release (the 26.04 matrix entry above), so neither package meets a soname or virtual-package skew
+  # that a user installing from one release would not. The swap job is restricted to non-PR / release
+  # events, hence the swap behaviour is first exercised on release branches, not on ordinary pull
+  # requests (the PR description states it).
   test_daemon_package_swap:
     if: github.event_name != 'pull_request' || github.head_ref == 'release'
     name: "Ubuntu Linux (contour / contour-daemon swap)"
@@ -466,6 +487,8 @@ jobs:
       - package_daemon_for_Ubuntu
     steps:
     - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set variables
@@ -478,17 +501,17 @@ jobs:
       with:
         name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
         path: pkg
-    - name: "fetch artifact: contour-daemon"
+    - name: "fetch artifact: contour-daemon (26.04)"
       uses: actions/download-artifact@v4
       with:
-        name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+        name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
         path: pkg
     - name: "Swap the packages in a clean ubuntu:26.04"
       run: |
         ls -la pkg
-        docker run --rm -v "$PWD/pkg:/pkg:ro" ubuntu:26.04 bash -euxc '
+        docker run --rm -e DEBIAN_FRONTEND=noninteractive -v "$PWD/pkg:/pkg:ro" ubuntu:26.04 bash -euxc '
           gui=/pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
-          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
           apt-get update
 
           # Asserts which of the two packages is installed, and that /usr/bin/contour is a single file.
@@ -2777,6 +2800,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+      - name: "fetch artifact: contour-daemon (Ubuntu 26.04)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
