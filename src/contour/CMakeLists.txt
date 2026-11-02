@@ -1623,6 +1623,38 @@ if(CONTOUR_TESTING)
     # The shells travel comma-separated: a ';' would split the list into arguments of its own on the
     # way through ARGS and add_test, leaving SHELLS the first shell alone.
     string(REPLACE ";" "," _shell_integration_shells "${CONTOUR_SHELL_INTEGRATION_SHELLS}")
+    # What the Debian package carries, per configuration: the GUI one the desktop files, the GUI-less
+    # one none of them and no Qt in its Depends. Read off the generated install rules and CPack config,
+    # so it needs neither a package build nor dpkg; CI's daemon-package job installs the real .deb.
+    if(UNIX AND NOT APPLE)
+        # Which optional rules the install block emits, from the conditions that gate them there.
+        set(_packaging_systemd OFF)
+        if(LINUX AND CONTOUR_WITH_SYSTEMD AND NOT EXISTS "/.flatpak-info")
+            set(_packaging_systemd ON)
+        endif()
+        set(_packaging_extensions OFF)
+        if(CONTOUR_BUNDLED_EXTENSIONS)
+            set(_packaging_extensions ON)
+        endif()
+        set(_packaging_terminfo OFF)
+        if(CONTOUR_PACKAGE_TERMINFO)
+            set(_packaging_terminfo ON)
+        endif()
+        add_test(NAME contour_e2e_packaging_rules
+            COMMAND ${CMAKE_COMMAND}
+                    -D "FRONTEND=${_frontend_kind}"
+                    -D "WITH_SYSTEMD_UNITS=${_packaging_systemd}"
+                    -D "WITH_EXTENSIONS=${_packaging_extensions}"
+                    -D "WITH_TERMINFO=${_packaging_terminfo}"
+                    -D "INSTALL_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake"
+                    -D "CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/PackagingRules.cmake)
+        set_tests_properties(contour_e2e_packaging_rules PROPERTIES
+            TIMEOUT 60
+            LABELS e2e
+            PASS_REGULAR_EXPRESSION "packaging-rules: OK")
+    endif()
+
     contour_add_e2e_cmake_test(
         NAME contour_e2e_shell_integration
         SCRIPT ShellIntegration.cmake
@@ -2024,33 +2056,62 @@ else()
             endif()
         endif()
 
-        # Qt SVG's image plugin draws the header bar's bundled icons: in qt6-svg-plugins since Debian's
-        # 6.7.2-5, in libqt6svg6 before it (Ubuntu 24.04).
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
+        # The runtime libraries the Qt-free part of the program links, in the order the GUI package has
+        # always listed them. Cairo and Fontconfig are linked by the text shaper (contour_config ->
+        # vtrasterizer -> text_shaper), so the GUI-less binary needs them without any Qt.
+        set(DEPENDS_QT_FREE ", libcairo2, libfontconfig1, libssh2-1")
 
         # Generator: Debian
         # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-        set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
-        set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
-        set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
         set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
         set(CPACK_DEB_COMPONENT_INSTALL ON)
-        # Override because component-based install would create "contour-contour".
-        set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
-
         set(CPACK_COMPONENTS_ALL "contour")
 
-        install(FILES "packaging/contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
-        install(FILES "packaging/${AppId}.Connect.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
-        install(FILES "packaging/contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
-        install(FILES "packaging/${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
-        install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
-        install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
-        install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
-        install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
-        install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
-        install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+        if(CONTOUR_FRONTEND_GUI)
+            # Qt SVG's image plugin draws the header bar's bundled icons: in qt6-svg-plugins since Debian's
+            # 6.7.2-5, in libqt6svg6 before it (Ubuntu 24.04).
+            set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6multimedia6, libqt6opengl6, libqt6openglwidgets6, libqt6widgets6, libssh2-1, qml6-module-qt-labs-platform, qml6-module-qt5compat-graphicaleffects, qml6-module-qtmultimedia, qml6-module-qtqml-workerscript, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qt6-qpa-plugins, qt6-svg-plugins | libqt6svg6 (<< 6.7.2-5)")
+            set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libxkbcommon0, libxkbcommon-x11-0${DEPENDS_EXTRA}")
+            set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
+            set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
+            # Override because component-based install would create "contour-contour".
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
+            # The GUI package and the daemon-only package ship the same binary and the same files.
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_CONFLICTS "contour-daemon")
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_REPLACES "contour-daemon")
+        else()
+            # A GUI-less build links no Qt, so neither does its package: the daemon for a headless
+            # server, installed without a desktop stack. The package is named for what it is, and the
+            # file follows it (contour-daemon_<version>_<arch>.deb) rather than CPack's
+            # Contour-<version>-Linux-contour.deb.
+            set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b${DEPENDS_EXTRA}${DEPENDS_QT_FREE}")
+            set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour-daemon")
+            set(CPACK_DEBIAN_CONTOUR_FILE_NAME "DEB-DEFAULT")
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_CONFLICTS "contour")
+            set(CPACK_DEBIAN_CONTOUR_PACKAGE_REPLACES "contour")
+            if(CPACK_DEBIAN_PACKAGE_DEPENDS MATCHES "[Qq][Tt]|qml")
+                message(FATAL_ERROR "The contour-daemon package must not depend on Qt: ${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+            endif()
+        endif()
+
+        # Everything addressed at a desktop: launchers, service menus, icons, AppStream metadata, and
+        # the OOM drop-ins for the `app-*` units a desktop launches Contour as. A daemon-only package
+        # has no desktop to read any of it.
+        if(CONTOUR_FRONTEND_GUI)
+            install(FILES "packaging/contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications" RENAME "${AppId}.desktop")
+            install(FILES "packaging/${AppId}.Connect.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+            install(FILES "packaging/contour-run.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus" RENAME "${AppId}.RunIn.desktop")
+            install(FILES "packaging/${AppId}.OpenHere.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/kio/servicemenus")
+            install(FILES "res/images/contour-logo-512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${AppId}.png")
+            install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${AppId}.png")
+            install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
+            install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
+            install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
+            install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+
+        endif()
 
         # A desktop launches Contour as a systemd unit of its own, named after the application ID
         # (https://systemd.io/DESKTOP_ENVIRONMENTS/), with OOMPolicy=stop: an out-of-memory kill of anything
@@ -2065,14 +2126,16 @@ else()
             # Launchers that start scopes: KDE's scope launcher (app-<id>-<random>.scope), GNOME Shell
             # (app-gnome-<id>-<pid>.scope), and GLib's GDesktopAppInfo (app-glib-<id>-<pid>.scope).
             set(_oomPolicyScopes "app-${AppId}-.scope" "app-gnome-${AppId}-.scope" "app-glib-${AppId}-.scope")
-            foreach(_unit IN LISTS _oomPolicyServices)
-                install(FILES "packaging/systemd/oom-policy-service.conf"
-                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
-            endforeach()
-            foreach(_unit IN LISTS _oomPolicyScopes)
-                install(FILES "packaging/systemd/oom-policy-scope.conf"
-                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
-            endforeach()
+            if(CONTOUR_FRONTEND_GUI)
+                foreach(_unit IN LISTS _oomPolicyServices)
+                    install(FILES "packaging/systemd/oom-policy-service.conf"
+                            DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+                endforeach()
+                foreach(_unit IN LISTS _oomPolicyScopes)
+                    install(FILES "packaging/systemd/oom-policy-scope.conf"
+                            DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+                endforeach()
+            endif()
 
             # The daemon that hosts persistent sessions, as a user service. Shipped, not enabled:
             # `contour daemon-service install` writes the user's own copy and enables it.

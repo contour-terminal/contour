@@ -56,7 +56,7 @@ jobs:
       # by installing a modern Qt over the distro one; this job needs no Qt at all, so it opts out
       # instead. CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so the build
       # cannot merely happen to pick up whichever Qt is lying around -- same assertion as the
-      # "Ubuntu Linux (no GUI frontend)" job in build.yml.
+      # "Ubuntu Linux (contour-daemon package, ...)" job in build.yml.
       #
       # CONTOUR_EXTENSIONS_BUNDLED=OFF for the same reason: the bundled status-line extensions are Rust,
       # nothing the documentation verbs print comes from them, and building them would take a Rust

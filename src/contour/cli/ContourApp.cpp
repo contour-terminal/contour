@@ -80,6 +80,7 @@
 #include <vthost/DaemonSpawn.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/FilePrivacy.hpp>
+#include <vthost/Linger.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
@@ -1788,6 +1789,13 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
             }
             cout << std::format(
                 "contour daemon-service: {} installed, starting at {}\n", name, vthost::nameOf(*mode));
+#ifdef __linux__
+            // Only the systemd user manager can stop at logout; the Logon install is the one that lands
+            // there.
+            if (auto const advice = vthost::lingerHintAfterInstall(*mode, *commands, processEnvironment());
+                !advice.empty())
+                cout << std::format("contour daemon-service: {}\n", advice);
+#endif
             return EXIT_SUCCESS;
         }
         case DaemonServiceAction::Uninstall:

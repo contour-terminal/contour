@@ -58,7 +58,9 @@ env:
 # `if: github.event_name != 'pull_request' || github.head_ref == 'release'`. Exceptions: FreeBSD and
 # the full-tree clang-tidy use `github.event_name != 'pull_request'` and skip even the `release`
 # pull request, and the static build (`github.ref == 'refs/heads/master' || head_ref == 'release'`)
-# never runs in the merge queue.
+# never runs in the merge queue. The daemon packages: the Debian one (`package_daemon_for_Ubuntu`) runs
+# on every pull request, for 24.04 alone (both releases otherwise), because it is the only job that
+# builds the GUI-less configuration; the RPMs (`package_for_Fedora`) follow the packaging rule above.
 # A required status check is never gated that way: it always runs and judges a skipped job as passed
 # (scripts/check-workflows.py enforces it). See docs/internals/build-times.md.
 
@@ -271,27 +273,46 @@ jobs:
               --base origin/${{ github.base_ref }} \
               --build-dir build
 
-  # Builds the GUI-less configuration, whose product is `contour daemon` -- a session host for a
-  # server or a container. Being unbuilt is exactly how this configuration rotted before; one job
-  # is what keeps a new GUI source from landing outside its CONTOUR_FRONTEND_GUI guard.
+  # Builds, tests, packages and install-tests the GUI-less configuration, whose product is `contour daemon`
+  # -- a session host for a server or a container -- shipped as the `contour-daemon` Debian package.
+  # Being unbuilt is exactly how this configuration rotted before; one job is what keeps a new GUI source
+  # from landing outside its CONTOUR_FRONTEND_GUI guard. It replaces `build_headless`, and so carries every
+  # guard that job had, and it runs on EVERY pull request: nothing but the artifact upload is conditional.
   #
   # Deliberately NOT installing a modern Qt over the distro one: relying on Ubuntu's Qt 6.4.2
   # proves the headless build needs nothing beyond Qt6::Core -- no Qt6::GuiPrivate, no Qt Quick.
-  # Clang only, since this gates a build configuration and not a toolchain.
-  build_headless:
-    name: "Ubuntu Linux (no GUI frontend)"
-    runs-on: ubuntu-24.04
+  # Clang only, since this gates a build configuration and not a toolchain. RelWithDebInfo rather than
+  # Debug, because the product is a package: it is what a user installs, and what carries a -dbgsym.
+  package_daemon_for_Ubuntu:
+    name: "Ubuntu Linux (contour-daemon package, ${{ matrix.os_version }})"
+    # 24.04 is the oldest release the package is built for and runs on every pull request. 26.04 is the
+    # release the GUI package is built on, so the swap job below can install both from one release; it is
+    # a second full build, hence not on ordinary pull requests.
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ${{ fromJSON(github.event_name == 'pull_request' && github.head_ref != 'release' && '["24.04"]' || '["24.04","26.04"]') }}
+    runs-on: ubuntu-${{ matrix.os_version }}
+    env:
+      OS_VERSION: ${{ matrix.os_version }}
     steps:
     - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
-        key: "ccache-ubuntu2404-headless"
+        key: "ccache-ubuntu${{ matrix.os_version }}-headless"
         max-size: 500M
         save: ${{ github.event_name == 'push' }}
         evict-old-files: job
-    - name: "update APT database"
-      run: sudo ./scripts/apt-update.sh
     - name: "install dependencies"
       run: sudo env QTVER=6 ./scripts/install-deps.sh
     - name: "Post-fix embedded dependency permissions."
@@ -310,17 +331,34 @@ jobs:
     # step above installed Qt, which is what makes the assertion worth anything: the point is not
     # that Qt is absent from the runner, it is that the build never reaches for it. Issue #2042 is
     # reported from a machine where Qt6 does not exist at all.
+    #
+    # CMAKE_INSTALL_PREFIX=/usr: the package installs under /usr, like the GUI one.
+    #
+    # PEDANTIC_COMPILER_WERROR=OFF: this is a release/packaging build, and no other job builds
+    # clang-release (the GUI packaging job turns -Werror off as well). No Linux pull-request job builds
+    # the GUI-less tree with -Werror: the sources it shares with the GUI builds are checked there, and
+    # docs.yml's gcc-debug job (merge queue, GCC 14, GUI-less, -Werror=ON) compiles the `contour` target
+    # GUI-less. build_headless_macos only configures. A release-only warning must not block packaging.
+    #
+    # CONTOUR_PACKAGE_TERMINFO=OFF, like the GUI .deb: the contour terminfo entry is probably shipped by
+    # the distribution's ncurses packages already, and packaging it again would risk a file conflict on
+    # install. (Inferred, not verified: the commit that added the option, 0955d59c8, gives no reason.
+    # A host lacking the entry falls back to TERM=xterm-256color per Config.cpp, so the downside is mild.)
     - name: "cmake"
       run: |
         cmake \
-              --preset clang-debug \
+              --preset clang-release \
               -B build \
               -G Ninja \
+              -D CMAKE_INSTALL_PREFIX=/usr \
               -D CONTOUR_WAYLAND=OFF \
               -D CONTOUR_FRONTEND_GUI=OFF \
               -D CONTOUR_TESTING=ON \
+              -D CONTOUR_PACKAGE_TERMINFO=OFF \
+              -D PEDANTIC_COMPILER_WERROR=OFF \
               -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON \
               -D CONTOUR_LINK_JOBS=1 \
+              -D CMAKE_C_COMPILER="clang-${LLVM_VERSION}" \
               -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
     # One link at a time (CONTOUR_LINK_JOBS above): the runner was shut down three runs in a row at the
     # same step, while contour and contour_test linked side by side -- memory, not time (see #2186).
@@ -346,7 +384,7 @@ jobs:
     # a Qt resource. All three are ctest tests rather than steps of this job, so they also run in the
     # ordinary GUI builds, where they assert the other half.
     - name: "tests"
-      run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration" --output-on-failure
+      run: ctest --test-dir build -R "contour_test|contour_e2e_cli_verbs|contour_e2e_shell_integration|contour_e2e_packaging_rules" --output-on-failure
     # Building is not the same as being installable: this configuration reached issue #1780 with a
     # `contour` binary that compiled and an install target that errored out on a missing one. The
     # install rules are a per-configuration decision, so they need a per-configuration run.
@@ -363,6 +401,147 @@ jobs:
         for extension in agent-status clock git plasma sysload; do
           test -f "$RUNNER_TEMP/contour-headless/share/contour/extensions/$extension.wasm"
         done
+    # The package files are found by glob and counted rather than named: CPack derives the file name
+    # (contour-daemon_<version>_<arch>.deb, and the debug-info package beside it), and a name guessed
+    # here would be a second place to keep in step with it. Exactly one of each, or the step says which.
+    - name: "CPack: Creating DEB package"
+      run: |
+        set -eu
+        # -G DEB: nothing on Linux sets CPACK_GENERATOR (the GUI job gets DEB from the gcc-release
+        # package preset), and without it cpack builds tarballs. It also writes the -dbgsym .ddeb.
+        cpack -G DEB -B build --config build/CPackConfig.cmake
+        ls -la build
+        pick() {
+          # pick <glob-pattern> <what>: print the single file under build/ matching it.
+          local matches count
+          matches=$(find build -maxdepth 1 -type f -name "$1" | sort)
+          count=$(printf '%s' "$matches" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one $2 ($1) in build/, found $count:" >&2
+            printf '%s\n' "$matches" >&2
+            exit 1
+          fi
+          printf '%s\n' "$matches"
+        }
+        deb=$(pick 'contour-daemon*.deb' 'contour-daemon .deb')
+        ddeb=$(pick 'contour-daemon*.ddeb' 'contour-daemon debug-info .ddeb')
+        mv -v "$deb" "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
+        mv -v "$ddeb" "contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.ddeb"
+    - name: "Inspect the package"
+      run: |
+        set -eu
+        deb="contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${OS_VERSION}-amd64.deb"
+        dpkg-deb -I "$deb"
+        dpkg-deb -c "$deb"
+        depends=$(dpkg-deb -f "$deb" Depends)
+        echo "Depends: $depends"
+        if printf '%s' "$depends" | grep -Eiq 'qt|qml'; then
+          echo "::error::contour-daemon depends on Qt: $depends"
+          exit 1
+        fi
+        test "$(dpkg-deb -f "$deb" Package)" = contour-daemon
+    # A clean machine is what a user has, and the runner is not one: it carries Qt, the whole build
+    # toolchain and more. So the package is installed into a bare ubuntu image. `apt-get install ./file`
+    # resolves its Depends from the archive, which is the point: nothing Qt may come with it. The script
+    # runs as root inside the container; the repository checkout is mounted read-only.
+    - name: "Install the package in a clean ubuntu:${{ matrix.os_version }}"
+      run: |
+        docker run --rm -e DEBIAN_FRONTEND=noninteractive -v "$PWD:/pkg:ro" ubuntu:${{ matrix.os_version }} bash -euxc '
+          apt-get update
+          apt-get install -y "/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          dpkg -s contour-daemon
+          if dpkg -s contour-daemon | grep "^Depends:" | grep -Eiq "qt|qml"; then echo "Qt in Depends"; exit 1; fi
+          if dpkg -l | grep -Ei "libqt|qml6|qt6"; then echo "a Qt package was pulled in"; exit 1; fi
+          test -x /usr/bin/contour
+          if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
+          contour version
+          contour help | grep -q "contour daemon"
+          test -f /usr/lib/systemd/user/contour-daemon.service
+          for extension in agent-status clock git plasma sysload; do
+            test -f "/usr/share/contour/extensions/$extension.wasm"
+          done
+        '
+    # Uploaded wherever the GUI package is, and no more widely: the install-swap job and the release
+    # take it from here. The steps above are what run on a pull request.
+    - name: "Uploading artifact .deb package"
+      if: github.event_name != 'pull_request' || github.head_ref == 'release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+        path: |
+          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb
+          contour-daemon-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb
+        if-no-files-found: error
+        retention-days: 7
+
+  # The two Debian packages ship the same /usr/bin/contour and declare Conflicts/Replaces on each other,
+  # so installing either over the other must leave exactly one of them, with exactly one binary. That
+  # needs BOTH packages, and the GUI one is only built by package_for_Ubuntu (on 26.04, and not on pull
+  # requests), so this job needs both packaging jobs, downloads their artifacts, and runs where they
+  # exist. On a pull request the daemon-only install test above is what runs.
+  #
+  # ubuntu:26.04, the release the GUI package is built for, with the daemon package built on that same
+  # release (the 26.04 matrix entry above), so neither package meets a soname or virtual-package skew
+  # that a user installing from one release would not. The swap job is restricted to non-PR / release
+  # events, hence the swap behaviour is first exercised on release branches, not on ordinary pull
+  # requests (the PR description states it).
+  test_daemon_package_swap:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    name: "Ubuntu Linux (contour / contour-daemon swap)"
+    runs-on: ubuntu-24.04
+    needs:
+      - package_for_Ubuntu
+      - package_daemon_for_Ubuntu
+    steps:
+    - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "fetch artifact: contour (GUI)"
+      uses: actions/download-artifact@v4
+      with:
+        name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+        path: pkg
+    - name: "fetch artifact: contour-daemon (26.04)"
+      uses: actions/download-artifact@v4
+      with:
+        name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+        path: pkg
+    - name: "Swap the packages in a clean ubuntu:26.04"
+      run: |
+        ls -la pkg
+        docker run --rm -e DEBIAN_FRONTEND=noninteractive -v "$PWD/pkg:/pkg:ro" ubuntu:26.04 bash -euxc '
+          gui=/pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+          apt-get update
+
+          # Asserts which of the two packages is installed, and that /usr/bin/contour is a single file.
+          expect_only() {
+            local present=$1 absent=$2
+            dpkg -s "$present" | grep -q "^Status: install ok installed"
+            if dpkg -s "$absent" 2>/dev/null | grep -q "^Status: install ok installed"; then
+              echo "$absent is still installed after installing $present"; exit 1
+            fi
+            test -x /usr/bin/contour
+            test "$(dpkg -S /usr/bin/contour | wc -l)" -eq 1
+            dpkg -S /usr/bin/contour | grep -q "^$present:"
+          }
+
+          # apt-get install ./file is the way a user installs a downloaded .deb, and it is what lets the
+          # Conflicts remove the other package instead of refusing.
+          apt-get install -y "$daemon"
+          expect_only contour-daemon contour
+          apt-get install -y "$gui"
+          expect_only contour contour-daemon
+          apt-get install -y "$daemon"
+          expect_only contour-daemon contour
+        '
 
   # CONTOUR_EXTENSIONS=OFF compiles the status-line extensions out, and with them every type the code that
   # drives them names: whatever reaches for one outside its #ifdef breaks this configuration alone, which no
@@ -546,97 +725,171 @@ jobs:
           retention-days: 1
   # }}}
   # {{{ Fedora
-  # fedora:
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       os_version: [40]
-  #       arch:
-  #         [
-  #           "linux/amd64 x86_64"
-  #         ]
-  #   name: "Fedora ${{ matrix.os_version }} ${{ matrix.arch }}"
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Docker Buildx
-  #       id: buildx
-  #       uses: docker/setup-buildx-action@v2
-  #       with:
-  #         version: latest
-  #     - name: Read matrix info
-  #       id: tags
-  #       shell: bash
-  #       run: |
-  #         arch="${{ matrix.arch }}"
-  #         echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
-  #         echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
-  #     - name: "update APT database"
-  #       run: sudo apt -q update
-  #     - name: Installing xmllint for ci-set-vars
-  #       run: sudo apt -qy install libxml2-utils
-  #     - name: set environment variables
-  #       id: set_vars
-  #       run: ./scripts/ci-set-vars.sh
-  #       env:
-  #         REPOSITORY: ${{ github.event.repository.name }}
-  #     - name: Fetch and unpack embeds
-  #       run: ./scripts/install-deps.sh
-  #       env:
-  #         PREPARE_ONLY_EMBEDS: 'ON'
-  #         SYSDEP_ASSUME_YES: 'ON'
-  #         OS_OVERRIDE: 'fedora'
-  #     - name: "Post-fix embedded dependency permissions."
-  #       run: sudo find _deps/sources -exec chown $UID {} \;
-  #     - name: prepare distfile
-  #       run: |
-  #         set -x
-  #         PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
-  #         DISTDIR="/tmp/dist/${PKGNAME}"
-  #         mkdir -p ${DISTDIR}
-  #         cp -rvp . ${DISTDIR}
-  #         tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
-  #     - name: disable pedantic compiler on certain OS versions
-  #       # Generally disable -Werror.
-  #       #if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
-  #       run: |
-  #         set -ex
-  #         #sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
-  #         sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
-  #     - name: Build ${{ matrix.arch }} release
-  #       shell: bash
-  #       run: |
-  #         set -x
-  #         ARCH="${{ steps.tags.outputs.ARCH }}"
-  #         VERSION="${{ steps.set_vars.outputs.VERSION }}"
-  #         OS_VERSION="${{ matrix.os_version }}"
-  #         sed -i -e "s/fedora:35/fedora:${{ matrix.os_version }}/" .github/fedora/Dockerfile
-  #         docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
-  #                 --tag contour:${ARCH} \
-  #                 --build-arg VERSION=${VERSION} \
-  #                 --build-arg VERSION_STRING=${VERSION} \
-  #                 -f .github/fedora/Dockerfile \
-  #                 --load \
-  #                 .
-  #         docker create --name contour-${ARCH} contour:${ARCH}
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
-  #                   contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
-  #         docker container rm contour-${{ steps.tags.outputs.ARCH }}
-  #         echo "pwd: `pwd`" && ls -hla
-  #     - name: "Uploading Fedora RPM package"
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
-  #         path: |
-  #           contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #           contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #           contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm
-  #         if-no-files-found: error
-  #         retention-days: 7
+  # Builds BOTH RPMs from the one spec, .github/fedora/contour.spec: the GUI `contour`, and with
+  # `--with daemon` the Qt-free `contour-daemon`, then installs them in clean Fedora containers -- the
+  # runner carries Qt and a toolchain, so it is no evidence of what a user's machine needs.
+  #
+  # Current Fedora is the supported target, and rawhide is the early warning for the next one, so a break
+  # there is reported but never holds a release back (continue-on-error). EL9 and EL10 (CentOS Stream,
+  # Alma, Rocky) have no job: EL9's GCC 11 cannot build the C++23 sources (it would need gcc-toolset, plus
+  # EPEL for yaml-cpp and libutempter), and a job that can never be run by hand first -- the EL10 package
+  # set is unverified -- would be a guess committed to CI. Revisit with a machine to try it on.
+  #
+  # Two full RelWithDebInfo builds per leg, so like the other packaging it runs on master pushes, in the
+  # merge queue and on the `release` pull request, not on ordinary pull requests: the Ubuntu daemon job
+  # already builds the GUI-less configuration on every one.
+  package_for_Fedora:
+    if: github.event_name != 'pull_request' || github.head_ref == 'release'
+    name: "Fedora ${{ matrix.os_version }} (contour and contour-daemon RPMs)"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the stable entry in step with do_release's fetch below and the Dockerfile's default.
+        os_version: ["44", "rawhide"]
+    continue-on-error: ${{ matrix.os_version == 'rawhide' }}
+    runs-on: ubuntu-24.04
+    env:
+      OS_VERSION: ${{ matrix.os_version }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: Fetch and unpack embeds
+      run: ./scripts/install-deps.sh
+      env:
+        PREPARE_ONLY_EMBEDS: 'ON'
+        SYSDEP_ASSUME_YES: 'ON'
+        OS_OVERRIDE: 'fedora'
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    - name: prepare distfile
+      run: |
+        set -ex
+        PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
+        DISTDIR="/tmp/dist/${PKGNAME}"
+        mkdir -p ${DISTDIR}
+        cp -rvp . ${DISTDIR}
+        tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
+    # A packaging build, not a warnings gate: the clang-debug jobs enforce zero warnings, and a warning
+    # from a newer GCC (rawhide) must not stop a package from being built.
+    - name: disable -Werror for the package build
+      run: sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
+    # The RPM Version is the dotted VERSION: VERSION_STRING carries a `-prerelease` suffix, and a hyphen
+    # is not allowed in an RPM version. The artifacts below are named with VERSION_STRING, like the .deb.
+    - name: "Build both RPMs"
+      run: |
+        set -eux
+        VERSION="${{ steps.set_vars.outputs.VERSION }}"
+        docker build \
+                --tag contour-rpm \
+                --build-arg VERSION=${VERSION} \
+                --build-arg FEDORA_VERSION=${OS_VERSION} \
+                -f .github/fedora/Dockerfile \
+                .
+        docker create --name contour-rpm contour-rpm
+        mkdir -p rpms
+        docker cp contour-rpm:/app/rpmbuild/RPMS/x86_64/. rpms/
+        docker rm contour-rpm
+        ls -la rpms
+    # The built files are renamed to <name>-<VERSION_STRING>-fedora<release>-x86_64.rpm (and the
+    # -debuginfo/-debugsource beside each): the release tag is in the name because the dist tag of
+    # rawhide is not known in advance, and the VERSION_STRING because that is what the .deb carries.
+    - name: "Name the packages"
+      run: |
+        set -eux
+        VERSION="${{ steps.set_vars.outputs.VERSION }}"
+        VERSION_STRING="${{ steps.set_vars.outputs.VERSION_STRING }}"
+        for rpm in rpms/*.rpm; do
+          base=$(basename "$rpm")
+          stem="${base%%-"${VERSION}"-1.*}"
+          mv -v "$rpm" "${stem}-${VERSION_STRING}-fedora${OS_VERSION}-x86_64.rpm"
+        done
+        # Exactly the six packages: contour and contour-daemon, each with its debuginfo and debugsource.
+        test "$(find . -maxdepth 1 -name "contour-*-fedora${OS_VERSION}-x86_64.rpm" | wc -l)" -eq 6
+        ls -la ./*.rpm
+    # What the packages say about themselves, read inside a Fedora container (it has rpm; the Ubuntu
+    # runner does not). The daemon must name no Qt and ship no desktop files; the GUI package must still
+    # ship them; and each declares the conflict with the other.
+    - name: "Inspect the packages"
+      run: |
+        set -eu
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          daemon=/pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          gui=/pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          test "$(rpm -qp --qf "%{NAME}" "$daemon")" = contour-daemon
+          test "$(rpm -qp --qf "%{NAME}" "$gui")" = contour
+          rpm -qpR "$daemon"
+          if rpm -qpR "$daemon" | grep -i "qt6"; then echo "contour-daemon requires Qt"; exit 1; fi
+          rpm -qpl "$daemon"
+          rpm -qpl "$daemon" | grep -qx /usr/bin/contour
+          rpm -qpl "$daemon" | grep -qx /usr/lib/systemd/user/contour-daemon.service
+          if rpm -qpl "$daemon" | grep -E "\.desktop$|/icons/|/metainfo/|/app-.*\.d"; then echo "desktop files in contour-daemon"; exit 1; fi
+          rpm -qpl "$gui" | grep -qx /usr/bin/contour
+          rpm -qpl "$gui" | grep -qx /usr/lib/systemd/user/contour-daemon.service
+          rpm -qpl "$gui" | grep -q "\.desktop$"
+          rpm -qp --conflicts "$daemon" | grep -qx contour
+          rpm -qp --conflicts "$gui" | grep -qx contour-daemon
+        '
+    # A clean machine is what a user has. dnf resolves the package's Requires from the repositories, which
+    # is the point: nothing Qt may come with the daemon.
+    - name: "Install contour-daemon in a clean fedora:${{ matrix.os_version }}"
+      run: |
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          dnf install -y /pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          rpm -q contour-daemon
+          if rpm -qa | grep -i "^qt6"; then echo "a Qt package was pulled in"; exit 1; fi
+          test -x /usr/bin/contour
+          if ldd /usr/bin/contour | grep -i "libQt\|not found"; then echo "bad link"; exit 1; fi
+          contour version
+          contour help | grep -q "contour daemon"
+          test -f /usr/lib/systemd/user/contour-daemon.service
+          # ...and the GUI package must refuse to be installed over it, on the declared conflict.
+          if dnf install -y /pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm >/tmp/swap.log 2>&1; then
+            cat /tmp/swap.log; echo "contour installed over contour-daemon"; exit 1
+          fi
+          cat /tmp/swap.log
+          grep -qi conflict /tmp/swap.log
+          rpm -q contour-daemon
+        '
+    - name: "Install contour in a clean fedora:${{ matrix.os_version }}, then refuse contour-daemon"
+      run: |
+        docker run --rm -e OS_VERSION -v "$PWD:/pkg:ro" fedora:"${OS_VERSION}" bash -euxc '
+          dnf install -y /pkg/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm
+          rpm -q contour
+          if dnf install -y /pkg/contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${OS_VERSION}-x86_64.rpm >/tmp/swap.log 2>&1; then
+            cat /tmp/swap.log; echo "contour-daemon installed over contour"; exit 1
+          fi
+          cat /tmp/swap.log
+          grep -qi conflict /tmp/swap.log
+          rpm -q contour
+        '
+    - name: "Uploading Fedora RPM package: contour"
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
+        path: |
+          contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Uploading Fedora RPM package: contour-daemon"
+      uses: actions/upload-artifact@v4
+      with:
+        name: "contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm"
+        path: |
+          contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-daemon-debuginfo-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+          contour-daemon-debugsource-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora${{ matrix.os_version }}-x86_64.rpm
+        if-no-files-found: error
+        retention-days: 7
   # }}}
   # {{{ FreeBSD
   freebsd:
@@ -2597,6 +2850,9 @@ jobs:
       - check_notcurses_test_matrix
       - macOSArm
       - package_for_Ubuntu
+      - package_daemon_for_Ubuntu
+      - test_daemon_package_swap
+      - package_for_Fedora
       - windows
     permissions:
       # We need write permissions on contents to create GitHub releases and on
@@ -2620,6 +2876,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+      # The Qt-free contour-daemon package; its .deb and -dbgsym .ddeb land beside the GUI ones and are
+      # attached by the same *.deb / *.ddeb globs below.
+      - name: "fetch artifact: contour-daemon (Ubuntu 24.04)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu24.04-amd64.deb
+      - name: "fetch artifact: contour-daemon (Ubuntu 26.04)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu26.04-amd64.deb
+      # The Fedora RPMs (stable release only: rawhide is a canary and publishes nothing). The release
+      # number follows the stable entry of package_for_Fedora's matrix.
+      - name: "fetch artifact: contour RPM (Fedora 44)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
+      - name: "fetch artifact: contour-daemon RPM (Fedora 44)"
+        uses: actions/download-artifact@v4
+        with:
+          name: contour-daemon-${{ steps.set_vars.outputs.VERSION_STRING }}-fedora44-x86_64.rpm
       - name: "fetch artifact: MacOS (ARM)"
         uses: actions/download-artifact@v4
         with:
@@ -2665,6 +2941,7 @@ jobs:
           files: |
             *.deb
             *.ddeb
+            *.rpm
             *.dmg
             *.msi
             *.zip

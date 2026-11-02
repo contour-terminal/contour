@@ -138,14 +138,14 @@ debug info compresses well. `max-size` is about 1.3x the tree:
 | Packaging, Ubuntu 26.04 | `ccache-ubuntu-26.04` | 1200 MB |
 | `check_clang_tidy` (push/merge group) | `ccache-ubuntu2404-clang-tidy` | 700 MB |
 | `build_no_extensions` | `ccache-ubuntu2404-no-extensions` | 700 MB |
-| `build_headless` | `ccache-ubuntu2404-headless` | 500 MB |
+| `package_daemon_for_Ubuntu` (24.04; also 26.04 off pull requests) | `ccache-ubuntu<rel>-headless` | 500 MB each |
 | macOS (arm) | `ccache-macosArm-r1` | 800 MB |
 | Windows (MSVC) | `ccache-windows-msvc-release` | 1500 MB |
 
-The caps sum to 9.5 GB; the entries should settle near 70 % of that, about 6.7 GB, beside roughly
+The caps sum to 9.7 GB (counting both 500 MB entries of the daemon package job, 24.04 and 26.04); the entries should settle near 70 % of that, about 6.8 GB, beside roughly
 1.5 GB of Qt, vcpkg, FreeBSD and apt caches. That is inside the 10 GB quota with little to spare: a
 second `master` push before the first generation is evicted costs the oldest entries first. The guard
-jobs (`build_headless`, `build_no_extensions`, tidy) were not turned into read-only restorers of the
+jobs (`package_daemon_for_Ubuntu`, `build_no_extensions`, tidy) were not turned into read-only restorers of the
 Linux Clang key as the plan suggested: they compile with a different preset, so their command lines
 differ and a restored Clang-matrix entry would hit almost nothing. If eviction churn shows, drop the
 tidy cache first -- it caches compiles only, and the tidy runs themselves are not cacheable.
@@ -172,6 +172,13 @@ the rest: the other three compiler legs, packaging, valgrind, conformance, bench
 notcurses, FreeBSD and the full-tree clang-tidy. The `release` branch's pull request runs all of
 those except FreeBSD and the full-tree clang-tidy (both are `github.event_name != 'pull_request'`);
 the static build runs on master pushes and the `release` pull request, never in the merge queue.
+
+The daemon packages are the two exceptions in kind. `package_daemon_for_Ubuntu` (the Qt-free
+`contour-daemon` .deb) runs on every pull request, for 24.04 alone, and for 24.04 and 26.04 otherwise:
+it is the only job that builds the GUI-less configuration, so it cannot wait for master. The RPMs
+(`package_for_Fedora`: `contour` and `contour-daemon` from one spec, on current Fedora and rawhide) are
+ordinary packaging and run on master pushes, the merge queue and the `release` pull request only;
+rawhide never blocks a release.
 
 A required status check is never gated off pull requests. `tests matrix` and
 `Ubuntu Linux 24.04 post-check` always run and treat a skipped dependency as passed (a failed or
